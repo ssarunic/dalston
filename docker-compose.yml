@@ -43,6 +43,25 @@ services:
       timeout: 5s
       retries: 5
 
+  engine-stub-transcriber:
+    build:
+      context: .
+      dockerfile: engines/transcribe/stub-transcriber/Dockerfile
+    environment:
+      - ENGINE_ID=stub-transcriber
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   minio-data:

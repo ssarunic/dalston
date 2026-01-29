@@ -1,0 +1,28 @@
+# Base image for Dalston batch processing engines
+#
+# This image provides the dalston.engine_sdk package pre-installed.
+# All batch engines should extend this image.
+#
+# Build from repo root:
+#   docker build -f docker/Dockerfile.engine-base -t dalston/engine-base:latest .
+
+FROM python:3.11-slim
+
+WORKDIR /opt/dalston
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the dalston package source
+COPY pyproject.toml .
+COPY dalston/ dalston/
+
+# Install the package with engine-sdk dependencies
+RUN pip install --no-cache-dir -e ".[engine-sdk]"
+
+# Set working directory for engine code
+WORKDIR /engine
+
+# Default command (overridden by specific engines)
+CMD ["python", "engine.py"]

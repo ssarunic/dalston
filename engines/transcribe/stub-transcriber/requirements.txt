@@ -1,0 +1,2 @@
+# Stub transcriber has no additional dependencies beyond the base image.
+# The dalston.engine_sdk package is provided by the base image.
