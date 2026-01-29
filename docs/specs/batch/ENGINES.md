@@ -209,13 +209,14 @@ class TaskOutput:
 ### SDK Runner Loop
 
 The SDK handles:
-1. Connecting to Redis
+1. Connecting to Redis (for queue polling)
 2. Polling the engine's queue (`dalston:queue:{engine_id}`)
-3. Loading task input from filesystem
+3. Downloading task input from S3 to local temp
 4. Calling `engine.process()`
-5. Saving task output to filesystem
-6. Publishing completion event
-7. Error handling and reporting
+5. Uploading task output to S3
+6. Publishing completion event (Redis pub/sub)
+7. Cleaning up local temp files
+8. Error handling and reporting
 
 ```python
 class Engine:
@@ -326,10 +327,14 @@ engine-my-new-engine:
   environment:
     - REDIS_URL=redis://redis:6379
     - ENGINE_ID={engine-id}
-    - DATA_DIR=/data
+    - S3_BUCKET=${S3_BUCKET}
+    - S3_REGION=${S3_REGION}
+    - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+    - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+  tmpfs:
+    - /tmp/dalston:size=10G
   volumes:
-    - dalston-data:/data
-    - dalston-models:/models
+    - model-cache:/models
   depends_on:
     - redis
   deploy:

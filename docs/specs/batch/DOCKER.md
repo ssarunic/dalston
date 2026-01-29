@@ -4,6 +4,15 @@
 
 Dalston runs as a set of Docker containers orchestrated via Docker Compose.
 
+### Storage Architecture
+
+| Component | Storage | Purpose |
+|-----------|---------|---------|
+| PostgreSQL | Container volume | Persistent business data |
+| Redis | Container volume | Ephemeral queues, sessions |
+| S3 | External service | Audio files, transcripts, models |
+| Local temp | Container `/tmp` | In-flight processing only |
+
 ---
 
 ## Quick Start
@@ -17,11 +26,16 @@ cd dalston
 cp .env.example .env
 
 # Edit .env with your settings
+# - DATABASE_URL (PostgreSQL connection)
+# - S3_BUCKET, S3_REGION, AWS credentials
 # - HF_TOKEN (HuggingFace token for pyannote)
 # - ANTHROPIC_API_KEY (for LLM cleanup)
 
 # Start all services
 docker compose up -d
+
+# Run database migrations
+docker compose exec gateway python -m dalston.db.migrate
 
 # Check status
 docker compose ps
@@ -38,11 +52,11 @@ docker compose logs -f gateway
 version: "3.8"
 
 services:
-  
+
   # ============================================================
   # CORE SERVICES
   # ============================================================
-  
+
   gateway:
     build:
       context: .
@@ -50,11 +64,14 @@ services:
     ports:
       - "8000:8000"
     environment:
+      - DATABASE_URL=postgresql://dalston:${POSTGRES_PASSWORD}@postgres:5432/dalston
       - REDIS_URL=redis://redis:6379
-      - DATA_DIR=/data
-    volumes:
-      - dalston-data:/data
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
     depends_on:
+      - postgres
       - redis
     restart: unless-stopped
     healthcheck:
@@ -68,21 +85,39 @@ services:
       context: .
       dockerfile: docker/Dockerfile.orchestrator
     environment:
+      - DATABASE_URL=postgresql://dalston:${POSTGRES_PASSWORD}@postgres:5432/dalston
       - REDIS_URL=redis://redis:6379
-      - DATA_DIR=/data
-    volumes:
-      - dalston-data:/data
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
     depends_on:
+      - postgres
       - redis
     restart: unless-stopped
 
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=dalston
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=dalston
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dalston"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   redis:
     image: redis:7-alpine
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly no
     ports:
       - "6379:6379"
-    volumes:
-      - redis-data:/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -93,16 +128,19 @@ services:
   # ============================================================
   # PREPARE ENGINES
   # ============================================================
-  
+
   engine-audio-prepare:
     build:
       context: ./engines/prepare/audio-prepare
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=audio-prepare
-      - DATA_DIR=/data
-    volumes:
-      - dalston-data:/data
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    tmpfs:
+      - /tmp/dalston:size=10G
     depends_on:
       - redis
     restart: unless-stopped
@@ -117,10 +155,14 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=faster-whisper
-      - DATA_DIR=/data
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    tmpfs:
+      - /tmp/dalston:size=10G
     volumes:
-      - dalston-data:/data
-      - dalston-models:/models
+      - model-cache:/models
     depends_on:
       - redis
     deploy:
@@ -138,10 +180,14 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=parakeet
-      - DATA_DIR=/data
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    tmpfs:
+      - /tmp/dalston:size=10G
     volumes:
-      - dalston-data:/data
-      - dalston-models:/models
+      - model-cache:/models
     depends_on:
       - redis
     deploy:
@@ -163,10 +209,14 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=whisperx-align
-      - DATA_DIR=/data
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    tmpfs:
+      - /tmp/dalston:size=10G
     volumes:
-      - dalston-data:/data
-      - dalston-models:/models
+      - model-cache:/models
     depends_on:
       - redis
     deploy:
@@ -188,11 +238,15 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=pyannote-3.1
-      - DATA_DIR=/data
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - HF_TOKEN=${HF_TOKEN}
+    tmpfs:
+      - /tmp/dalston:size=10G
     volumes:
-      - dalston-data:/data
-      - dalston-models:/models
+      - model-cache:/models
     depends_on:
       - redis
     deploy:
@@ -214,11 +268,15 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=whisperx-full
-      - DATA_DIR=/data
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - HF_TOKEN=${HF_TOKEN}
+    tmpfs:
+      - /tmp/dalston:size=10G
     volumes:
-      - dalston-data:/data
-      - dalston-models:/models
+      - model-cache:/models
     depends_on:
       - redis
     deploy:
@@ -240,10 +298,14 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=emotion2vec
-      - DATA_DIR=/data
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    tmpfs:
+      - /tmp/dalston:size=10G
     volumes:
-      - dalston-data:/data
-      - dalston-models:/models
+      - model-cache:/models
     depends_on:
       - redis
     deploy:
@@ -261,10 +323,14 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=panns-events
-      - DATA_DIR=/data
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    tmpfs:
+      - /tmp/dalston:size=10G
     volumes:
-      - dalston-data:/data
-      - dalston-models:/models
+      - model-cache:/models
     depends_on:
       - redis
     restart: unless-stopped
@@ -279,11 +345,14 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=llm-cleanup
-      - DATA_DIR=/data
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-    volumes:
-      - dalston-data:/data
+    tmpfs:
+      - /tmp/dalston:size=1G
     depends_on:
       - redis
     restart: unless-stopped
@@ -298,19 +367,20 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=final-merger
-      - DATA_DIR=/data
-    volumes:
-      - dalston-data:/data
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    tmpfs:
+      - /tmp/dalston:size=1G
     depends_on:
       - redis
     restart: unless-stopped
 
 volumes:
-  dalston-data:
+  postgres-data:
     driver: local
-  dalston-models:
-    driver: local
-  redis-data:
+  model-cache:
     driver: local
 ```
 
@@ -321,16 +391,35 @@ volumes:
 ### .env.example
 
 ```bash
+# PostgreSQL
+POSTGRES_PASSWORD=your-secure-password
+
+# S3 Storage (required)
+S3_BUCKET=dalston-artifacts
+S3_REGION=eu-west-2
+AWS_ACCESS_KEY_ID=AKIA...
+AWS_SECRET_ACCESS_KEY=...
+
 # HuggingFace token (required for pyannote)
 HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxx
 
 # LLM providers (optional, for llm-cleanup engine)
 ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxxx
 OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxx
-
-# Optional: custom model cache location
-# MODEL_CACHE_DIR=/path/to/models
 ```
+
+### Required Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `POSTGRES_PASSWORD` | Yes | PostgreSQL password |
+| `S3_BUCKET` | Yes | S3 bucket for artifacts |
+| `S3_REGION` | Yes | S3 region (e.g., `eu-west-2`) |
+| `AWS_ACCESS_KEY_ID` | Yes | AWS access key |
+| `AWS_SECRET_ACCESS_KEY` | Yes | AWS secret key |
+| `HF_TOKEN` | For diarization | HuggingFace token for pyannote |
+| `ANTHROPIC_API_KEY` | For LLM cleanup | Anthropic API key |
+| `OPENAI_API_KEY` | For LLM cleanup | OpenAI API key (alternative) |
 
 ---
 
@@ -440,10 +529,10 @@ CMD ["python", "/app/engine.py"]
 docker compose up -d
 
 # Start core only (minimal)
-docker compose up -d gateway orchestrator redis engine-audio-prepare engine-faster-whisper engine-merger
+docker compose up -d postgres redis gateway orchestrator engine-audio-prepare engine-faster-whisper engine-merger
 
 # Start with specific engines
-docker compose up -d gateway orchestrator redis \
+docker compose up -d postgres redis gateway orchestrator \
   engine-audio-prepare \
   engine-faster-whisper \
   engine-whisperx-align \
@@ -551,21 +640,49 @@ engine-faster-whisper:
 
 | Volume | Purpose | Can Delete? |
 |--------|---------|-------------|
-| `dalston-data` | Job data, transcripts | No (contains results) |
-| `dalston-models` | Cached model weights | Yes (will re-download) |
-| `redis-data` | Redis persistence | No (contains job state) |
+| `postgres-data` | PostgreSQL database | No (contains job/task state) |
+| `model-cache` | Cached model weights | Yes (will re-download from S3) |
+
+**Note**: Redis runs without persistence (`--appendonly no`) since it only stores ephemeral data (queues, session state). All durable data is in PostgreSQL and S3.
 
 ### Backup
 
 ```bash
-# Backup job data
-docker run --rm -v dalston-data:/data -v $(pwd):/backup alpine \
-  tar czf /backup/dalston-data-$(date +%Y%m%d).tar.gz /data
+# Backup PostgreSQL
+docker compose exec postgres pg_dump -U dalston dalston > dalston-$(date +%Y%m%d).sql
 
-# Backup Redis
-docker compose exec redis redis-cli BGSAVE
-docker run --rm -v redis-data:/data -v $(pwd):/backup alpine \
-  cp /data/dump.rdb /backup/redis-$(date +%Y%m%d).rdb
+# Restore PostgreSQL
+docker compose exec -T postgres psql -U dalston dalston < dalston-backup.sql
+
+# S3 artifacts are backed up via S3 versioning or cross-region replication
+```
+
+### S3 Bucket Setup
+
+Create the S3 bucket with recommended settings:
+
+```bash
+# Create bucket
+aws s3 mb s3://dalston-artifacts --region eu-west-2
+
+# Enable versioning (recommended)
+aws s3api put-bucket-versioning \
+  --bucket dalston-artifacts \
+  --versioning-configuration Status=Enabled
+
+# Set lifecycle rule for old sessions
+aws s3api put-bucket-lifecycle-configuration \
+  --bucket dalston-artifacts \
+  --lifecycle-configuration '{
+    "Rules": [
+      {
+        "ID": "cleanup-old-sessions",
+        "Prefix": "sessions/",
+        "Status": "Enabled",
+        "Expiration": { "Days": 7 }
+      }
+    ]
+  }'
 ```
 
 ---
@@ -581,8 +698,14 @@ curl http://localhost:8000/health
 # System status
 curl http://localhost:8000/v1/system/status
 
+# PostgreSQL
+docker compose exec postgres pg_isready -U dalston
+
 # Redis
 docker compose exec redis redis-cli ping
+
+# S3 connectivity
+aws s3 ls s3://${S3_BUCKET}/ --region ${S3_REGION}
 ```
 
 ### Resource Usage
@@ -645,4 +768,37 @@ docker compose logs redis
 
 # Test connection
 docker compose exec redis redis-cli ping
+```
+
+### PostgreSQL Connection Errors
+
+```bash
+# Check PostgreSQL is running
+docker compose ps postgres
+
+# Check PostgreSQL logs
+docker compose logs postgres
+
+# Test connection
+docker compose exec postgres psql -U dalston -c "SELECT 1"
+
+# Check database exists
+docker compose exec postgres psql -U dalston -l
+```
+
+### S3 Connection Errors
+
+```bash
+# Check credentials are set
+echo "Bucket: $S3_BUCKET, Region: $S3_REGION"
+
+# Test S3 access
+aws s3 ls s3://${S3_BUCKET}/ --region ${S3_REGION}
+
+# Check bucket policy allows access
+aws s3api get-bucket-policy --bucket ${S3_BUCKET}
+
+# Test write access
+echo "test" | aws s3 cp - s3://${S3_BUCKET}/test.txt
+aws s3 rm s3://${S3_BUCKET}/test.txt
 ```

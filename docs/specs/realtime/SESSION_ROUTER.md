@@ -190,6 +190,197 @@ Members: [session_id, ...]
 
 ---
 
+## Hybrid Mode Storage
+
+When `enhance_on_end=true`, the real-time session's audio is recorded for subsequent batch processing (speaker diarization, LLM cleanup, etc.).
+
+### Storage Architecture
+
+| Layer | Purpose |
+|-------|---------|
+| **S3** | Permanent storage for audio, transcripts, and metadata |
+| **Local temp** | In-flight audio buffering during session |
+| **Redis** | Session state (ephemeral, TTL-based) |
+
+### S3 Storage Structure
+
+```
+s3://{bucket}/sessions/{session_id}/
+├── audio.wav              # Recorded audio (16kHz, 16-bit PCM)
+├── transcript.json        # Real-time transcript segments
+├── metadata.json          # Session configuration and timing
+└── chunks/                # Optional: incremental audio chunks
+    ├── 000001.wav
+    ├── 000002.wav
+    └── ...
+```
+
+### Local Temporary Storage
+
+Workers buffer audio locally during the session, then upload to S3 on completion:
+
+```
+/tmp/dalston/sessions/{session_id}/
+├── audio_buffer.wav       # Growing audio file during session
+└── chunks/                # Checkpoint chunks (continuous mode)
+```
+
+Local files are deleted after successful S3 upload.
+
+### S3 Object Ownership
+
+| Component | Creates | Writes | Reads |
+|-----------|---------|--------|-------|
+| Session Router | — | metadata.json (on session start) | metadata.json |
+| Real-time Worker | — | audio.wav, transcript.json, chunks/ | — |
+| Batch Orchestrator | — | — | All objects |
+
+All S3 writes use the same bucket configured in the environment (`S3_BUCKET`).
+
+### Audio Recording Strategy
+
+Two modes are available, configured per-session:
+
+| Mode | Config | Behavior | Use Case |
+|------|--------|----------|----------|
+| **End-only** | `checkpoint_interval: 0` | Write complete audio on session end | Short sessions (< 5 min) |
+| **Continuous** | `checkpoint_interval: 60` | Write checkpoint every N seconds | Long sessions, fault tolerance |
+
+**Continuous mode benefits:**
+- Recoverable on worker crash (audio up to last checkpoint preserved)
+- Lower memory usage (chunks flushed to disk)
+- Enables mid-session batch enhancement triggers
+
+### Session State (Extended)
+
+```
+Key: dalston:realtime:session:{session_id}
+Type: Hash
+TTL: 300 seconds (extended on activity)
+
+{
+  "worker_id": "realtime-whisper-1",
+  "tenant_id": "uuid",
+  "status": "active",
+  "language": "en",
+  "model": "fast",
+  "client_ip": "192.168.1.100",
+  "started_at": "2025-01-28T12:00:00Z",
+  "audio_duration": 45.6,
+  "enhance_on_end": "true",
+  "checkpoint_interval": "60",
+  "storage_uri": "s3://bucket/sessions/sess_abc123",
+  "last_checkpoint_at": "2025-01-28T12:01:00Z"
+}
+```
+
+Session state in Redis is ephemeral. Audio and transcripts are persisted to S3.
+
+### Metadata File
+
+**S3 Path**: `s3://{bucket}/sessions/{session_id}/metadata.json`
+
+```json
+{
+  "session_id": "sess_abc123",
+  "tenant_id": "uuid",
+  "worker_id": "realtime-whisper-1",
+  "started_at": "2025-01-28T12:00:00Z",
+  "ended_at": "2025-01-28T12:05:30Z",
+  "config": {
+    "language": "en",
+    "model": "fast",
+    "sample_rate": 16000,
+    "encoding": "pcm_s16le",
+    "enable_vad": true,
+    "word_timestamps": true
+  },
+  "stats": {
+    "total_duration_ms": 330000,
+    "speech_duration_ms": 285000,
+    "segments_count": 42,
+    "checkpoints_written": 5
+  },
+  "storage": {
+    "audio_uri": "s3://bucket/sessions/sess_abc123/audio.wav",
+    "transcript_uri": "s3://bucket/sessions/sess_abc123/transcript.json"
+  }
+}
+```
+
+### Session End → Batch Enhancement Flow
+
+```
+1. Client sends { "type": "end" } or disconnects
+2. Worker finalizes audio buffer and uploads to S3:
+   - audio.wav → s3://{bucket}/sessions/{session_id}/audio.wav
+   - transcript.json → s3://{bucket}/sessions/{session_id}/transcript.json
+3. Worker uploads completed metadata.json to S3
+4. Worker cleans up local temp files
+5. Worker notifies Session Router: session_ended(enhance_requested=true)
+6. Session Router creates batch enhancement job in PostgreSQL:
+   - job_id = new UUID
+   - source_type = "realtime_enhancement"
+   - source_session_id = session_id
+   - audio_uri = "s3://{bucket}/sessions/{session_id}/audio.wav"
+7. Session Router returns enhancement_job_id to Gateway
+8. Gateway includes in session.end message to client
+9. Batch Orchestrator picks up job, runs enhancement pipeline
+10. Enhanced transcript written to s3://{bucket}/jobs/{job_id}/transcript.json
+```
+
+### Storage Requirements
+
+All workers require S3 access. No shared filesystem is needed between nodes.
+
+| Component | S3 Access | Local Temp |
+|-----------|-----------|------------|
+| Real-time Worker | Read/Write | Yes (audio buffering) |
+| Batch Worker | Read/Write | Yes (processing) |
+| Session Router | Read/Write | No |
+| Gateway | Read-only | No |
+
+**Environment Variables:**
+```bash
+S3_BUCKET=dalston-artifacts
+S3_REGION=eu-west-2
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+```
+
+### Cleanup Policy
+
+Session objects in S3 are retained temporarily, then cleaned up via S3 lifecycle rules or a cleanup job:
+
+```yaml
+# config/session_router.yaml
+storage:
+  s3:
+    bucket: dalston-artifacts
+    region: eu-west-2
+  retention:
+    completed_sessions: 24h      # Keep for 24 hours after completion
+    failed_sessions: 72h         # Keep failed sessions longer for debugging
+    enhanced_sessions: 1h        # Delete after batch job completes
+  cleanup_interval: 1h           # Run cleanup job every hour
+```
+
+**S3 Lifecycle Rule (recommended):**
+```json
+{
+  "Rules": [
+    {
+      "ID": "cleanup-old-sessions",
+      "Prefix": "sessions/",
+      "Status": "Enabled",
+      "Expiration": { "Days": 7 }
+    }
+  ]
+}
+```
+
+---
+
 ## API
 
 ### Internal API (Gateway → Session Router)

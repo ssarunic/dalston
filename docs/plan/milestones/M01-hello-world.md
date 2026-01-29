@@ -62,16 +62,16 @@ dalston/gateway/
 @router.post("/v1/audio/transcriptions")
 async def create_transcription(file: UploadFile) -> CreateJobResponse:
     job_id = f"job_{uuid4().hex[:12]}"
-    
-    # 1. Save file to /data/jobs/{job_id}/audio/original.*
-    # 2. Create Job record in Redis (status="pending")
-    # 3. Publish "job.created" event
-    
+
+    # 1. Upload file to S3: s3://{bucket}/jobs/{job_id}/audio/original.*
+    # 2. Create Job record in PostgreSQL (status="pending")
+    # 3. Publish "job.created" event (Redis pub/sub)
+
     return {"id": job_id, "status": "pending"}
 
 @router.get("/v1/audio/transcriptions/{job_id}")
 async def get_transcription(job_id: str) -> JobResponse:
-    # Load job from Redis, return status + transcript if complete
+    # Load job from PostgreSQL, return status + transcript (from S3) if complete
     pass
 ```
 
@@ -258,50 +258,69 @@ async def handle_task_completed(task_id: str):
 
 ```yaml
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=dalston
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=dalston
+    ports: ["5432:5432"]
+    volumes: [postgres-data:/var/lib/postgresql/data]
+
   redis:
     image: redis:7-alpine
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly no
     ports: ["6379:6379"]
-    volumes: [redis-data:/data]
-  
+
   gateway:
     build: { dockerfile: docker/Dockerfile.gateway }
     ports: ["8000:8000"]
     environment:
+      - DATABASE_URL=postgresql://dalston:${POSTGRES_PASSWORD}@postgres:5432/dalston
       - REDIS_URL=redis://redis:6379
-      - DATA_DIR=/data
-    volumes: [dalston-data:/data]
-    depends_on: [redis]
-  
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    depends_on: [postgres, redis]
+
   orchestrator:
     build: { dockerfile: docker/Dockerfile.orchestrator }
     environment:
+      - DATABASE_URL=postgresql://dalston:${POSTGRES_PASSWORD}@postgres:5432/dalston
       - REDIS_URL=redis://redis:6379
-      - DATA_DIR=/data
-    volumes: [dalston-data:/data]
-    depends_on: [redis]
-  
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    depends_on: [postgres, redis]
+
   engine-stub-transcriber:
     build: { context: ./engines/transcribe/stub-transcriber }
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=stub-transcriber
-      - DATA_DIR=/data
-    volumes: [dalston-data:/data]
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    tmpfs: ["/tmp/dalston:size=1G"]
     depends_on: [redis]
-  
+
   engine-stub-merger:
     build: { context: ./engines/merge/stub-merger }
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=stub-merger
-      - DATA_DIR=/data
-    volumes: [dalston-data:/data]
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    tmpfs: ["/tmp/dalston:size=1G"]
     depends_on: [redis]
 
 volumes:
-  dalston-data:
-  redis-data:
+  postgres-data:
 ```
 
 ---

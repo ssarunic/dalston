@@ -220,24 +220,31 @@ class FinalMerger(Engine):
 
 ```yaml
 services:
-  # ... redis, gateway, orchestrator unchanged ...
-  
+  # ... postgres, redis, gateway, orchestrator unchanged ...
+
   engine-audio-prepare:
     build: { context: ./engines/prepare/audio-prepare }
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=audio-prepare
-      - DATA_DIR=/data
-    volumes: [dalston-data:/data]
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    tmpfs: ["/tmp/dalston:size=10G"]
     depends_on: [redis]
-  
+
   engine-faster-whisper:
     build: { context: ./engines/transcribe/faster-whisper }
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=faster-whisper
-      - DATA_DIR=/data
-    volumes: [dalston-data:/data]
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    tmpfs: ["/tmp/dalston:size=10G"]
+    volumes: [model-cache:/models]
     deploy:
       resources:
         reservations:
@@ -246,15 +253,21 @@ services:
               count: 1
               capabilities: [gpu]
     depends_on: [redis]
-  
+
   engine-final-merger:
     build: { context: ./engines/merge/final-merger }
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=final-merger
-      - DATA_DIR=/data
-    volumes: [dalston-data:/data]
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    tmpfs: ["/tmp/dalston:size=1G"]
     depends_on: [redis]
+
+volumes:
+  model-cache:
 ```
 
 ---

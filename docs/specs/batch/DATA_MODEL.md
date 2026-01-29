@@ -4,153 +4,108 @@
 
 This document describes the data structures used in Dalston for jobs, tasks, and transcripts.
 
----
+### Storage Architecture
 
-## Redis Data Structures
-
-### Job State
-
-**Key**: `dalston:job:{job_id}`  
-**Type**: Hash
-
-```json
-{
-  "id": "job_abc123",
-  "tenant_id": "default",
-  "status": "running",
-  "audio_path": "/data/jobs/job_abc123/audio/original.wav",
-  "parameters": "{\"speaker_detection\": \"diarize\", \"word_timestamps\": true}",
-  "created_at": "2025-01-28T12:00:00Z",
-  "started_at": "2025-01-28T12:00:01Z",
-  "completed_at": null,
-  "webhook_url": "https://example.com/webhook",
-  "error": null
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string | Unique job identifier |
-| `tenant_id` | string | Tenant ID for multi-tenancy isolation |
-| `status` | string | pending, running, completed, failed, cancelled |
-| `audio_path` | string | Path to original audio file |
-| `parameters` | JSON string | Job configuration |
-| `created_at` | ISO timestamp | When job was created |
-| `started_at` | ISO timestamp | When processing began |
-| `completed_at` | ISO timestamp | When processing finished |
-| `webhook_url` | string | Callback URL (optional) |
-| `error` | string | Error message if failed |
-
-### Jobs by Tenant Index
-
-**Key**: `dalston:jobs:tenant:{tenant_id}`
-**Type**: Set
-
-Contains all job IDs belonging to a tenant. Used for listing jobs scoped to an API key.
-
-```
-SMEMBERS dalston:jobs:tenant:default
-→ ["job_abc123", "job_def456", ...]
-```
+| Layer | Technology | Purpose |
+|-------|------------|---------|
+| **PostgreSQL** | Primary database | Persistent business data (jobs, tasks, API keys, tenants) |
+| **Redis** | In-memory store | Ephemeral data (session state, rate limits, queues, pub/sub) |
+| **S3** | Object storage | All artifacts (audio files, transcripts, exports) |
+| **Local** | Temp filesystem | In-flight processing files only |
 
 ---
 
-### API Key State
+## PostgreSQL Schemas
 
-**Key**: `dalston:apikeys:{key_hash}`
-**Type**: String (JSON)
+### Jobs Table
 
-API keys are stored by their SHA256 hash for secure O(1) lookup.
+```sql
+CREATE TABLE jobs (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id       UUID NOT NULL REFERENCES tenants(id),
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending',
+    audio_uri       TEXT NOT NULL,
+    parameters      JSONB NOT NULL DEFAULT '{}',
+    webhook_url     TEXT,
+    error           TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at      TIMESTAMPTZ,
+    completed_at    TIMESTAMPTZ
+);
 
-```json
-{
-  "id": "550e8400-e29b-41d4-a716-446655440000",
-  "key_hash": "a1b2c3d4...",
-  "prefix": "dk_abc1234",
-  "name": "Production Key",
-  "tenant_id": "default",
-  "scopes": ["jobs:read", "jobs:write", "realtime"],
-  "rate_limit": 100,
-  "created_at": "2025-01-28T12:00:00Z",
-  "last_used_at": "2025-01-28T14:30:00Z",
-  "revoked_at": null
-}
+CREATE INDEX idx_jobs_tenant_id ON jobs(tenant_id);
+CREATE INDEX idx_jobs_status ON jobs(status);
+CREATE INDEX idx_jobs_created_at ON jobs(created_at DESC);
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string | Unique key identifier (UUID) |
-| `key_hash` | string | SHA256 hash of the full key |
-| `prefix` | string | First 10 chars for display (e.g., "dk_abc1234") |
-| `name` | string | Human-readable name |
-| `tenant_id` | string | Tenant this key belongs to |
-| `scopes` | array | Permissions: jobs:read, jobs:write, realtime, webhooks, admin |
-| `rate_limit` | integer | Max requests/minute (null = unlimited) |
-| `created_at` | ISO timestamp | When key was created |
-| `last_used_at` | ISO timestamp | When key was last used |
-| `revoked_at` | ISO timestamp | When key was revoked (null if active) |
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID | Unique job identifier |
+| `tenant_id` | UUID | Tenant for multi-tenancy isolation |
+| `status` | VARCHAR | pending, running, completed, failed, cancelled |
+| `audio_uri` | TEXT | S3 URI to original audio file |
+| `parameters` | JSONB | Job configuration |
+| `webhook_url` | TEXT | Callback URL (optional) |
+| `error` | TEXT | Error message if failed |
+| `created_at` | TIMESTAMPTZ | When job was created |
+| `started_at` | TIMESTAMPTZ | When processing began |
+| `completed_at` | TIMESTAMPTZ | When processing finished |
 
-### API Key Indexes
+#### Job Status Values
 
-**Key**: `dalston:apikeys:id:{key_id}` → `key_hash`
-Lookup key hash by ID for management operations.
-
-**Key**: `dalston:apikeys:tenant:{tenant_id}`
-**Type**: Set
-All key IDs belonging to a tenant.
-
-### Rate Limit Counter
-
-**Key**: `dalston:ratelimit:{key_id}`
-**Type**: String (counter)
-**TTL**: 60 seconds
-
-Incremented on each request, auto-expires for sliding window rate limiting.
+| Status | Description |
+|--------|-------------|
+| `pending` | Queued, waiting to start |
+| `running` | Currently being processed |
+| `completed` | Successfully finished |
+| `failed` | Error occurred |
+| `cancelled` | Cancelled by user |
 
 ---
 
-### Task State
+### Tasks Table
 
-**Key**: `dalston:task:{task_id}`  
-**Type**: Hash
+```sql
+CREATE TABLE tasks (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_id          UUID NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    stage           VARCHAR(50) NOT NULL,
+    engine_id       VARCHAR(100) NOT NULL,
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending',
+    dependencies    UUID[] NOT NULL DEFAULT '{}',
+    config          JSONB NOT NULL DEFAULT '{}',
+    input_uri       TEXT,
+    output_uri      TEXT,
+    retries         INTEGER NOT NULL DEFAULT 0,
+    max_retries     INTEGER NOT NULL DEFAULT 2,
+    required        BOOLEAN NOT NULL DEFAULT true,
+    error           TEXT,
+    started_at      TIMESTAMPTZ,
+    completed_at    TIMESTAMPTZ
+);
 
-```json
-{
-  "id": "task_xyz789",
-  "job_id": "job_abc123",
-  "stage": "transcribe",
-  "engine_id": "faster-whisper",
-  "status": "completed",
-  "dependencies": "[\"task_xyz788\"]",
-  "config": "{\"language\": \"auto\", \"model\": \"large-v3\"}",
-  "input_path": "/data/jobs/job_abc123/tasks/task_xyz789/input.json",
-  "output_path": "/data/jobs/job_abc123/tasks/task_xyz789/output.json",
-  "retries": 0,
-  "max_retries": 2,
-  "required": true,
-  "started_at": "2025-01-28T12:00:02Z",
-  "completed_at": "2025-01-28T12:01:30Z",
-  "error": null
-}
+CREATE INDEX idx_tasks_job_id ON tasks(job_id);
+CREATE INDEX idx_tasks_status ON tasks(status);
+CREATE INDEX idx_tasks_stage ON tasks(stage);
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string | Unique task identifier |
-| `job_id` | string | Parent job ID |
-| `stage` | string | Pipeline stage (transcribe, align, diarize, etc.) |
-| `engine_id` | string | Engine to execute this task |
-| `status` | string | pending, ready, running, completed, failed, skipped |
-| `dependencies` | JSON array | Task IDs this task depends on |
-| `config` | JSON string | Engine-specific configuration |
-| `input_path` | string | Path to input file |
-| `output_path` | string | Path to output file |
-| `retries` | integer | Current retry count |
-| `max_retries` | integer | Maximum retries allowed |
-| `required` | boolean | If false, job continues on failure |
-| `started_at` | ISO timestamp | When execution began |
-| `completed_at` | ISO timestamp | When execution finished |
-| `error` | string | Error message if failed |
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID | Unique task identifier |
+| `job_id` | UUID | Parent job ID |
+| `stage` | VARCHAR | Pipeline stage (transcribe, align, diarize, etc.) |
+| `engine_id` | VARCHAR | Engine to execute this task |
+| `status` | VARCHAR | pending, ready, running, completed, failed, skipped |
+| `dependencies` | UUID[] | Task IDs this task depends on |
+| `config` | JSONB | Engine-specific configuration |
+| `input_uri` | TEXT | S3 URI to input file |
+| `output_uri` | TEXT | S3 URI to output file |
+| `retries` | INTEGER | Current retry count |
+| `max_retries` | INTEGER | Maximum retries allowed |
+| `required` | BOOLEAN | If false, job continues on failure |
+| `error` | TEXT | Error message if failed |
+| `started_at` | TIMESTAMPTZ | When execution began |
+| `completed_at` | TIMESTAMPTZ | When execution finished |
 
 #### Task Status Values
 
@@ -165,51 +120,119 @@ Incremented on each request, auto-expires for sliding window rate limiting.
 
 ---
 
-### Job Tasks Index
+### Tenants Table
 
-**Key**: `dalston:job:{job_id}:tasks`  
-**Type**: Set
+```sql
+CREATE TABLE tenants (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            VARCHAR(255) NOT NULL,
+    settings        JSONB NOT NULL DEFAULT '{}',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
-Contains all task IDs belonging to a job.
-
+CREATE UNIQUE INDEX idx_tenants_name ON tenants(name);
 ```
-SMEMBERS dalston:job:job_abc123:tasks
-→ ["task_xyz788", "task_xyz789", "task_xyz790", ...]
-```
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID | Unique tenant identifier |
+| `name` | VARCHAR | Tenant name |
+| `settings` | JSONB | Tenant-specific configuration |
+| `created_at` | TIMESTAMPTZ | When tenant was created |
+| `updated_at` | TIMESTAMPTZ | Last modification time |
 
 ---
+
+### API Keys Table
+
+```sql
+CREATE TABLE api_keys (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    key_hash        VARCHAR(64) NOT NULL UNIQUE,
+    prefix          VARCHAR(12) NOT NULL,
+    name            VARCHAR(255) NOT NULL,
+    tenant_id       UUID NOT NULL REFERENCES tenants(id),
+    scopes          TEXT[] NOT NULL DEFAULT '{}',
+    rate_limit      INTEGER,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at    TIMESTAMPTZ,
+    revoked_at      TIMESTAMPTZ
+);
+
+CREATE INDEX idx_api_keys_key_hash ON api_keys(key_hash);
+CREATE INDEX idx_api_keys_tenant_id ON api_keys(tenant_id);
+CREATE INDEX idx_api_keys_prefix ON api_keys(prefix);
+```
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID | Unique key identifier |
+| `key_hash` | VARCHAR | SHA256 hash of the full key |
+| `prefix` | VARCHAR | First 10 chars for display (e.g., "dk_abc1234") |
+| `name` | VARCHAR | Human-readable name |
+| `tenant_id` | UUID | Tenant this key belongs to |
+| `scopes` | TEXT[] | Permissions: jobs:read, jobs:write, realtime, webhooks, admin |
+| `rate_limit` | INTEGER | Max requests/minute (null = use tenant default) |
+| `created_at` | TIMESTAMPTZ | When key was created |
+| `last_used_at` | TIMESTAMPTZ | When key was last used |
+| `revoked_at` | TIMESTAMPTZ | When key was revoked (null if active) |
+
+---
+
+## Redis Data Structures
+
+Redis is used exclusively for ephemeral, real-time data that doesn't require durability.
 
 ### Engine Work Queue
 
-**Key**: `dalston:queue:{engine_id}`  
+**Key**: `dalston:queue:{engine_id}`
 **Type**: List (FIFO)
 
 ```
-RPUSH dalston:queue:faster-whisper task_xyz789
+RPUSH dalston:queue:faster-whisper task_uuid
 BRPOP dalston:queue:faster-whisper 30
 ```
 
-Workers use `BRPOP` for blocking dequeue with timeout.
+Workers use `BRPOP` for blocking dequeue with timeout. Task UUIDs reference the PostgreSQL tasks table.
 
 ---
 
-### Recent Jobs Index
+### Rate Limit Counter
 
-**Key**: `dalston:jobs:recent`  
-**Type**: List
+**Key**: `dalston:ratelimit:{key_id}`
+**Type**: String (counter)
+**TTL**: 60 seconds
 
-Most recent job IDs (capped to last 1000).
+Incremented on each request, auto-expires for sliding window rate limiting.
 
+---
+
+### Real-time Session State
+
+**Key**: `dalston:session:{session_id}`
+**Type**: Hash
+**TTL**: 300 seconds (extended on activity)
+
+```json
+{
+  "session_id": "sess_abc123",
+  "tenant_id": "uuid",
+  "worker_id": "worker-1",
+  "status": "active",
+  "audio_duration_ms": 45000,
+  "created_at": "2025-01-28T12:00:00Z",
+  "last_activity": "2025-01-28T12:00:45Z"
+}
 ```
-LPUSH dalston:jobs:recent job_abc123
-LTRIM dalston:jobs:recent 0 999
-```
+
+Session state is ephemeral. Audio and transcripts are written to S3.
 
 ---
 
 ### Event Channel
 
-**Channel**: `dalston:events`  
+**Channel**: `dalston:events`
 **Type**: Pub/Sub
 
 #### Event Types
@@ -218,7 +241,7 @@ LTRIM dalston:jobs:recent 0 999
 ```json
 {
   "type": "job.created",
-  "job_id": "job_abc123",
+  "job_id": "uuid",
   "timestamp": "2025-01-28T12:00:00Z"
 }
 ```
@@ -227,8 +250,8 @@ LTRIM dalston:jobs:recent 0 999
 ```json
 {
   "type": "task.completed",
-  "task_id": "task_xyz789",
-  "job_id": "job_abc123",
+  "task_id": "uuid",
+  "job_id": "uuid",
   "stage": "transcribe",
   "timestamp": "2025-01-28T12:01:30Z"
 }
@@ -238,8 +261,8 @@ LTRIM dalston:jobs:recent 0 999
 ```json
 {
   "type": "task.failed",
-  "task_id": "task_xyz789",
-  "job_id": "job_abc123",
+  "task_id": "uuid",
+  "job_id": "uuid",
   "error": "CUDA out of memory",
   "timestamp": "2025-01-28T12:01:15Z"
 }
@@ -249,8 +272,8 @@ LTRIM dalston:jobs:recent 0 999
 ```json
 {
   "type": "task.progress",
-  "task_id": "task_xyz789",
-  "job_id": "job_abc123",
+  "task_id": "uuid",
+  "job_id": "uuid",
   "progress": 45,
   "timestamp": "2025-01-28T12:00:45Z"
 }
@@ -260,39 +283,68 @@ LTRIM dalston:jobs:recent 0 999
 ```json
 {
   "type": "job.completed",
-  "job_id": "job_abc123",
+  "job_id": "uuid",
   "timestamp": "2025-01-28T12:02:30Z"
 }
 ```
 
 ---
 
-## Filesystem Structure
+## S3 Storage Structure
 
-### Job Workspace
+### Job Artifacts
 
 ```
-/data/jobs/{job_id}/
-├── audio/
-│   ├── original.mp3           # As uploaded
-│   ├── original.wav           # Converted to WAV
-│   ├── prepared.wav           # 16kHz, 16-bit (mono or stereo)
-│   ├── channel_0.wav          # If split (per_channel mode)
-│   └── channel_1.wav          # If split
+s3://{bucket}/
+├── jobs/
+│   └── {job_id}/
+│       ├── audio/
+│       │   ├── original.mp3           # As uploaded
+│       │   ├── original.wav           # Converted to WAV
+│       │   ├── prepared.wav           # 16kHz, 16-bit (mono or stereo)
+│       │   ├── channel_0.wav          # If split (per_channel mode)
+│       │   └── channel_1.wav          # If split
+│       │
+│       ├── tasks/
+│       │   └── {task_id}/
+│       │       ├── input.json         # Task input specification
+│       │       └── output.json        # Task output result
+│       │
+│       └── transcript.json            # Final merged result
 │
-├── tasks/
-│   ├── {task_id}/
-│   │   ├── input.json         # Task input specification
-│   │   └── output.json        # Task output result
-│   └── ...
+├── sessions/
+│   └── {session_id}/
+│       ├── audio.wav                  # Recorded audio (if enabled)
+│       ├── partials/                  # Streaming transcripts
+│       │   ├── 0001.json
+│       │   └── ...
+│       └── final.json                 # Final session transcript
 │
-└── transcript.json            # Final merged result
+└── exports/
+    └── {job_id}/
+        ├── transcript.srt
+        ├── transcript.vtt
+        └── transcript.txt
+```
+
+### S3 URI Format
+
+All `*_uri` columns in PostgreSQL use the format:
+```
+s3://{bucket}/{path}
+```
+
+Example:
+```
+s3://dalston-artifacts/jobs/550e8400-e29b-41d4-a716-446655440000/audio/original.wav
 ```
 
 ### Model Cache
 
+Models are stored in S3 and cached locally on workers:
+
 ```
-/data/models/
+s3://{bucket}/models/
 ├── faster-whisper/
 │   ├── large-v3/
 │   ├── medium/
@@ -305,27 +357,32 @@ LTRIM dalston:jobs:recent 0 999
     └── base/
 ```
 
+Workers download models to local cache on startup:
+```
+/data/models/  (local cache, not persisted)
+```
+
 ---
 
 ## Task Input/Output Format
 
 ### Task Input
 
-**Path**: `/data/jobs/{job_id}/tasks/{task_id}/input.json`
+**S3 Path**: `s3://{bucket}/jobs/{job_id}/tasks/{task_id}/input.json`
 
 ```json
 {
-  "task_id": "task_xyz789",
-  "job_id": "job_abc123",
-  
-  "audio_path": "/data/jobs/job_abc123/audio/prepared.wav",
-  
+  "task_id": "uuid",
+  "job_id": "uuid",
+
+  "audio_uri": "s3://bucket/jobs/{job_id}/audio/prepared.wav",
+
   "previous_outputs": {
     "prepare": {
       "duration": 150.5,
       "channels": 1,
       "sample_rate": 16000,
-      "audio_path": "/data/jobs/job_abc123/audio/prepared.wav"
+      "audio_uri": "s3://bucket/jobs/{job_id}/audio/prepared.wav"
     },
     "transcribe": {
       "text": "...",
@@ -333,7 +390,7 @@ LTRIM dalston:jobs:recent 0 999
       "language": "en"
     }
   },
-  
+
   "config": {
     "model": "large-v3",
     "language": "auto",
@@ -345,14 +402,14 @@ LTRIM dalston:jobs:recent 0 999
 
 ### Task Output
 
-**Path**: `/data/jobs/{job_id}/tasks/{task_id}/output.json`
+**S3 Path**: `s3://{bucket}/jobs/{job_id}/tasks/{task_id}/output.json`
 
 ```json
 {
-  "task_id": "task_xyz789",
+  "task_id": "uuid",
   "completed_at": "2025-01-28T12:01:30Z",
   "processing_time_seconds": 88.5,
-  
+
   "data": {
     "text": "Welcome to the show. Thanks for having me...",
     "segments": [
@@ -376,13 +433,13 @@ LTRIM dalston:jobs:recent 0 999
 
 ## Final Transcript Format
 
-**Path**: `/data/jobs/{job_id}/transcript.json`
+**S3 Path**: `s3://{bucket}/jobs/{job_id}/transcript.json`
 
 ```json
 {
-  "job_id": "job_abc123",
+  "job_id": "uuid",
   "version": "1.0",
-  
+
   "metadata": {
     "audio_duration": 150.5,
     "audio_channels": 1,
@@ -390,11 +447,12 @@ LTRIM dalston:jobs:recent 0 999
     "created_at": "2025-01-28T12:00:00Z",
     "completed_at": "2025-01-28T12:02:30Z",
     "processing_time_seconds": 150,
-    "pipeline_stages": ["prepare", "transcribe", "align", "diarize", "llm-cleanup", "merge"]
+    "pipeline_stages": ["prepare", "transcribe", "align", "diarize", "llm-cleanup", "merge"],
+    "pipeline_warnings": []
   },
-  
+
   "text": "Welcome to the show. Thanks for having me. Today we're going to talk about...",
-  
+
   "speakers": [
     {
       "id": "SPEAKER_00",
@@ -407,7 +465,7 @@ LTRIM dalston:jobs:recent 0 999
       "channel": null
     }
   ],
-  
+
   "segments": [
     {
       "id": "seg_001",
@@ -454,7 +512,7 @@ LTRIM dalston:jobs:recent 0 999
       ]
     }
   ],
-  
+
   "paragraphs": [
     {
       "id": "para_001",
@@ -463,7 +521,7 @@ LTRIM dalston:jobs:recent 0 999
       "topic": "Introduction"
     }
   ],
-  
+
   "summary": "Sarah Chen interviews John Smith about his recent book on climate technology. Key topics include renewable energy investment, policy recommendations, and emerging technologies."
 }
 ```
@@ -507,3 +565,66 @@ LTRIM dalston:jobs:recent 0 999
 | `id` | string | Internal speaker ID (SPEAKER_00, SPEAKER_01) |
 | `label` | string | Human-readable name (from LLM cleanup) |
 | `channel` | number | Source channel (for per_channel mode) |
+
+### Pipeline Warnings
+
+When optional pipeline stages fail or are skipped, the `pipeline_warnings` array documents what happened. This allows clients to understand why certain features are missing from the output.
+
+```json
+{
+  "metadata": {
+    "pipeline_warnings": [
+      {
+        "stage": "diarize",
+        "status": "skipped",
+        "fallback": "single_speaker",
+        "reason": "pyannote engine unavailable",
+        "timestamp": "2025-01-28T12:01:30Z"
+      },
+      {
+        "stage": "align",
+        "status": "failed",
+        "fallback": "transcription_timestamps",
+        "reason": "whisperx-align failed after 2 retries",
+        "timestamp": "2025-01-28T12:00:45Z"
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `stage` | string | Pipeline stage that had issues |
+| `status` | string | `skipped` (not attempted) or `failed` (attempted but failed) |
+| `fallback` | string | Fallback behavior applied (see table below) |
+| `reason` | string | Human-readable explanation |
+| `timestamp` | string | When the fallback was activated |
+
+#### Fallback Values
+
+| Stage | Fallback | Effect on Output |
+|-------|----------|------------------|
+| `align` | `transcription_timestamps` | Word timestamps from transcription engine, less precise |
+| `diarize` | `single_speaker` | All segments assigned to `SPEAKER_00` |
+| `detect_emotions` | `omitted` | No emotion fields in segments |
+| `detect_events` | `omitted` | Empty events arrays |
+| `refine` | `raw_transcription` | No speaker names, no paragraph/topic segmentation |
+
+An empty `pipeline_warnings` array indicates all requested stages completed successfully.
+
+---
+
+## Local Temporary Storage
+
+Engines use local storage only for in-flight processing. Files are downloaded from S3, processed, and results uploaded back to S3.
+
+```
+/tmp/dalston/
+└── {task_id}/
+    ├── input.wav      # Downloaded from S3
+    ├── working/       # Intermediate files
+    └── output.json    # Uploaded to S3, then deleted
+```
+
+Local files are cleaned up immediately after task completion or failure.

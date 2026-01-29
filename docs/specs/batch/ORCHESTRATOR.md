@@ -4,6 +4,15 @@
 
 The Orchestrator is a background service responsible for expanding jobs into task DAGs, scheduling tasks, and managing the job lifecycle.
 
+### Storage Architecture
+
+| Data | Storage | Purpose |
+|------|---------|---------|
+| Jobs & Tasks | PostgreSQL | Persistent state, queryable |
+| Work Queues | Redis | Ephemeral task scheduling |
+| Events | Redis Pub/Sub | Real-time notifications |
+| Audio & Outputs | S3 | Artifact storage |
+
 ---
 
 ## Responsibilities
@@ -317,59 +326,52 @@ async def orchestrator_loop():
 
 ```python
 async def handle_job_created(job_id: str):
-    job = await load_job(job_id)
-    
-    # Analyze audio
-    audio_info = analyze_audio(job.audio_path)
-    
+    job = await db.jobs.get(job_id)  # PostgreSQL
+
+    # Download and analyze audio from S3
+    audio_info = await analyze_audio(job.audio_uri)
+
     # Build task DAG
     tasks = build_task_dag(job, audio_info)
-    
-    # Save all tasks
+
+    # Save all tasks to PostgreSQL
     for task in tasks:
-        await save_task(task)
-        await redis.sadd(f"dalston:job:{job_id}:tasks", task.id)
-    
-    # Queue tasks with no dependencies
+        await db.tasks.create(task)
+
+    # Queue tasks with no dependencies (Redis)
     for task in tasks:
         if not task.dependencies:
-            task.status = "ready"
-            await save_task(task)
-            await redis.lpush(f"dalston:queue:{task.engine_id}", task.id)
-    
+            await db.tasks.update(task.id, status="ready")
+            await redis.lpush(f"dalston:queue:{task.engine_id}", str(task.id))
+
     # Update job status
-    job.status = "running"
-    job.started_at = datetime.utcnow()
-    await save_job(job)
+    await db.jobs.update(job_id, status="running", started_at=datetime.utcnow())
 ```
 
 ### Handle Task Completed
 
 ```python
 async def handle_task_completed(task_id: str):
-    task = await load_task(task_id)
-    job = await load_job(task.job_id)
-    
+    task = await db.tasks.get(task_id)  # PostgreSQL
+    job = await db.jobs.get(task.job_id)
+
     # Find tasks that depend on this one
-    all_tasks = await get_job_tasks(job.id)
+    all_tasks = await db.tasks.get_by_job(job.id)
     dependents = [t for t in all_tasks if task.id in t.dependencies]
-    
+
     for dependent in dependents:
         # Check if ALL dependencies are complete
-        dep_tasks = [await load_task(dep_id) for dep_id in dependent.dependencies]
-        
+        dep_tasks = await db.tasks.get_many(dependent.dependencies)
+
         if all(t.status == "completed" for t in dep_tasks):
-            # All dependencies met - queue this task
-            dependent.status = "ready"
-            await save_task(dependent)
-            await redis.lpush(f"dalston:queue:{dependent.engine_id}", dependent.id)
-    
+            # All dependencies met - queue this task (Redis)
+            await db.tasks.update(dependent.id, status="ready")
+            await redis.lpush(f"dalston:queue:{dependent.engine_id}", str(dependent.id))
+
     # Check if job is complete
     if all(t.status in ["completed", "skipped"] for t in all_tasks):
-        job.status = "completed"
-        job.completed_at = datetime.utcnow()
-        await save_job(job)
-        
+        await db.jobs.update(job.id, status="completed", completed_at=datetime.utcnow())
+
         # Trigger webhook
         if job.webhook_url:
             await send_webhook(job)
@@ -379,35 +381,29 @@ async def handle_task_completed(task_id: str):
 
 ```python
 async def handle_task_failed(task_id: str):
-    task = await load_task(task_id)
-    job = await load_job(task.job_id)
-    
+    task = await db.tasks.get(task_id)  # PostgreSQL
+    job = await db.jobs.get(task.job_id)
+
     if task.retries < task.max_retries:
-        # Retry
-        task.retries += 1
-        task.status = "ready"
-        task.error = None
-        await save_task(task)
-        await redis.lpush(f"dalston:queue:{task.engine_id}", task.id)
-        
+        # Retry - update PostgreSQL, queue to Redis
+        await db.tasks.update(task.id, retries=task.retries + 1, status="ready", error=None)
+        await redis.lpush(f"dalston:queue:{task.engine_id}", str(task.id))
+
     elif not task.required:
         # Optional task - skip and continue
-        task.status = "skipped"
-        await save_task(task)
-        
-        # Publish completion event to unblock dependents
+        await db.tasks.update(task.id, status="skipped")
+
+        # Publish completion event to unblock dependents (Redis pub/sub)
         await redis.publish("dalston:events", json.dumps({
             "type": "task.completed",  # Treat as complete for dependency purposes
-            "task_id": task.id,
-            "job_id": task.job_id
+            "task_id": str(task.id),
+            "job_id": str(task.job_id)
         }))
-        
+
     else:
         # Required task failed - fail job
-        job.status = "failed"
-        job.error = f"Task {task.stage} failed: {task.error}"
-        await save_job(job)
-        
+        await db.jobs.update(job.id, status="failed", error=f"Task {task.stage} failed: {task.error}")
+
         # Send failure webhook
         if job.webhook_url:
             await send_webhook(job)
@@ -415,18 +411,109 @@ async def handle_task_failed(task_id: str):
 
 ---
 
+## Stage Requirements & Fallbacks
+
+Each pipeline stage has a default `required` setting and fallback behavior when it fails.
+
+### Default Stage Configuration
+
+| Stage | Required | Max Retries | Fallback Behavior |
+|-------|----------|-------------|-------------------|
+| `prepare` | **Yes** | 3 | — (cannot proceed without audio prep) |
+| `transcribe` | **Yes** | 3 | — (core functionality) |
+| `align` | No | 2 | Use word timestamps from transcription engine |
+| `diarize` | No | 2 | Mark all segments as `SPEAKER_00` |
+| `detect_emotions` | No | 1 | Omit emotion data from output |
+| `detect_events` | No | 1 | Omit audio events from output |
+| `refine` (LLM cleanup) | No | 1 | Use raw transcription text |
+| `merge` | **Yes** | 3 | — (must produce final output) |
+
+### Override Per-Job
+
+Users can override the default `required` setting per job:
+
+```json
+{
+  "speaker_detection": "diarize",
+  "pipeline": {
+    "stages": {
+      "diarize": { "required": true },
+      "detect_emotions": { "required": false }
+    }
+  }
+}
+```
+
+### Fallback Behavior Details
+
+When an optional stage fails and is skipped:
+
+**align (skipped):**
+- Uses `words` array from transcription output if available
+- Falls back to segment-level timestamps only
+- Sets `alignment_source: "transcription"` in metadata
+
+**diarize (skipped):**
+- All segments assigned to `SPEAKER_00`
+- `speaker_count: 1` in metadata
+- Sets `diarization_source: "default"` in metadata
+
+**detect_emotions (skipped):**
+- `emotion` and `emotion_confidence` fields omitted from segments
+- No emotion summary in metadata
+
+**detect_events (skipped):**
+- `events` array empty in all segments
+- No audio events in output
+
+**refine (skipped):**
+- Raw transcription text used without LLM cleanup
+- Speaker labels remain as `SPEAKER_00`, `SPEAKER_01` (no name inference)
+- No paragraph/topic segmentation
+
+### Pipeline Warnings
+
+When fallbacks are activated, the final transcript includes warnings in metadata:
+
+```json
+{
+  "metadata": {
+    "pipeline_warnings": [
+      {
+        "stage": "diarize",
+        "status": "skipped",
+        "fallback": "single_speaker",
+        "reason": "pyannote engine unavailable",
+        "timestamp": "2025-01-28T12:01:30Z"
+      },
+      {
+        "stage": "align",
+        "status": "skipped",
+        "fallback": "transcription_timestamps",
+        "reason": "whisperx-align failed after 2 retries",
+        "timestamp": "2025-01-28T12:00:45Z"
+      }
+    ]
+  }
+}
+```
+
+This allows clients to understand why certain features are missing from the output.
+
+---
+
 ## Progress Calculation
 
 ```python
-def calculate_job_progress(job_id: str) -> dict:
-    tasks = get_job_tasks(job_id)
-    
+async def calculate_job_progress(job_id: str) -> dict:
+    tasks = await db.tasks.get_by_job(job_id)  # PostgreSQL
+
     completed = sum(1 for t in tasks if t.status == "completed")
     total = len(tasks)
-    
+
     # Find currently running task
     running = next((t for t in tasks if t.status == "running"), None)
-    
+
     return {
         "overall": int(completed / total * 100),
         "current_stage": running.stage if running else None,
@@ -495,25 +582,32 @@ def select_engines_for_stages(required_stages: list[str], preference: str) -> li
 ```yaml
 # config/orchestrator.yaml
 
+database:
+  url: postgresql://dalston:password@localhost:5432/dalston
+
 redis:
   url: redis://localhost:6379
-  
+
+s3:
+  bucket: dalston-artifacts
+  region: eu-west-2
+
 queues:
   # How long workers wait on empty queue
   poll_timeout: 30
-  
+
 tasks:
   # Default retry settings
   max_retries: 2
   retry_delay: 5
-  
+
   # Task timeout (fail if running longer)
   timeout: 3600  # 1 hour
-  
+
 engines:
   # Preference for engine selection
   default_preference: null  # null = auto, "modular", or specific engine
-  
+
   # Health check interval
   heartbeat_interval: 30
   heartbeat_timeout: 90

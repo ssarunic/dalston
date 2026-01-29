@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-**Dalston** is a modular, self-hosted audio transcription server that provides an ElevenLabs-compatible API for both batch and real-time transcription. It deconstructs monolithic transcription pipelines into isolated, containerized engines that communicate via Redis queues and shared filesystem.
+**Dalston** is a modular, self-hosted audio transcription server that provides an ElevenLabs-compatible API for both batch and real-time transcription. It deconstructs monolithic transcription pipelines into isolated, containerized engines that communicate via Redis queues and S3 storage.
 
 ### Core Value Proposition
 
@@ -87,11 +87,17 @@
 │                            └──────────────────────────────────────────────────┘ │
 │                                                                                  │
 │  ┌─────────────────────────────────────────────────────────────────────────────┐ │
-│  │                          SHARED FILESYSTEM                                   │ │
+│  │                           STORAGE LAYER                                      │ │
 │  │                                                                              │ │
-│  │   /data/jobs/{job_id}/          Batch job workspace                         │ │
-│  │   /data/sessions/{session_id}/  Realtime session recordings (optional)      │ │
-│  │   /data/models/                 Shared model cache                          │ │
+│  │   ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────────┐ │ │
+│  │   │   PostgreSQL    │  │      S3         │  │      Local Temp             │ │ │
+│  │   │                 │  │                 │  │                             │ │ │
+│  │   │  • Jobs         │  │  • Audio files  │  │  • In-flight processing    │ │ │
+│  │   │  • Tasks        │  │  • Transcripts  │  │  • Audio buffering         │ │ │
+│  │   │  • API Keys     │  │  • Exports      │  │  • Model cache             │ │ │
+│  │   │  • Tenants      │  │  • Models       │  │                             │ │ │
+│  │   │                 │  │                 │  │                             │ │ │
+│  │   └─────────────────┘  └─────────────────┘  └─────────────────────────────┘ │ │
 │  └─────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
@@ -147,20 +153,28 @@
 
 ---
 
-### Redis
+### Storage Architecture
 
-**Purpose**: State storage, queues, pub/sub, coordination
+| Layer | Technology | Purpose |
+|-------|------------|---------|
+| **PostgreSQL** | Primary database | Persistent business data (jobs, tasks, API keys, tenants) |
+| **Redis** | In-memory store | Ephemeral data (queues, session state, rate limits, pub/sub) |
+| **S3** | Object storage | All artifacts (audio files, transcripts, exports, models) |
+| **Local** | Temp filesystem | In-flight processing files only |
+
+### Redis (Ephemeral)
+
+**Purpose**: Queues, pub/sub, rate limiting, session state
 
 **Batch Structures**:
-- `dalston:job:{id}` — Job state
-- `dalston:task:{id}` — Task state
 - `dalston:queue:{engine_id}` — Engine work queues
+- `dalston:ratelimit:{key_id}` — Rate limit counters
 - `dalston:events` — Event pub/sub
 
 **Real-Time Structures**:
 - `dalston:realtime:workers` — Worker registry
 - `dalston:realtime:worker:{id}` — Worker state
-- `dalston:realtime:session:{id}` — Session state
+- `dalston:realtime:session:{id}` — Session state (TTL-based)
 
 **Documentation**: [Data Model](./batch/DATA_MODEL.md)
 
@@ -289,9 +303,11 @@ On session end, returns `enhancement_job_id` to poll for enhanced transcript.
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Engine isolation | Docker containers | Solve Python dependency conflicts |
-| Batch communication | Files + Redis queues | Async, scalable, retry-friendly |
+| Persistent storage | PostgreSQL + S3 | Reliable, scalable, cloud-native |
+| Ephemeral data | Redis | Queues, pub/sub, rate limiting |
+| Artifact storage | S3 | Scalable, durable, no shared filesystem needed |
+| Batch communication | S3 + Redis queues | Async, scalable, retry-friendly |
 | Realtime communication | Direct WebSocket | Low latency, bidirectional |
-| Queue system | Redis | Simple, persistent, pub/sub built-in |
 | API compatibility | ElevenLabs | Easy migration for users |
 | Realtime scaling | Worker pool + router | Capacity management, load balancing |
 

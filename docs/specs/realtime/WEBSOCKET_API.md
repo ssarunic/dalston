@@ -849,3 +849,288 @@ If migrating to Dalston native for efficiency:
 - Session metadata (`session.begin`, `session.end`)
 - VAD events for UI feedback
 - Enhanced transcript option on session end
+
+---
+
+# Error Recovery & Reconnection
+
+## Unclean Session Termination
+
+When a session ends unexpectedly (worker crash, network issue, resource exhaustion), the server sends a `session.terminated` message before closing:
+
+```json
+{
+  "type": "session.terminated",
+  "session_id": "sess_abc123",
+  "reason": "worker_crash",
+  "last_transcript_offset_ms": 45600,
+  "recoverable": true,
+  "recovery_hint": {
+    "action": "reconnect_with_replay",
+    "buffer_window_ms": 10000,
+    "retry_after_ms": 500
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `reason` | string | `worker_crash`, `worker_maintenance`, `resource_exhaustion`, `session_timeout` |
+| `last_transcript_offset_ms` | integer | Last confirmed transcript position in milliseconds |
+| `recoverable` | boolean | Whether recovery is possible |
+| `recovery_hint.action` | string | `reconnect_with_replay` or `start_fresh` |
+| `recovery_hint.buffer_window_ms` | integer | How much audio the client should replay |
+| `recovery_hint.retry_after_ms` | integer | Suggested wait before reconnecting |
+
+## Reconnection Protocol
+
+When `recoverable=true`, clients can reconnect with session recovery:
+
+```
+ws://host/v1/audio/transcriptions/stream?api_key=dk_xxx&recovery_session=old_session_id&language=en
+```
+
+### Recovery Query Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `recovery_session` | string | Previous session ID to recover |
+
+### Recovery Flow
+
+1. **Client receives `session.terminated`** (or detects WebSocket close)
+2. **If `recoverable=true`:**
+   - Wait `retry_after_ms` milliseconds
+   - Reconnect with `recovery_session={old_session_id}` query param
+   - If client buffered audio since `last_transcript_offset_ms`, send as first chunks
+   - Gateway allocates new worker, returns `session.recovered`
+3. **If `recoverable=false`:**
+   - Start fresh session
+   - Audio since last `transcript.final` is lost
+
+### Recovery Response
+
+On successful recovery:
+
+```json
+{
+  "type": "session.recovered",
+  "session_id": "sess_def456",
+  "previous_session_id": "sess_abc123",
+  "recovered_offset_ms": 45600,
+  "message": "Session recovered. Resume sending audio."
+}
+```
+
+On failed recovery (session expired or unavailable):
+
+```json
+{
+  "type": "session.begin",
+  "session_id": "sess_def456",
+  "warnings": [
+    {
+      "code": "recovery_failed",
+      "message": "Previous session not found. Starting fresh session."
+    }
+  ]
+}
+```
+
+## Client Implementation Guidance
+
+Clients SHOULD:
+- Buffer the last 5-10 seconds of audio locally
+- Track the `offset_ms` from each `transcript.final`
+- Implement exponential backoff for reconnection attempts (500ms, 1s, 2s, 4s)
+- Set a maximum reconnection attempts limit (recommended: 3)
+- Clear buffer after successful `transcript.final` acknowledgment
+
+### Reconnection Example (JavaScript)
+
+```javascript
+class RobustTranscriber {
+  constructor(options) {
+    this.options = options;
+    this.audioBuffer = [];
+    this.lastConfirmedOffset = 0;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 3;
+    this.sessionId = null;
+  }
+
+  connect(recoverySessionId = null) {
+    const params = new URLSearchParams({
+      api_key: this.options.apiKey,
+      language: this.options.language,
+      model: this.options.model,
+    });
+
+    if (recoverySessionId) {
+      params.set('recovery_session', recoverySessionId);
+    }
+
+    this.ws = new WebSocket(`${this.options.url}?${params}`);
+    this.ws.binaryType = 'arraybuffer';
+
+    this.ws.onmessage = (event) => this.handleMessage(JSON.parse(event.data));
+    this.ws.onclose = (event) => this.handleClose(event);
+  }
+
+  handleMessage(message) {
+    switch (message.type) {
+      case 'session.begin':
+      case 'session.recovered':
+        this.sessionId = message.session_id;
+        this.reconnectAttempts = 0;
+
+        // Replay buffered audio on recovery
+        if (message.type === 'session.recovered') {
+          this.replayBuffer(message.recovered_offset_ms);
+        }
+        break;
+
+      case 'transcript.final':
+        this.lastConfirmedOffset = message.end * 1000;
+        // Clear buffer up to confirmed offset
+        this.trimBuffer(this.lastConfirmedOffset);
+        this.onFinalTranscript?.(message);
+        break;
+
+      case 'session.terminated':
+        if (message.recoverable && this.reconnectAttempts < this.maxReconnectAttempts) {
+          this.scheduleReconnect(message);
+        } else {
+          this.onSessionEnded?.(message);
+        }
+        break;
+    }
+  }
+
+  handleClose(event) {
+    // Unexpected close without session.terminated
+    if (this.sessionId && this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.scheduleReconnect({
+        recovery_hint: { retry_after_ms: 500 * Math.pow(2, this.reconnectAttempts) }
+      });
+    }
+  }
+
+  scheduleReconnect(terminationMsg) {
+    const delay = terminationMsg.recovery_hint?.retry_after_ms || 1000;
+    this.reconnectAttempts++;
+
+    setTimeout(() => {
+      this.connect(this.sessionId);
+    }, delay);
+  }
+
+  sendAudio(audioData) {
+    // Buffer audio for potential replay
+    this.audioBuffer.push({
+      timestamp: Date.now(),
+      data: audioData
+    });
+
+    // Send to server
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(audioData);
+    }
+  }
+
+  trimBuffer(offsetMs) {
+    const cutoffTime = Date.now() - 10000; // Keep last 10 seconds
+    this.audioBuffer = this.audioBuffer.filter(chunk => chunk.timestamp > cutoffTime);
+  }
+
+  replayBuffer(fromOffsetMs) {
+    // Replay buffered audio that wasn't confirmed
+    for (const chunk of this.audioBuffer) {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.ws.send(chunk.data);
+      }
+    }
+  }
+}
+```
+
+---
+
+# Rate Limits
+
+## Connection Limits
+
+| Limit | Default | Configurable | Description |
+|-------|---------|--------------|-------------|
+| Max concurrent sessions per API key | 3 | Yes | Simultaneous active sessions |
+| Max concurrent sessions per tenant | 10 | Yes | Total sessions across all keys |
+| Connection attempts per minute | 10 | Yes | Rate of new connection attempts |
+| Session creation rate | 5/minute | Yes | Successful session creations |
+
+## In-Session Limits
+
+| Limit | Default | Description |
+|-------|---------|-------------|
+| Audio data rate (sustained) | 1.5x real-time | Average rate over 10-second window |
+| Audio data rate (burst) | 10 seconds | Burst allowance for catch-up/replay |
+| Message rate (non-audio) | 30/second | Control messages (config, flush, etc.) |
+| Maximum audio chunk size | 1MB | Single message size limit |
+
+### Audio Rate Limiting (Token Bucket)
+
+Audio rate limiting uses a token bucket algorithm that allows bursts while maintaining a sustainable average rate:
+
+```
+Bucket capacity: 10 seconds of audio
+Refill rate: 1.5x real-time
+```
+
+This allows clients to:
+- Send up to 10 seconds of buffered audio immediately (reconnection scenario)
+- Sustain 1.5x real-time transmission (faster-than-realtime uploads)
+- Recover from temporary delays without data loss
+
+When the bucket is empty, excess audio is queued briefly, then dropped with a warning.
+
+## Rate Limit Errors
+
+When a rate limit is exceeded:
+
+```json
+{
+  "type": "error",
+  "code": "rate_limit",
+  "message": "Concurrent session limit reached",
+  "limit_type": "concurrent_sessions",
+  "current": 3,
+  "limit": 3,
+  "retry_after": null
+}
+```
+
+| `limit_type` | Meaning | Recovery |
+|--------------|---------|----------|
+| `concurrent_sessions` | Too many active sessions | Wait for one to end |
+| `connection_rate` | Too many connect attempts | Wait `retry_after` seconds |
+| `audio_rate` | Sending audio too fast | Slow down; data being dropped |
+| `message_rate` | Too many control messages | Reduce message frequency |
+
+### Rate Limit Response Behavior
+
+| Limit Type | Connection Phase | Behavior |
+|------------|------------------|----------|
+| `concurrent_sessions` | Before accept | Connection rejected with 4029 |
+| `connection_rate` | Before accept | Connection rejected with 4029 |
+| `audio_rate` | During session | Warning message, audio queued/dropped |
+| `message_rate` | During session | Warning, then disconnect |
+
+## WebSocket Close Codes
+
+| Code | Meaning |
+|------|---------|
+| `4001` | Invalid API key |
+| `4003` | Missing required scope |
+| `4029` | Rate limit exceeded |
+| `4008` | Session timeout |
+| `4500` | Internal server error |
+| `4503` | Service unavailable (no workers)
