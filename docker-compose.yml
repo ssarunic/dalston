@@ -1,4 +1,17 @@
+# Dalston M01 - Minimal Docker Compose
+#
+# Prerequisites:
+#   docker build -f docker/Dockerfile.engine-base -t dalston/engine-base:latest .
+#
+# Usage:
+#   docker compose up -d
+#   ./scripts/verify-m01.sh
+
 services:
+  # ============================================================
+  # INFRASTRUCTURE
+  # ============================================================
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -14,6 +27,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -25,23 +39,97 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
       - "9000:9000"
       - "9001:9001"
     volumes:
       - minio-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
+
+  # Initialize MinIO bucket before gateway starts
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set dalston http://minio:9000 $${MINIO_ROOT_USER:-minioadmin} $${MINIO_ROOT_PASSWORD:-minioadmin};
+      mc mb dalston/$${S3_BUCKET:-dalston-artifacts} --ignore-existing;
+      exit 0;
+      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-dalston-artifacts}
+
+  # ============================================================
+  # CORE SERVICES
+  # ============================================================
+
+  gateway:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://dalston:${POSTGRES_PASSWORD:-password}@postgres:5432/dalston
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.orchestrator
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://dalston:${POSTGRES_PASSWORD:-password}@postgres:5432/dalston
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ============================================================
+  # STUB ENGINES (M01)
+  # ============================================================
 
   engine-stub-transcriber:
     build:
@@ -58,8 +146,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      minio:
-        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   engine-stub-merger:
@@ -77,8 +165,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      minio:
-        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
 volumes:

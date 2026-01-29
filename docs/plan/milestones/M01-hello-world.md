@@ -187,3 +187,93 @@ curl http://localhost:8000/v1/audio/transcriptions/job_abc123
 - [ ] **Full flow** works end-to-end
 
 **Next**: [M2: Real Transcription](M02-real-transcription.md) — Replace stubs with faster-whisper
+
+---
+
+## Implementation Notes
+
+### Completed (Task 1.7)
+
+**Files created:**
+
+| File | Purpose |
+|------|---------|
+| `docker/Dockerfile.gateway` | Gateway container image |
+| `docker/Dockerfile.orchestrator` | Orchestrator container image |
+| `scripts/verify-m01.sh` | End-to-end verification script |
+
+**docker-compose.yml additions:**
+
+| Service | Notes |
+|---------|-------|
+| `gateway` | Depends on postgres, redis, minio-init; healthcheck via `/health` |
+| `orchestrator` | Depends on postgres, redis |
+| `minio-init` | Short-lived container that creates the S3 bucket before gateway starts |
+
+**Key implementation decisions:**
+
+1. **MinIO instead of S3**: For local development, we use MinIO as an S3-compatible object store. The `S3_ENDPOINT_URL` environment variable allows switching between MinIO (local) and real S3 (production).
+
+2. **Pre-built engine base image**: Engine containers extend `dalston/engine-base:latest` which must be built manually before running `docker compose up`:
+
+   ```bash
+   docker build -f docker/Dockerfile.engine-base -t dalston/engine-base:latest .
+   ```
+
+3. **Database initialization**: Both gateway and orchestrator call `init_db()` on startup, which:
+   - Creates all tables via `Base.metadata.create_all`
+   - Creates a default tenant (UUID `00000000-...`)
+
+   This approach is acceptable for M01 but has limitations (see below).
+
+### Notes for Future Milestones
+
+#### Database Migrations
+
+The current `init_db()` approach has limitations:
+
+- **No schema evolution**: `create_all` only creates missing tables; it won't modify existing tables if the model changes
+- **Race condition**: If gateway and orchestrator start simultaneously, both may try to create the default tenant
+- **No rollback**: Cannot undo schema changes
+
+**Recommended for M2+**: Introduce Alembic migrations:
+
+```text
+dalston/db/
+├── migrations/
+│   ├── versions/
+│   │   └── 001_initial.py
+│   └── env.py
+└── alembic.ini
+```
+
+Add a migration container or entrypoint script:
+
+```yaml
+gateway:
+  entrypoint: ["sh", "-c", "alembic upgrade head && uvicorn ..."]
+```
+
+#### Engine Base Image CI
+
+Currently the engine base image is built manually. Consider:
+
+- Building it in CI and pushing to a registry
+- Using Docker Compose `build.target` for multi-stage builds
+- Using a Makefile target: `make build-engine-base`
+
+#### Health Checks for Orchestrator
+
+The orchestrator currently has no health check. For production, consider:
+
+- Adding a `/health` HTTP endpoint (requires adding a small HTTP server)
+- Using a Redis PING as a proxy for health
+- Writing a heartbeat key to Redis that can be checked
+
+#### Verification Script Improvements
+
+The `scripts/verify-m01.sh` script could be extended to:
+
+- Check all service health before submitting
+- Verify Redis queue depths after job completion
+- Support CI mode with non-zero exit on any warning

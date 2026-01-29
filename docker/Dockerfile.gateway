@@ -1,0 +1,25 @@
+# Dalston Gateway
+#
+# FastAPI REST API server for batch transcription.
+#
+# Build from repo root:
+#   docker build -f docker/Dockerfile.gateway -t dalston/gateway:latest .
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies (curl for healthcheck)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy and install Python dependencies
+COPY pyproject.toml .
+COPY dalston/ dalston/
+
+RUN pip install --no-cache-dir -e ".[gateway]"
+
+EXPOSE 8000
+
+CMD ["uvicorn", "dalston.gateway.main:app", "--host", "0.0.0.0", "--port", "8000"]
