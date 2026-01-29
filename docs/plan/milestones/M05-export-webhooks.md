@@ -19,258 +19,85 @@
 
 ### 5.1: Export Endpoints
 
-```python
-# gateway/api/v1/transcription.py
+**New endpoint:**
 
-from fastapi.responses import Response
-
-@router.get("/v1/audio/transcriptions/{job_id}/export/{format}")
-async def export_transcript(
-    job_id: str, 
-    format: Literal["srt", "vtt", "txt", "json"],
-    include_speakers: bool = Query(True),
-    max_line_length: int = Query(42)
-):
-    job = await get_completed_job(job_id)
-    if job.status != "completed":
-        raise HTTPException(400, "Job not complete")
-    
-    transcript = job.transcript
-    
-    if format == "srt":
-        content = generate_srt(transcript, include_speakers, max_line_length)
-        return Response(
-            content, 
-            media_type="text/plain",
-            headers={"Content-Disposition": f"attachment; filename={job_id}.srt"}
-        )
-    
-    elif format in ("vtt", "webvtt"):
-        content = generate_vtt(transcript, include_speakers, max_line_length)
-        return Response(content, media_type="text/vtt")
-    
-    elif format == "txt":
-        content = generate_txt(transcript, include_speakers)
-        return Response(content, media_type="text/plain")
-    
-    elif format == "json":
-        return transcript
-    
-    raise HTTPException(400, f"Unknown format: {format}")
 ```
+GET /v1/audio/transcriptions/{job_id}/export/{format}
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `format` | string | required | `srt`, `vtt`, `txt`, `json` |
+| `include_speakers` | bool | true | Include speaker labels in output |
+| `max_line_length` | int | 42 | Word wrap for subtitles |
+
+**Deliverables:**
+
+- Return 400 if job not completed
+- Set appropriate Content-Type and Content-Disposition headers
+- Support all four export formats
 
 ---
 
 ### 5.2: Export Generators
 
-```python
-# gateway/services/export.py
+**Deliverables:**
 
-def format_timestamp_srt(seconds: float) -> str:
-    """Format as 00:00:01,500"""
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    ms = int((seconds % 1) * 1000)
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
-def format_timestamp_vtt(seconds: float) -> str:
-    """Format as 00:00:01.500"""
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    ms = int((seconds % 1) * 1000)
-    return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
-
-def wrap_text(text: str, max_chars: int) -> str:
-    """Word wrap for subtitles."""
-    words = text.split()
-    lines = []
-    current_line = []
-    current_length = 0
-    
-    for word in words:
-        if current_length + len(word) + 1 > max_chars and current_line:
-            lines.append(" ".join(current_line))
-            current_line = [word]
-            current_length = len(word)
-        else:
-            current_line.append(word)
-            current_length += len(word) + 1
-    
-    if current_line:
-        lines.append(" ".join(current_line))
-    
-    return "\n".join(lines)
-
-def generate_srt(transcript: dict, include_speakers: bool, max_chars: int) -> str:
-    lines = []
-    for i, seg in enumerate(transcript["segments"], 1):
-        start = format_timestamp_srt(seg["start"])
-        end = format_timestamp_srt(seg["end"])
-        
-        text = seg["text"]
-        if include_speakers and seg.get("speaker"):
-            text = f"[{seg['speaker']}] {text}"
-        
-        wrapped = wrap_text(text, max_chars)
-        lines.append(f"{i}\n{start} --> {end}\n{wrapped}\n")
-    
-    return "\n".join(lines)
-
-def generate_vtt(transcript: dict, include_speakers: bool, max_chars: int) -> str:
-    lines = ["WEBVTT", ""]
-    
-    for seg in transcript["segments"]:
-        start = format_timestamp_vtt(seg["start"])
-        end = format_timestamp_vtt(seg["end"])
-        
-        text = seg["text"]
-        if include_speakers and seg.get("speaker"):
-            text = f"<v {seg['speaker']}>{text}"
-        
-        wrapped = wrap_text(text, max_chars)
-        lines.append(f"{start} --> {end}\n{wrapped}\n")
-    
-    return "\n".join(lines)
-
-def generate_txt(transcript: dict, include_speakers: bool) -> str:
-    lines = []
-    current_speaker = None
-    
-    for seg in transcript["segments"]:
-        speaker = seg.get("speaker")
-        
-        if include_speakers and speaker and speaker != current_speaker:
-            lines.append(f"\n[{speaker}]")
-            current_speaker = speaker
-        
-        lines.append(seg["text"])
-    
-    return " ".join(lines).strip()
-```
+- **SRT format**: Sequential numbering, `00:00:01,500` timestamps, optional `[SPEAKER_00]` prefix
+- **VTT format**: `WEBVTT` header, `00:00:01.500` timestamps, `<v SPEAKER_00>` voice tags
+- **TXT format**: Plain text with speaker labels on change, word-wrapped
+- **JSON format**: Pass through transcript object
 
 ---
 
 ### 5.3: Webhook Support
 
-Update job creation to accept webhook URL:
+**Job creation changes:**
 
-```python
-# gateway/api/v1/transcription.py
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `webhook_url` | string | URL to POST on completion/failure |
+| `webhook_metadata` | JSON | Custom data echoed back in webhook |
 
-@router.post("/v1/audio/transcriptions")
-async def create_transcription(
-    file: UploadFile,
-    webhook_url: str | None = Form(None),
-    webhook_metadata: str | None = Form(None),  # JSON string
-    # ... other params
-):
-    job = await create_job(
-        file=file,
-        webhook_url=webhook_url,
-        webhook_metadata=json.loads(webhook_metadata) if webhook_metadata else None,
-        # ...
-    )
-    
-    return {"id": job.id, "status": "pending"}
-```
+**Deliverables:**
+
+- Store webhook_url and webhook_metadata in job record
+- Trigger webhook on job completion or failure
 
 ---
 
 ### 5.4: Webhook Delivery
 
-```python
-# orchestrator/webhooks.py
+**Webhook payload:**
 
-import hmac
-import hashlib
-import httpx
-
-async def send_webhook(job: Job):
-    if not job.webhook_url:
-        return
-    
-    payload = {
-        "event": "transcription.completed" if job.status == "completed" else "transcription.failed",
-        "transcription_id": job.id,
-        "status": job.status,
-        "timestamp": datetime.utcnow().isoformat(),
-        "text": job.transcript.get("text") if job.status == "completed" else None,
-        "duration": job.transcript.get("metadata", {}).get("audio_duration"),
-        "webhook_metadata": job.webhook_metadata
-    }
-    
-    # Generate signature
-    timestamp = str(int(time.time()))
-    payload_json = json.dumps(payload, sort_keys=True)
-    signature = hmac.new(
-        (job.webhook_secret or "").encode(),
-        f"{timestamp}.{payload_json}".encode(),
-        hashlib.sha256
-    ).hexdigest()
-    
-    headers = {
-        "Content-Type": "application/json",
-        "X-Dalston-Signature": f"sha256={signature}",
-        "X-Dalston-Timestamp": timestamp,
-        "User-Agent": "Dalston-Webhook/1.0"
-    }
-    
-    # Retry with exponential backoff
-    for attempt in range(3):
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    job.webhook_url,
-                    json=payload,
-                    headers=headers,
-                    timeout=10
-                )
-                
-                if resp.status_code < 400:
-                    logger.info(f"Webhook delivered: {job.id} → {job.webhook_url}")
-                    return
-                
-                logger.warning(f"Webhook failed ({resp.status_code}): {job.id}")
-        
-        except Exception as e:
-            logger.warning(f"Webhook error: {e}")
-        
-        # Wait before retry
-        await asyncio.sleep(2 ** attempt)
-    
-    logger.error(f"Webhook exhausted retries: {job.id} → {job.webhook_url}")
-
-# orchestrator/handlers.py
-async def handle_job_completed(job_id: str):
-    job = await load_job(job_id)
-    
-    if job.webhook_url:
-        await send_webhook(job)
+```json
+{
+  "event": "transcription.completed",
+  "transcription_id": "job_abc123",
+  "status": "completed",
+  "timestamp": "2025-01-28T12:00:00Z",
+  "text": "First 500 chars of transcript...",
+  "duration": 45.2,
+  "webhook_metadata": {"user_id": "123"}
+}
 ```
 
----
+**Headers:**
 
-### 5.5: Webhook Verification (Client Side)
+| Header | Description |
+| --- | --- |
+| `X-Dalston-Signature` | `sha256={hmac_hex}` |
+| `X-Dalston-Timestamp` | Unix timestamp |
 
-Document how clients verify webhooks:
+**Deliverables:**
 
-```python
-# Example client-side verification
-import hmac
-import hashlib
+- Sign payload with HMAC-SHA256: `{timestamp}.{json_payload}`
+- Retry 3 times with exponential backoff (1s, 2s, 4s)
+- Log delivery status
 
-def verify_webhook(payload: bytes, signature: str, timestamp: str, secret: str) -> bool:
-    expected = hmac.new(
-        secret.encode(),
-        f"{timestamp}.{payload.decode()}".encode(),
-        hashlib.sha256
-    ).hexdigest()
-    
-    received = signature.replace("sha256=", "")
-    return hmac.compare_digest(expected, received)
-```
+See [Webhook Verification Examples](../../specs/examples/webhook-verification.md) for client-side verification code.
 
 ---
 
@@ -285,10 +112,6 @@ cat transcript.srt
 # 1
 # 00:00:00,000 --> 00:00:02,500
 # [SPEAKER_00] Welcome to the show.
-#
-# 2
-# 00:00:02,800 --> 00:00:05,100
-# [SPEAKER_01] Thanks for having me.
 
 # Export as VTT
 curl http://localhost:8000/v1/audio/transcriptions/job_xyz/export/vtt
@@ -302,24 +125,16 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -F "file=@audio.mp3" \
   -F "webhook_url=https://my-server.com/webhooks/dalston" \
   -F 'webhook_metadata={"user_id": "123"}'
-
-# Webhook payload received:
-# {
-#   "event": "transcription.completed",
-#   "transcription_id": "job_abc",
-#   "text": "Welcome to...",
-#   "webhook_metadata": {"user_id": "123"}
-# }
 ```
 
 ---
 
 ## Checkpoint
 
-✓ **SRT export** with proper timestamp format  
-✓ **VTT export** with speaker voice tags  
-✓ **TXT export** with speaker labels  
-✓ **Webhooks** with HMAC signature  
-✓ **Retry logic** for failed deliveries  
+- [ ] **SRT export** with proper timestamp format
+- [ ] **VTT export** with speaker voice tags
+- [ ] **TXT export** with speaker labels
+- [ ] **Webhooks** with HMAC signature
+- [ ] **Retry logic** for failed deliveries
 
 **Next**: [M6: Real-Time MVP](M06-realtime-mvp.md) — Stream audio, get live transcripts

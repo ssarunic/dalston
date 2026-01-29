@@ -300,16 +300,16 @@ On session end, returns `enhancement_job_id` to poll for enhanced transcript.
 
 ## Key Technical Decisions
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Engine isolation | Docker containers | Solve Python dependency conflicts |
-| Persistent storage | PostgreSQL + S3 | Reliable, scalable, cloud-native |
-| Ephemeral data | Redis | Queues, pub/sub, rate limiting |
-| Artifact storage | S3 | Scalable, durable, no shared filesystem needed |
-| Batch communication | S3 + Redis queues | Async, scalable, retry-friendly |
+| Decision | Choice | Details |
+|----------|--------|---------|
+| Storage architecture | PostgreSQL + Redis + S3 | [ADR-001](../decisions/ADR-001-storage-architecture.md) |
+| Engine isolation | Docker containers | [ADR-002](../decisions/ADR-002-engine-isolation.md) |
+| Job/task model | Two-level queues (Jobs → Tasks) | [ADR-003](../decisions/ADR-003-two-level-queues.md) |
 | Realtime communication | Direct WebSocket | Low latency, bidirectional |
 | API compatibility | ElevenLabs | Easy migration for users |
 | Realtime scaling | Worker pool + router | Capacity management, load balancing |
+
+For detailed rationale on architectural decisions, see [Architecture Decision Records](../decisions/README.md).
 
 ---
 
@@ -358,18 +358,22 @@ On session end, returns `enhancement_job_id` to poll for enhanced transcript.
 - [Real-Time Engines](./realtime/REALTIME_ENGINES.md) — Streaming worker implementation
 
 ### General
+
 - [Project Structure](./PROJECT_STRUCTURE.md) — Directory layout, packages
+- [Glossary](../GLOSSARY.md) — Terminology definitions
 
----
+### Architecture Decisions
 
-## Glossary
+- [ADR Index](../decisions/README.md) — Why we made key technical choices
 
-| Term | Definition |
-|------|------------|
-| **Job** | Batch request to transcribe one audio file |
-| **Task** | Atomic unit of work in batch pipeline |
-| **DAG** | Directed Acyclic Graph — task dependencies |
-| **Engine** | Containerized processor (batch or realtime) |
-| **Stage** | Processing category (transcribe, diarize, etc.) |
-| **Session** | Real-time transcription connection |
-| **Worker** | Real-time engine instance handling sessions |
+### Examples
+
+- [WebSocket Clients](./examples/websocket-clients.md) — JS/Python client implementations
+- [Webhook Verification](./examples/webhook-verification.md) — Signature verification code
+
+### Implementation Reference
+
+- [Auth Patterns](./implementations/auth-patterns.md) — API key auth, middleware, scopes, rate limiting
+- [DAG Builder](./implementations/dag-builder.md) — Task DAG construction with optional/parallel tasks
+- [Enrichment Engines](./implementations/enrichment-engines.md) — Emotion, events, LLM cleanup patterns
+- [Console API](./implementations/console-api.md) — Dashboard aggregation, React Query integration

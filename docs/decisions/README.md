@@ -1,0 +1,56 @@
+# Architecture Decision Records
+
+This directory contains Architecture Decision Records (ADRs) documenting significant technical decisions made in the Dalston project.
+
+## Index
+
+| ADR | Title | Status |
+| --- | --- | --- |
+| [ADR-001](ADR-001-storage-architecture.md) | Storage Architecture (PostgreSQL + Redis + S3) | Accepted |
+| [ADR-002](ADR-002-engine-isolation.md) | Engine Isolation via Docker Containers | Accepted |
+| [ADR-003](ADR-003-two-level-queues.md) | Two-Level Queue Model (Jobs → Tasks) | Accepted |
+
+## ADR Template
+
+When creating a new ADR, use this template:
+
+```markdown
+# ADR-NNN: Title
+
+## Status
+
+Accepted | Proposed | Deprecated | Superseded by [ADR-NNN](link)
+
+## Context
+
+What is the issue that we're seeing that is motivating this decision or change?
+
+## Options Considered
+
+1. **Option A** — Description, pros, cons
+2. **Option B** — Description, pros, cons
+3. **Option C** — Description, pros, cons
+
+## Decision
+
+What is the change that we're proposing and/or doing?
+
+## Consequences
+
+What becomes easier or more difficult to do because of this change?
+```
+
+## When to Write an ADR
+
+Write an ADR when:
+
+- Choosing between multiple viable technical approaches
+- Making decisions that are difficult to reverse
+- Establishing patterns that will be repeated throughout the codebase
+- Making tradeoffs that future maintainers should understand
+
+ADRs are not needed for:
+
+- Implementation details that follow established patterns
+- Obvious choices with no meaningful alternatives
+- Decisions that can be easily changed later
