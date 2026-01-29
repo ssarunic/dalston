@@ -11,6 +11,53 @@ Dalston provides a dual-mode REST API for audio transcription:
 
 ---
 
+## Authentication
+
+All API endpoints require authentication via API key. Include the key in the `Authorization` header:
+
+```bash
+curl -X POST http://localhost:8000/v1/audio/transcriptions \
+  -H "Authorization: Bearer dk_your_api_key_here" \
+  -F "file=@audio.mp3"
+```
+
+### Getting an API Key
+
+```bash
+# Create your first admin key
+python -m dalston.gateway.cli create-admin-key --name "My Key"
+```
+
+### API Key Scopes
+
+| Scope | Permissions |
+|-------|-------------|
+| `jobs:read` | GET transcription jobs |
+| `jobs:write` | POST/DELETE transcription jobs |
+| `realtime` | WebSocket streaming access |
+| `webhooks` | Manage webhook configurations |
+| `admin` | All permissions + key management |
+
+### Error Responses
+
+| Status | Description |
+|--------|-------------|
+| `401 Unauthorized` | Missing or invalid API key |
+| `403 Forbidden` | API key lacks required scope |
+| `429 Too Many Requests` | Rate limit exceeded |
+
+### Key Management Endpoints
+
+| Method | Endpoint | Scope | Description |
+|--------|----------|-------|-------------|
+| POST | `/auth/keys` | `admin` | Create new API key |
+| GET | `/auth/keys` | `admin` | List API keys |
+| GET | `/auth/keys/{id}` | `admin` | Get key details |
+| DELETE | `/auth/keys/{id}` | `admin` | Revoke key |
+| GET | `/auth/me` | any | Get current key info |
+
+---
+
 ## Endpoints Summary
 
 ### Dalston Native API

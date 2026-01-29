@@ -16,6 +16,7 @@ This document describes the data structures used in Dalston for jobs, tasks, and
 ```json
 {
   "id": "job_abc123",
+  "tenant_id": "default",
   "status": "running",
   "audio_path": "/data/jobs/job_abc123/audio/original.wav",
   "parameters": "{\"speaker_detection\": \"diarize\", \"word_timestamps\": true}",
@@ -30,6 +31,7 @@ This document describes the data structures used in Dalston for jobs, tasks, and
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | string | Unique job identifier |
+| `tenant_id` | string | Tenant ID for multi-tenancy isolation |
 | `status` | string | pending, running, completed, failed, cancelled |
 | `audio_path` | string | Path to original audio file |
 | `parameters` | JSON string | Job configuration |
@@ -38,6 +40,72 @@ This document describes the data structures used in Dalston for jobs, tasks, and
 | `completed_at` | ISO timestamp | When processing finished |
 | `webhook_url` | string | Callback URL (optional) |
 | `error` | string | Error message if failed |
+
+### Jobs by Tenant Index
+
+**Key**: `dalston:jobs:tenant:{tenant_id}`
+**Type**: Set
+
+Contains all job IDs belonging to a tenant. Used for listing jobs scoped to an API key.
+
+```
+SMEMBERS dalston:jobs:tenant:default
+→ ["job_abc123", "job_def456", ...]
+```
+
+---
+
+### API Key State
+
+**Key**: `dalston:apikeys:{key_hash}`
+**Type**: String (JSON)
+
+API keys are stored by their SHA256 hash for secure O(1) lookup.
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "key_hash": "a1b2c3d4...",
+  "prefix": "dk_abc1234",
+  "name": "Production Key",
+  "tenant_id": "default",
+  "scopes": ["jobs:read", "jobs:write", "realtime"],
+  "rate_limit": 100,
+  "created_at": "2025-01-28T12:00:00Z",
+  "last_used_at": "2025-01-28T14:30:00Z",
+  "revoked_at": null
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique key identifier (UUID) |
+| `key_hash` | string | SHA256 hash of the full key |
+| `prefix` | string | First 10 chars for display (e.g., "dk_abc1234") |
+| `name` | string | Human-readable name |
+| `tenant_id` | string | Tenant this key belongs to |
+| `scopes` | array | Permissions: jobs:read, jobs:write, realtime, webhooks, admin |
+| `rate_limit` | integer | Max requests/minute (null = unlimited) |
+| `created_at` | ISO timestamp | When key was created |
+| `last_used_at` | ISO timestamp | When key was last used |
+| `revoked_at` | ISO timestamp | When key was revoked (null if active) |
+
+### API Key Indexes
+
+**Key**: `dalston:apikeys:id:{key_id}` → `key_hash`
+Lookup key hash by ID for management operations.
+
+**Key**: `dalston:apikeys:tenant:{tenant_id}`
+**Type**: Set
+All key IDs belonging to a tenant.
+
+### Rate Limit Counter
+
+**Key**: `dalston:ratelimit:{key_id}`
+**Type**: String (counter)
+**TTL**: 60 seconds
+
+Incremented on each request, auto-expires for sliding window rate limiting.
 
 ---
 

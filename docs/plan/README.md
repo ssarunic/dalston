@@ -26,8 +26,9 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M8](milestones/M08-elevenlabs-compat.md) | ElevenLabs Compat | Drop-in API replacement | 2-3 |
 | [M9](milestones/M09-enrichment.md) | Enrichment | Emotions, events, LLM cleanup | 4-5 |
 | [M10](milestones/M10-web-console.md) | Web Console | Monitoring UI | 3-4 |
+| [M11](milestones/M11-api-authentication.md) | API Authentication | Secure endpoints with API keys | 2-3 |
 
-**Total: ~30-38 days (~6-7 weeks)**
+**Total: ~32-41 days (~6-8 weeks)**
 
 ---
 
@@ -92,10 +93,12 @@ Week 6:
 
 ```
 M1 ──► M2 ──► M3 ──► M4 ──► M5
-                │
-                └──► M6 ──► M7
-                      │
-                      └──► M8
+ │            │
+ │            └──► M6 ──► M7
+ │                  │
+ │                  └──► M8
+ │
+ └──► M11 (can start early, applies to all endpoints)
 
 M4 ──► M9
 
@@ -106,6 +109,7 @@ M6 ──► M10
 - **M6-M8**: Real-time features (can start after M2)
 - **M9**: Enrichment (needs M4 for speaker context)
 - **M10**: Console (needs M6 for realtime monitoring)
+- **M11**: Authentication (can start after M1, recommended before production)
 
 ---
 
@@ -125,3 +129,4 @@ Each milestone has a verification section. Key checkpoints:
 | M8 | ElevenLabs client works unchanged |
 | M9 | Transcript includes emotion labels |
 | M10 | Dashboard shows job queue and realtime capacity |
+| M11 | Requests without valid API key return 401 |

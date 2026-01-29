@@ -23,12 +23,25 @@ This endpoint uses ElevenLabs message formats and parameter names by default.
 
 ---
 
+## Authentication
+
+WebSocket connections require an API key passed as a query parameter:
+
+```
+wss://api.dalston.example.com/v1/speech-to-text/realtime?api_key=dk_your_key_here&...
+```
+
+The API key must have the `realtime` scope. If authentication fails, the connection is closed immediately with code `4001` (invalid key) or `4003` (missing scope).
+
+---
+
 ## Connection
 
 ### Query Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
+| `api_key` | string | **required** | API key with `realtime` scope |
 | `model_id` | string | `"scribe_v1"` | Model: `"scribe_v1"` or `"scribe_v2"` |
 | `audio_format` | string | `"pcm_16000"` | Audio encoding (see table below) |
 | `language_code` | string | `"auto"` | ISO 639-1 code or `"auto"` |
@@ -61,7 +74,7 @@ This endpoint uses ElevenLabs message formats and parameter names by default.
 ```javascript
 const ws = new WebSocket(
   'wss://api.dalston.example.com/v1/speech-to-text/realtime?' +
-  'model_id=scribe_v1&language_code=en&commit_strategy=vad&include_timestamps=true'
+  'api_key=dk_your_key_here&model_id=scribe_v1&language_code=en&commit_strategy=vad&include_timestamps=true'
 );
 ```
 
@@ -425,10 +438,13 @@ This endpoint uses Dalston's native message format with efficient binary audio f
 
 ## Connection
 
+Authentication is required via the `api_key` query parameter. See the [Authentication section](#authentication) above.
+
 ### Query Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
+| `api_key` | string | **required** | API key with `realtime` scope |
 | `language` | string | `"auto"` | Language code (ISO 639-1) or `"auto"` |
 | `model` | string | `"fast"` | Model variant: `"fast"` or `"accurate"` |
 | `encoding` | string | `"pcm_s16le"` | Audio encoding |
@@ -453,7 +469,7 @@ This endpoint uses Dalston's native message format with efficient binary audio f
 ```javascript
 const ws = new WebSocket(
   'ws://localhost:8000/v1/audio/transcriptions/stream?' +
-  'language=en&model=fast&interim_results=true&word_timestamps=true'
+  'api_key=dk_your_key_here&language=en&model=fast&interim_results=true&word_timestamps=true'
 );
 ```
 
