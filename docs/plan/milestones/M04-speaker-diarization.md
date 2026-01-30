@@ -128,9 +128,49 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 
 ## Checkpoint
 
-- [ ] **Pyannote engine** identifies speaker turns
-- [ ] **DAG allows parallel** diarization and transcription
-- [ ] **Merger assigns speakers** to transcript segments by overlap
-- [ ] **Per-channel mode** available as alternative
+- [x] **Pyannote engine** identifies speaker turns
+- [x] **DAG allows parallel** diarization and transcription
+- [x] **Merger assigns speakers** to transcript segments by overlap
+- [x] **Per-channel mode** available as alternative
+
+---
+
+## Implementation Summary
+
+### Files Created
+
+| File | Description |
+|------|-------------|
+| `engines/diarize/pyannote-3.1/engine.py` | Pyannote 3.1 diarization engine with lazy loading, CUDA→CPU fallback |
+| `engines/diarize/pyannote-3.1/requirements.txt` | Pinned dependencies for pyannote.audio 3.1 compatibility |
+| `engines/diarize/pyannote-3.1/engine.yaml` | Engine metadata and queue configuration |
+| `engines/diarize/pyannote-3.1/Dockerfile` | GPU-enabled container with CUDA support |
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `dalston/orchestrator/dag.py` | Added `speaker_detection` parameter (`none`/`diarize`/`per_channel`), parallel diarize task, per-channel DAG builder |
+| `engines/merge/final-merger/engine.py` | Added speaker assignment via overlap algorithm, `_merge_per_channel()` for stereo audio |
+| `engines/prepare/audio-prepare/engine.py` | Added `split_channels` config, `_extract_channel()` for per-channel mode, mono validation |
+| `docker-compose.yml` | Added `engine-pyannote-3.1` and `engine-pyannote-3.1-gpu` services |
+
+### Key Implementation Details
+
+1. **Pyannote Engine**: Uses lazy model loading to avoid memory issues. Supports `DIARIZATION_DISABLED=true` env var for testing without GPU. Requires `HF_TOKEN` for HuggingFace model authentication (fails fast if missing).
+
+2. **DAG Builder**: Diarization runs in parallel with transcribe→align chain, both depending on prepare. Merge waits for all branches to complete.
+
+3. **Speaker Assignment**: Uses maximum overlap algorithm - for each transcript segment, finds the diarization speaker with the most temporal overlap.
+
+4. **Per-Channel Mode**: Splits stereo audio into separate mono files, transcribes each in parallel, interleaves segments by timestamp with speaker assigned by channel.
+
+5. **Version Pinning**: Required `numpy<2.0.0` (np.NaN removal), `huggingface_hub<0.24.0` (use_auth_token deprecation), `torch<2.5.0` (torchaudio API changes).
+
+### Testing
+
+Verified end-to-end with merged stereo test audio (`tests/audio/test_merged.wav`):
+- Successfully identified 2 speakers from concatenated mono recordings
+- Correct speaker assignment to transcript segments via overlap
 
 **Next**: [M5: Export & Webhooks](M05-export-webhooks.md) — SRT/VTT export and async notifications

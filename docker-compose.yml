@@ -273,8 +273,68 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  # ============================================================
+  # DIARIZATION ENGINES (M04)
+  # ============================================================
+
+  engine-pyannote-3.1:
+    build:
+      context: .
+      dockerfile: engines/diarize/pyannote-3.1/Dockerfile
+    environment:
+      - ENGINE_ID=pyannote-3.1
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - HF_TOKEN=${HF_TOKEN:-}
+      - DIARIZATION_DISABLED=${DIARIZATION_DISABLED:-false}
+    volumes:
+      - pyannote-models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # GPU-accelerated pyannote (use with: docker compose --profile gpu up -d)
+  engine-pyannote-3.1-gpu:
+    build:
+      context: .
+      dockerfile: engines/diarize/pyannote-3.1/Dockerfile
+    environment:
+      - ENGINE_ID=pyannote-3.1
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - pyannote-models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - gpu
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   minio-data:
   whisper-models:
   align-models:
+  pyannote-models:

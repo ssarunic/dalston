@@ -1,0 +1,21 @@
+# Pyannote 3.1 Diarization Engine Dependencies
+
+# Pyannote audio for speaker diarization
+# Pin to 3.1.x to avoid breaking changes
+pyannote.audio>=3.1.0,<3.2.0
+
+# PyTorch for model inference
+# Pin to compatible versions for pyannote.audio 3.1
+torch>=2.0.0,<2.5.0
+torchaudio>=2.0.0,<2.5.0
+
+# NumPy < 2.0 required for pyannote.audio 3.1 compatibility
+# (np.NaN was removed in NumPy 2.0)
+numpy<2.0.0
+
+# Pin huggingface_hub to version that supports use_auth_token parameter.
+# In huggingface_hub>=0.24.0, the 'use_auth_token' parameter was removed
+# (deprecated since 0.19.0, renamed to 'token'). Pyannote 3.1 still uses
+# the old parameter name, so we need the older version until pyannote updates.
+# See: https://github.com/huggingface/huggingface_hub/issues/2162
+huggingface_hub<0.24.0

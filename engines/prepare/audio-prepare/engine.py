@@ -9,6 +9,7 @@ import logging
 import os
 import subprocess
 from pathlib import Path
+from uuid import UUID
 
 from dalston.engine_sdk import Engine, TaskInput, TaskOutput
 from dalston.engine_sdk import io as s3_io
@@ -69,13 +70,35 @@ class AudioPrepareEngine(Engine):
 
         # Get config options with defaults
         target_sample_rate = config.get("target_sample_rate", self.DEFAULT_SAMPLE_RATE)
-        target_channels = config.get("target_channels", self.DEFAULT_CHANNELS)
+        split_channels = config.get("split_channels", False)
 
         logger.info(f"Processing audio: {audio_path}")
 
         # Step 1: Probe original audio metadata
         original_metadata = self._probe_audio(audio_path)
         logger.info(f"Original audio: {original_metadata}")
+
+        s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
+
+        # Handle channel splitting for per_channel speaker detection
+        if split_channels:
+            if original_metadata["channels"] < 2:
+                raise RuntimeError(
+                    f"per_channel mode requires stereo audio, but input has "
+                    f"{original_metadata['channels']} channel(s). Use speaker_detection=diarize "
+                    f"for mono audio."
+                )
+        if split_channels and original_metadata["channels"] >= 2:
+            return self._process_split_channels(
+                audio_path=audio_path,
+                job_id=job_id,
+                original_metadata=original_metadata,
+                target_sample_rate=target_sample_rate,
+                s3_bucket=s3_bucket,
+            )
+
+        # Standard processing: convert to mono
+        target_channels = config.get("target_channels", self.DEFAULT_CHANNELS)
 
         # Step 2: Convert to standardized format
         prepared_path = audio_path.parent / "prepared.wav"
@@ -92,7 +115,6 @@ class AudioPrepareEngine(Engine):
         logger.info(f"Prepared audio: {prepared_metadata}")
 
         # Step 4: Upload prepared audio to S3
-        s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
         audio_uri = f"s3://{s3_bucket}/jobs/{job_id}/audio/prepared.wav"
         s3_io.upload_file(prepared_path, audio_uri)
         logger.info(f"Uploaded prepared audio to: {audio_uri}")
@@ -114,9 +136,137 @@ class AudioPrepareEngine(Engine):
             "original_duration": original_metadata["duration"],
             "original_sample_rate": original_metadata["sample_rate"],
             "original_channels": original_metadata["channels"],
+            "split_channels": False,
         }
 
         return TaskOutput(data=output_data)
+
+    def _process_split_channels(
+        self,
+        audio_path: Path,
+        job_id: UUID,
+        original_metadata: dict,
+        target_sample_rate: int,
+        s3_bucket: str,
+    ) -> TaskOutput:
+        """Process audio by splitting into separate channel files.
+
+        Used for per_channel speaker detection where each channel
+        represents a different speaker.
+
+        Args:
+            audio_path: Path to input audio
+            job_id: Job identifier
+            original_metadata: Metadata from original audio probe
+            target_sample_rate: Target sample rate for output
+            s3_bucket: S3 bucket for uploads
+
+        Returns:
+            TaskOutput with channel_files array
+        """
+        num_channels = min(original_metadata["channels"], 2)  # Limit to stereo
+        logger.info(f"Splitting audio into {num_channels} channels")
+
+        channel_files = []
+        channel_uris = []
+
+        for channel_idx in range(num_channels):
+            # Extract single channel to mono WAV
+            channel_path = audio_path.parent / f"prepared_ch{channel_idx}.wav"
+            self._extract_channel(
+                input_path=audio_path,
+                output_path=channel_path,
+                channel=channel_idx,
+                sample_rate=target_sample_rate,
+            )
+
+            # Probe the channel file
+            channel_metadata = self._probe_audio(channel_path)
+            logger.info(f"Channel {channel_idx}: {channel_metadata}")
+
+            # Upload to S3
+            audio_uri = f"s3://{s3_bucket}/jobs/{job_id}/audio/prepared_ch{channel_idx}.wav"
+            s3_io.upload_file(channel_path, audio_uri)
+            logger.info(f"Uploaded channel {channel_idx} to: {audio_uri}")
+
+            channel_files.append({
+                "channel": channel_idx,
+                "audio_uri": audio_uri,
+                "duration": channel_metadata["duration"],
+            })
+            channel_uris.append(audio_uri)
+
+            # Clean up temp file
+            try:
+                channel_path.unlink()
+            except OSError as e:
+                logger.warning(f"Failed to clean up {channel_path}: {e}")
+
+        # Build output data
+        output_data = {
+            "audio_uri": channel_uris[0],  # Primary audio for compatibility
+            "duration": original_metadata["duration"],
+            "sample_rate": target_sample_rate,
+            "channels": 1,  # Each output file is mono
+            "original_format": original_metadata.get("codec_name", "unknown"),
+            "original_duration": original_metadata["duration"],
+            "original_sample_rate": original_metadata["sample_rate"],
+            "original_channels": original_metadata["channels"],
+            "split_channels": True,
+            "channel_count": num_channels,
+            "channel_files": channel_files,
+        }
+
+        return TaskOutput(data=output_data)
+
+    def _extract_channel(
+        self,
+        input_path: Path,
+        output_path: Path,
+        channel: int,
+        sample_rate: int,
+    ) -> None:
+        """Extract a single channel from audio file.
+
+        Args:
+            input_path: Path to input audio file
+            output_path: Path for output mono WAV file
+            channel: Channel index (0=left, 1=right)
+            sample_rate: Target sample rate
+        """
+        # Use ffmpeg's pan filter to extract specific channel
+        # pan=mono|c0=c{channel} extracts channel N to mono output
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i", str(input_path),
+            "-af", f"pan=mono|c0=c{channel}",
+            "-ar", str(sample_rate),
+            "-sample_fmt", "s16",
+            "-f", "wav",
+            str(output_path),
+        ]
+
+        logger.debug(f"Extracting channel {channel}: {' '.join(cmd)}")
+
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=self.FFMPEG_TIMEOUT
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"ffmpeg channel extraction timed out after {self.FFMPEG_TIMEOUT}s"
+            )
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"ffmpeg channel extraction failed: {result.stderr}"
+            )
+
+        if not output_path.exists():
+            raise RuntimeError(
+                f"ffmpeg did not produce output file: {output_path}"
+            )
 
     def _probe_audio(self, audio_path: Path) -> dict:
         """Probe audio file to extract metadata using ffprobe.
