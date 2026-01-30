@@ -27,6 +27,10 @@ class AudioPrepareEngine(Engine):
     DEFAULT_SAMPLE_RATE = 16000
     DEFAULT_CHANNELS = 1
 
+    # Subprocess timeouts (seconds)
+    FFPROBE_TIMEOUT = 60  # 1 minute for probing metadata
+    FFMPEG_TIMEOUT = 1800  # 30 minutes for conversion (handles long audio)
+
     def __init__(self) -> None:
         super().__init__()
         self._verify_ffmpeg_installed()
@@ -93,6 +97,13 @@ class AudioPrepareEngine(Engine):
         s3_io.upload_file(prepared_path, audio_uri)
         logger.info(f"Uploaded prepared audio to: {audio_uri}")
 
+        # Step 5: Clean up local temp file to prevent accumulation
+        try:
+            prepared_path.unlink()
+            logger.debug(f"Cleaned up temporary file: {prepared_path}")
+        except OSError as e:
+            logger.warning(f"Failed to clean up temp file {prepared_path}: {e}")
+
         # Build output data
         output_data = {
             "audio_uri": audio_uri,
@@ -126,7 +137,14 @@ class AudioPrepareEngine(Engine):
             str(audio_path),
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=self.FFPROBE_TIMEOUT
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"ffprobe timed out after {self.FFPROBE_TIMEOUT}s for {audio_path}"
+            )
 
         if result.returncode != 0:
             raise RuntimeError(
@@ -204,7 +222,14 @@ class AudioPrepareEngine(Engine):
 
         logger.debug(f"Running ffmpeg: {' '.join(cmd)}")
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=self.FFMPEG_TIMEOUT
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"ffmpeg conversion timed out after {self.FFMPEG_TIMEOUT}s"
+            )
 
         if result.returncode != 0:
             raise RuntimeError(

@@ -8,7 +8,7 @@ description: |
   Includes VAD filtering for improved accuracy on audio with silence.
 
 container:
-  gpu: required
+  gpu: optional  # Recommended for performance; auto-detects and falls back to CPU
   memory: 8G
   model_cache: /models
 

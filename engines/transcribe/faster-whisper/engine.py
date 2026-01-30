@@ -159,14 +159,24 @@ class FasterWhisperEngine(Engine):
 
     def health_check(self) -> dict[str, Any]:
         """Return health status including GPU availability."""
-        import torch
+        cuda_available = False
+        cuda_device_count = 0
+
+        try:
+            import torch
+            cuda_available = torch.cuda.is_available()
+            cuda_device_count = torch.cuda.device_count() if cuda_available else 0
+        except ImportError:
+            pass
 
         return {
             "status": "healthy",
             "model_loaded": self._model is not None,
             "model_size": self._model_size,
-            "cuda_available": torch.cuda.is_available(),
-            "cuda_device_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
+            "device": self._device,
+            "compute_type": self._compute_type,
+            "cuda_available": cuda_available,
+            "cuda_device_count": cuda_device_count,
         }
 
 

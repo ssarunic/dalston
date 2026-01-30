@@ -14,6 +14,6 @@ COPY engines/merge/final-merger/engine.yaml .
 COPY engines/merge/final-merger/engine.py .
 
 # Install any additional Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt || true
+RUN pip install --no-cache-dir -r requirements.txt
 
 CMD ["python", "engine.py"]
