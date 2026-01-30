@@ -43,6 +43,10 @@ class TranscriptionCreateParams(BaseModel):
         default=None,
         description="URL for completion callback",
     )
+    webhook_metadata: dict | None = Field(
+        default=None,
+        description="Custom data echoed back in webhook callback (max 16KB)",
+    )
 
     def to_job_parameters(self) -> dict:
         """Convert to job parameters dict for storage."""

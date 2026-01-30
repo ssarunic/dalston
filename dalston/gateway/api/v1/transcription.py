@@ -3,33 +3,39 @@
 POST /v1/audio/transcriptions - Submit audio for transcription
 GET /v1/audio/transcriptions/{job_id} - Get job status and results
 GET /v1/audio/transcriptions - List jobs
+GET /v1/audio/transcriptions/{job_id}/export/{format} - Export transcript
 """
 
+import json
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.events import publish_job_created
 from dalston.common.models import JobStatus
-from dalston.config import Settings
+from dalston.config import Settings, WEBHOOK_METADATA_MAX_SIZE
 from dalston.db.session import DEFAULT_TENANT_ID
-from dalston.gateway.dependencies import get_db, get_redis, get_settings
+from dalston.gateway.dependencies import (
+    get_db,
+    get_export_service,
+    get_jobs_service,
+    get_redis,
+    get_settings,
+)
 from dalston.gateway.models.responses import (
     JobCreatedResponse,
     JobListResponse,
     JobResponse,
     JobSummary,
 )
+from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
 
 router = APIRouter(prefix="/audio/transcriptions", tags=["transcriptions"])
-
-# Service instances
-jobs_service = JobsService()
 
 
 @router.post(
@@ -56,9 +62,13 @@ async def create_transcription(
     webhook_url: Annotated[
         str | None, Form(description="Webhook URL for completion callback")
     ] = None,
+    webhook_metadata: Annotated[
+        str | None, Form(description="JSON object echoed in webhook callback (max 16KB)")
+    ] = None,
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
+    jobs_service: JobsService = Depends(get_jobs_service),
 ) -> JobCreatedResponse:
     """Create a new transcription job.
 
@@ -70,6 +80,28 @@ async def create_transcription(
     # Validate file
     if not file.filename:
         raise HTTPException(status_code=400, detail="File must have a filename")
+
+    # Parse webhook_metadata JSON string
+    parsed_webhook_metadata: dict | None = None
+    if webhook_metadata:
+        try:
+            parsed_webhook_metadata = json.loads(webhook_metadata)
+            if not isinstance(parsed_webhook_metadata, dict):
+                raise HTTPException(
+                    status_code=400,
+                    detail="webhook_metadata must be a JSON object",
+                )
+            # Validate size
+            if len(webhook_metadata) > WEBHOOK_METADATA_MAX_SIZE:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"webhook_metadata exceeds maximum size of {WEBHOOK_METADATA_MAX_SIZE // 1024}KB",
+                )
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid JSON in webhook_metadata: {e}",
+            ) from e
 
     # Build parameters
     parameters = {
@@ -94,6 +126,7 @@ async def create_transcription(
         audio_uri="pending",  # Will update after we have the job ID
         parameters=parameters,
         webhook_url=webhook_url,
+        webhook_metadata=parsed_webhook_metadata,
     )
 
     # Re-upload with correct job ID path
@@ -125,6 +158,7 @@ async def get_transcription(
     job_id: UUID,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    jobs_service: JobsService = Depends(get_jobs_service),
 ) -> JobResponse:
     """Get job status and transcript if complete.
 
@@ -175,6 +209,7 @@ async def list_transcriptions(
         JobStatus | None, Query(description="Filter by status")
     ] = None,
     db: AsyncSession = Depends(get_db),
+    jobs_service: JobsService = Depends(get_jobs_service),
 ) -> JobListResponse:
     """List jobs for the current tenant with pagination."""
     jobs, total = await jobs_service.list_jobs(
@@ -199,4 +234,75 @@ async def list_transcriptions(
         total=total,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.get(
+    "/{job_id}/export/{format}",
+    summary="Export transcription",
+    description="Export transcript in specified format: srt, vtt, txt, json",
+    responses={
+        200: {
+            "description": "Exported transcript",
+            "content": {
+                "text/plain": {"schema": {"type": "string"}},
+                "text/vtt": {"schema": {"type": "string"}},
+                "application/json": {"schema": {"type": "object"}},
+            },
+        },
+        400: {"description": "Job not completed or unsupported format"},
+        404: {"description": "Job not found"},
+    },
+)
+async def export_transcription(
+    job_id: UUID,
+    format: str,
+    include_speakers: Annotated[
+        bool, Query(description="Include speaker labels in output")
+    ] = True,
+    max_line_length: Annotated[
+        int, Query(ge=10, le=200, description="Max characters per subtitle line")
+    ] = 42,
+    max_lines: Annotated[
+        int, Query(ge=1, le=10, description="Max lines per subtitle block")
+    ] = 2,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    jobs_service: JobsService = Depends(get_jobs_service),
+    export_service: ExportService = Depends(get_export_service),
+) -> Response:
+    """Export transcript in specified format.
+
+    Supported formats:
+    - srt: SubRip subtitle format (uses segments)
+    - vtt/webvtt: WebVTT subtitle format (uses segments)
+    - txt: Plain text with speaker labels (uses words when available)
+    - json: Full transcript JSON
+    """
+    # Validate format
+    export_format = export_service.validate_format(format)
+
+    # Get job
+    job = await jobs_service.get_job(db, job_id, tenant_id=DEFAULT_TENANT_ID)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Check job is completed
+    if job.status != JobStatus.COMPLETED.value:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job not completed. Current status: {job.status}",
+        )
+
+    # Fetch transcript from S3
+    storage = StorageService(settings)
+    transcript = await storage.get_transcript(job.id)
+
+    # Generate and return export response
+    return export_service.create_export_response(
+        transcript=transcript,
+        export_format=export_format,
+        include_speakers=include_speakers,
+        max_line_length=max_line_length,
+        max_lines=max_lines,
     )

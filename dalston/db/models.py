@@ -67,6 +67,7 @@ class JobModel(Base):
     audio_uri: Mapped[str] = mapped_column(Text, nullable=False)
     parameters: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    webhook_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),

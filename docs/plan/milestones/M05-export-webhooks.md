@@ -131,10 +131,51 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 
 ## Checkpoint
 
-- [ ] **SRT export** with proper timestamp format
-- [ ] **VTT export** with speaker voice tags
-- [ ] **TXT export** with speaker labels
-- [ ] **Webhooks** with HMAC signature
-- [ ] **Retry logic** for failed deliveries
+- [x] **SRT export** with proper timestamp format
+- [x] **VTT export** with speaker voice tags
+- [x] **TXT export** with speaker labels
+- [x] **Webhooks** with HMAC signature
+- [x] **Retry logic** for failed deliveries
 
 **Next**: [M6: Real-Time MVP](M06-realtime-mvp.md) — Stream audio, get live transcripts
+
+---
+
+## Implementation Notes
+
+**Completed**: January 2026
+
+### Files Changed
+
+| File | Description |
+| ---- | ----------- |
+| `dalston/gateway/services/export.py` | Export service with SRT, VTT, TXT, JSON generators |
+| `dalston/gateway/services/webhook.py` | Webhook service with HMAC signing, retry logic, SSRF protection |
+| `dalston/gateway/api/v1/transcription.py` | Export endpoint, webhook_url/metadata parameters |
+| `dalston/gateway/api/v1/speech_to_text.py` | ElevenLabs-compatible export endpoint |
+| `dalston/gateway/dependencies.py` | FastAPI dependency injection for services |
+| `dalston/orchestrator/handlers.py` | Publishes job.completed/failed events for webhooks |
+| `dalston/orchestrator/main.py` | Handles webhook delivery on job events |
+| `dalston/common/events.py` | Event publishers for job completion/failure |
+| `dalston/config.py` | Webhook constants (WEBHOOK_METADATA_MAX_SIZE, WEBHOOK_SECRET_DEFAULT) |
+| `dalston/db/models.py` | Added webhook_metadata JSONB column |
+| `alembic/versions/20260130_0001_add_webhook_metadata.py` | Migration for webhook_metadata |
+
+### Test Coverage
+
+- **118 tests total** for M05 features
+- `tests/unit/test_export.py` — 66 tests for export formats
+- `tests/unit/test_webhook.py` — 42 tests for webhook signing, delivery, retry, URL validation
+- `tests/integration/test_webhook_e2e.py` — 10 E2E tests
+
+### Security Features
+
+- **SSRF Protection**: Webhook URLs are validated to block private/internal IPs
+- **HMAC-SHA256 Signing**: Signature format `sha256={hmac_hex}` over `{timestamp}.{payload}`
+- **Size Limits**: webhook_metadata limited to 16KB
+
+### Future Improvements
+
+1. **Webhook retry persistence**: Current retries are in-memory. If orchestrator crashes mid-retry, webhook is lost. Consider Redis-based persistent retry queue.
+2. **Move WebhookService to shared location**: Currently creates orchestrator → gateway dependency. Consider `dalston/services/` for shared services.
+3. **API endpoint integration tests**: Add tests for export endpoints themselves (not just service layer).

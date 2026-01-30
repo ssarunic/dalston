@@ -15,6 +15,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dalston.common.events import publish_job_completed, publish_job_failed
 from dalston.common.models import JobStatus, TaskStatus
 from dalston.config import Settings
 from dalston.db.models import JobModel, TaskModel
@@ -204,7 +205,7 @@ async def handle_task_completed(
             )
 
     # 5. Check if job is complete
-    await _check_job_completion(job_id, db)
+    await _check_job_completion(job_id, db, redis)
 
 
 async def handle_task_failed(
@@ -301,6 +302,10 @@ async def handle_task_failed(
         job.completed_at = datetime.now(timezone.utc)
         await db.commit()
 
+        # Trigger webhook if configured
+        if job.webhook_url:
+            await publish_job_failed(redis, job_id, job.error)
+
     log.error("job_failed", reason=f"Task {task.stage} failed: {error}")
 
 
@@ -338,12 +343,13 @@ async def _gather_previous_outputs(
     return previous_outputs
 
 
-async def _check_job_completion(job_id: UUID, db: AsyncSession) -> None:
+async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) -> None:
     """Check if all tasks are done and mark job as completed.
 
     Args:
         job_id: Job UUID to check
         db: Database session
+        redis: Redis client for publishing webhook events
     """
     log = logger.bind(job_id=str(job_id))
 
@@ -381,10 +387,18 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession) -> None:
 
     if any_failed:
         job.status = JobStatus.FAILED.value
-        log.error("job_failed", reason="One or more required tasks failed")
+        job.error = job.error or "One or more required tasks failed"
+        log.error("job_failed", reason=job.error)
     else:
         job.status = JobStatus.COMPLETED.value
         log.info("job_completed")
 
     job.completed_at = datetime.now(timezone.utc)
     await db.commit()
+
+    # Trigger webhook if configured
+    if job.webhook_url:
+        if any_failed:
+            await publish_job_failed(redis, job_id, job.error or "Unknown error")
+        else:
+            await publish_job_completed(redis, job_id)

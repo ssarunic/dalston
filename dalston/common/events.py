@@ -72,3 +72,13 @@ async def publish_task_failed(
         "task.failed",
         {"task_id": task_id, "job_id": job_id, "error": error},
     )
+
+
+async def publish_job_completed(redis: Redis, job_id: UUID) -> None:
+    """Publish a job.completed event for webhook delivery."""
+    await publish_event(redis, "job.completed", {"job_id": job_id})
+
+
+async def publish_job_failed(redis: Redis, job_id: UUID, error: str) -> None:
+    """Publish a job.failed event for webhook delivery."""
+    await publish_event(redis, "job.failed", {"job_id": job_id, "error": error})

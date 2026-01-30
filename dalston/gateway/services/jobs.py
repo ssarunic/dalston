@@ -20,6 +20,7 @@ class JobsService:
         audio_uri: str,
         parameters: dict[str, Any],
         webhook_url: str | None = None,
+        webhook_metadata: dict | None = None,
     ) -> JobModel:
         """Create a new transcription job.
 
@@ -29,6 +30,7 @@ class JobsService:
             audio_uri: S3 URI to uploaded audio
             parameters: Job configuration parameters
             webhook_url: Optional webhook URL for completion callback
+            webhook_metadata: Optional custom data echoed in webhook callback
 
         Returns:
             Created JobModel instance
@@ -38,6 +40,7 @@ class JobsService:
             audio_uri=audio_uri,
             parameters=parameters,
             webhook_url=webhook_url,
+            webhook_metadata=webhook_metadata,
             status=JobStatus.PENDING.value,
         )
         db.add(job)
