@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from dalston.gateway.api.v1 import speech_to_text, transcription
+from dalston.gateway.api.v1 import realtime, speech_to_text, transcription
 
 router = APIRouter(prefix="/v1")
 
@@ -11,3 +11,7 @@ router.include_router(transcription.router)
 
 # Mount speech-to-text routes (ElevenLabs compatible API)
 router.include_router(speech_to_text.router)
+
+# Mount real-time transcription routes
+router.include_router(realtime.stream_router)  # WS /v1/audio/transcriptions/stream
+router.include_router(realtime.management_router)  # GET /v1/realtime/*

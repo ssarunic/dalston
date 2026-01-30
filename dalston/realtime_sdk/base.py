@@ -1,0 +1,445 @@
+"""Abstract base class for real-time transcription engines.
+
+Provides the foundation for building real-time transcription workers
+that integrate with the Dalston real-time infrastructure.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import signal
+from abc import ABC, abstractmethod
+from typing import Any
+from urllib.parse import parse_qs, urlparse
+
+import numpy as np
+from websockets import serve, WebSocketServerProtocol
+
+from dalston.realtime_sdk.assembler import TranscribeResult, Word
+from dalston.realtime_sdk.registry import WorkerInfo, WorkerRegistry
+from dalston.realtime_sdk.session import SessionConfig, SessionHandler
+
+logger = logging.getLogger(__name__)
+
+
+class RealtimeEngine(ABC):
+    """Abstract base class for real-time transcription engines.
+
+    Engine implementations subclass this and implement:
+    - load_models(): Load ASR models into memory
+    - transcribe(): Transcribe an audio segment
+
+    The SDK handles:
+    - WebSocket server lifecycle
+    - Session management
+    - Worker registration and heartbeat
+    - Signal handling for graceful shutdown
+
+    Example:
+        class MyRealtimeEngine(RealtimeEngine):
+            def load_models(self) -> None:
+                from faster_whisper import WhisperModel
+                self.model = WhisperModel("large-v3", device="cuda")
+
+            def transcribe(
+                self,
+                audio: np.ndarray,
+                language: str,
+                model_variant: str,
+            ) -> TranscribeResult:
+                segments, info = self.model.transcribe(
+                    audio,
+                    language=None if language == "auto" else language,
+                    word_timestamps=True,
+                )
+
+                words = []
+                text_parts = []
+                for segment in segments:
+                    text_parts.append(segment.text.strip())
+                    for word in segment.words or []:
+                        words.append(Word(
+                            word=word.word,
+                            start=word.start,
+                            end=word.end,
+                            confidence=word.probability,
+                        ))
+
+                return TranscribeResult(
+                    text=" ".join(text_parts),
+                    words=words,
+                    language=info.language,
+                    confidence=info.language_probability,
+                )
+
+        if __name__ == "__main__":
+            import asyncio
+            engine = MyRealtimeEngine()
+            asyncio.run(engine.run())
+
+    Environment variables:
+        WORKER_ID: Unique identifier for this worker (required)
+        WORKER_PORT: WebSocket server port (default: 9000)
+        WORKER_ENDPOINT: WebSocket endpoint URL for registration (auto-detected if not set)
+        MAX_SESSIONS: Maximum concurrent sessions (default: 4)
+        REDIS_URL: Redis connection URL (default: redis://localhost:6379)
+    """
+
+    def __init__(self) -> None:
+        """Initialize the engine."""
+        self.worker_id = os.environ.get("WORKER_ID", "realtime-worker")
+        self.port = int(os.environ.get("WORKER_PORT", "9000"))
+        self.max_sessions = int(os.environ.get("MAX_SESSIONS", "4"))
+        self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
+
+        # Worker endpoint for registration - use env var or detect hostname
+        self._worker_endpoint = os.environ.get("WORKER_ENDPOINT")
+        if not self._worker_endpoint:
+            # Auto-detect: use hostname in Docker, localhost otherwise
+            import socket
+            hostname = socket.gethostname()
+            self._worker_endpoint = f"ws://{hostname}:{self.port}"
+
+        self._sessions: dict[str, SessionHandler] = {}
+        self._registry: WorkerRegistry | None = None
+        self._running = False
+        self._server = None
+
+        # Setup logging
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        )
+
+    @abstractmethod
+    def load_models(self) -> None:
+        """Load ASR models into memory.
+
+        Called once on startup before accepting connections.
+        Implement to load your models (e.g., Whisper, VAD).
+
+        Example:
+            def load_models(self) -> None:
+                from faster_whisper import WhisperModel
+                self.model = WhisperModel("large-v3", device="cuda")
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def transcribe(
+        self,
+        audio: np.ndarray,
+        language: str,
+        model_variant: str,
+    ) -> TranscribeResult:
+        """Transcribe an audio segment.
+
+        Called by SessionHandler when VAD detects an utterance endpoint.
+
+        Args:
+            audio: Audio samples as float32 numpy array, mono, 16kHz
+            language: Language code (e.g., "en") or "auto" for detection
+            model_variant: Model variant ("fast" or "accurate")
+
+        Returns:
+            TranscribeResult with text, words, language, confidence
+
+        Example:
+            def transcribe(self, audio, language, model_variant):
+                segments, info = self.model.transcribe(
+                    audio,
+                    language=None if language == "auto" else language,
+                    word_timestamps=True,
+                )
+                # Process segments...
+                return TranscribeResult(text=text, words=words, ...)
+        """
+        raise NotImplementedError
+
+    def get_models(self) -> list[str]:
+        """Return list of loaded model variants.
+
+        Override to report available models (e.g., ["fast", "accurate"]).
+        Used when registering with Session Router.
+
+        Returns:
+            List of model variant names. Default: ["fast"]
+        """
+        return ["fast"]
+
+    def get_languages(self) -> list[str]:
+        """Return list of supported languages.
+
+        Override to report supported languages.
+        Used when registering with Session Router.
+
+        Returns:
+            List of language codes. Default: ["auto"]
+        """
+        return ["auto"]
+
+    def get_gpu_memory_usage(self) -> str:
+        """Return GPU memory usage string.
+
+        Override to report actual GPU usage for monitoring.
+
+        Returns:
+            GPU memory usage string (e.g., "4.2GB"). Default: "0GB"
+        """
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                used = torch.cuda.memory_allocated() / 1e9
+                return f"{used:.1f}GB"
+        except ImportError:
+            pass
+        return "0GB"
+
+    def health_check(self) -> dict[str, Any]:
+        """Return health status for monitoring.
+
+        Override to provide engine-specific health information.
+
+        Returns:
+            Dictionary with at least a "status" key
+        """
+        return {
+            "status": "healthy",
+            "worker_id": self.worker_id,
+            "active_sessions": len(self._sessions),
+            "capacity": self.max_sessions,
+            "gpu_memory": self.get_gpu_memory_usage(),
+        }
+
+    async def run(self) -> None:
+        """Start the engine.
+
+        This method:
+        1. Loads models via load_models()
+        2. Registers with Session Router
+        3. Starts heartbeat loop
+        4. Starts WebSocket server
+        5. Runs until shutdown signal
+
+        Call this from your engine's main:
+            if __name__ == "__main__":
+                engine = MyEngine()
+                asyncio.run(engine.run())
+        """
+        logger.info(f"Starting realtime engine {self.worker_id}")
+
+        # Load models
+        logger.info("Loading models...")
+        self.load_models()
+        logger.info("Models loaded")
+
+        # Initialize registry client
+        self._registry = WorkerRegistry(self.redis_url)
+
+        # Register with Session Router
+        logger.info(f"Registering with endpoint: {self._worker_endpoint}")
+        await self._registry.register(
+            WorkerInfo(
+                worker_id=self.worker_id,
+                endpoint=self._worker_endpoint,
+                capacity=self.max_sessions,
+                models=self.get_models(),
+                languages=self.get_languages(),
+            )
+        )
+
+        self._running = True
+
+        # Setup signal handlers
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, lambda: asyncio.create_task(self.shutdown()))
+
+        # Start heartbeat loop
+        heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+
+        # Start WebSocket server
+        logger.info(f"Starting WebSocket server on port {self.port}")
+        async with serve(
+            self._handle_connection,
+            "0.0.0.0",
+            self.port,
+            ping_interval=30,
+            ping_timeout=10,
+        ) as server:
+            self._server = server
+            logger.info(f"Realtime engine {self.worker_id} ready")
+
+            # Wait until shutdown
+            while self._running:
+                await asyncio.sleep(1)
+
+        # Cleanup
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except asyncio.CancelledError:
+            pass
+
+        logger.info("Engine stopped")
+
+    async def shutdown(self) -> None:
+        """Graceful shutdown.
+
+        Stops accepting new sessions, waits for active sessions to complete,
+        unregisters from Session Router.
+        """
+        if not self._running:
+            return
+
+        logger.info("Shutting down...")
+        self._running = False
+
+        # Unregister from Session Router
+        if self._registry:
+            await self._registry.unregister(self.worker_id)
+            await self._registry.close()
+
+        # Close server (stops accepting new connections)
+        if self._server:
+            self._server.close()
+
+    async def _heartbeat_loop(self) -> None:
+        """Send periodic heartbeats to Session Router."""
+        while self._running:
+            try:
+                if self._registry:
+                    status = "ready" if len(self._sessions) < self.max_sessions else "busy"
+                    await self._registry.heartbeat(
+                        worker_id=self.worker_id,
+                        active_sessions=len(self._sessions),
+                        gpu_memory_used=self.get_gpu_memory_usage(),
+                        status=status,
+                    )
+            except Exception as e:
+                logger.error(f"Heartbeat error: {e}")
+
+            await asyncio.sleep(10)
+
+    async def _handle_connection(
+        self,
+        websocket: WebSocketServerProtocol,
+        path: str,
+    ) -> None:
+        """Handle new WebSocket connection.
+
+        Args:
+            websocket: WebSocket connection
+            path: Request path (e.g., "/session?language=en")
+        """
+        # Handle health check endpoint
+        if path == "/health" or path.startswith("/health?"):
+            await websocket.send(json.dumps(self.health_check()))
+            return
+
+        # Only accept /session path
+        if not path.startswith("/session"):
+            await websocket.close(1008, "Invalid path")
+            return
+
+        # Check capacity
+        if len(self._sessions) >= self.max_sessions:
+            await websocket.close(1013, "Server at capacity")
+            return
+
+        # Parse query parameters
+        config = self._parse_connection_params(path)
+
+        # Create session handler
+        handler = SessionHandler(
+            websocket=websocket,
+            config=config,
+            transcribe_fn=self.transcribe,
+            on_session_end=self._on_session_end,
+        )
+
+        # Track session
+        self._sessions[config.session_id] = handler
+
+        # Notify registry
+        if self._registry:
+            await self._registry.session_started(self.worker_id, config.session_id)
+
+        try:
+            # Run session
+            await handler.run()
+        finally:
+            # Remove from tracking
+            del self._sessions[config.session_id]
+
+    async def _on_session_end(
+        self,
+        session_id: str,
+        duration: float,
+        status: str,
+    ) -> None:
+        """Callback when session ends.
+
+        Args:
+            session_id: Session identifier
+            duration: Session duration in seconds
+            status: End status ("completed" or "error")
+        """
+        if self._registry:
+            await self._registry.session_ended(
+                worker_id=self.worker_id,
+                session_id=session_id,
+                duration=duration,
+                status=status,
+            )
+
+    def _parse_connection_params(self, path: str) -> SessionConfig:
+        """Parse query parameters from connection path.
+
+        Args:
+            path: Request path with query string
+
+        Returns:
+            SessionConfig with parsed parameters
+        """
+        import uuid
+
+        # Parse query string
+        parsed = urlparse(path)
+        params = parse_qs(parsed.query)
+
+        def get_param(name: str, default: str) -> str:
+            values = params.get(name, [default])
+            return values[0] if values else default
+
+        def get_bool_param(name: str, default: bool) -> bool:
+            value = get_param(name, str(default).lower())
+            return value.lower() in ("true", "1", "yes")
+
+        def get_int_param(name: str, default: int) -> int:
+            try:
+                return int(get_param(name, str(default)))
+            except ValueError:
+                return default
+
+        # Use session_id from Gateway if provided, otherwise generate one
+        # (Gateway passes session_id for coordination with Session Router)
+        session_id = get_param("session_id", "")
+        if not session_id:
+            session_id = f"sess_{uuid.uuid4().hex[:16]}"
+
+        return SessionConfig(
+            session_id=session_id,
+            language=get_param("language", "auto"),
+            model=get_param("model", "fast"),
+            encoding=get_param("encoding", "pcm_s16le"),
+            sample_rate=get_int_param("sample_rate", 16000),
+            channels=get_int_param("channels", 1),
+            enable_vad=get_bool_param("enable_vad", True),
+            interim_results=get_bool_param("interim_results", True),
+            word_timestamps=get_bool_param("word_timestamps", False),
+        )

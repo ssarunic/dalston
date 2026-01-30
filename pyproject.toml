@@ -21,6 +21,7 @@ gateway = [
     "aioboto3>=13.0.0",
     "types-aiobotocore-s3>=2.13.0",
     "structlog>=24.0.0",
+    "websockets>=12.0",  # For realtime WebSocket proxy
 ]
 orchestrator = [
     "redis>=5.0.0",
@@ -33,6 +34,15 @@ orchestrator = [
 engine-sdk = [
     "redis>=5.0.0",
     "boto3>=1.34.0",
+]
+realtime-sdk = [
+    "websockets>=12.0",
+    "redis>=5.0.0",
+    "numpy>=1.24.0",
+    "torch>=2.0.0",
+]
+session-router = [
+    "redis>=5.0.0",
 ]
 dev = [
     "pytest>=8.0.0",

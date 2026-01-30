@@ -11,7 +11,9 @@ from dalston.common.s3 import ensure_bucket_exists
 from dalston.config import get_settings
 from dalston.db.session import engine, init_db
 from dalston.gateway.api.v1 import router as v1_router
+from dalston.gateway.api.console import router as console_router
 from dalston.gateway.middleware import setup_exception_handlers
+from dalston.session_router import SessionRouter
 
 # Configure logging
 logging.basicConfig(
@@ -19,6 +21,9 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# Global session router instance (initialized in lifespan)
+session_router: SessionRouter | None = None
 
 
 @asynccontextmanager
@@ -29,11 +34,15 @@ async def lifespan(app: FastAPI):
     - Initialize database tables
     - Ensure default tenant exists
     - Ensure S3 bucket exists
+    - Start Session Router (for real-time transcription)
 
     Shutdown:
+    - Stop Session Router
     - Close Redis connections
     - Dispose database engine
     """
+    global session_router
+
     logger.info("Starting Dalston Gateway...")
 
     # Initialize database
@@ -47,12 +56,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Could not ensure S3 bucket exists: %s", e)
 
+    # Start Session Router for real-time transcription
+    settings = get_settings()
+    logger.info("Starting Session Router...")
+    session_router = SessionRouter(redis_url=settings.redis_url)
+    await session_router.start()
+
     logger.info("Dalston Gateway started successfully")
 
     yield
 
     # Shutdown
     logger.info("Shutting down Dalston Gateway...")
+
+    # Stop Session Router
+    if session_router:
+        await session_router.stop()
+
     await close_redis()
     await engine.dispose()
     logger.info("Dalston Gateway shutdown complete")
@@ -80,6 +100,7 @@ setup_exception_handlers(app)
 
 # Mount API routes
 app.include_router(v1_router)
+app.include_router(console_router)
 
 
 @app.get("/health", tags=["system"])

@@ -388,9 +388,90 @@ services:
       - gpu
     restart: unless-stopped
 
+  # ============================================================
+  # REALTIME ENGINES (M06)
+  # ============================================================
+
+  realtime-whisper-1:
+    build:
+      context: .
+      dockerfile: engines/realtime/whisper-streaming/Dockerfile
+    environment:
+      - WORKER_ID=realtime-whisper-1
+      - WORKER_PORT=9000
+      - WORKER_ENDPOINT=ws://realtime-whisper-1:9000
+      - MAX_SESSIONS=4
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - realtime-models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 9000)); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  realtime-whisper-2:
+    build:
+      context: .
+      dockerfile: engines/realtime/whisper-streaming/Dockerfile
+    environment:
+      - WORKER_ID=realtime-whisper-2
+      - WORKER_PORT=9000
+      - WORKER_ENDPOINT=ws://realtime-whisper-2:9000
+      - MAX_SESSIONS=4
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - realtime-models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 9000)); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # GPU-accelerated realtime worker (use with: docker compose --profile gpu up -d)
+  realtime-whisper-gpu:
+    build:
+      context: .
+      dockerfile: engines/realtime/whisper-streaming/Dockerfile
+    environment:
+      - WORKER_ID=realtime-whisper-gpu
+      - WORKER_PORT=9000
+      - WORKER_ENDPOINT=ws://realtime-whisper-gpu:9000
+      - MAX_SESSIONS=4
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - realtime-models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 9000)); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - gpu
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   minio-data:
   whisper-models:
   align-models:
   pyannote-models:
+  realtime-models:
