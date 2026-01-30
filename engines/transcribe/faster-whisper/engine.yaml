@@ -1,0 +1,126 @@
+id: faster-whisper
+stage: transcribe
+name: Faster Whisper
+version: 1.0.0
+description: |
+  CTranslate2-optimized Whisper implementation for fast transcription.
+  Supports all Whisper model sizes and 99 languages.
+  Includes VAD filtering for improved accuracy on audio with silence.
+
+container:
+  gpu: required
+  memory: 8G
+  model_cache: /models
+
+capabilities:
+  languages:
+    - all  # 99 languages supported
+  max_audio_duration: 7200  # 2 hours
+  streaming: false
+  word_timestamps: true
+
+input:
+  audio_formats:
+    - wav
+  sample_rate: 16000
+  channels: 1
+
+config_schema:
+  type: object
+  properties:
+    model:
+      type: string
+      enum:
+        - tiny
+        - tiny.en
+        - base
+        - base.en
+        - small
+        - small.en
+        - medium
+        - medium.en
+        - large-v1
+        - large-v2
+        - large-v3
+      default: large-v3
+      description: Whisper model size
+    language:
+      type: string
+      description: Language code (e.g., 'en', 'es') or null for auto-detection
+    beam_size:
+      type: integer
+      default: 5
+      minimum: 1
+      maximum: 10
+      description: Beam search width (higher = more accurate but slower)
+    vad_filter:
+      type: boolean
+      default: true
+      description: Enable VAD to filter out silence for better accuracy
+    device:
+      type: string
+      enum:
+        - cuda
+        - cpu
+      default: cuda
+      description: Device to run inference on
+    compute_type:
+      type: string
+      enum:
+        - float16
+        - int8
+        - int8_float16
+      default: float16
+      description: Compute precision (float16 for GPU, int8 for CPU)
+  additionalProperties: false
+
+output_schema:
+  type: object
+  required:
+    - text
+    - segments
+    - language
+    - language_probability
+  properties:
+    text:
+      type: string
+      description: Full transcript text
+    segments:
+      type: array
+      description: Transcript segments with timestamps
+      items:
+        type: object
+        required:
+          - start
+          - end
+          - text
+        properties:
+          start:
+            type: number
+            description: Start time in seconds
+          end:
+            type: number
+            description: End time in seconds
+          text:
+            type: string
+            description: Segment text
+          words:
+            type: array
+            description: Word-level timestamps
+            items:
+              type: object
+              properties:
+                word:
+                  type: string
+                start:
+                  type: number
+                end:
+                  type: number
+                probability:
+                  type: number
+    language:
+      type: string
+      description: Detected language code (ISO 639-1)
+    language_probability:
+      type: number
+      description: Confidence in language detection (0-1)

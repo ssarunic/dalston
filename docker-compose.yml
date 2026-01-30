@@ -1,4 +1,4 @@
-# Dalston M01 - Minimal Docker Compose
+# Dalston M02 - Real Transcription Pipeline
 #
 # Prerequisites:
 #   docker build -f docker/Dockerfile.engine-base -t dalston/engine-base:latest .
@@ -128,15 +128,15 @@ services:
     restart: unless-stopped
 
   # ============================================================
-  # STUB ENGINES (M01)
+  # ENGINES (M02+)
   # ============================================================
 
-  engine-stub-transcriber:
+  engine-audio-prepare:
     build:
       context: .
-      dockerfile: engines/transcribe/stub-transcriber/Dockerfile
+      dockerfile: engines/prepare/audio-prepare/Dockerfile
     environment:
-      - ENGINE_ID=stub-transcriber
+      - ENGINE_ID=audio-prepare
       - REDIS_URL=redis://redis:6379
       - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
       - S3_REGION=${S3_REGION:-us-east-1}
@@ -150,12 +150,64 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
-  engine-stub-merger:
+  engine-faster-whisper:
     build:
       context: .
-      dockerfile: engines/merge/stub-merger/Dockerfile
+      dockerfile: engines/transcribe/faster-whisper/Dockerfile
     environment:
-      - ENGINE_ID=stub-merger
+      - ENGINE_ID=faster-whisper
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - whisper-models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # GPU-accelerated faster-whisper (use with: docker compose --profile gpu up -d)
+  engine-faster-whisper-gpu:
+    build:
+      context: .
+      dockerfile: engines/transcribe/faster-whisper/Dockerfile
+    environment:
+      - ENGINE_ID=faster-whisper
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - whisper-models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - gpu
+    restart: unless-stopped
+
+  engine-final-merger:
+    build:
+      context: .
+      dockerfile: engines/merge/final-merger/Dockerfile
+    environment:
+      - ENGINE_ID=final-merger
       - REDIS_URL=redis://redis:6379
       - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
       - S3_REGION=${S3_REGION:-us-east-1}
@@ -172,3 +224,4 @@ services:
 volumes:
   postgres-data:
   minio-data:
+  whisper-models:

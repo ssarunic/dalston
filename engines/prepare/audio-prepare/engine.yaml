@@ -1,0 +1,81 @@
+id: audio-prepare
+stage: prepare
+name: Audio Prepare
+version: 1.0.0
+description: |
+  Converts any audio format to 16kHz, 16-bit, mono WAV.
+  Extracts duration and audio metadata using ffprobe.
+  Required as the first stage of all batch pipelines.
+
+container:
+  gpu: none
+  memory: 512M
+
+capabilities:
+  languages:
+    - all
+  max_audio_duration: 14400  # 4 hours
+  streaming: false
+  word_timestamps: false
+
+input:
+  audio_formats:
+    - mp3
+    - wav
+    - m4a
+    - flac
+    - ogg
+    - webm
+    - mp4
+    - mkv
+    - avi
+    - aac
+    - wma
+  sample_rate: any
+  channels: any
+
+config_schema:
+  type: object
+  properties:
+    target_sample_rate:
+      type: integer
+      default: 16000
+      description: Target sample rate in Hz
+    target_channels:
+      type: integer
+      default: 1
+      description: Target number of channels (1=mono, 2=stereo)
+  additionalProperties: false
+
+output_schema:
+  type: object
+  required:
+    - audio_uri
+    - duration
+    - sample_rate
+    - channels
+  properties:
+    audio_uri:
+      type: string
+      description: S3 URI to prepared WAV file
+    duration:
+      type: number
+      description: Audio duration in seconds
+    sample_rate:
+      type: integer
+      description: Output sample rate (16000)
+    channels:
+      type: integer
+      description: Output channels (1)
+    original_format:
+      type: string
+      description: Original audio codec/format
+    original_duration:
+      type: number
+      description: Original duration before conversion
+    original_sample_rate:
+      type: integer
+      description: Original sample rate
+    original_channels:
+      type: integer
+      description: Original number of channels

@@ -65,6 +65,7 @@ async def handle_job_created(
 
     # 3. Save all tasks to PostgreSQL
     for task in tasks:
+        log.info("creating_task", task_id=str(task.id), stage=task.stage, engine_id=task.engine_id)
         task_model = TaskModel(
             id=task.id,
             job_id=task.job_id,
@@ -346,6 +347,9 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession) -> None:
     """
     log = logger.bind(job_id=str(job_id))
 
+    # Expire all cached objects to ensure we read fresh data from DB
+    db.expire_all()
+
     result = await db.execute(
         select(TaskModel).where(TaskModel.job_id == job_id)
     )
@@ -361,6 +365,8 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession) -> None:
     all_done = all(t.status in terminal_states for t in all_tasks)
 
     if not all_done:
+        pending_stages = [t.stage for t in all_tasks if t.status not in terminal_states]
+        log.debug("job_not_complete_yet", pending_stages=pending_stages)
         return
 
     # Check if any required task failed

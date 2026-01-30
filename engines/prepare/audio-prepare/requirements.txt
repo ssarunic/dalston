@@ -1,0 +1,5 @@
+# Audio Prepare Engine Dependencies
+#
+# No additional Python dependencies required.
+# ffmpeg is installed via apt in Dockerfile.
+# boto3, redis are already in engine-base image.

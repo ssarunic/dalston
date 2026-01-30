@@ -1,0 +1,125 @@
+id: final-merger
+stage: merge
+name: Final Merger
+version: 1.0.0
+description: |
+  Combines outputs from upstream pipeline stages into the
+  standard Dalston transcript format.
+
+  Adds segment IDs, metadata, and writes the canonical
+  transcript.json file for the Gateway to read.
+
+container:
+  gpu: none
+  memory: 256M
+
+capabilities:
+  languages:
+    - all
+  max_audio_duration: 86400
+  streaming: false
+  word_timestamps: false
+
+input:
+  # This engine doesn't process audio directly
+  # It reads from previous_outputs
+  audio_formats: []
+  sample_rate: any
+  channels: any
+
+config_schema:
+  type: object
+  properties: {}
+  additionalProperties: false
+
+output_schema:
+  type: object
+  required:
+    - job_id
+    - version
+    - metadata
+    - text
+    - segments
+    - speakers
+  properties:
+    job_id:
+      type: string
+      description: Job identifier
+    version:
+      type: string
+      description: Transcript format version
+    metadata:
+      type: object
+      description: Audio and pipeline metadata
+      properties:
+        audio_duration:
+          type: number
+        audio_channels:
+          type: integer
+        sample_rate:
+          type: integer
+        language:
+          type: string
+        language_probability:
+          type: number
+        created_at:
+          type: string
+        completed_at:
+          type: string
+        pipeline_stages:
+          type: array
+          items:
+            type: string
+        pipeline_warnings:
+          type: array
+    text:
+      type: string
+      description: Full transcript text
+    speakers:
+      type: array
+      description: Speaker information (empty in M02)
+      items:
+        type: object
+        properties:
+          id:
+            type: string
+          label:
+            type: string
+          channel:
+            type: integer
+    segments:
+      type: array
+      description: Transcript segments with IDs
+      items:
+        type: object
+        required:
+          - id
+          - start
+          - end
+          - text
+        properties:
+          id:
+            type: string
+            description: Segment ID (seg_000, seg_001, ...)
+          start:
+            type: number
+          end:
+            type: number
+          text:
+            type: string
+          speaker:
+            type: string
+          words:
+            type: array
+          emotion:
+            type: string
+          emotion_confidence:
+            type: number
+          events:
+            type: array
+    paragraphs:
+      type: array
+      description: Paragraph groupings (empty in M02)
+    summary:
+      type: string
+      description: Content summary (null in M02)

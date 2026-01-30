@@ -1,0 +1,11 @@
+# Faster-Whisper Engine Dependencies
+
+# Core transcription library (CTranslate2-based Whisper)
+faster-whisper>=1.0.0
+
+# PyTorch for GPU support and model handling
+# Using CUDA 12.1 compatible version
+torch>=2.0.0
+
+# Additional utilities
+numpy>=1.24.0
