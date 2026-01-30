@@ -45,8 +45,14 @@ WORKER_ID=dev-worker REDIS_URL=redis://localhost:6379 python engine.py
 # Start all services
 docker compose up -d
 
-# Start core services only (minimal setup)
-docker compose up -d gateway orchestrator redis engine-audio-prepare engine-faster-whisper engine-merger
+# Start core services only (minimal setup with word timestamps)
+docker compose up -d gateway orchestrator redis postgres minio minio-init \
+  engine-audio-prepare engine-faster-whisper engine-whisperx-align engine-final-merger
+
+# Start without word-level alignment (faster, smaller setup)
+# Note: Submit jobs with timestamps_granularity=segment to skip alignment
+docker compose up -d gateway orchestrator redis postgres minio minio-init \
+  engine-audio-prepare engine-faster-whisper engine-final-merger
 
 # Start with real-time workers
 docker compose up -d gateway orchestrator redis \

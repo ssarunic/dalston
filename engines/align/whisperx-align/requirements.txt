@@ -1,0 +1,11 @@
+# WhisperX Alignment Engine Dependencies
+
+# WhisperX for wav2vec2-based forced alignment
+whisperx>=3.1.0
+
+# PyTorch for model inference
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# Audio processing
+numpy>=1.24.0

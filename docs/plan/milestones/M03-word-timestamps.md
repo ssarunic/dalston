@@ -88,9 +88,65 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 
 ## Checkpoint
 
-- [ ] **WhisperX Align** produces word-level timestamps
-- [ ] **DAG builder** conditionally includes alignment stage
-- [ ] **Merger** includes words array when available
-- [ ] **Pipeline** is now: prepare → transcribe → [align] → merge
+- [x] **WhisperX Align** produces word-level timestamps
+- [x] **DAG builder** conditionally includes alignment stage
+- [x] **Merger** includes words array when available
+- [x] **Pipeline** is now: prepare → transcribe → [align] → merge
 
 **Next**: [M4: Speaker Diarization](M04-speaker-diarization.md) — Identify who said what
+
+---
+
+## Implementation Summary
+
+**Completed**: 2026-01-30
+
+### Files Created
+
+| File | Description |
+| ---- | ----------- |
+| `engines/align/whisperx-align/engine.py` | WhisperX alignment engine with lazy model loading per language |
+| `engines/align/whisperx-align/engine.yaml` | Engine metadata and capability declaration |
+| `engines/align/whisperx-align/requirements.txt` | Dependencies: whisperx, torch, torchaudio |
+| `engines/align/whisperx-align/Dockerfile` | Container with CPU/GPU support |
+
+### Files Modified
+
+| File | Changes |
+| ---- | ------- |
+| `dalston/orchestrator/dag.py` | Added align stage, conditional based on `timestamps_granularity` or `word_timestamps` |
+| `engines/merge/final-merger/engine.py` | Handle aligned segments, track `word_timestamps` and `word_timestamps_requested` in metadata |
+| `docker-compose.yml` | Added `engine-whisperx-align` and `engine-whisperx-align-gpu` services |
+| `CLAUDE.md` | Updated core services list to include alignment engine |
+
+### Key Implementation Details
+
+1. **API Compatibility**: Supports both `timestamps_granularity` (API style: "word"/"segment"/"none") and `word_timestamps` (boolean) parameters
+
+2. **Graceful Degradation**: If alignment fails (unsupported language, model error), the engine returns original transcription segments with a warning in `pipeline_warnings`
+
+3. **Device Detection**: Auto-detects CUDA availability, falls back to CPU
+
+4. **Model Caching**: Language-specific wav2vec2 models are lazily loaded and cached in memory
+
+5. **Observability**: Metadata includes:
+   - `word_timestamps`: Whether words are actually available
+   - `word_timestamps_requested`: Whether alignment was requested (helps distinguish "failed" vs "not requested")
+   - `pipeline_warnings`: Array of any fallback events
+
+### Docker Services
+
+```yaml
+# CPU version (default)
+engine-whisperx-align
+
+# GPU version (--profile gpu)
+engine-whisperx-align-gpu
+```
+
+### Verification Results
+
+```text
+timestamps_granularity=segment → 3 tasks (prepare → transcribe → merge)
+timestamps_granularity=word    → 4 tasks (prepare → transcribe → align → merge)
+```
