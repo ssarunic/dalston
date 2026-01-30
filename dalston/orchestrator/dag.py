@@ -23,7 +23,7 @@ DEFAULT_ENGINES = {
     "prepare": "audio-prepare",
     "transcribe": "faster-whisper",
     "align": "whisperx-align",
-    "diarize": "pyannote-3.1",
+    "diarize": "pyannote-4.0",
     "merge": "final-merger",
 }
 
@@ -116,6 +116,10 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
             diarize_config["min_speakers"] = parameters["min_speakers"]
         if parameters.get("max_speakers") is not None and parameters["max_speakers"] > 0:
             diarize_config["max_speakers"] = parameters["max_speakers"]
+
+    # Exclusive mode for pyannote 4.0+ (one speaker per segment)
+    if parameters.get("exclusive"):
+        diarize_config["exclusive"] = True
 
     # Build transcription config from parameters
     transcribe_config = {

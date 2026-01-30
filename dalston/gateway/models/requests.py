@@ -27,6 +27,10 @@ class TranscriptionCreateParams(BaseModel):
         le=32,
         description="Expected number of speakers (hint for diarization)",
     )
+    exclusive: bool = Field(
+        default=False,
+        description="Exclusive diarization mode (pyannote 4.0+): one speaker per segment",
+    )
 
     # Timestamps (M03)
     timestamps_granularity: str = Field(
@@ -46,5 +50,6 @@ class TranscriptionCreateParams(BaseModel):
             "language": self.language,
             "speaker_detection": self.speaker_detection,
             "num_speakers": self.num_speakers,
+            "exclusive": self.exclusive,
             "timestamps_granularity": self.timestamps_granularity,
         }

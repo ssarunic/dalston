@@ -1,0 +1,9 @@
+# Pyannote 4.0 Diarization Engine Dependencies
+
+# Pyannote audio 4.0 with new Community-1 pipeline and VBx clustering
+# Features: exclusive diarization mode, improved speaker counting
+# Note: pyannote.audio 4.0 pulls torchcodec as dependency (x86_64 only)
+pyannote.audio>=4.0.0,<5.0.0
+
+# HuggingFace hub - pyannote 4.0 uses the new 'token' parameter
+huggingface_hub>=0.24.0

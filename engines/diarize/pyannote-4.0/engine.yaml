@@ -1,0 +1,86 @@
+id: pyannote-4.0
+stage: diarize
+name: Pyannote Speaker Diarization 4.0
+version: 1.0.0
+description: |
+  Speaker diarization using pyannote-audio 4.0 with the new Community-1 pipeline.
+  Identifies who speaks when in an audio file.
+
+  New in 4.0:
+    - VBx clustering for improved speaker counting and assignment
+    - Exclusive mode for single-speaker segments (better Whisper alignment)
+    - NumPy 2.0 and modern dependency compatibility
+
+  Requires HuggingFace token (HF_TOKEN) for accessing gated models.
+  Supports optional min/max speaker count hints for improved accuracy.
+
+container:
+  gpu: optional  # Recommended for performance; very slow on CPU
+  memory: 6G
+  model_cache: /models
+
+capabilities:
+  languages:
+    - all  # Language-agnostic speaker diarization
+  max_audio_duration: 7200  # 2 hours
+  streaming: false
+
+input:
+  audio_formats:
+    - wav
+  sample_rate: 16000
+  channels: 1
+
+config_schema:
+  type: object
+  properties:
+    min_speakers:
+      type: integer
+      minimum: 1
+      description: Minimum number of speakers (hint for clustering)
+    max_speakers:
+      type: integer
+      minimum: 1
+      description: Maximum number of speakers (hint for clustering)
+    exclusive:
+      type: boolean
+      default: false
+      description: |
+        Enable exclusive diarization mode (new in 4.0).
+        When enabled, each segment has exactly one speaker assigned,
+        making it easier to align with Whisper transcription timestamps.
+  additionalProperties: false
+
+output_schema:
+  type: object
+  required:
+    - speakers
+    - diarization_segments
+  properties:
+    speakers:
+      type: array
+      description: List of detected speaker IDs
+      items:
+        type: string
+    diarization_segments:
+      type: array
+      description: Speaker turns with timestamps
+      items:
+        type: object
+        required:
+          - start
+          - end
+          - speaker
+        properties:
+          start:
+            type: number
+            description: Segment start time in seconds
+          end:
+            type: number
+            description: Segment end time in seconds
+          speaker:
+            type: string
+            description: Speaker ID (e.g., "SPEAKER_00")
+    exclusive_mode:
+      type: boolean
+      description: Whether exclusive diarization mode was used
