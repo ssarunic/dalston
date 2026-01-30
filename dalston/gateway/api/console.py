@@ -1,0 +1,324 @@
+"""Console API endpoints for the web management interface.
+
+GET /api/console/dashboard - Aggregated dashboard data
+GET /api/console/jobs/{job_id}/tasks - Get task DAG for a job
+GET /api/console/engines - Get batch and realtime engine status
+"""
+
+from datetime import datetime, timezone
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from redis.asyncio import Redis
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from dalston.common.models import JobStatus
+from dalston.db.models import JobModel
+from dalston.db.session import DEFAULT_TENANT_ID
+from dalston.gateway.dependencies import get_db, get_redis, get_session_router
+from dalston.session_router import SessionRouter
+
+router = APIRouter(prefix="/api/console", tags=["console"])
+
+
+# Dashboard models
+class SystemStatus(BaseModel):
+    """System health status."""
+    healthy: bool
+    version: str = "0.1.0"
+
+
+class BatchStats(BaseModel):
+    """Batch processing statistics."""
+    running_jobs: int
+    queued_jobs: int
+    completed_today: int
+    failed_today: int
+
+
+class RealtimeCapacity(BaseModel):
+    """Realtime worker capacity."""
+    total_capacity: int
+    used_capacity: int
+    available_capacity: int
+    worker_count: int
+    ready_workers: int
+
+
+class JobSummary(BaseModel):
+    """Job summary for dashboard."""
+    id: UUID
+    status: str
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class DashboardResponse(BaseModel):
+    """Aggregated dashboard data."""
+    system: SystemStatus
+    batch: BatchStats
+    realtime: RealtimeCapacity
+    recent_jobs: list[JobSummary]
+
+
+@router.get(
+    "/dashboard",
+    response_model=DashboardResponse,
+    summary="Get dashboard data",
+    description="Get aggregated dashboard data including system status, batch stats, realtime capacity, and recent jobs.",
+)
+async def get_dashboard(
+    db: AsyncSession = Depends(get_db),
+    session_router: SessionRouter = Depends(get_session_router),
+) -> DashboardResponse:
+    """Get aggregated dashboard data in a single call."""
+    # Get job counts by status
+    status_counts = await db.execute(
+        select(JobModel.status, func.count(JobModel.id))
+        .where(JobModel.tenant_id == DEFAULT_TENANT_ID)
+        .group_by(JobModel.status)
+    )
+    counts = {row[0]: row[1] for row in status_counts.all()}
+
+    # Get today's completed/failed counts
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_completed = await db.execute(
+        select(func.count(JobModel.id))
+        .where(JobModel.tenant_id == DEFAULT_TENANT_ID)
+        .where(JobModel.status == JobStatus.COMPLETED.value)
+        .where(JobModel.completed_at >= today_start)
+    )
+    today_failed = await db.execute(
+        select(func.count(JobModel.id))
+        .where(JobModel.tenant_id == DEFAULT_TENANT_ID)
+        .where(JobModel.status == JobStatus.FAILED.value)
+        .where(JobModel.completed_at >= today_start)
+    )
+
+    # Get recent jobs
+    recent_result = await db.execute(
+        select(JobModel)
+        .where(JobModel.tenant_id == DEFAULT_TENANT_ID)
+        .order_by(JobModel.created_at.desc())
+        .limit(5)
+    )
+    recent_jobs = recent_result.scalars().all()
+
+    # Get realtime capacity
+    try:
+        capacity = await session_router.get_capacity()
+        realtime = RealtimeCapacity(
+            total_capacity=capacity.total_capacity,
+            used_capacity=capacity.used_capacity,
+            available_capacity=capacity.available_capacity,
+            worker_count=capacity.worker_count,
+            ready_workers=capacity.ready_workers,
+        )
+    except Exception:
+        # If session router is not available, return zeros
+        realtime = RealtimeCapacity(
+            total_capacity=0,
+            used_capacity=0,
+            available_capacity=0,
+            worker_count=0,
+            ready_workers=0,
+        )
+
+    return DashboardResponse(
+        system=SystemStatus(healthy=True),
+        batch=BatchStats(
+            running_jobs=counts.get(JobStatus.RUNNING.value, 0),
+            queued_jobs=counts.get(JobStatus.PENDING.value, 0),
+            completed_today=today_completed.scalar() or 0,
+            failed_today=today_failed.scalar() or 0,
+        ),
+        realtime=realtime,
+        recent_jobs=[
+            JobSummary(
+                id=job.id,
+                status=job.status,
+                created_at=job.created_at,
+                started_at=job.started_at,
+                completed_at=job.completed_at,
+            )
+            for job in recent_jobs
+        ],
+    )
+
+
+class TaskResponse(BaseModel):
+    """Task in the job pipeline."""
+
+    id: UUID
+    stage: str
+    engine_id: str
+    status: str
+    dependencies: list[UUID]
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    error: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class TaskListResponse(BaseModel):
+    """Response for task list endpoint."""
+
+    job_id: UUID
+    tasks: list[TaskResponse]
+
+
+@router.get(
+    "/jobs/{job_id}/tasks",
+    response_model=TaskListResponse,
+    summary="Get job tasks",
+    description="Get all tasks in the job's processing pipeline.",
+)
+async def get_job_tasks(
+    job_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> TaskListResponse:
+    """Get task DAG for a job."""
+    # Fetch job with tasks
+    result = await db.execute(
+        select(JobModel)
+        .where(JobModel.id == job_id)
+        .where(JobModel.tenant_id == DEFAULT_TENANT_ID)
+        .options(selectinload(JobModel.tasks))
+    )
+    job = result.scalar_one_or_none()
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Sort tasks by stage order for display
+    stage_order = {
+        "prepare": 0,
+        "transcribe": 1,
+        "align": 2,
+        "diarize": 3,
+        "detect": 4,
+        "refine": 5,
+        "merge": 6,
+    }
+    sorted_tasks = sorted(
+        job.tasks,
+        key=lambda t: (stage_order.get(t.stage, 99), t.engine_id),
+    )
+
+    return TaskListResponse(
+        job_id=job.id,
+        tasks=[
+            TaskResponse(
+                id=task.id,
+                stage=task.stage,
+                engine_id=task.engine_id,
+                status=task.status,
+                dependencies=task.dependencies or [],
+                started_at=task.started_at,
+                completed_at=task.completed_at,
+                error=task.error,
+            )
+            for task in sorted_tasks
+        ],
+    )
+
+
+# Engine models
+class BatchEngine(BaseModel):
+    """Batch engine status."""
+
+    engine_id: str
+    stage: str
+    status: str  # "healthy" or "unhealthy"
+    queue_depth: int
+    processing: int
+
+
+class RealtimeWorker(BaseModel):
+    """Realtime worker status."""
+
+    worker_id: str
+    endpoint: str
+    status: str
+    capacity: int
+    active_sessions: int
+    models: list[str]
+    languages: list[str]
+
+
+class EnginesResponse(BaseModel):
+    """Response for engines endpoint."""
+
+    batch_engines: list[BatchEngine]
+    realtime_engines: list[RealtimeWorker]
+
+
+# Known batch engines and their stages
+BATCH_ENGINES = {
+    "audio-prepare": "prepare",
+    "faster-whisper": "transcribe",
+    "whisperx-align": "align",
+    "pyannote-3.1": "diarize",
+    "pyannote-4.0": "diarize",
+    "final-merger": "merge",
+}
+
+
+@router.get(
+    "/engines",
+    response_model=EnginesResponse,
+    summary="Get engine status",
+    description="Get status of all batch and realtime engines.",
+)
+async def get_engines(
+    redis: Redis = Depends(get_redis),
+    session_router: SessionRouter = Depends(get_session_router),
+) -> EnginesResponse:
+    """Get status of all engines."""
+    # Get batch engine queue depths
+    batch_engines = []
+    for engine_id, stage in BATCH_ENGINES.items():
+        queue_key = f"dalston:queue:{engine_id}"
+        queue_depth = await redis.llen(queue_key) or 0
+
+        batch_engines.append(
+            BatchEngine(
+                engine_id=engine_id,
+                stage=stage,
+                status="healthy",  # We assume healthy if queue is accessible
+                queue_depth=queue_depth,
+                processing=0,  # Not tracked currently
+            )
+        )
+
+    # Get realtime workers
+    realtime_engines = []
+    try:
+        workers = await session_router.list_workers()
+        for worker in workers:
+            realtime_engines.append(
+                RealtimeWorker(
+                    worker_id=worker.worker_id,
+                    endpoint=worker.endpoint,
+                    status=worker.status,
+                    capacity=worker.capacity,
+                    active_sessions=worker.active_sessions,
+                    models=worker.models,
+                    languages=worker.languages,
+                )
+            )
+    except Exception:
+        # Session router may not be available
+        pass
+
+    return EnginesResponse(
+        batch_engines=batch_engines,
+        realtime_engines=realtime_engines,
+    )

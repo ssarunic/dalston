@@ -200,14 +200,61 @@ curl http://localhost:8000/api/console/realtime/status
 
 ---
 
+## Implementation Summary
+
+Completed: 2026-01-30
+
+### Stack Used
+
+- React 19 + Vite 7 + TypeScript
+- Tailwind CSS v3 with dark theme (CSS variables)
+- TanStack Query (React Query) for data fetching
+- React Router 7 with dynamic basename for `/console/` path
+- shadcn/ui-style components (Card, Badge, Table, Skeleton)
+- ky HTTP client for API calls
+
+### Key Files
+
+| Component      | Path                                         |
+| -------------- | -------------------------------------------- |
+| Main App       | `web/src/App.tsx`                            |
+| API Client     | `web/src/api/client.ts`                      |
+| Dashboard      | `web/src/pages/Dashboard.tsx`                |
+| Job Detail     | `web/src/pages/JobDetail.tsx`                |
+| DAG Viewer     | `web/src/components/DAGViewer.tsx`           |
+| Console API    | `dalston/gateway/api/console.py`             |
+| Static Serving | `dalston/gateway/main.py` (lines 125-163)    |
+| Dockerfile     | `docker/Dockerfile.gateway`                  |
+
+### API Endpoints Implemented
+
+| Endpoint                           | Description                                                 |
+| ---------------------------------- | ----------------------------------------------------------- |
+| `GET /api/console/dashboard`       | Aggregated dashboard (system, batch, realtime, recent jobs) |
+| `GET /api/console/jobs/{id}/tasks` | Task DAG for job pipeline visualization                     |
+| `GET /api/console/engines`         | Batch engine queues + realtime workers                      |
+
+Reused existing endpoints:
+
+- `GET /v1/audio/transcriptions` - Job list
+- `GET /v1/audio/transcriptions/{id}` - Job detail
+- `GET /v1/audio/transcriptions/{id}/export/{format}` - Export
+
+### Security Notes
+
+- Path traversal protection added to static file serving using `.resolve()` and `.is_relative_to()`
+- Console is served without authentication (internal tool assumption)
+
+---
+
 ## Checkpoint
 
-- [ ] **React app** with Vite + TypeScript + Tailwind
-- [ ] **Dashboard** with system overview
-- [ ] **Job list** with filtering and pagination
-- [ ] **Job detail** with DAG visualization
-- [ ] **Transcript viewer** with speakers and timestamps
-- [ ] **Realtime monitoring** for workers and sessions
-- [ ] **API endpoints** for all console data
+- [x] **React app** with Vite + TypeScript + Tailwind
+- [x] **Dashboard** with system overview
+- [x] **Job list** with filtering and pagination
+- [x] **Job detail** with DAG visualization
+- [x] **Transcript viewer** with speakers and timestamps
+- [x] **Realtime monitoring** for workers and sessions
+- [x] **API endpoints** for all console data
 
 **Next**: [M11: API Authentication](M11-api-authentication.md) — Secure all endpoints

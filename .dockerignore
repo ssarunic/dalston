@@ -1,0 +1,44 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.eggs/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+venv/
+.venv/
+
+# Node (we copy web/ but exclude node_modules)
+web/node_modules
+web/.vite
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/
+
+# Docs & misc
+docs/
+*.md
+!README.md
+LICENSE
+
+# Test files
+tests/
+*.test.ts
+*.spec.ts
+
+# Local env
+.env
+.env.*
+!.env.example
