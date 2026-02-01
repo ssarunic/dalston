@@ -14,6 +14,7 @@ This folder contains reference implementations for non-obvious patterns used acr
 | [dag-builder.md](dag-builder.md) | Task DAG construction with optional/parallel tasks |
 | [enrichment-engines.md](enrichment-engines.md) | Emotion, events, and LLM cleanup engine patterns |
 | [console-api.md](console-api.md) | Console API aggregation patterns |
+| [python-sdk.md](python-sdk.md) | Python SDK package structure, patterns, testing |
 
 ## When to Use These
 
