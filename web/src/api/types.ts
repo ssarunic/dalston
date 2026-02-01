@@ -89,9 +89,14 @@ export interface CapacityInfo {
   ready_workers: number
 }
 
+// Response from /v1/realtime/status (flat structure)
 export interface RealtimeStatusResponse {
-  capacity: CapacityInfo
-  workers: WorkerStatus[]
+  status: 'ready' | 'at_capacity' | 'unavailable'
+  total_capacity: number
+  active_sessions: number
+  available_capacity: number
+  worker_count: number
+  ready_workers: number
 }
 
 // Dashboard types (aggregated)

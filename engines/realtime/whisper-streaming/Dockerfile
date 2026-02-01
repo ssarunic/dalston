@@ -35,12 +35,12 @@ COPY engines/realtime/whisper-streaming/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download models at build time for faster startup
-# Download distil-whisper (fast model)
-RUN python -c "from faster_whisper import WhisperModel; WhisperModel('distil-whisper/distil-large-v3', device='cpu', compute_type='int8')" \
+# Download distil-whisper (fast model) - use Systran CTranslate2 converted model
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('Systran/faster-distil-whisper-large-v3', device='cpu', compute_type='int8')" \
     && echo "Fast model (distil-large-v3) downloaded successfully"
 
-# Download large-v3 (accurate model)
-RUN python -c "from faster_whisper import WhisperModel; WhisperModel('large-v3', device='cpu', compute_type='int8')" \
+# Download large-v3 (accurate model) - use Systran CTranslate2 converted model
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('Systran/faster-whisper-large-v3', device='cpu', compute_type='int8')" \
     && echo "Accurate model (large-v3) downloaded successfully"
 
 # Download Silero VAD model

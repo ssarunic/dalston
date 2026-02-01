@@ -1,11 +1,13 @@
-# Dalston M03 - Word Timestamps & Alignment
+# Dalston - Modular Audio Transcription Server
 #
-# Prerequisites:
-#   docker build -f docker/Dockerfile.engine-base -t dalston/engine-base:latest .
+# Image Sharing Strategy:
+#   Services that use the same Dockerfile share a single image via the `image:` directive.
+#   Only the first service has a `build:` section; others just reference the image.
+#   This saves disk space and ensures consistency.
 #
 # Usage:
 #   docker compose up -d
-#   ./scripts/verify-m01.sh
+#   docker compose up -d --scale engine-faster-whisper=2  # scale specific engine
 
 services:
   # ============================================================
@@ -81,6 +83,7 @@ services:
   # ============================================================
 
   gateway:
+    image: dalston/gateway:latest
     build:
       context: .
       dockerfile: docker/Dockerfile.gateway
@@ -109,6 +112,7 @@ services:
     restart: unless-stopped
 
   orchestrator:
+    image: dalston/orchestrator:latest
     build:
       context: .
       dockerfile: docker/Dockerfile.orchestrator
@@ -132,6 +136,7 @@ services:
   # ============================================================
 
   engine-audio-prepare:
+    image: dalston/engine-audio-prepare:latest
     build:
       context: .
       dockerfile: engines/prepare/audio-prepare/Dockerfile
@@ -151,6 +156,7 @@ services:
     restart: unless-stopped
 
   engine-faster-whisper:
+    image: dalston/engine-faster-whisper:latest
     build:
       context: .
       dockerfile: engines/transcribe/faster-whisper/Dockerfile
@@ -172,10 +178,9 @@ services:
     restart: unless-stopped
 
   # GPU-accelerated faster-whisper (use with: docker compose --profile gpu up -d)
+  # Shares image with engine-faster-whisper
   engine-faster-whisper-gpu:
-    build:
-      context: .
-      dockerfile: engines/transcribe/faster-whisper/Dockerfile
+    image: dalston/engine-faster-whisper:latest
     environment:
       - ENGINE_ID=faster-whisper
       - REDIS_URL=redis://redis:6379
@@ -203,6 +208,7 @@ services:
     restart: unless-stopped
 
   engine-whisperx-align:
+    image: dalston/engine-whisperx-align:latest
     build:
       context: .
       dockerfile: engines/align/whisperx-align/Dockerfile
@@ -224,10 +230,9 @@ services:
     restart: unless-stopped
 
   # GPU-accelerated whisperx-align (use with: docker compose --profile gpu up -d)
+  # Shares image with engine-whisperx-align
   engine-whisperx-align-gpu:
-    build:
-      context: .
-      dockerfile: engines/align/whisperx-align/Dockerfile
+    image: dalston/engine-whisperx-align:latest
     environment:
       - ENGINE_ID=whisperx-align
       - REDIS_URL=redis://redis:6379
@@ -255,6 +260,7 @@ services:
     restart: unless-stopped
 
   engine-final-merger:
+    image: dalston/engine-final-merger:latest
     build:
       context: .
       dockerfile: engines/merge/final-merger/Dockerfile
@@ -278,6 +284,7 @@ services:
   # ============================================================
 
   engine-pyannote-3.1:
+    image: dalston/engine-pyannote-3.1:latest
     build:
       context: .
       dockerfile: engines/diarize/pyannote-3.1/Dockerfile
@@ -301,10 +308,9 @@ services:
     restart: unless-stopped
 
   # GPU-accelerated pyannote (use with: docker compose --profile gpu up -d)
+  # Shares image with engine-pyannote-3.1
   engine-pyannote-3.1-gpu:
-    build:
-      context: .
-      dockerfile: engines/diarize/pyannote-3.1/Dockerfile
+    image: dalston/engine-pyannote-3.1:latest
     environment:
       - ENGINE_ID=pyannote-3.1
       - REDIS_URL=redis://redis:6379
@@ -334,6 +340,7 @@ services:
 
   # Pyannote 4.0 with Community-1 pipeline and VBx clustering
   engine-pyannote-4.0:
+    image: dalston/engine-pyannote-4.0:latest
     build:
       context: .
       dockerfile: engines/diarize/pyannote-4.0/Dockerfile
@@ -357,10 +364,9 @@ services:
     restart: unless-stopped
 
   # GPU-accelerated pyannote 4.0 (use with: docker compose --profile gpu up -d)
+  # Shares image with engine-pyannote-4.0
   engine-pyannote-4.0-gpu:
-    build:
-      context: .
-      dockerfile: engines/diarize/pyannote-4.0/Dockerfile
+    image: dalston/engine-pyannote-4.0:latest
     environment:
       - ENGINE_ID=pyannote-4.0
       - REDIS_URL=redis://redis:6379
@@ -390,9 +396,11 @@ services:
 
   # ============================================================
   # REALTIME ENGINES (M06)
+  # All realtime workers share the same image (dalston/realtime-whisper)
   # ============================================================
 
   realtime-whisper-1:
+    image: dalston/realtime-whisper:latest
     build:
       context: .
       dockerfile: engines/realtime/whisper-streaming/Dockerfile
@@ -414,10 +422,9 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # Additional realtime worker - shares image with realtime-whisper-1
   realtime-whisper-2:
-    build:
-      context: .
-      dockerfile: engines/realtime/whisper-streaming/Dockerfile
+    image: dalston/realtime-whisper:latest
     environment:
       - WORKER_ID=realtime-whisper-2
       - WORKER_PORT=9000
@@ -437,10 +444,9 @@ services:
     restart: unless-stopped
 
   # GPU-accelerated realtime worker (use with: docker compose --profile gpu up -d)
+  # Shares image with realtime-whisper-1
   realtime-whisper-gpu:
-    build:
-      context: .
-      dockerfile: engines/realtime/whisper-streaming/Dockerfile
+    image: dalston/realtime-whisper:latest
     environment:
       - WORKER_ID=realtime-whisper-gpu
       - WORKER_PORT=9000

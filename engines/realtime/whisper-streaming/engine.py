@@ -26,13 +26,13 @@ class WhisperStreamingEngine(RealtimeEngine):
         WORKER_PORT: WebSocket server port (default: 9000)
         MAX_SESSIONS: Maximum concurrent sessions (default: 4)
         REDIS_URL: Redis connection URL (default: redis://localhost:6379)
-        FAST_MODEL: Model for "fast" variant (default: distil-whisper/distil-large-v3)
-        ACCURATE_MODEL: Model for "accurate" variant (default: large-v3)
+        FAST_MODEL: Model for "fast" variant (default: Systran/faster-distil-whisper-large-v3)
+        ACCURATE_MODEL: Model for "accurate" variant (default: Systran/faster-whisper-large-v3)
     """
 
-    # Model configurations
-    FAST_MODEL = "distil-whisper/distil-large-v3"
-    ACCURATE_MODEL = "large-v3"
+    # Model configurations - use Systran CTranslate2-converted models for faster-whisper
+    FAST_MODEL = "Systran/faster-distil-whisper-large-v3"
+    ACCURATE_MODEL = "Systran/faster-whisper-large-v3"
 
     def __init__(self) -> None:
         """Initialize the engine."""
