@@ -15,13 +15,13 @@ import httpx
 
 from .exceptions import (
     AuthenticationError,
-    ConnectionError,
+    ConnectError,
     DalstonError,
+    ForbiddenError,
     NotFoundError,
-    PermissionError,
     RateLimitError,
     ServerError,
-    TimeoutError,
+    TimeoutException,
     ValidationError,
 )
 from .types import (
@@ -116,8 +116,15 @@ def _parse_job(data: dict[str, Any]) -> Job:
     )
 
 
-def _parse_datetime(value: str | None) -> Any:
-    """Parse ISO datetime string."""
+def _parse_datetime(value: str | None) -> "datetime | None":
+    """Parse ISO datetime string.
+
+    Args:
+        value: ISO 8601 datetime string or None.
+
+    Returns:
+        Parsed datetime object, or None if value is None or unparseable.
+    """
     if value is None:
         return None
     from datetime import datetime
@@ -127,8 +134,8 @@ def _parse_datetime(value: str | None) -> Any:
     try:
         return datetime.fromisoformat(value)
     except ValueError:
-        # Fallback for edge cases
-        return value
+        # Return None for unparseable values to maintain type safety
+        return None
 
 
 def _handle_error(response: httpx.Response) -> None:
@@ -143,7 +150,7 @@ def _handle_error(response: httpx.Response) -> None:
     if status == 401:
         raise AuthenticationError(str(detail))
     elif status == 403:
-        raise PermissionError(str(detail))
+        raise ForbiddenError(str(detail))
     elif status == 404:
         raise NotFoundError(str(detail))
     elif status == 429:
@@ -271,18 +278,20 @@ class Dalston:
 
         # Handle file upload
         files: dict[str, Any] | None = None
-        if file is not None:
-            if isinstance(file, (str, Path)):
-                path = Path(file)
-                files = {"file": (path.name, open(path, "rb"))}
-            else:
-                # File-like object
-                filename = getattr(file, "name", "audio")
-                if isinstance(filename, str) and "/" in filename:
-                    filename = filename.split("/")[-1]
-                files = {"file": (filename, file)}
-
+        opened_file = None
         try:
+            if file is not None:
+                if isinstance(file, (str, Path)):
+                    path = Path(file)
+                    opened_file = open(path, "rb")
+                    files = {"file": (path.name, opened_file)}
+                else:
+                    # File-like object
+                    filename = getattr(file, "name", "audio")
+                    if isinstance(filename, str) and "/" in filename:
+                        filename = filename.split("/")[-1]
+                    files = {"file": (filename, file)}
+
             response = self._client.post(
                 f"{self.base_url}/v1/audio/transcriptions",
                 data=data,
@@ -290,13 +299,13 @@ class Dalston:
                 headers=self._headers(),
             )
         except httpx.ConnectError as e:
-            raise ConnectionError(f"Failed to connect: {e}") from e
+            raise ConnectError(f"Failed to connect: {e}") from e
         except httpx.TimeoutException as e:
-            raise TimeoutError(f"Request timed out: {e}") from e
+            raise TimeoutException(f"Request timed out: {e}") from e
         finally:
             # Close file if we opened it
-            if files and isinstance(file, (str, Path)):
-                files["file"][1].close()
+            if opened_file is not None:
+                opened_file.close()
 
         if response.status_code != 201:
             _handle_error(response)
@@ -321,9 +330,9 @@ class Dalston:
                 headers=self._headers(),
             )
         except httpx.ConnectError as e:
-            raise ConnectionError(f"Failed to connect: {e}") from e
+            raise ConnectError(f"Failed to connect: {e}") from e
         except httpx.TimeoutException as e:
-            raise TimeoutError(f"Request timed out: {e}") from e
+            raise TimeoutException(f"Request timed out: {e}") from e
 
         if response.status_code != 200:
             _handle_error(response)
@@ -357,9 +366,9 @@ class Dalston:
                 headers=self._headers(),
             )
         except httpx.ConnectError as e:
-            raise ConnectionError(f"Failed to connect: {e}") from e
+            raise ConnectError(f"Failed to connect: {e}") from e
         except httpx.TimeoutException as e:
-            raise TimeoutError(f"Request timed out: {e}") from e
+            raise TimeoutException(f"Request timed out: {e}") from e
 
         if response.status_code != 200:
             _handle_error(response)
@@ -427,7 +436,7 @@ class Dalston:
             if timeout is not None:
                 elapsed = time.monotonic() - start_time
                 if elapsed >= timeout:
-                    raise TimeoutError(
+                    raise TimeoutException(
                         f"Timeout waiting for job {job_id} after {elapsed:.1f}s"
                     )
 
@@ -472,9 +481,9 @@ class Dalston:
                 headers=self._headers(),
             )
         except httpx.ConnectError as e:
-            raise ConnectionError(f"Failed to connect: {e}") from e
+            raise ConnectError(f"Failed to connect: {e}") from e
         except httpx.TimeoutException as e:
-            raise TimeoutError(f"Request timed out: {e}") from e
+            raise TimeoutException(f"Request timed out: {e}") from e
 
         if response.status_code != 200:
             _handle_error(response)
@@ -498,9 +507,9 @@ class Dalston:
                 headers=self._headers(),
             )
         except httpx.ConnectError as e:
-            raise ConnectionError(f"Failed to connect: {e}") from e
+            raise ConnectError(f"Failed to connect: {e}") from e
         except httpx.TimeoutException as e:
-            raise TimeoutError(f"Request timed out: {e}") from e
+            raise TimeoutException(f"Request timed out: {e}") from e
 
         if response.status_code != 200:
             _handle_error(response)
@@ -523,9 +532,9 @@ class Dalston:
                 headers=self._headers(),
             )
         except httpx.ConnectError as e:
-            raise ConnectionError(f"Failed to connect: {e}") from e
+            raise ConnectError(f"Failed to connect: {e}") from e
         except httpx.TimeoutException as e:
-            raise TimeoutError(f"Request timed out: {e}") from e
+            raise TimeoutException(f"Request timed out: {e}") from e
 
         if response.status_code != 200:
             _handle_error(response)
@@ -574,9 +583,9 @@ class Dalston:
                 headers=self._headers(),
             )
         except httpx.ConnectError as e:
-            raise ConnectionError(f"Failed to connect: {e}") from e
+            raise ConnectError(f"Failed to connect: {e}") from e
         except httpx.TimeoutException as e:
-            raise TimeoutError(f"Request timed out: {e}") from e
+            raise TimeoutException(f"Request timed out: {e}") from e
 
         if response.status_code != 201:
             _handle_error(response)
@@ -711,9 +720,9 @@ class AsyncDalston:
                 headers=self._headers(),
             )
         except httpx.ConnectError as e:
-            raise ConnectionError(f"Failed to connect: {e}") from e
+            raise ConnectError(f"Failed to connect: {e}") from e
         except httpx.TimeoutException as e:
-            raise TimeoutError(f"Request timed out: {e}") from e
+            raise TimeoutException(f"Request timed out: {e}") from e
         finally:
             if opened_file:
                 opened_file.close()
@@ -738,9 +747,9 @@ class AsyncDalston:
                 headers=self._headers(),
             )
         except httpx.ConnectError as e:
-            raise ConnectionError(f"Failed to connect: {e}") from e
+            raise ConnectError(f"Failed to connect: {e}") from e
         except httpx.TimeoutException as e:
-            raise TimeoutError(f"Request timed out: {e}") from e
+            raise TimeoutException(f"Request timed out: {e}") from e
 
         if response.status_code != 200:
             _handle_error(response)
@@ -774,9 +783,9 @@ class AsyncDalston:
                 headers=self._headers(),
             )
         except httpx.ConnectError as e:
-            raise ConnectionError(f"Failed to connect: {e}") from e
+            raise ConnectError(f"Failed to connect: {e}") from e
         except httpx.TimeoutException as e:
-            raise TimeoutError(f"Request timed out: {e}") from e
+            raise TimeoutException(f"Request timed out: {e}") from e
 
         if response.status_code != 200:
             _handle_error(response)
@@ -842,7 +851,7 @@ class AsyncDalston:
             if timeout is not None:
                 elapsed = time.monotonic() - start_time
                 if elapsed >= timeout:
-                    raise TimeoutError(
+                    raise TimeoutException(
                         f"Timeout waiting for job {job_id} after {elapsed:.1f}s"
                     )
 
@@ -883,9 +892,9 @@ class AsyncDalston:
                 headers=self._headers(),
             )
         except httpx.ConnectError as e:
-            raise ConnectionError(f"Failed to connect: {e}") from e
+            raise ConnectError(f"Failed to connect: {e}") from e
         except httpx.TimeoutException as e:
-            raise TimeoutError(f"Request timed out: {e}") from e
+            raise TimeoutException(f"Request timed out: {e}") from e
 
         if response.status_code != 200:
             _handle_error(response)
@@ -909,9 +918,9 @@ class AsyncDalston:
                 headers=self._headers(),
             )
         except httpx.ConnectError as e:
-            raise ConnectionError(f"Failed to connect: {e}") from e
+            raise ConnectError(f"Failed to connect: {e}") from e
         except httpx.TimeoutException as e:
-            raise TimeoutError(f"Request timed out: {e}") from e
+            raise TimeoutException(f"Request timed out: {e}") from e
 
         if response.status_code != 200:
             _handle_error(response)
@@ -934,9 +943,9 @@ class AsyncDalston:
                 headers=self._headers(),
             )
         except httpx.ConnectError as e:
-            raise ConnectionError(f"Failed to connect: {e}") from e
+            raise ConnectError(f"Failed to connect: {e}") from e
         except httpx.TimeoutException as e:
-            raise TimeoutError(f"Request timed out: {e}") from e
+            raise TimeoutException(f"Request timed out: {e}") from e
 
         if response.status_code != 200:
             _handle_error(response)
@@ -985,9 +994,9 @@ class AsyncDalston:
                 headers=self._headers(),
             )
         except httpx.ConnectError as e:
-            raise ConnectionError(f"Failed to connect: {e}") from e
+            raise ConnectError(f"Failed to connect: {e}") from e
         except httpx.TimeoutException as e:
-            raise TimeoutError(f"Request timed out: {e}") from e
+            raise TimeoutException(f"Request timed out: {e}") from e
 
         if response.status_code != 201:
             _handle_error(response)

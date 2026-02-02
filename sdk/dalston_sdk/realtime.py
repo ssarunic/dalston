@@ -17,8 +17,8 @@ import websockets
 
 from .exceptions import (
     AuthenticationError,
-    ConnectionError,
-    PermissionError,
+    ConnectError,
+    ForbiddenError,
     RateLimitError,
     RealtimeError,
 )
@@ -277,21 +277,21 @@ class AsyncRealtimeSession:
             if e.status_code == 401:
                 raise AuthenticationError("Invalid or missing API key") from e
             elif e.status_code == 403:
-                raise PermissionError("API key lacks required scope") from e
+                raise ForbiddenError("API key lacks required scope") from e
             elif e.status_code == 429:
                 raise RateLimitError("Rate limit exceeded") from e
-            raise ConnectionError(f"Failed to connect: {e}") from e
+            raise ConnectError(f"Failed to connect: {e}") from e
         except websockets.exceptions.ConnectionClosedError as e:
             # Handle WebSocket close codes for auth errors
             if e.code == 4001:
                 raise AuthenticationError(e.reason or "Invalid API key") from e
             elif e.code == 4003:
-                raise PermissionError(e.reason or "Missing required scope") from e
+                raise ForbiddenError(e.reason or "Missing required scope") from e
             elif e.code == 4029:
                 raise RateLimitError(e.reason or "Rate limit exceeded") from e
-            raise ConnectionError(f"Connection closed: {e}") from e
+            raise ConnectError(f"Connection closed: {e}") from e
         except Exception as e:
-            raise ConnectionError(f"Failed to connect: {e}") from e
+            raise ConnectError(f"Failed to connect: {e}") from e
 
         self._connected = True
 
@@ -473,6 +473,8 @@ class RealtimeSession:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        self._loop_ready = threading.Event()
+        self._receive_task: asyncio.Task[None] | None = None
         self._session_begin: SessionBegin | None = None
         self._session_end: SessionEnd | None = None
 
@@ -571,18 +573,31 @@ class RealtimeSession:
                 if self._stop_event.is_set():
                     break
                 self._dispatch(message)
-        except Exception:
-            pass
+        except Exception as e:
+            # Dispatch connection errors to error callbacks
+            if not self._stop_event.is_set():
+                error_data = RealtimeErrorData(
+                    code="connection_lost",
+                    message=f"Connection error: {e}",
+                    details=None,
+                )
+                for cb in self._callbacks["error"]:
+                    try:
+                        cb(error_data)
+                    except Exception:
+                        pass  # Don't let callback errors crash the loop
 
     def _run_loop(self) -> None:
         """Run the event loop in background thread."""
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
+        self._loop_ready.set()
 
         try:
-            self._loop.run_until_complete(self._receive_loop())
+            self._loop.run_forever()
         finally:
             self._loop.close()
+            self._loop = None
 
     def connect(self, timeout: float = 10.0) -> SessionBegin:
         """Connect to the server.
@@ -594,22 +609,32 @@ class RealtimeSession:
             SessionBegin message with session configuration.
 
         Raises:
-            ConnectionError: If connection fails.
+            ConnectError: If connection fails.
             RealtimeError: If server returns an error.
         """
-        # Create event loop for connection
-        loop = asyncio.new_event_loop()
-        try:
-            self._session_begin = loop.run_until_complete(
-                asyncio.wait_for(self._async_session.connect(), timeout)
-            )
-        finally:
-            loop.close()
-
-        # Start background thread for receiving messages
+        # Start background thread with event loop
         self._stop_event.clear()
+        self._loop_ready.clear()
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
+
+        # Wait for loop to be ready
+        if not self._loop_ready.wait(timeout=5.0):
+            raise RealtimeError("Failed to start event loop", code="loop_timeout")
+
+        # Connect using the background loop
+        assert self._loop is not None
+        future = asyncio.run_coroutine_threadsafe(
+            asyncio.wait_for(self._async_session.connect(), timeout),
+            self._loop,
+        )
+        self._session_begin = future.result(timeout=timeout + 1.0)
+
+        # Start receive loop as a task in the background
+        self._receive_task = asyncio.run_coroutine_threadsafe(
+            self._receive_loop(),
+            self._loop,
+        )
 
         return self._session_begin
 
@@ -622,26 +647,26 @@ class RealtimeSession:
         Raises:
             RealtimeError: If not connected.
         """
-        if not self._async_session.connected:
+        if not self._async_session.connected or self._loop is None:
             raise RealtimeError("Not connected", code="not_connected")
 
-        # Run send in a temporary event loop
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(self._async_session.send_audio(audio))
-        finally:
-            loop.close()
+        # Schedule on background loop (efficient - no new loop creation)
+        future = asyncio.run_coroutine_threadsafe(
+            self._async_session.send_audio(audio),
+            self._loop,
+        )
+        future.result(timeout=5.0)
 
     def flush(self) -> None:
         """Force processing of buffered audio."""
-        if not self._async_session.connected:
+        if not self._async_session.connected or self._loop is None:
             raise RealtimeError("Not connected", code="not_connected")
 
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(self._async_session.flush())
-        finally:
-            loop.close()
+        future = asyncio.run_coroutine_threadsafe(
+            self._async_session.flush(),
+            self._loop,
+        )
+        future.result(timeout=5.0)
 
     def close(self, timeout: float = 5.0) -> SessionEnd | None:
         """Close the session.
@@ -654,15 +679,18 @@ class RealtimeSession:
         """
         self._stop_event.set()
 
-        loop = asyncio.new_event_loop()
-        try:
-            self._session_end = loop.run_until_complete(
-                asyncio.wait_for(self._async_session.close(), timeout)
-            )
-        except asyncio.TimeoutError:
-            pass
-        finally:
-            loop.close()
+        if self._loop is not None and self._loop.is_running():
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    asyncio.wait_for(self._async_session.close(), timeout),
+                    self._loop,
+                )
+                self._session_end = future.result(timeout=timeout + 1.0)
+            except (asyncio.TimeoutError, TimeoutError):
+                pass
+            finally:
+                # Stop the event loop
+                self._loop.call_soon_threadsafe(self._loop.stop)
 
         if self._thread:
             self._thread.join(timeout=1.0)

@@ -73,14 +73,17 @@ from .types import (
 # Exceptions
 from .exceptions import (
     AuthenticationError,
-    ConnectionError,
+    ConnectError,
+    ConnectionError,  # Deprecated alias for ConnectError
     DalstonError,
+    ForbiddenError,
     NotFoundError,
-    PermissionError,
+    PermissionError,  # Deprecated alias for ForbiddenError
     RateLimitError,
     RealtimeError as RealtimeException,
     ServerError,
-    TimeoutError,
+    TimeoutError,  # Deprecated alias for TimeoutException
+    TimeoutException,
     ValidationError,
     WebhookVerificationError,
 )
@@ -129,16 +132,20 @@ __all__ = [
     "SessionToken",
     # Webhook types
     "WebhookPayload",
-    # Exceptions
+    # Exceptions (new names)
     "DalstonError",
     "AuthenticationError",
-    "PermissionError",
+    "ForbiddenError",
     "NotFoundError",
     "ValidationError",
     "RateLimitError",
     "ServerError",
-    "ConnectionError",
-    "TimeoutError",
+    "ConnectError",
+    "TimeoutException",
     "WebhookVerificationError",
     "RealtimeException",
+    # Deprecated aliases (shadow builtins - avoid using)
+    "PermissionError",
+    "ConnectionError",
+    "TimeoutError",
 ]

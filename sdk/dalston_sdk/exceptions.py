@@ -33,11 +33,15 @@ class AuthenticationError(DalstonError):
         super().__init__(message, status_code=401)
 
 
-class PermissionError(DalstonError):
+class ForbiddenError(DalstonError):
     """Insufficient permissions (403)."""
 
     def __init__(self, message: str = "Permission denied") -> None:
         super().__init__(message, status_code=403)
+
+
+# Backward compatibility alias (deprecated)
+PermissionError = ForbiddenError
 
 
 class NotFoundError(DalstonError):
@@ -75,18 +79,26 @@ class ServerError(DalstonError):
         super().__init__(message, status_code=500)
 
 
-class ConnectionError(DalstonError):
+class ConnectError(DalstonError):
     """Network or connection error."""
 
     def __init__(self, message: str = "Connection failed") -> None:
         super().__init__(message)
 
 
-class TimeoutError(DalstonError):
+# Backward compatibility alias (deprecated)
+ConnectionError = ConnectError
+
+
+class TimeoutException(DalstonError):
     """Request or operation timeout."""
 
     def __init__(self, message: str = "Operation timed out") -> None:
         super().__init__(message)
+
+
+# Backward compatibility alias (deprecated)
+TimeoutError = TimeoutException
 
 
 class WebhookVerificationError(DalstonError):
