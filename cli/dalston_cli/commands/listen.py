@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import click
-from dalston_sdk import RealtimeSession, RealtimeMessageType
+from dalston_sdk import RealtimeSession
 
 from dalston_cli.audio import MicrophoneStream, resolve_device
 from dalston_cli.output import (
@@ -62,11 +62,6 @@ from dalston_cli.output import (
     is_flag=True,
     help="Disable voice activity detection events.",
 )
-@click.option(
-    "--enhance",
-    is_flag=True,
-    help="Trigger batch enhancement when session ends.",
-)
 @click.pass_context
 def listen(
     ctx: click.Context,
@@ -78,7 +73,6 @@ def listen(
     list_devices: bool,
     no_interim: bool,
     no_vad: bool,
-    enhance: bool,
 ) -> None:
     """Real-time transcription from microphone.
 
@@ -151,11 +145,10 @@ def listen(
     # Track session stats
     total_duration = 0.0
     speech_duration = 0.0
-    enhancement_job_id = None
 
     @session.on_partial
     def on_partial(data):
-        handler.partial(data.text, 0.0)
+        handler.partial(data.text, data.start)
 
     @session.on_final
     def on_final(data):
@@ -194,4 +187,4 @@ def listen(
             pass
 
         # Output session summary
-        handler.session_end(total_duration, speech_duration, enhancement_job_id)
+        handler.session_end(total_duration, speech_duration)

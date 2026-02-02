@@ -150,7 +150,7 @@ def wait_job(
     quiet = ctx.obj["quiet"]
 
     try:
-        result = wait_with_progress(client, job_id, quiet)
+        result = wait_with_progress(client, job_id, quiet, timeout=timeout)
 
         if result.status == JobStatus.FAILED:
             raise click.ClickException(f"Job failed: {result.error or 'Unknown error'}")

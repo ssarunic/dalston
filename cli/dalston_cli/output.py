@@ -56,15 +56,23 @@ def output_transcript(
         fmt: Output format (txt, json, srt, vtt).
         output_path: Path to write output, or None for stdout.
         include_speakers: Include speaker labels in output.
+
+    Raises:
+        click.ClickException: If format is not supported.
     """
+    import click
+
     if fmt == "json":
         content = _job_to_json(job)
     elif fmt == "txt":
         content = job.transcript.text if job.transcript else ""
+    elif fmt in ("srt", "vtt"):
+        raise click.ClickException(
+            f"Format '{fmt}' requires the export endpoint. "
+            f"Use 'dalston export {job.id} -f {fmt}' instead."
+        )
     else:
-        # For srt/vtt, we'd need the export endpoint
-        # For now, fall back to text
-        content = job.transcript.text if job.transcript else ""
+        raise click.ClickException(f"Unsupported format: {fmt}")
 
     if output_path:
         Path(output_path).write_text(content)
@@ -129,19 +137,22 @@ def _job_to_json(job: Job) -> str:
     return json.dumps(data, indent=2)
 
 
-def wait_with_progress(client: Any, job_id: Any, quiet: bool = False) -> Any:
+def wait_with_progress(
+    client: Any, job_id: Any, quiet: bool = False, timeout: int | None = None
+) -> Any:
     """Wait for job completion with progress display.
 
     Args:
         client: Dalston client instance.
         job_id: Job ID to wait for.
         quiet: Suppress progress output if True.
+        timeout: Maximum time to wait in seconds, or None for no limit.
 
     Returns:
         Completed job.
     """
     if quiet:
-        return client.wait_for_completion(job_id)
+        return client.wait_for_completion(job_id, timeout=timeout)
 
     with Progress(
         SpinnerColumn(),
@@ -157,6 +168,7 @@ def wait_with_progress(client: Any, job_id: Any, quiet: bool = False) -> Any:
         return client.wait_for_completion(
             job_id,
             poll_interval=1.0,
+            timeout=timeout,
             on_progress=on_progress,
         )
 
@@ -271,6 +283,21 @@ class LiveOutputHandler:
         self.show_interim = show_interim
         self.file = open(output_path, "a") if output_path else None
         self._last_partial = ""
+        self._closed = False
+
+    def __enter__(self) -> "LiveOutputHandler":
+        """Enter context manager."""
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Exit context manager, ensuring file is closed."""
+        self.close()
+
+    def close(self) -> None:
+        """Close the file handle if open."""
+        if self.file and not self._closed:
+            self.file.close()
+            self._closed = True
 
     def partial(self, text: str, start: float) -> None:
         """Handle partial transcript.
@@ -331,8 +358,7 @@ class LiveOutputHandler:
         if enhancement_job_id:
             error_console.print(f"Enhancement job: {enhancement_job_id}")
 
-        if self.file:
-            self.file.close()
+        self.close()
 
     def _format_time(self, seconds: float) -> str:
         """Format timestamp as MM:SS."""
@@ -350,7 +376,23 @@ class JsonlOutputHandler:
         Args:
             output_path: Path to write output, or None for stdout.
         """
+        self.output_path = output_path
         self.file = open(output_path, "a") if output_path else sys.stdout
+        self._closed = False
+
+    def __enter__(self) -> "JsonlOutputHandler":
+        """Enter context manager."""
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Exit context manager, ensuring file is closed."""
+        self.close()
+
+    def close(self) -> None:
+        """Close the file handle if open."""
+        if self.file != sys.stdout and not self._closed:
+            self.file.close()
+            self._closed = True
 
     def partial(self, text: str, start: float) -> None:
         """Handle partial transcript (ignored in JSONL mode)."""
@@ -399,8 +441,7 @@ class JsonlOutputHandler:
             obj["enhancement_job_id"] = enhancement_job_id
         self.file.write(json.dumps(obj) + "\n")
 
-        if self.file != sys.stdout:
-            self.file.close()
+        self.close()
 
 
 class JsonOutputHandler:

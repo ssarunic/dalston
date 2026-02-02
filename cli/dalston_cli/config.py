@@ -9,9 +9,12 @@ Supports configuration from:
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def load_config() -> dict[str, Any]:
@@ -46,11 +49,9 @@ def load_config() -> dict[str, Any]:
                 if file_config:
                     _merge_config(config, file_config)
         except ImportError:
-            # yaml not installed, skip config file
-            pass
-        except Exception:
-            # Ignore config file errors
-            pass
+            logger.debug("PyYAML not installed, skipping config file")
+        except Exception as e:
+            logger.warning("Failed to load config file %s: %s", config_path, e)
 
     # Override with environment variables
     if os.environ.get("DALSTON_SERVER"):

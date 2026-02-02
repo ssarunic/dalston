@@ -146,10 +146,6 @@ def transcribe(
                 output_job_created(job, json_output)
                 continue
 
-            if json_output and not wait:
-                output_job_created(job, json_output)
-                continue
-
             # Wait for completion with progress
             result = wait_with_progress(client, job.id, quiet or json_output)
 
@@ -162,8 +158,7 @@ def transcribe(
             file_output = output
             if output_is_dir:
                 stem = Path(file_path).stem
-                ext = fmt if fmt != "json" else "json"
-                file_output = str(Path(output) / f"{stem}.{ext}")
+                file_output = str(Path(output) / f"{stem}.{fmt}")
 
             # Output result
             if json_output:
