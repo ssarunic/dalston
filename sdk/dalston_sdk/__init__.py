@@ -57,6 +57,7 @@ from .types import (
     Segment,
     SessionBegin,
     SessionEnd,
+    SessionToken,
     Speaker,
     SpeakerDetection,
     TimestampGranularity,
@@ -124,6 +125,8 @@ __all__ = [
     # System status types
     "HealthStatus",
     "RealtimeStatus",
+    # Session token types
+    "SessionToken",
     # Webhook types
     "WebhookPayload",
     # Exceptions

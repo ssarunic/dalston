@@ -15,7 +15,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from dalston.gateway.dependencies import get_session_router
+from dalston.gateway.dependencies import (
+    RequireJobsRead,
+    get_auth_service,
+    get_session_router,
+)
+from dalston.gateway.middleware.auth import authenticate_websocket
+from dalston.gateway.services.auth import Scope
 from dalston.session_router import CapacityInfo, SessionRouter, WorkerStatus
 
 logger = logging.getLogger(__name__)
@@ -51,6 +57,7 @@ async def realtime_transcription(
     - Server sends JSON messages (session.begin, transcript.final, etc.)
 
     Query Parameters:
+    - api_key: API key for authentication (required)
     - language: Language code or "auto" for detection
     - model: "fast" (distil-whisper) or "accurate" (large-v3)
     - encoding: Audio encoding (pcm_s16le, pcm_f32le, mulaw, alaw)
@@ -68,7 +75,22 @@ async def realtime_transcription(
         await websocket.close(code=4503, reason="Service unavailable")
         return
 
-    # Accept WebSocket connection
+    # Authenticate BEFORE accepting the connection
+    # This allows us to reject with proper close codes
+    # Use the same dependency pattern as REST endpoints
+    from dalston.common.redis import get_redis as _get_redis
+
+    redis = await _get_redis()
+    auth_service = await get_auth_service(redis)
+
+    api_key = await authenticate_websocket(
+        websocket, auth_service, required_scope=Scope.REALTIME
+    )
+    if api_key is None:
+        # Connection was closed with appropriate error code
+        return
+
+    # Accept WebSocket connection after successful auth
     await websocket.accept()
 
     # Get client IP for logging
@@ -295,6 +317,7 @@ class WorkersListResponse(BaseModel):
     description="Get capacity and availability information for real-time transcription.",
 )
 async def get_realtime_status(
+    api_key: RequireJobsRead,
     router: SessionRouter = Depends(get_session_router),
 ) -> RealtimeStatusResponse:
     """Get real-time transcription system status."""
@@ -325,6 +348,7 @@ async def get_realtime_status(
     description="List all registered real-time transcription workers.",
 )
 async def list_realtime_workers(
+    api_key: RequireJobsRead,
     router: SessionRouter = Depends(get_session_router),
 ) -> WorkersListResponse:
     """List all real-time workers."""
@@ -356,6 +380,7 @@ async def list_realtime_workers(
 )
 async def get_worker_status(
     worker_id: str,
+    api_key: RequireJobsRead,
     router: SessionRouter = Depends(get_session_router),
 ) -> WorkerStatusResponse:
     """Get specific worker status."""

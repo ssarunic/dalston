@@ -9,13 +9,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from dalston.common.redis import close_redis
+from dalston.common.redis import close_redis, get_redis
 from dalston.common.s3 import ensure_bucket_exists
 from dalston.config import get_settings
-from dalston.db.session import engine, init_db
+from dalston.db.session import DEFAULT_TENANT_ID, engine, init_db
+from dalston.gateway.api.auth import router as auth_router
 from dalston.gateway.api.v1 import router as v1_router
 from dalston.gateway.api.console import router as console_router
 from dalston.gateway.middleware import setup_exception_handlers
+from dalston.gateway.services.auth import AuthService, Scope
 from dalston.session_router import SessionRouter
 
 # Configure logging
@@ -27,6 +29,51 @@ logger = logging.getLogger(__name__)
 
 # Global session router instance (initialized in lifespan)
 session_router: SessionRouter | None = None
+
+
+async def _ensure_admin_key_exists() -> None:
+    """Create an admin API key if none exist.
+
+    This provides a seamless first-run experience by auto-creating
+    an admin key and printing it to the console.
+    """
+    try:
+        redis = await get_redis()
+        auth_service = AuthService(redis)
+
+        # Check if any keys exist
+        if await auth_service.has_any_api_keys():
+            logger.info("API keys already exist, skipping auto-bootstrap")
+            return
+
+        # Create admin key
+        raw_key, api_key = await auth_service.create_api_key(
+            name="Auto-generated Admin Key",
+            tenant_id=DEFAULT_TENANT_ID,
+            scopes=[Scope.ADMIN],
+            rate_limit=None,
+        )
+
+        # Print key prominently
+        logger.info("")
+        logger.info("=" * 70)
+        logger.info("FIRST RUN: Admin API key auto-generated")
+        logger.info("=" * 70)
+        logger.info("")
+        logger.info("API Key: %s", raw_key)
+        logger.info("")
+        logger.info("IMPORTANT: Store this key securely! It will not be shown again.")
+        logger.info("")
+        logger.info("Set as environment variable:")
+        logger.info('  export DALSTON_API_KEY="%s"', raw_key)
+        logger.info("")
+        logger.info("Or use with curl:")
+        logger.info('  curl -H "Authorization: Bearer %s" ...', raw_key)
+        logger.info("")
+        logger.info("=" * 70)
+
+    except Exception as e:
+        logger.warning("Could not auto-bootstrap admin key: %s", e)
 
 
 @asynccontextmanager
@@ -64,6 +111,9 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Session Router...")
     session_router = SessionRouter(redis_url=settings.redis_url)
     await session_router.start()
+
+    # Auto-bootstrap admin key if no keys exist
+    await _ensure_admin_key_exists()
 
     logger.info("Dalston Gateway started successfully")
 
@@ -103,6 +153,7 @@ setup_exception_handlers(app)
 
 # Mount API routes
 app.include_router(v1_router)
+app.include_router(auth_router)
 app.include_router(console_router)
 
 

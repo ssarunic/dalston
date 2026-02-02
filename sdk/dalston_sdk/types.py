@@ -291,3 +291,23 @@ class RealtimeStatus:
     available_capacity: int
     worker_count: int
     ready_workers: int
+
+
+# -----------------------------------------------------------------------------
+# Session Token Types
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class SessionToken:
+    """Ephemeral session token for client-side WebSocket auth.
+
+    Session tokens are short-lived and designed for use in browser
+    clients that need to connect to WebSocket endpoints without
+    exposing long-lived API keys.
+    """
+
+    token: str
+    expires_at: datetime
+    scopes: list[str]
+    tenant_id: UUID

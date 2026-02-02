@@ -15,7 +15,13 @@ from urllib.parse import urlencode
 
 import websockets
 
-from .exceptions import ConnectionError, RealtimeError
+from .exceptions import (
+    AuthenticationError,
+    ConnectionError,
+    PermissionError,
+    RateLimitError,
+    RealtimeError,
+)
 from .types import (
     RealtimeError as RealtimeErrorData,
     RealtimeMessage,
@@ -199,21 +205,35 @@ class AsyncRealtimeSession:
         self._connected = False
 
     def _build_url(self) -> str:
-        """Build WebSocket URL with query parameters."""
-        params = {
+        """Build WebSocket URL with query parameters.
+
+        Note: api_key is passed as a query parameter because WebSocket
+        connections don't reliably support custom headers in all browsers
+        and environments.
+        """
+        params: dict[str, str] = {
             "language": self.language,
             "model": self.model,
             "encoding": self.encoding,
-            "sample_rate": self.sample_rate,
+            "sample_rate": str(self.sample_rate),
             "enable_vad": str(self.enable_vad).lower(),
             "interim_results": str(self.interim_results).lower(),
             "word_timestamps": str(self.word_timestamps).lower(),
         }
+
+        # Pass API key as query parameter (WebSocket auth standard)
+        if self.api_key:
+            params["api_key"] = self.api_key
+
         query = urlencode(params)
         return f"{self.base_url}/v1/audio/transcriptions/stream?{query}"
 
     def _build_headers(self) -> dict[str, str]:
-        """Build WebSocket headers."""
+        """Build WebSocket headers.
+
+        Note: Some WebSocket clients support custom headers. We send
+        the API key in both places for maximum compatibility.
+        """
         headers: dict[str, str] = {}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -236,6 +256,9 @@ class AsyncRealtimeSession:
             SessionBegin message with session configuration.
 
         Raises:
+            AuthenticationError: If API key is invalid or missing.
+            PermissionError: If API key lacks required scope.
+            RateLimitError: If rate limit exceeded.
             ConnectionError: If connection fails.
             RealtimeError: If server returns an error.
         """
@@ -249,6 +272,24 @@ class AsyncRealtimeSession:
                 open_timeout=10,
                 close_timeout=5,
             )
+        except websockets.exceptions.InvalidStatusCode as e:
+            # Handle HTTP-level errors (before WebSocket upgrade)
+            if e.status_code == 401:
+                raise AuthenticationError("Invalid or missing API key") from e
+            elif e.status_code == 403:
+                raise PermissionError("API key lacks required scope") from e
+            elif e.status_code == 429:
+                raise RateLimitError("Rate limit exceeded") from e
+            raise ConnectionError(f"Failed to connect: {e}") from e
+        except websockets.exceptions.ConnectionClosedError as e:
+            # Handle WebSocket close codes for auth errors
+            if e.code == 4001:
+                raise AuthenticationError(e.reason or "Invalid API key") from e
+            elif e.code == 4003:
+                raise PermissionError(e.reason or "Missing required scope") from e
+            elif e.code == 4029:
+                raise RateLimitError(e.reason or "Rate limit exceeded") from e
+            raise ConnectionError(f"Connection closed: {e}") from e
         except Exception as e:
             raise ConnectionError(f"Failed to connect: {e}") from e
 

@@ -223,14 +223,56 @@ websocat "ws://localhost:8000/v1/audio/transcriptions/stream?api_key=$DALSTON_AP
 
 ## Checkpoint
 
-- [ ] **API keys** stored as SHA256 hashes in Redis
-- [ ] **Auth middleware** validates all REST endpoints
-- [ ] **WebSocket auth** via query parameter
-- [ ] **Scopes** control access to specific operations
-- [ ] **Rate limiting** per API key
-- [ ] **Tenant isolation** - jobs scoped by tenant_id
-- [ ] **Key management** endpoints at `/auth/*`
-- [ ] **CLI tool** for bootstrapping admin key
+- [x] **API keys** stored as SHA256 hashes in Redis
+- [x] **Auth middleware** validates all REST endpoints
+- [x] **WebSocket auth** via query parameter
+- [x] **Scopes** control access to specific operations
+- [x] **Rate limiting** per API key
+- [x] **Tenant isolation** - jobs scoped by tenant_id
+- [x] **Key management** endpoints at `/auth/*`
+- [x] **CLI tool** for bootstrapping admin key
+
+---
+
+## Implementation Summary
+
+**Completed**: All M11 deliverables implemented.
+
+### Files Created
+
+| File | Description |
+| ---- | ----------- |
+| `dalston/gateway/services/auth.py` | Core auth service: key generation, hashing, validation, rate limiting |
+| `dalston/gateway/middleware/auth.py` | Request/WebSocket authentication middleware |
+| `dalston/gateway/api/auth.py` | `/auth/*` API endpoints for key management |
+| `dalston/gateway/cli.py` | CLI tool for `create-admin-key` command |
+| `tests/unit/test_auth.py` | 800+ lines of unit tests for auth system |
+
+### Key Features
+
+- **API Keys** (`dk_` prefix): Long-lived credentials with SHA256 hashing
+- **Session Tokens** (`tk_` prefix): Ephemeral tokens for browser WebSocket auth (10 min default, 1 hour max)
+- **Scopes**: `jobs:read`, `jobs:write`, `realtime`, `webhooks`, `admin`
+- **Rate Limiting**: Redis sliding window, configurable per key
+- **ElevenLabs Compatibility**: Supports `xi-api-key` header alongside Bearer tokens
+- **Auto-Bootstrap**: Creates admin key on first run and prints to console
+
+### SDK Updates
+
+- `Dalston.create_session_token()` / `AsyncDalston.create_session_token()` for browser auth flow
+- `SessionToken` type added to SDK exports
+- Realtime client handles auth errors with custom WebSocket close codes
+
+### Auth Endpoints
+
+| Endpoint | Scope | Description |
+| -------- | ----- | ----------- |
+| `POST /auth/keys` | admin | Create new API key |
+| `GET /auth/keys` | admin | List tenant's API keys |
+| `GET /auth/keys/{id}` | admin | Get key details |
+| `DELETE /auth/keys/{id}` | admin | Revoke API key |
+| `GET /auth/me` | any | Get current key info |
+| `POST /auth/tokens` | realtime | Create ephemeral session token |
 
 ---
 

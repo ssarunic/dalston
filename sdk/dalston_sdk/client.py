@@ -18,6 +18,7 @@ from .exceptions import (
     ConnectionError,
     DalstonError,
     NotFoundError,
+    PermissionError,
     RateLimitError,
     ServerError,
     TimeoutError,
@@ -32,6 +33,7 @@ from .types import (
     JobSummary,
     RealtimeStatus,
     Segment,
+    SessionToken,
     Speaker,
     SpeakerDetection,
     TimestampGranularity,
@@ -141,7 +143,7 @@ def _handle_error(response: httpx.Response) -> None:
     if status == 401:
         raise AuthenticationError(str(detail))
     elif status == 403:
-        raise DalstonError(str(detail), status_code=403)
+        raise PermissionError(str(detail))
     elif status == 404:
         raise NotFoundError(str(detail))
     elif status == 429:
@@ -538,6 +540,55 @@ class Dalston:
             ready_workers=data.get("ready_workers", 0),
         )
 
+    def create_session_token(
+        self,
+        ttl: int = 600,
+        scopes: list[str] | None = None,
+    ) -> SessionToken:
+        """Create an ephemeral session token for client-side WebSocket auth.
+
+        Session tokens are short-lived and designed for browser clients
+        that need to connect directly to WebSocket endpoints without
+        exposing long-lived API keys.
+
+        Args:
+            ttl: Time-to-live in seconds (60-3600). Default 600 (10 minutes).
+            scopes: Requested scopes. Defaults to ["realtime"].
+                    Cannot exceed the parent API key's scopes.
+
+        Returns:
+            SessionToken with the token and expiry info.
+
+        Raises:
+            PermissionError: If API key lacks 'realtime' scope.
+            ValidationError: If invalid scopes or TTL.
+        """
+        payload: dict[str, Any] = {"ttl": ttl}
+        if scopes is not None:
+            payload["scopes"] = scopes
+
+        try:
+            response = self._client.post(
+                f"{self.base_url}/auth/tokens",
+                json=payload,
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectionError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutError(f"Request timed out: {e}") from e
+
+        if response.status_code != 201:
+            _handle_error(response)
+
+        data = response.json()
+        return SessionToken(
+            token=data["token"],
+            expires_at=_parse_datetime(data["expires_at"]),
+            scopes=data["scopes"],
+            tenant_id=UUID(data["tenant_id"]),
+        )
+
 
 class AsyncDalston:
     """Asynchronous client for Dalston batch transcription API.
@@ -898,4 +949,53 @@ class AsyncDalston:
             available_capacity=data.get("available_capacity", 0),
             worker_count=data.get("worker_count", 0),
             ready_workers=data.get("ready_workers", 0),
+        )
+
+    async def create_session_token(
+        self,
+        ttl: int = 600,
+        scopes: list[str] | None = None,
+    ) -> SessionToken:
+        """Create an ephemeral session token for client-side WebSocket auth.
+
+        Session tokens are short-lived and designed for browser clients
+        that need to connect directly to WebSocket endpoints without
+        exposing long-lived API keys.
+
+        Args:
+            ttl: Time-to-live in seconds (60-3600). Default 600 (10 minutes).
+            scopes: Requested scopes. Defaults to ["realtime"].
+                    Cannot exceed the parent API key's scopes.
+
+        Returns:
+            SessionToken with the token and expiry info.
+
+        Raises:
+            PermissionError: If API key lacks 'realtime' scope.
+            ValidationError: If invalid scopes or TTL.
+        """
+        payload: dict[str, Any] = {"ttl": ttl}
+        if scopes is not None:
+            payload["scopes"] = scopes
+
+        try:
+            response = await self._client.post(
+                f"{self.base_url}/auth/tokens",
+                json=payload,
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectionError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutError(f"Request timed out: {e}") from e
+
+        if response.status_code != 201:
+            _handle_error(response)
+
+        data = response.json()
+        return SessionToken(
+            token=data["token"],
+            expires_at=_parse_datetime(data["expires_at"]),
+            scopes=data["scopes"],
+            tenant_id=UUID(data["tenant_id"]),
         )

@@ -17,8 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dalston.common.events import publish_job_created
 from dalston.common.models import JobStatus
 from dalston.config import Settings, WEBHOOK_METADATA_MAX_SIZE
-from dalston.db.session import DEFAULT_TENANT_ID
 from dalston.gateway.dependencies import (
+    RequireJobsRead,
+    RequireJobsWrite,
     get_db,
     get_export_service,
     get_jobs_service,
@@ -31,6 +32,7 @@ from dalston.gateway.models.responses import (
     JobResponse,
     JobSummary,
 )
+from dalston.gateway.services.auth import APIKey
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
@@ -47,6 +49,7 @@ router = APIRouter(prefix="/audio/transcriptions", tags=["transcriptions"])
 )
 async def create_transcription(
     file: Annotated[UploadFile, File(description="Audio file to transcribe")],
+    api_key: RequireJobsWrite,
     language: Annotated[
         str, Form(description="Language code or 'auto' for detection")
     ] = "auto",
@@ -122,7 +125,7 @@ async def create_transcription(
     # Note: We create the job first to get the ID, then re-upload with correct path
     job = await jobs_service.create_job(
         db=db,
-        tenant_id=DEFAULT_TENANT_ID,
+        tenant_id=api_key.tenant_id,
         audio_uri="pending",  # Will update after we have the job ID
         parameters=parameters,
         webhook_url=webhook_url,
@@ -156,6 +159,7 @@ async def create_transcription(
 )
 async def get_transcription(
     job_id: UUID,
+    api_key: RequireJobsRead,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
@@ -166,7 +170,7 @@ async def get_transcription(
     2. If completed, fetch transcript from S3
     3. Return job with transcript data
     """
-    job = await jobs_service.get_job(db, job_id, tenant_id=DEFAULT_TENANT_ID)
+    job = await jobs_service.get_job(db, job_id, tenant_id=api_key.tenant_id)
 
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -203,6 +207,7 @@ async def get_transcription(
     description="List transcription jobs with pagination and optional status filter.",
 )
 async def list_transcriptions(
+    api_key: RequireJobsRead,
     limit: Annotated[int, Query(ge=1, le=100, description="Max results")] = 20,
     offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
     status: Annotated[
@@ -214,7 +219,7 @@ async def list_transcriptions(
     """List jobs for the current tenant with pagination."""
     jobs, total = await jobs_service.list_jobs(
         db=db,
-        tenant_id=DEFAULT_TENANT_ID,
+        tenant_id=api_key.tenant_id,
         limit=limit,
         offset=offset,
         status=status,
@@ -257,6 +262,7 @@ async def list_transcriptions(
 async def export_transcription(
     job_id: UUID,
     format: str,
+    api_key: RequireJobsRead,
     include_speakers: Annotated[
         bool, Query(description="Include speaker labels in output")
     ] = True,
@@ -283,7 +289,7 @@ async def export_transcription(
     export_format = export_service.validate_format(format)
 
     # Get job
-    job = await jobs_service.get_job(db, job_id, tenant_id=DEFAULT_TENANT_ID)
+    job = await jobs_service.get_job(db, job_id, tenant_id=api_key.tenant_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 

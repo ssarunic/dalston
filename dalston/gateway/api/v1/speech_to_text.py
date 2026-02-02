@@ -1,6 +1,9 @@
 """ElevenLabs-compatible Speech-to-Text API endpoints.
 
 GET /v1/speech-to-text/transcripts/{transcription_id}/export/{format}
+
+Note: ElevenLabs uses xi-api-key header for authentication.
+This is supported by the auth middleware alongside Bearer tokens.
 """
 
 from typing import Annotated
@@ -11,8 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.models import JobStatus
 from dalston.config import Settings
-from dalston.db.session import DEFAULT_TENANT_ID
 from dalston.gateway.dependencies import (
+    RequireJobsRead,
     get_db,
     get_export_service,
     get_jobs_service,
@@ -45,6 +48,7 @@ router = APIRouter(prefix="/speech-to-text", tags=["speech-to-text"])
 async def export_transcript(
     transcription_id: UUID,
     format: str,
+    api_key: RequireJobsRead,
     include_speakers: Annotated[
         bool, Query(description="Include speaker labels in output")
     ] = True,
@@ -74,7 +78,7 @@ async def export_transcript(
     export_format = export_service.validate_format(format)
 
     # Get job (transcription_id maps to job_id internally)
-    job = await jobs_service.get_job(db, transcription_id, tenant_id=DEFAULT_TENANT_ID)
+    job = await jobs_service.get_job(db, transcription_id, tenant_id=api_key.tenant_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Transcription not found")
 

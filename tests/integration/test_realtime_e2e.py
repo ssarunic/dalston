@@ -5,7 +5,9 @@ session allocation, and management API endpoints.
 """
 
 import json
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID
 
 import pytest
 from fastapi import FastAPI
@@ -17,6 +19,7 @@ from dalston.gateway.api.v1.realtime import (
     WorkersListResponse,
     management_router,
 )
+from dalston.gateway.services.auth import APIKey, Scope
 from dalston.session_router import CapacityInfo, SessionRouter, WorkerStatus
 
 
@@ -29,15 +32,32 @@ class TestRealtimeManagementEndpoints:
         return router
 
     @pytest.fixture
-    def app(self, mock_session_router):
-        from dalston.gateway.dependencies import get_session_router
+    def mock_api_key(self):
+        """Create a mock API key with jobs:read scope."""
+        return APIKey(
+            id=UUID("12345678-1234-1234-1234-123456789abc"),
+            key_hash="abc123def456",
+            prefix="dk_abc1234",
+            name="Test Key",
+            tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
+            scopes=[Scope.JOBS_READ, Scope.JOBS_WRITE, Scope.REALTIME],
+            rate_limit=None,
+            created_at=datetime.now(timezone.utc),
+            last_used_at=None,
+            revoked_at=None,
+        )
+
+    @pytest.fixture
+    def app(self, mock_session_router, mock_api_key):
+        from dalston.gateway.dependencies import get_session_router, require_auth
 
         app = FastAPI()
         # Note: management_router already has prefix="/realtime", so mount under /v1
         app.include_router(management_router, prefix="/v1")
 
-        # Override dependency
+        # Override dependencies
         app.dependency_overrides[get_session_router] = lambda: mock_session_router
+        app.dependency_overrides[require_auth] = lambda: mock_api_key
 
         return app
 
