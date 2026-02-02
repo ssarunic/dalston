@@ -35,7 +35,7 @@ pip install -e ".[dev]"
 The simplest way to transcribe an audio file:
 
 ```python
-from dalston import Dalston
+from dalston_sdk import Dalston
 
 client = Dalston(base_url="http://localhost:8000")
 job = client.transcribe("meeting.mp3")
@@ -54,7 +54,7 @@ For pre-recorded audio files. The audio is processed server-side with high accur
 Submit an audio file and wait for the result:
 
 ```python
-from dalston import Dalston
+from dalston_sdk import Dalston
 
 client = Dalston(base_url="http://localhost:8000")
 
@@ -110,7 +110,7 @@ For applications using asyncio:
 
 ```python
 import asyncio
-from dalston import AsyncDalston
+from dalston_sdk import AsyncDalston
 
 async def transcribe_async():
     async with AsyncDalston(base_url="http://localhost:8000") as client:
@@ -133,7 +133,7 @@ The recommended approach for real-time transcription:
 
 ```python
 import asyncio
-from dalston import AsyncRealtimeSession
+from dalston_sdk import AsyncRealtimeSession
 
 async def stream_microphone():
     session = AsyncRealtimeSession(
@@ -184,7 +184,7 @@ async with AsyncRealtimeSession(base_url="ws://localhost:8000") as session:
 For simpler integration with synchronous code, use decorator-based callbacks:
 
 ```python
-from dalston import RealtimeSession, TranscriptFinal, VADEvent
+from dalston_sdk import RealtimeSession, TranscriptFinal, VADEvent
 
 session = RealtimeSession(
     base_url="ws://localhost:8000",
@@ -219,7 +219,7 @@ session.close()
 Export completed transcripts to popular subtitle and text formats:
 
 ```python
-from dalston import Dalston, ExportFormat
+from dalston_sdk import Dalston, ExportFormat
 
 client = Dalston(base_url="http://localhost:8000")
 
@@ -258,7 +258,7 @@ job = client.transcribe(
 Always verify webhook signatures to ensure requests are authentic:
 
 ```python
-from dalston import verify_webhook_signature, parse_webhook_payload
+from dalston_sdk import verify_webhook_signature, parse_webhook_payload
 
 def handle_webhook(request):
     # Verify the signature
@@ -286,7 +286,7 @@ Use the built-in dependency for automatic verification:
 
 ```python
 from fastapi import FastAPI, Depends
-from dalston import fastapi_webhook_dependency, WebhookPayload, WebhookEventType
+from dalston_sdk import fastapi_webhook_dependency, WebhookPayload, WebhookEventType
 
 app = FastAPI()
 verify_webhook = fastapi_webhook_dependency("your-secret")
@@ -305,7 +305,7 @@ async def handle_webhook(payload: WebhookPayload = Depends(verify_webhook)):
 ### Client Options
 
 ```python
-from dalston import Dalston
+from dalston_sdk import Dalston
 
 client = Dalston(
     base_url="http://localhost:8000",  # Dalston server URL
@@ -346,7 +346,7 @@ client = Dalston(
 The SDK provides typed exceptions for different error scenarios:
 
 ```python
-from dalston import (
+from dalston_sdk import (
     Dalston,
     DalstonError,        # Base exception
     AuthenticationError, # Invalid/missing API key (401)
@@ -411,10 +411,10 @@ pip install -e ".[dev]"
 pytest
 
 # Type checking
-mypy dalston/
+mypy dalston_sdk/
 
 # Linting
-ruff check dalston/
+ruff check dalston_sdk/
 ```
 
 ## License

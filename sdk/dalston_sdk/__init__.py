@@ -7,7 +7,7 @@ This SDK provides both synchronous and asynchronous clients for:
 
 Quick Start:
     ```python
-    from dalston import Dalston
+    from dalston_sdk import Dalston
 
     # Batch transcription
     client = Dalston(base_url="http://localhost:8000")
@@ -16,7 +16,7 @@ Quick Start:
     print(job.transcript.text)
 
     # Real-time streaming
-    from dalston import AsyncRealtimeSession
+    from dalston_sdk import AsyncRealtimeSession
 
     async with AsyncRealtimeSession() as session:
         await session.connect()
@@ -45,6 +45,7 @@ from .webhook import (
 # Types
 from .types import (
     ExportFormat,
+    HealthStatus,
     Job,
     JobList,
     JobStatus,
@@ -52,6 +53,7 @@ from .types import (
     RealtimeError,
     RealtimeMessage,
     RealtimeMessageType,
+    RealtimeStatus,
     Segment,
     SessionBegin,
     SessionEnd,
@@ -119,6 +121,9 @@ __all__ = [
     "VADEvent",
     "RealtimeMessage",
     "RealtimeError",
+    # System status types
+    "HealthStatus",
+    "RealtimeStatus",
     # Webhook types
     "WebhookPayload",
     # Exceptions

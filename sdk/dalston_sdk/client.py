@@ -25,10 +25,12 @@ from .exceptions import (
 )
 from .types import (
     ExportFormat,
+    HealthStatus,
     Job,
     JobList,
     JobStatus,
     JobSummary,
+    RealtimeStatus,
     Segment,
     Speaker,
     SpeakerDetection,
@@ -479,6 +481,63 @@ class Dalston:
             return response.json()
         return response.text
 
+    def health(self) -> HealthStatus:
+        """Check server health.
+
+        Returns:
+            HealthStatus with server status.
+
+        Raises:
+            ConnectionError: If server is unreachable.
+        """
+        try:
+            response = self._client.get(
+                f"{self.base_url}/health",
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectionError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutError(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        data = response.json()
+        return HealthStatus(status=data.get("status", "unknown"))
+
+    def get_realtime_status(self) -> RealtimeStatus:
+        """Get real-time transcription system status.
+
+        Returns:
+            RealtimeStatus with capacity and availability info.
+
+        Raises:
+            ConnectionError: If server is unreachable.
+        """
+        try:
+            response = self._client.get(
+                f"{self.base_url}/v1/realtime/status",
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectionError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutError(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        data = response.json()
+        return RealtimeStatus(
+            status=data.get("status", "unknown"),
+            total_capacity=data.get("total_capacity", 0),
+            active_sessions=data.get("active_sessions", 0),
+            available_capacity=data.get("available_capacity", 0),
+            worker_count=data.get("worker_count", 0),
+            ready_workers=data.get("ready_workers", 0),
+        )
+
 
 class AsyncDalston:
     """Asynchronous client for Dalston batch transcription API.
@@ -783,3 +842,60 @@ class AsyncDalston:
         if format_str == "json":
             return response.json()
         return response.text
+
+    async def health(self) -> HealthStatus:
+        """Check server health.
+
+        Returns:
+            HealthStatus with server status.
+
+        Raises:
+            ConnectionError: If server is unreachable.
+        """
+        try:
+            response = await self._client.get(
+                f"{self.base_url}/health",
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectionError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutError(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        data = response.json()
+        return HealthStatus(status=data.get("status", "unknown"))
+
+    async def get_realtime_status(self) -> RealtimeStatus:
+        """Get real-time transcription system status.
+
+        Returns:
+            RealtimeStatus with capacity and availability info.
+
+        Raises:
+            ConnectionError: If server is unreachable.
+        """
+        try:
+            response = await self._client.get(
+                f"{self.base_url}/v1/realtime/status",
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectionError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutError(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        data = response.json()
+        return RealtimeStatus(
+            status=data.get("status", "unknown"),
+            total_capacity=data.get("total_capacity", 0),
+            active_sessions=data.get("active_sessions", 0),
+            available_capacity=data.get("available_capacity", 0),
+            worker_count=data.get("worker_count", 0),
+            ready_workers=data.get("ready_workers", 0),
+        )

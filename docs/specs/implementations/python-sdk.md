@@ -401,6 +401,13 @@ All spec features implemented:
 - `PermissionError` — Added 403 handling
 - `flask_verify_webhook()` — Flask decorator helper
 - Expanded README with parameter tables
+- `health()` method — Check server health
+- `get_realtime_status()` method — Get real-time capacity info
+- `HealthStatus` and `RealtimeStatus` types
+
+### Package Rename
+
+The Python package was renamed from `dalston` to `dalston_sdk` to avoid import conflicts with the `dalston/` server package in the repo root. Users import as `from dalston_sdk import Dalston`. The PyPI distribution name remains `dalston-sdk`.
 
 ### Deferred
 

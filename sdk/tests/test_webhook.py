@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from dalston import (
+from dalston_sdk import (
     WebhookEventType,
     WebhookPayload,
     WebhookVerificationError,

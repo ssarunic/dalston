@@ -6,7 +6,7 @@ from uuid import UUID
 
 import pytest
 
-from dalston import (
+from dalston_sdk import (
     AsyncDalston,
     Dalston,
     Job,

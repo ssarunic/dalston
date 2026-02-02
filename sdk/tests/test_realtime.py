@@ -4,14 +4,14 @@ import json
 
 import pytest
 
-from dalston import (
+from dalston_sdk import (
     RealtimeMessageType,
     SessionBegin,
     TranscriptFinal,
     TranscriptPartial,
     VADEvent,
 )
-from dalston.realtime import _parse_message
+from dalston_sdk.realtime import _parse_message
 
 
 class TestParseMessage:
@@ -171,7 +171,7 @@ class TestAsyncRealtimeSession:
 
     def test_url_building(self):
         """Test WebSocket URL building."""
-        from dalston import AsyncRealtimeSession
+        from dalston_sdk import AsyncRealtimeSession
 
         session = AsyncRealtimeSession(
             base_url="http://localhost:8000",
@@ -197,7 +197,7 @@ class TestAsyncRealtimeSession:
 
     def test_http_to_ws_conversion(self):
         """Test HTTP to WS URL conversion."""
-        from dalston import AsyncRealtimeSession
+        from dalston_sdk import AsyncRealtimeSession
 
         # http -> ws
         session = AsyncRealtimeSession(base_url="http://localhost:8000")
@@ -213,7 +213,7 @@ class TestAsyncRealtimeSession:
 
     def test_headers_with_api_key(self):
         """Test headers include API key when provided."""
-        from dalston import AsyncRealtimeSession
+        from dalston_sdk import AsyncRealtimeSession
 
         session = AsyncRealtimeSession(
             base_url="ws://localhost:8000",
@@ -226,7 +226,7 @@ class TestAsyncRealtimeSession:
 
     def test_headers_without_api_key(self):
         """Test headers are empty without API key."""
-        from dalston import AsyncRealtimeSession
+        from dalston_sdk import AsyncRealtimeSession
 
         session = AsyncRealtimeSession(base_url="ws://localhost:8000")
 
@@ -240,7 +240,7 @@ class TestRealtimeSession:
 
     def test_callback_registration(self):
         """Test callback registration."""
-        from dalston import RealtimeSession, TranscriptFinal
+        from dalston_sdk import RealtimeSession, TranscriptFinal
 
         session = RealtimeSession(base_url="ws://localhost:8000")
         received = []
@@ -253,7 +253,7 @@ class TestRealtimeSession:
 
     def test_multiple_callbacks(self):
         """Test multiple callbacks for same event."""
-        from dalston import RealtimeSession
+        from dalston_sdk import RealtimeSession
 
         session = RealtimeSession(base_url="ws://localhost:8000")
 
@@ -269,7 +269,7 @@ class TestRealtimeSession:
 
     def test_all_callback_types(self):
         """Test all callback registration methods."""
-        from dalston import RealtimeSession
+        from dalston_sdk import RealtimeSession
 
         session = RealtimeSession(base_url="ws://localhost:8000")
 

@@ -267,3 +267,27 @@ class WebhookPayload:
     timestamp: datetime
     data: dict[str, Any]
     metadata: dict[str, Any] | None = None  # Echoed from job creation
+
+
+# -----------------------------------------------------------------------------
+# System Status Types
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class HealthStatus:
+    """Server health status."""
+
+    status: str
+
+
+@dataclass
+class RealtimeStatus:
+    """Real-time transcription system status."""
+
+    status: str  # "ready", "at_capacity", "unavailable"
+    total_capacity: int
+    active_sessions: int
+    available_capacity: int
+    worker_count: int
+    ready_workers: int
