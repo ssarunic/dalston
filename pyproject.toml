@@ -30,6 +30,9 @@ orchestrator = [
     "aioboto3>=13.0.0",
     "structlog>=24.0.0",
     "httpx>=0.26.0",
+    "fastapi>=0.109.0",  # Required for importing gateway.services
+    "python-multipart>=0.0.6",  # Required by FastAPI for form data
+    "websockets>=12.0",  # Required by gateway module
 ]
 engine-sdk = [
     "redis>=5.0.0",

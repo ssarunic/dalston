@@ -9,8 +9,9 @@
 #
 # For GPU support, use docker compose --profile gpu
 #
-# Note: torchcodec (required by pyannote 4.0) only has x86_64 wheels,
-# so this image must be built for linux/amd64 platform.
+# Note: torchcodec (required by pyannote 4.0) only has x86_64 Linux wheels,
+# so this image must be built for linux/amd64 platform on ARM Macs.
+# macOS ARM64 wheels exist but Docker runs Linux, not macOS.
 
 # Python 3.10+ required for pyannote.audio 4.0
 FROM --platform=linux/amd64 python:3.11-slim
