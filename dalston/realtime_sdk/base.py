@@ -16,7 +16,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import numpy as np
-from websockets import serve, WebSocketServerProtocol
+from websockets.asyncio.server import serve, ServerConnection
 
 from dalston.realtime_sdk.assembler import TranscribeResult, Word
 from dalston.realtime_sdk.registry import WorkerInfo, WorkerRegistry
@@ -264,12 +264,19 @@ class RealtimeEngine(ABC):
 
         # Start WebSocket server
         logger.info(f"Starting WebSocket server on port {self.port}")
+
+        def capture_request_path(connection, request):
+            """Capture request path for use in handler (websockets v16+ API)."""
+            connection.request_path = request.path
+            return None  # Continue with default handling
+
         async with serve(
             self._handle_connection,
             "0.0.0.0",
             self.port,
             ping_interval=30,
             ping_timeout=10,
+            process_request=capture_request_path,
         ) as server:
             self._server = server
             logger.info(f"Realtime engine {self.worker_id} ready")
@@ -327,15 +334,16 @@ class RealtimeEngine(ABC):
 
     async def _handle_connection(
         self,
-        websocket: WebSocketServerProtocol,
-        path: str,
+        websocket: ServerConnection,
     ) -> None:
         """Handle new WebSocket connection.
 
         Args:
             websocket: WebSocket connection
-            path: Request path (e.g., "/session?language=en")
         """
+        # Get path stored by process_request callback (websockets v16+ API)
+        path = getattr(websocket, "request_path", "/")
+
         # Handle health check endpoint
         if path == "/health" or path.startswith("/health?"):
             await websocket.send(json.dumps(self.health_check()))

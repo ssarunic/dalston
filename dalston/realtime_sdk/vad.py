@@ -141,14 +141,24 @@ class VADProcessor:
         if audio.dtype != np.float32:
             audio = audio.astype(np.float32)
 
-        # Convert to torch tensor
-        audio_tensor = torch.from_numpy(audio)
+        # Silero VAD requires exactly 512 samples at 16kHz (or 256 at 8kHz)
+        # Process in windows and return max probability
+        window_size = 512 if self.config.sample_rate == 16000 else 256
 
-        # Get speech probability
+        if len(audio) < window_size:
+            # Pad short audio with zeros
+            audio = np.pad(audio, (0, window_size - len(audio)))
+
+        # Process all windows and return max probability
+        max_prob = 0.0
         with torch.no_grad():
-            prob = self._model(audio_tensor, self.config.sample_rate).item()
+            for i in range(0, len(audio) - window_size + 1, window_size):
+                window = audio[i : i + window_size]
+                audio_tensor = torch.from_numpy(window)
+                prob = self._model(audio_tensor, self.config.sample_rate).item()
+                max_prob = max(max_prob, prob)
 
-        return prob
+        return max_prob
 
     def process_chunk(self, audio: np.ndarray) -> VADResult:
         """Process audio chunk and detect speech boundaries.
