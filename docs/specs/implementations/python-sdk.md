@@ -376,3 +376,34 @@ def test_transcribe_with_per_channel(client, httpx_mock):
 1. **Async-first** — Native asyncio support
 2. **Binary frames** — Clean handling of binary messages
 3. **Well-maintained** — Active development, good docs
+
+---
+
+## Implementation Status
+
+**Status:** Complete
+**Location:** `/sdk/`
+**Tests:** 43 passing
+
+### What Was Built
+
+All spec features implemented:
+
+- `Dalston` and `AsyncDalston` batch clients
+- `RealtimeSession` and `AsyncRealtimeSession` with callbacks
+- Webhook verification with FastAPI/Flask helpers
+- All types as dataclasses
+- Full test suite
+
+### Additions (beyond spec)
+
+- `exceptions.py` — Separated into own module
+- `PermissionError` — Added 403 handling
+- `flask_verify_webhook()` — Flask decorator helper
+- Expanded README with parameter tables
+
+### Deferred
+
+- `audio_url` parameter — In SDK but gateway doesn't support yet
+- Retry logic — Users handle `RateLimitError.retry_after` manually
+- Connection pooling config — Using httpx defaults
