@@ -7,8 +7,10 @@ for interacting with the Dalston transcription API.
 from __future__ import annotations
 
 import time
+import warnings
 from pathlib import Path
 from typing import Any, BinaryIO, Callable
+from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
@@ -202,6 +204,21 @@ class Dalston:
         self.api_key = api_key
         self._client = httpx.Client(timeout=timeout)
 
+        # Warn if API key is sent over unencrypted HTTP to non-localhost
+        if api_key:
+            parsed = urlparse(self.base_url)
+            if parsed.scheme == "http" and parsed.hostname not in (
+                "localhost",
+                "127.0.0.1",
+                "::1",
+            ):
+                warnings.warn(
+                    f"API key is being sent over unencrypted HTTP to {parsed.hostname}. "
+                    "Consider using HTTPS to protect your credentials.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
     def _headers(self) -> dict[str, str]:
         """Build request headers."""
         headers: dict[str, str] = {}
@@ -286,10 +303,10 @@ class Dalston:
                     opened_file = open(path, "rb")
                     files = {"file": (path.name, opened_file)}
                 else:
-                    # File-like object
+                    # File-like object - extract basename for cross-platform safety
                     filename = getattr(file, "name", "audio")
-                    if isinstance(filename, str) and "/" in filename:
-                        filename = filename.split("/")[-1]
+                    if isinstance(filename, str):
+                        filename = Path(filename).name
                     files = {"file": (filename, file)}
 
             response = self._client.post(
@@ -628,6 +645,21 @@ class AsyncDalston:
         self.api_key = api_key
         self._client = httpx.AsyncClient(timeout=timeout)
 
+        # Warn if API key is sent over unencrypted HTTP to non-localhost
+        if api_key:
+            parsed = urlparse(self.base_url)
+            if parsed.scheme == "http" and parsed.hostname not in (
+                "localhost",
+                "127.0.0.1",
+                "::1",
+            ):
+                warnings.warn(
+                    f"API key is being sent over unencrypted HTTP to {parsed.hostname}. "
+                    "Consider using HTTPS to protect your credentials.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
     def _headers(self) -> dict[str, str]:
         """Build request headers."""
         headers: dict[str, str] = {}
@@ -707,9 +739,10 @@ class AsyncDalston:
                 opened_file = open(path, "rb")
                 files = {"file": (path.name, opened_file)}
             else:
+                # File-like object - extract basename for cross-platform safety
                 filename = getattr(file, "name", "audio")
-                if isinstance(filename, str) and "/" in filename:
-                    filename = filename.split("/")[-1]
+                if isinstance(filename, str):
+                    filename = Path(filename).name
                 files = {"file": (filename, file)}
 
         try:
