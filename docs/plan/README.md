@@ -27,8 +27,11 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M9](milestones/M09-enrichment.md) | Enrichment | Emotions, events, LLM cleanup | 4-5 |
 | [M10](milestones/M10-web-console.md) | Web Console | Monitoring UI | 3-4 |
 | [M11](milestones/M11-api-authentication.md) | API Authentication | Secure endpoints with API keys | 2-3 |
+| [M12](milestones/M12-python-sdk.md) | Python SDK | Native SDK for Dalston features | 3-4 |
+| [M13](milestones/M13-cli.md) | CLI | Command-line interface | 2-3 |
+| [M14](milestones/M14-model-selection.md) | Model Selection | User-selectable transcription models | 2-3 |
 
-**Total: ~32-41 days (~6-8 weeks)**
+**Total: ~40-52 days (~8-10 weeks)**
 
 ---
 
