@@ -6,11 +6,14 @@ Usage:
 
 import asyncio
 import sys
+from typing import Annotated
 
-import click
+import typer
 
 from dalston.db.session import DEFAULT_TENANT_ID
 from dalston.gateway.services.auth import AuthService, Scope
+
+app = typer.Typer(help="Dalston Gateway CLI.")
 
 
 async def _create_admin_key(name: str) -> tuple[str, str]:
@@ -37,20 +40,17 @@ async def _create_admin_key(name: str) -> tuple[str, str]:
     return raw_key, str(api_key.id)
 
 
-@click.group()
-def cli():
-    """Dalston Gateway CLI."""
-    pass
-
-
-@cli.command("create-admin-key")
-@click.option(
-    "--name",
-    "-n",
-    default="Admin",
-    help="Human-readable name for the API key",
-)
-def create_admin_key(name: str):
+@app.command("create-admin-key")
+def create_admin_key(
+    name: Annotated[
+        str,
+        typer.Option(
+            "--name",
+            "-n",
+            help="Human-readable name for the API key",
+        ),
+    ] = "Admin",
+) -> None:
     """Create an admin API key for the default tenant.
 
     The key is displayed once and cannot be retrieved later.
@@ -59,44 +59,44 @@ def create_admin_key(name: str):
     Example:
         python -m dalston.gateway.cli create-admin-key --name "My Admin Key"
     """
-    click.echo(f"Creating admin API key '{name}'...")
+    typer.echo(f"Creating admin API key '{name}'...")
 
     try:
         raw_key, key_id = asyncio.run(_create_admin_key(name))
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+        typer.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
-    click.echo()
-    click.echo("=" * 60)
-    click.echo("Admin API key created successfully!")
-    click.echo("=" * 60)
-    click.echo()
-    click.echo(f"Key ID:  {key_id}")
-    click.echo(f"API Key: {raw_key}")
-    click.echo()
-    click.echo("IMPORTANT: Store this key securely!")
-    click.echo("It cannot be retrieved later.")
-    click.echo()
-    click.echo("=" * 60)
-    click.echo("Usage Examples")
-    click.echo("=" * 60)
-    click.echo()
-    click.echo("# Set as environment variable")
-    click.echo(f'export DALSTON_API_KEY="{raw_key}"')
-    click.echo()
-    click.echo("# Use with curl")
-    click.echo('curl -X POST http://localhost:8000/v1/audio/transcriptions \\')
-    click.echo(f'  -H "Authorization: Bearer {raw_key}" \\')
-    click.echo('  -F "file=@audio.mp3"')
-    click.echo()
-    click.echo("# Use with dalston-cli")
-    click.echo(f'dalston --api-key "{raw_key}" transcribe audio.mp3')
-    click.echo()
+    typer.echo()
+    typer.echo("=" * 60)
+    typer.echo("Admin API key created successfully!")
+    typer.echo("=" * 60)
+    typer.echo()
+    typer.echo(f"Key ID:  {key_id}")
+    typer.echo(f"API Key: {raw_key}")
+    typer.echo()
+    typer.echo("IMPORTANT: Store this key securely!")
+    typer.echo("It cannot be retrieved later.")
+    typer.echo()
+    typer.echo("=" * 60)
+    typer.echo("Usage Examples")
+    typer.echo("=" * 60)
+    typer.echo()
+    typer.echo("# Set as environment variable")
+    typer.echo(f'export DALSTON_API_KEY="{raw_key}"')
+    typer.echo()
+    typer.echo("# Use with curl")
+    typer.echo("curl -X POST http://localhost:8000/v1/audio/transcriptions \\")
+    typer.echo(f'  -H "Authorization: Bearer {raw_key}" \\')
+    typer.echo('  -F "file=@audio.mp3"')
+    typer.echo()
+    typer.echo("# Use with dalston-cli")
+    typer.echo(f'dalston --api-key "{raw_key}" transcribe audio.mp3')
+    typer.echo()
 
 
-@cli.command("list-keys")
-def list_keys():
+@app.command("list-keys")
+def list_keys() -> None:
     """List all API keys for the default tenant."""
 
     async def _list_keys():
@@ -109,42 +109,53 @@ def list_keys():
     try:
         keys = asyncio.run(_list_keys())
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+        typer.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
     if not keys:
-        click.echo("No API keys found.")
+        typer.echo("No API keys found.")
         return
 
-    click.echo(f"Found {len(keys)} API key(s):")
-    click.echo()
+    typer.echo(f"Found {len(keys)} API key(s):")
+    typer.echo()
 
     for key in keys:
-        click.echo(f"  ID:      {key.id}")
-        click.echo(f"  Prefix:  {key.prefix}...")
-        click.echo(f"  Name:    {key.name}")
-        click.echo(f"  Scopes:  {', '.join(s.value for s in key.scopes)}")
-        click.echo(f"  Created: {key.created_at.isoformat()}")
+        typer.echo(f"  ID:      {key.id}")
+        typer.echo(f"  Prefix:  {key.prefix}...")
+        typer.echo(f"  Name:    {key.name}")
+        typer.echo(f"  Scopes:  {', '.join(s.value for s in key.scopes)}")
+        typer.echo(f"  Created: {key.created_at.isoformat()}")
         if key.last_used_at:
-            click.echo(f"  Used:    {key.last_used_at.isoformat()}")
-        click.echo()
+            typer.echo(f"  Used:    {key.last_used_at.isoformat()}")
+        typer.echo()
 
 
-@cli.command("revoke-key")
-@click.argument("key_id")
-@click.option("--yes", "-y", is_flag=True, help="Skip confirmation")
-def revoke_key(key_id: str, yes: bool):
+@app.command("revoke-key")
+def revoke_key(
+    key_id: Annotated[
+        str,
+        typer.Argument(help="Key ID to revoke"),
+    ],
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="Skip confirmation",
+        ),
+    ] = False,
+) -> None:
     """Revoke an API key by ID."""
     from uuid import UUID
 
     try:
         key_uuid = UUID(key_id)
     except ValueError:
-        click.echo(f"Error: Invalid key ID format: {key_id}", err=True)
+        typer.echo(f"Error: Invalid key ID format: {key_id}", err=True)
         sys.exit(1)
 
     if not yes:
-        click.confirm(f"Revoke API key {key_id}?", abort=True)
+        typer.confirm(f"Revoke API key {key_id}?", abort=True)
 
     async def _revoke_key():
         from dalston.common.redis import get_redis
@@ -156,19 +167,19 @@ def revoke_key(key_id: str, yes: bool):
     try:
         success = asyncio.run(_revoke_key())
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+        typer.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
     if success:
-        click.echo(f"API key {key_id} revoked.")
+        typer.echo(f"API key {key_id} revoked.")
     else:
-        click.echo(f"API key {key_id} not found.", err=True)
+        typer.echo(f"API key {key_id} not found.", err=True)
         sys.exit(1)
 
 
 def main():
     """Entry point for the CLI."""
-    cli()
+    app()
 
 
 if __name__ == "__main__":

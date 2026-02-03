@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-import click
+from pathlib import Path
+from typing import Annotated, Literal, Optional
+
+import typer
 from dalston_sdk import RealtimeSession
 
 from dalston_cli.audio import MicrophoneStream, resolve_device
+from dalston_cli.main import state
 from dalston_cli.output import (
     JsonlOutputHandler,
     JsonOutputHandler,
@@ -13,66 +17,72 @@ from dalston_cli.output import (
     error_console,
 )
 
+FormatType = Literal["live", "json", "jsonl"]
+ModelType = Literal["fast", "accurate"]
 
-@click.command()
-@click.option(
-    "--language",
-    "-l",
-    default="auto",
-    help="Language code or 'auto' for detection.",
-)
-@click.option(
-    "--output",
-    "-o",
-    type=click.Path(),
-    help="Output file (append mode for live/jsonl, overwrite for json).",
-)
-@click.option(
-    "--format",
-    "-f",
-    "fmt",
-    default="live",
-    type=click.Choice(["live", "json", "jsonl"]),
-    help="Output format: live (human-readable), json (full session), jsonl (streaming).",
-)
-@click.option(
-    "--model",
-    "-m",
-    default="fast",
-    type=click.Choice(["fast", "accurate"]),
-    help="Model variant: fast (lower latency) or accurate (better quality).",
-)
-@click.option(
-    "--device",
-    "-d",
-    help="Audio input device (index or partial name).",
-)
-@click.option(
-    "--list-devices",
-    is_flag=True,
-    help="List available audio devices and exit.",
-)
-@click.option(
-    "--no-interim",
-    is_flag=True,
-    help="Only show final transcripts, not interim results.",
-)
-@click.option(
-    "--no-vad",
-    is_flag=True,
-    help="Disable voice activity detection events.",
-)
-@click.pass_context
+
 def listen(
-    ctx: click.Context,
-    language: str,
-    output: str | None,
-    fmt: str,
-    model: str,
-    device: str | None,
-    list_devices: bool,
-    no_interim: bool,
-    no_vad: bool,
+    language: Annotated[
+        str,
+        typer.Option(
+            "--language",
+            "-l",
+            help="Language code or 'auto' for detection.",
+        ),
+    ] = "auto",
+    output: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output file (append mode for live/jsonl, overwrite for json).",
+        ),
+    ] = None,
+    fmt: Annotated[
+        FormatType,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format: live (human-readable), json (full session), jsonl (streaming).",
+        ),
+    ] = "live",
+    model: Annotated[
+        ModelType,
+        typer.Option(
+            "--model",
+            "-m",
+            help="Model variant: fast (lower latency) or accurate (better quality).",
+        ),
+    ] = "fast",
+    device: Annotated[
+        Optional[str],
+        typer.Option(
+            "--device",
+            "-d",
+            help="Audio input device (index or partial name).",
+        ),
+    ] = None,
+    list_devices: Annotated[
+        bool,
+        typer.Option(
+            "--list-devices",
+            help="List available audio devices and exit.",
+        ),
+    ] = False,
+    no_interim: Annotated[
+        bool,
+        typer.Option(
+            "--no-interim",
+            help="Only show final transcripts, not interim results.",
+        ),
+    ] = False,
+    no_vad: Annotated[
+        bool,
+        typer.Option(
+            "--no-vad",
+            help="Disable voice activity detection events.",
+        ),
+    ] = False,
 ) -> None:
     """Real-time transcription from microphone.
 
@@ -98,7 +108,7 @@ def listen(
         devices = MicrophoneStream.list_devices()
         if not devices:
             error_console.print("No audio input devices found.")
-            ctx.exit(1)
+            raise typer.Exit(code=1)
 
         for d in devices:
             default_marker = ""
@@ -111,7 +121,7 @@ def listen(
             )
         return
 
-    client = ctx.obj["client"]
+    client = state.client
 
     # Build WebSocket URL from HTTP URL
     ws_url = client.base_url.replace("http://", "ws://").replace("https://", "wss://")
@@ -122,15 +132,17 @@ def listen(
         try:
             device_id = resolve_device(device)
         except ValueError as e:
-            raise click.ClickException(str(e)) from e
+            error_console.print(f"[red]Error:[/red] {e}")
+            raise typer.Exit(code=1) from e
 
     # Create output handler based on format
+    output_path = str(output) if output else None
     if fmt == "live":
-        handler = LiveOutputHandler(output, show_interim=not no_interim)
+        handler = LiveOutputHandler(output_path, show_interim=not no_interim)
     elif fmt == "jsonl":
-        handler = JsonlOutputHandler(output)
+        handler = JsonlOutputHandler(output_path)
     else:
-        handler = JsonOutputHandler(output)
+        handler = JsonOutputHandler(output_path)
 
     # Create real-time session
     session = RealtimeSession(
@@ -176,7 +188,8 @@ def listen(
         # Graceful shutdown
         pass
     except Exception as e:
-        raise click.ClickException(f"Connection error: {e}") from e
+        error_console.print(f"[red]Error:[/red] Connection error: {e}")
+        raise typer.Exit(code=1) from e
     finally:
         # Close session and get stats
         try:

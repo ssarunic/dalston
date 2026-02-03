@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated, Literal, Optional
 
-import click
+import typer
 from dalston_sdk import SpeakerDetection, TimestampGranularity
 
+from dalston_cli.main import state
 from dalston_cli.output import (
     console,
     error_console,
@@ -15,76 +17,84 @@ from dalston_cli.output import (
     wait_with_progress,
 )
 
+FormatType = Literal["txt", "json", "srt", "vtt"]
+SpeakerMode = Literal["none", "diarize", "per-channel"]
+TimestampMode = Literal["none", "segment", "word"]
 
-@click.command()
-@click.argument("files", nargs=-1, required=True, type=click.Path(exists=True))
-@click.option(
-    "--language",
-    "-l",
-    default="auto",
-    help="Language code (en, es, etc.) or 'auto' for detection.",
-)
-@click.option(
-    "--output",
-    "-o",
-    type=click.Path(),
-    help="Output file path. For multiple files, use a directory.",
-)
-@click.option(
-    "--format",
-    "-f",
-    "fmt",
-    default="txt",
-    type=click.Choice(["txt", "json", "srt", "vtt"]),
-    help="Output format.",
-)
-@click.option(
-    "--wait/--no-wait",
-    "-w",
-    default=True,
-    help="Wait for completion (default) or return immediately.",
-)
-@click.option(
-    "--json",
-    "json_output",
-    is_flag=True,
-    help="Machine-readable JSON output.",
-)
-@click.option(
-    "--speakers",
-    default="none",
-    type=click.Choice(["none", "diarize", "per-channel"]),
-    help="Speaker detection mode.",
-)
-@click.option(
-    "--num-speakers",
-    type=click.IntRange(1, 32),
-    help="Expected number of speakers (for diarization).",
-)
-@click.option(
-    "--timestamps",
-    default="word",
-    type=click.Choice(["none", "segment", "word"]),
-    help="Timestamp granularity.",
-)
-@click.option(
-    "--no-speakers",
-    is_flag=True,
-    help="Exclude speaker labels from output.",
-)
-@click.pass_context
+
 def transcribe(
-    ctx: click.Context,
-    files: tuple[str, ...],
-    language: str,
-    output: str | None,
-    fmt: str,
-    wait: bool,
-    json_output: bool,
-    speakers: str,
-    num_speakers: int | None,
-    timestamps: str,
-    no_speakers: bool,
+    files: Annotated[
+        list[Path],
+        typer.Argument(
+            exists=True,
+            help="Audio files to transcribe.",
+        ),
+    ],
+    language: Annotated[
+        str,
+        typer.Option(
+            "--language",
+            "-l",
+            help="Language code (en, es, etc.) or 'auto' for detection.",
+        ),
+    ] = "auto",
+    output: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output file path. For multiple files, use a directory.",
+        ),
+    ] = None,
+    fmt: Annotated[
+        FormatType,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format.",
+        ),
+    ] = "txt",
+    wait: Annotated[
+        bool,
+        typer.Option(
+            "--wait/--no-wait",
+            "-w",
+            help="Wait for completion (default) or return immediately.",
+        ),
+    ] = True,
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Machine-readable JSON output.",
+        ),
+    ] = False,
+    speakers: Annotated[
+        SpeakerMode,
+        typer.Option(
+            help="Speaker detection mode.",
+        ),
+    ] = "none",
+    num_speakers: Annotated[
+        Optional[int],
+        typer.Option(
+            min=1,
+            max=32,
+            help="Expected number of speakers (for diarization).",
+        ),
+    ] = None,
+    timestamps: Annotated[
+        TimestampMode,
+        typer.Option(
+            help="Timestamp granularity.",
+        ),
+    ] = "word",
+    no_speakers: Annotated[
+        bool,
+        typer.Option(
+            help="Exclude speaker labels from output.",
+        ),
+    ] = False,
 ) -> None:
     """Transcribe audio files.
 
@@ -102,8 +112,8 @@ def transcribe(
 
         dalston transcribe *.mp3 -f json -o transcripts/
     """
-    client = ctx.obj["client"]
-    quiet = ctx.obj["quiet"]
+    client = state.client
+    quiet = state.quiet
 
     # Map speaker detection string to enum
     speaker_detection_map = {
@@ -122,10 +132,11 @@ def transcribe(
     timestamps_granularity = timestamps_map[timestamps]
 
     # Determine output handling for multiple files
-    output_is_dir = output and Path(output).is_dir()
+    output_path = str(output) if output else None
+    output_is_dir = output and output.is_dir()
     if len(files) > 1 and output and not output_is_dir:
         # Create directory if it doesn't exist
-        Path(output).mkdir(parents=True, exist_ok=True)
+        output.mkdir(parents=True, exist_ok=True)
         output_is_dir = True
 
     for file_path in files:
@@ -135,7 +146,7 @@ def transcribe(
         try:
             # Submit job
             job = client.transcribe(
-                file=file_path,
+                file=str(file_path),
                 language=language,
                 speaker_detection=speaker_detection,
                 num_speakers=num_speakers,
@@ -150,15 +161,16 @@ def transcribe(
             result = wait_with_progress(client, job.id, quiet or json_output)
 
             if result.status.value == "failed":
-                raise click.ClickException(
-                    f"Transcription failed: {result.error or 'Unknown error'}"
+                error_console.print(
+                    f"[red]Error:[/red] Transcription failed: {result.error or 'Unknown error'}"
                 )
+                raise typer.Exit(code=1)
 
             # Determine output path for this file
-            file_output = output
+            file_output = output_path
             if output_is_dir:
-                stem = Path(file_path).stem
-                file_output = str(Path(output) / f"{stem}.{fmt}")
+                stem = file_path.stem
+                file_output = str(output / f"{stem}.{fmt}")
 
             # Output result
             if json_output:
@@ -166,7 +178,8 @@ def transcribe(
             else:
                 output_transcript(result, fmt, file_output, not no_speakers)
 
-        except click.ClickException:
+        except typer.Exit:
             raise
         except Exception as e:
-            raise click.ClickException(f"Error processing {file_path}: {e}") from e
+            error_console.print(f"[red]Error:[/red] Error processing {file_path}: {e}")
+            raise typer.Exit(code=1) from e

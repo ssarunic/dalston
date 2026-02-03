@@ -3,21 +3,23 @@
 from __future__ import annotations
 
 import json
+from typing import Annotated
 
-import click
+import typer
 
-from dalston_cli.output import console, error_console
+from dalston_cli.main import state
+from dalston_cli.output import console
 
 
-@click.command()
-@click.option(
-    "--json",
-    "as_json",
-    is_flag=True,
-    help="Output as JSON.",
-)
-@click.pass_context
-def status(ctx: click.Context, as_json: bool) -> None:
+def status(
+    as_json: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Output as JSON.",
+        ),
+    ] = False,
+) -> None:
     """Show server and system status.
 
     Displays server health, batch processing queue status, and real-time
@@ -29,8 +31,9 @@ def status(ctx: click.Context, as_json: bool) -> None:
 
         dalston status --json
     """
-    client = ctx.obj["client"]
+    client = state.client
     exit_code = 0
+    health_error = ""
 
     # Check server health
     try:
@@ -71,15 +74,15 @@ def status(ctx: click.Context, as_json: bool) -> None:
             data["realtime"] = {"error": realtime_error}
 
         console.print(json.dumps(data, indent=2))
-        ctx.exit(exit_code)
+        raise typer.Exit(code=exit_code)
 
     # Human-readable output
     if server_healthy:
-        console.print(f"Server: {client.base_url} [green]\u2713[/green]\n")
+        console.print(f"Server: {client.base_url} [green]✓[/green]\n")
     else:
-        console.print(f"Server: {client.base_url} [red]\u2717[/red]")
+        console.print(f"Server: {client.base_url} [red]✗[/red]")
         console.print(f"[red]Error: {health_error}[/red]\n")
-        ctx.exit(4)
+        raise typer.Exit(code=4)
 
     # Real-time status
     console.print("Real-time:")

@@ -60,19 +60,21 @@ def output_transcript(
     Raises:
         click.ClickException: If format is not supported.
     """
-    import click
+    import typer
 
     if fmt == "json":
         content = _job_to_json(job)
     elif fmt == "txt":
         content = job.transcript.text if job.transcript else ""
     elif fmt in ("srt", "vtt"):
-        raise click.ClickException(
-            f"Format '{fmt}' requires the export endpoint. "
+        error_console.print(
+            f"[red]Error:[/red] Format '{fmt}' requires the export endpoint. "
             f"Use 'dalston export {job.id} -f {fmt}' instead."
         )
+        raise typer.Exit(code=1)
     else:
-        raise click.ClickException(f"Unsupported format: {fmt}")
+        error_console.print(f"[red]Error:[/red] Unsupported format: {fmt}")
+        raise typer.Exit(code=1)
 
     if output_path:
         Path(output_path).write_text(content)

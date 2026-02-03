@@ -5,49 +5,85 @@ Provides the main `dalston` command with global options and subcommands.
 
 from __future__ import annotations
 
-import click
+from typing import Annotated, Optional
+
+import typer
 from dalston_sdk import Dalston
 
 from dalston_cli import __version__
-from dalston_cli.commands import export, jobs, listen, status, transcribe
 from dalston_cli.config import load_config
 
+app = typer.Typer(
+    name="dalston",
+    help="Dalston CLI - Audio transcription from the command line.",
+    no_args_is_help=True,
+)
 
-@click.group()
-@click.option(
-    "--server",
-    "-s",
-    envvar="DALSTON_SERVER",
-    default=None,
-    help="Server URL (default: http://localhost:8000).",
-)
-@click.option(
-    "--api-key",
-    "-k",
-    envvar="DALSTON_API_KEY",
-    default=None,
-    help="API key for authentication.",
-)
-@click.option(
-    "--verbose",
-    "-v",
-    is_flag=True,
-    help="Verbose output to stderr.",
-)
-@click.option(
-    "--quiet",
-    "-q",
-    is_flag=True,
-    help="Suppress non-essential output.",
-)
-@click.version_option(version=__version__, prog_name="dalston")
-@click.pass_context
-def cli(
-    ctx: click.Context,
-    server: str | None,
-    api_key: str | None,
-    verbose: bool,
-    quiet: bool,
+
+class State:
+    """Global state container for CLI context."""
+
+    client: Dalston
+    config: dict
+    verbose: bool = False
+    quiet: bool = False
+
+
+state = State()
+
+
+def version_callback(value: bool) -> None:
+    """Handle --version flag."""
+    if value:
+        print(f"dalston {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    server: Annotated[
+        Optional[str],
+        typer.Option(
+            "--server",
+            "-s",
+            envvar="DALSTON_SERVER",
+            help="Server URL (default: http://localhost:8000).",
+        ),
+    ] = None,
+    api_key: Annotated[
+        Optional[str],
+        typer.Option(
+            "--api-key",
+            "-k",
+            envvar="DALSTON_API_KEY",
+            help="API key for authentication.",
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Verbose output to stderr.",
+        ),
+    ] = False,
+    quiet: Annotated[
+        bool,
+        typer.Option(
+            "--quiet",
+            "-q",
+            help="Suppress non-essential output.",
+        ),
+    ] = False,
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            callback=version_callback,
+            is_eager=True,
+            help="Show version and exit.",
+        ),
+    ] = False,
 ) -> None:
     """Dalston CLI - Audio transcription from the command line.
 
@@ -56,24 +92,20 @@ def cli(
 
     Configuration can be provided via:
 
-    \b
-      - CLI options (--server, --api-key)
-      - Environment variables (DALSTON_SERVER, DALSTON_API_KEY)
-      - Config file (~/.dalston/config.yaml)
+        - CLI options (--server, --api-key)
+        - Environment variables (DALSTON_SERVER, DALSTON_API_KEY)
+        - Config file (~/.dalston/config.yaml)
 
     Examples:
 
-    \b
-      # Transcribe an audio file
-      dalston transcribe meeting.mp3
+        # Transcribe an audio file
+        dalston transcribe meeting.mp3
 
-    \b
-      # Real-time transcription from microphone
-      dalston listen
+        # Real-time transcription from microphone
+        dalston listen
 
-    \b
-      # Check server status
-      dalston status
+        # Check server status
+        dalston status
     """
     # Load config from file and environment
     config = load_config()
@@ -85,26 +117,27 @@ def cli(
     # Create client
     client = Dalston(base_url=final_server, api_key=final_api_key)
 
-    # Store in context for subcommands
-    ctx.ensure_object(dict)
-    ctx.obj["client"] = client
-    ctx.obj["config"] = config
-    ctx.obj["verbose"] = verbose
-    ctx.obj["quiet"] = quiet
+    # Store in global state for subcommands
+    state.client = client
+    state.config = config
+    state.verbose = verbose
+    state.quiet = quiet
 
 
-# Register commands
-cli.add_command(transcribe.transcribe)
-cli.add_command(listen.listen)
-cli.add_command(jobs.jobs)
-cli.add_command(export.export)
-cli.add_command(status.status)
+# Import and register commands after app is defined
+from dalston_cli.commands import export, jobs, listen, status, transcribe
+
+app.command()(transcribe.transcribe)
+app.command()(listen.listen)
+app.add_typer(jobs.app, name="jobs")
+app.command()(export.export)
+app.command()(status.status)
 
 
-def main() -> None:
+def cli() -> None:
     """Main entry point."""
-    cli()
+    app()
 
 
 if __name__ == "__main__":
-    main()
+    cli()

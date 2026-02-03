@@ -2,55 +2,62 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Annotated, Literal, Optional
 
-import click
+import typer
 
+from dalston_cli.main import state
 from dalston_cli.output import console, error_console
 
+FormatType = Literal["txt", "json", "srt", "vtt"]
 
-@click.command()
-@click.argument("job_id")
-@click.option(
-    "--format",
-    "-f",
-    "fmt",
-    default="txt",
-    type=click.Choice(["txt", "json", "srt", "vtt"]),
-    help="Export format.",
-)
-@click.option(
-    "--output",
-    "-o",
-    type=click.Path(),
-    help="Output file path.",
-)
-@click.option(
-    "--no-speakers",
-    is_flag=True,
-    help="Exclude speaker labels from output.",
-)
-@click.option(
-    "--max-line-length",
-    default=42,
-    type=click.IntRange(10, 200),
-    help="Maximum characters per subtitle line (for srt/vtt).",
-)
-@click.option(
-    "--max-lines",
-    default=2,
-    type=click.IntRange(1, 10),
-    help="Maximum lines per subtitle block (for srt/vtt).",
-)
-@click.pass_context
+
 def export(
-    ctx: click.Context,
-    job_id: str,
-    fmt: str,
-    output: str | None,
-    no_speakers: bool,
-    max_line_length: int,
-    max_lines: int,
+    job_id: Annotated[
+        str,
+        typer.Argument(help="Job ID to export."),
+    ],
+    fmt: Annotated[
+        FormatType,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Export format.",
+        ),
+    ] = "txt",
+    output: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output file path.",
+        ),
+    ] = None,
+    no_speakers: Annotated[
+        bool,
+        typer.Option(
+            "--no-speakers",
+            help="Exclude speaker labels from output.",
+        ),
+    ] = False,
+    max_line_length: Annotated[
+        int,
+        typer.Option(
+            min=10,
+            max=200,
+            help="Maximum characters per subtitle line (for srt/vtt).",
+        ),
+    ] = 42,
+    max_lines: Annotated[
+        int,
+        typer.Option(
+            min=1,
+            max=10,
+            help="Maximum lines per subtitle block (for srt/vtt).",
+        ),
+    ] = 2,
 ) -> None:
     """Export transcript in various formats.
 
@@ -66,7 +73,7 @@ def export(
 
         dalston export abc123 -f json --no-speakers
     """
-    client = ctx.obj["client"]
+    client = state.client
 
     try:
         content = client.export(
@@ -80,15 +87,14 @@ def export(
         # Handle output
         if isinstance(content, dict):
             # JSON format returns dict
-            import json
-
             content = json.dumps(content, indent=2)
 
         if output:
-            Path(output).write_text(content)
+            output.write_text(content)
             error_console.print(f"Written to {output}")
         else:
             console.print(content)
 
     except Exception as e:
-        raise click.ClickException(f"Export failed: {e}") from e
+        error_console.print(f"[red]Error:[/red] Export failed: {e}")
+        raise typer.Exit(code=1) from e

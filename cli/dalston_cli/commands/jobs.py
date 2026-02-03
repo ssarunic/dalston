@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-import click
+from pathlib import Path
+from typing import Annotated, Literal, Optional
+
+import typer
 from dalston_sdk import JobStatus
 
+from dalston_cli.main import state
 from dalston_cli.output import (
-    console,
     error_console,
     output_job_detail,
     output_jobs_table,
@@ -14,40 +17,35 @@ from dalston_cli.output import (
     wait_with_progress,
 )
 
+app = typer.Typer(help="Manage transcription jobs.")
 
-@click.group()
-def jobs() -> None:
-    """Manage transcription jobs.
-
-    List, view, and manage batch transcription jobs.
-    """
-    pass
+StatusFilter = Literal["pending", "running", "completed", "failed", "cancelled"]
+FormatType = Literal["txt", "json", "srt", "vtt"]
 
 
-@jobs.command("list")
-@click.option(
-    "--status",
-    type=click.Choice(["pending", "running", "completed", "failed", "cancelled"]),
-    help="Filter by job status.",
-)
-@click.option(
-    "--limit",
-    default=20,
-    type=click.IntRange(1, 100),
-    help="Maximum number of jobs to return.",
-)
-@click.option(
-    "--json",
-    "as_json",
-    is_flag=True,
-    help="Output as JSON.",
-)
-@click.pass_context
+@app.command("list")
 def list_jobs(
-    ctx: click.Context,
-    status: str | None,
-    limit: int,
-    as_json: bool,
+    status: Annotated[
+        Optional[StatusFilter],
+        typer.Option(
+            help="Filter by job status.",
+        ),
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option(
+            min=1,
+            max=100,
+            help="Maximum number of jobs to return.",
+        ),
+    ] = 20,
+    as_json: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Output as JSON.",
+        ),
+    ] = False,
 ) -> None:
     """List transcription jobs.
 
@@ -61,7 +59,7 @@ def list_jobs(
 
         dalston jobs list --limit 50 --json
     """
-    client = ctx.obj["client"]
+    client = state.client
 
     # Convert status string to enum if provided
     status_filter = JobStatus(status) if status else None
@@ -70,22 +68,23 @@ def list_jobs(
         result = client.list_jobs(limit=limit, status=status_filter)
         output_jobs_table(result.jobs, as_json=as_json)
     except Exception as e:
-        raise click.ClickException(f"Failed to list jobs: {e}") from e
+        error_console.print(f"[red]Error:[/red] Failed to list jobs: {e}")
+        raise typer.Exit(code=1) from e
 
 
-@jobs.command("get")
-@click.argument("job_id")
-@click.option(
-    "--json",
-    "as_json",
-    is_flag=True,
-    help="Output as JSON.",
-)
-@click.pass_context
+@app.command("get")
 def get_job(
-    ctx: click.Context,
-    job_id: str,
-    as_json: bool,
+    job_id: Annotated[
+        str,
+        typer.Argument(help="Job ID to retrieve."),
+    ],
+    as_json: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Output as JSON.",
+        ),
+    ] = False,
 ) -> None:
     """Get job details.
 
@@ -97,44 +96,44 @@ def get_job(
 
         dalston jobs get abc123 --json
     """
-    client = ctx.obj["client"]
+    client = state.client
 
     try:
         job = client.get_job(job_id)
         output_job_detail(job, as_json=as_json)
     except Exception as e:
-        raise click.ClickException(f"Failed to get job: {e}") from e
+        error_console.print(f"[red]Error:[/red] Failed to get job: {e}")
+        raise typer.Exit(code=1) from e
 
 
-@jobs.command("wait")
-@click.argument("job_id")
-@click.option(
-    "--timeout",
-    default=300,
-    type=int,
-    help="Maximum time to wait in seconds.",
-)
-@click.option(
-    "--format",
-    "-f",
-    "fmt",
-    default="txt",
-    type=click.Choice(["txt", "json", "srt", "vtt"]),
-    help="Output format for transcript.",
-)
-@click.option(
-    "--output",
-    "-o",
-    type=click.Path(),
-    help="Output file path.",
-)
-@click.pass_context
+@app.command("wait")
 def wait_job(
-    ctx: click.Context,
-    job_id: str,
-    timeout: int,
-    fmt: str,
-    output: str | None,
+    job_id: Annotated[
+        str,
+        typer.Argument(help="Job ID to wait for."),
+    ],
+    timeout: Annotated[
+        int,
+        typer.Option(
+            help="Maximum time to wait in seconds.",
+        ),
+    ] = 300,
+    fmt: Annotated[
+        FormatType,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format for transcript.",
+        ),
+    ] = "txt",
+    output: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output file path.",
+        ),
+    ] = None,
 ) -> None:
     """Wait for job completion.
 
@@ -146,30 +145,34 @@ def wait_job(
 
         dalston jobs wait abc123 -f srt -o subtitles.srt
     """
-    client = ctx.obj["client"]
-    quiet = ctx.obj["quiet"]
+    client = state.client
+    quiet = state.quiet
 
     try:
         result = wait_with_progress(client, job_id, quiet, timeout=timeout)
 
         if result.status == JobStatus.FAILED:
-            raise click.ClickException(f"Job failed: {result.error or 'Unknown error'}")
-        elif result.status == JobStatus.CANCELLED:
-            raise click.ClickException("Job was cancelled")
+            error_console.print(
+                f"[red]Error:[/red] Job failed: {result.error or 'Unknown error'}"
+            )
+            raise typer.Exit(code=1)
+        if result.status == JobStatus.CANCELLED:
+            error_console.print("[red]Error:[/red] Job was cancelled")
+            raise typer.Exit(code=1)
 
-        output_transcript(result, fmt, output)
-    except click.ClickException:
+        output_path = str(output) if output else None
+        output_transcript(result, fmt, output_path)
+    except typer.Exit:
         raise
     except Exception as e:
-        raise click.ClickException(f"Error waiting for job: {e}") from e
+        error_console.print(f"[red]Error:[/red] Error waiting for job: {e}")
+        raise typer.Exit(code=1) from e
 
 
 # Note: cancel command deferred - requires gateway endpoint
-# @jobs.command("cancel")
-# @click.argument("job_id")
-# @click.pass_context
-# def cancel_job(ctx: click.Context, job_id: str) -> None:
+# @app.command("cancel")
+# def cancel_job(job_id: str) -> None:
 #     """Cancel a pending or running job."""
-#     client = ctx.obj["client"]
+#     client = state.client
 #     client.cancel_job(job_id)
 #     console.print(f"Job {job_id} cancelled")
