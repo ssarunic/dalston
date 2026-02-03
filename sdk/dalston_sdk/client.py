@@ -52,10 +52,10 @@ def _parse_job(data: dict[str, Any]) -> Job:
         if data.get("words"):
             words = [
                 Word(
-                    text=w.get("word") or w.get("text", ""),
+                    text=w["word"],
                     start=w["start"],
                     end=w["end"],
-                    confidence=w.get("confidence") or w.get("probability"),
+                    confidence=w.get("confidence"),
                     speaker_id=w.get("speaker_id"),
                 )
                 for w in data["words"]
@@ -72,10 +72,10 @@ def _parse_job(data: dict[str, Any]) -> Job:
                     speaker_id=s.get("speaker_id"),
                     words=[
                         Word(
-                            text=w.get("word") or w.get("text", ""),
+                            text=w["word"],
                             start=w["start"],
                             end=w["end"],
-                            confidence=w.get("confidence") or w.get("probability"),
+                            confidence=w.get("confidence"),
                             speaker_id=w.get("speaker_id"),
                         )
                         for w in s.get("words", [])

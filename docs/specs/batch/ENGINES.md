@@ -377,7 +377,7 @@ Fast Whisper implementation using CTranslate2 for optimized inference.
     }
   ],
   "language": "en",
-  "language_probability": 0.98
+  "language_confidence": 0.98
 }
 ```
 

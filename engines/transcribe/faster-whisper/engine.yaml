@@ -116,11 +116,11 @@ output_schema:
                   type: number
                 end:
                   type: number
-                probability:
+                confidence:
                   type: number
     language:
       type: string
       description: Detected language code (ISO 639-1)
-    language_probability:
+    language_confidence:
       type: number
       description: Confidence in language detection (0-1)

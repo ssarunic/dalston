@@ -207,7 +207,7 @@ class WhisperXAlignEngine(Engine):
                             "word": word_text,
                             "start": round(w.get("start", 0.0), 3),
                             "end": round(w.get("end", 0.0), 3),
-                            "probability": round(w.get("score", 0.0), 3),
+                            "confidence": round(w.get("score", 0.0), 3),
                         })
                     else:
                         filtered_words += 1

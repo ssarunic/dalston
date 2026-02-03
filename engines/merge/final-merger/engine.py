@@ -98,7 +98,7 @@ class FinalMergerEngine(Engine):
         # Extract other transcription data
         text = transcribe_output.get("text", "")
         language = transcribe_output.get("language", "en")
-        language_probability = transcribe_output.get("language_probability", 1.0)
+        language_confidence = transcribe_output.get("language_confidence", 1.0)
 
         # Extract diarization data if available
         diarization_segments = []
@@ -171,7 +171,7 @@ class FinalMergerEngine(Engine):
                 "audio_channels": audio_channels,
                 "sample_rate": sample_rate,
                 "language": language,
-                "language_probability": round(language_probability, 3),
+                "language_confidence": round(language_confidence, 3),
                 "word_timestamps": word_timestamps_available,
                 "word_timestamps_requested": word_timestamps_requested,
                 "speaker_detection": speaker_detection,
@@ -237,7 +237,7 @@ class FinalMergerEngine(Engine):
         all_segments = []
         pipeline_warnings = []
         language = "en"
-        language_probability = 1.0
+        language_confidence = 1.0
 
         for channel in range(channel_count):
             # Get transcribe output for this channel
@@ -254,7 +254,7 @@ class FinalMergerEngine(Engine):
             # Use first channel's language detection
             if channel == 0:
                 language = transcribe_output.get("language", "en")
-                language_probability = transcribe_output.get("language_probability", 1.0)
+                language_confidence = transcribe_output.get("language_confidence", 1.0)
 
             # Get segments from align or transcribe
             if align_output and not align_output.get("warning"):
@@ -323,7 +323,7 @@ class FinalMergerEngine(Engine):
                 "audio_channels": audio_channels,
                 "sample_rate": sample_rate,
                 "language": language,
-                "language_probability": round(language_probability, 3),
+                "language_confidence": round(language_confidence, 3),
                 "word_timestamps": word_timestamps,
                 "word_timestamps_requested": word_timestamps,
                 "speaker_detection": "per_channel",

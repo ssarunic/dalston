@@ -49,7 +49,7 @@ engines/transcribe/faster-whisper/
 - Load faster-whisper model (lazy loading on first request)
 - Support model size config (default: `large-v3`)
 - Enable VAD filtering for better accuracy
-- Output: `text`, `segments` (with start/end times), `language`, `language_probability`
+- Output: `text`, `segments` (with start/end times), `language`, `language_confidence`
 - GPU Dockerfile with CUDA 12.1, model pre-downloaded at build time
 
 ---

@@ -60,7 +60,7 @@ output_schema:
           type: integer
         language:
           type: string
-        language_probability:
+        language_confidence:
           type: number
         created_at:
           type: string

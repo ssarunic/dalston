@@ -253,7 +253,7 @@ For audio < 5 minutes without `webhook=true`:
 {
   "transcription_id": "trans_abc123def456",
   "language_code": "en",
-  "language_probability": 0.98,
+  "language_confidence": 0.98,
   "text": "Welcome to the show. Thanks for having me.",
   "words": [
     {
@@ -581,7 +581,7 @@ Get job status and results.
   "processing_time_seconds": 150.0,
   
   "language_code": "en",
-  "language_probability": 0.98,
+  "language_confidence": 0.98,
   "text": "Welcome to the show. Thanks for having me...",
   
   "words": [

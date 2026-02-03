@@ -134,7 +134,7 @@ class FasterWhisperEngine(Engine):
                         "word": word.word.strip(),
                         "start": round(word.start, 3),
                         "end": round(word.end, 3),
-                        "probability": round(word.probability, 3),
+                        "confidence": round(word.probability, 3),
                     }
                     for word in segment.words
                 ]
@@ -146,14 +146,14 @@ class FasterWhisperEngine(Engine):
         full_text = " ".join(full_text_parts)
 
         logger.info(f"Transcription complete: {len(segments)} segments, {len(full_text)} chars")
-        logger.info(f"Detected language: {info.language} (probability: {info.language_probability:.2f})")
+        logger.info(f"Detected language: {info.language} (confidence: {info.language_probability:.2f})")
 
         return TaskOutput(
             data={
                 "text": full_text,
                 "segments": segments,
                 "language": info.language,
-                "language_probability": round(info.language_probability, 3),
+                "language_confidence": round(info.language_probability, 3),
             }
         )
 

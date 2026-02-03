@@ -60,7 +60,7 @@ output_schema:
         language:
           type: string
           description: Detected language code
-        language_probability:
+        language_confidence:
           type: number
           description: Confidence in language detection
         pipeline:

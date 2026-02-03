@@ -34,7 +34,7 @@ class StubTranscriberEngine(Engine):
                     }
                 ],
                 "language": "en",
-                "language_probability": 1.0,
+                "language_confidence": 1.0,
             }
         )
 

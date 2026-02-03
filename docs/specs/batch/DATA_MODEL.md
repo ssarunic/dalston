@@ -424,7 +424,7 @@ Workers download models to local cache on startup:
       }
     ],
     "language": "en",
-    "language_probability": 0.98
+    "language_confidence": 0.98
   }
 }
 ```

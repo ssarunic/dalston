@@ -86,7 +86,7 @@ output_schema:
                 end:
                   type: number
                   description: Word end time in seconds
-                probability:
+                confidence:
                   type: number
                   description: Alignment confidence (0-1)
     language:

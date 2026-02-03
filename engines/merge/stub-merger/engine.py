@@ -38,8 +38,8 @@ class StubMergerEngine(Engine):
             "speakers": [],  # Empty for M01
             "metadata": {
                 "language": transcribe_output.get("language", "en"),
-                "language_probability": transcribe_output.get(
-                    "language_probability", 1.0
+                "language_confidence": transcribe_output.get(
+                    "language_confidence", 1.0
                 ),
                 "pipeline": ["stub-transcriber", "stub-merger"],
             },

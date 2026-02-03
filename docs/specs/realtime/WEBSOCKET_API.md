@@ -212,7 +212,7 @@ When `include_language_detection=true`, language info is included:
 {
   "message_type": "language_detection",
   "language_code": "en",
-  "language_probability": 0.98
+  "language_confidence": 0.98
 }
 ```
 
