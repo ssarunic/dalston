@@ -19,7 +19,7 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv pip install --system ruff==0.9.4
+        run: uv pip install ruff==0.9.4
 
       - name: Lint
         run: ruff check .
@@ -44,7 +44,7 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv pip install --system -e ".[gateway,orchestrator,dev]"
+        run: uv pip install -e ".[gateway,orchestrator,dev]"
 
       - name: Run tests
         run: pytest
