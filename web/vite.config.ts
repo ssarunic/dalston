@@ -15,15 +15,19 @@ export default defineConfig(({ command }) => ({
     port: 3000,
     proxy: {
       '/v1': {
-        target: 'http://localhost:8000',
+        target: 'http://gateway:8000',
         changeOrigin: true,
       },
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://gateway:8000',
+        changeOrigin: true,
+      },
+      '/auth': {
+        target: 'http://gateway:8000',
         changeOrigin: true,
       },
       '/health': {
-        target: 'http://localhost:8000',
+        target: 'http://gateway:8000',
         changeOrigin: true,
       },
     },
