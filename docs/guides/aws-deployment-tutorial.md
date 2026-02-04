@@ -91,9 +91,20 @@ terraform apply
 ```
 
 Note the outputs:
+
 - `instance_id`: e.g., `i-05c2428b930fc1712`
 - `public_ip`: e.g., `3.8.28.219`
 - `s3_bucket`: e.g., `dalston-artifacts-178457246645`
+
+The bootstrap script automatically:
+
+- Installs Docker and Docker Compose
+- Installs Tailscale (requires manual authentication)
+- Mounts the data volume at `/data`
+- Clones the Dalston repository
+- Creates `/data/dalston/.env.aws` with S3/region config
+- Creates `/data/dalston/docker-compose.minimal.yml`
+- Creates a systemd service (disabled by default)
 
 ## 6. Setup Tailscale on EC2
 
@@ -281,6 +292,7 @@ dalston-ssh
 
 ```bash
 dalston-ssh
+cd /data/dalston
 sudo docker-compose -f docker-compose.minimal.yml logs -f
 ```
 
@@ -288,8 +300,20 @@ sudo docker-compose -f docker-compose.minimal.yml logs -f
 
 ```bash
 dalston-ssh
+sudo systemctl restart dalston
+
+# Or manually:
 cd /data/dalston
 sudo docker-compose -f docker-compose.minimal.yml restart
+```
+
+### Update code
+
+```bash
+dalston-ssh
+cd /data/dalston
+sudo git pull
+sudo docker-compose -f docker-compose.minimal.yml restart gateway web
 ```
 
 ## Cost
