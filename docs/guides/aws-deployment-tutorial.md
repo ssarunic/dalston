@@ -74,7 +74,7 @@ Edit `terraform.tfvars`:
 ```hcl
 key_name    = "dalston-dev"
 aws_region  = "eu-west-2"
-repo_url    = "https://github.com/YOUR-ORG/dalston.git"
+repo_url    = "https://github.com/ssarunic/dalston.git"
 repo_branch = "main"
 ```
 
@@ -353,7 +353,7 @@ sudo cat /var/log/user-data.log
 Clone manually with a personal access token:
 
 ```bash
-sudo git clone https://<token>@github.com/YOUR-ORG/dalston.git /data/dalston
+sudo git clone https://<token>@github.com/ssarunic/dalston.git /data/dalston
 ```
 
 ### Git pull conflicts with local changes
