@@ -11,7 +11,7 @@ from typing import Annotated
 import typer
 
 from dalston.db.session import DEFAULT_TENANT_ID
-from dalston.gateway.services.auth import AuthService, Scope
+from dalston.gateway.services.auth import AuthService, DEFAULT_SCOPES, Scope
 
 app = typer.Typer(help="Dalston Gateway CLI.")
 
@@ -74,6 +74,86 @@ def create_admin_key(
     typer.echo()
     typer.echo(f"Key ID:  {key_id}")
     typer.echo(f"API Key: {raw_key}")
+    typer.echo()
+    typer.echo("IMPORTANT: Store this key securely!")
+    typer.echo("It cannot be retrieved later.")
+    typer.echo()
+    typer.echo("=" * 60)
+    typer.echo("Usage Examples")
+    typer.echo("=" * 60)
+    typer.echo()
+    typer.echo("# Set as environment variable")
+    typer.echo(f'export DALSTON_API_KEY="{raw_key}"')
+    typer.echo()
+    typer.echo("# Use with curl")
+    typer.echo("curl -X POST http://localhost:8000/v1/audio/transcriptions \\")
+    typer.echo(f'  -H "Authorization: Bearer {raw_key}" \\')
+    typer.echo('  -F "file=@audio.mp3"')
+    typer.echo()
+    typer.echo("# Use with dalston-cli")
+    typer.echo(f'dalston --api-key "{raw_key}" transcribe audio.mp3')
+    typer.echo()
+
+
+async def _create_key(name: str) -> tuple[str, str]:
+    """Create an API key with default scopes.
+
+    Args:
+        name: Human-readable name for the key
+
+    Returns:
+        Tuple of (raw_key, key_id)
+    """
+    from dalston.common.redis import get_redis
+
+    redis = await get_redis()
+    auth_service = AuthService(redis)
+
+    raw_key, api_key = await auth_service.create_api_key(
+        name=name,
+        tenant_id=DEFAULT_TENANT_ID,
+        scopes=list(DEFAULT_SCOPES),
+        rate_limit=None,
+    )
+
+    return raw_key, str(api_key.id)
+
+
+@app.command("create-key")
+def create_key(
+    name: Annotated[
+        str,
+        typer.Option(
+            "--name",
+            "-n",
+            help="Human-readable name for the API key",
+        ),
+    ] = "API Key",
+) -> None:
+    """Create an API key with default scopes (jobs:read, jobs:write, realtime).
+
+    The key is displayed once and cannot be retrieved later.
+    Store it securely!
+
+    Example:
+        python -m dalston.gateway.cli create-key --name "My Key"
+    """
+    typer.echo(f"Creating API key '{name}'...")
+
+    try:
+        raw_key, key_id = asyncio.run(_create_key(name))
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    typer.echo()
+    typer.echo("=" * 60)
+    typer.echo("API key created successfully!")
+    typer.echo("=" * 60)
+    typer.echo()
+    typer.echo(f"Key ID:  {key_id}")
+    typer.echo(f"API Key: {raw_key}")
+    typer.echo(f"Scopes:  {', '.join(s.value for s in DEFAULT_SCOPES)}")
     typer.echo()
     typer.echo("IMPORTANT: Store this key securely!")
     typer.echo("It cannot be retrieved later.")
