@@ -42,6 +42,12 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 |------------------------------------------|----------------|--------------------------------------------|------|
 | [M16](milestones/M16-aws-deployment.md)  | AWS Deployment | Single EC2 + Tailscale + S3 via Terraform  | 2-3  |
 
+## Console Feature Milestones
+
+| #                                              | Milestone          | Goal                                      | Days |
+|------------------------------------------------|--------------------|-------------------------------------------|------|
+| [M17](milestones/M17-api-key-management.md)    | API Key Management | Web UI for creating/revoking API keys     | 2-3  |
+
 ---
 
 ## Timeline
@@ -115,6 +121,8 @@ M1 ──► M2 ──► M3 ──► M4 ──► M5
 M4 ──► M9
 
 M6 ──► M10
+
+M10 + M11 + M15 ──► M17
 ```
 
 - **M1-M5**: Core batch pipeline (sequential)
@@ -122,6 +130,7 @@ M6 ──► M10
 - **M9**: Enrichment (needs M4 for speaker context)
 - **M10**: Console (needs M6 for realtime monitoring)
 - **M11**: Authentication (can start after M1, recommended before production)
+- **M17**: API Key Management (needs M10 console, M11 auth, M15 console auth)
 
 ---
 
@@ -142,3 +151,5 @@ Each milestone has a verification section. Key checkpoints:
 | M9 | Transcript includes emotion labels |
 | M10 | Dashboard shows job queue and realtime capacity |
 | M11 | Requests without valid API key return 401 |
+| M15 | Console requires admin API key to access |
+| M17 | API keys can be created/revoked from web console |
