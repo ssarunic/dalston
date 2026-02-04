@@ -20,6 +20,11 @@ echo "Installing Docker..."
 dnf update -y
 dnf install -y docker git
 
+# Install Tailscale
+echo "Installing Tailscale..."
+curl -fsSL https://tailscale.com/install.sh | sh
+echo "Tailscale installed. Run 'sudo tailscale up' after boot to authenticate."
+
 # Start and enable Docker
 systemctl start docker
 systemctl enable docker
@@ -83,7 +88,56 @@ DATABASE_URL=postgresql://dalston:dalston@postgres:5432/dalston
 HF_HOME=/data/models
 EOF
 
-# Create systemd service for Docker Compose
+# Create minimal docker-compose file for reliable startup
+echo "Creating docker-compose.minimal.yml..."
+cat > "$DATA_MOUNT/dalston/docker-compose.minimal.yml" << 'COMPOSE_EOF'
+services:
+  gateway:
+    image: python:3.11-slim
+    working_dir: /app
+    command: bash -c "apt-get update && apt-get install -y gcc libpq-dev && pip install psycopg2-binary asyncpg && pip install -e '.[gateway]' && uvicorn dalston.gateway.main:app --host 0.0.0.0 --port 8000"
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql+asyncpg://dalston:dalston@postgres:5432/dalston
+      - S3_BUCKET=$${S3_BUCKET}
+      - AWS_REGION=$${AWS_REGION}
+    depends_on:
+      - redis
+      - postgres
+
+  web:
+    image: node:20-alpine
+    working_dir: /app/web
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    volumes:
+      - .:/app
+    ports:
+      - "3000:3000"
+    depends_on:
+      - gateway
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=dalston
+      - POSTGRES_PASSWORD=dalston
+      - POSTGRES_DB=dalston
+    volumes:
+      - /data/postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+COMPOSE_EOF
+
+# Create systemd service for Docker Compose (uses minimal compose by default)
 echo "Creating systemd service..."
 cat > /etc/systemd/system/dalston.service << 'EOF'
 [Unit]
@@ -95,17 +149,27 @@ After=docker.service
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/data/dalston
-ExecStart=/usr/bin/docker-compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml --env-file .env.aws up -d gateway orchestrator redis postgres engine-audio-prepare engine-faster-whisper engine-final-merger
-ExecStop=/usr/bin/docker-compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml down
-TimeoutStartSec=300
+ExecStart=/usr/bin/docker-compose -f docker-compose.minimal.yml --env-file .env.aws up -d
+ExecStop=/usr/bin/docker-compose -f docker-compose.minimal.yml down
+TimeoutStartSec=600
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# Enable and start the service
+# Enable service but don't start automatically (user should configure Tailscale first)
 systemctl daemon-reload
 systemctl enable dalston.service
-systemctl start dalston.service
+echo "Dalston service enabled. Start manually with: sudo systemctl start dalston"
 
+echo ""
+echo "=========================================="
 echo "Dalston bootstrap completed at $(date)"
+echo "=========================================="
+echo ""
+echo "Next steps:"
+echo "1. Run 'sudo tailscale up' and authenticate"
+echo "2. Note your Tailscale IP: tailscale ip -4"
+echo "3. Start services: sudo systemctl start dalston"
+echo "4. Create admin API key (see docs)"
+echo ""

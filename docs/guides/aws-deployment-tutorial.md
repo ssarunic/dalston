@@ -112,17 +112,16 @@ aws ec2 authorize-security-group-ingress \
   --cidr <your-ip>/32
 ```
 
-### SSH and install Tailscale
+### SSH and configure Tailscale
 
 ```bash
 ssh -i ~/.ssh/dalston-dev.pem ec2-user@<public_ip>
 ```
 
-On the EC2 instance:
+On the EC2 instance (Tailscale is pre-installed by the bootstrap script):
 
 ```bash
-# Install Tailscale
-curl -fsSL https://tailscale.com/install.sh | sh
+# Authenticate Tailscale
 sudo tailscale up
 
 # Follow the auth link in your browser
@@ -181,59 +180,18 @@ SSH to the instance:
 dalston-ssh
 ```
 
-Create environment file:
+The bootstrap script has already created:
+
+- `/data/dalston/.env.aws` - environment variables
+- `/data/dalston/docker-compose.minimal.yml` - minimal compose file with gateway, web, redis, postgres
+
+Start services using the systemd service:
 
 ```bash
-sudo tee /data/dalston/.env.aws << EOF
-S3_BUCKET=dalston-artifacts-<your-account-id>
-AWS_REGION=eu-west-2
-REDIS_URL=redis://redis:6379
-DATABASE_URL=postgresql://dalston:dalston@postgres:5432/dalston
-HF_HOME=/data/models
-EOF
+sudo systemctl start dalston
 ```
 
-Create minimal compose file (if main compose has issues):
-
-```bash
-sudo tee /data/dalston/docker-compose.minimal.yml << 'EOF'
-services:
-  gateway:
-    image: python:3.11-slim
-    working_dir: /app
-    command: bash -c "apt-get update && apt-get install -y gcc libpq-dev && pip install psycopg2-binary asyncpg && pip install -e '.[gateway]' && uvicorn dalston.gateway.main:app --host 0.0.0.0 --port 8000"
-    volumes:
-      - .:/app
-    ports:
-      - "8000:8000"
-    environment:
-      - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=postgresql+asyncpg://dalston:dalston@postgres:5432/dalston
-      - S3_BUCKET=${S3_BUCKET}
-      - AWS_REGION=${AWS_REGION}
-    depends_on:
-      - redis
-      - postgres
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      - POSTGRES_USER=dalston
-      - POSTGRES_PASSWORD=dalston
-      - POSTGRES_DB=dalston
-    volumes:
-      - /data/postgres:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-EOF
-```
-
-Start services:
+Or start manually with docker-compose:
 
 ```bash
 cd /data/dalston
@@ -263,78 +221,7 @@ Access in browser:
 
 ## 11. Setup Web Console
 
-The web console provides a UI for monitoring jobs and engines.
-
-### Add web service to docker-compose
-
-Update `/data/dalston/docker-compose.minimal.yml` to include the web service:
-
-```bash
-sudo tee -a /data/dalston/docker-compose.minimal.yml << 'EOF'
-
-  web:
-    image: node:20-alpine
-    working_dir: /app/web
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
-    volumes:
-      - .:/app
-    ports:
-      - "3000:3000"
-    depends_on:
-      - gateway
-EOF
-```
-
-Or create a complete minimal compose file with web:
-
-```bash
-sudo tee /data/dalston/docker-compose.minimal.yml << 'EOF'
-services:
-  gateway:
-    image: python:3.11-slim
-    working_dir: /app
-    command: bash -c "apt-get update && apt-get install -y gcc libpq-dev && pip install psycopg2-binary asyncpg && pip install -e '.[gateway]' && uvicorn dalston.gateway.main:app --host 0.0.0.0 --port 8000"
-    volumes:
-      - .:/app
-    ports:
-      - "8000:8000"
-    environment:
-      - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=postgresql+asyncpg://dalston:dalston@postgres:5432/dalston
-      - S3_BUCKET=${S3_BUCKET}
-      - AWS_REGION=${AWS_REGION}
-    depends_on:
-      - redis
-      - postgres
-
-  web:
-    image: node:20-alpine
-    working_dir: /app/web
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
-    volumes:
-      - .:/app
-    ports:
-      - "3000:3000"
-    depends_on:
-      - gateway
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      - POSTGRES_USER=dalston
-      - POSTGRES_PASSWORD=dalston
-      - POSTGRES_DB=dalston
-    volumes:
-      - /data/postgres:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-EOF
-```
+The web console provides a UI for monitoring jobs and engines. The `docker-compose.minimal.yml` created by the bootstrap script already includes the web service.
 
 ### Create Admin API Key
 
@@ -360,13 +247,9 @@ asyncio.run(create_key())
 
 **Save the output key** (starts with `dk_`) - it cannot be retrieved later.
 
-### Start web console
-
-```bash
-sudo docker-compose -f docker-compose.minimal.yml up -d web
-```
-
 ### Access the console
+
+The web console starts automatically with the other services.
 
 1. Open `http://<TAILSCALE_IP>:3000/login` in your browser
 2. Enter the admin API key you created
