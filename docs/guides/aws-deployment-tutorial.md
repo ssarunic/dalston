@@ -261,6 +261,117 @@ Access in browser:
 - API docs: `http://100.x.x.x:8000/docs`
 - Health: `http://100.x.x.x:8000/health`
 
+## 11. Setup Web Console
+
+The web console provides a UI for monitoring jobs and engines.
+
+### Add web service to docker-compose
+
+Update `/data/dalston/docker-compose.minimal.yml` to include the web service:
+
+```bash
+sudo tee -a /data/dalston/docker-compose.minimal.yml << 'EOF'
+
+  web:
+    image: node:20-alpine
+    working_dir: /app/web
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    volumes:
+      - .:/app
+    ports:
+      - "3000:3000"
+    depends_on:
+      - gateway
+EOF
+```
+
+Or create a complete minimal compose file with web:
+
+```bash
+sudo tee /data/dalston/docker-compose.minimal.yml << 'EOF'
+services:
+  gateway:
+    image: python:3.11-slim
+    working_dir: /app
+    command: bash -c "apt-get update && apt-get install -y gcc libpq-dev && pip install psycopg2-binary asyncpg && pip install -e '.[gateway]' && uvicorn dalston.gateway.main:app --host 0.0.0.0 --port 8000"
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql+asyncpg://dalston:dalston@postgres:5432/dalston
+      - S3_BUCKET=${S3_BUCKET}
+      - AWS_REGION=${AWS_REGION}
+    depends_on:
+      - redis
+      - postgres
+
+  web:
+    image: node:20-alpine
+    working_dir: /app/web
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    volumes:
+      - .:/app
+    ports:
+      - "3000:3000"
+    depends_on:
+      - gateway
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=dalston
+      - POSTGRES_PASSWORD=dalston
+      - POSTGRES_DB=dalston
+    volumes:
+      - /data/postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+EOF
+```
+
+### Create Admin API Key
+
+The console requires an admin API key to authenticate:
+
+```bash
+cd /data/dalston
+sudo docker-compose -f docker-compose.minimal.yml exec -T gateway python -c "
+import asyncio
+from dalston.common.redis import get_redis
+from dalston.gateway.services.auth import AuthService, Scope
+from dalston.db.session import DEFAULT_TENANT_ID
+
+async def create_key():
+    redis = await get_redis()
+    auth = AuthService(redis)
+    key, _ = await auth.create_api_key('Console Admin', DEFAULT_TENANT_ID, [Scope.ADMIN])
+    print('API Key:', key)
+
+asyncio.run(create_key())
+"
+```
+
+**Save the output key** (starts with `dk_`) - it cannot be retrieved later.
+
+### Start web console
+
+```bash
+sudo docker-compose -f docker-compose.minimal.yml up -d web
+```
+
+### Access the console
+
+1. Open `http://<TAILSCALE_IP>:3000/login` in your browser
+2. Enter the admin API key you created
+3. You should now see the dashboard
+
 ## Daily Operations
 
 ### Start instance
@@ -335,6 +446,52 @@ Clone manually with a personal access token:
 ```bash
 sudo git clone https://<token>@github.com/YOUR-ORG/dalston.git /data/dalston
 ```
+
+### Git pull conflicts with local changes
+
+If `git pull` fails due to local changes:
+
+```bash
+# Discard local changes to specific file
+sudo git checkout <filename>
+sudo git pull
+
+# Or force reset to match remote
+sudo git fetch origin
+sudo git reset --hard origin/main
+```
+
+### Console shows "Invalid API key"
+
+1. Verify the API key was created successfully by testing directly:
+
+   ```bash
+   curl -v http://localhost:8000/auth/me -H "Authorization: Bearer dk_YOUR_KEY_HERE"
+   ```
+
+2. Make sure you copied the entire key including the `dk_` prefix
+
+3. Restart the gateway to ensure code changes are loaded:
+
+   ```bash
+   sudo docker-compose -f docker-compose.minimal.yml restart gateway
+   ```
+
+### Console API returns 404
+
+The gateway may need to be restarted after code updates:
+
+```bash
+sudo docker-compose -f docker-compose.minimal.yml restart gateway web
+```
+
+### Console pages show errors or empty data
+
+All console endpoints require admin authentication. Make sure you:
+
+1. Created an admin API key
+2. Logged in at `/login` with the key
+3. The browser has the key stored in session
 
 ## Destroy Infrastructure
 
