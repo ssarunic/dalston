@@ -19,7 +19,7 @@ from dalston.gateway.api.v1.realtime import (
     WorkersListResponse,
     management_router,
 )
-from dalston.gateway.services.auth import APIKey, Scope
+from dalston.gateway.services.auth import APIKey, DEFAULT_EXPIRES_AT, Scope
 from dalston.session_router import CapacityInfo, SessionRouter, WorkerStatus
 
 
@@ -44,6 +44,7 @@ class TestRealtimeManagementEndpoints:
             rate_limit=None,
             created_at=datetime.now(timezone.utc),
             last_used_at=None,
+            expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
         )
 

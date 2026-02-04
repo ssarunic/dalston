@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useDashboard } from '@/hooks/useDashboard'
-import type { JobSummary } from '@/api/types'
+import type { ConsoleJobSummary } from '@/api/types'
 
 function StatCard({
   title,
@@ -41,7 +41,7 @@ function StatCard({
   )
 }
 
-function RecentJobRow({ job }: { job: JobSummary }) {
+function RecentJobRow({ job }: { job: ConsoleJobSummary }) {
   const timeAgo = formatTimeAgo(job.created_at)
 
   return (
@@ -75,13 +75,10 @@ function formatTimeAgo(dateStr: string): string {
 }
 
 export function Dashboard() {
-  const { data, isLoading, error } = useDashboard()
+  const { health, jobStats, realtime, recentJobs, isLoading, error } = useDashboard()
 
   // Handle error state - show basic dashboard with error indicator
-  const isHealthy = !error && data?.system.healthy
-  const batch = data?.batch
-  const realtime = data?.realtime
-  const recentJobs = data?.recent_jobs ?? []
+  const isHealthy = !error && health?.status === 'healthy'
 
   return (
     <div className="space-y-6">
@@ -95,28 +92,28 @@ export function Dashboard() {
         <StatCard
           title="System Status"
           value={isLoading ? '...' : isHealthy ? 'Online' : 'Offline'}
-          subtitle={data?.system.version ? `v${data.system.version}` : undefined}
+          subtitle={health?.version ? `v${health.version}` : undefined}
           icon={Activity}
           loading={isLoading}
         />
         <StatCard
           title="Running Jobs"
-          value={batch?.running_jobs ?? 0}
-          subtitle={`${batch?.queued_jobs ?? 0} queued`}
+          value={jobStats?.running ?? 0}
+          subtitle={`${jobStats?.queued ?? 0} queued`}
           icon={Cpu}
           loading={isLoading}
         />
         <StatCard
           title="Realtime Sessions"
-          value={`${realtime?.used_capacity ?? 0}/${realtime?.total_capacity ?? 0}`}
+          value={`${realtime?.active_sessions ?? 0}/${realtime?.total_capacity ?? 0}`}
           subtitle={`${realtime?.worker_count ?? 0} workers`}
           icon={Radio}
           loading={isLoading}
         />
         <StatCard
           title="Completed Today"
-          value={batch?.completed_today ?? 0}
-          subtitle={batch?.failed_today ? `${batch.failed_today} failed` : 'no failures'}
+          value={jobStats?.completed_today ?? 0}
+          subtitle={jobStats?.failed_today ? `${jobStats.failed_today} failed` : 'no failures'}
           icon={CheckCircle}
           loading={isLoading}
         />

@@ -11,7 +11,9 @@ POST /auth/tokens - Create ephemeral session token
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from dalston.gateway.dependencies import (
@@ -61,9 +63,22 @@ class APIKeyResponse(BaseModel):
     rate_limit: int | None
     created_at: datetime
     last_used_at: datetime | None
+    expires_at: datetime
+    is_current: bool = Field(
+        default=False,
+        description="True if this is the key making the current request",
+    )
+    is_revoked: bool = Field(
+        default=False,
+        description="True if this key has been revoked",
+    )
 
     @classmethod
-    def from_api_key(cls, api_key: APIKey) -> "APIKeyResponse":
+    def from_api_key(
+        cls,
+        api_key: APIKey,
+        current_key_id: UUID | None = None,
+    ) -> "APIKeyResponse":
         return cls(
             id=api_key.id,
             prefix=api_key.prefix,
@@ -73,6 +88,9 @@ class APIKeyResponse(BaseModel):
             rate_limit=api_key.rate_limit,
             created_at=api_key.created_at,
             last_used_at=api_key.last_used_at,
+            expires_at=api_key.expires_at,
+            is_current=current_key_id is not None and api_key.id == current_key_id,
+            is_revoked=api_key.is_revoked,
         )
 
 
@@ -87,6 +105,7 @@ class APIKeyCreatedResponse(BaseModel):
     scopes: list[str]
     rate_limit: int | None
     created_at: datetime
+    expires_at: datetime
 
 
 class APIKeyListResponse(BaseModel):
@@ -107,6 +126,7 @@ class CurrentKeyResponse(BaseModel):
     rate_limit: int | None
     created_at: datetime
     last_used_at: datetime | None
+    expires_at: datetime
 
 
 class CreateSessionTokenRequest(BaseModel):
@@ -183,6 +203,7 @@ async def create_api_key(
         scopes=[s.value for s in new_key.scopes],
         rate_limit=new_key.rate_limit,
         created_at=new_key.created_at,
+        expires_at=new_key.expires_at,
     )
 
 
@@ -194,13 +215,23 @@ async def create_api_key(
 )
 async def list_api_keys(
     api_key: RequireAdmin,
+    include_revoked: Annotated[
+        bool,
+        Query(description="Include revoked keys in the list"),
+    ] = False,
     auth_service: AuthService = Depends(get_auth_service),
 ) -> APIKeyListResponse:
     """List all API keys for the current tenant."""
-    keys = await auth_service.list_api_keys(api_key.tenant_id)
+    keys = await auth_service.list_api_keys(
+        api_key.tenant_id,
+        include_revoked=include_revoked,
+    )
 
     return APIKeyListResponse(
-        keys=[APIKeyResponse.from_api_key(k) for k in keys],
+        keys=[
+            APIKeyResponse.from_api_key(k, current_key_id=api_key.id)
+            for k in keys
+        ],
         total=len(keys),
     )
 
@@ -227,7 +258,7 @@ async def get_api_key(
     if target_key.tenant_id != api_key.tenant_id:
         raise HTTPException(status_code=404, detail="API key not found")
 
-    return APIKeyResponse.from_api_key(target_key)
+    return APIKeyResponse.from_api_key(target_key, current_key_id=api_key.id)
 
 
 @router.delete(
@@ -281,6 +312,7 @@ async def get_current_key(
         rate_limit=api_key.rate_limit,
         created_at=api_key.created_at,
         last_used_at=api_key.last_used_at,
+        expires_at=api_key.expires_at,
     )
 
 

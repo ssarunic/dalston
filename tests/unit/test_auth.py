@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from dalston.gateway.services.auth import (
+    DEFAULT_EXPIRES_AT,
     KEY_PREFIX,
     TOKEN_PREFIX,
     APIKey,
@@ -94,6 +95,7 @@ class TestAPIKeyModel:
             rate_limit=100,
             created_at=datetime.now(timezone.utc),
             last_used_at=None,
+            expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
         )
 
@@ -103,6 +105,20 @@ class TestAPIKeyModel:
     def test_is_revoked_true(self, sample_api_key: APIKey):
         sample_api_key.revoked_at = datetime.now(timezone.utc)
         assert sample_api_key.is_revoked is True
+
+    def test_is_expired_false(self, sample_api_key: APIKey):
+        # Default expires_at is distant future
+        assert sample_api_key.is_expired is False
+
+    def test_is_expired_true(self, sample_api_key: APIKey):
+        from datetime import timedelta
+        sample_api_key.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        assert sample_api_key.is_expired is True
+
+    def test_is_expired_future(self, sample_api_key: APIKey):
+        from datetime import timedelta
+        sample_api_key.expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+        assert sample_api_key.is_expired is False
 
     def test_has_scope_direct(self, sample_api_key: APIKey):
         assert sample_api_key.has_scope(Scope.JOBS_READ) is True
@@ -122,8 +138,11 @@ class TestAPIKeyModel:
         assert data["name"] == "Test Key"
         assert data["scopes"] == ["jobs:read", "jobs:write"]
         assert data["rate_limit"] == 100
+        assert data["expires_at"] == DEFAULT_EXPIRES_AT.isoformat()
 
     def test_from_dict(self, sample_api_key: APIKey):
+        from datetime import timedelta
+        custom_expires = datetime.now(timezone.utc) + timedelta(days=90)
         data = {
             "id": str(sample_api_key.id),
             "key_hash": "abc123",
@@ -134,6 +153,7 @@ class TestAPIKeyModel:
             "rate_limit": "100",
             "created_at": sample_api_key.created_at.isoformat(),
             "last_used_at": "",
+            "expires_at": custom_expires.isoformat(),
             "revoked_at": "",
         }
         api_key = APIKey.from_dict(data)
@@ -142,6 +162,25 @@ class TestAPIKeyModel:
         assert api_key.rate_limit == 100
         assert api_key.last_used_at is None
         assert api_key.revoked_at is None
+        assert api_key.expires_at == custom_expires
+
+    def test_from_dict_missing_expires_at_uses_default(self, sample_api_key: APIKey):
+        """Test backward compatibility - old keys without expires_at get default."""
+        data = {
+            "id": str(sample_api_key.id),
+            "key_hash": "abc123",
+            "prefix": "dk_abc1234",
+            "name": "Legacy Key",
+            "tenant_id": str(sample_api_key.tenant_id),
+            "scopes": "jobs:read",
+            "rate_limit": "",
+            "created_at": sample_api_key.created_at.isoformat(),
+            "last_used_at": "",
+            "revoked_at": "",
+            # No expires_at field
+        }
+        api_key = APIKey.from_dict(data)
+        assert api_key.expires_at == DEFAULT_EXPIRES_AT
 
 
 class TestAuthService:
@@ -203,6 +242,34 @@ class TestAuthService:
         )
 
         assert api_key.rate_limit == 60
+
+    @pytest.mark.asyncio
+    async def test_create_api_key_default_expires_at(
+        self, auth_service: AuthService, mock_redis
+    ):
+        """Test that keys created without expires_at use distant future default."""
+        raw_key, api_key = await auth_service.create_api_key(
+            name="Default Expiry Key",
+            tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
+        )
+
+        assert api_key.expires_at == DEFAULT_EXPIRES_AT
+
+    @pytest.mark.asyncio
+    async def test_create_api_key_with_custom_expires_at(
+        self, auth_service: AuthService, mock_redis
+    ):
+        """Test creating key with custom expiration date."""
+        from datetime import timedelta
+        custom_expires = datetime.now(timezone.utc) + timedelta(days=30)
+
+        raw_key, api_key = await auth_service.create_api_key(
+            name="Expiring Key",
+            tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
+            expires_at=custom_expires,
+        )
+
+        assert api_key.expires_at == custom_expires
 
     @pytest.mark.asyncio
     async def test_validate_api_key_valid(
@@ -268,6 +335,33 @@ class TestAuthService:
         assert api_key is None
 
     @pytest.mark.asyncio
+    async def test_validate_api_key_expired(
+        self, auth_service: AuthService, mock_redis
+    ):
+        """Test that expired keys are rejected during validation."""
+        from datetime import timedelta
+        tenant_id = UUID("00000000-0000-0000-0000-000000000000")
+        expired_time = datetime.now(timezone.utc) - timedelta(minutes=1)
+
+        mock_redis.hgetall.return_value = {
+            "id": str(uuid4()),
+            "key_hash": "abc123",
+            "prefix": "dk_abc1234",
+            "name": "Expired Key",
+            "tenant_id": str(tenant_id),
+            "scopes": "jobs:read",
+            "rate_limit": "",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "last_used_at": "",
+            "expires_at": expired_time.isoformat(),
+            "revoked_at": "",
+        }
+
+        api_key = await auth_service.validate_api_key("dk_expired_key")
+
+        assert api_key is None
+
+    @pytest.mark.asyncio
     async def test_check_rate_limit_unlimited(
         self, auth_service: AuthService, mock_redis
     ):
@@ -281,6 +375,7 @@ class TestAuthService:
             rate_limit=None,
             created_at=datetime.now(timezone.utc),
             last_used_at=None,
+            expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
         )
 
@@ -303,6 +398,7 @@ class TestAuthService:
             rate_limit=100,
             created_at=datetime.now(timezone.utc),
             last_used_at=None,
+            expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
         )
 
@@ -327,6 +423,7 @@ class TestAuthService:
             rate_limit=100,
             created_at=datetime.now(timezone.utc),
             last_used_at=None,
+            expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
         )
 
@@ -391,6 +488,126 @@ class TestAuthService:
         has_keys = await auth_service.has_any_api_keys()
 
         assert has_keys is True
+
+    @pytest.mark.asyncio
+    async def test_list_api_keys_excludes_revoked_by_default(
+        self, auth_service: AuthService, mock_redis
+    ):
+        """Test that list_api_keys excludes revoked keys by default."""
+        tenant_id = UUID("00000000-0000-0000-0000-000000000000")
+        key1_id = uuid4()
+        key2_id = uuid4()  # This one will be revoked
+
+        mock_redis.smembers.return_value = {str(key1_id), str(key2_id)}
+
+        # Setup get_api_key_by_id to return different keys
+        async def mock_get_by_id(id_key):
+            return "hash123"
+
+        mock_redis.get.side_effect = mock_get_by_id
+
+        # Track which key_id is being requested
+        call_count = [0]
+
+        async def mock_hgetall(hash_key):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # First key - active
+                return {
+                    "id": str(key1_id),
+                    "key_hash": "hash1",
+                    "prefix": "dk_active",
+                    "name": "Active Key",
+                    "tenant_id": str(tenant_id),
+                    "scopes": "jobs:read",
+                    "rate_limit": "",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "last_used_at": "",
+                    "expires_at": DEFAULT_EXPIRES_AT.isoformat(),
+                    "revoked_at": "",
+                }
+            else:
+                # Second key - revoked
+                return {
+                    "id": str(key2_id),
+                    "key_hash": "hash2",
+                    "prefix": "dk_revoked",
+                    "name": "Revoked Key",
+                    "tenant_id": str(tenant_id),
+                    "scopes": "jobs:read",
+                    "rate_limit": "",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "last_used_at": "",
+                    "expires_at": DEFAULT_EXPIRES_AT.isoformat(),
+                    "revoked_at": datetime.now(timezone.utc).isoformat(),
+                }
+
+        mock_redis.hgetall.side_effect = mock_hgetall
+
+        keys = await auth_service.list_api_keys(tenant_id)
+
+        # Should only return the active key
+        assert len(keys) == 1
+        assert keys[0].name == "Active Key"
+
+    @pytest.mark.asyncio
+    async def test_list_api_keys_includes_revoked_when_requested(
+        self, auth_service: AuthService, mock_redis
+    ):
+        """Test that list_api_keys includes revoked keys when include_revoked=True."""
+        tenant_id = UUID("00000000-0000-0000-0000-000000000000")
+        key1_id = uuid4()
+        key2_id = uuid4()  # This one will be revoked
+
+        mock_redis.smembers.return_value = {str(key1_id), str(key2_id)}
+
+        async def mock_get_by_id(id_key):
+            return "hash123"
+
+        mock_redis.get.side_effect = mock_get_by_id
+
+        call_count = [0]
+
+        async def mock_hgetall(hash_key):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return {
+                    "id": str(key1_id),
+                    "key_hash": "hash1",
+                    "prefix": "dk_active",
+                    "name": "Active Key",
+                    "tenant_id": str(tenant_id),
+                    "scopes": "jobs:read",
+                    "rate_limit": "",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "last_used_at": "",
+                    "expires_at": DEFAULT_EXPIRES_AT.isoformat(),
+                    "revoked_at": "",
+                }
+            else:
+                return {
+                    "id": str(key2_id),
+                    "key_hash": "hash2",
+                    "prefix": "dk_revoked",
+                    "name": "Revoked Key",
+                    "tenant_id": str(tenant_id),
+                    "scopes": "jobs:read",
+                    "rate_limit": "",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "last_used_at": "",
+                    "expires_at": DEFAULT_EXPIRES_AT.isoformat(),
+                    "revoked_at": datetime.now(timezone.utc).isoformat(),
+                }
+
+        mock_redis.hgetall.side_effect = mock_hgetall
+
+        keys = await auth_service.list_api_keys(tenant_id, include_revoked=True)
+
+        # Should return both keys
+        assert len(keys) == 2
+        key_names = {k.name for k in keys}
+        assert "Active Key" in key_names
+        assert "Revoked Key" in key_names
 
 
 class TestMiddlewareHelpers:
@@ -492,6 +709,7 @@ class TestMiddlewareHelpers:
             rate_limit=None,
             created_at=datetime.now(timezone.utc),
             last_used_at=None,
+            expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
         )
 
@@ -514,6 +732,7 @@ class TestMiddlewareHelpers:
             rate_limit=None,
             created_at=datetime.now(timezone.utc),
             last_used_at=None,
+            expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
         )
 
@@ -630,6 +849,7 @@ class TestSessionTokenService:
             rate_limit=100,
             created_at=datetime.now(timezone.utc),
             last_used_at=None,
+            expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
         )
 

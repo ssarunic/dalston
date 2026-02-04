@@ -1,10 +1,13 @@
 import ky, { type KyInstance } from 'ky'
 import type {
+  APIKeyCreatedResponse,
+  APIKeyListResponse,
   ConsoleJobListResponse,
-  DashboardResponse,
+  CreateAPIKeyRequest,
   EnginesResponse,
   HealthResponse,
   JobDetail,
+  JobStatsResponse,
   RealtimeStatusResponse,
   TaskListResponse,
 } from './types'
@@ -49,8 +52,8 @@ export const apiClient = {
   // Health check (no auth required)
   getHealth: () => currentClient.get('health').json<HealthResponse>(),
 
-  // Dashboard (admin required)
-  getDashboard: () => currentClient.get('api/console/dashboard').json<DashboardResponse>(),
+  // Job stats (for dashboard)
+  getJobStats: () => currentClient.get('v1/jobs/stats').json<JobStatsResponse>(),
 
   // Jobs list - use console endpoint (admin required, shows all tenants)
   getJobs: (params: JobListParams = {}) => {
@@ -99,4 +102,17 @@ export const apiClient = {
       return { valid: false, isAdmin: false }
     }
   },
+
+  // API Key management
+  getApiKeys: (includeRevoked = false) => {
+    const searchParams = new URLSearchParams()
+    if (includeRevoked) searchParams.set('include_revoked', 'true')
+    return currentClient.get('auth/keys', { searchParams }).json<APIKeyListResponse>()
+  },
+
+  createApiKey: (request: CreateAPIKeyRequest) =>
+    currentClient.post('auth/keys', { json: request }).json<APIKeyCreatedResponse>(),
+
+  revokeApiKey: (keyId: string) =>
+    currentClient.delete(`auth/keys/${keyId}`),
 }

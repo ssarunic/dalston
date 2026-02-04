@@ -154,6 +154,52 @@ export interface HealthResponse {
   version?: string
 }
 
+// Job stats (for dashboard)
+export interface JobStatsResponse {
+  running: number
+  queued: number
+  completed_today: number
+  failed_today: number
+}
+
+// API Key types
+export interface APIKey {
+  id: string
+  prefix: string
+  name: string
+  tenant_id: string
+  scopes: string[]
+  rate_limit: number | null
+  created_at: string
+  last_used_at: string | null
+  expires_at: string
+  is_current: boolean
+  is_revoked: boolean
+}
+
+export interface APIKeyListResponse {
+  keys: APIKey[]
+  total: number
+}
+
+export interface CreateAPIKeyRequest {
+  name: string
+  scopes?: string[]
+  rate_limit?: number | null
+}
+
+export interface APIKeyCreatedResponse {
+  id: string
+  key: string
+  prefix: string
+  name: string
+  tenant_id: string
+  scopes: string[]
+  rate_limit: number | null
+  created_at: string
+  expires_at: string
+}
+
 // Engine types
 export interface BatchEngine {
   engine_id: string

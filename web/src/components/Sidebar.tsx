@@ -6,6 +6,7 @@ import {
   ListTodo,
   Radio,
   Server,
+  Key,
   LogOut,
 } from 'lucide-react'
 
@@ -14,6 +15,7 @@ const navItems = [
   { to: '/jobs', icon: ListTodo, label: 'Batch Jobs' },
   { to: '/realtime', icon: Radio, label: 'Realtime' },
   { to: '/engines', icon: Server, label: 'Engines' },
+  { to: '/keys', icon: Key, label: 'API Keys' },
 ]
 
 export function Sidebar() {

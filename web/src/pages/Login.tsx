@@ -74,7 +74,7 @@ export function Login() {
             <p>
               Create an admin key with:{' '}
               <code className="bg-muted px-1 py-0.5 rounded">
-                python -m dalston.gateway.cli create-admin-key
+                python -m dalston.gateway.cli create-key --scopes admin
               </code>
             </p>
           </div>

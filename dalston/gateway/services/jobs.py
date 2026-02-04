@@ -1,5 +1,6 @@
 """Job lifecycle management service."""
 
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -8,6 +9,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.models import JobStatus
 from dalston.db.models import JobModel
+
+
+class JobStats:
+    """Job statistics for dashboard."""
+
+    def __init__(
+        self,
+        running: int,
+        queued: int,
+        completed_today: int,
+        failed_today: int,
+    ):
+        self.running = running
+        self.queued = queued
+        self.completed_today = completed_today
+        self.failed_today = failed_today
 
 
 class JobsService:
@@ -143,3 +160,69 @@ class JobsService:
         await db.commit()
         await db.refresh(job)
         return job
+
+    async def get_stats(
+        self,
+        db: AsyncSession,
+        tenant_id: UUID | None = None,
+    ) -> JobStats:
+        """Get job statistics for dashboard.
+
+        Args:
+            db: Database session
+            tenant_id: Optional tenant UUID for isolation (None = all tenants)
+
+        Returns:
+            JobStats with running, queued, completed_today, failed_today counts
+        """
+        # Base filter (optional tenant isolation)
+        def base_filter(query):
+            if tenant_id is not None:
+                return query.where(JobModel.tenant_id == tenant_id)
+            return query
+
+        # Count running jobs
+        running_query = base_filter(
+            select(func.count()).select_from(JobModel).where(
+                JobModel.status == JobStatus.RUNNING.value
+            )
+        )
+        running = (await db.execute(running_query)).scalar() or 0
+
+        # Count queued (pending) jobs
+        queued_query = base_filter(
+            select(func.count()).select_from(JobModel).where(
+                JobModel.status == JobStatus.PENDING.value
+            )
+        )
+        queued = (await db.execute(queued_query)).scalar() or 0
+
+        # Today's start (UTC)
+        today_start = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+
+        # Count completed today
+        completed_query = base_filter(
+            select(func.count()).select_from(JobModel).where(
+                JobModel.status == JobStatus.COMPLETED.value,
+                JobModel.completed_at >= today_start,
+            )
+        )
+        completed_today = (await db.execute(completed_query)).scalar() or 0
+
+        # Count failed today
+        failed_query = base_filter(
+            select(func.count()).select_from(JobModel).where(
+                JobModel.status == JobStatus.FAILED.value,
+                JobModel.completed_at >= today_start,
+            )
+        )
+        failed_today = (await db.execute(failed_query)).scalar() or 0
+
+        return JobStats(
+            running=running,
+            queued=queued,
+            completed_today=completed_today,
+            failed_today=failed_today,
+        )

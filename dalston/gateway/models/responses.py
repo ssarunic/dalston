@@ -70,6 +70,15 @@ class JobListResponse(BaseModel):
     offset: int
 
 
+class JobStatsResponse(BaseModel):
+    """Response for GET /v1/jobs/stats."""
+
+    running: int
+    queued: int
+    completed_today: int
+    failed_today: int
+
+
 class ErrorDetail(BaseModel):
     """Error detail following API.md spec."""
 

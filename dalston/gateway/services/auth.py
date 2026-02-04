@@ -38,6 +38,9 @@ REDIS_SESSION_TOKEN = "dalston:session_token:{hash}"
 # Rate limit window in seconds
 RATE_LIMIT_WINDOW = 60
 
+# Default expiration date (distant future - we avoid nulls)
+DEFAULT_EXPIRES_AT = datetime(2099, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+
 
 class Scope(str, Enum):
     """API key permission scopes."""
@@ -66,12 +69,18 @@ class APIKey:
     rate_limit: int | None  # Requests per minute, None = unlimited
     created_at: datetime
     last_used_at: datetime | None
+    expires_at: datetime  # Expiration date (default: 2099-12-31)
     revoked_at: datetime | None
 
     @property
     def is_revoked(self) -> bool:
         """Check if key has been revoked."""
         return self.revoked_at is not None
+
+    @property
+    def is_expired(self) -> bool:
+        """Check if key has expired."""
+        return datetime.now(timezone.utc) > self.expires_at
 
     def has_scope(self, scope: Scope) -> bool:
         """Check if key has the specified scope or admin scope."""
@@ -89,12 +98,20 @@ class APIKey:
             "rate_limit": self.rate_limit if self.rate_limit is not None else "",
             "created_at": self.created_at.isoformat(),
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else "",
+            "expires_at": self.expires_at.isoformat(),
             "revoked_at": self.revoked_at.isoformat() if self.revoked_at else "",
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> APIKey:
         """Create from dictionary (Redis storage)."""
+        # Handle expires_at with fallback for existing keys without this field
+        expires_at_str = data.get("expires_at")
+        if expires_at_str:
+            expires_at = datetime.fromisoformat(expires_at_str)
+        else:
+            expires_at = DEFAULT_EXPIRES_AT
+
         return cls(
             id=UUID(data["id"]),
             key_hash=data["key_hash"],
@@ -109,6 +126,7 @@ class APIKey:
                 if data.get("last_used_at")
                 else None
             ),
+            expires_at=expires_at,
             revoked_at=(
                 datetime.fromisoformat(data["revoked_at"])
                 if data.get("revoked_at")
@@ -228,6 +246,7 @@ class AuthService:
         tenant_id: UUID,
         scopes: list[Scope] | None = None,
         rate_limit: int | None = None,
+        expires_at: datetime | None = None,
     ) -> tuple[str, APIKey]:
         """Create a new API key.
 
@@ -236,6 +255,7 @@ class AuthService:
             tenant_id: Tenant UUID for isolation
             scopes: Permission scopes (defaults to DEFAULT_SCOPES)
             rate_limit: Requests per minute limit (None = unlimited)
+            expires_at: Expiration date (defaults to DEFAULT_EXPIRES_AT)
 
         Returns:
             Tuple of (raw_key, APIKey object)
@@ -243,6 +263,8 @@ class AuthService:
         """
         if scopes is None:
             scopes = list(DEFAULT_SCOPES)
+        if expires_at is None:
+            expires_at = DEFAULT_EXPIRES_AT
 
         # Generate key
         raw_key = generate_api_key()
@@ -260,6 +282,7 @@ class AuthService:
             rate_limit=rate_limit,
             created_at=datetime.now(timezone.utc),
             last_used_at=None,
+            expires_at=expires_at,
             revoked_at=None,
         )
 
@@ -294,7 +317,7 @@ class AuthService:
             raw_key: Raw API key string
 
         Returns:
-            APIKey object if valid, None if invalid or revoked
+            APIKey object if valid, None if invalid, revoked, or expired
         """
         if not raw_key or not raw_key.startswith(KEY_PREFIX):
             return None
@@ -309,8 +332,8 @@ class AuthService:
 
         api_key = APIKey.from_dict(data)
 
-        # Check if revoked
-        if api_key.is_revoked:
+        # Check if revoked or expired
+        if api_key.is_revoked or api_key.is_expired:
             return None
 
         # Update last_used_at (fire and forget)
@@ -343,14 +366,19 @@ class AuthService:
 
         return APIKey.from_dict(data)
 
-    async def list_api_keys(self, tenant_id: UUID) -> list[APIKey]:
+    async def list_api_keys(
+        self,
+        tenant_id: UUID,
+        include_revoked: bool = False,
+    ) -> list[APIKey]:
         """List all API keys for a tenant.
 
         Args:
             tenant_id: Tenant UUID
+            include_revoked: If True, include revoked keys in the list
 
         Returns:
-            List of APIKey objects (excluding revoked)
+            List of APIKey objects
         """
         tenant_key = REDIS_TENANT_KEYS.format(tenant_id=tenant_id)
         key_ids = await self.redis.smembers(tenant_key)
@@ -358,8 +386,9 @@ class AuthService:
         keys = []
         for key_id in key_ids:
             api_key = await self.get_api_key_by_id(UUID(key_id))
-            if api_key and not api_key.is_revoked:
-                keys.append(api_key)
+            if api_key:
+                if include_revoked or not api_key.is_revoked:
+                    keys.append(api_key)
 
         # Sort by created_at descending
         keys.sort(key=lambda k: k.created_at, reverse=True)

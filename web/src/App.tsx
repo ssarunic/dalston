@@ -9,6 +9,7 @@ import { BatchJobs } from '@/pages/BatchJobs'
 import { JobDetail } from '@/pages/JobDetail'
 import { RealtimeSessions } from '@/pages/RealtimeSessions'
 import { Engines } from '@/pages/Engines'
+import { ApiKeys } from '@/pages/ApiKeys'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -40,6 +41,7 @@ export default function App() {
                       <Route path="/jobs/:jobId" element={<JobDetail />} />
                       <Route path="/realtime" element={<RealtimeSessions />} />
                       <Route path="/engines" element={<Engines />} />
+                      <Route path="/keys" element={<ApiKeys />} />
                     </Routes>
                   </Layout>
                 </ProtectedRoute>

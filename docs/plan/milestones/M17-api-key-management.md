@@ -20,14 +20,14 @@
 │                       API KEY MANAGEMENT CONSOLE                             │
 │                                                                              │
 │  ┌────────────────────────────────────────────────────────────────────────┐ │
-│  │  API Keys Page                                                         │ │
+│  │  API Keys Page                                      [Show Revoked ○]   │ │
 │  │                                                          [+ Create Key] │ │
 │  │  ┌──────────────────────────────────────────────────────────────────┐  │ │
 │  │  │ Prefix      Name           Scopes              Created    Actions │  │ │
 │  │  ├──────────────────────────────────────────────────────────────────┤  │ │
 │  │  │ dk_abc123.. Production API jobs:read,write    2 days ago  [Revoke]│  │ │
 │  │  │ dk_xyz789.. CI Pipeline    jobs:write         1 week ago  [Revoke]│  │ │
-│  │  │ dk_def456.. Admin Console  admin              1 month ago    -    │  │ │
+│  │  │ dk_def456.. Admin Console  admin              1 month ago [Revoke]│  │ │
 │  │  └──────────────────────────────────────────────────────────────────┘  │ │
 │  └────────────────────────────────────────────────────────────────────────┘ │
 │                                                                              │
@@ -42,16 +42,63 @@ Security Model:
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │  • Raw key shown ONCE at creation (never stored/retrievable)                 │
 │  • Keys displayed as masked prefix: "dk_abc1234..."                          │
-│  • Cannot revoke the key currently authenticating the request                │
+│  • Server prevents revoking the key used in current request (400 error)      │
+│  • Scopes are immutable (create new key for different scopes)                │
 │  • Admin scope required for all key management operations                    │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
+## Design Decisions
+
+### 1. Use Existing `/auth/keys` Endpoints
+
+The web console uses the same `/auth/keys` endpoints as CLI and SDK clients. No separate `/api/console/keys` endpoints - the console is just another API client.
+
+### 2. Single CLI Command
+
+One `create-key` command with `--scopes` option instead of separate `create-admin-key`:
+
+```bash
+# Regular key (default scopes: jobs:read, jobs:write, realtime)
+python -m dalston.gateway.cli create-key --name "My Key"
+
+# Admin key
+python -m dalston.gateway.cli create-key --name "Admin" --scopes admin
+
+# Custom scopes
+python -m dalston.gateway.cli create-key --name "Read Only" --scopes jobs:read
+```
+
+### 3. Server-Side Self-Revocation Check
+
+- Revoke button always enabled in UI
+- Server returns 400 error if user tries to revoke their current key
+- No frontend detection needed - just show error toast on failure
+
+### 4. No Key Rename Feature
+
+If users want to "rename" a key:
+1. Create new key with desired name
+2. Update systems to use new key
+3. Revoke old key
+
+This provides better audit trail and ensures systems are updated.
+
+### 5. Primitive Endpoints Over Aggregation
+
+Dashboard uses primitive endpoints instead of aggregated `/api/console/dashboard`:
+- `GET /health` - System status
+- `GET /v1/realtime/status` - Realtime capacity
+- `GET /v1/audio/transcriptions?limit=5` - Recent jobs
+- `GET /v1/jobs/stats` - Batch statistics (new)
+
+---
+
 ## Data Model
 
-### Existing: APIKey (from M11)
+### APIKey (updated from M11)
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -64,9 +111,10 @@ Security Model:
 | `rate_limit` | int \| null | Requests/minute (null = unlimited) |
 | `created_at` | datetime | Creation timestamp |
 | `last_used_at` | datetime \| null | Last API call |
+| `expires_at` | datetime | Expiration (default: 2099-12-31T23:59:59Z) |
 | `revoked_at` | datetime \| null | Revocation timestamp |
 
-### New: API Response Models
+### API Response Models (existing in auth.py)
 
 ```python
 class APIKeyResponse(BaseModel):
@@ -78,47 +126,72 @@ class APIKeyResponse(BaseModel):
     rate_limit: int | None
     created_at: datetime
     last_used_at: datetime | None
-
-class APIKeyCreateRequest(BaseModel):
-    """Request to create a new API key."""
-    name: str
-    scopes: list[str]
-    rate_limit: int | None = None
-
-class APIKeyCreateResponse(BaseModel):
-    """Response after creating key (includes raw key ONCE)."""
-    id: UUID
-    key: str  # Full raw key - only returned here!
-    prefix: str
-    name: str
-    scopes: list[str]
-
-class APIKeyUpdateRequest(BaseModel):
-    """Request to update key metadata."""
-    name: str
+    expires_at: datetime
+    is_current: bool  # True if this is the requesting key
 ```
 
 ---
 
 ## Steps
 
-### 17.1: Backend - List Keys Endpoint
+### 17.1: Backend - Add Job Stats Endpoint
 
 **Deliverables:**
 
-- `GET /api/console/keys` - List all API keys for tenant
-- Returns masked keys (prefix only)
-- Excludes revoked keys by default
-- Optional `?include_revoked=true` parameter
+- `GET /v1/jobs/stats` - Returns job counts for dashboard
+- Counts: running, queued, completed_today, failed_today
 
 **Files:**
 
-- `dalston/gateway/api/console.py` (modify)
+- `dalston/gateway/api/transcriptions.py` (modify)
 
 **API:**
 
 ```
-GET /api/console/keys
+GET /v1/jobs/stats
+Authorization: Bearer dk_...
+
+Response 200:
+{
+  "running": 3,
+  "queued": 12,
+  "completed_today": 47,
+  "failed_today": 2
+}
+```
+
+---
+
+### 17.2: Backend - Update AuthService
+
+**Deliverables:**
+
+- Add `expires_at` field to APIKey with default `2099-12-31T23:59:59Z`
+- Add `include_revoked` parameter to `list_api_keys()`
+- Update Redis storage/retrieval for new field
+
+**Files:**
+
+- `dalston/gateway/services/auth.py` (modify)
+
+---
+
+### 17.3: Backend - Update Auth Endpoints
+
+**Deliverables:**
+
+- Add `include_revoked` query param to `GET /auth/keys`
+- Add `is_current` field to `APIKeyResponse`
+- Existing self-revocation check already returns 400
+
+**Files:**
+
+- `dalston/gateway/api/auth.py` (modify)
+
+**API:**
+
+```
+GET /auth/keys?include_revoked=true
 Authorization: Bearer dk_...
 
 Response 200:
@@ -131,125 +204,66 @@ Response 200:
       "scopes": ["jobs:read", "jobs:write"],
       "rate_limit": null,
       "created_at": "2024-01-15T10:00:00Z",
-      "last_used_at": "2024-01-20T15:30:00Z"
+      "last_used_at": "2024-01-20T15:30:00Z",
+      "expires_at": "2099-12-31T23:59:59Z",
+      "is_current": false
     }
-  ]
+  ],
+  "total": 1
 }
 ```
 
 ---
 
-### 17.2: Backend - Create Key Endpoint
+### 17.4: Backend - Consolidate CLI
 
 **Deliverables:**
 
-- `POST /api/console/keys` - Create new API key
-- Validate scopes against allowed values
-- Return raw key ONCE in response
-- Log key creation for audit
+- Modify `create-key` to accept `--scopes` option
+- Remove `create-admin-key` command
+- Default scopes: `jobs:read,jobs:write,realtime`
 
 **Files:**
 
-- `dalston/gateway/api/console.py` (modify)
+- `dalston/gateway/cli.py` (modify)
 
-**API:**
+**CLI:**
 
-```
-POST /api/console/keys
-Authorization: Bearer dk_...
-Content-Type: application/json
-
-{
-  "name": "CI Pipeline Key",
-  "scopes": ["jobs:read", "jobs:write"],
-  "rate_limit": 100
-}
-
-Response 201:
-{
-  "id": "uuid",
-  "key": "dk_aBcDeFgHiJkLmNoPqRsTuVwXyZ123456789abcdef",
-  "prefix": "dk_aBcDeFg...",
-  "name": "CI Pipeline Key",
-  "scopes": ["jobs:read", "jobs:write"]
-}
+```bash
+python -m dalston.gateway.cli create-key --name "My Key" --scopes admin
 ```
 
 ---
 
-### 17.3: Backend - Revoke Key Endpoint
+### 17.5: Frontend - Refactor Dashboard
 
 **Deliverables:**
 
-- `DELETE /api/console/keys/{id}` - Revoke (soft-delete) a key
-- Prevent revoking the key used in current request
-- Return 404 if key not found or already revoked
+- Remove dependency on `/api/console/dashboard`
+- Each widget fetches its own data:
+  - System status from `/health`
+  - Batch stats from `/v1/jobs/stats`
+  - Realtime capacity from `/v1/realtime/status`
+  - Recent jobs from existing jobs endpoint
 
 **Files:**
 
-- `dalston/gateway/api/console.py` (modify)
-
-**API:**
-
-```
-DELETE /api/console/keys/{id}
-Authorization: Bearer dk_...
-
-Response 204: (no content)
-
-Response 400:
-{"detail": "Cannot revoke the key you are currently using"}
-
-Response 404:
-{"detail": "API key not found"}
-```
+- `web/src/pages/Dashboard.tsx` (modify)
+- `web/src/hooks/useDashboard.ts` (modify or remove)
+- `web/src/api/client.ts` (modify)
+- `web/src/api/types.ts` (modify)
 
 ---
 
-### 17.4: Backend - Update Key Endpoint
-
-**Deliverables:**
-
-- `PATCH /api/console/keys/{id}` - Update key name
-- Only name is updatable (scopes are immutable for security)
-- Add `update_api_key_name()` to AuthService
-
-**Files:**
-
-- `dalston/gateway/api/console.py` (modify)
-- `dalston/gateway/services/auth.py` (modify)
-
-**API:**
-
-```
-PATCH /api/console/keys/{id}
-Authorization: Bearer dk_...
-Content-Type: application/json
-
-{
-  "name": "Renamed Key"
-}
-
-Response 200:
-{
-  "id": "uuid",
-  "prefix": "dk_abc123...",
-  "name": "Renamed Key",
-  "scopes": ["jobs:read", "jobs:write"],
-  ...
-}
-```
-
----
-
-### 17.5: Frontend - API Keys Page
+### 17.6: Frontend - API Keys Page
 
 **Deliverables:**
 
 - New page at `/keys` listing all API keys
 - Table with columns: Prefix, Name, Scopes, Created, Last Used, Actions
 - Scope badges with color coding
-- "Revoke" button (disabled for current key)
+- "Revoke" button on all keys (server prevents self-revoke)
+- Toggle switch: "Show revoked" (hidden by default)
 - Empty state when no keys
 
 **Files:**
@@ -260,7 +274,7 @@ Response 200:
 
 ---
 
-### 17.6: Frontend - Create Key Dialog
+### 17.7: Frontend - Create Key Dialog
 
 **Deliverables:**
 
@@ -273,7 +287,6 @@ Response 200:
 
 **Files:**
 
-- `web/src/pages/ApiKeys.tsx` (modify)
 - `web/src/components/CreateKeyDialog.tsx` (new)
 
 **Scope Options:**
@@ -284,11 +297,11 @@ Response 200:
 | `jobs:write` | Create Jobs | Submit transcription jobs |
 | `realtime` | Real-time | Connect to WebSocket streams |
 | `webhooks` | Webhooks | Manage webhook configurations |
-| `admin` | Admin Access | Full console access (⚠️ grants all permissions) |
+| `admin` | Admin Access | Full console access (grants all permissions) |
 
 ---
 
-### 17.7: Frontend - Key Created Modal
+### 17.8: Frontend - Key Created Modal
 
 **Deliverables:**
 
@@ -296,26 +309,10 @@ Response 200:
 - Display full key with copy button
 - Warning: "This key will only be shown once"
 - Key hidden until user clicks "Show"
-- Close button disabled until key copied (optional UX)
 
 **Files:**
 
 - `web/src/components/KeyCreatedModal.tsx` (new)
-
----
-
-### 17.8: Frontend - Revoke Confirmation
-
-**Deliverables:**
-
-- Confirmation dialog before revoke
-- Show key name and prefix
-- Warning about immediate effect
-- Disable revoke for currently-used key with tooltip
-
-**Files:**
-
-- `web/src/pages/ApiKeys.tsx` (modify)
 
 ---
 
@@ -330,22 +327,36 @@ Response 200:
 **Files:**
 
 - `web/src/components/Sidebar.tsx` (modify)
+- `web/src/App.tsx` (modify)
 
 ---
 
-### 17.10: Tests
+### 17.10: Backend - Remove Aggregated Dashboard Endpoint
 
 **Deliverables:**
 
-- Unit tests for new AuthService methods
-- Integration tests for API endpoints
-- Test self-revocation prevention
-- Test scope validation
+- Remove or deprecate `GET /api/console/dashboard`
+- Keep other console endpoints that provide admin-specific views
 
 **Files:**
 
-- `tests/unit/test_auth_service.py` (modify)
-- `tests/integration/test_console_api.py` (modify)
+- `dalston/gateway/api/console.py` (modify)
+
+---
+
+### 17.11: Tests
+
+**Deliverables:**
+
+- Unit tests for updated AuthService methods
+- Integration tests for `/v1/jobs/stats`
+- Test `include_revoked` parameter
+- Test `is_current` flag in response
+
+**Files:**
+
+- `tests/unit/test_auth.py` (modify)
+- `tests/integration/test_api.py` (modify)
 
 ---
 
@@ -365,27 +376,33 @@ REDIS_URL=redis://localhost:6379
 ### List Keys
 
 ```bash
-# Create test keys via CLI first
-python -m dalston.gateway.cli create-key --name "Test Key 1"
-python -m dalston.gateway.cli create-admin-key --name "Admin Key"
-
-# List via API
+# List active keys
 curl -H "Authorization: Bearer $ADMIN_KEY" \
-  http://localhost:8000/api/console/keys
+  http://localhost:8000/auth/keys
 
-# Expected: Array of key objects with masked prefixes
+# Include revoked keys
+curl -H "Authorization: Bearer $ADMIN_KEY" \
+  "http://localhost:8000/auth/keys?include_revoked=true"
 ```
 
-### Create Key via Console
+### Create Key via CLI
+
+```bash
+# Regular key
+python -m dalston.gateway.cli create-key --name "Test Key"
+
+# Admin key
+python -m dalston.gateway.cli create-key --name "Admin" --scopes admin
+```
+
+### Create Key via API
 
 ```bash
 curl -X POST \
   -H "Authorization: Bearer $ADMIN_KEY" \
   -H "Content-Type: application/json" \
   -d '{"name": "New Key", "scopes": ["jobs:read"]}' \
-  http://localhost:8000/api/console/keys
-
-# Expected: Response includes full raw key (only time it's shown)
+  http://localhost:8000/auth/keys
 ```
 
 ### Revoke Key
@@ -393,14 +410,9 @@ curl -X POST \
 ```bash
 curl -X DELETE \
   -H "Authorization: Bearer $ADMIN_KEY" \
-  http://localhost:8000/api/console/keys/$KEY_ID
+  http://localhost:8000/auth/keys/$KEY_ID
 
 # Expected: 204 No Content
-
-# Verify revoked key no longer works
-curl -H "Authorization: Bearer $REVOKED_KEY" \
-  http://localhost:8000/v1/audio/transcriptions
-# Expected: 401 Unauthorized
 ```
 
 ### Self-Revocation Prevention
@@ -409,43 +421,102 @@ curl -H "Authorization: Bearer $REVOKED_KEY" \
 # Try to revoke the key you're using
 curl -X DELETE \
   -H "Authorization: Bearer $ADMIN_KEY" \
-  http://localhost:8000/api/console/keys/$ADMIN_KEY_ID
+  http://localhost:8000/auth/keys/$ADMIN_KEY_ID
 
 # Expected: 400 Bad Request
-# {"detail": "Cannot revoke the key you are currently using"}
+# {"detail": "Cannot revoke your own API key"}
+```
+
+### Job Stats
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_KEY" \
+  http://localhost:8000/v1/jobs/stats
+
+# Expected: {"running": 0, "queued": 0, "completed_today": 5, "failed_today": 0}
 ```
 
 ---
 
 ## Checkpoint
 
-- [ ] `GET /api/console/keys` returns list of masked keys
-- [ ] `POST /api/console/keys` creates key and returns raw key once
-- [ ] `DELETE /api/console/keys/{id}` revokes key
-- [ ] `PATCH /api/console/keys/{id}` renames key
-- [ ] Cannot revoke currently-used key
-- [ ] API Keys page shows table of keys
-- [ ] Create dialog with scope checkboxes works
-- [ ] Key shown once in modal with copy button
-- [ ] Revoke confirmation dialog works
-- [ ] Navigation includes API Keys link
-- [ ] Tests pass
+- [x] `GET /v1/jobs/stats` returns batch statistics
+- [x] `GET /auth/keys` supports `include_revoked` parameter
+- [x] `GET /auth/keys` returns `is_current` flag on each key
+- [x] `APIKey` model includes `expires_at` field
+- [x] CLI `create-key` accepts `--scopes` option
+- [x] `create-admin-key` command removed
+- [x] Dashboard uses primitive endpoints
+- [x] API Keys page shows table of keys
+- [x] "Show revoked" toggle works
+- [x] Create dialog with scope checkboxes works
+- [x] Key shown once in modal with copy button
+- [x] Revoke shows error toast for current key
+- [x] Navigation includes API Keys link
+- [x] Tests pass
+
+---
+
+## Implementation Summary
+
+**Completed:** February 2026
+
+### Backend Changes
+
+| File | Changes |
+| ---- | ------- |
+| `dalston/gateway/services/auth.py` | Added `DEFAULT_EXPIRES_AT` (2099-12-31), `expires_at` field to `APIKey`, `is_expired` property, `include_revoked` param to `list_api_keys()` |
+| `dalston/gateway/services/jobs.py` | Added `JobStats` dataclass and `get_stats()` method |
+| `dalston/gateway/api/v1/jobs.py` | New file with `GET /v1/jobs/stats` endpoint |
+| `dalston/gateway/api/auth.py` | Added `include_revoked` query param, `is_current` and `expires_at` to responses |
+| `dalston/gateway/cli.py` | Consolidated to single `create-key` command with `--scopes` option |
+
+### Frontend Changes
+
+| File | Changes |
+| ---- | ------- |
+| `web/src/pages/ApiKeys.tsx` | New API Keys management page with table, revoke dialog |
+| `web/src/components/CreateKeyDialog.tsx` | Modal for creating keys with scope selection |
+| `web/src/components/KeyCreatedModal.tsx` | Shows key once with copy button and clipboard fallback |
+| `web/src/components/ui/dialog.tsx` | Accessible dialog component (focus trap, escape key, ARIA) |
+| `web/src/hooks/useDashboard.ts` | Refactored to use `useQueries` with primitive endpoints |
+| `web/src/hooks/useApiKeys.ts` | Hooks for API key CRUD operations |
+| `web/src/api/client.ts` | Added `getJobStats`, `getApiKeys`, `createApiKey`, `revokeApiKey` |
+| `web/src/api/types.ts` | Added `APIKey`, `APIKeyCreatedResponse`, `JobStatsResponse` types |
+
+### Test Coverage
+
+| File | Tests Added |
+| ---- | ----------- |
+| `tests/unit/test_auth.py` | `is_expired`, `expires_at` serialization, backward compatibility, `include_revoked` filter |
+| `tests/unit/test_jobs_service.py` | New file testing `JobStats` and `get_stats()` |
+| `tests/integration/test_batch_api.py` | New file testing `/v1/jobs/stats` endpoint |
+| `tests/integration/test_auth_api.py` | New file testing `/auth/keys` CRUD, `is_current`, self-revocation prevention |
+
+Total: 289 tests passing
+
+### Code Quality Improvements (from review)
+
+- Fixed import ordering in `services/jobs.py` (stdlib before third-party)
+- Added clipboard fallback for older browsers in `KeyCreatedModal`
+- Created accessible `Dialog` component with focus management and keyboard support
+- Removed unused `APIKey` import from `api/client.ts`
 
 ---
 
 ## Security Considerations
 
 1. **Key Exposure**: Raw keys only returned at creation, never retrievable after
-2. **Self-Revocation**: Prevents accidental lockout by blocking revoke of current key
+2. **Self-Revocation**: Server prevents revoking current key (400 error)
 3. **Scope Immutability**: Cannot modify scopes after creation (create new key instead)
 4. **Admin Required**: All key management endpoints require admin scope
-5. **Audit Trail**: Consider logging key create/revoke events (future enhancement)
+5. **Expiration**: Keys have `expires_at` field for future expiration support
 
 ---
 
 ## Future Enhancements
 
-- **Key Expiration**: Optional expiry date for temporary keys
+- **Key Expiration**: Allow setting custom expiration dates
 - **Usage Analytics**: Show request counts per key
 - **Audit Log**: Track who created/revoked keys and when
 - **Key Rotation**: Generate new key with same scopes, revoke old
