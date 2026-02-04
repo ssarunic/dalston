@@ -15,17 +15,11 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
-      - name: Set up Python
-        run: uv python install 3.11
-
-      - name: Install dependencies
-        run: uv pip install --system ruff
-
       - name: Lint
-        run: ruff check .
+        run: uvx ruff@0.9.4 check .
 
       - name: Format check
-        run: ruff format --check .
+        run: uvx ruff@0.9.4 format --check .
 
   test:
     runs-on: ubuntu-latest
@@ -44,9 +38,9 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv pip install --system -e ".[gateway,orchestrator,dev]"
+        run: uv venv && uv pip install -e ".[gateway,orchestrator,dev]"
 
       - name: Run tests
-        run: pytest
+        run: uv run pytest
         env:
           REDIS_URL: redis://localhost:6379
