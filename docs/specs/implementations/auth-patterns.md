@@ -19,6 +19,7 @@ def hash_api_key(key: str) -> str:
 ```
 
 **Storage in Redis:**
+
 - `dalston:apikeys:{hash}` → Full API key JSON
 - `dalston:apikeys:id:{id}` → Hash (for management lookups)
 - `dalston:apikeys:tenant:{tenant_id}` → Set of key IDs
@@ -159,6 +160,7 @@ async def stream_transcription(
 ```
 
 **WebSocket close codes:**
+
 - `4001` - Invalid API key
 - `4003` - Missing required scope
 - `4029` - Rate limit exceeded

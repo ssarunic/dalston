@@ -39,7 +39,12 @@ Environment variables:
 """
 
 # Light imports (no heavy dependencies like numpy, torch, websockets)
-from dalston.realtime_sdk.assembler import Segment, TranscribeResult, TranscriptAssembler, Word
+from dalston.realtime_sdk.assembler import (
+    Segment,
+    TranscribeResult,
+    TranscriptAssembler,
+    Word,
+)
 from dalston.realtime_sdk.protocol import (
     ErrorCode,
     ErrorMessage,
@@ -64,33 +69,43 @@ def __getattr__(name: str):
     # Heavy imports that require numpy, torch, websockets, redis
     if name == "RealtimeEngine":
         from dalston.realtime_sdk.base import RealtimeEngine
+
         return RealtimeEngine
     elif name == "WorkerRegistry":
         from dalston.realtime_sdk.registry import WorkerRegistry
+
         return WorkerRegistry
     elif name == "WorkerInfo":
         from dalston.realtime_sdk.registry import WorkerInfo
+
         return WorkerInfo
     elif name == "SessionHandler":
         from dalston.realtime_sdk.session import SessionHandler
+
         return SessionHandler
     elif name == "SessionConfig":
         from dalston.realtime_sdk.session import SessionConfig
+
         return SessionConfig
     elif name == "AudioBuffer":
         from dalston.realtime_sdk.session import AudioBuffer
+
         return AudioBuffer
     elif name == "VADProcessor":
         from dalston.realtime_sdk.vad import VADProcessor
+
         return VADProcessor
     elif name == "VADConfig":
         from dalston.realtime_sdk.vad import VADConfig
+
         return VADConfig
     elif name == "VADResult":
         from dalston.realtime_sdk.vad import VADResult
+
         return VADResult
     elif name == "VADState":
         from dalston.realtime_sdk.vad import VADState
+
         return VADState
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

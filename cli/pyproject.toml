@@ -44,6 +44,7 @@ line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

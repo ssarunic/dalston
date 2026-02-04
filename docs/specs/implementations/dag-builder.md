@@ -64,6 +64,7 @@ def build_task_dag(job: Job) -> list[Task]:
 ## Optional/Parallel Enrichment
 
 Enrichment tasks are:
+
 - **Optional** (`required=False`): Don't fail job if they fail
 - **Parallel**: Can run alongside each other
 - **Post-core**: Wait for core pipeline to complete
@@ -178,22 +179,26 @@ def build_task_dag(job: Job) -> list[Task]:
 ## Example DAG Shapes
 
 ### Minimal (transcribe only)
+
 ```
 prepare → transcribe → merge
 ```
 
 ### With alignment
+
 ```
 prepare → transcribe → align → merge
 ```
 
 ### With diarization (parallel)
+
 ```
 prepare → transcribe → align ──┐
     └──→ diarize ──────────────┴─→ merge
 ```
 
 ### Full enrichment
+
 ```
 prepare → transcribe → align ──┬─→ emotions ──┐
     │                          │              │
@@ -215,6 +220,7 @@ PENDING ──→ READY ──→ RUNNING ──→ COMPLETED
 ```
 
 **Transition rules:**
+
 1. Task moves `PENDING` → `READY` when all dependencies are `COMPLETED`
 2. `READY` tasks are pushed to engine-specific Redis queues
 3. Engine pulls task, moves to `RUNNING`, processes, moves to `COMPLETED`

@@ -72,7 +72,9 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
     # Extract engine overrides from parameters (for testing/flexibility)
     engines = {
         "prepare": parameters.get("engine_prepare", DEFAULT_ENGINES["prepare"]),
-        "transcribe": parameters.get("engine_transcribe", DEFAULT_ENGINES["transcribe"]),
+        "transcribe": parameters.get(
+            "engine_transcribe", DEFAULT_ENGINES["transcribe"]
+        ),
         "align": parameters.get("engine_align", DEFAULT_ENGINES["align"]),
         "diarize": parameters.get("engine_diarize", DEFAULT_ENGINES["diarize"]),
         "merge": parameters.get("engine_merge", DEFAULT_ENGINES["merge"]),
@@ -112,9 +114,15 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
         diarize_config["min_speakers"] = parameters["num_speakers"]
         diarize_config["max_speakers"] = parameters["num_speakers"]
     else:
-        if parameters.get("min_speakers") is not None and parameters["min_speakers"] > 0:
+        if (
+            parameters.get("min_speakers") is not None
+            and parameters["min_speakers"] > 0
+        ):
             diarize_config["min_speakers"] = parameters["min_speakers"]
-        if parameters.get("max_speakers") is not None and parameters["max_speakers"] > 0:
+        if (
+            parameters.get("max_speakers") is not None
+            and parameters["max_speakers"] > 0
+        ):
             diarize_config["max_speakers"] = parameters["max_speakers"]
 
     # Exclusive mode for pyannote 4.0+ (one speaker per segment)
@@ -125,8 +133,12 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
     transcribe_config = {
         "model": parameters.get("model", DEFAULT_TRANSCRIBE_CONFIG["model"]),
         "language": parameters.get("language", DEFAULT_TRANSCRIBE_CONFIG["language"]),
-        "beam_size": parameters.get("beam_size", DEFAULT_TRANSCRIBE_CONFIG["beam_size"]),
-        "vad_filter": parameters.get("vad_filter", DEFAULT_TRANSCRIBE_CONFIG["vad_filter"]),
+        "beam_size": parameters.get(
+            "beam_size", DEFAULT_TRANSCRIBE_CONFIG["beam_size"]
+        ),
+        "vad_filter": parameters.get(
+            "vad_filter", DEFAULT_TRANSCRIBE_CONFIG["vad_filter"]
+        ),
     }
 
     tasks = []

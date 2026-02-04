@@ -7,8 +7,7 @@ the canonical transcript.json file for the Gateway to read.
 
 import os
 
-from dalston.engine_sdk import Engine, TaskInput, TaskOutput
-from dalston.engine_sdk import io
+from dalston.engine_sdk import Engine, TaskInput, TaskOutput, io
 
 
 class StubMergerEngine(Engine):

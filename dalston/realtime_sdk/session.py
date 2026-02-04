@@ -7,15 +7,18 @@ audio buffering, VAD, ASR, and transcript assembly.
 from __future__ import annotations
 
 import audioop
-import json
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Awaitable
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from dalston.realtime_sdk.assembler import Segment, TranscribeResult, TranscriptAssembler, Word
+from dalston.realtime_sdk.assembler import (
+    TranscribeResult,
+    TranscriptAssembler,
+)
 from dalston.realtime_sdk.protocol import (
     ConfigUpdateMessage,
     EndMessage,
@@ -239,9 +242,7 @@ class SessionHandler:
             sample_rate=config.sample_rate,
             encoding=config.encoding,
         )
-        self._vad = VADProcessor(
-            VADConfig(sample_rate=config.sample_rate)
-        )
+        self._vad = VADProcessor(VADConfig(sample_rate=config.sample_rate))
         self._assembler = TranscriptAssembler()
 
         # Session state
@@ -410,7 +411,10 @@ class SessionHandler:
 
             # Flush audio buffer
             remaining = self._buffer.flush()
-            if remaining is not None and len(remaining) > self._vad.config.sample_rate * 0.1:
+            if (
+                remaining is not None
+                and len(remaining) > self._vad.config.sample_rate * 0.1
+            ):
                 # Only process if > 100ms
                 await self._transcribe_and_send(remaining)
 

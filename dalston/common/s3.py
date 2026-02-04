@@ -8,7 +8,7 @@ import aioboto3
 from dalston.config import Settings, get_settings
 
 if TYPE_CHECKING:
-    from types_aiobotocore_s3 import S3Client
+    pass
 
 _session: aioboto3.Session | None = None
 

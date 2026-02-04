@@ -124,24 +124,24 @@ required_stages = ["prepare"]  # Always required
 if job.word_timestamps or job.speaker_detection == "diarize":
     required_stages.append("transcribe")
     required_stages.append("align")
-    
+
 if job.speaker_detection == "diarize":
     required_stages.append("diarize")
-    
+
 if job.speaker_detection == "per_channel":
     required_stages.append("transcribe")  # Per channel
     required_stages.append("align")       # Per channel
     # No diarize - speakers known from channels
-    
+
 if job.detect_emotions:
     required_stages.append("detect_emotions")
-    
+
 if job.detect_events:
     required_stages.append("detect_events")
-    
+
 if job.llm_cleanup:
     required_stages.append("refine")
-    
+
 required_stages.append("merge")  # Always required
 ```
 
@@ -150,11 +150,11 @@ required_stages.append("merge")  # Always required
 ```python
 def select_engines(required_stages, preference):
     """Select engines to cover all required stages."""
-    
+
     available = get_available_engines()
     selected = []
     remaining = set(required_stages)
-    
+
     # Check for multi-stage engine covering multiple needed stages
     if preference != "modular":
         for engine in available:
@@ -163,12 +163,12 @@ def select_engines(required_stages, preference):
                 # Multi-stage engine covers multiple needs
                 selected.append(engine)
                 remaining -= coverage
-    
+
     # Fill remaining with single-stage engines
     for stage in remaining:
         engine = find_best_engine_for_stage(stage, available, preference)
         selected.append(engine)
-    
+
     return selected
 ```
 
@@ -303,21 +303,21 @@ def select_engines(required_stages, preference):
 async def orchestrator_loop():
     pubsub = redis.pubsub()
     pubsub.subscribe("dalston:events")
-    
+
     while True:
         message = await pubsub.get_message()
-        
+
         if message["type"] != "message":
             continue
-            
+
         event = json.loads(message["data"])
-        
+
         if event["type"] == "job.created":
             await handle_job_created(event["job_id"])
-            
+
         elif event["type"] == "task.completed":
             await handle_task_completed(event["task_id"])
-            
+
         elif event["type"] == "task.failed":
             await handle_task_failed(event["task_id"])
 ```
@@ -449,24 +449,29 @@ Users can override the default `required` setting per job:
 When an optional stage fails and is skipped:
 
 **align (skipped):**
+
 - Uses `words` array from transcription output if available
 - Falls back to segment-level timestamps only
 - Sets `alignment_source: "transcription"` in metadata
 
 **diarize (skipped):**
+
 - All segments assigned to `SPEAKER_00`
 - `speaker_count: 1` in metadata
 - Sets `diarization_source: "default"` in metadata
 
 **detect_emotions (skipped):**
+
 - `emotion` and `emotion_confidence` fields omitted from segments
 - No emotion summary in metadata
 
 **detect_events (skipped):**
+
 - `events` array empty in all segments
 - No audio events in output
 
 **refine (skipped):**
+
 - Raw transcription text used without LLM cleanup
 - Speaker labels remain as `SPEAKER_00`, `SPEAKER_01` (no name inference)
 - No paragraph/topic segmentation
@@ -532,46 +537,46 @@ async def calculate_job_progress(job_id: str) -> dict:
 def select_engines_for_stages(required_stages: list[str], preference: str) -> list[Engine]:
     """
     Select engines to cover all required stages.
-    
+
     Strategy:
     1. If preference is "modular", only use single-stage engines
     2. Otherwise, prefer multi-stage engines when they cover multiple needed stages
     3. Fall back to single-stage engines for remaining stages
     """
-    
+
     available = get_available_engines()
     selected = []
     remaining = set(required_stages)
-    
+
     if preference == "modular":
         # Only single-stage engines
         for stage in required_stages:
             engine = find_single_stage_engine(stage, available)
             selected.append((stage, engine))
         return selected
-    
+
     # Sort engines by coverage (most stages first)
     def coverage_score(engine):
         return len(remaining & set(engine.stages))
-    
+
     while remaining:
         # Find engine with best coverage
         best = max(available, key=coverage_score, default=None)
-        
+
         if best is None or coverage_score(best) == 0:
             raise ValueError(f"No engine available for stages: {remaining}")
-        
+
         covered = remaining & set(best.stages)
-        
+
         for stage in covered:
             selected.append((stage, best))
-        
+
         remaining -= covered
-        
+
         # Don't reuse multi-stage engine for different stage groups
         if len(best.stages) > 1:
             available = [e for e in available if e.id != best.id]
-    
+
     return selected
 ```
 

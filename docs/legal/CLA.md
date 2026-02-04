@@ -101,10 +101,10 @@ When you open your first pull request, CLA Assistant will automatically prompt y
 
 **Option 2: Email**
 
-Send a signed copy of this agreement to sasa@sarunic.com.
+Send a signed copy of this agreement to <sasa@sarunic.com>.
 
 ---
 
 ## Questions?
 
-If you have questions about this agreement, please open an issue or contact sasa@sarunic.com.
+If you have questions about this agreement, please open an issue or contact <sasa@sarunic.com>.

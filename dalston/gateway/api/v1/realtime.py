@@ -22,7 +22,7 @@ from dalston.gateway.dependencies import (
 )
 from dalston.gateway.middleware.auth import authenticate_websocket
 from dalston.gateway.services.auth import Scope
-from dalston.session_router import CapacityInfo, SessionRouter, WorkerStatus
+from dalston.session_router import SessionRouter
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +46,13 @@ async def realtime_transcription(
     encoding: Annotated[str, Query(description="Audio encoding")] = "pcm_s16le",
     sample_rate: Annotated[int, Query(description="Sample rate in Hz")] = 16000,
     enable_vad: Annotated[bool, Query(description="Enable VAD events")] = True,
-    interim_results: Annotated[bool, Query(description="Send partial transcripts")] = True,
+    interim_results: Annotated[
+        bool, Query(description="Send partial transcripts")
+    ] = True,
     word_timestamps: Annotated[bool, Query(description="Include word timing")] = False,
-    enhance_on_end: Annotated[bool, Query(description="Trigger batch enhancement")] = False,
+    enhance_on_end: Annotated[
+        bool, Query(description="Trigger batch enhancement")
+    ] = False,
 ):
     """WebSocket endpoint for real-time streaming transcription.
 
@@ -106,11 +110,13 @@ async def realtime_transcription(
 
     if allocation is None:
         # No capacity - send error and close
-        await websocket.send_json({
-            "type": "error",
-            "code": "no_capacity",
-            "message": "No realtime workers available. Try again later.",
-        })
+        await websocket.send_json(
+            {
+                "type": "error",
+                "code": "no_capacity",
+                "message": "No realtime workers available. Try again later.",
+            }
+        )
         await websocket.close(code=4503, reason="No capacity")
         return
 
@@ -174,16 +180,18 @@ async def _proxy_to_worker(
     import websockets
 
     # Build worker URL with session parameters (use urlencode for safe encoding)
-    params = urlencode({
-        "session_id": session_id,  # Pass Gateway's session_id to worker
-        "language": language,
-        "model": model,
-        "encoding": encoding,
-        "sample_rate": sample_rate,
-        "enable_vad": str(enable_vad).lower(),
-        "interim_results": str(interim_results).lower(),
-        "word_timestamps": str(word_timestamps).lower(),
-    })
+    params = urlencode(
+        {
+            "session_id": session_id,  # Pass Gateway's session_id to worker
+            "language": language,
+            "model": model,
+            "encoding": encoding,
+            "sample_rate": sample_rate,
+            "enable_vad": str(enable_vad).lower(),
+            "interim_results": str(interim_results).lower(),
+            "word_timestamps": str(word_timestamps).lower(),
+        }
+    )
     worker_url = f"{worker_endpoint}/session?{params}"
 
     # Connect with timeouts to prevent hanging connections

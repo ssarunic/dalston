@@ -155,9 +155,7 @@ class TestSRTExport:
 class TestVTTExport:
     """Tests for VTT format export."""
 
-    def test_vtt_header(
-        self, export_service: ExportService, sample_transcript: dict
-    ):
+    def test_vtt_header(self, export_service: ExportService, sample_transcript: dict):
         result = export_service.export_vtt(sample_transcript)
         assert result.startswith("WEBVTT")
 
@@ -234,10 +232,10 @@ class TestTXTExport:
     def test_txt_word_wrap_long_text(self, export_service: ExportService):
         """Test that long text is wrapped at max_line_length."""
         long_text = "This is a very long sentence that should be wrapped across multiple lines when exported to plain text format."
-        transcript = {
-            "segments": [{"text": long_text, "speaker_id": "SPEAKER_00"}]
-        }
-        result = export_service.export_txt(transcript, include_speakers=False, max_line_length=40)
+        transcript = {"segments": [{"text": long_text, "speaker_id": "SPEAKER_00"}]}
+        result = export_service.export_txt(
+            transcript, include_speakers=False, max_line_length=40
+        )
         lines = result.split("\n")
         # All lines should be <= 40 chars
         for line in lines:
@@ -246,10 +244,10 @@ class TestTXTExport:
     def test_txt_word_wrap_with_speaker_prefix(self, export_service: ExportService):
         """Test word wrapping maintains speaker prefix alignment."""
         long_text = "This is a very long sentence that should be wrapped with proper indentation for speaker labels."
-        transcript = {
-            "segments": [{"text": long_text, "speaker_id": "SPEAKER_00"}]
-        }
-        result = export_service.export_txt(transcript, include_speakers=True, max_line_length=50)
+        transcript = {"segments": [{"text": long_text, "speaker_id": "SPEAKER_00"}]}
+        result = export_service.export_txt(
+            transcript, include_speakers=True, max_line_length=50
+        )
         lines = result.split("\n")
         # First line should have speaker prefix
         assert lines[0].startswith("SPEAKER_00:")
@@ -293,16 +291,12 @@ class TestJSONExport:
 class TestExportMethod:
     """Tests for the main export() method."""
 
-    def test_export_srt(
-        self, export_service: ExportService, sample_transcript: dict
-    ):
+    def test_export_srt(self, export_service: ExportService, sample_transcript: dict):
         result = export_service.export(sample_transcript, "srt")
         assert "-->" in result
         assert "[SPEAKER_00]" in result
 
-    def test_export_vtt(
-        self, export_service: ExportService, sample_transcript: dict
-    ):
+    def test_export_vtt(self, export_service: ExportService, sample_transcript: dict):
         result = export_service.export(sample_transcript, "vtt")
         assert result.startswith("WEBVTT")
 
@@ -312,15 +306,11 @@ class TestExportMethod:
         result = export_service.export(sample_transcript, "webvtt")
         assert result.startswith("WEBVTT")
 
-    def test_export_txt(
-        self, export_service: ExportService, sample_transcript: dict
-    ):
+    def test_export_txt(self, export_service: ExportService, sample_transcript: dict):
         result = export_service.export(sample_transcript, "txt")
         assert "SPEAKER_00:" in result
 
-    def test_export_json(
-        self, export_service: ExportService, sample_transcript: dict
-    ):
+    def test_export_json(self, export_service: ExportService, sample_transcript: dict):
         result = export_service.export(sample_transcript, "json")
         parsed = json.loads(result)
         assert "metadata" in parsed

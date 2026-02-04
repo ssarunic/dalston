@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Literal
 
 import typer
 
@@ -28,7 +28,7 @@ def export(
         ),
     ] = "txt",
     output: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option(
             "--output",
             "-o",

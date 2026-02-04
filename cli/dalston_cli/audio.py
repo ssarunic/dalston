@@ -45,7 +45,7 @@ class MicrophoneStream:
         self._stream: sd.InputStream | None = None
         self._queue: queue.Queue[bytes] = queue.Queue()
 
-    def __enter__(self) -> "MicrophoneStream":
+    def __enter__(self) -> MicrophoneStream:
         """Start audio capture."""
         self._stream = sd.InputStream(
             device=self.device,

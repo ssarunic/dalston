@@ -6,10 +6,9 @@ into the standard Dalston transcript format with segment IDs and metadata.
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from dalston.engine_sdk import Engine, TaskInput, TaskOutput
-from dalston.engine_sdk import io
+from dalston.engine_sdk import Engine, TaskInput, TaskOutput, io
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +107,9 @@ class FinalMergerEngine(Engine):
         if diarize_output and speaker_detection == "diarize":
             diarization_warning = diarize_output.get("warning")
             if diarization_warning:
-                logger.warning(f"Diarization warning: {diarization_warning.get('reason')}")
+                logger.warning(
+                    f"Diarization warning: {diarization_warning.get('reason')}"
+                )
                 pipeline_warnings.append(diarization_warning)
             else:
                 diarization_segments = diarize_output.get("diarization_segments", [])
@@ -148,10 +149,12 @@ class FinalMergerEngine(Engine):
         speakers = []
         if diarization_speakers:
             for speaker_id in diarization_speakers:
-                speakers.append({
-                    "id": speaker_id,
-                    "label": None,  # User can assign labels later
-                })
+                speakers.append(
+                    {
+                        "id": speaker_id,
+                        "label": None,  # User can assign labels later
+                    }
+                )
             logger.info(f"Built speakers array with {len(speakers)} speakers")
 
         # Determine pipeline stages that ran
@@ -176,8 +179,8 @@ class FinalMergerEngine(Engine):
                 "word_timestamps_requested": word_timestamps_requested,
                 "speaker_detection": speaker_detection,
                 "speaker_count": len(speakers),
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
+                "completed_at": datetime.now(UTC).isoformat(),
                 "pipeline_stages": pipeline_stages,
                 "pipeline_warnings": pipeline_warnings,
             },
@@ -269,14 +272,16 @@ class FinalMergerEngine(Engine):
             # Add channel/speaker info to each segment
             speaker_id = f"SPEAKER_{channel:02d}"
             for seg in raw_segments:
-                all_segments.append({
-                    "start": seg.get("start", 0.0),
-                    "end": seg.get("end", 0.0),
-                    "text": seg.get("text", ""),
-                    "speaker": speaker_id,
-                    "words": seg.get("words") if has_words else None,
-                    "channel": channel,
-                })
+                all_segments.append(
+                    {
+                        "start": seg.get("start", 0.0),
+                        "end": seg.get("end", 0.0),
+                        "text": seg.get("text", ""),
+                        "speaker": speaker_id,
+                        "words": seg.get("words") if has_words else None,
+                        "channel": channel,
+                    }
+                )
 
         # Sort all segments by start time (interleave)
         all_segments.sort(key=lambda s: s["start"])
@@ -328,8 +333,8 @@ class FinalMergerEngine(Engine):
                 "word_timestamps_requested": word_timestamps,
                 "speaker_detection": "per_channel",
                 "speaker_count": len(speakers),
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
+                "completed_at": datetime.now(UTC).isoformat(),
                 "pipeline_stages": pipeline_stages,
                 "pipeline_warnings": pipeline_warnings,
             },

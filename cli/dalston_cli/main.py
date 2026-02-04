@@ -5,7 +5,7 @@ Provides the main `dalston` command with global options and subcommands.
 
 from __future__ import annotations
 
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 from dalston_sdk import Dalston
@@ -42,7 +42,7 @@ def version_callback(value: bool) -> None:
 @app.callback()
 def main(
     server: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--server",
             "-s",
@@ -51,7 +51,7 @@ def main(
         ),
     ] = None,
     api_key: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--api-key",
             "-k",
@@ -125,7 +125,7 @@ def main(
 
 
 # Import and register commands after app is defined
-from dalston_cli.commands import export, jobs, listen, status, transcribe
+from dalston_cli.commands import export, jobs, listen, status, transcribe  # noqa: E402
 
 app.command()(transcribe.transcribe)
 app.command()(listen.listen)

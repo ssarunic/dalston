@@ -7,7 +7,7 @@ including signature verification.
 import hashlib
 import hmac
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest

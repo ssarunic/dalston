@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -17,7 +16,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 if TYPE_CHECKING:
-    from dalston_sdk import Job, JobList, JobSummary
+    from dalston_sdk import Job, JobSummary
 
 # Console instances for stdout and stderr
 console = Console()
@@ -283,11 +282,11 @@ class LiveOutputHandler:
         """
         self.output_path = output_path
         self.show_interim = show_interim
-        self.file = open(output_path, "a") if output_path else None
+        self.file = open(output_path, "a") if output_path else None  # noqa: SIM115
         self._last_partial = ""
         self._closed = False
 
-    def __enter__(self) -> "LiveOutputHandler":
+    def __enter__(self) -> LiveOutputHandler:
         """Enter context manager."""
         return self
 
@@ -379,10 +378,10 @@ class JsonlOutputHandler:
             output_path: Path to write output, or None for stdout.
         """
         self.output_path = output_path
-        self.file = open(output_path, "a") if output_path else sys.stdout
+        self.file = open(output_path, "a") if output_path else sys.stdout  # noqa: SIM115
         self._closed = False
 
-    def __enter__(self) -> "JsonlOutputHandler":
+    def __enter__(self) -> JsonlOutputHandler:
         """Enter context manager."""
         return self
 

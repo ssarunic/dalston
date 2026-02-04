@@ -114,6 +114,7 @@
 **Technology**: FastAPI (Python) + React (TypeScript)
 
 **Endpoints**:
+
 - `POST /v1/audio/transcriptions` — Submit file for batch transcription
 - `GET /v1/audio/transcriptions/{id}` — Get batch job status/results
 - `WS /v1/audio/transcriptions/stream` — Real-time streaming transcription
@@ -129,6 +130,7 @@
 **Purpose**: Job expansion, task scheduling, dependency management
 
 **Responsibilities**:
+
 - Expand jobs into task DAGs based on parameters
 - Select optimal engines (single-stage or multi-stage)
 - Push ready tasks to engine queues
@@ -144,6 +146,7 @@
 **Purpose**: Real-time worker pool management and session allocation
 
 **Responsibilities**:
+
 - Track available real-time workers
 - Allocate sessions to workers with capacity
 - Monitor worker health via heartbeat
@@ -167,11 +170,13 @@
 **Purpose**: Queues, pub/sub, rate limiting, session state
 
 **Batch Structures**:
+
 - `dalston:queue:{engine_id}` — Engine work queues
 - `dalston:ratelimit:{key_id}` — Rate limit counters
 - `dalston:events` — Event pub/sub
 
 **Real-Time Structures**:
+
 - `dalston:realtime:workers` — Worker registry
 - `dalston:realtime:worker:{id}` — Worker state
 - `dalston:realtime:session:{id}` — Session state (TTL-based)
@@ -187,6 +192,7 @@
 **Execution Model**: Poll Redis queue, process task, publish completion
 
 **Engine Categories**:
+
 | Category | Engines |
 |----------|---------|
 | TRANSCRIBE | faster-whisper, parakeet, whisper-openai |
@@ -208,6 +214,7 @@
 **Execution Model**: WebSocket server accepting direct connections
 
 **Capabilities**:
+
 - Voice Activity Detection (VAD)
 - Streaming ASR with partial results
 - Multiple concurrent sessions per worker
@@ -234,11 +241,13 @@ Ingest → Prepare → Transcribe → Align → Diarize → Enrich → Refine (L
 ### Single-Stage vs Multi-Stage
 
 **Modular** (maximum flexibility):
+
 ```
 faster-whisper → whisperx-align → pyannote → merger
 ```
 
 **Integrated** (optimized pipeline):
+
 ```
 whisperx-full [transcribe + align + diarize] → merger
 ```
@@ -290,6 +299,7 @@ Get immediate results with real-time, then enhance with batch processing:
 ```
 
 **Usage**:
+
 ```
 WS /v1/audio/transcriptions/stream?enhance_on_end=true
 ```
@@ -316,27 +326,33 @@ For detailed rationale on architectural decisions, see [Architecture Decision Re
 ## Implementation Phases
 
 ### Phase 1: Batch MVP
+
 - Gateway (REST API)
 - Orchestrator
 - Core engines: faster-whisper, merger
 
 ### Phase 2: Batch Speaker Detection
+
 - Diarization and per-channel modes
 - Engines: whisperx-align, pyannote
 
 ### Phase 3: Batch Enrichment
+
 - Emotion, events, LLM cleanup
 
 ### Phase 4: Real-Time MVP
+
 - Session Router
 - Realtime workers
 - WebSocket API
 
 ### Phase 5: Hybrid Mode
+
 - Session recording
 - Batch enhancement from realtime
 
 ### Phase 6: Management Console
+
 - React web application
 - Unified batch + realtime monitoring
 
@@ -345,6 +361,7 @@ For detailed rationale on architectural decisions, see [Architecture Decision Re
 ## Documentation Index
 
 ### Batch Transcription
+
 - [API Reference](./batch/API.md) — REST endpoints, parameters, responses
 - [Orchestrator](./batch/ORCHESTRATOR.md) — DAG building, task scheduling
 - [Data Model](./batch/DATA_MODEL.md) — Redis structures, transcript format
@@ -352,6 +369,7 @@ For detailed rationale on architectural decisions, see [Architecture Decision Re
 - [Docker](./batch/DOCKER.md) — Container composition, operations
 
 ### Real-Time Transcription
+
 - [Real-Time Overview](./realtime/REALTIME.md) — Architecture and concepts
 - [WebSocket API](./realtime/WEBSOCKET_API.md) — Protocol reference
 - [Session Router](./realtime/SESSION_ROUTER.md) — Worker pool management

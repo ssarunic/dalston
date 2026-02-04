@@ -37,7 +37,11 @@ API endpoints (for management):
     GET /v1/realtime/sessions - List active sessions
 """
 
-from dalston.session_router.allocator import SessionAllocator, SessionState, WorkerAllocation
+from dalston.session_router.allocator import (
+    SessionAllocator,
+    SessionState,
+    WorkerAllocation,
+)
 from dalston.session_router.health import HealthMonitor
 from dalston.session_router.registry import WorkerRegistry, WorkerState
 from dalston.session_router.router import CapacityInfo, SessionRouter, WorkerStatus

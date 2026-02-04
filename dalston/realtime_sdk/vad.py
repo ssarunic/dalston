@@ -7,7 +7,7 @@ determining when to trigger ASR transcription.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
 
@@ -217,7 +217,7 @@ class VADProcessor:
                         self._reset_speech_state()
 
                         logger.debug(
-                            f"Speech end detected, duration={len(speech_audio)/self.config.sample_rate:.2f}s"
+                            f"Speech end detected, duration={len(speech_audio) / self.config.sample_rate:.2f}s"
                         )
                         return VADResult(event="speech_end", speech_audio=speech_audio)
                     else:
@@ -252,7 +252,7 @@ class VADProcessor:
                 speech_audio = np.concatenate(self._speech_buffer)
                 self._reset_speech_state()
                 logger.debug(
-                    f"Flushed remaining speech, duration={len(speech_audio)/self.config.sample_rate:.2f}s"
+                    f"Flushed remaining speech, duration={len(speech_audio) / self.config.sample_rate:.2f}s"
                 )
                 return speech_audio
 

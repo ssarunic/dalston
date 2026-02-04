@@ -170,6 +170,7 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 ### Testing
 
 Verified end-to-end with merged stereo test audio (`tests/audio/test_merged.wav`):
+
 - Successfully identified 2 speakers from concatenated mono recordings
 - Correct speaker assignment to transcript segments via overlap
 

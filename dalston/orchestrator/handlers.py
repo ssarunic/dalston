@@ -6,7 +6,7 @@ Handles Redis pub/sub events:
 - task.failed: Retry or fail job
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -66,14 +66,19 @@ async def handle_job_created(
 
     # 3. Save all tasks to PostgreSQL
     for task in tasks:
-        log.info("creating_task", task_id=str(task.id), stage=task.stage, engine_id=task.engine_id)
+        log.info(
+            "creating_task",
+            task_id=str(task.id),
+            stage=task.stage,
+            engine_id=task.engine_id,
+        )
         task_model = TaskModel(
             id=task.id,
             job_id=task.job_id,
             stage=task.stage,
             engine_id=task.engine_id,
             status=task.status.value,
-            dependencies=[dep for dep in task.dependencies],
+            dependencies=list(task.dependencies),
             config=task.config,
             input_uri=task.input_uri,
             output_uri=task.output_uri,
@@ -85,7 +90,7 @@ async def handle_job_created(
 
     # 4. Update job status to 'running'
     job.status = JobStatus.RUNNING.value
-    job.started_at = datetime.now(timezone.utc)
+    job.started_at = datetime.now(UTC)
 
     await db.commit()
 
@@ -142,7 +147,7 @@ async def handle_task_completed(
         return
 
     task.status = TaskStatus.COMPLETED.value
-    task.completed_at = datetime.now(timezone.utc)
+    task.completed_at = datetime.now(UTC)
     await db.commit()
 
     job_id = task.job_id
@@ -150,9 +155,7 @@ async def handle_task_completed(
     log.info("marked_task_completed")
 
     # 2. Find all tasks for this job
-    result = await db.execute(
-        select(TaskModel).where(TaskModel.job_id == job_id)
-    )
+    result = await db.execute(select(TaskModel).where(TaskModel.job_id == job_id))
     all_tasks = list(result.scalars().all())
 
     # Build lookup maps
@@ -249,7 +252,9 @@ async def handle_task_failed(
         task.error = error
         await db.commit()
 
-        log.info("retrying_task", retry_count=task.retries, max_retries=task.max_retries)
+        log.info(
+            "retrying_task", retry_count=task.retries, max_retries=task.max_retries
+        )
 
         # Re-queue the task
         from dalston.common.models import Task
@@ -257,9 +262,7 @@ async def handle_task_failed(
         task_model = Task.model_validate(task)
 
         # Get previous outputs for retry
-        result = await db.execute(
-            select(TaskModel).where(TaskModel.job_id == job_id)
-        )
+        result = await db.execute(select(TaskModel).where(TaskModel.job_id == job_id))
         all_tasks = list(result.scalars().all())
         task_by_id = {t.id: t for t in all_tasks}
 
@@ -299,7 +302,7 @@ async def handle_task_failed(
     if job:
         job.status = JobStatus.FAILED.value
         job.error = f"Task {task.stage} failed: {error}"
-        job.completed_at = datetime.now(timezone.utc)
+        job.completed_at = datetime.now(UTC)
         await db.commit()
 
         # Trigger webhook if configured
@@ -356,9 +359,7 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
     # Expire all cached objects to ensure we read fresh data from DB
     db.expire_all()
 
-    result = await db.execute(
-        select(TaskModel).where(TaskModel.job_id == job_id)
-    )
+    result = await db.execute(select(TaskModel).where(TaskModel.job_id == job_id))
     all_tasks = list(result.scalars().all())
 
     # Check if all tasks are in a terminal state
@@ -377,8 +378,7 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
 
     # Check if any required task failed
     any_failed = any(
-        t.status == TaskStatus.FAILED.value and t.required
-        for t in all_tasks
+        t.status == TaskStatus.FAILED.value and t.required for t in all_tasks
     )
 
     job = await db.get(JobModel, job_id)
@@ -393,7 +393,7 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
         job.status = JobStatus.COMPLETED.value
         log.info("job_completed")
 
-    job.completed_at = datetime.now(timezone.utc)
+    job.completed_at = datetime.now(UTC)
     await db.commit()
 
     # Trigger webhook if configured

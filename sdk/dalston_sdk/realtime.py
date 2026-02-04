@@ -10,7 +10,8 @@ import asyncio
 import json
 import threading
 from collections import defaultdict
-from typing import Any, AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable
+from typing import Any
 from urllib.parse import urlencode
 
 import websockets
@@ -24,6 +25,8 @@ from .exceptions import (
 )
 from .types import (
     RealtimeError as RealtimeErrorData,
+)
+from .types import (
     RealtimeMessage,
     RealtimeMessageType,
     SessionBegin,
@@ -396,7 +399,7 @@ class AsyncRealtimeSession:
         except websockets.exceptions.ConnectionClosed:
             self._connected = False
 
-    async def __aenter__(self) -> "AsyncRealtimeSession":
+    async def __aenter__(self) -> AsyncRealtimeSession:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -488,7 +491,9 @@ class RealtimeSession:
         """Check if connected."""
         return self._async_session.connected
 
-    def on_partial(self, fn: Callable[[TranscriptPartial], None]) -> Callable[[TranscriptPartial], None]:
+    def on_partial(
+        self, fn: Callable[[TranscriptPartial], None]
+    ) -> Callable[[TranscriptPartial], None]:
         """Register callback for transcript.partial messages.
 
         Args:
@@ -500,7 +505,9 @@ class RealtimeSession:
         self._callbacks["partial"].append(fn)
         return fn
 
-    def on_final(self, fn: Callable[[TranscriptFinal], None]) -> Callable[[TranscriptFinal], None]:
+    def on_final(
+        self, fn: Callable[[TranscriptFinal], None]
+    ) -> Callable[[TranscriptFinal], None]:
         """Register callback for transcript.final messages.
 
         Args:
@@ -512,7 +519,9 @@ class RealtimeSession:
         self._callbacks["final"].append(fn)
         return fn
 
-    def on_vad_start(self, fn: Callable[[VADEvent], None]) -> Callable[[VADEvent], None]:
+    def on_vad_start(
+        self, fn: Callable[[VADEvent], None]
+    ) -> Callable[[VADEvent], None]:
         """Register callback for vad.speech_start events.
 
         Args:
@@ -536,7 +545,9 @@ class RealtimeSession:
         self._callbacks["vad_end"].append(fn)
         return fn
 
-    def on_error(self, fn: Callable[[RealtimeErrorData], None]) -> Callable[[RealtimeErrorData], None]:
+    def on_error(
+        self, fn: Callable[[RealtimeErrorData], None]
+    ) -> Callable[[RealtimeErrorData], None]:
         """Register callback for error messages.
 
         Args:
@@ -582,7 +593,7 @@ class RealtimeSession:
                     details=None,
                 )
                 for cb in self._callbacks["error"]:
-                    try:
+                    try:  # noqa: SIM105
                         cb(error_data)
                     except Exception:
                         pass  # Don't let callback errors crash the loop
@@ -698,7 +709,7 @@ class RealtimeSession:
 
         return self._session_end
 
-    def __enter__(self) -> "RealtimeSession":
+    def __enter__(self) -> RealtimeSession:
         return self
 
     def __exit__(self, *args: Any) -> None:

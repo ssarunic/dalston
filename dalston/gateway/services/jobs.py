@@ -1,6 +1,6 @@
 """Job lifecycle management service."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -175,6 +175,7 @@ class JobsService:
         Returns:
             JobStats with running, queued, completed_today, failed_today counts
         """
+
         # Base filter (optional tenant isolation)
         def base_filter(query):
             if tenant_id is not None:
@@ -183,28 +184,30 @@ class JobsService:
 
         # Count running jobs
         running_query = base_filter(
-            select(func.count()).select_from(JobModel).where(
-                JobModel.status == JobStatus.RUNNING.value
-            )
+            select(func.count())
+            .select_from(JobModel)
+            .where(JobModel.status == JobStatus.RUNNING.value)
         )
         running = (await db.execute(running_query)).scalar() or 0
 
         # Count queued (pending) jobs
         queued_query = base_filter(
-            select(func.count()).select_from(JobModel).where(
-                JobModel.status == JobStatus.PENDING.value
-            )
+            select(func.count())
+            .select_from(JobModel)
+            .where(JobModel.status == JobStatus.PENDING.value)
         )
         queued = (await db.execute(queued_query)).scalar() or 0
 
         # Today's start (UTC)
-        today_start = datetime.now(timezone.utc).replace(
+        today_start = datetime.now(UTC).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
 
         # Count completed today
         completed_query = base_filter(
-            select(func.count()).select_from(JobModel).where(
+            select(func.count())
+            .select_from(JobModel)
+            .where(
                 JobModel.status == JobStatus.COMPLETED.value,
                 JobModel.completed_at >= today_start,
             )
@@ -213,7 +216,9 @@ class JobsService:
 
         # Count failed today
         failed_query = base_filter(
-            select(func.count()).select_from(JobModel).where(
+            select(func.count())
+            .select_from(JobModel)
+            .where(
                 JobModel.status == JobStatus.FAILED.value,
                 JobModel.completed_at >= today_start,
             )

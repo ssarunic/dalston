@@ -579,11 +579,11 @@ Get job status and results.
   "created_at": "2025-01-28T12:00:00Z",
   "completed_at": "2025-01-28T12:02:30Z",
   "processing_time_seconds": 150.0,
-  
+
   "language_code": "en",
   "language_confidence": 0.98,
   "text": "Welcome to the show. Thanks for having me...",
-  
+
   "words": [
     {
       "text": "Welcome",
@@ -603,7 +603,7 @@ Get job status and results.
       "confidence": 0.87
     }
   ],
-  
+
   "segments": [
     {
       "id": "seg_001",
@@ -616,17 +616,17 @@ Get job status and results.
       "emotion_confidence": 0.85
     }
   ],
-  
+
   "speakers": [
     { "id": "SPEAKER_00", "label": "Host", "duration_seconds": 45.2 },
     { "id": "SPEAKER_01", "label": "Guest", "duration_seconds": 102.8 }
   ],
-  
+
   "additional_formats": {
     "srt": "http://localhost:8000/v1/audio/transcriptions/job_abc123/export/srt",
     "vtt": "http://localhost:8000/v1/audio/transcriptions/job_abc123/export/vtt"
   },
-  
+
   "model_used": "whisperx-large-v3"
 }
 ```

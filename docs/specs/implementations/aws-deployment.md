@@ -40,6 +40,7 @@ infra/
 ### User Data Script
 
 The `user-data.sh` script runs on first boot and:
+
 1. Installs Docker and Docker Compose
 2. Formats and mounts the data EBS volume to `/data`
 3. Adds fstab entry for persistence
@@ -50,6 +51,7 @@ The `user-data.sh` script runs on first boot and:
 ### Docker Compose Override
 
 The `docker-compose.aws.yml` override:
+
 - Configures S3 environment variables (bucket, region)
 - Maps Postgres data to `/data/postgres`
 - Maps model cache to `/data/models`
@@ -83,6 +85,7 @@ terraform apply
 ### Outputs
 
 After deployment, Terraform outputs:
+
 - `instance_id`: EC2 instance ID for start/stop commands
 - `public_ip`: For initial Tailscale setup
 - `s3_bucket`: Artifact bucket name

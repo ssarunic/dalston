@@ -9,9 +9,8 @@ POST /auth/tokens - Create ephemeral session token
 """
 
 from datetime import datetime
-from uuid import UUID
-
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -22,9 +21,9 @@ from dalston.gateway.dependencies import (
     require_auth,
 )
 from dalston.gateway.services.auth import (
+    DEFAULT_TOKEN_TTL,
     APIKey,
     AuthService,
-    DEFAULT_TOKEN_TTL,
     Scope,
 )
 
@@ -39,7 +38,9 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 class CreateAPIKeyRequest(BaseModel):
     """Request to create a new API key."""
 
-    name: str = Field(..., min_length=1, max_length=255, description="Human-readable name")
+    name: str = Field(
+        ..., min_length=1, max_length=255, description="Human-readable name"
+    )
     scopes: list[str] | None = Field(
         default=None,
         description="Permission scopes. Defaults to jobs:read, jobs:write, realtime",
@@ -228,10 +229,7 @@ async def list_api_keys(
     )
 
     return APIKeyListResponse(
-        keys=[
-            APIKeyResponse.from_api_key(k, current_key_id=api_key.id)
-            for k in keys
-        ],
+        keys=[APIKeyResponse.from_api_key(k, current_key_id=api_key.id) for k in keys],
         total=len(keys),
     )
 

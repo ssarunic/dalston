@@ -3,8 +3,8 @@
 Tests the jobs-related API endpoints including stats.
 """
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
@@ -12,8 +12,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from dalston.gateway.api.v1.jobs import router as jobs_router
-from dalston.gateway.services.auth import APIKey, DEFAULT_EXPIRES_AT, Scope
-from dalston.gateway.services.jobs import JobStats, JobsService
+from dalston.gateway.services.auth import DEFAULT_EXPIRES_AT, APIKey, Scope
+from dalston.gateway.services.jobs import JobsService, JobStats
 
 
 class TestJobsStatsEndpoint:
@@ -40,7 +40,7 @@ class TestJobsStatsEndpoint:
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
             scopes=[Scope.JOBS_READ, Scope.JOBS_WRITE],
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -169,9 +169,7 @@ class TestJobsStatsEndpointAuthorization:
         db = AsyncMock()
         return db
 
-    def test_get_job_stats_requires_jobs_read_scope(
-        self, mock_jobs_service, mock_db
-    ):
+    def test_get_job_stats_requires_jobs_read_scope(self, mock_jobs_service, mock_db):
         """Test that jobs stats requires jobs:read scope."""
         from dalston.gateway.dependencies import (
             get_db,
@@ -188,7 +186,7 @@ class TestJobsStatsEndpointAuthorization:
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
             scopes=[Scope.REALTIME],  # No jobs:read
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,

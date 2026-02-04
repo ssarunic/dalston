@@ -6,7 +6,7 @@ Enums inherit from str for JSON serialization compatibility.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -243,7 +243,14 @@ class RealtimeMessage:
     """Union type for all real-time messages."""
 
     type: RealtimeMessageType
-    data: SessionBegin | SessionEnd | TranscriptPartial | TranscriptFinal | VADEvent | RealtimeError
+    data: (
+        SessionBegin
+        | SessionEnd
+        | TranscriptPartial
+        | TranscriptFinal
+        | VADEvent
+        | RealtimeError
+    )
 
 
 # -----------------------------------------------------------------------------

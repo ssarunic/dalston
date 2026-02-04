@@ -1,9 +1,5 @@
 """Tests for real-time transcription client."""
 
-import json
-
-import pytest
-
 from dalston_sdk import (
     RealtimeMessageType,
     SessionBegin,

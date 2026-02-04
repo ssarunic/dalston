@@ -238,6 +238,7 @@ Session state is ephemeral. Audio and transcripts are written to S3.
 #### Event Types
 
 **Job Created**
+
 ```json
 {
   "type": "job.created",
@@ -247,6 +248,7 @@ Session state is ephemeral. Audio and transcripts are written to S3.
 ```
 
 **Task Completed**
+
 ```json
 {
   "type": "task.completed",
@@ -258,6 +260,7 @@ Session state is ephemeral. Audio and transcripts are written to S3.
 ```
 
 **Task Failed**
+
 ```json
 {
   "type": "task.failed",
@@ -269,6 +272,7 @@ Session state is ephemeral. Audio and transcripts are written to S3.
 ```
 
 **Task Progress**
+
 ```json
 {
   "type": "task.progress",
@@ -280,6 +284,7 @@ Session state is ephemeral. Audio and transcripts are written to S3.
 ```
 
 **Job Completed**
+
 ```json
 {
   "type": "job.completed",
@@ -330,11 +335,13 @@ s3://{bucket}/
 ### S3 URI Format
 
 All `*_uri` columns in PostgreSQL use the format:
+
 ```
 s3://{bucket}/{path}
 ```
 
 Example:
+
 ```
 s3://dalston-artifacts/jobs/550e8400-e29b-41d4-a716-446655440000/audio/original.wav
 ```
@@ -358,6 +365,7 @@ s3://{bucket}/models/
 ```
 
 Workers download models to local cache on startup:
+
 ```
 /data/models/  (local cache, not persisted)
 ```

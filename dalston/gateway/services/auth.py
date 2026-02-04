@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -39,7 +39,7 @@ REDIS_SESSION_TOKEN = "dalston:session_token:{hash}"
 RATE_LIMIT_WINDOW = 60
 
 # Default expiration date (distant future - we avoid nulls)
-DEFAULT_EXPIRES_AT = datetime(2099, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+DEFAULT_EXPIRES_AT = datetime(2099, 12, 31, 23, 59, 59, tzinfo=UTC)
 
 
 class Scope(str, Enum):
@@ -80,7 +80,7 @@ class APIKey:
     @property
     def is_expired(self) -> bool:
         """Check if key has expired."""
-        return datetime.now(timezone.utc) > self.expires_at
+        return datetime.now(UTC) > self.expires_at
 
     def has_scope(self, scope: Scope) -> bool:
         """Check if key has the specified scope or admin scope."""
@@ -154,7 +154,7 @@ class SessionToken:
     @property
     def is_expired(self) -> bool:
         """Check if token has expired."""
-        return datetime.now(timezone.utc) > self.expires_at
+        return datetime.now(UTC) > self.expires_at
 
     def has_scope(self, scope: Scope) -> bool:
         """Check if token has the specified scope."""
@@ -280,7 +280,7 @@ class AuthService:
             tenant_id=tenant_id,
             scopes=scopes,
             rate_limit=rate_limit,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=expires_at,
             revoked_at=None,
@@ -337,9 +337,7 @@ class AuthService:
             return None
 
         # Update last_used_at (fire and forget)
-        await self.redis.hset(
-            hash_key, "last_used_at", datetime.now(timezone.utc).isoformat()
-        )
+        await self.redis.hset(hash_key, "last_used_at", datetime.now(UTC).isoformat())
 
         return api_key
 
@@ -409,9 +407,7 @@ class AuthService:
 
         # Update revoked_at
         hash_key = REDIS_KEY_BY_HASH.format(hash=api_key.key_hash)
-        await self.redis.hset(
-            hash_key, "revoked_at", datetime.now(timezone.utc).isoformat()
-        )
+        await self.redis.hset(hash_key, "revoked_at", datetime.now(UTC).isoformat())
 
         return True
 
@@ -490,19 +486,21 @@ class AuthService:
         # Validate scopes don't exceed parent
         for scope in scopes:
             if not api_key.has_scope(scope):
-                raise ValueError(f"Cannot grant scope '{scope.value}' - parent key lacks it")
+                raise ValueError(
+                    f"Cannot grant scope '{scope.value}' - parent key lacks it"
+                )
 
         # Generate token
         raw_token = generate_session_token()
         token_hash = hash_api_key(raw_token)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         session_token = SessionToken(
             token_hash=token_hash,
             tenant_id=api_key.tenant_id,
             parent_key_id=api_key.id,
             scopes=scopes,
-            expires_at=datetime.fromtimestamp(now.timestamp() + ttl, tz=timezone.utc),
+            expires_at=datetime.fromtimestamp(now.timestamp() + ttl, tz=UTC),
             created_at=now,
         )
 

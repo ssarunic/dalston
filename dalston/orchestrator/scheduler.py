@@ -13,7 +13,7 @@ from uuid import UUID
 import structlog
 from redis.asyncio import Redis
 
-from dalston.common.models import Task, TaskStatus
+from dalston.common.models import Task
 from dalston.common.s3 import get_s3_client
 from dalston.config import Settings
 

@@ -233,7 +233,9 @@ class TestTranscriptAssembler:
     def test_segment_id_format(self, assembler: TranscriptAssembler):
         for i in range(5):
             seg = assembler.add_utterance(
-                TranscribeResult(text=f"seg{i}", words=[], language="en", confidence=0.9),
+                TranscribeResult(
+                    text=f"seg{i}", words=[], language="en", confidence=0.9
+                ),
                 audio_duration=1.0,
             )
             assert seg.id == f"seg_{i:04d}"

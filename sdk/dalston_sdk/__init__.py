@@ -31,16 +31,28 @@ from ._version import __version__
 # Clients
 from .client import AsyncDalston, Dalston
 
+# Exceptions
+from .exceptions import (
+    AuthenticationError,
+    ConnectError,
+    ConnectionError,  # Deprecated alias for ConnectError
+    DalstonError,
+    ForbiddenError,
+    NotFoundError,
+    PermissionError,  # Deprecated alias for ForbiddenError
+    RateLimitError,
+    ServerError,
+    TimeoutError,  # Deprecated alias for TimeoutException
+    TimeoutException,
+    ValidationError,
+    WebhookVerificationError,
+)
+from .exceptions import (
+    RealtimeError as RealtimeException,
+)
+
 # Real-time
 from .realtime import AsyncRealtimeSession, RealtimeSession
-
-# Webhook
-from .webhook import (
-    fastapi_webhook_dependency,
-    flask_verify_webhook,
-    parse_webhook_payload,
-    verify_webhook_signature,
-)
 
 # Types
 from .types import (
@@ -70,22 +82,12 @@ from .types import (
     Word,
 )
 
-# Exceptions
-from .exceptions import (
-    AuthenticationError,
-    ConnectError,
-    ConnectionError,  # Deprecated alias for ConnectError
-    DalstonError,
-    ForbiddenError,
-    NotFoundError,
-    PermissionError,  # Deprecated alias for ForbiddenError
-    RateLimitError,
-    RealtimeError as RealtimeException,
-    ServerError,
-    TimeoutError,  # Deprecated alias for TimeoutException
-    TimeoutException,
-    ValidationError,
-    WebhookVerificationError,
+# Webhook
+from .webhook import (
+    fastapi_webhook_dependency,
+    flask_verify_webhook,
+    parse_webhook_payload,
+    verify_webhook_signature,
 )
 
 __all__ = [

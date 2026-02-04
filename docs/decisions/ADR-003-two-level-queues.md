@@ -7,6 +7,7 @@ Accepted
 ## Context
 
 Users submit transcription requests with various options:
+
 - Speaker diarization (yes/no)
 - Word timestamps (yes/no)
 - Emotion detection (yes/no)
@@ -15,6 +16,7 @@ Users submit transcription requests with various options:
 Each combination requires different processing steps. Some steps can run in parallel, others have dependencies.
 
 We need a model that:
+
 1. Handles variable pipeline configurations
 2. Supports parallel execution where possible
 3. Provides granular progress tracking
@@ -32,11 +34,13 @@ User Request → Queue → Worker (does all steps) → Result
 ```
 
 **Pros:**
+
 - Simple to understand
 - No coordination needed
 - Single point of monitoring
 
 **Cons:**
+
 - No parallelism within a job
 - Retry means redoing everything
 - Can't scale individual stages
@@ -51,11 +55,13 @@ User Request → Prepare Queue → Transcribe Queue → Align Queue → ... → 
 ```
 
 **Pros:**
+
 - Clear pipeline structure
 - Each stage scales independently
 - Retry at stage level
 
 **Cons:**
+
 - Inflexible (all jobs do all stages)
 - No parallelism between independent stages
 - Wasted work for simple jobs
@@ -69,6 +75,7 @@ User Request → Job → [Task DAG] → Per-engine Queues → Results → Merge
 ```
 
 **Pros:**
+
 - Flexible pipeline per job
 - Parallel execution of independent tasks
 - Granular retry (single task, not whole job)
@@ -76,6 +83,7 @@ User Request → Job → [Task DAG] → Per-engine Queues → Results → Merge
 - Clear separation of scheduling (orchestrator) and execution (engines)
 
 **Cons:**
+
 - More complex coordination
 - Orchestrator becomes critical component
 - Must track task dependencies
@@ -102,6 +110,7 @@ Implement a two-level queue model:
 ### DAG Expansion Example
 
 **Job parameters:**
+
 ```json
 {
   "speaker_detection": "diarize",
@@ -111,6 +120,7 @@ Implement a two-level queue model:
 ```
 
 **Expanded to:**
+
 ```
 prepare ──→ transcribe ──→ align ──→ diarize ──┬──→ emotions ──→ merge
                                                └──→ (parallel)

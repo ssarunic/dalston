@@ -9,6 +9,7 @@ Engines are containerized processors that implement one or more pipeline stages.
 ## Engine Categories
 
 ### PREPARE
+
 Audio preprocessing and analysis.
 
 | Engine ID | Description | GPU |
@@ -18,6 +19,7 @@ Audio preprocessing and analysis.
 | `vad-chunker` | Split long audio at silence points using VAD | No |
 
 ### TRANSCRIBE
+
 Speech-to-text conversion.
 
 | Engine ID | Description | GPU | Languages |
@@ -28,6 +30,7 @@ Speech-to-text conversion.
 | `distil-whisper` | Distilled Whisper, faster but slightly less accurate | Yes | English |
 
 ### ALIGN
+
 Word-level timestamp alignment.
 
 | Engine ID | Description | GPU |
@@ -37,6 +40,7 @@ Word-level timestamp alignment.
 | `ctc-forced` | CTC forced alignment | No |
 
 ### DIARIZE
+
 Speaker identification and segmentation.
 
 | Engine ID | Description | GPU |
@@ -47,6 +51,7 @@ Speaker identification and segmentation.
 | `speechbrain-diar` | SpeechBrain diarization | Yes |
 
 ### DETECT
+
 Audio analysis and classification.
 
 | Engine ID | Description | GPU |
@@ -56,6 +61,7 @@ Audio analysis and classification.
 | `topic-classifier` | Topic/category classification | No |
 
 ### REFINE
+
 LLM-based transcript refinement.
 
 | Engine ID | Description | GPU |
@@ -63,6 +69,7 @@ LLM-based transcript refinement.
 | `llm-cleanup` | Error correction, speaker naming, punctuation | No |
 
 ### MERGE
+
 Combine outputs from multiple stages.
 
 | Engine ID | Description | GPU |
@@ -72,6 +79,7 @@ Combine outputs from multiple stages.
 | `final-merger` | Combine all results into final output | No |
 
 ### MULTI-STAGE
+
 Integrated engines covering multiple stages.
 
 | Engine ID | Stages | Description | GPU |
@@ -161,22 +169,22 @@ from dalston_engine_sdk import Engine, TaskInput, TaskOutput
 
 class MyEngine(Engine):
     """Custom engine implementation."""
-    
+
     def __init__(self):
         super().__init__()
         self.model = None
-    
+
     def load_model(self, config: dict):
         """Load model (called once, cached)."""
         if self.model is None:
             self.model = load_my_model(config)
-    
+
     def process(self, input: TaskInput) -> TaskOutput:
         """Process a single task."""
         self.load_model(input.config)
-        
+
         result = self.model.process(input.audio_path)
-        
+
         return TaskOutput(data=result)
 
 
@@ -209,6 +217,7 @@ class TaskOutput:
 ### SDK Runner Loop
 
 The SDK handles:
+
 1. Connecting to Redis (for queue polling)
 2. Polling the engine's queue (`dalston:queue:{engine_id}`)
 3. Downloading task input from S3 to local temp
@@ -224,36 +233,36 @@ class Engine:
         """Main loop - SDK implementation."""
         redis = Redis.from_url(os.environ["REDIS_URL"])
         engine_id = os.environ["ENGINE_ID"]
-        
+
         while True:
             # Blocking pop from queue
             _, task_id = redis.brpop(f"dalston:queue:{engine_id}", timeout=30)
-            
+
             if task_id is None:
                 continue  # Timeout, check again
-            
+
             try:
                 # Load task
                 task = self.load_task(task_id)
                 self.update_status(task, "running")
-                
+
                 # Load input
                 input = self.load_input(task)
-                
+
                 # Process
                 output = self.process(input)
-                
+
                 # Save output
                 self.save_output(task, output)
                 self.update_status(task, "completed")
-                
+
                 # Publish event
                 redis.publish("dalston:events", json.dumps({
                     "type": "task.completed",
                     "task_id": task_id,
                     "job_id": task.job_id
                 }))
-                
+
             except Exception as e:
                 self.update_status(task, "failed", error=str(e))
                 redis.publish("dalston:events", json.dumps({
@@ -357,6 +366,7 @@ engine-my-new-engine:
 Fast Whisper implementation using CTranslate2 for optimized inference.
 
 **Config**:
+
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `model` | string | `large-v3` | Model size |
@@ -365,6 +375,7 @@ Fast Whisper implementation using CTranslate2 for optimized inference.
 | `vad_filter` | bool | `true` | Filter silence with VAD |
 
 **Output**:
+
 ```json
 {
   "text": "Full transcript...",
@@ -390,6 +401,7 @@ Fast Whisper implementation using CTranslate2 for optimized inference.
 State-of-the-art speaker diarization.
 
 **Config**:
+
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `min_speakers` | int | `null` | Minimum speakers |
@@ -397,6 +409,7 @@ State-of-the-art speaker diarization.
 | `hf_token` | string | env | HuggingFace token |
 
 **Output**:
+
 ```json
 {
   "speakers": ["SPEAKER_00", "SPEAKER_01"],
@@ -416,6 +429,7 @@ State-of-the-art speaker diarization.
 LLM-based transcript refinement.
 
 **Config**:
+
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `provider` | string | `anthropic` | LLM provider |
@@ -423,6 +437,7 @@ LLM-based transcript refinement.
 | `tasks` | array | all | Which tasks to run |
 
 **Available Tasks**:
+
 - `fix_transcription_errors` — Correct obvious mistakes
 - `identify_speakers` — Name speakers from context
 - `improve_punctuation` — Fix punctuation and capitalization
@@ -430,6 +445,7 @@ LLM-based transcript refinement.
 - `generate_summary` — Create content summary
 
 **Output**:
+
 ```json
 {
   "segments": [...],          // Corrected segments
@@ -450,6 +466,7 @@ LLM-based transcript refinement.
 Integrated WhisperX pipeline in a single engine.
 
 **Config**:
+
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `model` | string | `large-v3` | Whisper model |
@@ -460,6 +477,7 @@ Integrated WhisperX pipeline in a single engine.
 
 **Output**:
 Combined output with transcription, alignment, and diarization already merged:
+
 ```json
 {
   "text": "...",

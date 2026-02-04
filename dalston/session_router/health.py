@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import redis.asyncio as redis
 
@@ -96,7 +96,7 @@ class HealthMonitor:
         Called periodically by the background loop.
         """
         workers = await self._registry.get_workers()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         for worker in workers:
             # Skip already offline workers
@@ -146,7 +146,7 @@ class HealthMonitor:
                     "type": "worker.offline",
                     "worker_id": worker_id,
                     "session_id": session_id,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             ),
         )

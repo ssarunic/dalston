@@ -5,7 +5,6 @@ accurate word boundaries from transcription segments.
 """
 
 import logging
-from pathlib import Path
 from typing import Any
 
 import whisperx
@@ -30,7 +29,9 @@ class WhisperXAlignEngine(Engine):
 
         # Detect device
         self._device, self._compute_type = self._detect_device()
-        logger.info(f"Detected device: {self._device}, compute_type: {self._compute_type}")
+        logger.info(
+            f"Detected device: {self._device}, compute_type: {self._compute_type}"
+        )
 
     def _detect_device(self) -> tuple[str, str]:
         """Detect the best available device and compute type.
@@ -40,6 +41,7 @@ class WhisperXAlignEngine(Engine):
         """
         try:
             import torch
+
             if torch.cuda.is_available():
                 return "cuda", "float16"
         except ImportError:
@@ -60,7 +62,9 @@ class WhisperXAlignEngine(Engine):
             logger.debug(f"Using cached alignment model for '{language}'")
             return self._align_models[language]
 
-        logger.info(f"Loading alignment model for language '{language}' on {self._device}")
+        logger.info(
+            f"Loading alignment model for language '{language}' on {self._device}"
+        )
 
         try:
             model, metadata = whisperx.load_align_model(
@@ -108,7 +112,12 @@ class WhisperXAlignEngine(Engine):
                 f"No alignment model for language '{language}', "
                 "returning original transcription timestamps"
             )
-            return self._fallback_output(text, segments, language, reason=f"No alignment model available for language '{language}'")
+            return self._fallback_output(
+                text,
+                segments,
+                language,
+                reason=f"No alignment model available for language '{language}'",
+            )
 
         model, metadata = model_result
 
@@ -134,7 +143,9 @@ class WhisperXAlignEngine(Engine):
             # Normalize the output format
             output_segments = self._normalize_aligned_segments(aligned_segments)
 
-            logger.info(f"Alignment complete: {len(output_segments)} segments with word timestamps")
+            logger.info(
+                f"Alignment complete: {len(output_segments)} segments with word timestamps"
+            )
 
             return TaskOutput(
                 data={
@@ -149,8 +160,7 @@ class WhisperXAlignEngine(Engine):
             # Graceful degradation on alignment failure
             logger.error(f"Alignment failed: {e}", exc_info=True)
             return self._fallback_output(
-                text, segments, language,
-                reason=f"Alignment failed: {str(e)}"
+                text, segments, language, reason=f"Alignment failed: {str(e)}"
             )
 
     def _prepare_segments_for_alignment(self, segments: list[dict]) -> list[dict]:
@@ -166,11 +176,13 @@ class WhisperXAlignEngine(Engine):
         """
         prepared = []
         for seg in segments:
-            prepared.append({
-                "start": seg.get("start", 0.0),
-                "end": seg.get("end", 0.0),
-                "text": seg.get("text", ""),
-            })
+            prepared.append(
+                {
+                    "start": seg.get("start", 0.0),
+                    "end": seg.get("end", 0.0),
+                    "text": seg.get("text", ""),
+                }
+            )
         return prepared
 
     def _normalize_aligned_segments(self, aligned_segments: list[dict]) -> list[dict]:
@@ -203,12 +215,14 @@ class WhisperXAlignEngine(Engine):
                 for w in words:
                     word_text = w.get("word", "").strip()
                     if word_text:
-                        valid_words.append({
-                            "word": word_text,
-                            "start": round(w.get("start", 0.0), 3),
-                            "end": round(w.get("end", 0.0), 3),
-                            "confidence": round(w.get("score", 0.0), 3),
-                        })
+                        valid_words.append(
+                            {
+                                "word": word_text,
+                                "start": round(w.get("start", 0.0), 3),
+                                "end": round(w.get("end", 0.0), 3),
+                                "confidence": round(w.get("score", 0.0), 3),
+                            }
+                        )
                     else:
                         filtered_words += 1
                 segment["words"] = valid_words if valid_words else None
@@ -267,6 +281,7 @@ class WhisperXAlignEngine(Engine):
 
         try:
             import torch
+
             cuda_available = torch.cuda.is_available()
             cuda_device_count = torch.cuda.device_count() if cuda_available else 0
         except ImportError:

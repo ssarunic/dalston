@@ -562,6 +562,7 @@ If migrating to Dalston native for efficiency:
 | Finals | `committed_transcript_with_timestamps` | `transcript.final` |
 
 **Benefits of Dalston native:**
+
 - ~33% bandwidth reduction (no base64 overhead)
 - Session metadata (`session.begin`, `session.end`)
 - VAD events for UI feedback
@@ -698,6 +699,7 @@ Refill rate: 1.5x real-time
 ```
 
 This allows clients to:
+
 - Send up to 10 seconds of buffered audio immediately (reconnection scenario)
 - Sustain 1.5x real-time transmission (faster-than-realtime uploads)
 - Recover from temporary delays without data loss

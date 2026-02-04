@@ -5,7 +5,6 @@ speech-to-text transcription with GPU acceleration.
 """
 
 import logging
-from pathlib import Path
 from typing import Any
 
 from faster_whisper import WhisperModel
@@ -37,7 +36,9 @@ class FasterWhisperEngine(Engine):
 
         # Auto-detect device and compute type
         self._device, self._compute_type = self._detect_device()
-        logger.info(f"Detected device: {self._device}, compute_type: {self._compute_type}")
+        logger.info(
+            f"Detected device: {self._device}, compute_type: {self._compute_type}"
+        )
 
     def _detect_device(self) -> tuple[str, str]:
         """Detect the best available device and compute type.
@@ -47,6 +48,7 @@ class FasterWhisperEngine(Engine):
         """
         try:
             import torch
+
             if torch.cuda.is_available():
                 return "cuda", "float16"
         except ImportError:
@@ -105,7 +107,9 @@ class FasterWhisperEngine(Engine):
         self._load_model(model_size, device, compute_type)
 
         logger.info(f"Transcribing: {audio_path}")
-        logger.info(f"Config: model={model_size}, language={language}, beam_size={beam_size}, vad_filter={vad_filter}")
+        logger.info(
+            f"Config: model={model_size}, language={language}, beam_size={beam_size}, vad_filter={vad_filter}"
+        )
 
         # Transcribe audio
         segments_generator, info = self._model.transcribe(
@@ -145,8 +149,12 @@ class FasterWhisperEngine(Engine):
         # Build full text
         full_text = " ".join(full_text_parts)
 
-        logger.info(f"Transcription complete: {len(segments)} segments, {len(full_text)} chars")
-        logger.info(f"Detected language: {info.language} (confidence: {info.language_probability:.2f})")
+        logger.info(
+            f"Transcription complete: {len(segments)} segments, {len(full_text)} chars"
+        )
+        logger.info(
+            f"Detected language: {info.language} (confidence: {info.language_probability:.2f})"
+        )
 
         return TaskOutput(
             data={
@@ -164,6 +172,7 @@ class FasterWhisperEngine(Engine):
 
         try:
             import torch
+
             cuda_available = torch.cuda.is_available()
             cuda_device_count = torch.cuda.device_count() if cuda_available else 0
         except ImportError:

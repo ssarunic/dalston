@@ -16,9 +16,9 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import numpy as np
-from websockets.asyncio.server import serve, ServerConnection
+from websockets.asyncio.server import ServerConnection, serve
 
-from dalston.realtime_sdk.assembler import TranscribeResult, Word
+from dalston.realtime_sdk.assembler import TranscribeResult
 from dalston.realtime_sdk.registry import WorkerInfo, WorkerRegistry
 from dalston.realtime_sdk.session import SessionConfig, SessionHandler
 
@@ -100,6 +100,7 @@ class RealtimeEngine(ABC):
         if not self._worker_endpoint:
             # Auto-detect: use hostname in Docker, localhost otherwise
             import socket
+
             hostname = socket.gethostname()
             self._worker_endpoint = f"ws://{hostname}:{self.port}"
 
@@ -320,7 +321,9 @@ class RealtimeEngine(ABC):
         while self._running:
             try:
                 if self._registry:
-                    status = "ready" if len(self._sessions) < self.max_sessions else "busy"
+                    status = (
+                        "ready" if len(self._sessions) < self.max_sessions else "busy"
+                    )
                     await self._registry.heartbeat(
                         worker_id=self.worker_id,
                         active_sessions=len(self._sessions),

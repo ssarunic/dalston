@@ -5,8 +5,8 @@ session allocation, and management API endpoints.
 """
 
 import json
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
@@ -14,12 +14,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from dalston.gateway.api.v1.realtime import (
-    RealtimeStatusResponse,
-    WorkerStatusResponse,
-    WorkersListResponse,
     management_router,
 )
-from dalston.gateway.services.auth import APIKey, DEFAULT_EXPIRES_AT, Scope
+from dalston.gateway.services.auth import DEFAULT_EXPIRES_AT, APIKey, Scope
 from dalston.session_router import CapacityInfo, SessionRouter, WorkerStatus
 
 
@@ -42,7 +39,7 @@ class TestRealtimeManagementEndpoints:
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
             scopes=[Scope.JOBS_READ, Scope.JOBS_WRITE, Scope.REALTIME],
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -324,7 +321,7 @@ class TestTranscriptAssemblyE2E:
 
         durations = [2.0, 2.0, 1.5]
 
-        for result, duration in zip(results, durations):
+        for result, duration in zip(results, durations, strict=False):
             assembler.add_utterance(result, audio_duration=duration)
 
         # Verify full transcript

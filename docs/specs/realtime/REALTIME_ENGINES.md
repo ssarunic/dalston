@@ -142,7 +142,7 @@ Loads and manages ASR models in GPU memory.
 class ModelManager:
     def __init__(self, models_config: dict):
         self.models = {}
-        
+
     async def load_models(self):
         """Load configured models into GPU memory."""
         # Load fast model (distil-whisper)
@@ -151,18 +151,18 @@ class ModelManager:
             device="cuda",
             compute_type="float16"
         )
-        
+
         # Load accurate model (faster-whisper large-v3)
         self.models["accurate"] = WhisperModel(
             "large-v3",
             device="cuda",
             compute_type="float16"
         )
-    
+
     def get_model(self, variant: str) -> WhisperModel:
         """Get model by variant name."""
         return self.models.get(variant, self.models["fast"])
-    
+
     def get_gpu_memory_usage(self) -> str:
         """Report GPU memory usage."""
         return f"{torch.cuda.memory_allocated() / 1e9:.1f}GB"
@@ -180,15 +180,15 @@ class VADEngine:
         self.state = VADState.SILENCE
         self.speech_buffer = []
         self.silence_duration = 0
-        
+
     def process_chunk(self, audio: np.ndarray) -> VADResult:
         """Process audio chunk and detect speech."""
-        
+
         # Get speech probability
         prob = self.model(torch.from_numpy(audio))
-        
+
         is_speech = prob > self.config.speech_threshold
-        
+
         if self.state == VADState.SILENCE:
             if is_speech:
                 self.state = VADState.SPEECH
@@ -197,21 +197,21 @@ class VADEngine:
                     event=VADEvent.SPEECH_START,
                     audio=None
                 )
-        
+
         elif self.state == VADState.SPEECH:
             if is_speech:
                 self.speech_buffer.append(audio)
                 self.silence_duration = 0
             else:
                 self.silence_duration += len(audio) / self.config.sample_rate
-                
+
                 if self.silence_duration >= self.config.endpoint_silence:
                     # Endpoint detected
                     self.state = VADState.SILENCE
                     speech_audio = np.concatenate(self.speech_buffer)
                     self.speech_buffer = []
                     self.silence_duration = 0
-                    
+
                     return VADResult(
                         event=VADEvent.SPEECH_END,
                         audio=speech_audio
@@ -219,7 +219,7 @@ class VADEngine:
                 else:
                     # Brief pause, keep buffering
                     self.speech_buffer.append(audio)
-        
+
         return VADResult(event=None, audio=None)
 
 @dataclass
@@ -250,7 +250,7 @@ Streaming-optimized Whisper transcription.
 class ASREngine:
     def __init__(self, model_manager: ModelManager):
         self.model_manager = model_manager
-        
+
     def transcribe(
         self,
         audio: np.ndarray,
@@ -258,22 +258,22 @@ class ASREngine:
         language: str
     ) -> ASRResult:
         """Transcribe speech audio."""
-        
+
         model = self.model_manager.get_model(model_variant)
-        
+
         segments, info = model.transcribe(
             audio,
             language=None if language == "auto" else language,
             word_timestamps=True,
             vad_filter=False  # We already did VAD
         )
-        
+
         words = []
         text_parts = []
-        
+
         for segment in segments:
             text_parts.append(segment.text.strip())
-            
+
             if segment.words:
                 for word in segment.words:
                     words.append(Word(
@@ -282,7 +282,7 @@ class ASREngine:
                         end=word.end,
                         confidence=word.probability
                     ))
-        
+
         return ASRResult(
             text=" ".join(text_parts),
             words=words,
@@ -314,10 +314,10 @@ class TranscriptAssembler:
     def __init__(self):
         self.segments = []
         self.current_time = 0.0
-        
+
     def add_utterance(self, result: ASRResult, audio_duration: float) -> Segment:
         """Add transcribed utterance to session transcript."""
-        
+
         # Adjust timestamps to session time
         segment = Segment(
             id=f"seg_{len(self.segments):04d}",
@@ -335,16 +335,16 @@ class TranscriptAssembler:
             ],
             confidence=result.confidence
         )
-        
+
         self.segments.append(segment)
         self.current_time = segment.end
-        
+
         return segment
-    
+
     def get_full_transcript(self) -> str:
         """Get full session transcript."""
         return " ".join(s.text for s in self.segments)
-    
+
     def get_all_segments(self) -> list[Segment]:
         """Get all segments."""
         return self.segments
@@ -386,17 +386,17 @@ class WhisperStreamingEngine(RealtimeEngine):
         self.worker_id = os.environ["WORKER_ID"]
         self.port = int(os.environ.get("WORKER_PORT", 9000))
         self.max_sessions = int(os.environ.get("MAX_SESSIONS", 4))
-        
+
         self.model_manager = ModelManager()
         self.registry = RegistryClient(os.environ["REDIS_URL"])
         self.sessions: dict[str, SessionHandler] = {}
-        
+
     async def start(self):
         """Start the engine."""
-        
+
         # Load models
         await self.model_manager.load_models()
-        
+
         # Register with Session Router
         await self.registry.register(
             worker_id=self.worker_id,
@@ -405,15 +405,15 @@ class WhisperStreamingEngine(RealtimeEngine):
             models=list(self.model_manager.models.keys()),
             languages=["en", "es", "fr", "de", "auto"]
         )
-        
+
         # Start heartbeat
         asyncio.create_task(self.heartbeat_loop())
-        
+
         # Start WebSocket server
         async with serve(self.handle_connection, "0.0.0.0", self.port):
             print(f"Realtime engine listening on port {self.port}")
             await asyncio.Future()  # Run forever
-    
+
     async def heartbeat_loop(self):
         """Send periodic heartbeats to Session Router."""
         while True:
@@ -423,25 +423,25 @@ class WhisperStreamingEngine(RealtimeEngine):
                 gpu_memory=self.model_manager.get_gpu_memory_usage()
             )
             await asyncio.sleep(10)
-    
+
     async def handle_connection(self, websocket: WebSocketServerProtocol, path: str):
         """Handle new WebSocket connection."""
-        
+
         if path == "/health":
             await websocket.send(json.dumps({"status": "healthy"}))
             return
-        
+
         if path != "/session":
             await websocket.close(1008, "Invalid path")
             return
-        
+
         if len(self.sessions) >= self.max_sessions:
             await websocket.close(1013, "Server at capacity")
             return
-        
+
         # Parse query parameters
         params = self._parse_query_params(websocket.request_headers.get("uri", ""))
-        
+
         # Create session handler
         session = SessionHandler(
             websocket=websocket,
@@ -454,9 +454,9 @@ class WhisperStreamingEngine(RealtimeEngine):
                 enable_vad=params.get("enable_vad", "true") == "true"
             )
         )
-        
+
         self.sessions[session.session_id] = session
-        
+
         try:
             await session.run()
         finally:
@@ -487,24 +487,24 @@ class SessionHandler:
         self.websocket = websocket
         self.model_manager = model_manager
         self.config = config
-        
+
         self.session_id = f"sess_{generate_id()}"
         self.started_at = time.time()
         self.error = None
-        
+
         self.vad = VADEngine(VADConfig())
         self.asr = ASREngine(model_manager)
         self.assembler = TranscriptAssembler()
-        
+
         self.audio_buffer = AudioBuffer(
             sample_rate=config.sample_rate,
             channels=config.channels,
             encoding=config.encoding
         )
-        
+
     async def run(self):
         """Main session loop."""
-        
+
         # Send session begin
         await self.send({
             "type": "session.begin",
@@ -517,14 +517,14 @@ class SessionHandler:
                 "model": self.config.model
             }
         })
-        
+
         try:
             async for message in self.websocket:
                 if isinstance(message, bytes):
                     await self.handle_audio(message)
                 else:
                     await self.handle_control(json.loads(message))
-                    
+
         except Exception as e:
             self.error = str(e)
             await self.send({
@@ -533,37 +533,37 @@ class SessionHandler:
                 "message": str(e),
                 "recoverable": False
             })
-    
+
     async def handle_audio(self, data: bytes):
         """Process incoming audio data."""
-        
+
         # Add to buffer
         self.audio_buffer.add(data)
-        
+
         # Process in chunks
         while chunk := self.audio_buffer.get_chunk():
             await self.process_chunk(chunk)
-    
+
     async def process_chunk(self, audio: np.ndarray):
         """Process a single audio chunk through the pipeline."""
-        
+
         # VAD
         vad_result = self.vad.process_chunk(audio)
-        
+
         if vad_result.event == VADEvent.SPEECH_START:
             if self.config.enable_vad:
                 await self.send({
                     "type": "vad.speech_start",
                     "timestamp": self.assembler.current_time
                 })
-        
+
         elif vad_result.event == VADEvent.SPEECH_END:
             if self.config.enable_vad:
                 await self.send({
                     "type": "vad.speech_end",
                     "timestamp": self.assembler.current_time
                 })
-            
+
             # Transcribe the speech
             if vad_result.audio is not None and len(vad_result.audio) > 0:
                 asr_result = self.asr.transcribe(
@@ -571,11 +571,11 @@ class SessionHandler:
                     self.config.model,
                     self.config.language
                 )
-                
+
                 if asr_result.text:
                     audio_duration = len(vad_result.audio) / self.config.sample_rate
                     segment = self.assembler.add_utterance(asr_result, audio_duration)
-                    
+
                     # Send final transcript
                     message = {
                         "type": "transcript.final",
@@ -584,7 +584,7 @@ class SessionHandler:
                         "end": segment.end,
                         "confidence": segment.confidence
                     }
-                    
+
                     if self.config.word_timestamps:
                         message["words"] = [
                             {
@@ -595,24 +595,24 @@ class SessionHandler:
                             }
                             for w in segment.words
                         ]
-                    
+
                     await self.send(message)
-    
+
     async def handle_control(self, message: dict):
         """Handle control messages."""
-        
+
         msg_type = message.get("type")
-        
+
         if msg_type == "config":
             # Update configuration
             if "language" in message:
                 self.config.language = message["language"]
-        
+
         elif msg_type == "flush":
             # Force process any buffered audio
             if remaining := self.audio_buffer.flush():
                 await self.process_chunk(remaining)
-        
+
         elif msg_type == "end":
             # End session
             await self.send({
@@ -630,13 +630,13 @@ class SessionHandler:
                     for s in self.assembler.get_all_segments()
                 ]
             })
-            
+
             await self.websocket.close()
-    
+
     async def send(self, message: dict):
         """Send message to client."""
         await self.websocket.send(json.dumps(message))
-    
+
     def get_duration(self) -> float:
         """Get session duration in seconds."""
         return time.time() - self.started_at

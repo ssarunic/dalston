@@ -52,6 +52,7 @@ class WhisperStreamingEngine(RealtimeEngine):
 
         # Load fast model (distil-whisper)
         import os
+
         fast_model_name = os.environ.get("FAST_MODEL", self.FAST_MODEL)
         logger.info(f"Loading fast model: {fast_model_name}")
         self._models["fast"] = WhisperModel(

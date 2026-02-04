@@ -185,15 +185,19 @@ class AudioPrepareEngine(Engine):
             logger.info(f"Channel {channel_idx}: {channel_metadata}")
 
             # Upload to S3
-            audio_uri = f"s3://{s3_bucket}/jobs/{job_id}/audio/prepared_ch{channel_idx}.wav"
+            audio_uri = (
+                f"s3://{s3_bucket}/jobs/{job_id}/audio/prepared_ch{channel_idx}.wav"
+            )
             s3_io.upload_file(channel_path, audio_uri)
             logger.info(f"Uploaded channel {channel_idx} to: {audio_uri}")
 
-            channel_files.append({
-                "channel": channel_idx,
-                "audio_uri": audio_uri,
-                "duration": channel_metadata["duration"],
-            })
+            channel_files.append(
+                {
+                    "channel": channel_idx,
+                    "audio_uri": audio_uri,
+                    "duration": channel_metadata["duration"],
+                }
+            )
             channel_uris.append(audio_uri)
 
             # Clean up temp file
@@ -239,11 +243,16 @@ class AudioPrepareEngine(Engine):
         cmd = [
             "ffmpeg",
             "-y",
-            "-i", str(input_path),
-            "-af", f"pan=mono|c0=c{channel}",
-            "-ar", str(sample_rate),
-            "-sample_fmt", "s16",
-            "-f", "wav",
+            "-i",
+            str(input_path),
+            "-af",
+            f"pan=mono|c0=c{channel}",
+            "-ar",
+            str(sample_rate),
+            "-sample_fmt",
+            "s16",
+            "-f",
+            "wav",
             str(output_path),
         ]
 
@@ -256,17 +265,13 @@ class AudioPrepareEngine(Engine):
         except subprocess.TimeoutExpired:
             raise RuntimeError(
                 f"ffmpeg channel extraction timed out after {self.FFMPEG_TIMEOUT}s"
-            )
+            ) from None
 
         if result.returncode != 0:
-            raise RuntimeError(
-                f"ffmpeg channel extraction failed: {result.stderr}"
-            )
+            raise RuntimeError(f"ffmpeg channel extraction failed: {result.stderr}")
 
         if not output_path.exists():
-            raise RuntimeError(
-                f"ffmpeg did not produce output file: {output_path}"
-            )
+            raise RuntimeError(f"ffmpeg did not produce output file: {output_path}")
 
     def _probe_audio(self, audio_path: Path) -> dict:
         """Probe audio file to extract metadata using ffprobe.
@@ -279,11 +284,14 @@ class AudioPrepareEngine(Engine):
         """
         cmd = [
             "ffprobe",
-            "-v", "quiet",
-            "-print_format", "json",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
             "-show_streams",
             "-show_format",
-            "-select_streams", "a:0",  # First audio stream
+            "-select_streams",
+            "a:0",  # First audio stream
             str(audio_path),
         ]
 
@@ -294,12 +302,10 @@ class AudioPrepareEngine(Engine):
         except subprocess.TimeoutExpired:
             raise RuntimeError(
                 f"ffprobe timed out after {self.FFPROBE_TIMEOUT}s for {audio_path}"
-            )
+            ) from None
 
         if result.returncode != 0:
-            raise RuntimeError(
-                f"ffprobe failed for {audio_path}: {result.stderr}"
-            )
+            raise RuntimeError(f"ffprobe failed for {audio_path}: {result.stderr}")
 
         try:
             probe_data = json.loads(result.stdout)
@@ -362,11 +368,16 @@ class AudioPrepareEngine(Engine):
         cmd = [
             "ffmpeg",
             "-y",  # Overwrite output without asking
-            "-i", str(input_path),
-            "-ar", str(sample_rate),  # Resample
-            "-ac", str(channels),  # Convert channels
-            "-sample_fmt", "s16",  # 16-bit signed PCM
-            "-f", "wav",  # Force WAV format
+            "-i",
+            str(input_path),
+            "-ar",
+            str(sample_rate),  # Resample
+            "-ac",
+            str(channels),  # Convert channels
+            "-sample_fmt",
+            "s16",  # 16-bit signed PCM
+            "-f",
+            "wav",  # Force WAV format
             str(output_path),
         ]
 
@@ -379,17 +390,13 @@ class AudioPrepareEngine(Engine):
         except subprocess.TimeoutExpired:
             raise RuntimeError(
                 f"ffmpeg conversion timed out after {self.FFMPEG_TIMEOUT}s"
-            )
+            ) from None
 
         if result.returncode != 0:
-            raise RuntimeError(
-                f"ffmpeg conversion failed: {result.stderr}"
-            )
+            raise RuntimeError(f"ffmpeg conversion failed: {result.stderr}")
 
         if not output_path.exists():
-            raise RuntimeError(
-                f"ffmpeg did not produce output file: {output_path}"
-            )
+            raise RuntimeError(f"ffmpeg did not produce output file: {output_path}")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """Unit tests for API key authentication."""
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -93,7 +93,7 @@ class TestAPIKeyModel:
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
             scopes=[Scope.JOBS_READ, Scope.JOBS_WRITE],
             rate_limit=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -103,7 +103,7 @@ class TestAPIKeyModel:
         assert sample_api_key.is_revoked is False
 
     def test_is_revoked_true(self, sample_api_key: APIKey):
-        sample_api_key.revoked_at = datetime.now(timezone.utc)
+        sample_api_key.revoked_at = datetime.now(UTC)
         assert sample_api_key.is_revoked is True
 
     def test_is_expired_false(self, sample_api_key: APIKey):
@@ -112,12 +112,14 @@ class TestAPIKeyModel:
 
     def test_is_expired_true(self, sample_api_key: APIKey):
         from datetime import timedelta
-        sample_api_key.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+
+        sample_api_key.expires_at = datetime.now(UTC) - timedelta(minutes=1)
         assert sample_api_key.is_expired is True
 
     def test_is_expired_future(self, sample_api_key: APIKey):
         from datetime import timedelta
-        sample_api_key.expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+
+        sample_api_key.expires_at = datetime.now(UTC) + timedelta(days=30)
         assert sample_api_key.is_expired is False
 
     def test_has_scope_direct(self, sample_api_key: APIKey):
@@ -142,7 +144,8 @@ class TestAPIKeyModel:
 
     def test_from_dict(self, sample_api_key: APIKey):
         from datetime import timedelta
-        custom_expires = datetime.now(timezone.utc) + timedelta(days=90)
+
+        custom_expires = datetime.now(UTC) + timedelta(days=90)
         data = {
             "id": str(sample_api_key.id),
             "key_hash": "abc123",
@@ -261,7 +264,8 @@ class TestAuthService:
     ):
         """Test creating key with custom expiration date."""
         from datetime import timedelta
-        custom_expires = datetime.now(timezone.utc) + timedelta(days=30)
+
+        custom_expires = datetime.now(UTC) + timedelta(days=30)
 
         raw_key, api_key = await auth_service.create_api_key(
             name="Expiring Key",
@@ -272,9 +276,7 @@ class TestAuthService:
         assert api_key.expires_at == custom_expires
 
     @pytest.mark.asyncio
-    async def test_validate_api_key_valid(
-        self, auth_service: AuthService, mock_redis
-    ):
+    async def test_validate_api_key_valid(self, auth_service: AuthService, mock_redis):
         # Setup mock to return valid key data
         tenant_id = UUID("00000000-0000-0000-0000-000000000000")
         mock_redis.hgetall.return_value = {
@@ -285,7 +287,7 @@ class TestAuthService:
             "tenant_id": str(tenant_id),
             "scopes": "jobs:read,jobs:write",
             "rate_limit": "",
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
             "last_used_at": "",
             "revoked_at": "",
         }
@@ -318,9 +320,9 @@ class TestAuthService:
             "tenant_id": str(tenant_id),
             "scopes": "jobs:read",
             "rate_limit": "",
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
             "last_used_at": "",
-            "revoked_at": datetime.now(timezone.utc).isoformat(),
+            "revoked_at": datetime.now(UTC).isoformat(),
         }
 
         api_key = await auth_service.validate_api_key("dk_revoked_key")
@@ -340,8 +342,9 @@ class TestAuthService:
     ):
         """Test that expired keys are rejected during validation."""
         from datetime import timedelta
+
         tenant_id = UUID("00000000-0000-0000-0000-000000000000")
-        expired_time = datetime.now(timezone.utc) - timedelta(minutes=1)
+        expired_time = datetime.now(UTC) - timedelta(minutes=1)
 
         mock_redis.hgetall.return_value = {
             "id": str(uuid4()),
@@ -351,7 +354,7 @@ class TestAuthService:
             "tenant_id": str(tenant_id),
             "scopes": "jobs:read",
             "rate_limit": "",
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
             "last_used_at": "",
             "expires_at": expired_time.isoformat(),
             "revoked_at": "",
@@ -373,7 +376,7 @@ class TestAuthService:
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
             scopes=[Scope.JOBS_READ],
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -396,7 +399,7 @@ class TestAuthService:
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
             scopes=[Scope.JOBS_READ],
             rate_limit=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -421,7 +424,7 @@ class TestAuthService:
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
             scopes=[Scope.JOBS_READ],
             rate_limit=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -449,7 +452,7 @@ class TestAuthService:
             "tenant_id": str(UUID("00000000-0000-0000-0000-000000000000")),
             "scopes": "jobs:read",
             "rate_limit": "",
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
             "last_used_at": "",
             "revoked_at": "",
         }
@@ -470,9 +473,7 @@ class TestAuthService:
         assert success is False
 
     @pytest.mark.asyncio
-    async def test_has_any_api_keys_empty(
-        self, auth_service: AuthService, mock_redis
-    ):
+    async def test_has_any_api_keys_empty(self, auth_service: AuthService, mock_redis):
         mock_redis.scan.return_value = (0, [])
 
         has_keys = await auth_service.has_any_api_keys()
@@ -480,9 +481,7 @@ class TestAuthService:
         assert has_keys is False
 
     @pytest.mark.asyncio
-    async def test_has_any_api_keys_exists(
-        self, auth_service: AuthService, mock_redis
-    ):
+    async def test_has_any_api_keys_exists(self, auth_service: AuthService, mock_redis):
         mock_redis.scan.return_value = (0, ["dalston:apikey:hash:abc123"])
 
         has_keys = await auth_service.has_any_api_keys()
@@ -521,7 +520,7 @@ class TestAuthService:
                     "tenant_id": str(tenant_id),
                     "scopes": "jobs:read",
                     "rate_limit": "",
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(UTC).isoformat(),
                     "last_used_at": "",
                     "expires_at": DEFAULT_EXPIRES_AT.isoformat(),
                     "revoked_at": "",
@@ -536,10 +535,10 @@ class TestAuthService:
                     "tenant_id": str(tenant_id),
                     "scopes": "jobs:read",
                     "rate_limit": "",
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(UTC).isoformat(),
                     "last_used_at": "",
                     "expires_at": DEFAULT_EXPIRES_AT.isoformat(),
-                    "revoked_at": datetime.now(timezone.utc).isoformat(),
+                    "revoked_at": datetime.now(UTC).isoformat(),
                 }
 
         mock_redis.hgetall.side_effect = mock_hgetall
@@ -579,7 +578,7 @@ class TestAuthService:
                     "tenant_id": str(tenant_id),
                     "scopes": "jobs:read",
                     "rate_limit": "",
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(UTC).isoformat(),
                     "last_used_at": "",
                     "expires_at": DEFAULT_EXPIRES_AT.isoformat(),
                     "revoked_at": "",
@@ -593,10 +592,10 @@ class TestAuthService:
                     "tenant_id": str(tenant_id),
                     "scopes": "jobs:read",
                     "rate_limit": "",
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(UTC).isoformat(),
                     "last_used_at": "",
                     "expires_at": DEFAULT_EXPIRES_AT.isoformat(),
-                    "revoked_at": datetime.now(timezone.utc).isoformat(),
+                    "revoked_at": datetime.now(UTC).isoformat(),
                 }
 
         mock_redis.hgetall.side_effect = mock_hgetall
@@ -707,7 +706,7 @@ class TestMiddlewareHelpers:
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
             scopes=[Scope.JOBS_READ],
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -730,7 +729,7 @@ class TestMiddlewareHelpers:
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
             scopes=[Scope.JOBS_READ, Scope.JOBS_WRITE],
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -769,8 +768,8 @@ class TestSessionTokenModel:
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
             parent_key_id=UUID("12345678-1234-1234-1234-123456789abc"),
             scopes=[Scope.REALTIME],
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
-            created_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(UTC) + timedelta(minutes=10),
+            created_at=datetime.now(UTC),
         )
 
     def test_is_expired_false(self, sample_session_token: SessionToken):
@@ -779,9 +778,7 @@ class TestSessionTokenModel:
     def test_is_expired_true(self, sample_session_token: SessionToken):
         from datetime import timedelta
 
-        sample_session_token.expires_at = datetime.now(timezone.utc) - timedelta(
-            minutes=1
-        )
+        sample_session_token.expires_at = datetime.now(UTC) - timedelta(minutes=1)
         assert sample_session_token.is_expired is True
 
     def test_has_scope_direct(self, sample_session_token: SessionToken):
@@ -847,7 +844,7 @@ class TestSessionTokenService:
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
             scopes=[Scope.JOBS_READ, Scope.REALTIME],
             rate_limit=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -903,7 +900,7 @@ class TestSessionTokenService:
 
         tenant_id = UUID("00000000-0000-0000-0000-000000000000")
         parent_key_id = UUID("12345678-1234-1234-1234-123456789abc")
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        expires_at = datetime.now(UTC) + timedelta(minutes=10)
 
         mock_redis.hgetall.return_value = {
             "token_hash": "abc123",
@@ -911,7 +908,7 @@ class TestSessionTokenService:
             "parent_key_id": str(parent_key_id),
             "scopes": "realtime",
             "expires_at": expires_at.isoformat(),
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         session_token = await auth_service.validate_session_token("tk_valid_token")
@@ -938,7 +935,7 @@ class TestSessionTokenService:
 
         tenant_id = UUID("00000000-0000-0000-0000-000000000000")
         parent_key_id = UUID("12345678-1234-1234-1234-123456789abc")
-        expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        expires_at = datetime.now(UTC) - timedelta(minutes=1)
 
         mock_redis.hgetall.return_value = {
             "token_hash": "abc123",
@@ -946,7 +943,7 @@ class TestSessionTokenService:
             "parent_key_id": str(parent_key_id),
             "scopes": "realtime",
             "expires_at": expires_at.isoformat(),
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         session_token = await auth_service.validate_session_token("tk_expired_token")
@@ -962,9 +959,7 @@ class TestSessionTokenService:
         assert session_token is None
 
     @pytest.mark.asyncio
-    async def test_revoke_session_token(
-        self, auth_service: AuthService, mock_redis
-    ):
+    async def test_revoke_session_token(self, auth_service: AuthService, mock_redis):
         mock_redis.delete.return_value = 1
 
         success = await auth_service.revoke_session_token("tk_valid_token")
@@ -996,8 +991,8 @@ class TestMiddlewareSessionTokenSupport:
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
             parent_key_id=UUID("12345678-1234-1234-1234-123456789abc"),
             scopes=[Scope.REALTIME],
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
-            created_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(UTC) + timedelta(minutes=10),
+            created_at=datetime.now(UTC),
         )
 
         # Should not raise
@@ -1016,8 +1011,8 @@ class TestMiddlewareSessionTokenSupport:
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
             parent_key_id=UUID("12345678-1234-1234-1234-123456789abc"),
             scopes=[Scope.REALTIME],
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
-            created_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(UTC) + timedelta(minutes=10),
+            created_at=datetime.now(UTC),
         )
 
         with pytest.raises(AuthorizationError) as exc_info:

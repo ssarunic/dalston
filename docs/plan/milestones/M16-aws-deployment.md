@@ -125,6 +125,7 @@
 ### IAM Role
 
 Policy allows:
+
 - `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` on bucket objects
 - `s3:ListBucket` on bucket
 

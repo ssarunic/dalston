@@ -14,12 +14,11 @@ from typing import TYPE_CHECKING
 from fastapi import HTTPException, Request, WebSocket, status
 
 from dalston.gateway.services.auth import (
+    TOKEN_PREFIX,
     APIKey,
     AuthService,
-    KEY_PREFIX,
     Scope,
     SessionToken,
-    TOKEN_PREFIX,
 )
 
 if TYPE_CHECKING:

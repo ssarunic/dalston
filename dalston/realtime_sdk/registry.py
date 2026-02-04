@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import redis.asyncio as redis
 
@@ -122,8 +122,8 @@ class WorkerRegistry:
                 "gpu_memory_total": "0GB",
                 "models_loaded": json.dumps(info.models),
                 "languages_supported": json.dumps(info.languages),
-                "last_heartbeat": datetime.now(timezone.utc).isoformat(),
-                "started_at": datetime.now(timezone.utc).isoformat(),
+                "last_heartbeat": datetime.now(UTC).isoformat(),
+                "started_at": datetime.now(UTC).isoformat(),
             },
         )
 
@@ -139,7 +139,7 @@ class WorkerRegistry:
                     "worker_id": info.worker_id,
                     "endpoint": info.endpoint,
                     "capacity": info.capacity,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             ),
         )
@@ -172,7 +172,7 @@ class WorkerRegistry:
                 "status": status,
                 "active_sessions": str(active_sessions),
                 "gpu_memory_used": gpu_memory_used,
-                "last_heartbeat": datetime.now(timezone.utc).isoformat(),
+                "last_heartbeat": datetime.now(UTC).isoformat(),
             },
         )
 
@@ -227,7 +227,7 @@ class WorkerRegistry:
                     "session_id": session_id,
                     "duration": duration,
                     "status": status,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             ),
         )
@@ -265,7 +265,7 @@ class WorkerRegistry:
                 {
                     "type": "worker.unregistered",
                     "worker_id": worker_id,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             ),
         )

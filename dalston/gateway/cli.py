@@ -14,7 +14,7 @@ from typing import Annotated
 import typer
 
 from dalston.db.session import DEFAULT_TENANT_ID
-from dalston.gateway.services.auth import AuthService, DEFAULT_SCOPES, Scope
+from dalston.gateway.services.auth import DEFAULT_SCOPES, AuthService, Scope
 
 app = typer.Typer(help="Dalston Gateway CLI.")
 
@@ -70,7 +70,7 @@ def parse_scopes(scopes_str: str | None) -> list[Scope]:
         except ValueError:
             raise typer.BadParameter(
                 f"Invalid scope '{s}'. Valid scopes: {', '.join(VALID_SCOPES)}"
-            )
+            ) from None
 
     return scopes
 

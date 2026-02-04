@@ -11,7 +11,7 @@ import ipaddress
 import json
 import socket
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
@@ -161,7 +161,7 @@ class WebhookService:
             "event": event,
             "transcription_id": str(job_id),
             "status": status,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
         if text is not None:
@@ -252,10 +252,14 @@ class WebhookService:
 
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.post(url, content=payload_json, headers=headers)
+                    response = await client.post(
+                        url, content=payload_json, headers=headers
+                    )
 
                 if response.status_code < 300:
-                    attempt_log.info("webhook_delivered", status_code=response.status_code)
+                    attempt_log.info(
+                        "webhook_delivered", status_code=response.status_code
+                    )
                     return True
 
                 # Non-2xx response - log and potentially retry
@@ -281,7 +285,11 @@ class WebhookService:
 
             # Check if we should retry
             if attempt < max_retries:
-                delay = backoff_delays[attempt] if attempt < len(backoff_delays) else backoff_delays[-1]
+                delay = (
+                    backoff_delays[attempt]
+                    if attempt < len(backoff_delays)
+                    else backoff_delays[-1]
+                )
                 attempt_log.info("webhook_retry_scheduled", delay_seconds=delay)
                 await asyncio.sleep(delay)
             else:

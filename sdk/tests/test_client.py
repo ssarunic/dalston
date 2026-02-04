@@ -1,6 +1,5 @@
 """Tests for batch transcription client."""
 
-import json
 from io import BytesIO
 from uuid import UUID
 

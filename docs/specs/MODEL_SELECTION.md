@@ -9,15 +9,18 @@ This specification defines how users select transcription models in Dalston's AP
 ## Current State
 
 ### Batch API (REST)
+
 - **Model selection**: Not exposed in API parameters
 - **Default**: `large-v3` (hardcoded in orchestrator)
 - **Engine override**: `engine_transcribe` parameter exists but not documented
 
 ### Real-time API (WebSocket)
+
 - **Model selection**: `model=fast|accurate` query parameter
 - **Mapping**: `fast` → distil-whisper, `accurate` → faster-whisper-large-v3
 
 ### Engine Level
+
 - Each engine defines its own model options in `engine.yaml`
 - faster-whisper supports: tiny, base, small, medium, large-v1/v2/v3
 - Engines read model from `input.config.model`
@@ -146,6 +149,7 @@ POST /v1/audio/transcriptions
 | `model` | string | `whisper-large-v3` | Model identifier or alias |
 
 **Example request:**
+
 ```bash
 curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -F "file=@audio.wav" \
@@ -167,6 +171,7 @@ GET /v1/models
 ```
 
 **Response:**
+
 ```json
 {
   "object": "list",
@@ -251,6 +256,7 @@ When adding a new engine (e.g., Parakeet):
 ### Language-Specific Models
 
 Support explicit language variants:
+
 ```
 whisper-large-v3         # Auto-detect language
 whisper-large-v3-en      # English-optimized
@@ -260,6 +266,7 @@ whisper-base-en          # English-only base
 ### Model Routing by Capability
 
 Future: automatic model selection based on requirements:
+
 ```python
 model="auto"
 language="hr"           # Route to best Croatian model

@@ -27,11 +27,14 @@ class TestVerifyWebhookSignature:
 
         # Compute valid signature
         signed_payload = f"{timestamp}.{payload.decode('utf-8')}"
-        signature = "sha256=" + hmac.new(
-            secret.encode(),
-            signed_payload.encode(),
-            hashlib.sha256,
-        ).hexdigest()
+        signature = (
+            "sha256="
+            + hmac.new(
+                secret.encode(),
+                signed_payload.encode(),
+                hashlib.sha256,
+            ).hexdigest()
+        )
 
         result = verify_webhook_signature(payload, signature, timestamp, secret)
 
@@ -55,11 +58,14 @@ class TestVerifyWebhookSignature:
         payload = b'{"event": "job.completed"}'
 
         signed_payload = f"{timestamp}.{payload.decode('utf-8')}"
-        signature = "sha256=" + hmac.new(
-            secret.encode(),
-            signed_payload.encode(),
-            hashlib.sha256,
-        ).hexdigest()
+        signature = (
+            "sha256="
+            + hmac.new(
+                secret.encode(),
+                signed_payload.encode(),
+                hashlib.sha256,
+            ).hexdigest()
+        )
 
         with pytest.raises(WebhookVerificationError, match="Timestamp too old"):
             verify_webhook_signature(payload, signature, timestamp, secret)
@@ -67,18 +73,14 @@ class TestVerifyWebhookSignature:
     def test_invalid_timestamp_format(self):
         """Test verification with invalid timestamp format."""
         with pytest.raises(WebhookVerificationError, match="Invalid timestamp"):
-            verify_webhook_signature(
-                b"payload", "sha256=abc", "not-a-number", "secret"
-            )
+            verify_webhook_signature(b"payload", "sha256=abc", "not-a-number", "secret")
 
     def test_invalid_signature_format(self):
         """Test verification with invalid signature format."""
         timestamp = str(int(time.time()))
 
         with pytest.raises(WebhookVerificationError, match="Invalid signature format"):
-            verify_webhook_signature(
-                b"payload", "invalid-prefix", timestamp, "secret"
-            )
+            verify_webhook_signature(b"payload", "invalid-prefix", timestamp, "secret")
 
     def test_custom_max_age(self):
         """Test verification with custom max_age."""
@@ -87,11 +89,14 @@ class TestVerifyWebhookSignature:
         payload = b'{"event": "job.completed"}'
 
         signed_payload = f"{timestamp}.{payload.decode('utf-8')}"
-        signature = "sha256=" + hmac.new(
-            secret.encode(),
-            signed_payload.encode(),
-            hashlib.sha256,
-        ).hexdigest()
+        signature = (
+            "sha256="
+            + hmac.new(
+                secret.encode(),
+                signed_payload.encode(),
+                hashlib.sha256,
+            ).hexdigest()
+        )
 
         # Should pass with 120 second max_age
         result = verify_webhook_signature(
@@ -101,9 +106,7 @@ class TestVerifyWebhookSignature:
 
         # Should fail with 30 second max_age
         with pytest.raises(WebhookVerificationError, match="Timestamp too old"):
-            verify_webhook_signature(
-                payload, signature, timestamp, secret, max_age=30
-            )
+            verify_webhook_signature(payload, signature, timestamp, secret, max_age=30)
 
 
 class TestParseWebhookPayload:
@@ -111,16 +114,18 @@ class TestParseWebhookPayload:
 
     def test_parse_completed_event(self):
         """Test parsing job.completed event."""
-        payload = json.dumps({
-            "event": "job.completed",
-            "job_id": "550e8400-e29b-41d4-a716-446655440000",
-            "timestamp": "2024-01-01T00:00:00Z",
-            "data": {
-                "text": "Hello world",
-                "duration": 10.5,
-            },
-            "metadata": {"user_id": "123"},
-        })
+        payload = json.dumps(
+            {
+                "event": "job.completed",
+                "job_id": "550e8400-e29b-41d4-a716-446655440000",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "data": {
+                    "text": "Hello world",
+                    "duration": 10.5,
+                },
+                "metadata": {"user_id": "123"},
+            }
+        )
 
         result = parse_webhook_payload(payload)
 
@@ -132,15 +137,17 @@ class TestParseWebhookPayload:
 
     def test_parse_failed_event(self):
         """Test parsing job.failed event."""
-        payload = json.dumps({
-            "event": "job.failed",
-            "job_id": "550e8400-e29b-41d4-a716-446655440000",
-            "timestamp": "2024-01-01T00:00:00Z",
-            "data": {
-                "error": "Processing failed",
-                "stage": "transcribe",
-            },
-        })
+        payload = json.dumps(
+            {
+                "event": "job.failed",
+                "job_id": "550e8400-e29b-41d4-a716-446655440000",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "data": {
+                    "error": "Processing failed",
+                    "stage": "transcribe",
+                },
+            }
+        )
 
         result = parse_webhook_payload(payload)
 
@@ -157,12 +164,14 @@ class TestParseWebhookPayload:
 
     def test_parse_unix_timestamp(self):
         """Test parsing with Unix timestamp."""
-        payload = json.dumps({
-            "event": "job.completed",
-            "job_id": "550e8400-e29b-41d4-a716-446655440000",
-            "timestamp": 1704067200,  # Unix timestamp
-            "data": {},
-        })
+        payload = json.dumps(
+            {
+                "event": "job.completed",
+                "job_id": "550e8400-e29b-41d4-a716-446655440000",
+                "timestamp": 1704067200,  # Unix timestamp
+                "data": {},
+            }
+        )
 
         result = parse_webhook_payload(payload)
 
@@ -170,21 +179,25 @@ class TestParseWebhookPayload:
 
     def test_missing_required_field(self):
         """Test parsing with missing required field."""
-        payload = json.dumps({
-            "event": "job.completed",
-            # Missing job_id and timestamp
-        })
+        payload = json.dumps(
+            {
+                "event": "job.completed",
+                # Missing job_id and timestamp
+            }
+        )
 
         with pytest.raises(WebhookVerificationError, match="Missing required field"):
             parse_webhook_payload(payload)
 
     def test_invalid_event_type(self):
         """Test parsing with invalid event type."""
-        payload = json.dumps({
-            "event": "invalid.event",
-            "job_id": "550e8400-e29b-41d4-a716-446655440000",
-            "timestamp": "2024-01-01T00:00:00Z",
-        })
+        payload = json.dumps(
+            {
+                "event": "invalid.event",
+                "job_id": "550e8400-e29b-41d4-a716-446655440000",
+                "timestamp": "2024-01-01T00:00:00Z",
+            }
+        )
 
         with pytest.raises(WebhookVerificationError, match="Invalid event type"):
             parse_webhook_payload(payload)
@@ -196,11 +209,13 @@ class TestParseWebhookPayload:
 
     def test_invalid_job_id(self):
         """Test parsing with invalid job_id."""
-        payload = json.dumps({
-            "event": "job.completed",
-            "job_id": "not-a-uuid",
-            "timestamp": "2024-01-01T00:00:00Z",
-        })
+        payload = json.dumps(
+            {
+                "event": "job.completed",
+                "job_id": "not-a-uuid",
+                "timestamp": "2024-01-01T00:00:00Z",
+            }
+        )
 
         with pytest.raises(WebhookVerificationError, match="Invalid job_id"):
             parse_webhook_payload(payload)

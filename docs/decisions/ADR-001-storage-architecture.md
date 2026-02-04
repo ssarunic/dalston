@@ -23,11 +23,13 @@ A single storage system cannot optimally serve all these needs.
 Store everything in PostgreSQL, including queues (using `SKIP LOCKED`) and blobs (using `bytea` or `TOAST`).
 
 **Pros:**
+
 - Single system to operate
 - Strong consistency guarantees
 - Mature tooling
 
 **Cons:**
+
 - Poor fit for queue workloads (polling overhead, lock contention)
 - Storing large blobs in database is inefficient and complicates backups
 - No native pub/sub for real-time events
@@ -38,11 +40,13 @@ Store everything in PostgreSQL, including queues (using `SKIP LOCKED`) and blobs
 Store everything in Redis, using different data structures for different needs.
 
 **Pros:**
+
 - Excellent for queues (BRPOP), pub/sub, TTL
 - Very fast for all operations
 - Single system
 
 **Cons:**
+
 - No durable storage (persistence options have tradeoffs)
 - Limited query capabilities (no "find all jobs where status=X")
 - Memory-bound (expensive for large datasets)
@@ -51,17 +55,20 @@ Store everything in Redis, using different data structures for different needs.
 ### 3. PostgreSQL + Redis + S3 (Chosen)
 
 Use each system for what it does best:
+
 - **PostgreSQL**: Persistent business data (jobs, tasks, API keys, tenants)
 - **Redis**: Ephemeral data (queues, session state, rate limits, pub/sub)
 - **S3**: Artifact storage (audio, transcripts, exports)
 
 **Pros:**
+
 - Each system used for its strengths
 - Clear separation of concerns
 - Scales independently per tier
 - Cloud-native (managed services available)
 
 **Cons:**
+
 - Three systems to operate
 - Data consistency across systems requires care
 - More complex deployment

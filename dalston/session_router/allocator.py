@@ -10,7 +10,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import redis.asyncio as redis
 
@@ -133,7 +133,9 @@ class SessionAllocator:
         available = await self._registry.get_available_workers(model, language)
 
         if not available:
-            logger.warning(f"No workers available for model={model}, language={language}")
+            logger.warning(
+                f"No workers available for model={model}, language={language}"
+            )
             return None
 
         # Select best worker (first in list = most available capacity)
@@ -212,7 +214,9 @@ class SessionAllocator:
                     enhance_on_end=enhance_on_end,
                 )
 
-                sessions_key = f"{WORKER_KEY_PREFIX}{worker.worker_id}{WORKER_SESSIONS_SUFFIX}"
+                sessions_key = (
+                    f"{WORKER_KEY_PREFIX}{worker.worker_id}{WORKER_SESSIONS_SUFFIX}"
+                )
                 await self._redis.sadd(sessions_key, session_id)
                 await self._redis.sadd(ACTIVE_SESSIONS_KEY, session_id)
 
@@ -251,7 +255,7 @@ class SessionAllocator:
                 "language": language,
                 "model": model,
                 "client_ip": client_ip,
-                "started_at": datetime.now(timezone.utc).isoformat(),
+                "started_at": datetime.now(UTC).isoformat(),
                 "enhance_on_end": json.dumps(enhance_on_end),
             },
         )
@@ -354,4 +358,4 @@ class SessionAllocator:
                 return datetime.fromisoformat(value.replace("Z", "+00:00"))
             except ValueError:
                 pass
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)

@@ -17,8 +17,8 @@ from redis import asyncio as aioredis
 
 from dalston.common.events import EVENTS_CHANNEL
 from dalston.config import get_settings
-from dalston.db.session import async_session, init_db
 from dalston.db.models import JobModel
+from dalston.db.session import async_session, init_db
 from dalston.gateway.services.storage import StorageService
 from dalston.gateway.services.webhook import WebhookService
 from dalston.orchestrator.handlers import (
@@ -93,7 +93,7 @@ async def orchestrator_loop() -> None:
 
                 await _dispatch_event(message["data"], redis, settings)
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Normal timeout, check shutdown flag and continue
                 continue
             except Exception as e:

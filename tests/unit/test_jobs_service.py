@@ -1,12 +1,11 @@
 """Unit tests for JobsService."""
 
-from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 
-from dalston.gateway.services.jobs import JobStats, JobsService
+from dalston.gateway.services.jobs import JobsService, JobStats
 
 
 class TestJobStats:
@@ -52,10 +51,10 @@ class TestJobsServiceGetStats:
         """Test that get_stats returns JobStats instance with correct counts."""
         # Setup mock to return counts for each query
         mock_db.execute.side_effect = [
-            self._mock_scalar_result(3),   # running
-            self._mock_scalar_result(7),   # queued
+            self._mock_scalar_result(3),  # running
+            self._mock_scalar_result(7),  # queued
             self._mock_scalar_result(15),  # completed_today
-            self._mock_scalar_result(2),   # failed_today
+            self._mock_scalar_result(2),  # failed_today
         ]
 
         stats = await jobs_service.get_stats(mock_db)
@@ -74,10 +73,10 @@ class TestJobsServiceGetStats:
         tenant_id = UUID("12345678-1234-1234-1234-123456789abc")
 
         mock_db.execute.side_effect = [
-            self._mock_scalar_result(1),   # running
-            self._mock_scalar_result(2),   # queued
-            self._mock_scalar_result(5),   # completed_today
-            self._mock_scalar_result(0),   # failed_today
+            self._mock_scalar_result(1),  # running
+            self._mock_scalar_result(2),  # queued
+            self._mock_scalar_result(5),  # completed_today
+            self._mock_scalar_result(0),  # failed_today
         ]
 
         stats = await jobs_service.get_stats(mock_db, tenant_id=tenant_id)
@@ -99,8 +98,8 @@ class TestJobsServiceGetStats:
         mock_db.execute.side_effect = [
             self._mock_scalar_result(10),  # running
             self._mock_scalar_result(20),  # queued
-            self._mock_scalar_result(100), # completed_today
-            self._mock_scalar_result(5),   # failed_today
+            self._mock_scalar_result(100),  # completed_today
+            self._mock_scalar_result(5),  # failed_today
         ]
 
         stats = await jobs_service.get_stats(mock_db, tenant_id=None)
@@ -131,9 +130,7 @@ class TestJobsServiceGetStats:
         assert stats.failed_today == 0
 
     @pytest.mark.asyncio
-    async def test_get_stats_zero_counts(
-        self, jobs_service: JobsService, mock_db
-    ):
+    async def test_get_stats_zero_counts(self, jobs_service: JobsService, mock_db):
         """Test that get_stats correctly returns zero counts."""
         mock_db.execute.side_effect = [
             self._mock_scalar_result(0),  # running

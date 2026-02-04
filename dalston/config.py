@@ -32,7 +32,9 @@ class Settings(BaseSettings):
 
     # AWS Credentials (optional, can use IAM roles)
     aws_access_key_id: str | None = Field(default=None, alias="AWS_ACCESS_KEY_ID")
-    aws_secret_access_key: str | None = Field(default=None, alias="AWS_SECRET_ACCESS_KEY")
+    aws_secret_access_key: str | None = Field(
+        default=None, alias="AWS_SECRET_ACCESS_KEY"
+    )
 
     # Webhooks (M05)
     webhook_secret: str = Field(

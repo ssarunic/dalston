@@ -3,11 +3,10 @@
 import hashlib
 import hmac
 import json
-import time
 from uuid import UUID
 
-import pytest
 import httpx
+import pytest
 
 from dalston.gateway.services.webhook import (
     WebhookService,
@@ -194,7 +193,7 @@ class TestSignPayload:
         # Verify manually
         signed_payload = f"{timestamp}.{payload}"
         expected = hmac.new(
-            "test-webhook-secret".encode(),
+            b"test-webhook-secret",
             signed_payload.encode(),
             hashlib.sha256,
         ).hexdigest()
@@ -223,9 +222,7 @@ class TestDifferentSecrets:
 class TestDeliver:
     """Tests for webhook delivery."""
 
-    async def test_deliver_success(
-        self, webhook_service: WebhookService, httpx_mock
-    ):
+    async def test_deliver_success(self, webhook_service: WebhookService, httpx_mock):
         """Test successful webhook delivery."""
         httpx_mock.add_response(status_code=200, json={"status": "ok"})
 
@@ -424,9 +421,7 @@ class TestDeliverRetry:
         requests = httpx_mock.get_requests()
         assert len(requests) == 4  # 1 initial + 3 retries
 
-    async def test_retry_on_timeout(
-        self, webhook_service: WebhookService, httpx_mock
-    ):
+    async def test_retry_on_timeout(self, webhook_service: WebhookService, httpx_mock):
         """Test that timeout triggers retry."""
         # First request times out, second succeeds
         httpx_mock.add_exception(httpx.TimeoutException("timeout"))

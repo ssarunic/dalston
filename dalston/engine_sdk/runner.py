@@ -9,7 +9,7 @@ import shutil
 import signal
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -169,9 +169,7 @@ class EngineRunner:
             # Publish success event
             self._publish_task_completed(task_id, job_id)
 
-            logger.info(
-                f"Task {task_id} completed in {processing_time:.2f}s"
-            )
+            logger.info(f"Task {task_id} completed in {processing_time:.2f}s")
 
         except Exception as e:
             logger.exception(f"Task {task_id} failed: {e}")
@@ -266,7 +264,7 @@ class EngineRunner:
 
         output_data = {
             "task_id": task_id,
-            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "completed_at": datetime.now(UTC).isoformat(),
             "processing_time_seconds": round(processing_time, 2),
             "data": output.data,
         }
@@ -295,7 +293,7 @@ class EngineRunner:
             "task_id": task_id,
             "job_id": job_id,
             "engine_id": self.engine_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
         self.redis_client.publish(self.EVENTS_CHANNEL, json.dumps(event))
         logger.debug(f"Published task.completed event for {task_id}")
@@ -319,7 +317,7 @@ class EngineRunner:
             "job_id": job_id,
             "engine_id": self.engine_id,
             "error": error,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
         self.redis_client.publish(self.EVENTS_CHANNEL, json.dumps(event))
         logger.debug(f"Published task.failed event for {task_id}")

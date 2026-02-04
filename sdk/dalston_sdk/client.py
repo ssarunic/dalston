@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import time
 import warnings
+from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
-from typing import Any, BinaryIO, Callable
+from typing import Any, BinaryIO
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -118,7 +120,7 @@ def _parse_job(data: dict[str, Any]) -> Job:
     )
 
 
-def _parse_datetime(value: str | None) -> "datetime | None":
+def _parse_datetime(value: str | None) -> datetime | None:
     """Parse ISO datetime string.
 
     Args:
@@ -129,7 +131,6 @@ def _parse_datetime(value: str | None) -> "datetime | None":
     """
     if value is None:
         return None
-    from datetime import datetime
 
     # Handle various ISO formats
     value = value.replace("Z", "+00:00")
@@ -230,7 +231,7 @@ class Dalston:
         """Close the HTTP client."""
         self._client.close()
 
-    def __enter__(self) -> "Dalston":
+    def __enter__(self) -> Dalston:
         return self
 
     def __exit__(self, *args: Any) -> None:
@@ -298,9 +299,9 @@ class Dalston:
         opened_file = None
         try:
             if file is not None:
-                if isinstance(file, (str, Path)):
+                if isinstance(file, str | Path):
                     path = Path(file)
-                    opened_file = open(path, "rb")
+                    opened_file = open(path, "rb")  # noqa: SIM115
                     files = {"file": (path.name, opened_file)}
                 else:
                     # File-like object - extract basename for cross-platform safety
@@ -671,7 +672,7 @@ class AsyncDalston:
         """Close the HTTP client."""
         await self._client.aclose()
 
-    async def __aenter__(self) -> "AsyncDalston":
+    async def __aenter__(self) -> AsyncDalston:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -734,9 +735,9 @@ class AsyncDalston:
         files: dict[str, Any] | None = None
         opened_file = None
         if file is not None:
-            if isinstance(file, (str, Path)):
+            if isinstance(file, str | Path):
                 path = Path(file)
-                opened_file = open(path, "rb")
+                opened_file = open(path, "rb")  # noqa: SIM115
                 files = {"file": (path.name, opened_file)}
             else:
                 # File-like object - extract basename for cross-platform safety

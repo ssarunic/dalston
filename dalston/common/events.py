@@ -1,7 +1,7 @@
 """Redis pub/sub event publishing."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -34,7 +34,7 @@ async def publish_event(
     """
     event = {
         "type": event_type,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         **payload,
     }
     message = json.dumps(event, default=_json_serializer)

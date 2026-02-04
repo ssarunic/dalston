@@ -1,24 +1,19 @@
 """Unit tests for session_router module."""
 
-import json
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import pytest
 
-from dalston.session_router.registry import (
-    ACTIVE_SESSIONS_KEY,
-    SESSION_KEY_PREFIX,
-    WORKER_KEY_PREFIX,
-    WORKER_SET_KEY,
-    WORKER_SESSIONS_SUFFIX,
-    WorkerRegistry,
-    WorkerState,
-)
 from dalston.session_router.allocator import (
     SessionAllocator,
     SessionState,
     WorkerAllocation,
+)
+from dalston.session_router.registry import (
+    WORKER_KEY_PREFIX,
+    WorkerRegistry,
+    WorkerState,
 )
 
 
@@ -36,8 +31,8 @@ class TestWorkerState:
             languages_supported=["auto"],
             gpu_memory_used="2GB",
             gpu_memory_total="8GB",
-            last_heartbeat=datetime.now(timezone.utc),
-            started_at=datetime.now(timezone.utc),
+            last_heartbeat=datetime.now(UTC),
+            started_at=datetime.now(UTC),
         )
 
         assert worker.available_capacity == 2
@@ -53,8 +48,8 @@ class TestWorkerState:
             languages_supported=["auto"],
             gpu_memory_used="4GB",
             gpu_memory_total="8GB",
-            last_heartbeat=datetime.now(timezone.utc),
-            started_at=datetime.now(timezone.utc),
+            last_heartbeat=datetime.now(UTC),
+            started_at=datetime.now(UTC),
         )
 
         assert worker.available_capacity == 0
@@ -70,8 +65,8 @@ class TestWorkerState:
             languages_supported=["auto"],
             gpu_memory_used="4GB",
             gpu_memory_total="8GB",
-            last_heartbeat=datetime.now(timezone.utc),
-            started_at=datetime.now(timezone.utc),
+            last_heartbeat=datetime.now(UTC),
+            started_at=datetime.now(UTC),
         )
 
         assert worker.available_capacity == 0
@@ -87,8 +82,8 @@ class TestWorkerState:
             languages_supported=["auto"],
             gpu_memory_used="2GB",
             gpu_memory_total="8GB",
-            last_heartbeat=datetime.now(timezone.utc),
-            started_at=datetime.now(timezone.utc),
+            last_heartbeat=datetime.now(UTC),
+            started_at=datetime.now(UTC),
         )
 
         assert worker.is_available is True
@@ -104,8 +99,8 @@ class TestWorkerState:
             languages_supported=["auto"],
             gpu_memory_used="3GB",
             gpu_memory_total="8GB",
-            last_heartbeat=datetime.now(timezone.utc),
-            started_at=datetime.now(timezone.utc),
+            last_heartbeat=datetime.now(UTC),
+            started_at=datetime.now(UTC),
         )
 
         assert worker.is_available is True
@@ -121,8 +116,8 @@ class TestWorkerState:
             languages_supported=["auto"],
             gpu_memory_used="0GB",
             gpu_memory_total="8GB",
-            last_heartbeat=datetime.now(timezone.utc),
-            started_at=datetime.now(timezone.utc),
+            last_heartbeat=datetime.now(UTC),
+            started_at=datetime.now(UTC),
         )
 
         assert worker.is_available is False
@@ -138,8 +133,8 @@ class TestWorkerState:
             languages_supported=["auto"],
             gpu_memory_used="1GB",
             gpu_memory_total="8GB",
-            last_heartbeat=datetime.now(timezone.utc),
-            started_at=datetime.now(timezone.utc),
+            last_heartbeat=datetime.now(UTC),
+            started_at=datetime.now(UTC),
         )
 
         assert worker.is_available is False
@@ -155,8 +150,8 @@ class TestWorkerState:
             languages_supported=["auto"],
             gpu_memory_used="4GB",
             gpu_memory_total="8GB",
-            last_heartbeat=datetime.now(timezone.utc),
-            started_at=datetime.now(timezone.utc),
+            last_heartbeat=datetime.now(UTC),
+            started_at=datetime.now(UTC),
         )
 
         assert worker.is_available is False
@@ -398,8 +393,8 @@ class TestSessionAllocator:
             languages_supported=["auto"],
             gpu_memory_used="2GB",
             gpu_memory_total="8GB",
-            last_heartbeat=datetime.now(timezone.utc),
-            started_at=datetime.now(timezone.utc),
+            last_heartbeat=datetime.now(UTC),
+            started_at=datetime.now(UTC),
         )
         mock_registry.get_available_workers.return_value = [worker]
         mock_redis.hincrby.return_value = 3  # New active session count
@@ -446,8 +441,8 @@ class TestSessionAllocator:
             languages_supported=["auto"],
             gpu_memory_used="4GB",
             gpu_memory_total="8GB",
-            last_heartbeat=datetime.now(timezone.utc),
-            started_at=datetime.now(timezone.utc),
+            last_heartbeat=datetime.now(UTC),
+            started_at=datetime.now(UTC),
         )
         mock_registry.get_available_workers.return_value = [worker]
         mock_redis.hincrby.return_value = 5  # Exceeds capacity of 4
@@ -528,7 +523,7 @@ class TestSessionState:
             language="en",
             model="fast",
             client_ip="192.168.1.100",
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             enhance_on_end=True,
         )
 

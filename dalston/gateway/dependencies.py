@@ -10,9 +10,11 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.redis import get_redis as _get_redis_client
-from dalston.config import Settings, get_settings as _get_settings
+from dalston.config import Settings
+from dalston.config import get_settings as _get_settings
 from dalston.db.session import async_session
-from dalston.gateway.middleware.auth import authenticate_request, require_scope as _require_scope
+from dalston.gateway.middleware.auth import authenticate_request
+from dalston.gateway.middleware.auth import require_scope as _require_scope
 from dalston.gateway.services.auth import APIKey, AuthService, Scope
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.jobs import JobsService
@@ -61,7 +63,7 @@ def get_export_service() -> ExportService:
     return _export_service
 
 
-def get_session_router() -> "SessionRouter":
+def get_session_router() -> SessionRouter:
     """Get SessionRouter instance.
 
     The router is initialized in main.py lifespan and stored globally.
@@ -135,7 +137,9 @@ def require_scope_dependency(scope: Scope) -> Callable:
 
 # Pre-built scope dependencies for common use cases
 RequireJobsRead = Annotated[APIKey, Depends(require_scope_dependency(Scope.JOBS_READ))]
-RequireJobsWrite = Annotated[APIKey, Depends(require_scope_dependency(Scope.JOBS_WRITE))]
+RequireJobsWrite = Annotated[
+    APIKey, Depends(require_scope_dependency(Scope.JOBS_WRITE))
+]
 RequireRealtime = Annotated[APIKey, Depends(require_scope_dependency(Scope.REALTIME))]
 RequireWebhooks = Annotated[APIKey, Depends(require_scope_dependency(Scope.WEBHOOKS))]
 RequireAdmin = Annotated[APIKey, Depends(require_scope_dependency(Scope.ADMIN))]

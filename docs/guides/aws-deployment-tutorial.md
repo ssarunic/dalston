@@ -42,6 +42,7 @@ aws configure
 ```
 
 Enter:
+
 - AWS Access Key ID: `<paste access key>`
 - AWS Secret Access Key: `<paste secret key>`
 - Default region: `eu-west-2` (or your preferred region)
@@ -227,6 +228,7 @@ curl http://$DALSTON_TAILSCALE_IP:8000/health
 ```
 
 Access in browser:
+
 - API docs: `http://100.x.x.x:8000/docs`
 - Health: `http://100.x.x.x:8000/health`
 
@@ -410,6 +412,7 @@ terraform destroy
 ```
 
 This will delete:
+
 - EC2 instance
 - EBS volumes
 - S3 bucket

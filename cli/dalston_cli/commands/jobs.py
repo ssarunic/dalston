@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Literal
 
 import typer
 from dalston_sdk import JobStatus
@@ -26,7 +26,7 @@ FormatType = Literal["txt", "json", "srt", "vtt"]
 @app.command("list")
 def list_jobs(
     status: Annotated[
-        Optional[StatusFilter],
+        StatusFilter | None,
         typer.Option(
             help="Filter by job status.",
         ),
@@ -127,7 +127,7 @@ def wait_job(
         ),
     ] = "txt",
     output: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option(
             "--output",
             "-o",

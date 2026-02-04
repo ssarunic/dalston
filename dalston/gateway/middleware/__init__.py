@@ -1,10 +1,10 @@
 from dalston.gateway.middleware.auth import (
-    AuthenticationError,
-    AuthorizationError,
-    RateLimitError,
     WS_CLOSE_INVALID_KEY,
     WS_CLOSE_MISSING_SCOPE,
     WS_CLOSE_RATE_LIMIT,
+    AuthenticationError,
+    AuthorizationError,
+    RateLimitError,
     authenticate_request,
     authenticate_websocket,
     extract_api_key_from_request,

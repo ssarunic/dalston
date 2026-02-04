@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import redis.asyncio as redis
 
@@ -155,7 +155,10 @@ class WorkerRegistry:
 
             # Check model support
             model_name = self._map_model_variant(model)
-            if model_name not in worker.models_loaded and model not in worker.models_loaded:
+            if (
+                model_name not in worker.models_loaded
+                and model not in worker.models_loaded
+            ):
                 continue
 
             # Check language support
@@ -215,7 +218,7 @@ class WorkerRegistry:
                 return datetime.fromisoformat(value.replace("Z", "+00:00"))
             except ValueError:
                 pass
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
     def _map_model_variant(self, model: str) -> str:
         """Map user-facing model name to internal name.

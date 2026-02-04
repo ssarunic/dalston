@@ -95,17 +95,20 @@ SESSION END:
 Distribute sessions evenly across workers.
 
 **Strategy: Least Loaded**
+
 ```
 Select worker with:
   (capacity - active_sessions) = maximum available slots
 ```
 
 **Strategy: Round Robin with Capacity Check**
+
 ```
 Rotate through workers, skip if at capacity
 ```
 
 **Strategy: Weighted**
+
 ```
 Consider GPU memory, model load time, network proximity
 ```
@@ -247,6 +250,7 @@ Two modes are available, configured per-session:
 | **Continuous** | `checkpoint_interval: 60` | Write checkpoint every N seconds | Long sessions, fault tolerance |
 
 **Continuous mode benefits:**
+
 - Recoverable on worker crash (audio up to last checkpoint preserved)
 - Lower memory usage (chunks flushed to disk)
 - Enables mid-session batch enhancement triggers
@@ -341,6 +345,7 @@ All workers require S3 access. No shared filesystem is needed between nodes.
 | Gateway | Read-only | No |
 
 **Environment Variables:**
+
 ```bash
 S3_BUCKET=dalston-artifacts
 S3_REGION=eu-west-2
@@ -366,6 +371,7 @@ storage:
 ```
 
 **S3 Lifecycle Rule (recommended):**
+
 ```json
 {
   "Rules": [
@@ -395,13 +401,14 @@ async def acquire_worker(
 ) -> WorkerAllocation | None:
     """
     Request a worker for a new session.
-    
+
     Returns:
         WorkerAllocation with endpoint and session_id, or None if no capacity
     """
 ```
 
 **Response:**
+
 ```python
 @dataclass
 class WorkerAllocation:
@@ -429,6 +436,7 @@ async def list_workers() -> list[WorkerStatus]:
 ```
 
 **Response:**
+
 ```python
 @dataclass
 class WorkerStatus:
@@ -516,54 +524,54 @@ async def acquire_worker(
     model: str,
     client_ip: str
 ) -> WorkerAllocation | None:
-    
+
     # 1. Get all workers
     worker_ids = await redis.smembers("dalston:realtime:workers")
-    
+
     candidates = []
-    
+
     for worker_id in worker_ids:
         worker = await redis.hgetall(f"dalston:realtime:worker:{worker_id}")
-        
+
         # 2. Filter by status
         if worker["status"] not in ("ready", "busy"):
             continue
-        
+
         # 3. Filter by capacity
         available = int(worker["capacity"]) - int(worker["active_sessions"])
         if available <= 0:
             continue
-        
+
         # 4. Filter by model
         models_loaded = json.loads(worker["models_loaded"])
         model_name = "distil-whisper" if model == "fast" else "faster-whisper-large-v3"
         if model_name not in models_loaded:
             continue
-        
+
         # 5. Filter by language
         languages = json.loads(worker["languages_supported"])
         if language != "auto" and language not in languages and "auto" not in languages:
             continue
-        
+
         candidates.append({
             "worker_id": worker_id,
             "worker": worker,
             "available": available
         })
-    
+
     if not candidates:
         return None
-    
+
     # 6. Select best candidate (least loaded)
     best = max(candidates, key=lambda c: c["available"])
-    
+
     # 7. Reserve capacity (atomic increment)
     await redis.hincrby(
         f"dalston:realtime:worker:{best['worker_id']}",
         "active_sessions",
         1
     )
-    
+
     # 8. Create session
     session_id = f"sess_{generate_id()}"
     await redis.hset(f"dalston:realtime:session:{session_id}", mapping={
@@ -574,13 +582,13 @@ async def acquire_worker(
         "client_ip": client_ip,
         "started_at": datetime.utcnow().isoformat()
     })
-    
+
     await redis.sadd("dalston:realtime:sessions:active", session_id)
     await redis.sadd(
         f"dalston:realtime:worker:{best['worker_id']}:sessions",
         session_id
     )
-    
+
     return WorkerAllocation(
         worker_id=best["worker_id"],
         endpoint=best["worker"]["endpoint"],
@@ -596,16 +604,16 @@ async def acquire_worker(
 async def health_check_loop():
     while True:
         await asyncio.sleep(10)  # Check every 10 seconds
-        
+
         worker_ids = await redis.smembers("dalston:realtime:workers")
         now = datetime.utcnow()
-        
+
         for worker_id in worker_ids:
             worker = await redis.hgetall(f"dalston:realtime:worker:{worker_id}")
-            
+
             last_heartbeat = datetime.fromisoformat(worker["last_heartbeat"])
             age = (now - last_heartbeat).total_seconds()
-            
+
             if age > 30 and worker["status"] != "offline":
                 # Worker is stale
                 await redis.hset(
@@ -613,12 +621,12 @@ async def health_check_loop():
                     "status",
                     "offline"
                 )
-                
+
                 # Get affected sessions
                 session_ids = await redis.smembers(
                     f"dalston:realtime:worker:{worker_id}:sessions"
                 )
-                
+
                 for session_id in session_ids:
                     # Mark session as error
                     await redis.hset(
@@ -626,7 +634,7 @@ async def health_check_loop():
                         "status",
                         "error"
                     )
-                    
+
                     # Publish event for Gateway
                     await redis.publish("dalston:realtime:events", json.dumps({
                         "type": "worker.offline",
@@ -649,7 +657,7 @@ workers:
   # Health check settings
   heartbeat_interval: 10        # Seconds between heartbeats
   heartbeat_timeout: 30         # Mark offline after this many seconds
-  
+
   # Allocation settings
   allocation_strategy: least_loaded   # least_loaded | round_robin | weighted
 
@@ -657,7 +665,7 @@ sessions:
   # Session limits
   max_duration: 14400           # 4 hours in seconds
   idle_timeout: 30              # End session after 30s silence
-  
+
 overflow:
   # What to do when no capacity
   strategy: reject              # reject | queue | degrade

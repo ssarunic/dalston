@@ -14,8 +14,8 @@ from dalston.common.s3 import ensure_bucket_exists
 from dalston.config import get_settings
 from dalston.db.session import DEFAULT_TENANT_ID, engine, init_db
 from dalston.gateway.api.auth import router as auth_router
-from dalston.gateway.api.v1 import router as v1_router
 from dalston.gateway.api.console import router as console_router
+from dalston.gateway.api.v1 import router as v1_router
 from dalston.gateway.middleware import setup_exception_handlers
 from dalston.gateway.services.auth import AuthService, Scope
 from dalston.session_router import SessionRouter

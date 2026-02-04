@@ -86,11 +86,13 @@ The project may in the future:
 2. **Change the license** for future versions if needed to protect the project
 
 Examples of why this might happen:
+
 - Cloud providers offering Dalston-as-a-service without contributing back
 - Need to fund development through commercial offerings
 - Enterprise features requiring different licensing terms
 
 **Important guarantees:**
+
 - Previously released versions remain under their original license forever
 - The CLA enables these options while protecting contributor rights
 - Any license change would be communicated clearly with rationale
@@ -134,6 +136,7 @@ The CLA provides legal clarity and future flexibility. Without it, relicensing w
 ### What if I don't want to sign the CLA?
 
 You can still:
+
 - Use Dalston freely under Apache 2.0
 - Fork and maintain your own version
 - Report issues and suggest features
@@ -142,6 +145,7 @@ You can still:
 ### Will you change the license to something restrictive?
 
 We have no current plans to do so. If circumstances require it (e.g., to sustain development), we would:
+
 - Communicate clearly and early
 - Only apply changes to new versions
 - Preserve Apache 2.0 for all prior releases

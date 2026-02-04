@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Literal
 
 import typer
 from dalston_sdk import SpeakerDetection, TimestampGranularity
 
 from dalston_cli.main import state
 from dalston_cli.output import (
-    console,
     error_console,
     output_job_created,
     output_transcript,
@@ -39,7 +38,7 @@ def transcribe(
         ),
     ] = "auto",
     output: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option(
             "--output",
             "-o",
@@ -76,7 +75,7 @@ def transcribe(
         ),
     ] = "none",
     num_speakers: Annotated[
-        Optional[int],
+        int | None,
         typer.Option(
             min=1,
             max=32,

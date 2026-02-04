@@ -15,6 +15,7 @@ Dalston uses multiple ML models and processing libraries:
 - **Various LLM clients**: For text cleanup
 
 These libraries have conflicting dependencies:
+
 - Different PyTorch versions
 - Different CUDA requirements
 - Incompatible numpy/scipy versions
@@ -29,11 +30,13 @@ Running all engines in a single process or virtualenv is impractical.
 Pin all dependencies to compatible versions, accept feature limitations.
 
 **Pros:**
+
 - Simpler deployment (one container)
 - No inter-process communication overhead
 - Easier debugging
 
 **Cons:**
+
 - May be impossible (some conflicts are irreconcilable)
 - Limits which models/versions can be used
 - Upgrades become very difficult
@@ -44,11 +47,13 @@ Pin all dependencies to compatible versions, accept feature limitations.
 Run each engine in its own venv, communicate via filesystem or IPC.
 
 **Pros:**
+
 - Isolates Python dependencies
 - No container overhead
 - Shared GPU memory pool
 
 **Cons:**
+
 - Doesn't isolate system libraries
 - Complex venv management
 - Still shares CUDA runtime (version conflicts)
@@ -59,6 +64,7 @@ Run each engine in its own venv, communicate via filesystem or IPC.
 Each engine runs in its own container with its own dependencies.
 
 **Pros:**
+
 - Complete isolation (Python, system libs, CUDA)
 - Each engine can use optimal dependencies
 - Independent scaling per engine type
@@ -66,6 +72,7 @@ Each engine runs in its own container with its own dependencies.
 - Reproducible builds
 
 **Cons:**
+
 - Container overhead (minimal for long-running workers)
 - GPU memory not shared (each container reserves its allocation)
 - More complex orchestration
@@ -76,11 +83,13 @@ Each engine runs in its own container with its own dependencies.
 Engines as sidecar containers in pods, sharing network namespace.
 
 **Pros:**
+
 - Fine-grained resource control
 - Native Kubernetes orchestration
 - Health checks and restarts
 
 **Cons:**
+
 - Requires Kubernetes (complex for self-hosted)
 - Over-engineered for single-node deployments
 - Steep learning curve
@@ -123,6 +132,7 @@ Use Docker containers for engine isolation:
 ### GPU Memory Management
 
 Since containers don't share GPU memory:
+
 - Configure `CUDA_VISIBLE_DEVICES` to assign specific GPUs
 - Use model size appropriate for available VRAM
 - Consider model unloading for memory-constrained setups

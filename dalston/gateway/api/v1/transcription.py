@@ -10,13 +10,22 @@ import json
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+)
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.events import publish_job_created
 from dalston.common.models import JobStatus
-from dalston.config import Settings, WEBHOOK_METADATA_MAX_SIZE
+from dalston.config import WEBHOOK_METADATA_MAX_SIZE, Settings
 from dalston.gateway.dependencies import (
     RequireJobsRead,
     RequireJobsWrite,
@@ -32,7 +41,6 @@ from dalston.gateway.models.responses import (
     JobResponse,
     JobSummary,
 )
-from dalston.gateway.services.auth import APIKey
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
@@ -66,7 +74,8 @@ async def create_transcription(
         str | None, Form(description="Webhook URL for completion callback")
     ] = None,
     webhook_metadata: Annotated[
-        str | None, Form(description="JSON object echoed in webhook callback (max 16KB)")
+        str | None,
+        Form(description="JSON object echoed in webhook callback (max 16KB)"),
     ] = None,
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
@@ -210,9 +219,7 @@ async def list_transcriptions(
     api_key: RequireJobsRead,
     limit: Annotated[int, Query(ge=1, le=100, description="Max results")] = 20,
     offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
-    status: Annotated[
-        JobStatus | None, Query(description="Filter by status")
-    ] = None,
+    status: Annotated[JobStatus | None, Query(description="Filter by status")] = None,
     db: AsyncSession = Depends(get_db),
     jobs_service: JobsService = Depends(get_jobs_service),
 ) -> JobListResponse:

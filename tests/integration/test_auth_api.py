@@ -3,7 +3,7 @@
 Tests the /auth/* API endpoints including key management.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
@@ -13,9 +13,9 @@ from fastapi.testclient import TestClient
 
 from dalston.gateway.api.auth import router as auth_router
 from dalston.gateway.services.auth import (
+    DEFAULT_EXPIRES_AT,
     APIKey,
     AuthService,
-    DEFAULT_EXPIRES_AT,
     Scope,
 )
 
@@ -39,7 +39,7 @@ class TestListApiKeysEndpoint:
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
             scopes=[Scope.ADMIN],
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -77,7 +77,7 @@ class TestListApiKeysEndpoint:
             tenant_id=admin_api_key.tenant_id,
             scopes=[Scope.JOBS_READ],
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -112,7 +112,7 @@ class TestListApiKeysEndpoint:
             tenant_id=admin_api_key.tenant_id,
             scopes=[Scope.JOBS_READ],
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -126,10 +126,10 @@ class TestListApiKeysEndpoint:
             tenant_id=admin_api_key.tenant_id,
             scopes=[Scope.JOBS_READ],
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
-            revoked_at=datetime.now(timezone.utc),
+            revoked_at=datetime.now(UTC),
         )
 
         mock_auth_service.list_api_keys.return_value = [active_key, revoked_key]
@@ -159,7 +159,7 @@ class TestListApiKeysEndpoint:
             tenant_id=admin_api_key.tenant_id,
             scopes=[Scope.JOBS_READ],
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -183,13 +183,11 @@ class TestListApiKeysEndpoint:
         assert current_keys[0]["id"] == str(admin_api_key.id)
         assert other_keys[0]["id"] == str(other_key.id)
 
-    def test_list_keys_shows_expires_at(
-        self, client, mock_auth_service, admin_api_key
-    ):
+    def test_list_keys_shows_expires_at(self, client, mock_auth_service, admin_api_key):
         """Test that expires_at is included in the response."""
         from datetime import timedelta
 
-        custom_expires = datetime.now(timezone.utc) + timedelta(days=30)
+        custom_expires = datetime.now(UTC) + timedelta(days=30)
         key_with_expiry = APIKey(
             id=uuid4(),
             key_hash="hash1",
@@ -198,7 +196,7 @@ class TestListApiKeysEndpoint:
             tenant_id=admin_api_key.tenant_id,
             scopes=[Scope.JOBS_READ],
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=custom_expires,
             revoked_at=None,
@@ -237,7 +235,7 @@ class TestRevokeApiKeyEndpoint:
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
             scopes=[Scope.ADMIN],
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -275,9 +273,7 @@ class TestRevokeApiKeyEndpoint:
         data = response.json()
         assert "Cannot revoke your own API key" in data["detail"]
 
-    def test_revoke_key_success(
-        self, client, mock_auth_service, admin_api_key
-    ):
+    def test_revoke_key_success(self, client, mock_auth_service, admin_api_key):
         """Test successful key revocation."""
         other_key = APIKey(
             id=uuid4(),
@@ -287,7 +283,7 @@ class TestRevokeApiKeyEndpoint:
             tenant_id=admin_api_key.tenant_id,
             scopes=[Scope.JOBS_READ],
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -301,9 +297,7 @@ class TestRevokeApiKeyEndpoint:
         assert response.status_code == 204
         mock_auth_service.revoke_api_key.assert_called_once_with(other_key.id)
 
-    def test_revoke_key_not_found(
-        self, client, mock_auth_service, admin_api_key
-    ):
+    def test_revoke_key_not_found(self, client, mock_auth_service, admin_api_key):
         """Test revoking a non-existent key returns 404."""
         mock_auth_service.get_api_key_by_id.return_value = None
 
@@ -326,7 +320,7 @@ class TestRevokeApiKeyEndpoint:
             tenant_id=UUID("11111111-1111-1111-1111-111111111111"),  # Different tenant
             scopes=[Scope.JOBS_READ],
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -360,7 +354,7 @@ class TestCreateApiKeyEndpoint:
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
             scopes=[Scope.ADMIN],
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -385,9 +379,7 @@ class TestCreateApiKeyEndpoint:
     def client(self, app):
         return TestClient(app)
 
-    def test_create_key_success(
-        self, client, mock_auth_service, admin_api_key
-    ):
+    def test_create_key_success(self, client, mock_auth_service, admin_api_key):
         """Test successful key creation."""
         new_key = APIKey(
             id=uuid4(),
@@ -397,7 +389,7 @@ class TestCreateApiKeyEndpoint:
             tenant_id=admin_api_key.tenant_id,
             scopes=[Scope.JOBS_READ, Scope.JOBS_WRITE],
             rate_limit=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -438,7 +430,7 @@ class TestCreateApiKeyEndpoint:
             tenant_id=admin_api_key.tenant_id,
             scopes=[Scope.JOBS_READ],
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -463,9 +455,7 @@ class TestCreateApiKeyEndpoint:
         )
         assert response_expires.year == 2099
 
-    def test_create_key_invalid_scope(
-        self, client, mock_auth_service, admin_api_key
-    ):
+    def test_create_key_invalid_scope(self, client, mock_auth_service, admin_api_key):
         """Test that invalid scope returns 400 error."""
         response = client.post(
             "/auth/keys",
@@ -504,7 +494,7 @@ class TestAuthApiKeyEndpointAuthorization:
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
             scopes=[Scope.JOBS_READ, Scope.JOBS_WRITE],
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,
@@ -537,7 +527,7 @@ class TestAuthApiKeyEndpointAuthorization:
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
             scopes=[Scope.JOBS_READ, Scope.JOBS_WRITE],
             rate_limit=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             last_used_at=None,
             expires_at=DEFAULT_EXPIRES_AT,
             revoked_at=None,

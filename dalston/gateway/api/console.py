@@ -5,7 +5,7 @@ GET /api/console/jobs/{job_id}/tasks - Get task DAG for a job
 GET /api/console/engines - Get batch and realtime engine status
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,8 +18,12 @@ from sqlalchemy.orm import selectinload
 from dalston.common.models import JobStatus
 from dalston.db.models import JobModel
 from dalston.db.session import DEFAULT_TENANT_ID
-from dalston.gateway.dependencies import get_db, get_redis, get_session_router, RequireAdmin
-from dalston.gateway.services.auth import APIKey
+from dalston.gateway.dependencies import (
+    RequireAdmin,
+    get_db,
+    get_redis,
+    get_session_router,
+)
 from dalston.session_router import SessionRouter
 
 router = APIRouter(prefix="/api/console", tags=["console"])
@@ -28,12 +32,14 @@ router = APIRouter(prefix="/api/console", tags=["console"])
 # Dashboard models
 class SystemStatus(BaseModel):
     """System health status."""
+
     healthy: bool
     version: str = "0.1.0"
 
 
 class BatchStats(BaseModel):
     """Batch processing statistics."""
+
     running_jobs: int
     queued_jobs: int
     completed_today: int
@@ -42,6 +48,7 @@ class BatchStats(BaseModel):
 
 class RealtimeCapacity(BaseModel):
     """Realtime worker capacity."""
+
     total_capacity: int
     used_capacity: int
     available_capacity: int
@@ -51,6 +58,7 @@ class RealtimeCapacity(BaseModel):
 
 class JobSummary(BaseModel):
     """Job summary for dashboard."""
+
     id: UUID
     status: str
     created_at: datetime
@@ -62,6 +70,7 @@ class JobSummary(BaseModel):
 
 class DashboardResponse(BaseModel):
     """Aggregated dashboard data."""
+
     system: SystemStatus
     batch: BatchStats
     realtime: RealtimeCapacity
@@ -89,7 +98,7 @@ async def get_dashboard(
     counts = {row[0]: row[1] for row in status_counts.all()}
 
     # Get today's completed/failed counts
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     today_completed = await db.execute(
         select(func.count(JobModel.id))
         .where(JobModel.tenant_id == DEFAULT_TENANT_ID)

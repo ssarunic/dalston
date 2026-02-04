@@ -22,6 +22,7 @@ Pipeline stages: `PREPARE → TRANSCRIBE → ALIGN → DIARIZE → DETECT → RE
 ## Commands
 
 ### Development Setup
+
 ```bash
 # Start Redis
 docker run -d -p 6379:6379 redis:7-alpine
@@ -41,6 +42,7 @@ WORKER_ID=dev-worker REDIS_URL=redis://localhost:6379 python engine.py
 ```
 
 ### Docker Compose Operations
+
 ```bash
 # Start all services
 docker compose up -d
@@ -75,6 +77,7 @@ docker compose up -d --build engine-faster-whisper
 ```
 
 ### Testing
+
 ```bash
 # All tests
 pytest
@@ -90,6 +93,7 @@ pytest --cov=dalston --cov-report=html
 ```
 
 ### Health Checks
+
 ```bash
 # Gateway health
 curl http://localhost:8000/health
@@ -107,6 +111,7 @@ docker compose exec redis redis-cli LLEN dalston:queue:faster-whisper
 ## Development Workflow
 
 ### Adding New Engines
+
 1. Create directory: `engines/{stage}/{engine-id}/`
 2. Add files: `Dockerfile`, `requirements.txt`, `engine.yaml`, `engine.py`
 3. Implement `Engine.process()` method using dalston-engine-sdk
@@ -114,11 +119,13 @@ docker compose exec redis redis-cli LLEN dalston:queue:faster-whisper
 5. Test with minimal engine setup
 
 ### API Compatibility
+
 - **Dalston Native**: `/v1/audio/transcriptions/*`
 - **ElevenLabs Compatible**: `/v1/speech-to-text/*`
 - **WebSocket Real-time**: `/v1/audio/transcriptions/stream` (Dalston) or `/v1/speech-to-text/realtime` (ElevenLabs)
 
 ### File Structure
+
 - `dalston/gateway/` - FastAPI REST + WebSocket API server
 - `dalston/orchestrator/` - Batch job DAG scheduling
 - `dalston/session_router/` - Real-time worker pool management
@@ -132,6 +139,7 @@ docker compose exec redis redis-cli LLEN dalston:queue:faster-whisper
 ## Configuration
 
 ### Required Environment Variables
+
 ```bash
 # HuggingFace token (required for pyannote diarization)
 HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxx
@@ -148,21 +156,25 @@ REALTIME_MAX_SESSIONS_PER_WORKER=4
 ```
 
 ### GPU Requirements
+
 Most transcription and diarization engines require NVIDIA GPU with CUDA. CPU-only engines include audio-prepare, final-merger, and llm-cleanup.
 
 ## Key Design Patterns
 
 ### Dual Processing Modes
+
 - **Batch**: File upload → task DAG → queue-based processing → results
 - **Real-time**: WebSocket stream → direct worker connection → streaming results
 - **Hybrid**: Real-time for immediate results + batch enhancement for speaker ID and cleanup
 
 ### Engine Types
+
 - **Single-stage**: One processing step (transcribe, align, diarize, etc.)
 - **Multi-stage**: Integrated pipeline (e.g., whisperx-full does transcribe+align+diarize)
 - **Batch engines**: Redis queue polling, file I/O
 - **Real-time engines**: WebSocket servers, streaming audio processing
 
 ### Data Flow
+
 - Batch: `Gateway → Orchestrator → Redis Queues → Engines → Shared Filesystem`
 - Real-time: `Gateway → Session Router → Direct WebSocket → Real-time Workers`

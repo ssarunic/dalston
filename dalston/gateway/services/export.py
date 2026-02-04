@@ -4,7 +4,6 @@ import json
 import textwrap
 from enum import Enum
 from typing import Any
-from uuid import UUID
 
 from fastapi import HTTPException, Response
 
@@ -364,8 +363,12 @@ class ExportService:
             try:
                 export_fmt = ExportFormat(fmt_lower)
             except ValueError as exc:
-                valid = ", ".join(f.value for f in ExportFormat if f != ExportFormat.WEBVTT)
-                raise ValueError(f"Unsupported format: {fmt}. Supported: {valid}") from exc
+                valid = ", ".join(
+                    f.value for f in ExportFormat if f != ExportFormat.WEBVTT
+                )
+                raise ValueError(
+                    f"Unsupported format: {fmt}. Supported: {valid}"
+                ) from exc
         else:
             export_fmt = fmt
 
@@ -445,7 +448,7 @@ class ExportService:
             raise HTTPException(
                 status_code=400,
                 detail=f"Unsupported format: {format_str}. Supported formats: {valid_formats}",
-            )
+            ) from None
 
     def create_export_response(
         self,

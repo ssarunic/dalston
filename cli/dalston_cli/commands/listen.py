@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Literal
 
 import typer
 from dalston_sdk import RealtimeSession
@@ -31,7 +31,7 @@ def listen(
         ),
     ] = "auto",
     output: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option(
             "--output",
             "-o",
@@ -55,7 +55,7 @@ def listen(
         ),
     ] = "fast",
     device: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--device",
             "-d",

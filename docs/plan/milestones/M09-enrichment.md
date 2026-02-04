@@ -18,6 +18,7 @@
 ## Overview
 
 Enrichment stages are:
+
 - **Optional**: Don't block the pipeline if they fail
 - **Parallel**: Can run alongside each other
 - **Post-core**: Run after transcription, alignment, diarization

@@ -41,6 +41,7 @@ class PyannoteEngine(Engine):
         """Detect the best available device (CUDA or CPU)."""
         try:
             import torch
+
             if torch.cuda.is_available():
                 logger.info("CUDA available, using GPU")
                 return "cuda"
@@ -89,6 +90,7 @@ class PyannoteEngine(Engine):
         # Move to appropriate device
         if self._device == "cuda":
             import torch
+
             self._pipeline = self._pipeline.to(torch.device("cuda"))
 
         logger.info("Pyannote pipeline loaded successfully")
@@ -139,7 +141,9 @@ class PyannoteEngine(Engine):
         # Convert pyannote Annotation to our output format
         speakers, segments = self._convert_annotation(diarization)
 
-        logger.info(f"Diarization complete: {len(speakers)} speakers, {len(segments)} segments")
+        logger.info(
+            f"Diarization complete: {len(speakers)} speakers, {len(segments)} segments"
+        )
 
         return TaskOutput(
             data={
@@ -162,11 +166,13 @@ class PyannoteEngine(Engine):
 
         for turn, _, speaker in annotation.itertracks(yield_label=True):
             speakers_set.add(speaker)
-            segments.append({
-                "start": round(turn.start, 3),
-                "end": round(turn.end, 3),
-                "speaker": speaker,
-            })
+            segments.append(
+                {
+                    "start": round(turn.start, 3),
+                    "end": round(turn.end, 3),
+                    "speaker": speaker,
+                }
+            )
 
         # Sort speakers for consistent ordering
         speakers = sorted(speakers_set)
@@ -201,6 +207,7 @@ class PyannoteEngine(Engine):
 
         try:
             import torch
+
             cuda_available = torch.cuda.is_available()
         except ImportError:
             pass

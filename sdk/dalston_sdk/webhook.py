@@ -72,7 +72,9 @@ def verify_webhook_signature(
 
     # Validate signature format
     if not signature.startswith("sha256="):
-        raise WebhookVerificationError("Invalid signature format: must start with 'sha256='")
+        raise WebhookVerificationError(
+            "Invalid signature format: must start with 'sha256='"
+        )
 
     provided_hash = signature[7:]  # Remove "sha256=" prefix
 
@@ -132,7 +134,9 @@ def parse_webhook_payload(payload: bytes | str) -> WebhookPayload:
 
     # Parse job_id
     try:
-        job_id = UUID(data["job_id"]) if isinstance(data["job_id"], str) else data["job_id"]
+        job_id = (
+            UUID(data["job_id"]) if isinstance(data["job_id"], str) else data["job_id"]
+        )
     except ValueError as e:
         raise WebhookVerificationError(f"Invalid job_id: {data['job_id']}") from e
 
@@ -144,7 +148,7 @@ def parse_webhook_payload(payload: bytes | str) -> WebhookPayload:
             timestamp = datetime.fromisoformat(timestamp_val)
         except ValueError as e:
             raise WebhookVerificationError(f"Invalid timestamp: {timestamp_val}") from e
-    elif isinstance(timestamp_val, (int, float)):
+    elif isinstance(timestamp_val, int | float):
         timestamp = datetime.fromtimestamp(timestamp_val)
     else:
         raise WebhookVerificationError(f"Invalid timestamp type: {type(timestamp_val)}")
@@ -203,7 +207,9 @@ def fastapi_webhook_dependency(secret: str, max_age: int = 300) -> Any:
             )
 
         try:
-            if not verify_webhook_signature(body, signature, timestamp, secret, max_age):
+            if not verify_webhook_signature(
+                body, signature, timestamp, secret, max_age
+            ):
                 raise HTTPException(status_code=401, detail="Invalid signature")
         except WebhookVerificationError as e:
             raise HTTPException(status_code=401, detail=str(e)) from e
@@ -242,8 +248,8 @@ def flask_verify_webhook(secret: str, max_age: int = 300) -> Any:
                 pass
         ```
     """
+    from collections.abc import Callable
     from functools import wraps
-    from typing import Callable
 
     def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(f)
@@ -259,7 +265,9 @@ def flask_verify_webhook(secret: str, max_age: int = 300) -> Any:
                 abort(401, "Missing signature or timestamp headers")
 
             try:
-                if not verify_webhook_signature(body, signature, timestamp, secret, max_age):
+                if not verify_webhook_signature(
+                    body, signature, timestamp, secret, max_age
+                ):
                     abort(401, "Invalid signature")
             except WebhookVerificationError as e:
                 abort(401, str(e))

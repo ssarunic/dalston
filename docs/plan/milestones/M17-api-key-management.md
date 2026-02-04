@@ -80,6 +80,7 @@ python -m dalston.gateway.cli create-key --name "Read Only" --scopes jobs:read
 ### 4. No Key Rename Feature
 
 If users want to "rename" a key:
+
 1. Create new key with desired name
 2. Update systems to use new key
 3. Revoke old key
@@ -89,6 +90,7 @@ This provides better audit trail and ensures systems are updated.
 ### 5. Primitive Endpoints Over Aggregation
 
 Dashboard uses primitive endpoints instead of aggregated `/api/console/dashboard`:
+
 - `GET /health` - System status
 - `GET /v1/realtime/status` - Realtime capacity
 - `GET /v1/audio/transcriptions?limit=5` - Recent jobs
