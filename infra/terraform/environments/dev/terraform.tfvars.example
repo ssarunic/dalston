@@ -1,0 +1,19 @@
+# Copy this file to terraform.tfvars and fill in your values
+
+# Required: Name of your SSH key pair in AWS
+key_name = "your-key-pair-name"
+
+# Optional: Override defaults
+# aws_region       = "us-west-2"
+# instance_type    = "t3.xlarge"
+# root_volume_size = 30
+# data_volume_size = 50
+
+# Required: Your Dalston repository URL
+repo_url    = "https://github.com/your-org/dalston.git"
+repo_branch = "main"
+
+# Optional: Additional tags
+# tags = {
+#   Owner = "your-name"
+# }

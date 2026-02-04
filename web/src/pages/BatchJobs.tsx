@@ -100,7 +100,7 @@ export function BatchJobs() {
                 <TableRow>
                   <TableHead>Job ID</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Progress</TableHead>
+                  <TableHead>State</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -120,20 +120,10 @@ export function BatchJobs() {
                       <StatusBadge status={job.status} />
                     </TableCell>
                     <TableCell>
-                      {job.status === 'running' && job.progress !== undefined ? (
-                        <div className="flex items-center gap-2">
-                          <div className="h-2 w-24 rounded-full bg-muted overflow-hidden">
-                            <div
-                              className="h-full bg-primary transition-all"
-                              style={{ width: `${job.progress}%` }}
-                            />
-                          </div>
-                          <span className="text-xs text-muted-foreground">
-                            {job.progress}%
-                          </span>
-                        </div>
+                      {job.status === 'running' ? (
+                        <span className="text-xs text-muted-foreground">In progress</span>
                       ) : job.status === 'completed' ? (
-                        <span className="text-xs text-muted-foreground">100%</span>
+                        <span className="text-xs text-muted-foreground">Done</span>
                       ) : (
                         <span className="text-xs text-muted-foreground">-</span>
                       )}

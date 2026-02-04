@@ -53,6 +53,35 @@ export interface JobListResponse {
   offset: number
 }
 
+// Console-specific types (admin endpoints)
+export interface ConsoleJobSummary {
+  id: string
+  status: JobStatus
+  audio_uri?: string
+  created_at: string
+  started_at?: string
+  completed_at?: string
+}
+
+export interface ConsoleJobListResponse {
+  jobs: ConsoleJobSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface ConsoleJobDetail {
+  id: string
+  status: JobStatus
+  audio_uri?: string
+  parameters?: Record<string, unknown>
+  result?: Record<string, unknown>
+  error?: string
+  created_at: string
+  started_at?: string
+  completed_at?: string
+}
+
 // Task types
 export interface Task {
   id: string

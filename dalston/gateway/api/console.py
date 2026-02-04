@@ -18,7 +18,8 @@ from sqlalchemy.orm import selectinload
 from dalston.common.models import JobStatus
 from dalston.db.models import JobModel
 from dalston.db.session import DEFAULT_TENANT_ID
-from dalston.gateway.dependencies import get_db, get_redis, get_session_router
+from dalston.gateway.dependencies import get_db, get_redis, get_session_router, RequireAdmin
+from dalston.gateway.services.auth import APIKey
 from dalston.session_router import SessionRouter
 
 router = APIRouter(prefix="/api/console", tags=["console"])
@@ -74,6 +75,7 @@ class DashboardResponse(BaseModel):
     description="Get aggregated dashboard data including system status, batch stats, realtime capacity, and recent jobs.",
 )
 async def get_dashboard(
+    api_key: RequireAdmin,
     db: AsyncSession = Depends(get_db),
     session_router: SessionRouter = Depends(get_session_router),
 ) -> DashboardResponse:
@@ -182,6 +184,7 @@ class TaskListResponse(BaseModel):
 )
 async def get_job_tasks(
     job_id: UUID,
+    api_key: RequireAdmin,
     db: AsyncSession = Depends(get_db),
 ) -> TaskListResponse:
     """Get task DAG for a job."""
@@ -278,6 +281,7 @@ BATCH_ENGINES = {
     description="Get status of all batch and realtime engines.",
 )
 async def get_engines(
+    api_key: RequireAdmin,
     redis: Redis = Depends(get_redis),
     session_router: SessionRouter = Depends(get_session_router),
 ) -> EnginesResponse:
@@ -321,4 +325,125 @@ async def get_engines(
     return EnginesResponse(
         batch_engines=batch_engines,
         realtime_engines=realtime_engines,
+    )
+
+
+# Job listing for console
+class ConsoleJobSummary(BaseModel):
+    """Job summary for console listing."""
+
+    id: UUID
+    status: str
+    audio_uri: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class ConsoleJobListResponse(BaseModel):
+    """Response for console job listing."""
+
+    jobs: list[ConsoleJobSummary]
+    total: int
+    limit: int
+    offset: int
+
+
+@router.get(
+    "/jobs",
+    response_model=ConsoleJobListResponse,
+    summary="List all jobs",
+    description="List all jobs across all tenants (admin only).",
+)
+async def list_console_jobs(
+    api_key: RequireAdmin,
+    db: AsyncSession = Depends(get_db),
+    limit: int = 20,
+    offset: int = 0,
+    status: str | None = None,
+) -> ConsoleJobListResponse:
+    """List all jobs for console (admin view)."""
+    # Build query - no tenant filter for admin
+    query = select(JobModel).order_by(JobModel.created_at.desc())
+
+    # Optional status filter
+    if status:
+        query = query.where(JobModel.status == status)
+
+    # Get total count
+    count_query = select(func.count(JobModel.id))
+    if status:
+        count_query = count_query.where(JobModel.status == status)
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+
+    # Apply pagination
+    query = query.limit(limit).offset(offset)
+    result = await db.execute(query)
+    jobs = result.scalars().all()
+
+    return ConsoleJobListResponse(
+        jobs=[
+            ConsoleJobSummary(
+                id=job.id,
+                status=job.status,
+                audio_uri=job.audio_uri,
+                created_at=job.created_at,
+                started_at=job.started_at,
+                completed_at=job.completed_at,
+            )
+            for job in jobs
+        ],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+class ConsoleJobDetailResponse(BaseModel):
+    """Detailed job response for console."""
+
+    id: UUID
+    status: str
+    audio_uri: str | None = None
+    parameters: dict | None = None
+    result: dict | None = None
+    error: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+@router.get(
+    "/jobs/{job_id}",
+    response_model=ConsoleJobDetailResponse,
+    summary="Get job details",
+    description="Get detailed job information (admin only).",
+)
+async def get_console_job(
+    job_id: UUID,
+    api_key: RequireAdmin,
+    db: AsyncSession = Depends(get_db),
+) -> ConsoleJobDetailResponse:
+    """Get job details for console (admin view)."""
+    result = await db.execute(select(JobModel).where(JobModel.id == job_id))
+    job = result.scalar_one_or_none()
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return ConsoleJobDetailResponse(
+        id=job.id,
+        status=job.status,
+        audio_uri=job.audio_uri,
+        parameters=job.parameters,
+        result=job.result,
+        error=job.error,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
     )
