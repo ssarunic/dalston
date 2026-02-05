@@ -119,11 +119,10 @@ async def _dispatch_event(
     event_type = event.get("type")
     log = logger.bind(event_type=event_type)
 
-    # Bind correlation IDs from the event into structlog context
-    structlog.contextvars.clear_contextvars()
-    structlog.contextvars.bind_contextvars(_service_name="orchestrator")
-    if "request_id" in event:
-        structlog.contextvars.bind_contextvars(request_id=event["request_id"])
+    # Reset structlog context for this event, preserving the service name.
+    dalston.logging.reset_context(
+        **({"request_id": event["request_id"]} if "request_id" in event else {})
+    )
 
     log.debug("received_event", payload=event)
 

@@ -12,6 +12,7 @@ from dalston.gateway.middleware.correlation import (
     REQUEST_ID_HEADER,
     CorrelationIdMiddleware,
     _generate_request_id,
+    _sanitize_request_id,
 )
 
 
@@ -110,3 +111,54 @@ class TestCorrelationIdMiddleware:
         r1 = client.get("/test")
         r2 = client.get("/test")
         assert r1.headers[REQUEST_ID_HEADER] != r2.headers[REQUEST_ID_HEADER]
+
+    def test_rejects_invalid_request_id(self, client):
+        """Invalid X-Request-ID is replaced with a generated one."""
+        response = client.get(
+            "/test", headers={REQUEST_ID_HEADER: "has spaces & <script>"}
+        )
+        assert response.status_code == 200
+        rid = response.headers[REQUEST_ID_HEADER]
+        assert rid.startswith("req_")
+
+    def test_rejects_oversized_request_id(self, client):
+        """Oversized X-Request-ID is replaced with a generated one."""
+        response = client.get(
+            "/test", headers={REQUEST_ID_HEADER: "a" * 200}
+        )
+        rid = response.headers[REQUEST_ID_HEADER]
+        assert rid.startswith("req_")
+
+
+class TestSanitizeRequestId:
+    """Tests for _sanitize_request_id validation."""
+
+    def test_accepts_valid_alphanumeric(self):
+        assert _sanitize_request_id("abc123") == "abc123"
+
+    def test_accepts_dashes_underscores_dots(self):
+        assert _sanitize_request_id("req_abc-123.456") == "req_abc-123.456"
+
+    def test_rejects_none(self):
+        result = _sanitize_request_id(None)
+        assert result.startswith("req_")
+
+    def test_rejects_empty_string(self):
+        result = _sanitize_request_id("")
+        assert result.startswith("req_")
+
+    def test_rejects_spaces(self):
+        result = _sanitize_request_id("has space")
+        assert result.startswith("req_")
+
+    def test_rejects_special_chars(self):
+        result = _sanitize_request_id("<script>alert(1)</script>")
+        assert result.startswith("req_")
+
+    def test_rejects_over_128_chars(self):
+        result = _sanitize_request_id("a" * 129)
+        assert result.startswith("req_")
+
+    def test_accepts_exactly_128_chars(self):
+        value = "a" * 128
+        assert _sanitize_request_id(value) == value

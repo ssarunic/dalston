@@ -165,7 +165,12 @@ class AudioPrepareEngine(Engine):
         Returns:
             TaskOutput with channel_files array
         """
-        num_channels = min(original_metadata["channels"], 2)  # Limit to stereo
+        num_channels = original_metadata["channels"]
+        if num_channels > 2:
+            raise ValueError(
+                f"per_channel mode supports stereo (2 channels), but input has "
+                f"{num_channels} channels. Use speaker_detection=diarize instead."
+            )
         logger.info("splitting_audio_into_channels", num_channels=num_channels)
 
         channel_files = []

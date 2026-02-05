@@ -252,3 +252,45 @@ class TestAddServiceNameProcessor:
         result = dalston.logging._add_service_name(None, None, event_dict)
         assert result == {"event": "test", "key": "value"}
         assert "service" not in result
+
+
+class TestResetContext:
+    """Tests for dalston.logging.reset_context()."""
+
+    def setup_method(self):
+        structlog.contextvars.clear_contextvars()
+        dalston.logging._configured_service_name = None
+
+    def teardown_method(self):
+        structlog.contextvars.clear_contextvars()
+        dalston.logging._configured_service_name = None
+
+    def test_clears_stale_context(self):
+        """reset_context removes previously bound keys."""
+        structlog.contextvars.bind_contextvars(stale="old_value")
+        dalston.logging.reset_context()
+        ctx = structlog.contextvars.get_contextvars()
+        assert "stale" not in ctx
+
+    def test_preserves_service_name(self):
+        """reset_context re-binds the service name set by configure()."""
+        dalston.logging._configured_service_name = "orchestrator"
+        structlog.contextvars.bind_contextvars(_service_name="orchestrator")
+        dalston.logging.reset_context()
+        ctx = structlog.contextvars.get_contextvars()
+        assert ctx["_service_name"] == "orchestrator"
+
+    def test_binds_extra_kwargs(self):
+        """reset_context binds additional keyword arguments."""
+        dalston.logging._configured_service_name = "gateway"
+        dalston.logging.reset_context(request_id="req_123")
+        ctx = structlog.contextvars.get_contextvars()
+        assert ctx["request_id"] == "req_123"
+        assert ctx["_service_name"] == "gateway"
+
+    def test_works_without_prior_configure(self):
+        """reset_context works even if configure() was never called."""
+        dalston.logging.reset_context(request_id="req_456")
+        ctx = structlog.contextvars.get_contextvars()
+        assert ctx["request_id"] == "req_456"
+        assert "_service_name" not in ctx

@@ -169,6 +169,7 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
 
     # Handle per_channel mode: parallel transcription per channel
     if speaker_detection == "per_channel":
+        num_channels = parameters.get("num_channels", 2)
         return _build_per_channel_dag(
             tasks=tasks,
             prepare_task=prepare_task,
@@ -176,6 +177,7 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
             engines=engines,
             transcribe_config=transcribe_config,
             word_timestamps=word_timestamps,
+            num_channels=num_channels,
         )
 
     # Task (optional): Diarization (depends only on prepare, runs parallel with transcribe/align)
@@ -215,11 +217,9 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
     )
     tasks.append(transcribe_task)
 
-    # Track the last task before merge (for merge dependencies)
-    pre_merge_task = transcribe_task
-
     # Task (optional): Alignment (depends on transcribe)
     # Adds precise word-level timestamps using wav2vec2 forced alignment
+    align_task = None
     if word_timestamps:
         align_task = Task(
             id=uuid4(),
@@ -236,11 +236,12 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
             required=True,
         )
         tasks.append(align_task)
-        pre_merge_task = align_task
 
-    # Final task: Merge (depends on prepare, transcribe/align chain, and optionally diarize)
+    # Final task: Merge (depends on prepare, transcribe, optionally align and diarize)
     # Combines outputs into final transcript format
-    merge_dependencies = [prepare_task.id, pre_merge_task.id]
+    merge_dependencies = [prepare_task.id, transcribe_task.id]
+    if align_task is not None:
+        merge_dependencies.append(align_task.id)
     if diarize_task is not None:
         merge_dependencies.append(diarize_task.id)
 
@@ -273,11 +274,13 @@ def _build_per_channel_dag(
     engines: dict[str, str],
     transcribe_config: dict,
     word_timestamps: bool,
+    num_channels: int = 2,
 ) -> list[Task]:
     """Build DAG for per_channel speaker detection mode.
 
     Creates parallel transcription (and optionally alignment) tasks
-    for each audio channel. Assumes stereo input (2 channels).
+    for each audio channel. Stage names always use the ``_chN`` suffix
+    (e.g. ``transcribe_ch0``, ``align_ch0``) even for a single channel.
 
     Args:
         tasks: List with prepare_task already added
@@ -286,13 +289,13 @@ def _build_per_channel_dag(
         engines: Engine ID mapping
         transcribe_config: Base transcription config
         word_timestamps: Whether to include alignment tasks
+        num_channels: Number of audio channels (default: 2)
 
     Returns:
         Complete task list including merge
     """
-    # Assume stereo (2 channels) for per_channel mode
-    num_channels = 2
-    pre_merge_tasks = []
+    all_channel_tasks = []  # All per-channel tasks (transcribe + align)
+    last_channel_tasks = []  # Last task per channel (for execution ordering)
 
     for channel in range(num_channels):
         # Transcription task for this channel
@@ -316,8 +319,9 @@ def _build_per_channel_dag(
             required=True,
         )
         tasks.append(transcribe_task)
+        all_channel_tasks.append(transcribe_task)
 
-        pre_merge_task = transcribe_task
+        last_task = transcribe_task
 
         # Alignment task for this channel (optional)
         if word_timestamps:
@@ -336,12 +340,14 @@ def _build_per_channel_dag(
                 required=True,
             )
             tasks.append(align_task)
-            pre_merge_task = align_task
+            all_channel_tasks.append(align_task)
+            last_task = align_task
 
-        pre_merge_tasks.append(pre_merge_task)
+        last_channel_tasks.append(last_task)
 
-    # Merge task depends on prepare and all channel tasks
-    merge_dependencies = [prepare_task.id] + [t.id for t in pre_merge_tasks]
+    # Merge task depends on prepare and ALL per-channel tasks
+    # (needs both transcribe and align outputs for each channel)
+    merge_dependencies = [prepare_task.id] + [t.id for t in all_channel_tasks]
 
     merge_task = Task(
         id=uuid4(),

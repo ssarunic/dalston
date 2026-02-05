@@ -6,6 +6,7 @@ Handles Redis pub/sub events:
 - task.failed: Retry or fail job
 """
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -148,6 +149,7 @@ async def handle_task_completed(
 
     task.status = TaskStatus.COMPLETED.value
     task.completed_at = datetime.now(UTC)
+    task.error = None  # Clear any error from a previous failed attempt
     await db.commit()
 
     job_id = task.job_id
@@ -351,6 +353,13 @@ async def _gather_previous_outputs(
         if output and "data" in output:
             previous_outputs[dep_task.stage] = output["data"]
 
+            # For per-channel stages (e.g. transcribe_ch0), also add the
+            # base stage key (e.g. "transcribe") so downstream engines that
+            # look up previous_outputs["transcribe"] can find the data.
+            base_stage = re.sub(r"_ch\d+$", "", dep_task.stage)
+            if base_stage != dep_task.stage:
+                previous_outputs[base_stage] = output["data"]
+
     return previous_outputs
 
 
@@ -423,8 +432,6 @@ def _resolve_channel_audio_uri(
     Returns:
         The channel's audio URI, or None if not a per-channel task.
     """
-    import re
-
     match = re.match(r"(?:transcribe|align)_ch(\d+)", stage)
     if not match:
         return None

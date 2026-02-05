@@ -41,6 +41,10 @@ class Engine(ABC):
     def __init__(self) -> None:
         """Initialize the engine."""
         self._runner = None
+        # structlog loggers are lazy proxies — configuration is resolved on
+        # first log call, not at creation time.  EngineRunner.__init__() calls
+        # dalston.logging.configure() before any logging happens, so this is
+        # safe despite being created before configure() runs.
         self.logger = structlog.get_logger()
 
     @abstractmethod

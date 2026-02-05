@@ -248,8 +248,8 @@ class FinalMergerEngine(Engine):
             transcribe_output = input.previous_outputs.get(transcribe_key, {})
             align_output = input.previous_outputs.get(align_key)
 
-            if not transcribe_output:
-                logger.warning("missing_transcribe_output", transcribe_key=transcribe_key)
+            if not transcribe_output and not align_output:
+                logger.warning("missing_channel_output", channel=channel)
                 continue
 
             # Use first channel's language detection

@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useDashboard } from '@/hooks/useDashboard'
-import type { ConsoleJobSummary } from '@/api/types'
+import type { JobSummary } from '@/api/types'
 
 function StatCard({
   title,
@@ -41,7 +41,7 @@ function StatCard({
   )
 }
 
-function RecentJobRow({ job }: { job: ConsoleJobSummary }) {
+function RecentJobRow({ job }: { job: JobSummary }) {
   const timeAgo = formatTimeAgo(job.created_at)
 
   return (

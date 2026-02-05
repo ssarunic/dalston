@@ -16,6 +16,9 @@ import sys
 
 import structlog
 
+# Stores the service name set by configure() so reset_context() can restore it.
+_configured_service_name: str | None = None
+
 
 def _add_service_name(
     logger: logging.Logger,
@@ -95,4 +98,23 @@ def configure(service_name: str) -> None:
     root_logger.setLevel(log_level)
 
     # Bind service name into the context so every log line includes it
+    global _configured_service_name
+    _configured_service_name = service_name
     structlog.contextvars.bind_contextvars(_service_name=service_name)
+
+
+def reset_context(**extra: str) -> None:
+    """Clear structlog contextvars and re-apply the service name.
+
+    Use this in event loops (orchestrator, middleware) to isolate context
+    between requests/events while preserving the service name originally
+    bound by :func:`configure`.
+
+    Args:
+        **extra: Additional context variables to bind (e.g. request_id).
+    """
+    structlog.contextvars.clear_contextvars()
+    if _configured_service_name:
+        structlog.contextvars.bind_contextvars(_service_name=_configured_service_name)
+    if extra:
+        structlog.contextvars.bind_contextvars(**extra)

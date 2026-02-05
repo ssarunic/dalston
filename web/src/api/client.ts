@@ -4,6 +4,7 @@ import type {
   APIKeyListResponse,
   ConsoleJobListResponse,
   CreateAPIKeyRequest,
+  DashboardResponse,
   EnginesResponse,
   HealthResponse,
   JobDetail,
@@ -54,6 +55,9 @@ export const apiClient = {
 
   // Job stats (for dashboard)
   getJobStats: () => currentClient.get('v1/jobs/stats').json<JobStatsResponse>(),
+
+  // Console dashboard (aggregated, consistent tenant filtering)
+  getDashboard: () => currentClient.get('api/console/dashboard').json<DashboardResponse>(),
 
   // Jobs list - use console endpoint (admin required, shows all tenants)
   getJobs: (params: JobListParams = {}) => {
