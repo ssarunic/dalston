@@ -80,6 +80,10 @@ export const apiClient = {
   getEngines: () =>
     currentClient.get('api/console/engines').json<EnginesResponse>(),
 
+  // Delete a job (admin required, job must be in terminal state)
+  deleteJob: (jobId: string) =>
+    currentClient.delete(`api/console/jobs/${jobId}`),
+
   // Export URL (needs API key as query param for download links)
   getExportUrl: (jobId: string, format: 'srt' | 'vtt' | 'txt' | 'json') => {
     const base = `/v1/audio/transcriptions/${jobId}/export/${format}`

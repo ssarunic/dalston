@@ -4,9 +4,11 @@ POST /v1/audio/transcriptions - Submit audio for transcription
 GET /v1/audio/transcriptions/{job_id} - Get job status and results
 GET /v1/audio/transcriptions - List jobs
 GET /v1/audio/transcriptions/{job_id}/export/{format} - Export transcript
+DELETE /v1/audio/transcriptions/{job_id} - Delete a completed/failed job
 """
 
 import json
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -319,3 +321,49 @@ async def export_transcription(
         max_line_length=max_line_length,
         max_lines=max_lines,
     )
+
+
+logger = logging.getLogger(__name__)
+
+
+@router.delete(
+    "/{job_id}",
+    status_code=204,
+    summary="Delete transcription job",
+    description="Delete a transcription job and its artifacts. Only terminal-state jobs (completed, failed, cancelled) can be deleted.",
+    responses={
+        204: {"description": "Job deleted successfully"},
+        404: {"description": "Job not found"},
+        409: {"description": "Job is not in a terminal state"},
+    },
+)
+async def delete_transcription(
+    job_id: UUID,
+    api_key: RequireJobsWrite,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    jobs_service: JobsService = Depends(get_jobs_service),
+) -> Response:
+    """Delete a job and all associated artifacts.
+
+    1. Validate job exists and is in a terminal state
+    2. Delete S3 artifacts (audio, task outputs, transcript)
+    3. Delete database record (cascades to tasks)
+    4. Return 204 No Content
+    """
+    try:
+        job = await jobs_service.delete_job(db, job_id, tenant_id=api_key.tenant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Clean up S3 artifacts (best-effort; DB record is already gone)
+    try:
+        storage = StorageService(settings)
+        await storage.delete_job_artifacts(job_id)
+    except Exception:
+        logger.warning("Failed to delete S3 artifacts for job %s", job_id, exc_info=True)
+
+    return Response(status_code=204)
