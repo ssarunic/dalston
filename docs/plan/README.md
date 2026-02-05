@@ -39,7 +39,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M16](milestones/M16-aws-deployment.md) | AWS Deployment | `infra/terraform/` |
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 
-### Not Started (5)
+### Not Started (6)
 
 | # | Milestone | Goal |
 |---|-----------|------|
@@ -48,6 +48,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M15](milestones/M15-console-authentication.md) | Console Auth | Secure web console access |
 | [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | OpenTelemetry spans |
 | [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | Prometheus + Grafana |
+| [M21](milestones/M21-admin-webhooks.md) | Admin Webhooks | Admin-registered webhook endpoints |
 
 ---
 
@@ -94,6 +95,12 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | Structlog everywhere, correlation IDs, JSON output | 3-4 | In Progress |
 | [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | OpenTelemetry spans across all services | 3-4 | Not Started |
 | [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | Prometheus metrics, Grafana dashboards | 3-4 | Not Started |
+
+## API Feature Milestones
+
+| # | Milestone | Goal | Days | Status |
+|---|-----------|------|------|--------|
+| [M21](milestones/M21-admin-webhooks.md) | Admin Webhooks | Admin-registered webhook endpoints with persistent delivery | 3-4 | Not Started |
 
 ---
 
@@ -173,6 +180,8 @@ M10 + M11 + M15 ──► M17
 
 M18 ──► M19
 M18 ──► M20 (M19 recommended but not required)
+
+M5 + M11 ──► M21
 ```
 
 - **M1-M5**: Core batch pipeline (sequential)
@@ -182,6 +191,7 @@ M18 ──► M20 (M19 recommended but not required)
 - **M11**: Authentication (can start after M1, recommended before production)
 - **M17**: API Key Management (needs M10 console, M11 auth, M15 console auth)
 - **M18-M20**: Observability (can start immediately, M19 and M20 depend on M18)
+- **M21**: Admin Webhooks (needs M5 webhooks, M11 auth)
 
 ---
 
@@ -207,3 +217,4 @@ Each milestone has a verification section. Key checkpoints:
 | M18 | `docker compose logs \| grep req_xxx` shows correlated JSON logs across all services |
 | M19 | Jaeger shows end-to-end waterfall trace for a batch job |
 | M20 | Grafana dashboard shows request rates, queue depths, and engine latency |
+| M21 | Registered webhook endpoints receive notifications without per-job URL |
