@@ -53,6 +53,18 @@ Terminology used throughout Dalston documentation.
 | **ElevenLabs Compatible API** | Drop-in replacement endpoints matching ElevenLabs conventions (`/v1/speech-to-text/*`). |
 | **Webhook** | An HTTP callback triggered on job completion or failure. |
 
+## Observability
+
+| Term | Definition |
+| --- | --- |
+| **Structured Logging** | Emitting log entries as machine-parseable data (JSON) with consistent fields, rather than free-form text strings. Enables indexing and querying in log aggregators. |
+| **Correlation ID** | A unique identifier (`request_id`) generated at the system boundary (gateway) and propagated through all downstream services, linking all log entries and traces for a single user request. |
+| **Distributed Tracing** | Recording the path of a request across multiple services as a tree of spans. Enables latency analysis and dependency visualization. Implemented via OpenTelemetry. |
+| **Span** | A single unit of work in a distributed trace. Has a start time, duration, parent span, and attributes. Examples: an HTTP request, a task processing call, a database query. |
+| **Trace** | A complete tree of spans representing the lifecycle of a request across all services. A batch transcription trace spans gateway, orchestrator, and engine spans. |
+| **Context Propagation** | Passing trace context and correlation IDs across service boundaries. In Dalston, propagated via Redis task metadata (batch) and WebSocket headers (real-time). |
+| **Metrics** | Numerical measurements of system behavior over time: counters (total requests), histograms (latency distribution), gauges (queue depth). Collected by Prometheus. |
+
 ## Pipeline Stages
 
 | Stage | Purpose |
