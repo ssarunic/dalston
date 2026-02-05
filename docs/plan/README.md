@@ -49,6 +49,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | OpenTelemetry spans |
 | [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | Prometheus + Grafana |
 | [M21](milestones/M21-admin-webhooks.md) | Admin Webhooks | Admin-registered webhook endpoints |
+| [M22](milestones/M22-parakeet-engine.md) | Parakeet Engine | NVIDIA Parakeet batch + real-time engines |
 
 ---
 
@@ -101,6 +102,12 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | # | Milestone | Goal | Days | Status |
 |---|-----------|------|------|--------|
 | [M21](milestones/M21-admin-webhooks.md) | Admin Webhooks | Admin-registered webhook endpoints with persistent delivery | 3-4 | Not Started |
+
+## Engine Milestones
+
+| # | Milestone | Goal | Days | Status |
+|---|-----------|------|------|--------|
+| [M22](milestones/M22-parakeet-engine.md) | Parakeet Engine | NVIDIA Parakeet batch + real-time transcription engines | 4-5 | Not Started |
 
 ---
 
@@ -182,6 +189,8 @@ M18 ──► M19
 M18 ──► M20 (M19 recommended but not required)
 
 M5 + M11 ──► M21
+
+M2 + M6 + M14 ──► M22
 ```
 
 - **M1-M5**: Core batch pipeline (sequential)
@@ -192,6 +201,7 @@ M5 + M11 ──► M21
 - **M17**: API Key Management (needs M10 console, M11 auth, M15 console auth)
 - **M18-M20**: Observability (can start immediately, M19 and M20 depend on M18)
 - **M21**: Admin Webhooks (needs M5 webhooks, M11 auth)
+- **M22**: Parakeet Engine (needs M2 batch, M6 real-time, M14 model selection)
 
 ---
 
@@ -218,3 +228,4 @@ Each milestone has a verification section. Key checkpoints:
 | M19 | Jaeger shows end-to-end waterfall trace for a batch job |
 | M20 | Grafana dashboard shows request rates, queue depths, and engine latency |
 | M21 | Registered webhook endpoints receive notifications without per-job URL |
+| M22 | English audio transcribed with Parakeet; real-time streaming with sub-100ms latency |
