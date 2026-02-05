@@ -4,13 +4,14 @@ Combines outputs from prepare, transcribe, align, and diarize stages
 into the standard Dalston transcript format with segment IDs and metadata.
 """
 
-import logging
 import os
 from datetime import UTC, datetime
 
+import structlog
+
 from dalston.engine_sdk import Engine, TaskInput, TaskOutput, io
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 class FinalMergerEngine(Engine):
@@ -47,8 +48,8 @@ class FinalMergerEngine(Engine):
         # Get speaker detection mode from config
         speaker_detection = config.get("speaker_detection", "none")
 
-        logger.info(f"Merging outputs for job {job_id}")
-        logger.debug(f"Prepare output keys: {list(prepare_output.keys())}")
+        logger.info("merging_outputs", job_id=str(job_id))
+        logger.debug("prepare_output_keys", keys=list(prepare_output.keys()))
 
         # Handle per_channel mode separately
         if speaker_detection == "per_channel":
@@ -59,11 +60,11 @@ class FinalMergerEngine(Engine):
         align_output = input.previous_outputs.get("align")
         diarize_output = input.previous_outputs.get("diarize")
 
-        logger.debug(f"Transcribe output keys: {list(transcribe_output.keys())}")
+        logger.debug("transcribe_output_keys", keys=list(transcribe_output.keys()))
         if align_output:
-            logger.debug(f"Align output keys: {list(align_output.keys())}")
+            logger.debug("align_output_keys", keys=list(align_output.keys()))
         if diarize_output:
-            logger.debug(f"Diarize output keys: {list(diarize_output.keys())}")
+            logger.debug("diarize_output_keys", keys=list(diarize_output.keys()))
 
         # Extract audio metadata from prepare stage
         audio_duration = prepare_output.get("duration", 0.0)
@@ -79,7 +80,7 @@ class FinalMergerEngine(Engine):
             # Check if alignment produced a warning (graceful degradation)
             align_warning = align_output.get("warning")
             if align_warning:
-                logger.warning(f"Alignment warning: {align_warning.get('reason')}")
+                logger.warning("alignment_warning", reason=align_warning.get("reason"))
                 pipeline_warnings.append(align_warning)
                 # Use transcribe segments as fallback
                 raw_segments = transcribe_output.get("segments", [])
@@ -88,7 +89,7 @@ class FinalMergerEngine(Engine):
                 # Use aligned segments
                 raw_segments = align_output.get("segments", [])
                 word_timestamps_available = align_output.get("word_timestamps", True)
-                logger.info("Using aligned segments with word-level timestamps")
+                logger.info("using_aligned_segments")
         else:
             # No alignment stage ran
             raw_segments = transcribe_output.get("segments", [])
@@ -107,17 +108,12 @@ class FinalMergerEngine(Engine):
         if diarize_output and speaker_detection == "diarize":
             diarization_warning = diarize_output.get("warning")
             if diarization_warning:
-                logger.warning(
-                    f"Diarization warning: {diarization_warning.get('reason')}"
-                )
+                logger.warning("diarization_warning", reason=diarization_warning.get("reason"))
                 pipeline_warnings.append(diarization_warning)
             else:
                 diarization_segments = diarize_output.get("diarization_segments", [])
                 diarization_speakers = diarize_output.get("speakers", [])
-                logger.info(
-                    f"Using diarization: {len(diarization_speakers)} speakers, "
-                    f"{len(diarization_segments)} segments"
-                )
+                logger.info("using_diarization", speaker_count=len(diarization_speakers), segment_count=len(diarization_segments))
 
         # Build segments with IDs and speaker assignments
         segments = []
@@ -155,7 +151,7 @@ class FinalMergerEngine(Engine):
                         "label": None,  # User can assign labels later
                     }
                 )
-            logger.info(f"Built speakers array with {len(speakers)} speakers")
+            logger.info("built_speakers_array", speaker_count=len(speakers))
 
         # Determine pipeline stages that ran
         pipeline_stages = ["prepare", "transcribe"]
@@ -192,17 +188,19 @@ class FinalMergerEngine(Engine):
         }
 
         logger.info(
-            f"Merged transcript: {len(segments)} segments, "
-            f"{len(text)} chars, language={language}, "
-            f"word_timestamps={word_timestamps_available}, "
-            f"speakers={len(speakers)}"
+            "merged_transcript",
+            segment_count=len(segments),
+            char_count=len(text),
+            language=language,
+            word_timestamps=word_timestamps_available,
+            speaker_count=len(speakers),
         )
 
         # Write to the canonical transcript location for the Gateway
         s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
         transcript_uri = f"s3://{s3_bucket}/jobs/{job_id}/transcript.json"
         io.upload_json(transcript, transcript_uri)
-        logger.info(f"Uploaded transcript to {transcript_uri}")
+        logger.info("uploaded_transcript", transcript_uri=transcript_uri)
 
         return TaskOutput(data=transcript)
 
@@ -229,7 +227,7 @@ class FinalMergerEngine(Engine):
         word_timestamps = config.get("word_timestamps", False)
         channel_count = config.get("channel_count", 2)
 
-        logger.info(f"Merging per-channel outputs: {channel_count} channels")
+        logger.info("merging_per_channel_outputs", channel_count=channel_count)
 
         # Extract audio metadata
         audio_duration = prepare_output.get("duration", 0.0)
@@ -251,7 +249,7 @@ class FinalMergerEngine(Engine):
             align_output = input.previous_outputs.get(align_key)
 
             if not transcribe_output:
-                logger.warning(f"Missing {transcribe_key} output")
+                logger.warning("missing_transcribe_output", transcribe_key=transcribe_key)
                 continue
 
             # Use first channel's language detection
@@ -345,16 +343,13 @@ class FinalMergerEngine(Engine):
             "summary": None,
         }
 
-        logger.info(
-            f"Merged per-channel transcript: {len(segments)} segments, "
-            f"{len(speakers)} speakers"
-        )
+        logger.info("merged_per_channel_transcript", segment_count=len(segments), speaker_count=len(speakers))
 
         # Upload to S3
         s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
         transcript_uri = f"s3://{s3_bucket}/jobs/{job_id}/transcript.json"
         io.upload_json(transcript, transcript_uri)
-        logger.info(f"Uploaded transcript to {transcript_uri}")
+        logger.info("uploaded_transcript", transcript_uri=transcript_uri)
 
         return TaskOutput(data=transcript)
 

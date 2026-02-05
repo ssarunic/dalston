@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
+    "structlog>=24.0.0",
 ]
 
 [project.optional-dependencies]
@@ -20,7 +21,6 @@ gateway = [
     "greenlet>=3.0.0",
     "aioboto3>=13.0.0",
     "types-aiobotocore-s3>=2.13.0",
-    "structlog>=24.0.0",
     "websockets>=12.0",  # For realtime WebSocket proxy
 ]
 orchestrator = [
@@ -28,7 +28,6 @@ orchestrator = [
     "sqlalchemy[asyncio]>=2.0.0",
     "asyncpg>=0.29.0",
     "aioboto3>=13.0.0",
-    "structlog>=24.0.0",
     "httpx>=0.26.0",
     "fastapi>=0.109.0",  # Required for importing gateway.services
     "python-multipart>=0.0.6",  # Required by FastAPI for form data
@@ -53,6 +52,7 @@ dev = [
     "pytest-httpx>=0.30.0",
     "httpx>=0.26.0",
     "redis>=5.0.0",
+    "structlog>=24.0.0",
     "alembic>=1.13.0",
     "ruff>=0.9.0",
     "pre-commit>=4.0.0",

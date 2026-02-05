@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
 import shutil
 import signal
@@ -14,7 +13,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import redis
+import structlog
 
+import dalston.logging
 from dalston.engine_sdk import io
 from dalston.engine_sdk.types import TaskInput, TaskOutput
 
@@ -22,7 +23,7 @@ if TYPE_CHECKING:
     from dalston.engine_sdk.base import Engine
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 class EngineRunner:
@@ -61,12 +62,9 @@ class EngineRunner:
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
         self.s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
 
-        # Setup logging
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        )
-        logger.info(f"Initialized EngineRunner for engine_id={self.engine_id}")
+        # Configure structured logging
+        dalston.logging.configure(f"engine-{self.engine_id}")
+        logger.info("engine_runner_initialized", engine_id=self.engine_id)
 
     @property
     def redis_client(self) -> redis.Redis:
@@ -91,21 +89,20 @@ class EngineRunner:
         self._running = True
         self._setup_signal_handlers()
 
-        logger.info(f"Starting engine loop for {self.engine_id}")
-        logger.info(f"Polling queue: {self.queue_key}")
+        logger.info("engine_loop_starting", engine_id=self.engine_id, queue=self.queue_key)
 
         while self._running:
             try:
                 self._poll_and_process()
             except redis.ConnectionError as e:
-                logger.error(f"Redis connection error: {e}")
+                logger.error("redis_connection_error", error=str(e))
                 time.sleep(5)  # Wait before reconnecting
                 self._redis = None  # Force reconnection
             except Exception as e:
-                logger.exception(f"Unexpected error in engine loop: {e}")
+                logger.exception("engine_loop_error", error=str(e))
                 time.sleep(1)
 
-        logger.info("Engine loop stopped")
+        logger.info("engine_loop_stopped")
 
     def stop(self) -> None:
         """Stop the processing loop."""
@@ -115,7 +112,7 @@ class EngineRunner:
         """Setup handlers for graceful shutdown."""
 
         def handle_signal(signum, frame):
-            logger.info(f"Received signal {signum}, shutting down...")
+            logger.info("shutdown_signal_received", signal=signum)
             self.stop()
 
         signal.signal(signal.SIGTERM, handle_signal)
@@ -134,7 +131,7 @@ class EngineRunner:
             return
 
         _, task_id = result
-        logger.info(f"Received task: {task_id}")
+        logger.info("task_received", task_id=task_id)
 
         self._process_task(task_id)
 
@@ -150,14 +147,23 @@ class EngineRunner:
         try:
             # Create temp directory for this task
             temp_dir = Path(tempfile.mkdtemp(prefix=self.TEMP_DIR_PREFIX))
-            logger.info(f"Created temp dir: {temp_dir}")
 
             # Load task input from S3
             task_input = self._load_task_input(task_id, temp_dir)
             job_id = task_input.job_id
 
+            # Extract request_id from task metadata and bind to logger
+            task_metadata = self._get_task_metadata(task_id)
+            request_id = task_metadata.get("request_id")
+            structlog.contextvars.bind_contextvars(
+                task_id=task_id,
+                job_id=job_id,
+                engine_id=self.engine_id,
+                **({"request_id": request_id} if request_id else {}),
+            )
+
             # Process the task
-            logger.info(f"Processing task {task_id} for job {job_id}")
+            logger.info("task_processing")
             output = self.engine.process(task_input)
 
             # Calculate processing time
@@ -169,10 +175,10 @@ class EngineRunner:
             # Publish success event
             self._publish_task_completed(task_id, job_id)
 
-            logger.info(f"Task {task_id} completed in {processing_time:.2f}s")
+            logger.info("task_completed", processing_time=round(processing_time, 2))
 
         except Exception as e:
-            logger.exception(f"Task {task_id} failed: {e}")
+            logger.exception("task_failed", error=str(e))
             # We need job_id for the event, try to extract from input
             try:
                 job_id = task_input.job_id
@@ -184,7 +190,11 @@ class EngineRunner:
             # Cleanup temp directory
             if temp_dir and temp_dir.exists():
                 shutil.rmtree(temp_dir, ignore_errors=True)
-                logger.debug(f"Cleaned up temp dir: {temp_dir}")
+                logger.debug("temp_dir_cleaned", path=str(temp_dir))
+            # Clear per-task context
+            structlog.contextvars.unbind_contextvars(
+                "task_id", "job_id", "request_id",
+            )
 
     def _load_task_input(self, task_id: str, temp_dir: Path) -> TaskInput:
         """Load task input from S3 and download audio file.
@@ -279,7 +289,7 @@ class EngineRunner:
             output_data["artifacts"] = artifacts_uploaded
 
         io.upload_json(output_data, output_uri)
-        logger.info(f"Uploaded output to {output_uri}")
+        logger.info("output_uploaded", output_uri=output_uri)
 
     def _publish_task_completed(self, task_id: str, job_id: str) -> None:
         """Publish task.completed event to Redis pub/sub.
@@ -296,7 +306,7 @@ class EngineRunner:
             "timestamp": datetime.now(UTC).isoformat(),
         }
         self.redis_client.publish(self.EVENTS_CHANNEL, json.dumps(event))
-        logger.debug(f"Published task.completed event for {task_id}")
+        logger.debug("published_task_completed")
 
     def _publish_task_failed(
         self,
@@ -320,4 +330,4 @@ class EngineRunner:
             "timestamp": datetime.now(UTC).isoformat(),
         }
         self.redis_client.publish(self.EVENTS_CHANNEL, json.dumps(event))
-        logger.debug(f"Published task.failed event for {task_id}")
+        logger.debug("published_task_failed")

@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from typing import Annotated
 
+import structlog
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
@@ -24,7 +24,7 @@ from dalston.gateway.middleware.auth import authenticate_websocket
 from dalston.gateway.services.auth import Scope
 from dalston.session_router import SessionRouter
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 # Router for WebSocket endpoint (mounted under /audio/transcriptions)
 stream_router = APIRouter(prefix="/audio/transcriptions", tags=["realtime"])
@@ -120,10 +120,15 @@ async def realtime_transcription(
         await websocket.close(code=4503, reason="No capacity")
         return
 
-    logger.info(
-        f"Allocated session {allocation.session_id} to worker {allocation.worker_id} "
-        f"for client {client_ip}"
+    log = logger.bind(
+        session_id=allocation.session_id,
+        worker_id=allocation.worker_id,
+        client_ip=client_ip,
     )
+    log.info("session_allocated")
+
+    # Bind session_id into structlog contextvars for downstream log calls
+    structlog.contextvars.bind_contextvars(session_id=allocation.session_id)
 
     # Connect to worker and proxy bidirectionally
     try:
@@ -140,13 +145,13 @@ async def realtime_transcription(
             word_timestamps=word_timestamps,
         )
     except WebSocketDisconnect:
-        logger.info(f"Client disconnected from session {allocation.session_id}")
+        log.info("client_disconnected")
     except Exception as e:
-        logger.error(f"Error in session {allocation.session_id}: {e}")
+        log.error("session_error", error=str(e))
     finally:
         # Release worker
         await session_router.release_worker(allocation.session_id)
-        logger.info(f"Released session {allocation.session_id}")
+        log.info("session_released")
 
 
 async def _proxy_to_worker(
@@ -252,7 +257,7 @@ async def _forward_client_to_worker(
                     # JSON control message
                     await worker_ws.send(message["text"])
     except Exception as e:
-        logger.debug(f"Client->Worker forward ended for {session_id}: {e}")
+        logger.debug("client_to_worker_ended", session_id=session_id, error=str(e))
         raise
 
 
@@ -279,7 +284,7 @@ async def _forward_worker_to_client(
                 except json.JSONDecodeError:
                     pass
     except Exception as e:
-        logger.debug(f"Worker->Client forward ended for {session_id}: {e}")
+        logger.debug("worker_to_client_ended", session_id=session_id, error=str(e))
         raise
 
 

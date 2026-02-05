@@ -8,9 +8,7 @@ Extracts and validates API keys from:
 
 from __future__ import annotations
 
-import logging
-from typing import TYPE_CHECKING
-
+import structlog
 from fastapi import HTTPException, Request, WebSocket, status
 
 from dalston.gateway.services.auth import (
@@ -21,10 +19,7 @@ from dalston.gateway.services.auth import (
     SessionToken,
 )
 
-if TYPE_CHECKING:
-    pass
-
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 class AuthenticationError(HTTPException):

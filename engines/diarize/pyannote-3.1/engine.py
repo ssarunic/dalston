@@ -4,13 +4,14 @@ Uses pyannote-audio for speaker diarization - identifying who speaks when.
 Requires HuggingFace token for accessing gated models.
 """
 
-import logging
 import os
 from typing import Any
 
+import structlog
+
 from dalston.engine_sdk import Engine, TaskInput, TaskOutput
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 class PyannoteEngine(Engine):
@@ -33,9 +34,9 @@ class PyannoteEngine(Engine):
         self._disabled = os.environ.get("DIARIZATION_DISABLED", "").lower() == "true"
 
         if self._disabled:
-            logger.warning("Diarization is DISABLED via DIARIZATION_DISABLED env var")
+            logger.warning("diarization_disabled")
         else:
-            logger.info(f"Pyannote engine initialized, device: {self._device}")
+            logger.info("pyannote_engine_initialized", device=self._device)
 
     def _detect_device(self) -> str:
         """Detect the best available device (CUDA or CPU)."""
@@ -43,12 +44,12 @@ class PyannoteEngine(Engine):
             import torch
 
             if torch.cuda.is_available():
-                logger.info("CUDA available, using GPU")
+                logger.info("cuda_available_using_gpu")
                 return "cuda"
         except ImportError:
             pass
 
-        logger.info("CUDA not available, using CPU (this will be slow)")
+        logger.info("cuda_not_available_using_cpu")
         return "cpu"
 
     def _get_hf_token(self, config: dict[str, Any]) -> str:
@@ -78,7 +79,7 @@ class PyannoteEngine(Engine):
         if self._pipeline is not None:
             return self._pipeline
 
-        logger.info(f"Loading pyannote pipeline: {self.MODEL_ID}")
+        logger.info("loading_pyannote_pipeline", model_id=self.MODEL_ID)
 
         from pyannote.audio import Pipeline
 
@@ -93,7 +94,7 @@ class PyannoteEngine(Engine):
 
             self._pipeline = self._pipeline.to(torch.device("cuda"))
 
-        logger.info("Pyannote pipeline loaded successfully")
+        logger.info("pyannote_pipeline_loaded_successfully")
         return self._pipeline
 
     def process(self, input: TaskInput) -> TaskOutput:
@@ -107,22 +108,22 @@ class PyannoteEngine(Engine):
         """
         # Check if diarization is disabled (for local dev/testing)
         if self._disabled:
-            logger.info("Diarization disabled, returning mock single-speaker output")
+            logger.info("diarization_disabled_returning_mock_output")
             return self._mock_output()
 
         audio_path = input.audio_path
         config = input.config
 
-        logger.info(f"Processing diarization for: {audio_path}")
+        logger.info("processing_diarization", audio_path=str(audio_path))
 
         # Get speaker count hints
         min_speakers = config.get("min_speakers")
         max_speakers = config.get("max_speakers")
 
         if min_speakers:
-            logger.info(f"Min speakers hint: {min_speakers}")
+            logger.info("min_speakers_hint", min_speakers=min_speakers)
         if max_speakers:
-            logger.info(f"Max speakers hint: {max_speakers}")
+            logger.info("max_speakers_hint", max_speakers=max_speakers)
 
         # Load pipeline (lazy)
         hf_token = self._get_hf_token(config)
@@ -135,15 +136,13 @@ class PyannoteEngine(Engine):
         if max_speakers is not None:
             diarization_params["max_speakers"] = max_speakers
 
-        logger.info("Running diarization...")
+        logger.info("running_diarization")
         diarization = pipeline(str(audio_path), **diarization_params)
 
         # Convert pyannote Annotation to our output format
         speakers, segments = self._convert_annotation(diarization)
 
-        logger.info(
-            f"Diarization complete: {len(speakers)} speakers, {len(segments)} segments"
-        )
+        logger.info("diarization_complete", speaker_count=len(speakers), segment_count=len(segments))
 
         return TaskOutput(
             data={

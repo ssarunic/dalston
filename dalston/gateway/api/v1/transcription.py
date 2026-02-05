@@ -10,6 +10,7 @@ import json
 from typing import Annotated
 from uuid import UUID
 
+import structlog
 from fastapi import (
     APIRouter,
     Depends,
@@ -17,6 +18,7 @@ from fastapi import (
     Form,
     HTTPException,
     Query,
+    Request,
     Response,
     UploadFile,
 )
@@ -56,6 +58,7 @@ router = APIRouter(prefix="/audio/transcriptions", tags=["transcriptions"])
     description="Upload an audio file for transcription. Returns a job ID to poll for results.",
 )
 async def create_transcription(
+    request: Request,
     file: Annotated[UploadFile, File(description="Audio file to transcribe")],
     api_key: RequireJobsWrite,
     language: Annotated[
@@ -150,8 +153,10 @@ async def create_transcription(
     await db.commit()
     await db.refresh(job)
 
-    # Publish event for orchestrator
-    await publish_job_created(redis, job.id)
+    # Publish event for orchestrator (include request_id for correlation)
+    request_id = getattr(request.state, "request_id", None)
+    structlog.contextvars.bind_contextvars(job_id=str(job.id))
+    await publish_job_created(redis, job.id, request_id=request_id)
 
     return JobCreatedResponse(
         id=job.id,

@@ -7,13 +7,13 @@ audio buffering, VAD, ASR, and transcript assembly.
 from __future__ import annotations
 
 import audioop
-import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import structlog
 
 from dalston.realtime_sdk.assembler import (
     TranscribeResult,
@@ -40,7 +40,7 @@ from dalston.realtime_sdk.vad import VADConfig, VADProcessor
 if TYPE_CHECKING:
     from websockets import WebSocketServerProtocol
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 @dataclass
@@ -270,7 +270,7 @@ class SessionHandler:
 
         except Exception as e:
             self._error = str(e)
-            logger.exception(f"Session {self.config.session_id} error: {e}")
+            logger.exception("session_error", session_id=self.config.session_id, error=str(e))
             await self._send_error(
                 ErrorCode.INTERNAL_ERROR,
                 f"Internal error: {e}",
@@ -375,7 +375,7 @@ class SessionHandler:
             )
 
         except Exception as e:
-            logger.error(f"Transcription error: {e}")
+            logger.error("transcription_error", error=str(e))
             await self._send_error(
                 ErrorCode.INTERNAL_ERROR,
                 f"Transcription failed: {e}",
@@ -401,7 +401,7 @@ class SessionHandler:
         if isinstance(parsed, ConfigUpdateMessage):
             if parsed.language:
                 self.config.language = parsed.language
-                logger.debug(f"Updated language to {parsed.language}")
+                logger.debug("language_updated", language=parsed.language)
 
         elif isinstance(parsed, FlushMessage):
             # Flush VAD buffer
@@ -482,7 +482,7 @@ class SessionHandler:
         try:
             await self.websocket.send(message.to_json())
         except Exception as e:
-            logger.error(f"Failed to send message: {e}")
+            logger.error("send_failed", error=str(e))
 
     def get_duration(self) -> float:
         """Get session wall-clock duration in seconds."""
