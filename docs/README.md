@@ -12,6 +12,8 @@ docs/
 ├── specs/                  # What the system IS (reference)
 │   ├── ARCHITECTURE.md         # System overview, components, data flow
 │   ├── PROJECT_STRUCTURE.md    # Directory layout, packages
+│   ├── DATA_RETENTION.md       # Retention policies, cleanup, deletion
+│   ├── AUDIT_LOG.md            # Audit logging, event catalog, query API
 │   │
 │   ├── batch/                  # Batch transcription specs
 │   │   ├── API.md                  # REST API specification
@@ -41,7 +43,8 @@ docs/
 │   ├── README.md               # ADR index and template
 │   ├── ADR-001-storage-architecture.md
 │   ├── ADR-002-engine-isolation.md
-│   └── ADR-003-two-level-queues.md
+│   ├── ADR-003-two-level-queues.md
+│   └── ADR-004-data-retention-strategy.md
 │
 └── plan/                   # How we BUILD it (implementation)
     ├── README.md               # Timeline, principles, overview
@@ -66,6 +69,8 @@ docs/
 - [Architecture Overview](specs/ARCHITECTURE.md) — Start here
 - [REST API](specs/batch/API.md) — Batch transcription endpoints
 - [WebSocket API](specs/realtime/WEBSOCKET_API.md) — Real-time streaming protocol
+- [Data Retention & Cleanup](specs/DATA_RETENTION.md) — Retention policies, automated purging
+- [Audit Log](specs/AUDIT_LOG.md) — Immutable event log, compliance
 - [Glossary](GLOSSARY.md) — Terminology definitions
 
 ### Architecture Decisions
