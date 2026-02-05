@@ -109,7 +109,6 @@ class RealtimeEngine(ABC):
         self._running = False
         self._server = None
 
-
     @abstractmethod
     def load_models(self) -> None:
         """Load ASR models into memory.

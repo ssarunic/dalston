@@ -175,7 +175,13 @@ class SessionAllocator:
         # Add to active sessions index
         await self._redis.sadd(ACTIVE_SESSIONS_KEY, session_id)
 
-        logger.info("session_allocated", session_id=session_id, worker_id=worker.worker_id, active=new_count, capacity=worker.capacity)
+        logger.info(
+            "session_allocated",
+            session_id=session_id,
+            worker_id=worker.worker_id,
+            active=new_count,
+            capacity=worker.capacity,
+        )
 
         return WorkerAllocation(
             worker_id=worker.worker_id,
@@ -213,7 +219,11 @@ class SessionAllocator:
                 await self._redis.sadd(sessions_key, session_id)
                 await self._redis.sadd(ACTIVE_SESSIONS_KEY, session_id)
 
-                logger.info("session_allocated", session_id=session_id, worker_id=worker.worker_id)
+                logger.info(
+                    "session_allocated",
+                    session_id=session_id,
+                    worker_id=worker.worker_id,
+                )
 
                 return WorkerAllocation(
                     worker_id=worker.worker_id,

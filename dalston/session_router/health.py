@@ -107,7 +107,12 @@ class HealthMonitor:
             age = (now - worker.last_heartbeat).total_seconds()
 
             if age > self.HEARTBEAT_TIMEOUT:
-                logger.warning("worker_heartbeat_stale", worker_id=worker.worker_id, age_seconds=round(age), timeout=self.HEARTBEAT_TIMEOUT)
+                logger.warning(
+                    "worker_heartbeat_stale",
+                    worker_id=worker.worker_id,
+                    age_seconds=round(age),
+                    timeout=self.HEARTBEAT_TIMEOUT,
+                )
 
                 # Mark offline
                 await self._registry.mark_worker_offline(worker.worker_id)
@@ -148,7 +153,9 @@ class HealthMonitor:
             ),
         )
 
-        logger.info("published_worker_offline_event", worker_id=worker_id, session_id=session_id)
+        logger.info(
+            "published_worker_offline_event", worker_id=worker_id, session_id=session_id
+        )
 
     @property
     def is_running(self) -> bool:

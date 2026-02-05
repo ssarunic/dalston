@@ -29,7 +29,9 @@ class WhisperXAlignEngine(Engine):
 
         # Detect device
         self._device, self._compute_type = self._detect_device()
-        logger.info("detected_device", device=self._device, compute_type=self._compute_type)
+        logger.info(
+            "detected_device", device=self._device, compute_type=self._compute_type
+        )
 
     def _detect_device(self) -> tuple[str, str]:
         """Detect the best available device and compute type.
@@ -72,7 +74,9 @@ class WhisperXAlignEngine(Engine):
             return model, metadata
 
         except Exception as e:
-            logger.warning("failed_to_load_alignment_model", language=language, error=str(e))
+            logger.warning(
+                "failed_to_load_alignment_model", language=language, error=str(e)
+            )
             return None
 
     def process(self, input: TaskInput) -> TaskOutput:
@@ -104,7 +108,11 @@ class WhisperXAlignEngine(Engine):
 
         if model_result is None:
             # Graceful degradation: return original segments with warning
-            logger.warning("no_alignment_model", language=language, fallback="original_transcription_timestamps")
+            logger.warning(
+                "no_alignment_model",
+                language=language,
+                fallback="original_transcription_timestamps",
+            )
             return self._fallback_output(
                 text,
                 segments,
@@ -223,7 +231,11 @@ class WhisperXAlignEngine(Engine):
             normalized.append(segment)
 
         if filtered_words > 0:
-            logger.debug("filtered_empty_words", filtered_count=filtered_words, total_count=total_words)
+            logger.debug(
+                "filtered_empty_words",
+                filtered_count=filtered_words,
+                total_count=total_words,
+            )
 
         return normalized
 

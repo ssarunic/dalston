@@ -125,7 +125,9 @@ class AudioPrepareEngine(Engine):
             prepared_path.unlink()
             logger.debug("cleaned_up_temporary_file", path=str(prepared_path))
         except OSError as e:
-            logger.warning("failed_to_clean_up_temp_file", path=str(prepared_path), error=str(e))
+            logger.warning(
+                "failed_to_clean_up_temp_file", path=str(prepared_path), error=str(e)
+            )
 
         # Build output data
         output_data = {
@@ -188,7 +190,9 @@ class AudioPrepareEngine(Engine):
 
             # Probe the channel file
             channel_metadata = self._probe_audio(channel_path)
-            logger.info("channel_metadata", channel=channel_idx, metadata=channel_metadata)
+            logger.info(
+                "channel_metadata", channel=channel_idx, metadata=channel_metadata
+            )
 
             # Upload to S3
             audio_uri = (
@@ -210,7 +214,11 @@ class AudioPrepareEngine(Engine):
             try:
                 channel_path.unlink()
             except OSError as e:
-                logger.warning("failed_to_clean_up_channel_file", path=str(channel_path), error=str(e))
+                logger.warning(
+                    "failed_to_clean_up_channel_file",
+                    path=str(channel_path),
+                    error=str(e),
+                )
 
         # Build output data
         output_data = {

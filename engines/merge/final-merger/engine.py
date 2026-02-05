@@ -108,12 +108,18 @@ class FinalMergerEngine(Engine):
         if diarize_output and speaker_detection == "diarize":
             diarization_warning = diarize_output.get("warning")
             if diarization_warning:
-                logger.warning("diarization_warning", reason=diarization_warning.get("reason"))
+                logger.warning(
+                    "diarization_warning", reason=diarization_warning.get("reason")
+                )
                 pipeline_warnings.append(diarization_warning)
             else:
                 diarization_segments = diarize_output.get("diarization_segments", [])
                 diarization_speakers = diarize_output.get("speakers", [])
-                logger.info("using_diarization", speaker_count=len(diarization_speakers), segment_count=len(diarization_segments))
+                logger.info(
+                    "using_diarization",
+                    speaker_count=len(diarization_speakers),
+                    segment_count=len(diarization_segments),
+                )
 
         # Build segments with IDs and speaker assignments
         segments = []
@@ -343,7 +349,11 @@ class FinalMergerEngine(Engine):
             "summary": None,
         }
 
-        logger.info("merged_per_channel_transcript", segment_count=len(segments), speaker_count=len(speakers))
+        logger.info(
+            "merged_per_channel_transcript",
+            segment_count=len(segments),
+            speaker_count=len(speakers),
+        )
 
         # Upload to S3
         s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")

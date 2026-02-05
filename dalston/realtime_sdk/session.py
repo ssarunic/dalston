@@ -270,7 +270,9 @@ class SessionHandler:
 
         except Exception as e:
             self._error = str(e)
-            logger.exception("session_error", session_id=self.config.session_id, error=str(e))
+            logger.exception(
+                "session_error", session_id=self.config.session_id, error=str(e)
+            )
             await self._send_error(
                 ErrorCode.INTERNAL_ERROR,
                 f"Internal error: {e}",

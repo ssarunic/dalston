@@ -1,6 +1,5 @@
 """Unit tests for the correlation ID middleware."""
 
-
 import pytest
 import structlog
 from starlette.applications import Starlette
@@ -73,9 +72,7 @@ class TestCorrelationIdMiddleware:
 
     def test_uses_client_provided_request_id(self, client):
         """Uses the client's X-Request-ID if provided."""
-        response = client.get(
-            "/test", headers={REQUEST_ID_HEADER: "client-trace-123"}
-        )
+        response = client.get("/test", headers={REQUEST_ID_HEADER: "client-trace-123"})
         assert response.status_code == 200
         assert response.headers[REQUEST_ID_HEADER] == "client-trace-123"
 
@@ -123,9 +120,7 @@ class TestCorrelationIdMiddleware:
 
     def test_rejects_oversized_request_id(self, client):
         """Oversized X-Request-ID is replaced with a generated one."""
-        response = client.get(
-            "/test", headers={REQUEST_ID_HEADER: "a" * 200}
-        )
+        response = client.get("/test", headers={REQUEST_ID_HEADER: "a" * 200})
         rid = response.headers[REQUEST_ID_HEADER]
         assert rid.startswith("req_")
 

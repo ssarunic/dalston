@@ -48,7 +48,9 @@ class WhisperStreamingEngine(RealtimeEngine):
         """
         # Detect device
         self._device, self._compute_type = self._detect_device()
-        logger.info("using_device", device=self._device, compute_type=self._compute_type)
+        logger.info(
+            "using_device", device=self._device, compute_type=self._compute_type
+        )
 
         # Load fast model (distil-whisper)
         import os

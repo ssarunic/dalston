@@ -118,9 +118,7 @@ class TestCorrelationIdGatewayFlow:
             return {"ok": True}
 
         client = TestClient(app)
-        response = client.get(
-            "/test", headers={REQUEST_ID_HEADER: "external-trace-id"}
-        )
+        response = client.get("/test", headers={REQUEST_ID_HEADER: "external-trace-id"})
         assert response.headers[REQUEST_ID_HEADER] == "external-trace-id"
 
     def test_create_transcription_publishes_request_id(
@@ -247,13 +245,19 @@ class TestRequestIdInTaskMetadata:
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(request_id="req_xyz789")
 
-        with patch("dalston.orchestrator.scheduler.write_task_input", new_callable=AsyncMock):
+        with patch(
+            "dalston.orchestrator.scheduler.write_task_input", new_callable=AsyncMock
+        ):
             await queue_task(mock_redis, task, mock_settings)
 
         # Verify hset was called with request_id in the mapping
         mock_redis.hset.assert_called_once()
         call_kwargs = mock_redis.hset.call_args
-        mapping = call_kwargs.kwargs.get("mapping") or call_kwargs.args[1] if len(call_kwargs.args) > 1 else None
+        mapping = (
+            call_kwargs.kwargs.get("mapping") or call_kwargs.args[1]
+            if len(call_kwargs.args) > 1
+            else None
+        )
 
         # Handle both positional and keyword args
         if mapping is None:
@@ -289,7 +293,9 @@ class TestRequestIdInTaskMetadata:
         # Clear context to ensure no request_id
         structlog.contextvars.clear_contextvars()
 
-        with patch("dalston.orchestrator.scheduler.write_task_input", new_callable=AsyncMock):
+        with patch(
+            "dalston.orchestrator.scheduler.write_task_input", new_callable=AsyncMock
+        ):
             await queue_task(mock_redis, task, mock_settings)
 
         mock_redis.hset.assert_called_once()
@@ -310,12 +316,14 @@ class TestOrchestratorEventDispatch:
         mock_settings = MagicMock()
 
         # Create a job.created event with request_id
-        event_data = json.dumps({
-            "type": "job.created",
-            "job_id": str(uuid4()),
-            "request_id": "req_from_gateway",
-            "timestamp": datetime.now(UTC).isoformat(),
-        })
+        event_data = json.dumps(
+            {
+                "type": "job.created",
+                "job_id": str(uuid4()),
+                "request_id": "req_from_gateway",
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+        )
 
         # Patch the handler to capture context during execution
         captured_ctx = {}
@@ -323,10 +331,13 @@ class TestOrchestratorEventDispatch:
         async def capture_handler(*args, **kwargs):
             captured_ctx.update(structlog.contextvars.get_contextvars())
 
-        with patch(
-            "dalston.orchestrator.main.handle_job_created",
-            side_effect=capture_handler,
-        ), patch("dalston.orchestrator.main.async_session") as mock_session_ctx:
+        with (
+            patch(
+                "dalston.orchestrator.main.handle_job_created",
+                side_effect=capture_handler,
+            ),
+            patch("dalston.orchestrator.main.async_session") as mock_session_ctx,
+        ):
             # Setup async context manager for session
             mock_session = AsyncMock()
             mock_session_ctx.return_value.__aenter__ = AsyncMock(
@@ -346,21 +357,26 @@ class TestOrchestratorEventDispatch:
         mock_redis = AsyncMock()
         mock_settings = MagicMock()
 
-        event_data = json.dumps({
-            "type": "job.created",
-            "job_id": str(uuid4()),
-            "timestamp": datetime.now(UTC).isoformat(),
-        })
+        event_data = json.dumps(
+            {
+                "type": "job.created",
+                "job_id": str(uuid4()),
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+        )
 
         captured_ctx = {}
 
         async def capture_handler(*args, **kwargs):
             captured_ctx.update(structlog.contextvars.get_contextvars())
 
-        with patch(
-            "dalston.orchestrator.main.handle_job_created",
-            side_effect=capture_handler,
-        ), patch("dalston.orchestrator.main.async_session") as mock_session_ctx:
+        with (
+            patch(
+                "dalston.orchestrator.main.handle_job_created",
+                side_effect=capture_handler,
+            ),
+            patch("dalston.orchestrator.main.async_session") as mock_session_ctx,
+        ):
             mock_session = AsyncMock()
             mock_session_ctx.return_value.__aenter__ = AsyncMock(
                 return_value=mock_session

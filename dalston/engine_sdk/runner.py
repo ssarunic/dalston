@@ -89,7 +89,9 @@ class EngineRunner:
         self._running = True
         self._setup_signal_handlers()
 
-        logger.info("engine_loop_starting", engine_id=self.engine_id, queue=self.queue_key)
+        logger.info(
+            "engine_loop_starting", engine_id=self.engine_id, queue=self.queue_key
+        )
 
         while self._running:
             try:
@@ -193,7 +195,9 @@ class EngineRunner:
                 logger.debug("temp_dir_cleaned", path=str(temp_dir))
             # Clear per-task context
             structlog.contextvars.unbind_contextvars(
-                "task_id", "job_id", "request_id",
+                "task_id",
+                "job_id",
+                "request_id",
             )
 
     def _load_task_input(self, task_id: str, temp_dir: Path) -> TaskInput:

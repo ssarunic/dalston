@@ -86,14 +86,16 @@ def configure(service_name: str) -> None:
     root_logger.handlers.clear()
 
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(structlog.stdlib.ProcessorFormatter(
-        processors=[
-            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-            *shared_processors,
-            structlog.processors.format_exc_info,
-            renderer,
-        ],
-    ))
+    handler.setFormatter(
+        structlog.stdlib.ProcessorFormatter(
+            processors=[
+                structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                *shared_processors,
+                structlog.processors.format_exc_info,
+                renderer,
+            ],
+        )
+    )
     root_logger.addHandler(handler)
     root_logger.setLevel(log_level)
 

@@ -219,7 +219,9 @@ class TestConfigure:
 
         # Should have exactly 1 handler (the structlog ProcessorFormatter one)
         assert len(root.handlers) == 1
-        assert isinstance(root.handlers[0].formatter, structlog.stdlib.ProcessorFormatter)
+        assert isinstance(
+            root.handlers[0].formatter, structlog.stdlib.ProcessorFormatter
+        )
 
     def test_configure_can_be_called_multiple_times(self):
         """Calling configure twice does not cause errors or duplicate handlers."""

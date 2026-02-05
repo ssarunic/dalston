@@ -36,7 +36,9 @@ class FasterWhisperEngine(Engine):
 
         # Auto-detect device and compute type
         self._device, self._compute_type = self._detect_device()
-        logger.info("detected_device", device=self._device, compute_type=self._compute_type)
+        logger.info(
+            "detected_device", device=self._device, compute_type=self._compute_type
+        )
 
     def _detect_device(self) -> tuple[str, str]:
         """Detect the best available device and compute type.
@@ -67,7 +69,12 @@ class FasterWhisperEngine(Engine):
         if self._model is not None and self._model_size == model_size:
             return
 
-        logger.info("loading_whisper_model", model_size=model_size, device=device, compute_type=compute_type)
+        logger.info(
+            "loading_whisper_model",
+            model_size=model_size,
+            device=device,
+            compute_type=compute_type,
+        )
 
         self._model = WhisperModel(
             model_size,
@@ -105,7 +112,13 @@ class FasterWhisperEngine(Engine):
         self._load_model(model_size, device, compute_type)
 
         logger.info("transcribing", audio_path=str(audio_path))
-        logger.info("transcribe_config", model=model_size, language=language, beam_size=beam_size, vad_filter=vad_filter)
+        logger.info(
+            "transcribe_config",
+            model=model_size,
+            language=language,
+            beam_size=beam_size,
+            vad_filter=vad_filter,
+        )
 
         # Transcribe audio
         segments_generator, info = self._model.transcribe(
@@ -145,8 +158,16 @@ class FasterWhisperEngine(Engine):
         # Build full text
         full_text = " ".join(full_text_parts)
 
-        logger.info("transcription_complete", segment_count=len(segments), char_count=len(full_text))
-        logger.info("detected_language", language=info.language, confidence=round(info.language_probability, 2))
+        logger.info(
+            "transcription_complete",
+            segment_count=len(segments),
+            char_count=len(full_text),
+        )
+        logger.info(
+            "detected_language",
+            language=info.language,
+            confidence=round(info.language_probability, 2),
+        )
 
         return TaskOutput(
             data={

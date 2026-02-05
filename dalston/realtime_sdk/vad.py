@@ -216,7 +216,12 @@ class VADProcessor:
                         speech_audio = np.concatenate(self._speech_buffer)
                         self._reset_speech_state()
 
-                        logger.debug("speech_end_detected", duration=round(len(speech_audio) / self.config.sample_rate, 2))
+                        logger.debug(
+                            "speech_end_detected",
+                            duration=round(
+                                len(speech_audio) / self.config.sample_rate, 2
+                            ),
+                        )
                         return VADResult(event="speech_end", speech_audio=speech_audio)
                     else:
                         # Too short, discard
@@ -249,7 +254,10 @@ class VADProcessor:
             if self._speech_duration >= self.config.min_speech_duration:
                 speech_audio = np.concatenate(self._speech_buffer)
                 self._reset_speech_state()
-                logger.debug("flushed_remaining_speech", duration=round(len(speech_audio) / self.config.sample_rate, 2))
+                logger.debug(
+                    "flushed_remaining_speech",
+                    duration=round(len(speech_audio) / self.config.sample_rate, 2),
+                )
                 return speech_audio
 
         self._reset_speech_state()

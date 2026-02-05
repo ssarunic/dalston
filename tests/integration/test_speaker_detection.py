@@ -326,8 +326,8 @@ class TestSpeakerDetectionModeComparison:
             )
             counts[mode] = len(tasks)
 
-        assert counts["none"] == 4       # prepare, transcribe, align, merge
-        assert counts["diarize"] == 5    # + diarize
+        assert counts["none"] == 4  # prepare, transcribe, align, merge
+        assert counts["diarize"] == 5  # + diarize
         assert counts["per_channel"] == 6  # prepare, 2x transcribe, 2x align, merge
 
     def test_prepare_only_splits_channels_for_per_channel(self, job_id, audio_uri):

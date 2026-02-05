@@ -161,7 +161,11 @@ class PyannoteEngine(Engine):
         # Convert pyannote output to our format
         speakers, segments = self._convert_annotation(diarization)
 
-        logger.info("diarization_complete", speaker_count=len(speakers), segment_count=len(segments))
+        logger.info(
+            "diarization_complete",
+            speaker_count=len(speakers),
+            segment_count=len(segments),
+        )
 
         return TaskOutput(
             data={

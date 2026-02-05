@@ -144,7 +144,9 @@ class WorkerRegistry:
             ),
         )
 
-        logger.info("worker_registered", worker_id=info.worker_id, capacity=info.capacity)
+        logger.info(
+            "worker_registered", worker_id=info.worker_id, capacity=info.capacity
+        )
 
     async def heartbeat(
         self,
@@ -232,7 +234,13 @@ class WorkerRegistry:
             ),
         )
 
-        logger.debug("session_ended", worker_id=worker_id, session_id=session_id, duration=round(duration, 1), status=status)
+        logger.debug(
+            "session_ended",
+            worker_id=worker_id,
+            session_id=session_id,
+            duration=round(duration, 1),
+            status=status,
+        )
 
     async def unregister(self, worker_id: str) -> None:
         """Unregister worker on shutdown.
