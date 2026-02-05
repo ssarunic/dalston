@@ -4,14 +4,12 @@ Tests the full per-channel flow: DAG building, previous_outputs key
 normalization, dependency wiring, and merge task assembly.
 """
 
-import json
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
-from dalston.common.models import Task, TaskStatus
+from dalston.common.models import TaskStatus
 from dalston.orchestrator.dag import build_task_dag
 
 

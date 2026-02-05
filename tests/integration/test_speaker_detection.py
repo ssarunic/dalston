@@ -4,12 +4,10 @@ Tests DAG structure, dependency wiring, and merge configuration for all
 speaker_detection modes: none, diarize, and per_channel.
 """
 
-from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 
-from dalston.common.models import TaskStatus
 from dalston.orchestrator.dag import build_task_dag
 
 
