@@ -117,6 +117,33 @@ async def handle_job_created(
             log.info("queued_initial_task", task_id=str(task.id), stage=task.stage)
 
 
+async def handle_task_started(
+    task_id: UUID,
+    db: AsyncSession,
+) -> None:
+    """Handle task.started event.
+
+    Marks the task as RUNNING and records the start time.
+
+    Args:
+        task_id: UUID of the started task
+        db: Database session
+    """
+    log = logger.bind(task_id=str(task_id))
+    log.info("handling_task_started")
+
+    task = await db.get(TaskModel, task_id)
+    if task is None:
+        log.error("task_not_found")
+        return
+
+    task.status = TaskStatus.RUNNING.value
+    task.started_at = datetime.now(UTC)
+    await db.commit()
+
+    log.info("marked_task_running", stage=task.stage)
+
+
 async def handle_task_completed(
     task_id: UUID,
     db: AsyncSession,

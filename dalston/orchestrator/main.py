@@ -26,6 +26,7 @@ from dalston.orchestrator.handlers import (
     handle_job_created,
     handle_task_completed,
     handle_task_failed,
+    handle_task_started,
 )
 
 # Configure structured logging via shared module
@@ -132,6 +133,10 @@ async def _dispatch_event(
             if event_type == "job.created":
                 job_id = UUID(event["job_id"])
                 await handle_job_created(job_id, db, redis, settings)
+
+            elif event_type == "task.started":
+                task_id = UUID(event["task_id"])
+                await handle_task_started(task_id, db)
 
             elif event_type == "task.completed":
                 task_id = UUID(event["task_id"])

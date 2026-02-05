@@ -164,6 +164,9 @@ class EngineRunner:
                 **({"request_id": request_id} if request_id else {}),
             )
 
+            # Notify orchestrator that processing has started
+            self._publish_task_started(task_id, job_id)
+
             # Process the task
             logger.info("task_processing")
             output = self.engine.process(task_input)
@@ -294,6 +297,23 @@ class EngineRunner:
 
         io.upload_json(output_data, output_uri)
         logger.info("output_uploaded", output_uri=output_uri)
+
+    def _publish_task_started(self, task_id: str, job_id: str) -> None:
+        """Publish task.started event to Redis pub/sub.
+
+        Args:
+            task_id: Task identifier
+            job_id: Job identifier
+        """
+        event = {
+            "type": "task.started",
+            "task_id": task_id,
+            "job_id": job_id,
+            "engine_id": self.engine_id,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+        self.redis_client.publish(self.EVENTS_CHANNEL, json.dumps(event))
+        logger.debug("published_task_started")
 
     def _publish_task_completed(self, task_id: str, job_id: str) -> None:
         """Publish task.completed event to Redis pub/sub.
