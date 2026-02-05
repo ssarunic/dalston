@@ -261,13 +261,76 @@ docker compose logs orchestrator | grep '"level":"debug"'
 
 ## Checkpoint
 
-- [ ] **Shared module** `dalston.logging.configure()` works with both JSON and console output
-- [ ] **Correlation ID** middleware generates and propagates `request_id`
-- [ ] **Gateway** emits structured JSON with `request_id` on every log line
-- [ ] **Orchestrator** uses shared config, includes `request_id` from job metadata
-- [ ] **Engines** automatically include `request_id`, `job_id`, `task_id` via SDK
-- [ ] **Session Router** emits structured JSON with `session_id`, `worker_id`
-- [ ] **LOG_LEVEL** and **LOG_FORMAT** environment variables work across all services
-- [ ] **No** `logging.basicConfig()` calls remain anywhere in the codebase
+- [x] **Shared module** `dalston.logging.configure()` works with both JSON and console output
+- [x] **Correlation ID** middleware generates and propagates `request_id`
+- [x] **Gateway** emits structured JSON with `request_id` on every log line
+- [x] **Orchestrator** uses shared config, includes `request_id` from job metadata
+- [x] **Engines** automatically include `request_id`, `job_id`, `task_id` via SDK
+- [x] **Session Router** emits structured JSON with `session_id`, `worker_id`
+- [x] **LOG_LEVEL** and **LOG_FORMAT** environment variables work across all services
+- [x] **No** `logging.basicConfig()` calls remain anywhere in the codebase
 
 **Next**: [M19: Distributed Tracing](M19-distributed-tracing.md) — OpenTelemetry instrumentation
+
+---
+
+## Implementation Notes
+
+**Completed**: 2026-02-05
+
+### Files Created
+
+| File | Description |
+| ---- | ----------- |
+| `dalston/logging.py` | Shared structlog configuration module with `configure()` and `reset_context()` |
+| `dalston/gateway/middleware/correlation.py` | Pure ASGI middleware for correlation ID generation and propagation |
+| `tests/unit/test_logging.py` | Unit tests for shared logging module (298 lines) |
+| `tests/unit/test_correlation.py` | Unit tests for correlation ID middleware (159 lines) |
+| `tests/integration/test_logging_e2e.py` | Integration tests for cross-service log correlation (388 lines) |
+
+### Files Modified
+
+| File | Changes |
+| ---- | ------- |
+| `dalston/gateway/main.py` | Replaced `logging.basicConfig()` with `dalston.logging.configure("gateway")`, added `CorrelationIdMiddleware` |
+| `dalston/gateway/middleware/auth.py` | Switched to `structlog.get_logger()` |
+| `dalston/gateway/middleware/error_handler.py` | Switched to `structlog.get_logger()` |
+| `dalston/gateway/api/v1/realtime.py` | Switched to `structlog.get_logger()` |
+| `dalston/gateway/api/v1/transcription.py` | Switched to `structlog.get_logger()` |
+| `dalston/orchestrator/main.py` | Replaced inline `structlog.configure()` with `dalston.logging.configure("orchestrator")` |
+| `dalston/orchestrator/handlers.py` | Added `request_id` extraction from job event metadata |
+| `dalston/orchestrator/scheduler.py` | Switched to shared logging, preserved `task_id`/`job_id` binding |
+| `dalston/session_router/router.py` | Switched to `structlog.get_logger()` |
+| `dalston/session_router/allocator.py` | Switched to `structlog.get_logger()` |
+| `dalston/session_router/registry.py` | Switched to `structlog.get_logger()` |
+| `dalston/session_router/health.py` | Switched to `structlog.get_logger()` |
+| `dalston/engine_sdk/runner.py` | Replaced `logging.basicConfig()` with `dalston.logging.configure("engine-{engine_id}")`, binds `request_id`/`job_id`/`task_id` per task |
+| `dalston/engine_sdk/base.py` | Added `self.logger` as structlog bound logger on `Engine` base class |
+| `dalston/realtime_sdk/base.py` | Switched to `structlog.get_logger()` |
+| `dalston/realtime_sdk/session.py` | Switched to `structlog.get_logger()` |
+| `dalston/realtime_sdk/vad.py` | Switched to `structlog.get_logger()` |
+| `dalston/realtime_sdk/registry.py` | Switched to `structlog.get_logger()` |
+| `dalston/common/events.py` | Added optional `request_id` parameter to `publish_event()` |
+| `engines/prepare/audio-prepare/engine.py` | Migrated to `self.logger` from base class |
+| `engines/transcribe/faster-whisper/engine.py` | Migrated to `self.logger` from base class |
+| `engines/align/whisperx-align/engine.py` | Migrated to `self.logger` from base class |
+| `engines/diarize/pyannote-3.1/engine.py` | Migrated to `self.logger` from base class |
+| `engines/diarize/pyannote-4.0/engine.py` | Migrated to `self.logger` from base class |
+| `engines/merge/final-merger/engine.py` | Migrated to `self.logger` from base class |
+| `engines/realtime/whisper-streaming/engine.py` | Migrated to `self.logger` from base class |
+| `docker-compose.yml` | Added `LOG_LEVEL` and `LOG_FORMAT` environment variables to all 15 services |
+| `pyproject.toml` | Added `structlog>=24.0.0` to gateway and engine SDK dependencies |
+
+### Key Implementation Details
+
+1. **Pure ASGI middleware**: The `CorrelationIdMiddleware` is implemented as a raw ASGI middleware rather than Starlette's `BaseHTTPMiddleware`, which correctly handles WebSocket connections and streaming responses without buffering issues.
+
+2. **Request ID validation**: Client-provided `X-Request-ID` headers are validated against a regex (`^[a-zA-Z0-9_.\-]{1,128}$`) to prevent log injection attacks. Invalid values are replaced with a generated `req_<uuid4>` ID.
+
+3. **Context reset pattern**: The `dalston.logging.reset_context()` helper clears structlog contextvars and re-binds the service name. This is used by the correlation middleware and the orchestrator event loop to isolate context between requests/events while preserving the service identity.
+
+4. **Lazy logger on Engine base class**: `self.logger = structlog.get_logger()` is created in `Engine.__init__()` before `dalston.logging.configure()` runs. This works because structlog loggers are lazy proxies — configuration is resolved on first log call, not at creation time.
+
+5. **Correlation ID propagation path**: Gateway sets `request_id` in structlog contextvars → `publish_event()` includes `request_id` in Redis event payload → Orchestrator extracts `request_id` from event and binds to logger → task metadata carries `request_id` → Engine SDK extracts `request_id` from task payload and binds to logger.
+
+6. **Standard library integration**: The shared module configures a `structlog.stdlib.ProcessorFormatter` on the root logger, so third-party libraries (uvicorn, boto3, redis) that use stdlib `logging` also emit structured output through the same processor pipeline.
