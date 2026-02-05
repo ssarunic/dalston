@@ -15,6 +15,7 @@ from uuid import UUID
 import structlog
 from redis import asyncio as aioredis
 
+import dalston.logging
 from dalston.common.events import EVENTS_CHANNEL
 from dalston.config import get_settings
 from dalston.db.models import JobModel
@@ -27,19 +28,8 @@ from dalston.orchestrator.handlers import (
     handle_task_failed,
 )
 
-# Configure structlog for JSON output
-structlog.configure(
-    processors=[
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.JSONRenderer(),
-    ],
-    wrapper_class=structlog.make_filtering_bound_logger(0),
-    context_class=dict,
-    logger_factory=structlog.PrintLoggerFactory(),
-    cache_logger_on_first_use=True,
-)
+# Configure structured logging via shared module
+dalston.logging.configure("orchestrator")
 
 logger = structlog.get_logger()
 
@@ -128,6 +118,12 @@ async def _dispatch_event(
 
     event_type = event.get("type")
     log = logger.bind(event_type=event_type)
+
+    # Bind correlation IDs from the event into structlog context
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(_service_name="orchestrator")
+    if "request_id" in event:
+        structlog.contextvars.bind_contextvars(request_id=event["request_id"])
 
     log.debug("received_event", payload=event)
 

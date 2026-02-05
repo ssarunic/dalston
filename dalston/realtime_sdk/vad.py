@@ -6,14 +6,14 @@ determining when to trigger ASR transcription.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
 
 import numpy as np
+import structlog
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 @dataclass
@@ -119,9 +119,9 @@ class VADProcessor:
             )
             self._model = model
             self._get_speech_timestamps = utils[0]
-            logger.info("Loaded Silero VAD model")
+            logger.info("silero_vad_loaded")
         except Exception as e:
-            logger.error(f"Failed to load Silero VAD: {e}")
+            logger.error("silero_vad_load_failed", error=str(e))
             raise RuntimeError(f"Failed to load Silero VAD model: {e}") from e
 
     def _get_speech_prob(self, audio: np.ndarray) -> float:
@@ -191,7 +191,7 @@ class VADProcessor:
                 # Include lookback buffer to capture speech onset
                 self._speech_buffer = list(self._lookback_buffer)
 
-                logger.debug(f"Speech start detected (prob={prob:.2f})")
+                logger.debug("speech_start_detected", probability=round(prob, 2))
                 return VADResult(event="speech_start")
             else:
                 # Still silence
@@ -216,13 +216,11 @@ class VADProcessor:
                         speech_audio = np.concatenate(self._speech_buffer)
                         self._reset_speech_state()
 
-                        logger.debug(
-                            f"Speech end detected, duration={len(speech_audio) / self.config.sample_rate:.2f}s"
-                        )
+                        logger.debug("speech_end_detected", duration=round(len(speech_audio) / self.config.sample_rate, 2))
                         return VADResult(event="speech_end", speech_audio=speech_audio)
                     else:
                         # Too short, discard
-                        logger.debug("Speech too short, discarding")
+                        logger.debug("speech_too_short_discarding")
                         self._reset_speech_state()
                         return VADResult(event="speech_end", speech_audio=None)
 
@@ -251,9 +249,7 @@ class VADProcessor:
             if self._speech_duration >= self.config.min_speech_duration:
                 speech_audio = np.concatenate(self._speech_buffer)
                 self._reset_speech_state()
-                logger.debug(
-                    f"Flushed remaining speech, duration={len(speech_audio) / self.config.sample_rate:.2f}s"
-                )
+                logger.debug("flushed_remaining_speech", duration=round(len(speech_audio) / self.config.sample_rate, 2))
                 return speech_audio
 
         self._reset_speech_state()

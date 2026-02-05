@@ -6,13 +6,13 @@ Reads worker state from Redis (written by realtime_sdk's WorkerRegistry client).
 from __future__ import annotations
 
 import json
-import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import redis.asyncio as redis
+import structlog
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 # Redis key patterns (shared with realtime_sdk)
@@ -181,7 +181,7 @@ class WorkerRegistry:
         """
         worker_key = f"{WORKER_KEY_PREFIX}{worker_id}"
         await self._redis.hset(worker_key, "status", "offline")
-        logger.warning(f"Marked worker {worker_id} as offline")
+        logger.warning("worker_marked_offline", worker_id=worker_id)
 
     async def get_worker_session_ids(self, worker_id: str) -> set[str]:
         """Get active session IDs for a worker.

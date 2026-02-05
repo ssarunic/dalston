@@ -5,10 +5,10 @@ Coordinates worker pool management, session allocation, and health monitoring.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 
 import redis.asyncio as redis
+import structlog
 
 from dalston.session_router.allocator import (
     SessionAllocator,
@@ -18,7 +18,7 @@ from dalston.session_router.allocator import (
 from dalston.session_router.health import HealthMonitor
 from dalston.session_router.registry import WorkerRegistry, WorkerState
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 @dataclass
@@ -134,7 +134,7 @@ class SessionRouter:
         # Start health monitoring
         await self._health.start()
 
-        logger.info("Session router started")
+        logger.info("session_router_started")
 
     async def stop(self) -> None:
         """Stop the session router.
@@ -153,7 +153,7 @@ class SessionRouter:
         self._allocator = None
         self._health = None
 
-        logger.info("Session router stopped")
+        logger.info("session_router_stopped")
 
     async def acquire_worker(
         self,

@@ -7,13 +7,13 @@ to the Session Router via Redis.
 from __future__ import annotations
 
 import json
-import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import redis.asyncio as redis
+import structlog
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 # Redis key patterns (shared with session_router)
@@ -144,7 +144,7 @@ class WorkerRegistry:
             ),
         )
 
-        logger.info(f"Registered worker {info.worker_id} with capacity {info.capacity}")
+        logger.info("worker_registered", worker_id=info.worker_id, capacity=info.capacity)
 
     async def heartbeat(
         self,
@@ -176,7 +176,7 @@ class WorkerRegistry:
             },
         )
 
-        logger.debug(f"Heartbeat: worker={worker_id}, sessions={active_sessions}")
+        logger.debug("heartbeat", worker_id=worker_id, active_sessions=active_sessions)
 
     async def session_started(self, worker_id: str, session_id: str) -> None:
         """Notify that a session has started on this worker.
@@ -192,7 +192,7 @@ class WorkerRegistry:
 
         await r.sadd(sessions_key, session_id)
 
-        logger.debug(f"Session started: worker={worker_id}, session={session_id}")
+        logger.debug("session_started", worker_id=worker_id, session_id=session_id)
 
     async def session_ended(
         self,
@@ -232,10 +232,7 @@ class WorkerRegistry:
             ),
         )
 
-        logger.debug(
-            f"Session ended: worker={worker_id}, session={session_id}, "
-            f"duration={duration:.1f}s, status={status}"
-        )
+        logger.debug("session_ended", worker_id=worker_id, session_id=session_id, duration=round(duration, 1), status=status)
 
     async def unregister(self, worker_id: str) -> None:
         """Unregister worker on shutdown.
@@ -270,7 +267,7 @@ class WorkerRegistry:
             ),
         )
 
-        logger.info(f"Unregistered worker {worker_id}")
+        logger.info("worker_unregistered", worker_id=worker_id)
 
     async def close(self) -> None:
         """Close Redis connection."""

@@ -7,17 +7,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from datetime import UTC, datetime
 
 import redis.asyncio as redis
+import structlog
 
 from dalston.session_router.registry import (
     EVENTS_CHANNEL,
     WorkerRegistry,
 )
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 class HealthMonitor:
@@ -64,7 +64,7 @@ class HealthMonitor:
 
         self._running = True
         self._task = asyncio.create_task(self._run_loop())
-        logger.info("Health monitor started")
+        logger.info("health_monitor_started")
 
     async def stop(self) -> None:
         """Stop the health check loop."""
@@ -78,7 +78,7 @@ class HealthMonitor:
                 pass
             self._task = None
 
-        logger.info("Health monitor stopped")
+        logger.info("health_monitor_stopped")
 
     async def _run_loop(self) -> None:
         """Main health check loop."""
@@ -86,7 +86,7 @@ class HealthMonitor:
             try:
                 await self.check_workers()
             except Exception as e:
-                logger.error(f"Error in health check: {e}")
+                logger.error("health_check_error", error=str(e))
 
             await asyncio.sleep(self.CHECK_INTERVAL)
 
@@ -107,10 +107,7 @@ class HealthMonitor:
             age = (now - worker.last_heartbeat).total_seconds()
 
             if age > self.HEARTBEAT_TIMEOUT:
-                logger.warning(
-                    f"Worker {worker.worker_id} heartbeat stale "
-                    f"({age:.0f}s > {self.HEARTBEAT_TIMEOUT}s)"
-                )
+                logger.warning("worker_heartbeat_stale", worker_id=worker.worker_id, age_seconds=round(age), timeout=self.HEARTBEAT_TIMEOUT)
 
                 # Mark offline
                 await self._registry.mark_worker_offline(worker.worker_id)
@@ -151,9 +148,7 @@ class HealthMonitor:
             ),
         )
 
-        logger.info(
-            f"Published worker.offline event: worker={worker_id}, session={session_id}"
-        )
+        logger.info("published_worker_offline_event", worker_id=worker_id, session_id=session_id)
 
     @property
     def is_running(self) -> bool:

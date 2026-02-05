@@ -41,9 +41,22 @@ async def publish_event(
     await redis.publish(EVENTS_CHANNEL, message)
 
 
-async def publish_job_created(redis: Redis, job_id: UUID) -> None:
-    """Publish a job.created event."""
-    await publish_event(redis, "job.created", {"job_id": job_id})
+async def publish_job_created(
+    redis: Redis,
+    job_id: UUID,
+    request_id: str | None = None,
+) -> None:
+    """Publish a job.created event.
+
+    Args:
+        redis: Async Redis client
+        job_id: Job UUID
+        request_id: Optional correlation ID from the originating request
+    """
+    payload: dict[str, Any] = {"job_id": job_id}
+    if request_id:
+        payload["request_id"] = request_id
+    await publish_event(redis, "job.created", payload)
 
 
 async def publish_task_completed(

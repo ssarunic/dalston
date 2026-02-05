@@ -1,14 +1,15 @@
 """FastAPI Gateway application entry point."""
 
-import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+import dalston.logging
 from dalston.common.redis import close_redis, get_redis
 from dalston.common.s3 import ensure_bucket_exists
 from dalston.config import get_settings
@@ -17,15 +18,13 @@ from dalston.gateway.api.auth import router as auth_router
 from dalston.gateway.api.console import router as console_router
 from dalston.gateway.api.v1 import router as v1_router
 from dalston.gateway.middleware import setup_exception_handlers
+from dalston.gateway.middleware.correlation import CorrelationIdMiddleware
 from dalston.gateway.services.auth import AuthService, Scope
 from dalston.session_router import SessionRouter
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
+# Configure structured logging
+dalston.logging.configure("gateway")
+logger = structlog.get_logger()
 
 # Global session router instance (initialized in lifespan)
 session_router: SessionRouter | None = None
@@ -147,6 +146,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add correlation ID middleware (generates request_id for every request)
+app.add_middleware(CorrelationIdMiddleware)
 
 # Setup exception handlers
 setup_exception_handlers(app)
