@@ -157,7 +157,6 @@ class APIKeyModel(Base):
         String(64),
         nullable=False,
         unique=True,
-        index=True,
     )
     prefix: Mapped[str] = mapped_column(String(10), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
