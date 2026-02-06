@@ -179,7 +179,9 @@ class WebhookService:
 
         return payload
 
-    def sign_payload(self, payload_json: str, timestamp: int) -> str:
+    def sign_payload(
+        self, payload_json: str, timestamp: int, secret: str | None = None
+    ) -> str:
         """Generate HMAC-SHA256 signature for webhook payload.
 
         The signature is computed over: "{timestamp}.{payload_json}"
@@ -187,13 +189,15 @@ class WebhookService:
         Args:
             payload_json: JSON-serialized payload
             timestamp: Unix timestamp
+            secret: Signing secret (defaults to self.secret if not provided)
 
         Returns:
             Signature in format "sha256={hex_digest}"
         """
+        signing_secret = secret or self.secret
         signed_payload = f"{timestamp}.{payload_json}"
         signature = hmac.new(
-            self.secret.encode(),
+            signing_secret.encode(),
             signed_payload.encode(),
             hashlib.sha256,
         ).hexdigest()
@@ -206,7 +210,9 @@ class WebhookService:
         max_retries: int = DEFAULT_MAX_RETRIES,
         backoff_delays: list[float] | None = None,
         allow_private_urls: bool = False,
-    ) -> bool:
+        secret: str | None = None,
+        delivery_id: UUID | None = None,
+    ) -> tuple[bool, int | None, str | None]:
         """Deliver webhook to the specified URL with retry logic.
 
         Retries up to max_retries times with exponential backoff on failure.
@@ -218,31 +224,37 @@ class WebhookService:
             max_retries: Maximum number of retry attempts (default: 3)
             backoff_delays: List of delay seconds between retries (default: [1, 2, 4])
             allow_private_urls: If True, skip private IP validation (for testing)
+            secret: Signing secret (defaults to self.secret if not provided)
+            delivery_id: Optional delivery UUID for deduplication header
 
         Returns:
-            True if delivery succeeded (2xx response), False after all retries exhausted
+            Tuple of (success, last_status_code, last_error)
         """
         if backoff_delays is None:
             backoff_delays = DEFAULT_BACKOFF_DELAYS
 
         log = logger.bind(url=url, event=payload.get("event"))
+        if delivery_id:
+            log = log.bind(delivery_id=str(delivery_id))
 
         # Validate URL for SSRF protection
         try:
             validate_webhook_url(url, allow_private=allow_private_urls)
         except WebhookValidationError as e:
             log.error("webhook_url_validation_failed", error=str(e))
-            return False
+            return False, None, str(e)
 
         timestamp = int(time.time())
         payload_json = json.dumps(payload, default=str)
-        signature = self.sign_payload(payload_json, timestamp)
+        signature = self.sign_payload(payload_json, timestamp, secret=secret)
 
         headers = {
             "Content-Type": "application/json",
             "X-Dalston-Signature": signature,
             "X-Dalston-Timestamp": str(timestamp),
         }
+        if delivery_id:
+            headers["X-Dalston-Webhook-Id"] = str(delivery_id)
 
         last_error: str | None = None
         last_status_code: int | None = None
@@ -260,7 +272,7 @@ class WebhookService:
                     attempt_log.info(
                         "webhook_delivered", status_code=response.status_code
                     )
-                    return True
+                    return True, response.status_code, None
 
                 # Non-2xx response - log and potentially retry
                 last_status_code = response.status_code
@@ -301,4 +313,4 @@ class WebhookService:
                     last_status_code=last_status_code,
                 )
 
-        return False
+        return False, last_status_code, last_error

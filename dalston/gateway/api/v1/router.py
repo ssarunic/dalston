@@ -2,7 +2,14 @@
 
 from fastapi import APIRouter
 
-from dalston.gateway.api.v1 import jobs, realtime, speech_to_text, tasks, transcription
+from dalston.gateway.api.v1 import (
+    jobs,
+    realtime,
+    speech_to_text,
+    tasks,
+    transcription,
+    webhooks,
+)
 
 router = APIRouter(prefix="/v1")
 
@@ -21,3 +28,6 @@ router.include_router(speech_to_text.router)
 # Mount real-time transcription routes
 router.include_router(realtime.stream_router)  # WS /v1/audio/transcriptions/stream
 router.include_router(realtime.management_router)  # GET /v1/realtime/*
+
+# Mount webhook management routes
+router.include_router(webhooks.router)  # /v1/webhooks/*

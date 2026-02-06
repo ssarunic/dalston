@@ -22,6 +22,8 @@ from dalston.db.models import JobModel
 from dalston.db.session import async_session, init_db
 from dalston.gateway.services.storage import StorageService
 from dalston.gateway.services.webhook import WebhookService
+from dalston.gateway.services.webhook_endpoints import WebhookEndpointService
+from dalston.orchestrator.delivery import DeliveryWorker, create_webhook_delivery
 from dalston.orchestrator.handlers import (
     handle_job_created,
     handle_task_completed,
@@ -36,6 +38,7 @@ logger = structlog.get_logger()
 
 # Shutdown flag
 _shutdown_event: asyncio.Event | None = None
+_delivery_worker: DeliveryWorker | None = None
 
 
 async def orchestrator_loop() -> None:
@@ -43,7 +46,7 @@ async def orchestrator_loop() -> None:
 
     Subscribes to Redis pub/sub and dispatches events to handlers.
     """
-    global _shutdown_event
+    global _shutdown_event, _delivery_worker
     _shutdown_event = asyncio.Event()
 
     settings = get_settings()
@@ -57,6 +60,13 @@ async def orchestrator_loop() -> None:
     # Initialize database
     await init_db()
     logger.info("database_initialized")
+
+    # Start webhook delivery worker
+    _delivery_worker = DeliveryWorker(
+        session_factory=async_session,
+        settings=settings,
+    )
+    await _delivery_worker.start()
 
     # Connect to Redis
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
@@ -93,6 +103,10 @@ async def orchestrator_loop() -> None:
                 await asyncio.sleep(0.1)
 
     finally:
+        # Stop delivery worker
+        if _delivery_worker:
+            await _delivery_worker.stop()
+
         await pubsub.unsubscribe(EVENTS_CHANNEL)
         await pubsub.close()
         await redis.close()
@@ -173,6 +187,12 @@ async def _handle_job_webhook(
 ) -> None:
     """Handle webhook delivery for completed or failed jobs.
 
+    Creates delivery rows for:
+    1. All registered endpoints subscribed to the event
+    2. Per-job webhook_url if configured (legacy behavior, controlled by settings)
+
+    The actual delivery is handled by the DeliveryWorker.
+
     Args:
         job_id: Job UUID
         status: "completed" or "failed"
@@ -188,14 +208,10 @@ async def _handle_job_webhook(
         log.error("job_not_found_for_webhook")
         return
 
-    if not job.webhook_url:
-        log.debug("no_webhook_url_configured")
-        return
+    event_type = f"transcription.{status}"
+    log = log.bind(event_type=event_type)
 
-    log = log.bind(webhook_url=job.webhook_url)
-    log.info("delivering_webhook")
-
-    # Initialize webhook service
+    # Initialize webhook service for building payload
     webhook_service = WebhookService(secret=settings.webhook_secret)
 
     # Get transcript data for completed jobs
@@ -212,8 +228,7 @@ async def _handle_job_webhook(
         except Exception as e:
             log.warning("failed_to_fetch_transcript_for_webhook", error=str(e))
 
-    # Build and deliver webhook
-    event_type = f"transcription.{status}"
+    # Build webhook payload
     payload = webhook_service.build_payload(
         event=event_type,
         job_id=job_id,
@@ -224,13 +239,49 @@ async def _handle_job_webhook(
         webhook_metadata=job.webhook_metadata,
     )
 
-    success = await webhook_service.deliver(job.webhook_url, payload)
+    deliveries_created = 0
 
-    if success:
-        log.info("webhook_delivered_successfully")
+    # Create deliveries for registered endpoints
+    endpoint_service = WebhookEndpointService()
+    endpoints = await endpoint_service.get_endpoints_for_event(db, job.tenant_id, event_type)
+
+    for endpoint in endpoints:
+        await create_webhook_delivery(
+            db=db,
+            endpoint_id=endpoint.id,
+            job_id=job_id,
+            event_type=event_type,
+            payload=payload,
+        )
+        deliveries_created += 1
+        log.debug(
+            "webhook_delivery_created",
+            endpoint_id=str(endpoint.id),
+            endpoint_url=endpoint.url,
+        )
+
+    # Create delivery for per-job webhook_url (legacy behavior)
+    if job.webhook_url and settings.allow_per_job_webhooks:
+        await create_webhook_delivery(
+            db=db,
+            endpoint_id=None,
+            job_id=job_id,
+            event_type=event_type,
+            payload=payload,
+            url_override=job.webhook_url,
+        )
+        deliveries_created += 1
+        log.debug(
+            "webhook_delivery_created",
+            url_override=job.webhook_url,
+        )
+
+    await db.commit()
+
+    if deliveries_created > 0:
+        log.info("webhook_deliveries_queued", count=deliveries_created)
     else:
-        log.warning("webhook_delivery_failed")
-        # Note: Retry logic will be added in M05.4
+        log.debug("no_webhook_endpoints_configured")
 
 
 def _handle_shutdown(signum, frame) -> None:

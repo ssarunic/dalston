@@ -79,10 +79,11 @@ class TestWebhookEndToEnd:
         )
 
         # Deliver webhook
-        success = await webhook_service.deliver(webhook_url, payload)
+        success, status_code, error = await webhook_service.deliver(webhook_url, payload)
 
         # Verify delivery succeeded
         assert success is True
+        assert status_code == 200
 
         # Get the captured request
         request = httpx_mock.get_request()
@@ -134,9 +135,10 @@ class TestWebhookEndToEnd:
             webhook_metadata=webhook_metadata,
         )
 
-        success = await webhook_service.deliver(webhook_url, payload)
+        success, status_code, error = await webhook_service.deliver(webhook_url, payload)
 
         assert success is True
+        assert status_code == 200
 
         request = httpx_mock.get_request()
         received_payload = json.loads(request.content.decode())
@@ -230,8 +232,9 @@ class TestWebhookEndToEnd:
             webhook_metadata=complex_metadata,
         )
 
-        success = await webhook_service.deliver(webhook_url, payload)
+        success, status_code, error = await webhook_service.deliver(webhook_url, payload)
         assert success is True
+        assert status_code == 200
 
         request = httpx_mock.get_request()
         received_payload = json.loads(request.content.decode())

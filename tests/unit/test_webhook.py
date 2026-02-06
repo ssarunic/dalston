@@ -227,12 +227,14 @@ class TestDeliver:
         httpx_mock.add_response(status_code=200, json={"status": "ok"})
 
         payload = {"event": "transcription.completed", "status": "completed"}
-        result = await webhook_service.deliver(
+        success, status_code, error = await webhook_service.deliver(
             url="https://example.com/webhook",
             payload=payload,
         )
 
-        assert result is True
+        assert success is True
+        assert status_code == 200
+        assert error is None
 
     async def test_deliver_includes_headers(
         self, webhook_service: WebhookService, httpx_mock
@@ -260,13 +262,14 @@ class TestDeliver:
         httpx_mock.add_response(status_code=400, json={"error": "bad request"})
 
         payload = {"event": "transcription.completed"}
-        result = await webhook_service.deliver(
+        success, status_code, error = await webhook_service.deliver(
             url="https://example.com/webhook",
             payload=payload,
             max_retries=0,  # Disable retries for this test
         )
 
-        assert result is False
+        assert success is False
+        assert status_code == 400
 
     async def test_deliver_failure_5xx_no_retry(
         self, webhook_service: WebhookService, httpx_mock
@@ -275,13 +278,14 @@ class TestDeliver:
         httpx_mock.add_response(status_code=500)
 
         payload = {"event": "transcription.completed"}
-        result = await webhook_service.deliver(
+        success, status_code, error = await webhook_service.deliver(
             url="https://example.com/webhook",
             payload=payload,
             max_retries=0,  # Disable retries for this test
         )
 
-        assert result is False
+        assert success is False
+        assert status_code == 500
 
     async def test_deliver_timeout_no_retry(
         self, webhook_service: WebhookService, httpx_mock
@@ -290,13 +294,15 @@ class TestDeliver:
         httpx_mock.add_exception(httpx.TimeoutException("Connection timeout"))
 
         payload = {"event": "transcription.completed"}
-        result = await webhook_service.deliver(
+        success, status_code, error = await webhook_service.deliver(
             url="https://example.com/webhook",
             payload=payload,
             max_retries=0,  # Disable retries for this test
         )
 
-        assert result is False
+        assert success is False
+        assert status_code is None
+        assert error == "timeout"
 
     async def test_deliver_connection_error_no_retry(
         self, webhook_service: WebhookService, httpx_mock
@@ -305,13 +311,14 @@ class TestDeliver:
         httpx_mock.add_exception(httpx.ConnectError("Connection refused"))
 
         payload = {"event": "transcription.completed"}
-        result = await webhook_service.deliver(
+        success, status_code, error = await webhook_service.deliver(
             url="https://example.com/webhook",
             payload=payload,
             max_retries=0,  # Disable retries for this test
         )
 
-        assert result is False
+        assert success is False
+        assert status_code is None
 
     async def test_deliver_201_success(
         self, webhook_service: WebhookService, httpx_mock
@@ -320,12 +327,13 @@ class TestDeliver:
         httpx_mock.add_response(status_code=201)
 
         payload = {"event": "transcription.completed"}
-        result = await webhook_service.deliver(
+        success, status_code, error = await webhook_service.deliver(
             url="https://example.com/webhook",
             payload=payload,
         )
 
-        assert result is True
+        assert success is True
+        assert status_code == 201
 
     async def test_deliver_payload_is_json(
         self, webhook_service: WebhookService, httpx_mock
@@ -368,14 +376,14 @@ class TestDeliverRetry:
         httpx_mock.add_response(status_code=200)
 
         payload = {"event": "transcription.completed"}
-        result = await webhook_service.deliver(
+        success, status_code, error = await webhook_service.deliver(
             url="https://example.com/webhook",
             payload=payload,
             max_retries=3,
             backoff_delays=[0.01, 0.01, 0.01],  # Fast delays for testing
         )
 
-        assert result is True
+        assert success is True
         # Should have made 2 requests
         requests = httpx_mock.get_requests()
         assert len(requests) == 2
@@ -390,14 +398,14 @@ class TestDeliverRetry:
         httpx_mock.add_response(status_code=200)
 
         payload = {"event": "transcription.completed"}
-        result = await webhook_service.deliver(
+        success, status_code, error = await webhook_service.deliver(
             url="https://example.com/webhook",
             payload=payload,
             max_retries=3,
             backoff_delays=[0.01, 0.01, 0.01],
         )
 
-        assert result is True
+        assert success is True
         requests = httpx_mock.get_requests()
         assert len(requests) == 3
 
@@ -410,14 +418,14 @@ class TestDeliverRetry:
             httpx_mock.add_response(status_code=500)
 
         payload = {"event": "transcription.completed"}
-        result = await webhook_service.deliver(
+        success, status_code, error = await webhook_service.deliver(
             url="https://example.com/webhook",
             payload=payload,
             max_retries=3,
             backoff_delays=[0.01, 0.01, 0.01],
         )
 
-        assert result is False
+        assert success is False
         requests = httpx_mock.get_requests()
         assert len(requests) == 4  # 1 initial + 3 retries
 
@@ -428,14 +436,14 @@ class TestDeliverRetry:
         httpx_mock.add_response(status_code=200)
 
         payload = {"event": "transcription.completed"}
-        result = await webhook_service.deliver(
+        success, status_code, error = await webhook_service.deliver(
             url="https://example.com/webhook",
             payload=payload,
             max_retries=3,
             backoff_delays=[0.01, 0.01, 0.01],
         )
 
-        assert result is True
+        assert success is True
         requests = httpx_mock.get_requests()
         assert len(requests) == 2
 
@@ -448,14 +456,14 @@ class TestDeliverRetry:
         httpx_mock.add_response(status_code=200)
 
         payload = {"event": "transcription.completed"}
-        result = await webhook_service.deliver(
+        success, status_code, error = await webhook_service.deliver(
             url="https://example.com/webhook",
             payload=payload,
             max_retries=3,
             backoff_delays=[0.01, 0.01, 0.01],
         )
 
-        assert result is True
+        assert success is True
         requests = httpx_mock.get_requests()
         assert len(requests) == 2
 
@@ -466,14 +474,14 @@ class TestDeliverRetry:
         httpx_mock.add_response(status_code=200)
 
         payload = {"event": "transcription.completed"}
-        result = await webhook_service.deliver(
+        success, status_code, error = await webhook_service.deliver(
             url="https://example.com/webhook",
             payload=payload,
             max_retries=3,
             backoff_delays=[0.01, 0.01, 0.01],
         )
 
-        assert result is True
+        assert success is True
         requests = httpx_mock.get_requests()
         assert len(requests) == 1
 
@@ -484,13 +492,13 @@ class TestDeliverRetry:
         httpx_mock.add_response(status_code=500)
 
         payload = {"event": "transcription.completed"}
-        result = await webhook_service.deliver(
+        success, status_code, error = await webhook_service.deliver(
             url="https://example.com/webhook",
             payload=payload,
             max_retries=0,
         )
 
-        assert result is False
+        assert success is False
         requests = httpx_mock.get_requests()
         assert len(requests) == 1
 
@@ -503,14 +511,14 @@ class TestDeliverRetry:
             httpx_mock.add_response(status_code=500)
 
         payload = {"event": "transcription.completed"}
-        result = await webhook_service.deliver(
+        success, status_code, error = await webhook_service.deliver(
             url="https://example.com/webhook",
             payload=payload,
             max_retries=2,
             backoff_delays=[0.01, 0.02],
         )
 
-        assert result is False
+        assert success is False
         requests = httpx_mock.get_requests()
         assert len(requests) == 3  # 1 initial + 2 retries
 
@@ -524,14 +532,14 @@ class TestDeliverRetry:
         httpx_mock.add_response(status_code=200)
 
         payload = {"event": "transcription.completed"}
-        result = await webhook_service.deliver(
+        success, status_code, error = await webhook_service.deliver(
             url="https://example.com/webhook",
             payload=payload,
             max_retries=3,
             backoff_delays=[0.01, 0.01, 0.01],
         )
 
-        assert result is True
+        assert success is True
         requests = httpx_mock.get_requests()
         assert len(requests) == 4
 
@@ -609,13 +617,15 @@ class TestDeliverUrlValidation:
     ):
         """Test delivery fails for private IP URLs."""
         payload = {"event": "transcription.completed"}
-        result = await webhook_service.deliver(
+        success, status_code, error = await webhook_service.deliver(
             url="http://10.0.0.1/webhook",
             payload=payload,
             max_retries=0,
         )
         # Should return False due to validation failure
-        assert result is False
+        assert success is False
+        assert status_code is None
+        assert error is not None
 
     async def test_deliver_allows_private_with_flag(
         self, webhook_service: WebhookService, httpx_mock
@@ -624,10 +634,11 @@ class TestDeliverUrlValidation:
         httpx_mock.add_response(status_code=200)
 
         payload = {"event": "transcription.completed"}
-        result = await webhook_service.deliver(
+        success, status_code, error = await webhook_service.deliver(
             url="https://example.com/webhook",
             payload=payload,
             max_retries=0,
             allow_private_urls=True,
         )
-        assert result is True
+        assert success is True
+        assert status_code == 200
