@@ -79,15 +79,15 @@ def get_session_router() -> SessionRouter:
 
 
 async def get_auth_service(
+    db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ) -> AuthService:
     """Get AuthService instance.
 
-    Creates a new AuthService per request with the current Redis connection.
-    AuthService is lightweight (no state beyond redis reference), so this
-    avoids race conditions in the singleton pattern.
+    Creates a new AuthService per request with database and Redis connections.
+    API keys are stored in PostgreSQL, session tokens and rate limits in Redis.
     """
-    return AuthService(redis)
+    return AuthService(db, redis)
 
 
 async def require_auth(

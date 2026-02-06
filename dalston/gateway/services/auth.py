@@ -1,7 +1,8 @@
 """API Key authentication service.
 
 Handles API key generation, validation, and rate limiting.
-Keys are stored in Redis with SHA256 hashes (never plaintext).
+API keys are stored in PostgreSQL with SHA256 hashes (never plaintext).
+Session tokens and rate limits remain in Redis (ephemeral data).
 """
 
 from __future__ import annotations
@@ -11,13 +12,13 @@ import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from redis.asyncio import Redis
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-if TYPE_CHECKING:
-    pass
+from dalston.db.models import APIKeyModel
 
 # Key format: dk_{43 chars} = dk_ prefix + 32 urlsafe bytes (base64 = 43 chars)
 KEY_PREFIX = "dk_"
@@ -28,10 +29,7 @@ TOKEN_PREFIX = "tk_"
 TOKEN_BYTES = 32
 DEFAULT_TOKEN_TTL = 600  # 10 minutes
 
-# Redis key patterns
-REDIS_KEY_BY_HASH = "dalston:apikey:hash:{hash}"
-REDIS_KEY_BY_ID = "dalston:apikey:id:{id}"
-REDIS_TENANT_KEYS = "dalston:tenant:{tenant_id}:apikeys"
+# Redis key patterns (only for session tokens and rate limits now)
 REDIS_RATE_LIMIT = "dalston:ratelimit:{key_id}"
 REDIS_SESSION_TOKEN = "dalston:session_token:{hash}"
 
@@ -86,52 +84,21 @@ class APIKey:
         """Check if key has the specified scope or admin scope."""
         return Scope.ADMIN in self.scopes or scope in self.scopes
 
-    def to_dict(self) -> dict:
-        """Convert to dictionary for Redis storage."""
-        return {
-            "id": str(self.id),
-            "key_hash": self.key_hash,
-            "prefix": self.prefix,
-            "name": self.name,
-            "tenant_id": str(self.tenant_id),
-            "scopes": [s.value for s in self.scopes],
-            "rate_limit": self.rate_limit if self.rate_limit is not None else "",
-            "created_at": self.created_at.isoformat(),
-            "last_used_at": self.last_used_at.isoformat() if self.last_used_at else "",
-            "expires_at": self.expires_at.isoformat(),
-            "revoked_at": self.revoked_at.isoformat() if self.revoked_at else "",
-        }
-
     @classmethod
-    def from_dict(cls, data: dict) -> APIKey:
-        """Create from dictionary (Redis storage)."""
-        # Handle expires_at with fallback for existing keys without this field
-        expires_at_str = data.get("expires_at")
-        if expires_at_str:
-            expires_at = datetime.fromisoformat(expires_at_str)
-        else:
-            expires_at = DEFAULT_EXPIRES_AT
-
+    def from_model(cls, model: APIKeyModel) -> APIKey:
+        """Create APIKey from SQLAlchemy model."""
         return cls(
-            id=UUID(data["id"]),
-            key_hash=data["key_hash"],
-            prefix=data["prefix"],
-            name=data["name"],
-            tenant_id=UUID(data["tenant_id"]),
-            scopes=[Scope(s) for s in data["scopes"].split(",") if s],
-            rate_limit=int(data["rate_limit"]) if data.get("rate_limit") else None,
-            created_at=datetime.fromisoformat(data["created_at"]),
-            last_used_at=(
-                datetime.fromisoformat(data["last_used_at"])
-                if data.get("last_used_at")
-                else None
-            ),
-            expires_at=expires_at,
-            revoked_at=(
-                datetime.fromisoformat(data["revoked_at"])
-                if data.get("revoked_at")
-                else None
-            ),
+            id=model.id,
+            key_hash=model.key_hash,
+            prefix=model.prefix,
+            name=model.name,
+            tenant_id=model.tenant_id,
+            scopes=[Scope(s) for s in model.scopes.split(",") if s],
+            rate_limit=model.rate_limit,
+            created_at=model.created_at,
+            last_used_at=model.last_used_at,
+            expires_at=model.expires_at if model.expires_at else DEFAULT_EXPIRES_AT,
+            revoked_at=model.revoked_at,
         )
 
 
@@ -230,14 +197,20 @@ def get_key_prefix(key: str) -> str:
 
 
 class AuthService:
-    """Service for API key authentication and management."""
+    """Service for API key authentication and management.
 
-    def __init__(self, redis: Redis):
+    API keys are stored in PostgreSQL for durability.
+    Session tokens and rate limits are stored in Redis (ephemeral).
+    """
+
+    def __init__(self, db: AsyncSession, redis: Redis):
         """Initialize auth service.
 
         Args:
-            redis: Async Redis client
+            db: Async SQLAlchemy session for API key storage
+            redis: Async Redis client for session tokens and rate limits
         """
+        self.db = db
         self.redis = redis
 
     async def create_api_key(
@@ -271,14 +244,14 @@ class AuthService:
         key_hash = hash_api_key(raw_key)
         prefix = get_key_prefix(raw_key)
 
-        # Create API key object
-        api_key = APIKey(
+        # Create database model
+        model = APIKeyModel(
             id=uuid4(),
             key_hash=key_hash,
             prefix=prefix,
             name=name,
             tenant_id=tenant_id,
-            scopes=scopes,
+            scopes=",".join(s.value for s in scopes),
             rate_limit=rate_limit,
             created_at=datetime.now(UTC),
             last_used_at=None,
@@ -286,29 +259,11 @@ class AuthService:
             revoked_at=None,
         )
 
-        # Store in Redis
-        await self._store_api_key(api_key)
+        self.db.add(model)
+        await self.db.commit()
+        await self.db.refresh(model)
 
-        return raw_key, api_key
-
-    async def _store_api_key(self, api_key: APIKey) -> None:
-        """Store API key in Redis with all indexes."""
-        data = api_key.to_dict()
-
-        # Store scopes as comma-separated string for Redis hash
-        data["scopes"] = ",".join(s.value for s in api_key.scopes)
-
-        # Primary storage by hash (for O(1) lookup during auth)
-        hash_key = REDIS_KEY_BY_HASH.format(hash=api_key.key_hash)
-        await self.redis.hset(hash_key, mapping=data)
-
-        # Index by ID (for management)
-        id_key = REDIS_KEY_BY_ID.format(id=api_key.id)
-        await self.redis.set(id_key, api_key.key_hash)
-
-        # Index by tenant (for listing)
-        tenant_key = REDIS_TENANT_KEYS.format(tenant_id=api_key.tenant_id)
-        await self.redis.sadd(tenant_key, str(api_key.id))
+        return raw_key, APIKey.from_model(model)
 
     async def validate_api_key(self, raw_key: str) -> APIKey | None:
         """Validate an API key and return its metadata.
@@ -323,46 +278,50 @@ class AuthService:
             return None
 
         key_hash = hash_api_key(raw_key)
-        hash_key = REDIS_KEY_BY_HASH.format(hash=key_hash)
 
-        # Fetch key data
-        data = await self.redis.hgetall(hash_key)
-        if not data:
+        # Fetch from PostgreSQL
+        stmt = select(APIKeyModel).where(APIKeyModel.key_hash == key_hash)
+        result = await self.db.execute(stmt)
+        model = result.scalar_one_or_none()
+
+        if not model:
             return None
 
-        api_key = APIKey.from_dict(data)
+        api_key = APIKey.from_model(model)
 
         # Check if revoked or expired
         if api_key.is_revoked or api_key.is_expired:
             return None
 
-        # Update last_used_at (fire and forget)
-        await self.redis.hset(hash_key, "last_used_at", datetime.now(UTC).isoformat())
+        # Update last_used_at
+        model.last_used_at = datetime.now(UTC)
+        await self.db.commit()
 
         return api_key
 
-    async def get_api_key_by_id(self, key_id: UUID) -> APIKey | None:
+    async def get_api_key_by_id(
+        self, key_id: UUID, tenant_id: UUID | None = None
+    ) -> APIKey | None:
         """Get API key by its ID.
 
         Args:
             key_id: API key UUID
+            tenant_id: Optional tenant UUID for isolation check
 
         Returns:
             APIKey object or None if not found
         """
-        id_key = REDIS_KEY_BY_ID.format(id=key_id)
-        key_hash = await self.redis.get(id_key)
+        stmt = select(APIKeyModel).where(APIKeyModel.id == key_id)
+        if tenant_id is not None:
+            stmt = stmt.where(APIKeyModel.tenant_id == tenant_id)
 
-        if not key_hash:
+        result = await self.db.execute(stmt)
+        model = result.scalar_one_or_none()
+
+        if not model:
             return None
 
-        hash_key = REDIS_KEY_BY_HASH.format(hash=key_hash)
-        data = await self.redis.hgetall(hash_key)
-
-        if not data:
-            return None
-
-        return APIKey.from_dict(data)
+        return APIKey.from_model(model)
 
     async def list_api_keys(
         self,
@@ -378,36 +337,40 @@ class AuthService:
         Returns:
             List of APIKey objects
         """
-        tenant_key = REDIS_TENANT_KEYS.format(tenant_id=tenant_id)
-        key_ids = await self.redis.smembers(tenant_key)
+        stmt = select(APIKeyModel).where(APIKeyModel.tenant_id == tenant_id)
 
-        keys = []
-        for key_id in key_ids:
-            api_key = await self.get_api_key_by_id(UUID(key_id))
-            if api_key:
-                if include_revoked or not api_key.is_revoked:
-                    keys.append(api_key)
+        if not include_revoked:
+            stmt = stmt.where(APIKeyModel.revoked_at.is_(None))
 
-        # Sort by created_at descending
-        keys.sort(key=lambda k: k.created_at, reverse=True)
-        return keys
+        stmt = stmt.order_by(APIKeyModel.created_at.desc())
 
-    async def revoke_api_key(self, key_id: UUID) -> bool:
+        result = await self.db.execute(stmt)
+        models = result.scalars().all()
+
+        return [APIKey.from_model(model) for model in models]
+
+    async def revoke_api_key(self, key_id: UUID, tenant_id: UUID | None = None) -> bool:
         """Revoke an API key.
 
         Args:
             key_id: API key UUID
+            tenant_id: Optional tenant UUID for isolation check
 
         Returns:
             True if revoked, False if not found
         """
-        api_key = await self.get_api_key_by_id(key_id)
-        if not api_key:
+        stmt = select(APIKeyModel).where(APIKeyModel.id == key_id)
+        if tenant_id is not None:
+            stmt = stmt.where(APIKeyModel.tenant_id == tenant_id)
+
+        result = await self.db.execute(stmt)
+        model = result.scalar_one_or_none()
+
+        if not model:
             return False
 
-        # Update revoked_at
-        hash_key = REDIS_KEY_BY_HASH.format(hash=api_key.key_hash)
-        await self.redis.hset(hash_key, "revoked_at", datetime.now(UTC).isoformat())
+        model.revoked_at = datetime.now(UTC)
+        await self.db.commit()
 
         return True
 
@@ -445,14 +408,11 @@ class AuthService:
         Returns:
             True if at least one API key exists
         """
-        # Check for any keys by scanning for hash keys
-        cursor = 0
-        cursor, keys = await self.redis.scan(
-            cursor=cursor, match="dalston:apikey:hash:*", count=1
-        )
-        return len(keys) > 0
+        stmt = select(APIKeyModel.id).where(APIKeyModel.revoked_at.is_(None)).limit(1)
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none() is not None
 
-    # Session Token Methods
+    # Session Token Methods (still using Redis - ephemeral data)
 
     async def create_session_token(
         self,
