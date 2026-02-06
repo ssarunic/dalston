@@ -18,11 +18,15 @@ def hash_api_key(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 ```
 
-**Storage in Redis:**
+**Storage in PostgreSQL** (per [ADR-004](../../decisions/ADR-004-api-key-storage-migration.md)):
 
-- `dalston:apikeys:{hash}` → Full API key JSON
-- `dalston:apikeys:id:{id}` → Hash (for management lookups)
-- `dalston:apikeys:tenant:{tenant_id}` → Set of key IDs
+API keys are stored in the `api_keys` table with:
+
+- `key_hash` (indexed, unique) — for validation lookups
+- `tenant_id` (indexed, FK) — for tenant scoping
+- `scopes`, `rate_limit`, `expires_at`, `revoked_at` — for authorization
+
+Session tokens and rate limits remain in Redis (ephemeral data with TTLs).
 
 ---
 

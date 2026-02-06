@@ -80,7 +80,7 @@ class TestScope:
         assert Scope.ADMIN.value == "admin"
 
 
-class TestAPIKeyModel:
+class TestAPIKeyDataclass:
     """Tests for APIKey dataclass."""
 
     @pytest.fixture
@@ -134,82 +134,37 @@ class TestAPIKeyModel:
         assert sample_api_key.has_scope(Scope.REALTIME) is True
         assert sample_api_key.has_scope(Scope.WEBHOOKS) is True
 
-    def test_to_dict(self, sample_api_key: APIKey):
-        data = sample_api_key.to_dict()
-        assert data["id"] == str(sample_api_key.id)
-        assert data["name"] == "Test Key"
-        assert data["scopes"] == ["jobs:read", "jobs:write"]
-        assert data["rate_limit"] == 100
-        assert data["expires_at"] == DEFAULT_EXPIRES_AT.isoformat()
-
-    def test_from_dict(self, sample_api_key: APIKey):
-        from datetime import timedelta
-
-        custom_expires = datetime.now(UTC) + timedelta(days=90)
-        data = {
-            "id": str(sample_api_key.id),
-            "key_hash": "abc123",
-            "prefix": "dk_abc1234",
-            "name": "Test Key",
-            "tenant_id": str(sample_api_key.tenant_id),
-            "scopes": "jobs:read,jobs:write",
-            "rate_limit": "100",
-            "created_at": sample_api_key.created_at.isoformat(),
-            "last_used_at": "",
-            "expires_at": custom_expires.isoformat(),
-            "revoked_at": "",
-        }
-        api_key = APIKey.from_dict(data)
-        assert api_key.name == "Test Key"
-        assert api_key.scopes == [Scope.JOBS_READ, Scope.JOBS_WRITE]
-        assert api_key.rate_limit == 100
-        assert api_key.last_used_at is None
-        assert api_key.revoked_at is None
-        assert api_key.expires_at == custom_expires
-
-    def test_from_dict_missing_expires_at_uses_default(self, sample_api_key: APIKey):
-        """Test backward compatibility - old keys without expires_at get default."""
-        data = {
-            "id": str(sample_api_key.id),
-            "key_hash": "abc123",
-            "prefix": "dk_abc1234",
-            "name": "Legacy Key",
-            "tenant_id": str(sample_api_key.tenant_id),
-            "scopes": "jobs:read",
-            "rate_limit": "",
-            "created_at": sample_api_key.created_at.isoformat(),
-            "last_used_at": "",
-            "revoked_at": "",
-            # No expires_at field
-        }
-        api_key = APIKey.from_dict(data)
-        assert api_key.expires_at == DEFAULT_EXPIRES_AT
-
 
 class TestAuthService:
-    """Tests for AuthService."""
+    """Tests for AuthService with PostgreSQL backend."""
+
+    @pytest.fixture
+    def mock_db(self):
+        """Create a mock AsyncSession."""
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        db.refresh = AsyncMock()
+        db.execute = AsyncMock()
+        return db
 
     @pytest.fixture
     def mock_redis(self):
-        """Create a mock Redis client."""
+        """Create a mock Redis client for session tokens and rate limits."""
         redis = AsyncMock()
         redis.hset = AsyncMock()
         redis.hgetall = AsyncMock(return_value={})
-        redis.set = AsyncMock()
-        redis.get = AsyncMock(return_value=None)
-        redis.sadd = AsyncMock()
-        redis.smembers = AsyncMock(return_value=set())
         redis.incr = AsyncMock(return_value=1)
         redis.expire = AsyncMock()
-        redis.scan = AsyncMock(return_value=(0, []))
+        redis.delete = AsyncMock(return_value=1)
         return redis
 
     @pytest.fixture
-    def auth_service(self, mock_redis) -> AuthService:
-        return AuthService(mock_redis)
+    def auth_service(self, mock_db, mock_redis) -> AuthService:
+        return AuthService(mock_db, mock_redis)
 
     @pytest.mark.asyncio
-    async def test_create_api_key(self, auth_service: AuthService, mock_redis):
+    async def test_create_api_key(self, auth_service: AuthService, mock_db):
         raw_key, api_key = await auth_service.create_api_key(
             name="Test Key",
             tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
@@ -220,11 +175,12 @@ class TestAuthService:
         assert Scope.JOBS_READ in api_key.scopes
         assert Scope.JOBS_WRITE in api_key.scopes
         assert Scope.REALTIME in api_key.scopes
-        assert mock_redis.hset.called
+        assert mock_db.add.called
+        assert mock_db.commit.called
 
     @pytest.mark.asyncio
     async def test_create_api_key_with_custom_scopes(
-        self, auth_service: AuthService, mock_redis
+        self, auth_service: AuthService, mock_db
     ):
         raw_key, api_key = await auth_service.create_api_key(
             name="Admin Key",
@@ -236,7 +192,7 @@ class TestAuthService:
 
     @pytest.mark.asyncio
     async def test_create_api_key_with_rate_limit(
-        self, auth_service: AuthService, mock_redis
+        self, auth_service: AuthService, mock_db
     ):
         raw_key, api_key = await auth_service.create_api_key(
             name="Limited Key",
@@ -248,7 +204,7 @@ class TestAuthService:
 
     @pytest.mark.asyncio
     async def test_create_api_key_default_expires_at(
-        self, auth_service: AuthService, mock_redis
+        self, auth_service: AuthService, mock_db
     ):
         """Test that keys created without expires_at use distant future default."""
         raw_key, api_key = await auth_service.create_api_key(
@@ -260,7 +216,7 @@ class TestAuthService:
 
     @pytest.mark.asyncio
     async def test_create_api_key_with_custom_expires_at(
-        self, auth_service: AuthService, mock_redis
+        self, auth_service: AuthService, mock_db
     ):
         """Test creating key with custom expiration date."""
         from datetime import timedelta
@@ -276,54 +232,67 @@ class TestAuthService:
         assert api_key.expires_at == custom_expires
 
     @pytest.mark.asyncio
-    async def test_validate_api_key_valid(self, auth_service: AuthService, mock_redis):
-        # Setup mock to return valid key data
-        tenant_id = UUID("00000000-0000-0000-0000-000000000000")
-        mock_redis.hgetall.return_value = {
-            "id": str(uuid4()),
-            "key_hash": "abc123",
-            "prefix": "dk_abc1234",
-            "name": "Test Key",
-            "tenant_id": str(tenant_id),
-            "scopes": "jobs:read,jobs:write",
-            "rate_limit": "",
-            "created_at": datetime.now(UTC).isoformat(),
-            "last_used_at": "",
-            "revoked_at": "",
-        }
+    async def test_validate_api_key_valid(self, auth_service: AuthService, mock_db):
+        """Test validating a valid API key from PostgreSQL."""
+        from dalston.db.models import APIKeyModel
+
+        # Create a mock model
+        mock_model = MagicMock(spec=APIKeyModel)
+        mock_model.id = uuid4()
+        mock_model.key_hash = "abc123"
+        mock_model.prefix = "dk_abc1234"
+        mock_model.name = "Test Key"
+        mock_model.tenant_id = UUID("00000000-0000-0000-0000-000000000000")
+        mock_model.scopes = "jobs:read,jobs:write"
+        mock_model.rate_limit = None
+        mock_model.created_at = datetime.now(UTC)
+        mock_model.last_used_at = None
+        mock_model.expires_at = DEFAULT_EXPIRES_AT
+        mock_model.revoked_at = None
+
+        # Setup mock to return model
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_model
+        mock_db.execute.return_value = mock_result
 
         api_key = await auth_service.validate_api_key("dk_valid_key")
 
         assert api_key is not None
         assert api_key.name == "Test Key"
+        assert mock_db.commit.called  # last_used_at update
 
     @pytest.mark.asyncio
-    async def test_validate_api_key_invalid(
-        self, auth_service: AuthService, mock_redis
-    ):
-        mock_redis.hgetall.return_value = {}
+    async def test_validate_api_key_invalid(self, auth_service: AuthService, mock_db):
+        """Test validating an invalid API key."""
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute.return_value = mock_result
 
         api_key = await auth_service.validate_api_key("dk_invalid_key")
 
         assert api_key is None
 
     @pytest.mark.asyncio
-    async def test_validate_api_key_revoked(
-        self, auth_service: AuthService, mock_redis
-    ):
-        tenant_id = UUID("00000000-0000-0000-0000-000000000000")
-        mock_redis.hgetall.return_value = {
-            "id": str(uuid4()),
-            "key_hash": "abc123",
-            "prefix": "dk_abc1234",
-            "name": "Revoked Key",
-            "tenant_id": str(tenant_id),
-            "scopes": "jobs:read",
-            "rate_limit": "",
-            "created_at": datetime.now(UTC).isoformat(),
-            "last_used_at": "",
-            "revoked_at": datetime.now(UTC).isoformat(),
-        }
+    async def test_validate_api_key_revoked(self, auth_service: AuthService, mock_db):
+        """Test that revoked keys are rejected."""
+        from dalston.db.models import APIKeyModel
+
+        mock_model = MagicMock(spec=APIKeyModel)
+        mock_model.id = uuid4()
+        mock_model.key_hash = "abc123"
+        mock_model.prefix = "dk_abc1234"
+        mock_model.name = "Revoked Key"
+        mock_model.tenant_id = UUID("00000000-0000-0000-0000-000000000000")
+        mock_model.scopes = "jobs:read"
+        mock_model.rate_limit = None
+        mock_model.created_at = datetime.now(UTC)
+        mock_model.last_used_at = None
+        mock_model.expires_at = DEFAULT_EXPIRES_AT
+        mock_model.revoked_at = datetime.now(UTC)  # Revoked
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_model
+        mock_db.execute.return_value = mock_result
 
         api_key = await auth_service.validate_api_key("dk_revoked_key")
 
@@ -331,34 +300,34 @@ class TestAuthService:
 
     @pytest.mark.asyncio
     async def test_validate_api_key_wrong_prefix(
-        self, auth_service: AuthService, mock_redis
+        self, auth_service: AuthService, mock_db
     ):
         api_key = await auth_service.validate_api_key("invalid_key_format")
         assert api_key is None
 
     @pytest.mark.asyncio
-    async def test_validate_api_key_expired(
-        self, auth_service: AuthService, mock_redis
-    ):
+    async def test_validate_api_key_expired(self, auth_service: AuthService, mock_db):
         """Test that expired keys are rejected during validation."""
         from datetime import timedelta
 
-        tenant_id = UUID("00000000-0000-0000-0000-000000000000")
-        expired_time = datetime.now(UTC) - timedelta(minutes=1)
+        from dalston.db.models import APIKeyModel
 
-        mock_redis.hgetall.return_value = {
-            "id": str(uuid4()),
-            "key_hash": "abc123",
-            "prefix": "dk_abc1234",
-            "name": "Expired Key",
-            "tenant_id": str(tenant_id),
-            "scopes": "jobs:read",
-            "rate_limit": "",
-            "created_at": datetime.now(UTC).isoformat(),
-            "last_used_at": "",
-            "expires_at": expired_time.isoformat(),
-            "revoked_at": "",
-        }
+        mock_model = MagicMock(spec=APIKeyModel)
+        mock_model.id = uuid4()
+        mock_model.key_hash = "abc123"
+        mock_model.prefix = "dk_abc1234"
+        mock_model.name = "Expired Key"
+        mock_model.tenant_id = UUID("00000000-0000-0000-0000-000000000000")
+        mock_model.scopes = "jobs:read"
+        mock_model.rate_limit = None
+        mock_model.created_at = datetime.now(UTC)
+        mock_model.last_used_at = None
+        mock_model.expires_at = datetime.now(UTC) - timedelta(minutes=1)  # Expired
+        mock_model.revoked_at = None
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_model
+        mock_db.execute.return_value = mock_result
 
         api_key = await auth_service.validate_api_key("dk_expired_key")
 
@@ -438,175 +407,115 @@ class TestAuthService:
         assert remaining == 0
 
     @pytest.mark.asyncio
-    async def test_revoke_api_key(self, auth_service: AuthService, mock_redis):
-        key_id = uuid4()
-        key_hash = "abc123"
+    async def test_revoke_api_key(self, auth_service: AuthService, mock_db):
+        """Test revoking an API key."""
+        from dalston.db.models import APIKeyModel
 
-        # Setup mocks
-        mock_redis.get.return_value = key_hash
-        mock_redis.hgetall.return_value = {
-            "id": str(key_id),
-            "key_hash": key_hash,
-            "prefix": "dk_abc1234",
-            "name": "Test Key",
-            "tenant_id": str(UUID("00000000-0000-0000-0000-000000000000")),
-            "scopes": "jobs:read",
-            "rate_limit": "",
-            "created_at": datetime.now(UTC).isoformat(),
-            "last_used_at": "",
-            "revoked_at": "",
-        }
+        key_id = uuid4()
+        mock_model = MagicMock(spec=APIKeyModel)
+        mock_model.id = key_id
+        mock_model.revoked_at = None
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_model
+        mock_db.execute.return_value = mock_result
 
         success = await auth_service.revoke_api_key(key_id)
 
         assert success is True
-        assert mock_redis.hset.called
+        assert mock_model.revoked_at is not None
+        assert mock_db.commit.called
 
     @pytest.mark.asyncio
-    async def test_revoke_api_key_not_found(
-        self, auth_service: AuthService, mock_redis
-    ):
-        mock_redis.get.return_value = None
+    async def test_revoke_api_key_not_found(self, auth_service: AuthService, mock_db):
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute.return_value = mock_result
 
         success = await auth_service.revoke_api_key(uuid4())
 
         assert success is False
 
     @pytest.mark.asyncio
-    async def test_has_any_api_keys_empty(self, auth_service: AuthService, mock_redis):
-        mock_redis.scan.return_value = (0, [])
+    async def test_has_any_api_keys_empty(self, auth_service: AuthService, mock_db):
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute.return_value = mock_result
 
         has_keys = await auth_service.has_any_api_keys()
 
         assert has_keys is False
 
     @pytest.mark.asyncio
-    async def test_has_any_api_keys_exists(self, auth_service: AuthService, mock_redis):
-        mock_redis.scan.return_value = (0, ["dalston:apikey:hash:abc123"])
+    async def test_has_any_api_keys_exists(self, auth_service: AuthService, mock_db):
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = uuid4()  # Some ID exists
+        mock_db.execute.return_value = mock_result
 
         has_keys = await auth_service.has_any_api_keys()
 
         assert has_keys is True
 
     @pytest.mark.asyncio
-    async def test_list_api_keys_excludes_revoked_by_default(
-        self, auth_service: AuthService, mock_redis
-    ):
-        """Test that list_api_keys excludes revoked keys by default."""
+    async def test_list_api_keys(self, auth_service: AuthService, mock_db):
+        """Test listing API keys for a tenant."""
+        from dalston.db.models import APIKeyModel
+
         tenant_id = UUID("00000000-0000-0000-0000-000000000000")
-        key1_id = uuid4()
-        key2_id = uuid4()  # This one will be revoked
 
-        mock_redis.smembers.return_value = {str(key1_id), str(key2_id)}
+        mock_model1 = MagicMock(spec=APIKeyModel)
+        mock_model1.id = uuid4()
+        mock_model1.key_hash = "hash1"
+        mock_model1.prefix = "dk_active1"
+        mock_model1.name = "Active Key"
+        mock_model1.tenant_id = tenant_id
+        mock_model1.scopes = "jobs:read"
+        mock_model1.rate_limit = None
+        mock_model1.created_at = datetime.now(UTC)
+        mock_model1.last_used_at = None
+        mock_model1.expires_at = DEFAULT_EXPIRES_AT
+        mock_model1.revoked_at = None
 
-        # Setup get_api_key_by_id to return different keys
-        async def mock_get_by_id(id_key):
-            return "hash123"
-
-        mock_redis.get.side_effect = mock_get_by_id
-
-        # Track which key_id is being requested
-        call_count = [0]
-
-        async def mock_hgetall(hash_key):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                # First key - active
-                return {
-                    "id": str(key1_id),
-                    "key_hash": "hash1",
-                    "prefix": "dk_active",
-                    "name": "Active Key",
-                    "tenant_id": str(tenant_id),
-                    "scopes": "jobs:read",
-                    "rate_limit": "",
-                    "created_at": datetime.now(UTC).isoformat(),
-                    "last_used_at": "",
-                    "expires_at": DEFAULT_EXPIRES_AT.isoformat(),
-                    "revoked_at": "",
-                }
-            else:
-                # Second key - revoked
-                return {
-                    "id": str(key2_id),
-                    "key_hash": "hash2",
-                    "prefix": "dk_revoked",
-                    "name": "Revoked Key",
-                    "tenant_id": str(tenant_id),
-                    "scopes": "jobs:read",
-                    "rate_limit": "",
-                    "created_at": datetime.now(UTC).isoformat(),
-                    "last_used_at": "",
-                    "expires_at": DEFAULT_EXPIRES_AT.isoformat(),
-                    "revoked_at": datetime.now(UTC).isoformat(),
-                }
-
-        mock_redis.hgetall.side_effect = mock_hgetall
+        mock_result = MagicMock()
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = [mock_model1]
+        mock_result.scalars.return_value = mock_scalars
+        mock_db.execute.return_value = mock_result
 
         keys = await auth_service.list_api_keys(tenant_id)
 
-        # Should only return the active key
         assert len(keys) == 1
         assert keys[0].name == "Active Key"
 
     @pytest.mark.asyncio
-    async def test_list_api_keys_includes_revoked_when_requested(
-        self, auth_service: AuthService, mock_redis
-    ):
-        """Test that list_api_keys includes revoked keys when include_revoked=True."""
+    async def test_get_api_key_by_id(self, auth_service: AuthService, mock_db):
+        """Test getting an API key by ID."""
+        from dalston.db.models import APIKeyModel
+
+        key_id = uuid4()
         tenant_id = UUID("00000000-0000-0000-0000-000000000000")
-        key1_id = uuid4()
-        key2_id = uuid4()  # This one will be revoked
 
-        mock_redis.smembers.return_value = {str(key1_id), str(key2_id)}
+        mock_model = MagicMock(spec=APIKeyModel)
+        mock_model.id = key_id
+        mock_model.key_hash = "hash1"
+        mock_model.prefix = "dk_test"
+        mock_model.name = "Test Key"
+        mock_model.tenant_id = tenant_id
+        mock_model.scopes = "jobs:read"
+        mock_model.rate_limit = None
+        mock_model.created_at = datetime.now(UTC)
+        mock_model.last_used_at = None
+        mock_model.expires_at = DEFAULT_EXPIRES_AT
+        mock_model.revoked_at = None
 
-        async def mock_get_by_id(id_key):
-            return "hash123"
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_model
+        mock_db.execute.return_value = mock_result
 
-        mock_redis.get.side_effect = mock_get_by_id
+        api_key = await auth_service.get_api_key_by_id(key_id, tenant_id)
 
-        call_count = [0]
-
-        async def mock_hgetall(hash_key):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return {
-                    "id": str(key1_id),
-                    "key_hash": "hash1",
-                    "prefix": "dk_active",
-                    "name": "Active Key",
-                    "tenant_id": str(tenant_id),
-                    "scopes": "jobs:read",
-                    "rate_limit": "",
-                    "created_at": datetime.now(UTC).isoformat(),
-                    "last_used_at": "",
-                    "expires_at": DEFAULT_EXPIRES_AT.isoformat(),
-                    "revoked_at": "",
-                }
-            else:
-                return {
-                    "id": str(key2_id),
-                    "key_hash": "hash2",
-                    "prefix": "dk_revoked",
-                    "name": "Revoked Key",
-                    "tenant_id": str(tenant_id),
-                    "scopes": "jobs:read",
-                    "rate_limit": "",
-                    "created_at": datetime.now(UTC).isoformat(),
-                    "last_used_at": "",
-                    "expires_at": DEFAULT_EXPIRES_AT.isoformat(),
-                    "revoked_at": datetime.now(UTC).isoformat(),
-                }
-
-        mock_redis.hgetall.side_effect = mock_hgetall
-
-        keys = await auth_service.list_api_keys(tenant_id, include_revoked=True)
-
-        # Should return both keys
-        assert len(keys) == 2
-        key_names = {k.name for k in keys}
-        assert "Active Key" in key_names
-        assert "Revoked Key" in key_names
+        assert api_key is not None
+        assert api_key.name == "Test Key"
 
 
 class TestMiddlewareHelpers:
@@ -812,7 +721,13 @@ class TestSessionTokenModel:
 
 
 class TestSessionTokenService:
-    """Tests for session token methods in AuthService."""
+    """Tests for session token methods in AuthService (still using Redis)."""
+
+    @pytest.fixture
+    def mock_db(self):
+        """Create a mock AsyncSession."""
+        db = AsyncMock()
+        return db
 
     @pytest.fixture
     def mock_redis(self):
@@ -820,19 +735,13 @@ class TestSessionTokenService:
         redis = AsyncMock()
         redis.hset = AsyncMock()
         redis.hgetall = AsyncMock(return_value={})
-        redis.set = AsyncMock()
-        redis.get = AsyncMock(return_value=None)
-        redis.sadd = AsyncMock()
-        redis.smembers = AsyncMock(return_value=set())
-        redis.incr = AsyncMock(return_value=1)
         redis.expire = AsyncMock()
-        redis.scan = AsyncMock(return_value=(0, []))
         redis.delete = AsyncMock(return_value=1)
         return redis
 
     @pytest.fixture
-    def auth_service(self, mock_redis) -> AuthService:
-        return AuthService(mock_redis)
+    def auth_service(self, mock_db, mock_redis) -> AuthService:
+        return AuthService(mock_db, mock_redis)
 
     @pytest.fixture
     def sample_api_key(self) -> APIKey:

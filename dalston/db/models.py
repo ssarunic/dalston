@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import ARRAY, TIMESTAMP, ForeignKey, String, Text, func
+from sqlalchemy import ARRAY, TIMESTAMP, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -41,6 +41,7 @@ class TenantModel(Base):
 
     # Relationships
     jobs: Mapped[list["JobModel"]] = relationship(back_populates="tenant")
+    api_keys: Mapped[list["APIKeyModel"]] = relationship(back_populates="tenant")
 
 
 class JobModel(Base):
@@ -140,3 +141,51 @@ class TaskModel(Base):
 
     # Relationships
     job: Mapped["JobModel"] = relationship(back_populates="tasks")
+
+
+class APIKeyModel(Base):
+    """API key for authentication."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+    )
+    key_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    prefix: Mapped[str] = mapped_column(String(10), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    tenant_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id"),
+        nullable=False,
+        index=True,
+    )
+    scopes: Mapped[str] = mapped_column(String(255), nullable=False)
+    rate_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+
+    # Relationships
+    tenant: Mapped["TenantModel"] = relationship(back_populates="api_keys")

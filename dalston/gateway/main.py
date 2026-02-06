@@ -36,22 +36,25 @@ async def _ensure_admin_key_exists() -> None:
     This provides a seamless first-run experience by auto-creating
     an admin key and printing it to the console.
     """
+    from dalston.db.session import async_session
+
     try:
         redis = await get_redis()
-        auth_service = AuthService(redis)
+        async with async_session() as db:
+            auth_service = AuthService(db, redis)
 
-        # Check if any keys exist
-        if await auth_service.has_any_api_keys():
-            logger.info("API keys already exist, skipping auto-bootstrap")
-            return
+            # Check if any keys exist
+            if await auth_service.has_any_api_keys():
+                logger.info("API keys already exist, skipping auto-bootstrap")
+                return
 
-        # Create admin key
-        raw_key, api_key = await auth_service.create_api_key(
-            name="Auto-generated Admin Key",
-            tenant_id=DEFAULT_TENANT_ID,
-            scopes=[Scope.ADMIN],
-            rate_limit=None,
-        )
+            # Create admin key
+            raw_key, api_key = await auth_service.create_api_key(
+                name="Auto-generated Admin Key",
+                tenant_id=DEFAULT_TENANT_ID,
+                scopes=[Scope.ADMIN],
+                rate_limit=None,
+            )
 
         # Print key prominently
         logger.info("")
