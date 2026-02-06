@@ -3,8 +3,12 @@
 Uses NVIDIA NeMo Parakeet FastConformer with cache-aware streaming
 for low-latency real-time transcription. Achieves ~100ms end-to-end
 latency with native word-level timestamps.
+
+Environment variables:
+    DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
 """
 
+import os
 from typing import Any
 
 import numpy as np
@@ -22,6 +26,9 @@ class ParakeetStreamingEngine(RealtimeEngine):
     Uses cache-aware FastConformer encoder for true streaming inference
     without chunked re-encoding, achieving lower latency than Whisper.
 
+    Supports both GPU (CUDA) and CPU inference. GPU is strongly
+    recommended for real-time use due to latency requirements.
+
     Environment variables:
         WORKER_ID: Unique identifier for this worker (required)
         WORKER_PORT: WebSocket server port (default: 9000)
@@ -29,6 +36,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
         REDIS_URL: Redis connection URL (default: redis://localhost:6379)
         PARAKEET_MODEL: Model variant (default: nvidia/parakeet-rnnt-0.6b)
         CHUNK_SIZE_MS: Audio chunk size in milliseconds (default: 100)
+        DEVICE: Device to use (cuda, cpu). Defaults to cuda if available.
     """
 
     DEFAULT_MODEL = "nvidia/parakeet-rnnt-0.6b"
@@ -41,23 +49,36 @@ class ParakeetStreamingEngine(RealtimeEngine):
         self._model_name: str | None = None
         self._chunk_size_ms: int = self.DEFAULT_CHUNK_SIZE_MS
 
-        # Verify CUDA availability
-        if not torch.cuda.is_available():
-            raise RuntimeError(
-                "Parakeet streaming engine requires NVIDIA GPU with CUDA. "
-                "No CUDA device detected."
-            )
+        # Determine device from environment or availability
+        requested_device = os.environ.get("DEVICE", "").lower()
+        cuda_available = torch.cuda.is_available()
 
-        self._device = "cuda"
-        logger.info("cuda_available", device_count=torch.cuda.device_count())
+        if requested_device == "cpu":
+            self._device = "cpu"
+            logger.warning(
+                "using_cpu_device",
+                message="Running on CPU - real-time latency may not be achievable",
+            )
+        elif requested_device == "cuda" or requested_device == "":
+            if cuda_available:
+                self._device = "cuda"
+                logger.info("cuda_available", device_count=torch.cuda.device_count())
+            else:
+                self._device = "cpu"
+                logger.warning(
+                    "cuda_not_available",
+                    message="CUDA not available, falling back to CPU - latency will be higher",
+                )
+        else:
+            raise ValueError(
+                f"Unknown device: {requested_device}. Use 'cuda' or 'cpu'."
+            )
 
     def load_models(self) -> None:
         """Load Parakeet model for streaming inference.
 
         Called once during engine startup.
         """
-        import os
-
         model_name = os.environ.get("PARAKEET_MODEL", self.DEFAULT_MODEL)
         self._chunk_size_ms = int(
             os.environ.get("CHUNK_SIZE_MS", self.DEFAULT_CHUNK_SIZE_MS)
@@ -119,9 +140,16 @@ class ParakeetStreamingEngine(RealtimeEngine):
         audio_tensor = torch.from_numpy(audio).unsqueeze(0).to(self._device)
 
         # Transcribe with streaming-aware inference
-        with torch.cuda.amp.autocast():
-            with torch.no_grad():
-                # Use the transcribe method
+        # Use autocast for GPU, inference_mode for CPU
+        with torch.inference_mode():
+            if self._device == "cuda":
+                with torch.cuda.amp.autocast():
+                    hypotheses = self._model.transcribe(
+                        audio_tensor,
+                        batch_size=1,
+                        return_hypotheses=True,
+                    )
+            else:
                 hypotheses = self._model.transcribe(
                     audio_tensor,
                     batch_size=1,
@@ -218,6 +246,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
             "model_loaded": self._model is not None,
             "model_name": self._model_name,
             "chunk_size_ms": self._chunk_size_ms,
+            "device": self._device,
             "cuda_available": cuda_available,
             "cuda_device_count": cuda_device_count,
             "cuda_memory_allocated_gb": round(cuda_memory_allocated, 2),

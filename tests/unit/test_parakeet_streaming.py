@@ -1,16 +1,14 @@
 """Unit tests for Parakeet real-time streaming engine.
 
-Tests the ParakeetStreamingEngine implementation with mocked NeMo models.
+Tests the ParakeetStreamingEngine implementation with mocked NeMo models and CUDA.
 Run with: uv run --extra dev pytest tests/unit/test_parakeet_streaming.py
-
-Note: These tests skip if CUDA is not available, as the engine requires GPU.
 """
 
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Skip all tests if torch/CUDA not available
+# Skip all tests if torch not installed
 torch = pytest.importorskip("torch")
 
 
@@ -53,9 +51,6 @@ def mock_nemo_asr():
 class TestParakeetStreamingEngineGetModels:
     """Tests for get_models() compatibility aliases."""
 
-    @pytest.mark.skipif(
-        not torch.cuda.is_available(), reason="CUDA required for Parakeet engine"
-    )
     def test_get_models_returns_compatibility_aliases(self, mock_cuda_available):
         """Test that get_models returns parakeet, fast, and accurate."""
         # Import with mocked CUDA
@@ -75,9 +70,6 @@ class TestParakeetStreamingEngineGetModels:
 class TestParakeetStreamingEngineGetLanguages:
     """Tests for get_languages() English-only restriction."""
 
-    @pytest.mark.skipif(
-        not torch.cuda.is_available(), reason="CUDA required for Parakeet engine"
-    )
     def test_get_languages_returns_english_only(self, mock_cuda_available):
         """Test that get_languages returns only English."""
         import sys
@@ -96,9 +88,6 @@ class TestParakeetStreamingEngineGetLanguages:
 class TestParakeetStreamingEngineHealthCheck:
     """Tests for streaming engine health check."""
 
-    @pytest.mark.skipif(
-        not torch.cuda.is_available(), reason="CUDA required for Parakeet engine"
-    )
     def test_health_check_includes_required_fields(self, mock_cuda_available):
         """Test that health check includes GPU and model info."""
         import sys
@@ -117,9 +106,6 @@ class TestParakeetStreamingEngineHealthCheck:
 class TestParakeetStreamingEngineGPUMemory:
     """Tests for GPU memory reporting."""
 
-    @pytest.mark.skipif(
-        not torch.cuda.is_available(), reason="CUDA required for Parakeet engine"
-    )
     def test_get_gpu_memory_usage_format(self, mock_cuda_available):
         """Test that GPU memory usage is returned in correct format."""
         import sys

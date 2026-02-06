@@ -1,16 +1,14 @@
 """Unit tests for Parakeet batch transcription engine.
 
-Tests the ParakeetEngine implementation with mocked NeMo models.
+Tests the ParakeetEngine implementation with mocked NeMo models and CUDA.
 Run with: uv run --extra dev pytest tests/unit/test_parakeet_engine.py
-
-Note: These tests skip if CUDA is not available, as the engine requires GPU.
 """
 
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Skip all tests if torch/CUDA not available
+# Skip all tests if torch not installed
 torch = pytest.importorskip("torch")
 
 
@@ -54,9 +52,6 @@ def mock_nemo_asr():
 class TestParakeetEngineModelVariants:
     """Tests for Parakeet model variants."""
 
-    @pytest.mark.skipif(
-        not torch.cuda.is_available(), reason="CUDA required for Parakeet engine"
-    )
     def test_default_model_is_06b(self, mock_cuda_available):
         """Test that default model is parakeet-rnnt-0.6b."""
         import sys
@@ -66,9 +61,6 @@ class TestParakeetEngineModelVariants:
 
         assert ParakeetEngine.DEFAULT_MODEL == "nvidia/parakeet-rnnt-0.6b"
 
-    @pytest.mark.skipif(
-        not torch.cuda.is_available(), reason="CUDA required for Parakeet engine"
-    )
     def test_supported_model_variants(self, mock_cuda_available):
         """Test that both 0.6B and 1.1B variants are supported."""
         import sys
@@ -83,9 +75,6 @@ class TestParakeetEngineModelVariants:
 class TestParakeetEngineHealthCheck:
     """Tests for Parakeet engine health check."""
 
-    @pytest.mark.skipif(
-        not torch.cuda.is_available(), reason="CUDA required for Parakeet engine"
-    )
     def test_health_check_returns_required_fields(self, mock_cuda_available):
         """Test that health check includes GPU information."""
         import sys
@@ -101,9 +90,6 @@ class TestParakeetEngineHealthCheck:
         assert "cuda_device_count" in health
         assert "model_loaded" in health
 
-    @pytest.mark.skipif(
-        not torch.cuda.is_available(), reason="CUDA required for Parakeet engine"
-    )
     def test_health_check_reports_healthy_with_cuda(self, mock_cuda_available):
         """Test that health check reports healthy when CUDA available."""
         import sys

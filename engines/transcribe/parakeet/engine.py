@@ -5,8 +5,12 @@ English-only speech-to-text transcription with GPU acceleration.
 
 Parakeet produces native word-level timestamps via RNNT alignment,
 eliminating the need for a separate alignment stage.
+
+Environment variables:
+    DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
 """
 
+import os
 from typing import Any
 
 import structlog
@@ -24,7 +28,8 @@ class ParakeetEngine(Engine):
     English-only transcription. Automatically produces word-level
     timestamps without requiring separate alignment.
 
-    Requires NVIDIA GPU with CUDA support.
+    Supports both GPU (CUDA) and CPU inference. GPU is strongly
+    recommended for production use.
     """
 
     # Model variants (NeMo model identifiers)
@@ -39,15 +44,30 @@ class ParakeetEngine(Engine):
         self._model = None
         self._model_name: str | None = None
 
-        # Verify CUDA availability
-        if not torch.cuda.is_available():
-            raise RuntimeError(
-                "Parakeet engine requires NVIDIA GPU with CUDA. "
-                "No CUDA device detected."
-            )
+        # Determine device from environment or availability
+        requested_device = os.environ.get("DEVICE", "").lower()
+        cuda_available = torch.cuda.is_available()
 
-        self._device = "cuda"
-        logger.info("cuda_available", device_count=torch.cuda.device_count())
+        if requested_device == "cpu":
+            self._device = "cpu"
+            logger.warning(
+                "using_cpu_device",
+                message="Running on CPU - inference will be significantly slower",
+            )
+        elif requested_device == "cuda" or requested_device == "":
+            if cuda_available:
+                self._device = "cuda"
+                logger.info("cuda_available", device_count=torch.cuda.device_count())
+            else:
+                self._device = "cpu"
+                logger.warning(
+                    "cuda_not_available",
+                    message="CUDA not available, falling back to CPU - inference will be slower",
+                )
+        else:
+            raise ValueError(
+                f"Unknown device: {requested_device}. Use 'cuda' or 'cpu'."
+            )
 
     def _load_model(self, model_name: str) -> None:
         """Load the Parakeet model if not already loaded.
@@ -106,7 +126,13 @@ class ParakeetEngine(Engine):
 
         # Transcribe with word-level timestamps
         # NeMo RNNT models can return word timestamps via the alignment
-        with torch.cuda.amp.autocast():
+        # Use autocast for GPU, no-op context for CPU
+        autocast_ctx = (
+            torch.cuda.amp.autocast()
+            if self._device == "cuda"
+            else torch.inference_mode()
+        )
+        with autocast_ctx:
             # Use transcribe method which returns text
             # For word timestamps, we use transcribe_with_timestamps
             transcriptions = self._model.transcribe(
@@ -149,7 +175,9 @@ class ParakeetEngine(Engine):
             frame_shift_seconds = 0.01
 
             current_words = []
-            for i, (token, frame_idx) in enumerate(zip(tokens, timesteps)):
+            for i, (token, frame_idx) in enumerate(
+                zip(tokens, timesteps, strict=False)
+            ):
                 word_start = frame_idx * frame_shift_seconds
                 # Estimate word end from next token or add small duration
                 if i + 1 < len(timesteps):
@@ -168,20 +196,24 @@ class ParakeetEngine(Engine):
 
             # Create a single segment with all words
             if current_words:
-                segments.append({
-                    "start": current_words[0]["start"],
-                    "end": current_words[-1]["end"],
-                    "text": full_text.strip(),
-                    "words": current_words,
-                })
+                segments.append(
+                    {
+                        "start": current_words[0]["start"],
+                        "end": current_words[-1]["end"],
+                        "text": full_text.strip(),
+                        "words": current_words,
+                    }
+                )
         else:
             # Fallback: create segment without word timestamps
             # This happens if the model doesn't support timestamp extraction
-            segments.append({
-                "start": 0.0,
-                "end": 0.0,  # Unknown duration
-                "text": full_text.strip(),
-            })
+            segments.append(
+                {
+                    "start": 0.0,
+                    "end": 0.0,  # Unknown duration
+                    "text": full_text.strip(),
+                }
+            )
 
         logger.info(
             "transcription_complete",
@@ -211,7 +243,8 @@ class ParakeetEngine(Engine):
             cuda_memory_total = torch.cuda.get_device_properties(0).total_memory / 1e9
 
         return {
-            "status": "healthy" if cuda_available else "degraded",
+            "status": "healthy",
+            "device": self._device,
             "model_loaded": self._model is not None,
             "model_name": self._model_name,
             "cuda_available": cuda_available,
