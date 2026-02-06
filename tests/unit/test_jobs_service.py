@@ -161,7 +161,9 @@ class TestJobsServiceDeleteJob:
         db = AsyncMock()
         return db
 
-    def _make_job(self, status: str, job_id: UUID | None = None, tenant_id: UUID | None = None):
+    def _make_job(
+        self, status: str, job_id: UUID | None = None, tenant_id: UUID | None = None
+    ):
         """Create a mock JobModel with the given status."""
         job = MagicMock()
         job.id = job_id or UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
@@ -209,7 +211,9 @@ class TestJobsServiceDeleteJob:
         job = self._make_job(JobStatus.RUNNING.value)
 
         with patch.object(jobs_service, "get_job", return_value=job):
-            with pytest.raises(ValueError, match="Cannot delete job in 'running' state"):
+            with pytest.raises(
+                ValueError, match="Cannot delete job in 'running' state"
+            ):
                 await jobs_service.delete_job(mock_db, job.id)
 
         mock_db.delete.assert_not_awaited()
@@ -220,13 +224,17 @@ class TestJobsServiceDeleteJob:
         job = self._make_job(JobStatus.PENDING.value)
 
         with patch.object(jobs_service, "get_job", return_value=job):
-            with pytest.raises(ValueError, match="Cannot delete job in 'pending' state"):
+            with pytest.raises(
+                ValueError, match="Cannot delete job in 'pending' state"
+            ):
                 await jobs_service.delete_job(mock_db, job.id)
 
         mock_db.delete.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_delete_nonexistent_job_returns_none(self, jobs_service: JobsService, mock_db):
+    async def test_delete_nonexistent_job_returns_none(
+        self, jobs_service: JobsService, mock_db
+    ):
         """Test that deleting a nonexistent job returns None."""
         with patch.object(jobs_service, "get_job", return_value=None):
             result = await jobs_service.delete_job(
@@ -237,11 +245,15 @@ class TestJobsServiceDeleteJob:
         mock_db.delete.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_delete_with_tenant_isolation(self, jobs_service: JobsService, mock_db):
+    async def test_delete_with_tenant_isolation(
+        self, jobs_service: JobsService, mock_db
+    ):
         """Test that delete passes tenant_id for isolation."""
         tenant_id = UUID("12345678-1234-1234-1234-123456789abc")
         job_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-        job = self._make_job(JobStatus.COMPLETED.value, job_id=job_id, tenant_id=tenant_id)
+        job = self._make_job(
+            JobStatus.COMPLETED.value, job_id=job_id, tenant_id=tenant_id
+        )
 
         with patch.object(jobs_service, "get_job", return_value=job) as mock_get:
             result = await jobs_service.delete_job(mock_db, job_id, tenant_id=tenant_id)
