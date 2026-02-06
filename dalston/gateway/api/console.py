@@ -3,12 +3,14 @@
 GET /api/console/dashboard - Aggregated dashboard data
 GET /api/console/jobs/{job_id}/tasks - Get task DAG for a job
 GET /api/console/engines - Get batch and realtime engine status
+DELETE /api/console/jobs/{job_id} - Delete a job and its artifacts (admin)
 """
 
+import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from redis.asyncio import Redis
 from sqlalchemy import func, select
@@ -16,15 +18,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from dalston.common.models import JobStatus
+from dalston.config import Settings
 from dalston.db.models import JobModel
 from dalston.db.session import DEFAULT_TENANT_ID
 from dalston.gateway.dependencies import (
     RequireAdmin,
     get_db,
+    get_jobs_service,
     get_redis,
     get_session_router,
+    get_settings,
 )
+from dalston.gateway.services.jobs import JobsService
+from dalston.gateway.services.storage import StorageService
 from dalston.session_router import SessionRouter
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/console", tags=["console"])
 
@@ -456,3 +465,43 @@ async def get_console_job(
         started_at=job.started_at,
         completed_at=job.completed_at,
     )
+
+
+@router.delete(
+    "/jobs/{job_id}",
+    status_code=204,
+    summary="Delete a job",
+    description="Delete a job and its artifacts. Only terminal-state jobs can be deleted. Admin only.",
+    responses={
+        204: {"description": "Job deleted successfully"},
+        404: {"description": "Job not found"},
+        409: {"description": "Job is not in a terminal state"},
+    },
+)
+async def delete_console_job(
+    job_id: UUID,
+    api_key: RequireAdmin,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    jobs_service: JobsService = Depends(get_jobs_service),
+) -> Response:
+    """Delete a job and all associated artifacts (admin endpoint).
+
+    No tenant filter — admins can delete any job.
+    """
+    try:
+        job = await jobs_service.delete_job(db, job_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Clean up S3 artifacts (best-effort)
+    try:
+        storage = StorageService(settings)
+        await storage.delete_job_artifacts(job_id)
+    except Exception:
+        logger.warning("Failed to delete S3 artifacts for job %s", job_id, exc_info=True)
+
+    return Response(status_code=204)
