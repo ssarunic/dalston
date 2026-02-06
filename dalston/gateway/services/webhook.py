@@ -2,9 +2,13 @@
 
 Handles building webhook payloads, signing with HMAC-SHA256, and delivery
 with retry logic using exponential backoff.
+
+Follows the Standard Webhooks specification:
+https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md
 """
 
 import asyncio
+import base64
 import hashlib
 import hmac
 import ipaddress
@@ -14,7 +18,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 import structlog
@@ -138,70 +142,98 @@ class WebhookService:
         event: str,
         job_id: UUID,
         status: str,
-        text: str | None = None,
         duration: float | None = None,
         error: str | None = None,
         webhook_metadata: dict | None = None,
     ) -> dict[str, Any]:
-        """Build webhook payload per M05 spec.
+        """Build webhook payload following Standard Webhooks specification.
+
+        See: https://github.com/standard-webhooks/standard-webhooks
 
         Args:
             event: Event type (e.g., "transcription.completed")
             job_id: Job UUID
             status: Job status
-            text: First 500 chars of transcript text (for completed jobs)
             duration: Audio duration in seconds
             error: Error message (for failed jobs)
             webhook_metadata: Custom data to echo back
 
         Returns:
-            Webhook payload dictionary
+            Webhook payload dictionary in Standard Webhooks format
         """
-        payload: dict[str, Any] = {
-            "event": event,
+        # Build event-specific data
+        data: dict[str, Any] = {
             "transcription_id": str(job_id),
             "status": status,
-            "timestamp": datetime.now(UTC).isoformat(),
         }
 
-        if text is not None:
-            # Truncate to first 500 characters
-            payload["text"] = text[:500] if len(text) > 500 else text
-
         if duration is not None:
-            payload["duration"] = duration
+            data["duration"] = duration
 
         if error is not None:
-            payload["error"] = error
+            data["error"] = error
 
         if webhook_metadata is not None:
-            payload["webhook_metadata"] = webhook_metadata
+            data["webhook_metadata"] = webhook_metadata
+
+        # Standard Webhooks envelope
+        payload: dict[str, Any] = {
+            "object": "event",
+            "id": f"evt_{uuid4().hex[:24]}",
+            "type": event,
+            "created_at": int(datetime.now(UTC).timestamp()),
+            "data": data,
+        }
 
         return payload
 
     def sign_payload(
-        self, payload_json: str, timestamp: int, secret: str | None = None
+        self,
+        payload_json: str,
+        msg_id: str,
+        timestamp: int,
+        secret: str | None = None,
     ) -> str:
-        """Generate HMAC-SHA256 signature for webhook payload.
+        """Generate HMAC-SHA256 signature per Standard Webhooks spec.
 
-        The signature is computed over: "{timestamp}.{payload_json}"
+        The signature is computed over: "{msg_id}.{timestamp}.{payload_json}"
+
+        See: https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md
 
         Args:
             payload_json: JSON-serialized payload
+            msg_id: Unique message ID (webhook-id header value)
             timestamp: Unix timestamp
             secret: Signing secret (defaults to self.secret if not provided)
 
         Returns:
-            Signature in format "sha256={hex_digest}"
+            Signature in Standard Webhooks format "v1,{base64_signature}"
         """
         signing_secret = secret or self.secret
-        signed_payload = f"{timestamp}.{payload_json}"
+
+        # Standard Webhooks: sign "{msg_id}.{timestamp}.{body}"
+        signed_payload = f"{msg_id}.{timestamp}.{payload_json}"
+
+        # Extract raw secret bytes (remove prefix if present)
+        secret_bytes = signing_secret.encode()
+        if signing_secret.startswith("whsec_"):
+            # Decode URL-safe base64 portion after prefix
+            # token_urlsafe produces base64 without padding, so we add it
+            b64_part = signing_secret[6:]
+            # Add padding if needed (base64 length must be multiple of 4)
+            padding = 4 - (len(b64_part) % 4)
+            if padding != 4:
+                b64_part += "=" * padding
+            secret_bytes = base64.urlsafe_b64decode(b64_part)
+
         signature = hmac.new(
-            signing_secret.encode(),
+            secret_bytes,
             signed_payload.encode(),
             hashlib.sha256,
-        ).hexdigest()
-        return f"sha256={signature}"
+        ).digest()
+
+        # Return in Standard Webhooks format: v1,{base64}
+        return f"v1,{base64.b64encode(signature).decode()}"
 
     async def deliver(
         self,
@@ -215,8 +247,8 @@ class WebhookService:
     ) -> tuple[bool, int | None, str | None]:
         """Deliver webhook to the specified URL with retry logic.
 
+        Follows Standard Webhooks specification for headers and signatures.
         Retries up to max_retries times with exponential backoff on failure.
-        Per M05.4 spec: 3 retries with delays of 1s, 2s, 4s.
 
         Args:
             url: Webhook URL to POST to
@@ -233,7 +265,7 @@ class WebhookService:
         if backoff_delays is None:
             backoff_delays = DEFAULT_BACKOFF_DELAYS
 
-        log = logger.bind(url=url, event=payload.get("event"))
+        log = logger.bind(url=url, event=payload.get("type"))
         if delivery_id:
             log = log.bind(delivery_id=str(delivery_id))
 
@@ -244,17 +276,21 @@ class WebhookService:
             log.error("webhook_url_validation_failed", error=str(e))
             return False, None, str(e)
 
+        # Standard Webhooks headers
         timestamp = int(time.time())
+        msg_id = (
+            f"msg_{delivery_id.hex[:24]}" if delivery_id else f"msg_{uuid4().hex[:24]}"
+        )
         payload_json = json.dumps(payload, default=str)
-        signature = self.sign_payload(payload_json, timestamp, secret=secret)
+        signature = self.sign_payload(payload_json, msg_id, timestamp, secret=secret)
 
+        # Standard Webhooks header names
         headers = {
             "Content-Type": "application/json",
-            "X-Dalston-Signature": signature,
-            "X-Dalston-Timestamp": str(timestamp),
+            "webhook-id": msg_id,
+            "webhook-timestamp": str(timestamp),
+            "webhook-signature": signature,
         }
-        if delivery_id:
-            headers["X-Dalston-Webhook-Id"] = str(delivery_id)
 
         last_error: str | None = None
         last_status_code: int | None = None

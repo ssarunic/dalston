@@ -1,18 +1,20 @@
 """Webhook signature verification for Dalston.
 
+Follows the Standard Webhooks specification:
+https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md
+
 Provides utilities for verifying webhook signatures and parsing
 webhook payloads. Uses timing-safe comparison to prevent timing attacks.
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
 import time
-from datetime import datetime
 from typing import Any
-from uuid import UUID
 
 from .exceptions import WebhookVerificationError
 from .types import WebhookEventType, WebhookPayload
@@ -21,20 +23,22 @@ from .types import WebhookEventType, WebhookPayload
 def verify_webhook_signature(
     payload: bytes,
     signature: str,
+    msg_id: str,
     timestamp: str,
     secret: str,
     max_age: int = 300,
 ) -> bool:
-    """Verify Dalston webhook signature.
+    """Verify webhook signature per Standard Webhooks specification.
 
     Uses HMAC-SHA256 with timing-safe comparison to prevent timing attacks.
-    The signed payload format is: "{timestamp}.{payload}"
+    The signed payload format is: "{msg_id}.{timestamp}.{payload}"
 
     Args:
         payload: Raw request body bytes.
-        signature: X-Dalston-Signature header value ("sha256=...").
-        timestamp: X-Dalston-Timestamp header value (Unix timestamp).
-        secret: Webhook secret from Dalston configuration.
+        signature: webhook-signature header value ("v1,{base64}").
+        msg_id: webhook-id header value.
+        timestamp: webhook-timestamp header value (Unix timestamp).
+        secret: Webhook signing secret (whsec_...).
         max_age: Maximum age in seconds (default 5 minutes).
 
     Returns:
@@ -48,9 +52,10 @@ def verify_webhook_signature(
         # In your webhook handler
         is_valid = verify_webhook_signature(
             payload=request.body,
-            signature=request.headers["X-Dalston-Signature"],
-            timestamp=request.headers["X-Dalston-Timestamp"],
-            secret="your-webhook-secret",
+            signature=request.headers["webhook-signature"],
+            msg_id=request.headers["webhook-id"],
+            timestamp=request.headers["webhook-timestamp"],
+            secret="whsec_...",
         )
 
         if not is_valid:
@@ -70,29 +75,50 @@ def verify_webhook_signature(
             f"Timestamp too old: {abs(current_time - ts)}s > {max_age}s"
         )
 
-    # Validate signature format
-    if not signature.startswith("sha256="):
+    # Validate signature format (v1,{base64})
+    if not signature.startswith("v1,"):
         raise WebhookVerificationError(
-            "Invalid signature format: must start with 'sha256='"
+            "Invalid signature format: must start with 'v1,'"
         )
 
-    provided_hash = signature[7:]  # Remove "sha256=" prefix
+    provided_sig_b64 = signature[3:]  # Remove "v1," prefix
 
-    # Compute expected signature
-    # Format: "{timestamp}.{payload}"
-    signed_payload = f"{timestamp}.{payload.decode('utf-8')}"
-    expected_hash = hmac.new(
-        secret.encode("utf-8"),
+    try:
+        provided_sig = base64.b64decode(provided_sig_b64)
+    except Exception as e:
+        raise WebhookVerificationError(f"Invalid signature encoding: {e}") from e
+
+    # Extract raw secret bytes (remove whsec_ prefix if present)
+    secret_bytes = secret.encode("utf-8")
+    if secret.startswith("whsec_"):
+        try:
+            # Decode URL-safe base64 portion after prefix
+            # token_urlsafe produces base64 without padding, so we add it
+            b64_part = secret[6:]
+            # Add padding if needed (base64 length must be multiple of 4)
+            padding = 4 - (len(b64_part) % 4)
+            if padding != 4:
+                b64_part += "=" * padding
+            secret_bytes = base64.urlsafe_b64decode(b64_part)
+        except Exception as e:
+            raise WebhookVerificationError(f"Invalid secret encoding: {e}") from e
+
+    # Standard Webhooks: sign "{msg_id}.{timestamp}.{body}"
+    signed_payload = f"{msg_id}.{timestamp}.{payload.decode('utf-8')}"
+    expected_sig = hmac.new(
+        secret_bytes,
         signed_payload.encode("utf-8"),
         hashlib.sha256,
-    ).hexdigest()
+    ).digest()
 
     # Timing-safe comparison
-    return hmac.compare_digest(expected_hash, provided_hash)
+    return hmac.compare_digest(expected_sig, provided_sig)
 
 
 def parse_webhook_payload(payload: bytes | str) -> WebhookPayload:
     """Parse webhook payload JSON into WebhookPayload object.
+
+    Expects Standard Webhooks format with envelope fields.
 
     Args:
         payload: Raw payload bytes or JSON string.
@@ -107,9 +133,9 @@ def parse_webhook_payload(payload: bytes | str) -> WebhookPayload:
         ```python
         payload = parse_webhook_payload(request.body)
 
-        if payload.event == WebhookEventType.JOB_COMPLETED:
-            job_id = payload.job_id
-            transcript = payload.data.get("transcript")
+        if payload.type == WebhookEventType.TRANSCRIPTION_COMPLETED:
+            transcription_id = payload.transcription_id
+            # Fetch full transcript using transcription_id
         ```
     """
     try:
@@ -120,45 +146,30 @@ def parse_webhook_payload(payload: bytes | str) -> WebhookPayload:
     except json.JSONDecodeError as e:
         raise WebhookVerificationError(f"Invalid JSON payload: {e}") from e
 
-    # Validate required fields
-    required_fields = ["event", "job_id", "timestamp"]
+    # Validate required Standard Webhooks fields
+    required_fields = ["object", "id", "type", "created_at", "data"]
     for field in required_fields:
         if field not in data:
             raise WebhookVerificationError(f"Missing required field: {field}")
 
+    # Validate object type
+    if data["object"] != "event":
+        raise WebhookVerificationError(
+            f"Invalid object type: {data['object']} (expected 'event')"
+        )
+
     # Parse event type
     try:
-        event = WebhookEventType(data["event"])
+        event_type = WebhookEventType(data["type"])
     except ValueError as e:
-        raise WebhookVerificationError(f"Invalid event type: {data['event']}") from e
-
-    # Parse job_id
-    try:
-        job_id = (
-            UUID(data["job_id"]) if isinstance(data["job_id"], str) else data["job_id"]
-        )
-    except ValueError as e:
-        raise WebhookVerificationError(f"Invalid job_id: {data['job_id']}") from e
-
-    # Parse timestamp
-    timestamp_val = data["timestamp"]
-    if isinstance(timestamp_val, str):
-        timestamp_val = timestamp_val.replace("Z", "+00:00")
-        try:
-            timestamp = datetime.fromisoformat(timestamp_val)
-        except ValueError as e:
-            raise WebhookVerificationError(f"Invalid timestamp: {timestamp_val}") from e
-    elif isinstance(timestamp_val, int | float):
-        timestamp = datetime.fromtimestamp(timestamp_val)
-    else:
-        raise WebhookVerificationError(f"Invalid timestamp type: {type(timestamp_val)}")
+        raise WebhookVerificationError(f"Invalid event type: {data['type']}") from e
 
     return WebhookPayload(
-        event=event,
-        job_id=job_id,
-        timestamp=timestamp,
+        object=data["object"],
+        id=data["id"],
+        type=event_type,
+        created_at=data["created_at"],
         data=data.get("data", {}),
-        metadata=data.get("metadata"),
     )
 
 
@@ -170,8 +181,10 @@ def parse_webhook_payload(payload: bytes | str) -> WebhookPayload:
 def fastapi_webhook_dependency(secret: str, max_age: int = 300) -> Any:
     """Create a FastAPI dependency for webhook verification.
 
+    Uses Standard Webhooks headers: webhook-id, webhook-timestamp, webhook-signature.
+
     Args:
-        secret: Webhook secret for signature verification.
+        secret: Webhook secret for signature verification (whsec_...).
         max_age: Maximum age in seconds for timestamp validation.
 
     Returns:
@@ -183,11 +196,11 @@ def fastapi_webhook_dependency(secret: str, max_age: int = 300) -> Any:
         from dalston import fastapi_webhook_dependency
 
         app = FastAPI()
-        verify_webhook = fastapi_webhook_dependency("your-secret")
+        verify_webhook = fastapi_webhook_dependency("whsec_...")
 
         @app.post("/webhooks/dalston")
         async def handle_webhook(payload: WebhookPayload = Depends(verify_webhook)):
-            if payload.event == WebhookEventType.JOB_COMPLETED:
+            if payload.type == WebhookEventType.TRANSCRIPTION_COMPLETED:
                 # Handle completion
                 pass
         ```
@@ -197,18 +210,21 @@ def fastapi_webhook_dependency(secret: str, max_age: int = 300) -> Any:
 
     async def verify(request: Request) -> WebhookPayload:
         body = await request.body()
-        signature = request.headers.get("X-Dalston-Signature", "")
-        timestamp = request.headers.get("X-Dalston-Timestamp", "")
 
-        if not signature or not timestamp:
+        # Standard Webhooks headers
+        signature = request.headers.get("webhook-signature", "")
+        msg_id = request.headers.get("webhook-id", "")
+        timestamp = request.headers.get("webhook-timestamp", "")
+
+        if not signature or not msg_id or not timestamp:
             raise HTTPException(
                 status_code=401,
-                detail="Missing signature or timestamp headers",
+                detail="Missing webhook headers (webhook-id, webhook-timestamp, webhook-signature)",
             )
 
         try:
             if not verify_webhook_signature(
-                body, signature, timestamp, secret, max_age
+                body, signature, msg_id, timestamp, secret, max_age
             ):
                 raise HTTPException(status_code=401, detail="Invalid signature")
         except WebhookVerificationError as e:
@@ -225,8 +241,10 @@ def fastapi_webhook_dependency(secret: str, max_age: int = 300) -> Any:
 def flask_verify_webhook(secret: str, max_age: int = 300) -> Any:
     """Create a Flask decorator for webhook verification.
 
+    Uses Standard Webhooks headers: webhook-id, webhook-timestamp, webhook-signature.
+
     Args:
-        secret: Webhook secret for signature verification.
+        secret: Webhook secret for signature verification (whsec_...).
         max_age: Maximum age in seconds for timestamp validation.
 
     Returns:
@@ -238,12 +256,12 @@ def flask_verify_webhook(secret: str, max_age: int = 300) -> Any:
         from dalston import flask_verify_webhook
 
         app = Flask(__name__)
-        verify = flask_verify_webhook("your-secret")
+        verify = flask_verify_webhook("whsec_...")
 
         @app.route("/webhooks/dalston", methods=["POST"])
         @verify
         def handle_webhook(payload: WebhookPayload):
-            if payload.event == WebhookEventType.JOB_COMPLETED:
+            if payload.type == WebhookEventType.TRANSCRIPTION_COMPLETED:
                 # Handle completion
                 pass
         ```
@@ -258,15 +276,18 @@ def flask_verify_webhook(secret: str, max_age: int = 300) -> Any:
             from flask import abort, request
 
             body = request.get_data()
-            signature = request.headers.get("X-Dalston-Signature", "")
-            timestamp = request.headers.get("X-Dalston-Timestamp", "")
 
-            if not signature or not timestamp:
-                abort(401, "Missing signature or timestamp headers")
+            # Standard Webhooks headers
+            signature = request.headers.get("webhook-signature", "")
+            msg_id = request.headers.get("webhook-id", "")
+            timestamp = request.headers.get("webhook-timestamp", "")
+
+            if not signature or not msg_id or not timestamp:
+                abort(401, "Missing webhook headers")
 
             try:
                 if not verify_webhook_signature(
-                    body, signature, timestamp, secret, max_age
+                    body, signature, msg_id, timestamp, secret, max_age
                 ):
                     abort(401, "Invalid signature")
             except WebhookVerificationError as e:

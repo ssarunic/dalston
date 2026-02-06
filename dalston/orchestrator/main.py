@@ -214,26 +214,23 @@ async def _handle_job_webhook(
     # Initialize webhook service for building payload
     webhook_service = WebhookService(secret=settings.webhook_secret)
 
-    # Get transcript data for completed jobs
-    text = None
+    # Get duration for completed jobs (lightweight payload - no text)
     duration = None
     if status == "completed":
         try:
             storage = StorageService(settings)
             transcript = await storage.get_transcript(job_id)
             if transcript:
-                text = transcript.get("text")
                 metadata = transcript.get("metadata", {})
                 duration = metadata.get("duration")
         except Exception as e:
             log.warning("failed_to_fetch_transcript_for_webhook", error=str(e))
 
-    # Build webhook payload
+    # Build webhook payload (Standard Webhooks format)
     payload = webhook_service.build_payload(
         event=event_type,
         job_id=job_id,
         status=status,
-        text=text,
         duration=duration,
         error=error,
         webhook_metadata=job.webhook_metadata,
@@ -243,7 +240,9 @@ async def _handle_job_webhook(
 
     # Create deliveries for registered endpoints
     endpoint_service = WebhookEndpointService()
-    endpoints = await endpoint_service.get_endpoints_for_event(db, job.tenant_id, event_type)
+    endpoints = await endpoint_service.get_endpoints_for_event(
+        db, job.tenant_id, event_type
+    )
 
     for endpoint in endpoints:
         await create_webhook_delivery(

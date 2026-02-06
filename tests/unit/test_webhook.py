@@ -1,5 +1,10 @@
-"""Unit tests for WebhookService."""
+"""Unit tests for WebhookService.
 
+Tests follow Standard Webhooks specification:
+https://github.com/standard-webhooks/standard-webhooks
+"""
+
+import base64
 import hashlib
 import hmac
 import json
@@ -29,54 +34,31 @@ def sample_job_id() -> UUID:
 
 
 class TestBuildPayload:
-    """Tests for payload building."""
+    """Tests for payload building (Standard Webhooks format)."""
 
     def test_completed_payload_basic(
         self, webhook_service: WebhookService, sample_job_id: UUID
     ):
-        """Test building a basic completed payload."""
+        """Test building a basic completed payload with Standard Webhooks envelope."""
         payload = webhook_service.build_payload(
             event="transcription.completed",
             job_id=sample_job_id,
             status="completed",
         )
 
-        assert payload["event"] == "transcription.completed"
-        assert payload["transcription_id"] == str(sample_job_id)
-        assert payload["status"] == "completed"
-        assert "timestamp" in payload
-        assert "text" not in payload
-        assert "duration" not in payload
-        assert "error" not in payload
-        assert "webhook_metadata" not in payload
+        # Standard Webhooks envelope fields
+        assert payload["object"] == "event"
+        assert payload["id"].startswith("evt_")
+        assert payload["type"] == "transcription.completed"
+        assert "created_at" in payload
+        assert isinstance(payload["created_at"], int)
 
-    def test_completed_payload_with_text(
-        self, webhook_service: WebhookService, sample_job_id: UUID
-    ):
-        """Test payload with transcript text."""
-        payload = webhook_service.build_payload(
-            event="transcription.completed",
-            job_id=sample_job_id,
-            status="completed",
-            text="Hello, this is a test transcript.",
-        )
-
-        assert payload["text"] == "Hello, this is a test transcript."
-
-    def test_text_truncation(
-        self, webhook_service: WebhookService, sample_job_id: UUID
-    ):
-        """Test that text is truncated to 500 characters."""
-        long_text = "x" * 1000
-        payload = webhook_service.build_payload(
-            event="transcription.completed",
-            job_id=sample_job_id,
-            status="completed",
-            text=long_text,
-        )
-
-        assert len(payload["text"]) == 500
-        assert payload["text"] == "x" * 500
+        # Event data in nested data object
+        assert payload["data"]["transcription_id"] == str(sample_job_id)
+        assert payload["data"]["status"] == "completed"
+        assert "duration" not in payload["data"]
+        assert "error" not in payload["data"]
+        assert "webhook_metadata" not in payload["data"]
 
     def test_completed_payload_with_duration(
         self, webhook_service: WebhookService, sample_job_id: UUID
@@ -89,7 +71,7 @@ class TestBuildPayload:
             duration=45.2,
         )
 
-        assert payload["duration"] == 45.2
+        assert payload["data"]["duration"] == 45.2
 
     def test_failed_payload_with_error(
         self, webhook_service: WebhookService, sample_job_id: UUID
@@ -102,9 +84,12 @@ class TestBuildPayload:
             error="Transcription engine failed: CUDA out of memory",
         )
 
-        assert payload["event"] == "transcription.failed"
-        assert payload["status"] == "failed"
-        assert payload["error"] == "Transcription engine failed: CUDA out of memory"
+        assert payload["type"] == "transcription.failed"
+        assert payload["data"]["status"] == "failed"
+        assert (
+            payload["data"]["error"]
+            == "Transcription engine failed: CUDA out of memory"
+        )
 
     def test_payload_with_webhook_metadata(
         self, webhook_service: WebhookService, sample_job_id: UUID
@@ -118,7 +103,7 @@ class TestBuildPayload:
             webhook_metadata=metadata,
         )
 
-        assert payload["webhook_metadata"] == metadata
+        assert payload["data"]["webhook_metadata"] == metadata
 
     def test_full_completed_payload(
         self, webhook_service: WebhookService, sample_job_id: UUID
@@ -129,35 +114,44 @@ class TestBuildPayload:
             event="transcription.completed",
             job_id=sample_job_id,
             status="completed",
-            text="Welcome to the show.",
             duration=120.5,
             webhook_metadata=metadata,
         )
 
-        assert payload["event"] == "transcription.completed"
-        assert payload["transcription_id"] == str(sample_job_id)
-        assert payload["status"] == "completed"
-        assert payload["text"] == "Welcome to the show."
-        assert payload["duration"] == 120.5
-        assert payload["webhook_metadata"] == metadata
-        assert "timestamp" in payload
+        # Standard Webhooks envelope
+        assert payload["object"] == "event"
+        assert payload["id"].startswith("evt_")
+        assert payload["type"] == "transcription.completed"
+        assert "created_at" in payload
+
+        # Event data
+        assert payload["data"]["transcription_id"] == str(sample_job_id)
+        assert payload["data"]["status"] == "completed"
+        assert payload["data"]["duration"] == 120.5
+        assert payload["data"]["webhook_metadata"] == metadata
 
 
 class TestSignPayload:
-    """Tests for HMAC signature generation."""
+    """Tests for HMAC signature generation (Standard Webhooks format)."""
 
     def test_sign_payload_format(self, webhook_service: WebhookService):
-        """Test signature has correct format."""
-        signature = webhook_service.sign_payload('{"test": "data"}', 1234567890)
-        assert signature.startswith("sha256=")
+        """Test signature has Standard Webhooks format (v1,base64)."""
+        signature = webhook_service.sign_payload(
+            '{"test": "data"}', "msg_abc123", 1234567890
+        )
+        assert signature.startswith("v1,")
+        # Verify base64 encoding is valid
+        sig_b64 = signature[3:]
+        base64.b64decode(sig_b64)  # Should not raise
 
     def test_sign_payload_consistent(self, webhook_service: WebhookService):
         """Test signature is consistent for same input."""
-        payload = '{"event": "transcription.completed"}'
+        payload = '{"type": "transcription.completed"}'
+        msg_id = "msg_test123"
         timestamp = 1234567890
 
-        sig1 = webhook_service.sign_payload(payload, timestamp)
-        sig2 = webhook_service.sign_payload(payload, timestamp)
+        sig1 = webhook_service.sign_payload(payload, msg_id, timestamp)
+        sig2 = webhook_service.sign_payload(payload, msg_id, timestamp)
 
         assert sig1 == sig2
 
@@ -165,10 +159,23 @@ class TestSignPayload:
         self, webhook_service: WebhookService
     ):
         """Test signature differs for different payloads."""
+        msg_id = "msg_test123"
         timestamp = 1234567890
 
-        sig1 = webhook_service.sign_payload('{"a": 1}', timestamp)
-        sig2 = webhook_service.sign_payload('{"a": 2}', timestamp)
+        sig1 = webhook_service.sign_payload('{"a": 1}', msg_id, timestamp)
+        sig2 = webhook_service.sign_payload('{"a": 2}', msg_id, timestamp)
+
+        assert sig1 != sig2
+
+    def test_sign_payload_different_for_different_msg_id(
+        self, webhook_service: WebhookService
+    ):
+        """Test signature differs for different message IDs."""
+        payload = '{"test": "data"}'
+        timestamp = 1234567890
+
+        sig1 = webhook_service.sign_payload(payload, "msg_abc", timestamp)
+        sig2 = webhook_service.sign_payload(payload, "msg_xyz", timestamp)
 
         assert sig1 != sig2
 
@@ -177,28 +184,30 @@ class TestSignPayload:
     ):
         """Test signature differs for different timestamps."""
         payload = '{"test": "data"}'
+        msg_id = "msg_test123"
 
-        sig1 = webhook_service.sign_payload(payload, 1234567890)
-        sig2 = webhook_service.sign_payload(payload, 1234567891)
+        sig1 = webhook_service.sign_payload(payload, msg_id, 1234567890)
+        sig2 = webhook_service.sign_payload(payload, msg_id, 1234567891)
 
         assert sig1 != sig2
 
     def test_signature_verification_roundtrip(self, webhook_service: WebhookService):
-        """Test that signature can be verified."""
-        payload = '{"event": "transcription.completed"}'
+        """Test that signature can be verified per Standard Webhooks spec."""
+        payload = '{"type": "transcription.completed"}'
+        msg_id = "msg_test123"
         timestamp = 1234567890
 
-        signature = webhook_service.sign_payload(payload, timestamp)
+        signature = webhook_service.sign_payload(payload, msg_id, timestamp)
 
-        # Verify manually
-        signed_payload = f"{timestamp}.{payload}"
+        # Verify manually using Standard Webhooks format: "{msg_id}.{timestamp}.{body}"
+        signed_payload = f"{msg_id}.{timestamp}.{payload}"
         expected = hmac.new(
             b"test-webhook-secret",
             signed_payload.encode(),
             hashlib.sha256,
-        ).hexdigest()
+        ).digest()
 
-        assert signature == f"sha256={expected}"
+        assert signature == f"v1,{base64.b64encode(expected).decode()}"
 
 
 class TestDifferentSecrets:
@@ -210,10 +219,11 @@ class TestDifferentSecrets:
         service2 = WebhookService(secret="secret-two")
 
         payload = '{"test": "data"}'
+        msg_id = "msg_test123"
         timestamp = 1234567890
 
-        sig1 = service1.sign_payload(payload, timestamp)
-        sig2 = service2.sign_payload(payload, timestamp)
+        sig1 = service1.sign_payload(payload, msg_id, timestamp)
+        sig2 = service2.sign_payload(payload, msg_id, timestamp)
 
         assert sig1 != sig2
 
@@ -239,10 +249,10 @@ class TestDeliver:
     async def test_deliver_includes_headers(
         self, webhook_service: WebhookService, httpx_mock
     ):
-        """Test that delivery includes required headers."""
+        """Test that delivery includes Standard Webhooks headers."""
         httpx_mock.add_response(status_code=200)
 
-        payload = {"event": "transcription.completed"}
+        payload = {"type": "transcription.completed"}
         await webhook_service.deliver(
             url="https://example.com/webhook",
             payload=payload,
@@ -251,9 +261,12 @@ class TestDeliver:
         request = httpx_mock.get_request()
         assert request is not None
         assert request.headers["Content-Type"] == "application/json"
-        assert "X-Dalston-Signature" in request.headers
-        assert request.headers["X-Dalston-Signature"].startswith("sha256=")
-        assert "X-Dalston-Timestamp" in request.headers
+        # Standard Webhooks headers
+        assert "webhook-signature" in request.headers
+        assert request.headers["webhook-signature"].startswith("v1,")
+        assert "webhook-timestamp" in request.headers
+        assert "webhook-id" in request.headers
+        assert request.headers["webhook-id"].startswith("msg_")
 
     async def test_deliver_failure_4xx_no_retry(
         self, webhook_service: WebhookService, httpx_mock

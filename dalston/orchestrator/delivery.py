@@ -7,10 +7,9 @@ with retry logic. This provides crash-resilient webhook delivery.
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
-
 import structlog
+from sqlalchemy import and_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.config import Settings
 from dalston.db.models import WebhookDeliveryModel, WebhookEndpointModel
@@ -101,15 +100,20 @@ class DeliveryWorker:
             )
 
             # Process deliveries concurrently
-            tasks = [
-                self._process_delivery(db, delivery)
-                for delivery in deliveries
-            ]
-            await asyncio.gather(*tasks, return_exceptions=True)
+            tasks = [self._process_delivery(db, delivery) for delivery in deliveries]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _process_delivery(
-        self, db: AsyncSession, delivery: WebhookDeliveryModel
-    ):
+            # Log any exceptions that were caught
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.error(
+                        "delivery_task_exception",
+                        delivery_id=str(deliveries[i].id),
+                        error=str(result),
+                        error_type=type(result).__name__,
+                    )
+
+    async def _process_delivery(self, db: AsyncSession, delivery: WebhookDeliveryModel):
         """Process a single delivery attempt."""
         log = logger.bind(
             delivery_id=str(delivery.id),

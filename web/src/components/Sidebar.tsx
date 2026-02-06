@@ -7,6 +7,7 @@ import {
   Radio,
   Server,
   Key,
+  Webhook,
   LogOut,
 } from 'lucide-react'
 
@@ -16,6 +17,7 @@ const navItems = [
   { to: '/realtime', icon: Radio, label: 'Realtime' },
   { to: '/engines', icon: Server, label: 'Engines' },
   { to: '/keys', icon: Key, label: 'API Keys' },
+  { to: '/webhooks', icon: Webhook, label: 'Webhooks' },
 ]
 
 export function Sidebar() {

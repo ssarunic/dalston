@@ -4,7 +4,9 @@ import type {
   APIKeyListResponse,
   ConsoleJobListResponse,
   CreateAPIKeyRequest,
+  CreateWebhookRequest,
   DashboardResponse,
+  DeliveryListResponse,
   EnginesResponse,
   HealthResponse,
   JobDetail,
@@ -12,6 +14,9 @@ import type {
   RealtimeStatusResponse,
   TaskArtifact,
   TaskListResponse,
+  UpdateWebhookRequest,
+  WebhookEndpointCreated,
+  WebhookEndpointListResponse,
 } from './types'
 
 // Create a ky instance with optional auth
@@ -128,4 +133,39 @@ export const apiClient = {
 
   revokeApiKey: (keyId: string) =>
     currentClient.delete(`auth/keys/${keyId}`),
+
+  // Webhook management
+  getWebhooks: (isActive?: boolean) => {
+    const searchParams = new URLSearchParams()
+    if (isActive !== undefined) searchParams.set('is_active', String(isActive))
+    return currentClient.get('v1/webhooks', { searchParams }).json<WebhookEndpointListResponse>()
+  },
+
+  createWebhook: (request: CreateWebhookRequest) =>
+    currentClient.post('v1/webhooks', { json: request }).json<WebhookEndpointCreated>(),
+
+  updateWebhook: (id: string, request: UpdateWebhookRequest) =>
+    currentClient.patch(`v1/webhooks/${id}`, { json: request }).json<WebhookEndpointCreated>(),
+
+  deleteWebhook: (id: string) =>
+    currentClient.delete(`v1/webhooks/${id}`),
+
+  rotateWebhookSecret: (id: string) =>
+    currentClient.post(`v1/webhooks/${id}/rotate-secret`).json<WebhookEndpointCreated>(),
+
+  getWebhookDeliveries: (
+    endpointId: string,
+    params: { status?: string; limit?: number; offset?: number } = {}
+  ) => {
+    const searchParams = new URLSearchParams()
+    if (params.status) searchParams.set('status', params.status)
+    if (params.limit) searchParams.set('limit', String(params.limit))
+    if (params.offset) searchParams.set('offset', String(params.offset))
+    return currentClient
+      .get(`v1/webhooks/${endpointId}/deliveries`, { searchParams })
+      .json<DeliveryListResponse>()
+  },
+
+  retryWebhookDelivery: (endpointId: string, deliveryId: string) =>
+    currentClient.post(`v1/webhooks/${endpointId}/deliveries/${deliveryId}/retry`).json(),
 }
