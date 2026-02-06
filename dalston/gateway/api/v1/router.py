@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from dalston.gateway.api.v1 import (
     jobs,
+    models,
     realtime,
     speech_to_text,
     tasks,
@@ -12,6 +13,9 @@ from dalston.gateway.api.v1 import (
 )
 
 router = APIRouter(prefix="/v1")
+
+# Mount model discovery routes
+router.include_router(models.router)
 
 # Mount transcription routes (Dalston native API)
 router.include_router(transcription.router)

@@ -15,6 +15,7 @@ import structlog
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from dalston.common.models import MODEL_ALIASES, MODEL_REGISTRY, resolve_model
 from dalston.gateway.dependencies import (
     RequireJobsRead,
     get_auth_service,
@@ -42,7 +43,9 @@ management_router = APIRouter(prefix="/realtime", tags=["realtime"])
 async def realtime_transcription(
     websocket: WebSocket,
     language: Annotated[str, Query(description="Language code or 'auto'")] = "auto",
-    model: Annotated[str, Query(description="Model: 'fast' or 'accurate'")] = "fast",
+    model: Annotated[
+        str, Query(description="Model ID or alias (e.g., whisper-large-v3, fast, accurate)")
+    ] = "fast",
     encoding: Annotated[str, Query(description="Audio encoding")] = "pcm_s16le",
     sample_rate: Annotated[int, Query(description="Sample rate in Hz")] = 16000,
     enable_vad: Annotated[bool, Query(description="Enable VAD events")] = True,
@@ -97,13 +100,28 @@ async def realtime_transcription(
     # Accept WebSocket connection after successful auth
     await websocket.accept()
 
+    # Validate model parameter using model registry
+    try:
+        model_def = resolve_model(model)
+        resolved_model = model_def.id
+    except ValueError as e:
+        await websocket.send_json(
+            {
+                "type": "error",
+                "code": "invalid_model",
+                "message": str(e),
+            }
+        )
+        await websocket.close(code=4400, reason="Invalid model")
+        return
+
     # Get client IP for logging
     client_ip = websocket.client.host if websocket.client else "unknown"
 
-    # Acquire worker from Session Router
+    # Acquire worker from Session Router (use resolved model ID)
     allocation = await session_router.acquire_worker(
         language=language,
-        model=model,
+        model=resolved_model,
         client_ip=client_ip,
         enhance_on_end=enhance_on_end,
     )
@@ -137,7 +155,7 @@ async def realtime_transcription(
             worker_endpoint=allocation.endpoint,
             session_id=allocation.session_id,
             language=language,
-            model=model,
+            model=resolved_model,
             encoding=encoding,
             sample_rate=sample_rate,
             enable_vad=enable_vad,

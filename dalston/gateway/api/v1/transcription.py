@@ -28,7 +28,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.events import publish_job_created
-from dalston.common.models import JobStatus
+from dalston.common.models import DEFAULT_MODEL, JobStatus, resolve_model
 from dalston.common.utils import compute_duration_ms
 from dalston.config import WEBHOOK_METADATA_MAX_SIZE, Settings
 from dalston.gateway.dependencies import (
@@ -66,6 +66,12 @@ async def create_transcription(
     response: Response,
     file: Annotated[UploadFile, File(description="Audio file to transcribe")],
     api_key: RequireJobsWrite,
+    model: Annotated[
+        str,
+        Form(
+            description="Transcription model (e.g., whisper-large-v3, whisper-base, fast)"
+        ),
+    ] = DEFAULT_MODEL,
     language: Annotated[
         str, Form(description="Language code or 'auto' for detection")
     ] = "auto",
@@ -117,6 +123,19 @@ async def create_transcription(
             "webhook_url parameter is deprecated. Use registered webhooks via POST /v1/webhooks."
         )
 
+    # Validate and resolve model
+    try:
+        model_def = resolve_model(model)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "type": "invalid_request_error",
+                "message": str(e),
+                "param": "model",
+            },
+        )
+
     # Parse webhook_metadata JSON string
     parsed_webhook_metadata: dict | None = None
     if webhook_metadata:
@@ -139,8 +158,13 @@ async def create_transcription(
                 detail=f"Invalid JSON in webhook_metadata: {e}",
             ) from e
 
-    # Build parameters
+    # Build parameters with resolved model info
     parameters = {
+        "model": model_def.id,
+        "engine_transcribe": model_def.engine,
+        "transcribe_config": {
+            "model": model_def.engine_model,
+        },
         "language": language,
         "speaker_detection": speaker_detection,
         "num_speakers": num_speakers,

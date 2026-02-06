@@ -130,16 +130,29 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
         diarize_config["exclusive"] = True
 
     # Build transcription config from parameters
-    transcribe_config = {
-        "model": parameters.get("model", DEFAULT_TRANSCRIBE_CONFIG["model"]),
-        "language": parameters.get("language", DEFAULT_TRANSCRIBE_CONFIG["language"]),
-        "beam_size": parameters.get(
-            "beam_size", DEFAULT_TRANSCRIBE_CONFIG["beam_size"]
-        ),
-        "vad_filter": parameters.get(
-            "vad_filter", DEFAULT_TRANSCRIBE_CONFIG["vad_filter"]
-        ),
-    }
+    # Gateway may pass pre-built transcribe_config (from model registry)
+    if "transcribe_config" in parameters:
+        transcribe_config = {
+            **DEFAULT_TRANSCRIBE_CONFIG,
+            **parameters["transcribe_config"],
+        }
+        # Override language from top-level if provided
+        if parameters.get("language"):
+            transcribe_config["language"] = parameters["language"]
+    else:
+        # Legacy: build from top-level parameters
+        transcribe_config = {
+            "model": parameters.get("model", DEFAULT_TRANSCRIBE_CONFIG["model"]),
+            "language": parameters.get(
+                "language", DEFAULT_TRANSCRIBE_CONFIG["language"]
+            ),
+            "beam_size": parameters.get(
+                "beam_size", DEFAULT_TRANSCRIBE_CONFIG["beam_size"]
+            ),
+            "vad_filter": parameters.get(
+                "vad_filter", DEFAULT_TRANSCRIBE_CONFIG["vad_filter"]
+            ),
+        }
 
     tasks = []
     diarize_task = None  # Track diarize task for merge dependencies
