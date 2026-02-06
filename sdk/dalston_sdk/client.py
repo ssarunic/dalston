@@ -35,6 +35,9 @@ from .types import (
     JobList,
     JobStatus,
     JobSummary,
+    Model,
+    ModelCapabilities,
+    ModelList,
     RealtimeStatus,
     Segment,
     SessionToken,
@@ -241,6 +244,7 @@ class Dalston:
         self,
         file: str | Path | BinaryIO | None = None,
         audio_url: str | None = None,
+        model: str = "whisper-large-v3",
         language: str = "auto",
         speaker_detection: SpeakerDetection | str = SpeakerDetection.NONE,
         num_speakers: int | None = None,
@@ -253,6 +257,8 @@ class Dalston:
         Args:
             file: Path to audio file, or file-like object.
             audio_url: URL to fetch audio from (alternative to file).
+            model: Transcription model ID or alias (e.g., "whisper-large-v3",
+                   "whisper-base", "fast", "accurate"). Defaults to "whisper-large-v3".
             language: Language code or "auto" for detection.
             speaker_detection: Speaker detection mode.
             num_speakers: Expected number of speakers (for diarization).
@@ -264,7 +270,7 @@ class Dalston:
             Job object with ID and initial status.
 
         Raises:
-            ValidationError: If neither file nor audio_url provided.
+            ValidationError: If neither file nor audio_url provided, or invalid model.
             DalstonError: On API errors.
         """
         if file is None and audio_url is None:
@@ -272,6 +278,7 @@ class Dalston:
 
         # Build form data
         data: dict[str, Any] = {
+            "model": model,
             "language": language,
             "speaker_detection": (
                 speaker_detection.value
@@ -535,6 +542,87 @@ class Dalston:
         data = response.json()
         return HealthStatus(status=data.get("status", "unknown"))
 
+    def list_models(self) -> ModelList:
+        """List available transcription models.
+
+        Returns:
+            ModelList with available models and aliases.
+
+        Raises:
+            ConnectionError: If server is unreachable.
+        """
+        try:
+            response = self._client.get(
+                f"{self.base_url}/v1/models",
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        data = response.json()
+        models = [
+            Model(
+                id=m["id"],
+                name=m["name"],
+                description=m["description"],
+                capabilities=ModelCapabilities(
+                    languages=m["capabilities"]["languages"],
+                    streaming=m["capabilities"]["streaming"],
+                    word_timestamps=m["capabilities"]["word_timestamps"],
+                ),
+                tier=m["tier"],
+            )
+            for m in data.get("data", [])
+        ]
+        return ModelList(
+            models=models,
+            aliases=data.get("aliases", {}),
+        )
+
+    def get_model(self, model_id: str) -> Model:
+        """Get details for a specific model.
+
+        Args:
+            model_id: Model identifier or alias.
+
+        Returns:
+            Model with full details.
+
+        Raises:
+            NotFoundError: If model doesn't exist.
+            ConnectionError: If server is unreachable.
+        """
+        try:
+            response = self._client.get(
+                f"{self.base_url}/v1/models/{model_id}",
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        m = response.json()
+        return Model(
+            id=m["id"],
+            name=m["name"],
+            description=m["description"],
+            capabilities=ModelCapabilities(
+                languages=m["capabilities"]["languages"],
+                streaming=m["capabilities"]["streaming"],
+                word_timestamps=m["capabilities"]["word_timestamps"],
+            ),
+            tier=m["tier"],
+        )
+
     def get_realtime_status(self) -> RealtimeStatus:
         """Get real-time transcription system status.
 
@@ -682,6 +770,7 @@ class AsyncDalston:
         self,
         file: str | Path | BinaryIO | None = None,
         audio_url: str | None = None,
+        model: str = "whisper-large-v3",
         language: str = "auto",
         speaker_detection: SpeakerDetection | str = SpeakerDetection.NONE,
         num_speakers: int | None = None,
@@ -694,6 +783,8 @@ class AsyncDalston:
         Args:
             file: Path to audio file, or file-like object.
             audio_url: URL to fetch audio from (alternative to file).
+            model: Transcription model ID or alias (e.g., "whisper-large-v3",
+                   "whisper-base", "fast", "accurate"). Defaults to "whisper-large-v3".
             language: Language code or "auto" for detection.
             speaker_detection: Speaker detection mode.
             num_speakers: Expected number of speakers (for diarization).
@@ -709,6 +800,7 @@ class AsyncDalston:
 
         # Build form data
         data: dict[str, Any] = {
+            "model": model,
             "language": language,
             "speaker_detection": (
                 speaker_detection.value
@@ -961,6 +1053,87 @@ class AsyncDalston:
 
         data = response.json()
         return HealthStatus(status=data.get("status", "unknown"))
+
+    async def list_models(self) -> ModelList:
+        """List available transcription models.
+
+        Returns:
+            ModelList with available models and aliases.
+
+        Raises:
+            ConnectionError: If server is unreachable.
+        """
+        try:
+            response = await self._client.get(
+                f"{self.base_url}/v1/models",
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        data = response.json()
+        models = [
+            Model(
+                id=m["id"],
+                name=m["name"],
+                description=m["description"],
+                capabilities=ModelCapabilities(
+                    languages=m["capabilities"]["languages"],
+                    streaming=m["capabilities"]["streaming"],
+                    word_timestamps=m["capabilities"]["word_timestamps"],
+                ),
+                tier=m["tier"],
+            )
+            for m in data.get("data", [])
+        ]
+        return ModelList(
+            models=models,
+            aliases=data.get("aliases", {}),
+        )
+
+    async def get_model(self, model_id: str) -> Model:
+        """Get details for a specific model.
+
+        Args:
+            model_id: Model identifier or alias.
+
+        Returns:
+            Model with full details.
+
+        Raises:
+            NotFoundError: If model doesn't exist.
+            ConnectionError: If server is unreachable.
+        """
+        try:
+            response = await self._client.get(
+                f"{self.base_url}/v1/models/{model_id}",
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        m = response.json()
+        return Model(
+            id=m["id"],
+            name=m["name"],
+            description=m["description"],
+            capabilities=ModelCapabilities(
+                languages=m["capabilities"]["languages"],
+                streaming=m["capabilities"]["streaming"],
+                word_timestamps=m["capabilities"]["word_timestamps"],
+            ),
+            tier=m["tier"],
+        )
 
     async def get_realtime_status(self) -> RealtimeStatus:
         """Get real-time transcription system status.

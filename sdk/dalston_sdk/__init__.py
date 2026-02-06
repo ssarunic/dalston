@@ -62,6 +62,9 @@ from .types import (
     JobList,
     JobStatus,
     JobSummary,
+    Model,
+    ModelCapabilities,
+    ModelList,
     RealtimeError,
     RealtimeMessage,
     RealtimeMessageType,
@@ -119,6 +122,10 @@ __all__ = [
     "Job",
     "JobSummary",
     "JobList",
+    # Model types
+    "Model",
+    "ModelCapabilities",
+    "ModelList",
     # Real-time types
     "SessionBegin",
     "SessionEnd",

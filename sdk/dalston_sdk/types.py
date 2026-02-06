@@ -343,3 +343,36 @@ class SessionToken:
     expires_at: datetime
     scopes: list[str]
     tenant_id: UUID
+
+
+# -----------------------------------------------------------------------------
+# Model Types
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class ModelCapabilities:
+    """Model capabilities and features."""
+
+    languages: int  # Number of supported languages (1 = English-only)
+    streaming: bool  # Supports real-time streaming
+    word_timestamps: bool  # Supports word-level timestamps
+
+
+@dataclass
+class Model:
+    """Transcription model information."""
+
+    id: str  # Model identifier (e.g., "whisper-large-v3")
+    name: str  # Human-readable name
+    description: str  # Brief description
+    capabilities: ModelCapabilities
+    tier: str  # "fast", "balanced", or "accurate"
+
+
+@dataclass
+class ModelList:
+    """List of available models."""
+
+    models: list[Model]
+    aliases: dict[str, str]  # Alias mappings (e.g., "fast" -> "distil-whisper")

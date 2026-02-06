@@ -29,6 +29,14 @@ def transcribe(
             help="Audio files to transcribe.",
         ),
     ],
+    model: Annotated[
+        str,
+        typer.Option(
+            "--model",
+            "-m",
+            help="Transcription model (e.g., whisper-large-v3, whisper-base, fast, accurate).",
+        ),
+    ] = "whisper-large-v3",
     language: Annotated[
         str,
         typer.Option(
@@ -110,6 +118,10 @@ def transcribe(
         dalston transcribe large.mp3 --no-wait --json
 
         dalston transcribe *.mp3 -f json -o transcripts/
+
+        dalston transcribe audio.mp3 --model whisper-base  # Use faster model
+
+        dalston transcribe audio.mp3 -m fast  # Use 'fast' alias (distil-whisper)
     """
     client = state.client
     quiet = state.quiet
@@ -146,6 +158,7 @@ def transcribe(
             # Submit job
             job = client.transcribe(
                 file=str(file_path),
+                model=model,
                 language=language,
                 speaker_detection=speaker_detection,
                 num_speakers=num_speakers,
