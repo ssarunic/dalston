@@ -45,7 +45,9 @@ def get_webhook_endpoint_service() -> WebhookEndpointService:
 class CreateWebhookRequest(BaseModel):
     """Request body for creating a webhook endpoint."""
 
-    url: HttpUrl = Field(description="Webhook callback URL (must be HTTPS in production)")
+    url: HttpUrl = Field(
+        description="Webhook callback URL (must be HTTPS in production)"
+    )
     events: list[str] = Field(
         description=f"Event types to subscribe to. Allowed: {', '.join(sorted(ALLOWED_EVENTS))}"
     )
@@ -58,8 +60,12 @@ class UpdateWebhookRequest(BaseModel):
     """Request body for updating a webhook endpoint."""
 
     url: HttpUrl | None = Field(default=None, description="New callback URL")
-    events: list[str] | None = Field(default=None, description="New event subscriptions")
-    description: str | None = Field(default=None, max_length=255, description="New description")
+    events: list[str] | None = Field(
+        default=None, description="New event subscriptions"
+    )
+    description: str | None = Field(
+        default=None, max_length=255, description="New description"
+    )
     is_active: bool | None = Field(default=None, description="Enable/disable endpoint")
 
 
@@ -76,6 +82,18 @@ class WebhookEndpointResponse(BaseModel):
     events: list[str]
     description: str | None
     is_active: bool
+    disabled_reason: str | None = Field(
+        default=None,
+        description="Reason for disabled status: 'auto_disabled' or null",
+    )
+    consecutive_failures: int = Field(
+        default=0,
+        description="Number of consecutive failed deliveries",
+    )
+    last_success_at: datetime | None = Field(
+        default=None,
+        description="Timestamp of last successful delivery",
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -154,6 +172,9 @@ async def create_webhook_endpoint(
         events=endpoint.events,
         description=endpoint.description,
         is_active=endpoint.is_active,
+        disabled_reason=endpoint.disabled_reason,
+        consecutive_failures=endpoint.consecutive_failures,
+        last_success_at=endpoint.last_success_at,
         created_at=endpoint.created_at,
         updated_at=endpoint.updated_at,
         signing_secret=raw_secret,
@@ -168,7 +189,9 @@ async def create_webhook_endpoint(
 )
 async def list_webhook_endpoints(
     api_key: RequireWebhooks,
-    is_active: Annotated[bool | None, Query(description="Filter by active status")] = None,
+    is_active: Annotated[
+        bool | None, Query(description="Filter by active status")
+    ] = None,
     db: AsyncSession = Depends(get_db),
     service: WebhookEndpointService = Depends(get_webhook_endpoint_service),
 ) -> WebhookEndpointListResponse:
@@ -186,6 +209,9 @@ async def list_webhook_endpoints(
                 events=e.events,
                 description=e.description,
                 is_active=e.is_active,
+                disabled_reason=e.disabled_reason,
+                consecutive_failures=e.consecutive_failures,
+                last_success_at=e.last_success_at,
                 created_at=e.created_at,
                 updated_at=e.updated_at,
             )
@@ -221,6 +247,9 @@ async def get_webhook_endpoint(
         events=endpoint.events,
         description=endpoint.description,
         is_active=endpoint.is_active,
+        disabled_reason=endpoint.disabled_reason,
+        consecutive_failures=endpoint.consecutive_failures,
+        last_success_at=endpoint.last_success_at,
         created_at=endpoint.created_at,
         updated_at=endpoint.updated_at,
     )
@@ -262,6 +291,9 @@ async def update_webhook_endpoint(
         events=endpoint.events,
         description=endpoint.description,
         is_active=endpoint.is_active,
+        disabled_reason=endpoint.disabled_reason,
+        consecutive_failures=endpoint.consecutive_failures,
+        last_success_at=endpoint.last_success_at,
         created_at=endpoint.created_at,
         updated_at=endpoint.updated_at,
     )
@@ -317,6 +349,9 @@ async def rotate_webhook_secret(
         events=endpoint.events,
         description=endpoint.description,
         is_active=endpoint.is_active,
+        disabled_reason=endpoint.disabled_reason,
+        consecutive_failures=endpoint.consecutive_failures,
+        last_success_at=endpoint.last_success_at,
         created_at=endpoint.created_at,
         updated_at=endpoint.updated_at,
         signing_secret=raw_secret,

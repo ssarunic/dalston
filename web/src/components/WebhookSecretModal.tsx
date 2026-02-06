@@ -118,14 +118,19 @@ export function WebhookSecretModal({ webhook, onClose, isRotation }: WebhookSecr
 
           {/* Verification Example */}
           <div>
-            <p className="text-sm font-medium text-muted-foreground mb-2">Signature Verification</p>
+            <p className="text-sm font-medium text-muted-foreground mb-2">Signature Verification (Standard Webhooks)</p>
             <div className="bg-muted p-3 rounded-md">
               <code className="text-xs break-all">
-                # Verify: sha256(timestamp + &quot;.&quot; + payload) using HMAC
+                # Headers sent with each webhook:
                 <br />
-                X-Dalston-Signature: sha256=...
+                webhook-id: msg_abc123...
                 <br />
-                X-Dalston-Timestamp: 1234567890
+                webhook-timestamp: 1234567890
+                <br />
+                webhook-signature: v1,{'{base64}'}
+                <br />
+                <br />
+                # Verify: HMAC-SHA256(&quot;{'{msg_id}.{timestamp}.{body}'}&quot;)
               </code>
             </div>
           </div>

@@ -239,6 +239,9 @@ export interface WebhookEndpoint {
   events: string[]
   description: string | null
   is_active: boolean
+  disabled_reason: string | null
+  consecutive_failures: number
+  last_success_at: string | null
   created_at: string
   updated_at: string
 }

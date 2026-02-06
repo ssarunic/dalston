@@ -162,15 +162,29 @@ export function WebhookDetail() {
             </div>
             <div>
               <p className="text-sm font-medium text-muted-foreground">Status</p>
-              <div className="mt-1">
+              <div className="mt-1 flex flex-col gap-1">
                 {webhook.is_active ? (
-                  <Badge variant="outline" className="bg-green-500/10 text-green-500">
+                  <Badge variant="outline" className="bg-green-500/10 text-green-500 w-fit">
                     Active
                   </Badge>
+                ) : webhook.disabled_reason === 'auto_disabled' ? (
+                  <Badge variant="outline" className="bg-orange-500/10 text-orange-500 border-orange-500/20 w-fit">
+                    Auto-disabled
+                  </Badge>
                 ) : (
-                  <Badge variant="outline" className="bg-gray-500/10 text-gray-500">
+                  <Badge variant="outline" className="bg-gray-500/10 text-gray-500 w-fit">
                     Inactive
                   </Badge>
+                )}
+                {webhook.consecutive_failures > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    {webhook.consecutive_failures} consecutive failure{webhook.consecutive_failures !== 1 ? 's' : ''}
+                  </span>
+                )}
+                {webhook.last_success_at && (
+                  <span className="text-xs text-muted-foreground">
+                    Last success: {formatTimeAgo(webhook.last_success_at)}
+                  </span>
                 )}
               </div>
             </div>

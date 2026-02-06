@@ -23,6 +23,10 @@ MAX_ATTEMPTS = 5
 POLL_INTERVAL = 2.0  # seconds
 MAX_CONCURRENT = 10
 
+# Auto-disable thresholds (ElevenLabs style)
+AUTO_DISABLE_FAILURE_THRESHOLD = 10  # consecutive failures
+AUTO_DISABLE_SUCCESS_WINDOW_DAYS = 7  # last success must be within this window
+
 
 class DeliveryWorker:
     """Worker that polls and delivers pending webhooks."""
@@ -174,6 +178,12 @@ class DeliveryWorker:
             delivery.status = "success"
             delivery.next_retry_at = None
             log.info("webhook_delivered_successfully", status_code=status_code)
+
+            # Reset endpoint failure tracking on success
+            if delivery.endpoint_id and endpoint:
+                endpoint.consecutive_failures = 0
+                endpoint.last_success_at = datetime.now(UTC)
+
         elif delivery.attempts >= MAX_ATTEMPTS:
             delivery.status = "failed"
             delivery.next_retry_at = None
@@ -182,6 +192,12 @@ class DeliveryWorker:
                 total_attempts=delivery.attempts,
                 last_error=error,
             )
+
+            # Increment endpoint failure count and check auto-disable
+            if delivery.endpoint_id and endpoint:
+                endpoint.consecutive_failures += 1
+                await self._check_auto_disable(endpoint, log)
+
         else:
             # Schedule retry
             delay = RETRY_DELAYS[min(delivery.attempts, len(RETRY_DELAYS) - 1)]
@@ -193,6 +209,37 @@ class DeliveryWorker:
             )
 
         await db.commit()
+
+    async def _check_auto_disable(self, endpoint: WebhookEndpointModel, log) -> None:
+        """Check if endpoint should be auto-disabled due to repeated failures.
+
+        Auto-disables when:
+        - 10+ consecutive failures AND
+        - Never had a successful delivery OR last success was > 7 days ago
+        """
+        if endpoint.consecutive_failures < AUTO_DISABLE_FAILURE_THRESHOLD:
+            return
+
+        # Check if last success was within the window
+        if endpoint.last_success_at:
+            window_start = datetime.now(UTC) - timedelta(
+                days=AUTO_DISABLE_SUCCESS_WINDOW_DAYS
+            )
+            if endpoint.last_success_at > window_start:
+                # Had a recent success, don't auto-disable
+                return
+
+        # Auto-disable the endpoint
+        endpoint.is_active = False
+        endpoint.disabled_reason = "auto_disabled"
+        log.warning(
+            "webhook_endpoint_auto_disabled",
+            endpoint_id=str(endpoint.id),
+            consecutive_failures=endpoint.consecutive_failures,
+            last_success_at=str(endpoint.last_success_at)
+            if endpoint.last_success_at
+            else None,
+        )
 
 
 async def create_webhook_delivery(

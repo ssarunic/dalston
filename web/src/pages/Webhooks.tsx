@@ -69,7 +69,7 @@ function truncateUrl(url: string, maxLength = 50): string {
 }
 
 export function Webhooks() {
-  const [showInactive, setShowInactive] = useState(false)
+  const [showInactive, setShowInactive] = useState(true)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [createdWebhook, setCreatedWebhook] = useState<WebhookEndpointCreated | null>(null)
   const [rotatedWebhook, setRotatedWebhook] = useState<WebhookEndpointCreated | null>(null)
@@ -206,15 +206,26 @@ export function Webhooks() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      {webhook.is_active ? (
-                        <Badge variant="outline" className="text-xs bg-green-500/10 text-green-500">
-                          Active
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-xs bg-gray-500/10 text-gray-500">
-                          Inactive
-                        </Badge>
-                      )}
+                      <div className="flex flex-col gap-1">
+                        {webhook.is_active ? (
+                          <Badge variant="outline" className="text-xs bg-green-500/10 text-green-500">
+                            Active
+                          </Badge>
+                        ) : webhook.disabled_reason === 'auto_disabled' ? (
+                          <Badge variant="outline" className="text-xs bg-orange-500/10 text-orange-500 border-orange-500/20">
+                            Auto-disabled
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-xs bg-gray-500/10 text-gray-500">
+                            Inactive
+                          </Badge>
+                        )}
+                        {webhook.consecutive_failures > 0 && (
+                          <span className="text-xs text-muted-foreground">
+                            {webhook.consecutive_failures} consecutive failure{webhook.consecutive_failures !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {formatTimeAgo(webhook.created_at)}
