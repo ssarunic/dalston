@@ -14,9 +14,11 @@ from fastapi.testclient import TestClient
 from dalston.db.models import WebhookDeliveryModel, WebhookEndpointModel
 from dalston.gateway.api.v1.webhooks import (
     get_webhook_endpoint_service,
+)
+from dalston.gateway.api.v1.webhooks import (
     router as webhooks_router,
 )
-from dalston.gateway.services.auth import APIKey, DEFAULT_EXPIRES_AT, Scope
+from dalston.gateway.services.auth import DEFAULT_EXPIRES_AT, APIKey, Scope
 from dalston.gateway.services.webhook import WebhookValidationError
 from dalston.gateway.services.webhook_endpoints import WebhookEndpointService
 
@@ -73,6 +75,9 @@ class TestCreateWebhookEndpoint:
             events=["transcription.completed"],
             signing_secret="whsec_testsecret123",
             is_active=True,
+            consecutive_failures=0,
+            last_success_at=None,
+            disabled_reason=None,
             created_at=created_at,
             updated_at=created_at,
         )
@@ -193,6 +198,9 @@ class TestListWebhookEndpoints:
                 events=["transcription.completed"],
                 signing_secret="whsec_secret1",
                 is_active=True,
+                consecutive_failures=0,
+                last_success_at=None,
+                disabled_reason=None,
                 created_at=now,
                 updated_at=now,
             ),
@@ -204,6 +212,9 @@ class TestListWebhookEndpoints:
                 events=["*"],
                 signing_secret="whsec_secret2",
                 is_active=False,
+                consecutive_failures=10,
+                last_success_at=None,
+                disabled_reason="auto_disabled",
                 created_at=now,
                 updated_at=now,
             ),
@@ -283,6 +294,9 @@ class TestGetWebhookEndpoint:
             events=["transcription.completed", "transcription.failed"],
             signing_secret="whsec_secret",
             is_active=True,
+            consecutive_failures=0,
+            last_success_at=None,
+            disabled_reason=None,
             created_at=now,
             updated_at=now,
         )
@@ -415,6 +429,9 @@ class TestRotateSecret:
             events=["transcription.completed"],
             signing_secret="whsec_newsecret456",
             is_active=True,
+            consecutive_failures=0,
+            last_success_at=None,
+            disabled_reason=None,
             created_at=now,
             updated_at=now,
         )

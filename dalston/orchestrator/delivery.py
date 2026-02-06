@@ -8,7 +8,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import structlog
-from sqlalchemy import and_, select
+from sqlalchemy import and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.config import Settings
@@ -125,6 +125,19 @@ class DeliveryWorker:
             attempts=delivery.attempts,
         )
 
+        try:
+            await self._do_delivery(db, delivery, log)
+        except Exception as e:
+            await db.rollback()
+            log.error(
+                "delivery_processing_error", error=str(e), error_type=type(e).__name__
+            )
+            raise
+
+    async def _do_delivery(self, db: AsyncSession, delivery: WebhookDeliveryModel, log):
+        """Execute the actual delivery logic within a transaction."""
+        endpoint = None
+
         # Determine URL and secret
         if delivery.endpoint_id:
             # Registered endpoint - get URL and secret from endpoint
@@ -179,10 +192,16 @@ class DeliveryWorker:
             delivery.next_retry_at = None
             log.info("webhook_delivered_successfully", status_code=status_code)
 
-            # Reset endpoint failure tracking on success
+            # Reset endpoint failure tracking on success (atomic update to prevent races)
             if delivery.endpoint_id and endpoint:
-                endpoint.consecutive_failures = 0
-                endpoint.last_success_at = datetime.now(UTC)
+                await db.execute(
+                    update(WebhookEndpointModel)
+                    .where(WebhookEndpointModel.id == endpoint.id)
+                    .values(
+                        consecutive_failures=0,
+                        last_success_at=datetime.now(UTC),
+                    )
+                )
 
         elif delivery.attempts >= MAX_ATTEMPTS:
             delivery.status = "failed"
@@ -193,10 +212,19 @@ class DeliveryWorker:
                 last_error=error,
             )
 
-            # Increment endpoint failure count and check auto-disable
+            # Increment endpoint failure count atomically and check auto-disable
             if delivery.endpoint_id and endpoint:
-                endpoint.consecutive_failures += 1
-                await self._check_auto_disable(endpoint, log)
+                await db.execute(
+                    update(WebhookEndpointModel)
+                    .where(WebhookEndpointModel.id == endpoint.id)
+                    .values(
+                        consecutive_failures=WebhookEndpointModel.consecutive_failures
+                        + 1,
+                    )
+                )
+                # Refresh endpoint to get updated failure count for auto-disable check
+                await db.refresh(endpoint)
+                await self._check_auto_disable(db, endpoint, log)
 
         else:
             # Schedule retry
@@ -210,7 +238,9 @@ class DeliveryWorker:
 
         await db.commit()
 
-    async def _check_auto_disable(self, endpoint: WebhookEndpointModel, log) -> None:
+    async def _check_auto_disable(
+        self, db: AsyncSession, endpoint: WebhookEndpointModel, log
+    ) -> None:
         """Check if endpoint should be auto-disabled due to repeated failures.
 
         Auto-disables when:
@@ -229,9 +259,15 @@ class DeliveryWorker:
                 # Had a recent success, don't auto-disable
                 return
 
-        # Auto-disable the endpoint
-        endpoint.is_active = False
-        endpoint.disabled_reason = "auto_disabled"
+        # Auto-disable the endpoint (atomic update)
+        await db.execute(
+            update(WebhookEndpointModel)
+            .where(WebhookEndpointModel.id == endpoint.id)
+            .values(
+                is_active=False,
+                disabled_reason="auto_disabled",
+            )
+        )
         log.warning(
             "webhook_endpoint_auto_disabled",
             endpoint_id=str(endpoint.id),

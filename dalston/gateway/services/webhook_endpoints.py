@@ -164,6 +164,10 @@ class WebhookEndpointService:
 
         if is_active is not None:
             endpoint.is_active = is_active
+            # When re-enabling, clear auto-disable state
+            if is_active:
+                endpoint.disabled_reason = None
+                endpoint.consecutive_failures = 0
 
         await db.commit()
         await db.refresh(endpoint)
