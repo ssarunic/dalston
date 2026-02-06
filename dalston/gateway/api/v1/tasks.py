@@ -9,6 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dalston.common.utils import compute_duration_ms
 from dalston.config import Settings
 from dalston.gateway.dependencies import (
     RequireJobsRead,
@@ -25,14 +26,6 @@ from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
 
 router = APIRouter(prefix="/audio/transcriptions", tags=["tasks"])
-
-
-def _compute_duration_ms(started_at, completed_at) -> int | None:
-    """Compute duration in milliseconds from timestamps."""
-    if started_at is None or completed_at is None:
-        return None
-    delta = completed_at - started_at
-    return int(delta.total_seconds() * 1000)
 
 
 @router.get(
@@ -71,7 +64,7 @@ async def list_job_tasks(
                 dependencies=list(task.dependencies) if task.dependencies else [],
                 started_at=task.started_at,
                 completed_at=task.completed_at,
-                duration_ms=_compute_duration_ms(task.started_at, task.completed_at),
+                duration_ms=compute_duration_ms(task.started_at, task.completed_at),
                 retries=task.retries,
                 error=task.error,
             )
@@ -103,9 +96,7 @@ async def get_task_artifacts(
     Fetches the raw JSON data that was passed to and produced by the engine.
     """
     # Fetch task (verifies job exists and belongs to tenant)
-    task = await jobs_service.get_task(
-        db, job_id, task_id, tenant_id=api_key.tenant_id
-    )
+    task = await jobs_service.get_task(db, job_id, task_id, tenant_id=api_key.tenant_id)
 
     if task is None:
         # Check if job exists to give appropriate error

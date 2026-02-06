@@ -255,6 +255,7 @@ class TaskArtifactResponse(BaseModel):
     completed_at: datetime | None = None
     duration_ms: int | None = None
     retries: int = 0
+    max_retries: int = 2
     error: str | None = None
     dependencies: list[UUID] = []
     input: dict | None = None
@@ -319,6 +320,7 @@ async def get_task_artifacts(
         completed_at=task.completed_at,
         duration_ms=duration_ms,
         retries=task.retries,
+        max_retries=task.max_retries,
         error=task.error,
         dependencies=task.dependencies or [],
         input=input_data,

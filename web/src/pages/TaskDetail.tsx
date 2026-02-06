@@ -593,7 +593,7 @@ export function TaskDetail() {
         />
         <MetricCard
           label="Retries"
-          value={`${artifact.retries} / 2`}
+          value={`${artifact.retries} / ${artifact.max_retries}`}
           subtext={artifact.required ? 'Required' : 'Optional'}
         />
       </div>

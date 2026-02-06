@@ -7,7 +7,6 @@ GET /v1/audio/transcriptions/{job_id}/export/{format} - Export transcript
 """
 
 import json
-from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -26,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.events import publish_job_created
 from dalston.common.models import JobStatus
+from dalston.common.utils import compute_duration_ms
 from dalston.config import WEBHOOK_METADATA_MAX_SIZE, Settings
 from dalston.gateway.dependencies import (
     RequireJobsRead,
@@ -200,7 +200,7 @@ async def get_transcription(
                 required=task.required,
                 started_at=task.started_at,
                 completed_at=task.completed_at,
-                duration_ms=_compute_duration_ms(task.started_at, task.completed_at),
+                duration_ms=compute_duration_ms(task.started_at, task.completed_at),
                 retries=task.retries if task.retries > 0 else None,
                 error=task.error,
             )
@@ -231,16 +231,6 @@ async def get_transcription(
             response.speakers = transcript.get("speakers")
 
     return response
-
-
-def _compute_duration_ms(
-    started_at: "datetime | None", completed_at: "datetime | None"
-) -> int | None:
-    """Compute duration in milliseconds from timestamps."""
-    if started_at is None or completed_at is None:
-        return None
-    delta = completed_at - started_at
-    return int(delta.total_seconds() * 1000)
 
 
 @router.get(

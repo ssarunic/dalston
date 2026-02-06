@@ -110,6 +110,7 @@ export interface TaskArtifact {
   completed_at?: string
   duration_ms?: number
   retries: number
+  max_retries: number
   error?: string
   dependencies: string[]
   input?: Record<string, unknown>
