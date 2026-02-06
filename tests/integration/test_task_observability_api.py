@@ -14,7 +14,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from dalston.common.models import JobStatus
 from dalston.gateway.api.v1 import tasks as tasks_module
 from dalston.gateway.api.v1 import transcription as transcription_module
 from dalston.gateway.services.auth import DEFAULT_EXPIRES_AT, APIKey, Scope
@@ -504,12 +503,8 @@ class TestTaskArtifactsEndpoint:
         async def mock_get_task_output(self, job_id, task_id):
             return mock_output
 
-        monkeypatch.setattr(
-            StorageService, "get_task_input", mock_get_task_input
-        )
-        monkeypatch.setattr(
-            StorageService, "get_task_output", mock_get_task_output
-        )
+        monkeypatch.setattr(StorageService, "get_task_input", mock_get_task_input)
+        monkeypatch.setattr(StorageService, "get_task_output", mock_get_task_output)
 
         response = client.get(
             f"/v1/audio/transcriptions/{job_id}/tasks/{task_id}/artifacts"

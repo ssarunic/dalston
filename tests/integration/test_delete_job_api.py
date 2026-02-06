@@ -14,7 +14,6 @@ from dalston.gateway.api.v1.transcription import router as transcription_router
 from dalston.gateway.services.auth import DEFAULT_EXPIRES_AT, APIKey, Scope
 from dalston.gateway.services.jobs import JobsService
 
-
 JOB_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 TENANT_ID = UUID("00000000-0000-0000-0000-000000000000")
 

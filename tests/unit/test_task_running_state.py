@@ -6,14 +6,13 @@ Verifies that:
 """
 
 import json
-from datetime import UTC, datetime
-from unittest.mock import MagicMock, patch
+from datetime import datetime
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 
 from dalston.common.models import TaskStatus
-
 
 # ---------------------------------------------------------------------------
 # handle_task_started handler
