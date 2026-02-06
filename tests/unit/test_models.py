@@ -38,6 +38,15 @@ class TestModelRegistry:
         for model_id in expected_models:
             assert model_id in MODEL_REGISTRY, f"Missing model: {model_id}"
 
+    def test_registry_contains_parakeet_models(self):
+        """Test that Parakeet models are registered."""
+        expected_parakeet_models = [
+            "parakeet-0.6b",
+            "parakeet-1.1b",
+        ]
+        for model_id in expected_parakeet_models:
+            assert model_id in MODEL_REGISTRY, f"Missing Parakeet model: {model_id}"
+
     def test_all_models_have_required_fields(self):
         """Test that all models have required fields populated."""
         for model_id, model in MODEL_REGISTRY.items():
@@ -76,6 +85,10 @@ class TestModelAliases:
             assert (
                 model_id in MODEL_REGISTRY
             ), f"Alias '{alias}' points to unknown model '{model_id}'"
+
+    def test_parakeet_alias(self):
+        """Test that 'parakeet' alias points to parakeet-0.6b."""
+        assert MODEL_ALIASES["parakeet"] == "parakeet-0.6b"
 
 
 class TestResolveModel:
@@ -182,6 +195,40 @@ class TestModelDefinitionFields:
         model = MODEL_REGISTRY["distil-whisper"]
         assert model.languages == 1  # English only
         assert model.tier == "fast"
+
+    def test_parakeet_0_6b_config(self):
+        """Test parakeet-0.6b model configuration."""
+        model = MODEL_REGISTRY["parakeet-0.6b"]
+        assert model.engine == "parakeet"
+        assert model.engine_model == "nvidia/parakeet-rnnt-0.6b"
+        assert model.tier == "fast"
+        assert model.languages == 1  # English only
+        assert model.streaming is True  # Native streaming support
+        assert model.word_timestamps is True  # Native word timestamps
+        assert model.vram_gb == 4.0
+
+    def test_parakeet_1_1b_config(self):
+        """Test parakeet-1.1b model configuration."""
+        model = MODEL_REGISTRY["parakeet-1.1b"]
+        assert model.engine == "parakeet"
+        assert model.engine_model == "nvidia/parakeet-rnnt-1.1b"
+        assert model.tier == "balanced"
+        assert model.languages == 1  # English only
+        assert model.streaming is True
+        assert model.word_timestamps is True
+        assert model.vram_gb == 6.0
+
+    def test_parakeet_models_are_english_only(self):
+        """Test that all Parakeet models are English-only."""
+        parakeet_models = [m for m in MODEL_REGISTRY.values() if m.engine == "parakeet"]
+        for model in parakeet_models:
+            assert model.languages == 1, f"Parakeet model {model.id} should be English-only"
+
+    def test_parakeet_models_support_streaming(self):
+        """Test that all Parakeet models support native streaming."""
+        parakeet_models = [m for m in MODEL_REGISTRY.values() if m.engine == "parakeet"]
+        for model in parakeet_models:
+            assert model.streaming is True, f"Parakeet model {model.id} should support streaming"
 
     def test_model_speed_factors_ordered(self):
         """Test that smaller models have higher speed factors."""

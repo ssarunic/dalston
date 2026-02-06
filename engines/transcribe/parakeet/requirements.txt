@@ -1,0 +1,15 @@
+# NVIDIA Parakeet Engine Dependencies
+
+# NeMo toolkit for ASR models
+# Pin to a known working version for stability
+nemo_toolkit[asr]>=1.23.0
+
+# PyTorch with CUDA support (installed via nemo_toolkit)
+# torch>=2.0.0
+
+# Audio processing
+numpy>=1.24.0
+librosa>=0.10.0
+
+# For audio file handling
+soundfile>=0.12.0

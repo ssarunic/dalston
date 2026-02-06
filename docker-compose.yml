@@ -296,6 +296,45 @@ services:
     restart: unless-stopped
 
   # ============================================================
+  # PARAKEET ENGINES (M21) - GPU ONLY
+  # ============================================================
+
+  # NVIDIA Parakeet batch transcription engine (GPU required)
+  engine-parakeet:
+    image: dalston/engine-parakeet:latest
+    build:
+      context: .
+      dockerfile: engines/transcribe/parakeet/Dockerfile
+    environment:
+      - ENGINE_ID=parakeet
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+    volumes:
+      - parakeet-models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - gpu
+      - parakeet
+    restart: unless-stopped
+
+  # ============================================================
   # DIARIZATION ENGINES (M04)
   # ============================================================
 
@@ -504,6 +543,79 @@ services:
       - gpu
     restart: unless-stopped
 
+  # ============================================================
+  # PARAKEET REALTIME ENGINES (M21) - GPU ONLY
+  # ============================================================
+
+  # NVIDIA Parakeet streaming realtime worker (GPU required)
+  realtime-parakeet-1:
+    image: dalston/realtime-parakeet:latest
+    build:
+      context: .
+      dockerfile: engines/realtime/parakeet-streaming/Dockerfile
+    environment:
+      - WORKER_ID=realtime-parakeet-1
+      - WORKER_PORT=9000
+      - WORKER_ENDPOINT=ws://realtime-parakeet-1:9000
+      - MAX_SESSIONS=4
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+    volumes:
+      - parakeet-models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 9000)); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - gpu
+      - parakeet
+    restart: unless-stopped
+
+  # Additional Parakeet realtime worker - shares image with realtime-parakeet-1
+  realtime-parakeet-2:
+    image: dalston/realtime-parakeet:latest
+    environment:
+      - WORKER_ID=realtime-parakeet-2
+      - WORKER_PORT=9000
+      - WORKER_ENDPOINT=ws://realtime-parakeet-2:9000
+      - MAX_SESSIONS=4
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+    volumes:
+      - parakeet-models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 9000)); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - gpu
+      - parakeet
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   minio-data:
@@ -511,3 +623,4 @@ volumes:
   align-models:
   pyannote-models:
   realtime-models:
+  parakeet-models:

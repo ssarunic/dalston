@@ -35,6 +35,9 @@ DEFAULT_TRANSCRIBE_CONFIG = {
     "vad_filter": True,
 }
 
+# Engines that produce native word timestamps (skip ALIGN stage)
+NATIVE_WORD_TIMESTAMP_ENGINES = {"parakeet"}
+
 
 def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]:
     """Build a task DAG for a job.
@@ -232,8 +235,10 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
 
     # Task (optional): Alignment (depends on transcribe)
     # Adds precise word-level timestamps using wav2vec2 forced alignment
+    # Skip alignment for engines that produce native word timestamps (e.g., Parakeet)
     align_task = None
-    if word_timestamps:
+    skip_alignment = engines["transcribe"] in NATIVE_WORD_TIMESTAMP_ENGINES
+    if word_timestamps and not skip_alignment:
         align_task = Task(
             id=uuid4(),
             job_id=job_id,
@@ -310,6 +315,9 @@ def _build_per_channel_dag(
     all_channel_tasks = []  # All per-channel tasks (transcribe + align)
     last_channel_tasks = []  # Last task per channel (for execution ordering)
 
+    # Skip alignment for engines with native word timestamps (e.g., Parakeet)
+    skip_alignment = engines["transcribe"] in NATIVE_WORD_TIMESTAMP_ENGINES
+
     for channel in range(num_channels):
         # Transcription task for this channel
         channel_transcribe_config = {
@@ -336,8 +344,8 @@ def _build_per_channel_dag(
 
         last_task = transcribe_task
 
-        # Alignment task for this channel (optional)
-        if word_timestamps:
+        # Alignment task for this channel (optional, skipped for native word timestamp engines)
+        if word_timestamps and not skip_alignment:
             align_task = Task(
                 id=uuid4(),
                 job_id=job_id,

@@ -1,0 +1,71 @@
+id: parakeet-streaming
+type: realtime
+name: Parakeet Streaming
+version: 1.0.0
+description: |
+  Real-time streaming transcription using NVIDIA Parakeet.
+  Uses cache-aware FastConformer encoder for true streaming with ~100ms latency.
+  English-only, requires NVIDIA GPU.
+
+container:
+  gpu: required  # Requires NVIDIA GPU with CUDA
+  memory: 8G
+  model_cache: /models
+
+capabilities:
+  languages:
+    - en  # English only
+  max_sessions: 4
+  streaming: true
+  word_timestamps: true  # Native word-level timestamps via RNNT
+
+server:
+  port: 9000
+  protocol: websocket
+  path: /session
+
+models:
+  default:
+    name: nvidia/parakeet-rnnt-0.6b
+    description: Parakeet 0.6B RNNT for low-latency streaming
+    latency: very_low  # ~100ms end-to-end
+    accuracy: good
+
+audio:
+  encodings:
+    - pcm_s16le
+    - pcm_f32le
+  sample_rates:
+    - 16000
+  channels: 1
+
+vad:
+  engine: silero
+  threshold: 0.5
+  min_speech_duration_ms: 250
+  min_silence_duration_ms: 500
+  lookback_ms: 300
+
+heartbeat:
+  interval_seconds: 10
+  timeout_seconds: 30
+
+environment:
+  WORKER_ID:
+    description: Unique identifier for this worker
+    required: true
+  WORKER_PORT:
+    description: WebSocket server port
+    default: "9000"
+  MAX_SESSIONS:
+    description: Maximum concurrent sessions
+    default: "4"
+  REDIS_URL:
+    description: Redis connection URL
+    default: redis://localhost:6379
+  PARAKEET_MODEL:
+    description: Parakeet model variant
+    default: nvidia/parakeet-rnnt-0.6b
+  CHUNK_SIZE_MS:
+    description: Audio chunk size in milliseconds
+    default: "100"

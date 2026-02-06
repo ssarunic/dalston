@@ -124,6 +124,33 @@ MODEL_REGISTRY: dict[str, ModelDefinition] = {
         vram_gb=5.0,
         speed_factor=6.0,
     ),
+    # NVIDIA Parakeet FastConformer RNNT models
+    "parakeet-0.6b": ModelDefinition(
+        id="parakeet-0.6b",
+        engine="parakeet",
+        engine_model="nvidia/parakeet-rnnt-0.6b",
+        name="Parakeet 0.6B",
+        description="Fast English-only with native streaming, low latency",
+        tier="fast",
+        languages=1,
+        streaming=True,
+        word_timestamps=True,
+        vram_gb=4.0,
+        speed_factor=10.0,  # RTFx >2000, much faster than Whisper
+    ),
+    "parakeet-1.1b": ModelDefinition(
+        id="parakeet-1.1b",
+        engine="parakeet",
+        engine_model="nvidia/parakeet-rnnt-1.1b",
+        name="Parakeet 1.1B",
+        description="Balanced English-only with native streaming",
+        tier="balanced",
+        languages=1,
+        streaming=True,
+        word_timestamps=True,
+        vram_gb=6.0,
+        speed_factor=8.0,
+    ),
 }
 
 MODEL_ALIASES: dict[str, str] = {
@@ -134,6 +161,7 @@ MODEL_ALIASES: dict[str, str] = {
     "small": "whisper-small",
     "base": "whisper-base",
     "tiny": "whisper-tiny",
+    "parakeet": "parakeet-0.6b",
 }
 
 DEFAULT_MODEL = "whisper-large-v3"

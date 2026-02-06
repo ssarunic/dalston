@@ -11,6 +11,7 @@ import pytest
 from dalston.orchestrator.dag import (
     DEFAULT_ENGINES,
     DEFAULT_TRANSCRIBE_CONFIG,
+    NATIVE_WORD_TIMESTAMP_ENGINES,
     build_task_dag,
 )
 
@@ -182,3 +183,116 @@ class TestBuildTaskDagPipeline:
         assert task_by_stage["prepare"].id in merge_deps
         assert task_by_stage["transcribe"].id in merge_deps
         assert task_by_stage["align"].id in merge_deps
+
+
+class TestBuildTaskDagParakeet:
+    """Tests for Parakeet engine DAG behavior (M21)."""
+
+    @pytest.fixture
+    def job_id(self) -> UUID:
+        return uuid4()
+
+    @pytest.fixture
+    def audio_uri(self) -> str:
+        return "s3://test-bucket/audio/test.wav"
+
+    def test_parakeet_in_native_word_timestamp_engines(self):
+        """Test that parakeet is listed in native word timestamp engines."""
+        assert "parakeet" in NATIVE_WORD_TIMESTAMP_ENGINES
+
+    def test_parakeet_skips_align_stage(self, job_id: UUID, audio_uri: str):
+        """Test that Parakeet engine skips the ALIGN stage."""
+        parameters = {
+            "engine_transcribe": "parakeet",
+            "timestamps_granularity": "word",  # Request word timestamps
+        }
+
+        tasks = build_task_dag(job_id, audio_uri, parameters)
+
+        stages = [t.stage for t in tasks]
+        # Parakeet should NOT have align stage
+        assert "align" not in stages
+        # But should have other stages
+        assert "prepare" in stages
+        assert "transcribe" in stages
+        assert "merge" in stages
+
+    def test_parakeet_with_diarization(self, job_id: UUID, audio_uri: str):
+        """Test that Parakeet works with diarization (no align, but diarize)."""
+        parameters = {
+            "engine_transcribe": "parakeet",
+            "speaker_detection": "diarize",
+            "timestamps_granularity": "word",
+        }
+
+        tasks = build_task_dag(job_id, audio_uri, parameters)
+
+        stages = [t.stage for t in tasks]
+        # Parakeet should have diarize but NOT align
+        assert "diarize" in stages
+        assert "align" not in stages
+
+    def test_parakeet_per_channel_skips_align(self, job_id: UUID, audio_uri: str):
+        """Test that Parakeet per-channel mode skips align stages."""
+        parameters = {
+            "engine_transcribe": "parakeet",
+            "speaker_detection": "per_channel",
+            "timestamps_granularity": "word",
+            "num_channels": 2,
+        }
+
+        tasks = build_task_dag(job_id, audio_uri, parameters)
+
+        stages = [t.stage for t in tasks]
+        # Should have per-channel transcribe but NOT align
+        assert "transcribe_ch0" in stages
+        assert "transcribe_ch1" in stages
+        assert "align_ch0" not in stages
+        assert "align_ch1" not in stages
+
+    def test_whisper_still_has_align_stage(self, job_id: UUID, audio_uri: str):
+        """Test that Whisper (faster-whisper) still uses the ALIGN stage."""
+        parameters = {
+            "engine_transcribe": "faster-whisper",
+            "timestamps_granularity": "word",
+        }
+
+        tasks = build_task_dag(job_id, audio_uri, parameters)
+
+        stages = [t.stage for t in tasks]
+        # Whisper should have align stage
+        assert "align" in stages
+
+    def test_parakeet_merge_dependencies_correct(self, job_id: UUID, audio_uri: str):
+        """Test that merge dependencies are correct when align is skipped."""
+        parameters = {
+            "engine_transcribe": "parakeet",
+            "timestamps_granularity": "word",
+        }
+
+        tasks = build_task_dag(job_id, audio_uri, parameters)
+
+        task_by_stage = {t.stage: t for t in tasks}
+        merge_deps = task_by_stage["merge"].dependencies
+
+        # Merge should depend on prepare and transcribe (but NOT align since it's skipped)
+        assert task_by_stage["prepare"].id in merge_deps
+        assert task_by_stage["transcribe"].id in merge_deps
+        assert len([t for t in tasks if t.stage == "align"]) == 0
+
+    def test_parakeet_transcribe_task_uses_parakeet_engine(
+        self, job_id: UUID, audio_uri: str
+    ):
+        """Test that transcribe task uses Parakeet engine when specified."""
+        parameters = {
+            "engine_transcribe": "parakeet",
+            "transcribe_config": {
+                "model": "nvidia/parakeet-rnnt-0.6b",
+            },
+        }
+
+        tasks = build_task_dag(job_id, audio_uri, parameters)
+
+        transcribe_task = next(t for t in tasks if t.stage == "transcribe")
+        assert transcribe_task.engine_id == "parakeet"
+        assert transcribe_task.config["model"] == "nvidia/parakeet-rnnt-0.6b"
