@@ -2,12 +2,15 @@
 
 from fastapi import APIRouter
 
-from dalston.gateway.api.v1 import jobs, realtime, speech_to_text, transcription
+from dalston.gateway.api.v1 import jobs, realtime, speech_to_text, tasks, transcription
 
 router = APIRouter(prefix="/v1")
 
 # Mount transcription routes (Dalston native API)
 router.include_router(transcription.router)
+
+# Mount tasks routes (task observability - nested under transcriptions)
+router.include_router(tasks.router)
 
 # Mount jobs routes (stats endpoint)
 router.include_router(jobs.router)

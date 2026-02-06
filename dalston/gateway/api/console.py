@@ -242,6 +242,90 @@ async def get_job_tasks(
     )
 
 
+class TaskArtifactResponse(BaseModel):
+    """Task artifact data for debugging."""
+
+    task_id: UUID
+    job_id: UUID
+    stage: str
+    engine_id: str
+    status: str
+    required: bool
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    duration_ms: int | None = None
+    retries: int = 0
+    error: str | None = None
+    dependencies: list[UUID] = []
+    input: dict | None = None
+    output: dict | None = None
+
+
+@router.get(
+    "/jobs/{job_id}/tasks/{task_id}/artifacts",
+    response_model=TaskArtifactResponse,
+    summary="Get task artifacts",
+    description="Get detailed task information including input/output artifacts.",
+)
+async def get_task_artifacts(
+    job_id: UUID,
+    task_id: UUID,
+    api_key: RequireAdmin,
+    db: AsyncSession = Depends(get_db),
+) -> TaskArtifactResponse:
+    """Get task artifacts for debugging."""
+    from dalston.config import get_settings
+    from dalston.gateway.services.storage import StorageService
+
+    # Fetch job with tasks
+    result = await db.execute(
+        select(JobModel)
+        .where(JobModel.id == job_id)
+        .options(selectinload(JobModel.tasks))
+    )
+    job = result.scalar_one_or_none()
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Find the task
+    task = next((t for t in job.tasks if t.id == task_id), None)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Calculate duration
+    duration_ms = None
+    if task.started_at and task.completed_at:
+        delta = task.completed_at - task.started_at
+        duration_ms = int(delta.total_seconds() * 1000)
+
+    # Fetch artifacts from S3 if task has started
+    input_data = None
+    output_data = None
+    if task.status != "pending":
+        settings = get_settings()
+        storage = StorageService(settings)
+        input_data = await storage.get_task_input(job_id, task_id)
+        output_data = await storage.get_task_output(job_id, task_id)
+
+    return TaskArtifactResponse(
+        task_id=task.id,
+        job_id=job_id,
+        stage=task.stage,
+        engine_id=task.engine_id,
+        status=task.status,
+        required=task.required,
+        started_at=task.started_at,
+        completed_at=task.completed_at,
+        duration_ms=duration_ms,
+        retries=task.retries,
+        error=task.error,
+        dependencies=task.dependencies or [],
+        input=input_data,
+        output=output_data,
+    )
+
+
 # Engine models
 class BatchEngine(BaseModel):
     """Batch engine status."""

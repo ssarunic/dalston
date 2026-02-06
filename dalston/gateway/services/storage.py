@@ -101,3 +101,51 @@ class StorageService:
                         Bucket=self.bucket,
                         Delete={"Objects": objects},
                     )
+
+    async def get_task_input(
+        self, job_id: UUID, task_id: UUID
+    ) -> dict[str, Any] | None:
+        """Fetch task input JSON from S3.
+
+        Args:
+            job_id: Job UUID
+            task_id: Task UUID
+
+        Returns:
+            Parsed input dict or None if not found
+        """
+        key = f"jobs/{job_id}/tasks/{task_id}/input.json"
+
+        async with get_s3_client(self.settings) as s3:
+            try:
+                response = await s3.get_object(Bucket=self.bucket, Key=key)
+                body = await response["Body"].read()
+                return json.loads(body.decode("utf-8"))
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "NoSuchKey":
+                    return None
+                raise
+
+    async def get_task_output(
+        self, job_id: UUID, task_id: UUID
+    ) -> dict[str, Any] | None:
+        """Fetch task output JSON from S3.
+
+        Args:
+            job_id: Job UUID
+            task_id: Task UUID
+
+        Returns:
+            Parsed output dict or None if not found
+        """
+        key = f"jobs/{job_id}/tasks/{task_id}/output.json"
+
+        async with get_s3_client(self.settings) as s3:
+            try:
+                response = await s3.get_object(Bucket=self.bucket, Key=key)
+                body = await response["Body"].read()
+                return json.loads(body.decode("utf-8"))
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "NoSuchKey":
+                    return None
+                raise

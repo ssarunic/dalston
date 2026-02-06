@@ -1,8 +1,10 @@
+import { Link } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import type { Task, TaskStatus } from '@/api/types'
 
 interface DAGViewerProps {
   tasks: Task[]
+  jobId: string
   className?: string
 }
 
@@ -22,51 +24,54 @@ interface StageGroup {
   tasks: Task[]
 }
 
-function TaskNode({ task }: { task: Task }) {
+function TaskNode({ task, jobId }: { task: Task; jobId: string }) {
   const config = statusConfig[task.status] || statusConfig.pending
   const isActive = task.status === 'running' || task.status === 'ready'
 
   return (
-    <div
-      className={cn(
-        'relative flex flex-col gap-1 px-3 py-2 rounded-lg border border-border',
-        'min-w-[140px] transition-all',
-        config.bg,
-        isActive && 'ring-2',
-        config.ring,
-        task.status === 'running' && 'animate-pulse'
-      )}
-    >
-      {/* Status indicator dot */}
-      <div className="flex items-center gap-2">
-        <div
-          className={cn(
-            'w-2 h-2 rounded-full',
-            task.status === 'completed' && 'bg-green-400',
-            task.status === 'running' && 'bg-blue-400',
-            task.status === 'ready' && 'bg-yellow-400',
-            task.status === 'failed' && 'bg-red-400',
-            task.status === 'pending' && 'bg-zinc-400',
-            task.status === 'skipped' && 'bg-zinc-500'
-          )}
-        />
-        <span className={cn('text-xs font-semibold uppercase', config.text)}>
-          {task.stage}
+    <Link to={`/jobs/${jobId}/tasks/${task.id}`}>
+      <div
+        className={cn(
+          'relative flex flex-col gap-1 px-3 py-2 rounded-lg border border-border',
+          'min-w-[140px] transition-all cursor-pointer',
+          'hover:border-primary/50 hover:shadow-md',
+          config.bg,
+          isActive && 'ring-2',
+          config.ring,
+          task.status === 'running' && 'animate-pulse'
+        )}
+      >
+        {/* Status indicator dot */}
+        <div className="flex items-center gap-2">
+          <div
+            className={cn(
+              'w-2 h-2 rounded-full',
+              task.status === 'completed' && 'bg-green-400',
+              task.status === 'running' && 'bg-blue-400',
+              task.status === 'ready' && 'bg-yellow-400',
+              task.status === 'failed' && 'bg-red-400',
+              task.status === 'pending' && 'bg-zinc-400',
+              task.status === 'skipped' && 'bg-zinc-500'
+            )}
+          />
+          <span className={cn('text-xs font-semibold uppercase', config.text)}>
+            {task.stage}
+          </span>
+        </div>
+
+        {/* Engine ID */}
+        <span className="text-[10px] text-muted-foreground truncate">
+          {task.engine_id}
         </span>
+
+        {/* Error indicator */}
+        {task.error && (
+          <span className="text-[10px] text-red-400 truncate" title={task.error}>
+            Error
+          </span>
+        )}
       </div>
-
-      {/* Engine ID */}
-      <span className="text-[10px] text-muted-foreground truncate">
-        {task.engine_id}
-      </span>
-
-      {/* Error indicator */}
-      {task.error && (
-        <span className="text-[10px] text-red-400 truncate" title={task.error}>
-          Error
-        </span>
-      )}
-    </div>
+    </Link>
   )
 }
 
@@ -92,12 +97,12 @@ function Arrow() {
   )
 }
 
-function StageColumn({ stageGroup, isLast }: { stageGroup: StageGroup; isLast: boolean }) {
+function StageColumn({ stageGroup, jobId, isLast }: { stageGroup: StageGroup; jobId: string; isLast: boolean }) {
   return (
     <div className="flex items-center">
       <div className="flex flex-col gap-2">
         {stageGroup.tasks.map((task) => (
-          <TaskNode key={task.id} task={task} />
+          <TaskNode key={task.id} task={task} jobId={jobId} />
         ))}
       </div>
       {!isLast && <Arrow />}
@@ -105,7 +110,7 @@ function StageColumn({ stageGroup, isLast }: { stageGroup: StageGroup; isLast: b
   )
 }
 
-export function DAGViewer({ tasks, className }: DAGViewerProps) {
+export function DAGViewer({ tasks, jobId, className }: DAGViewerProps) {
   // Group tasks by stage
   const stageGroups: StageGroup[] = stageOrder
     .map((stage) => ({
@@ -173,6 +178,7 @@ export function DAGViewer({ tasks, className }: DAGViewerProps) {
           <StageColumn
             key={group.stage}
             stageGroup={group}
+            jobId={jobId}
             isLast={idx === stageGroups.length - 1}
           />
         ))}

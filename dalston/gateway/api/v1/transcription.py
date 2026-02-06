@@ -7,6 +7,7 @@ GET /v1/audio/transcriptions/{job_id}/export/{format} - Export transcript
 """
 
 import json
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -40,6 +41,7 @@ from dalston.gateway.models.responses import (
     JobListResponse,
     JobResponse,
     JobSummary,
+    StageResponse,
 )
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.jobs import JobsService
@@ -175,14 +177,35 @@ async def get_transcription(
 ) -> JobResponse:
     """Get job status and transcript if complete.
 
-    1. Fetch job from PostgreSQL
-    2. If completed, fetch transcript from S3
-    3. Return job with transcript data
+    1. Fetch job from PostgreSQL with tasks
+    2. Build stages array from tasks
+    3. If completed, fetch transcript from S3
+    4. Return job with transcript data and stages
     """
-    job = await jobs_service.get_job(db, job_id, tenant_id=api_key.tenant_id)
+    job = await jobs_service.get_job_with_tasks(db, job_id, tenant_id=api_key.tenant_id)
 
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # Build stages array from tasks (if any)
+    stages = None
+    if job.tasks:
+        sorted_tasks = jobs_service._topological_sort_tasks(list(job.tasks))
+        stages = [
+            StageResponse(
+                stage=task.stage,
+                task_id=task.id,
+                engine_id=task.engine_id,
+                status=task.status,
+                required=task.required,
+                started_at=task.started_at,
+                completed_at=task.completed_at,
+                duration_ms=_compute_duration_ms(task.started_at, task.completed_at),
+                retries=task.retries if task.retries > 0 else None,
+                error=task.error,
+            )
+            for task in sorted_tasks
+        ]
 
     # Build response
     response = JobResponse(
@@ -192,6 +215,7 @@ async def get_transcription(
         started_at=job.started_at,
         completed_at=job.completed_at,
         error=job.error,
+        stages=stages,
     )
 
     # If completed, fetch transcript from S3
@@ -207,6 +231,16 @@ async def get_transcription(
             response.speakers = transcript.get("speakers")
 
     return response
+
+
+def _compute_duration_ms(
+    started_at: "datetime | None", completed_at: "datetime | None"
+) -> int | None:
+    """Compute duration in milliseconds from timestamps."""
+    if started_at is None or completed_at is None:
+        return None
+    delta = completed_at - started_at
+    return int(delta.total_seconds() * 1000)
 
 
 @router.get(

@@ -9,6 +9,7 @@ import type {
   JobDetail,
   JobStatsResponse,
   RealtimeStatusResponse,
+  TaskArtifact,
   TaskListResponse,
 } from './types'
 
@@ -71,6 +72,10 @@ export const apiClient = {
   // Tasks (admin required)
   getJobTasks: (jobId: string) =>
     currentClient.get(`api/console/jobs/${jobId}/tasks`).json<TaskListResponse>(),
+
+  // Task artifacts (admin required)
+  getTaskArtifacts: (jobId: string, taskId: string) =>
+    currentClient.get(`api/console/jobs/${jobId}/tasks/${taskId}/artifacts`).json<TaskArtifact>(),
 
   // Realtime status (no auth required for basic status)
   getRealtimeStatus: () =>

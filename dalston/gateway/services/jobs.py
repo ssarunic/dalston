@@ -6,9 +6,10 @@ from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from dalston.common.models import JobStatus
-from dalston.db.models import JobModel
+from dalston.db.models import JobModel, TaskModel
 
 
 class JobStats:
@@ -231,3 +232,135 @@ class JobsService:
             completed_today=completed_today,
             failed_today=failed_today,
         )
+
+    async def get_job_with_tasks(
+        self,
+        db: AsyncSession,
+        job_id: UUID,
+        tenant_id: UUID | None = None,
+    ) -> JobModel | None:
+        """Fetch a job with its tasks eagerly loaded.
+
+        Args:
+            db: Database session
+            job_id: Job UUID
+            tenant_id: Optional tenant UUID for isolation check
+
+        Returns:
+            JobModel with tasks loaded, or None if not found
+        """
+        query = (
+            select(JobModel)
+            .options(selectinload(JobModel.tasks))
+            .where(JobModel.id == job_id)
+        )
+
+        if tenant_id is not None:
+            query = query.where(JobModel.tenant_id == tenant_id)
+
+        result = await db.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_job_tasks(
+        self,
+        db: AsyncSession,
+        job_id: UUID,
+        tenant_id: UUID | None = None,
+    ) -> list[TaskModel]:
+        """Fetch all tasks for a job, ordered by dependency topology.
+
+        Args:
+            db: Database session
+            job_id: Job UUID
+            tenant_id: Optional tenant UUID for isolation check
+
+        Returns:
+            List of TaskModel ordered by execution sequence
+        """
+        # First verify job exists and belongs to tenant
+        job = await self.get_job(db, job_id, tenant_id)
+        if job is None:
+            return []
+
+        # Fetch tasks for this job
+        query = select(TaskModel).where(TaskModel.job_id == job_id)
+        result = await db.execute(query)
+        tasks = list(result.scalars().all())
+
+        # Topological sort by dependencies
+        return self._topological_sort_tasks(tasks)
+
+    async def get_task(
+        self,
+        db: AsyncSession,
+        job_id: UUID,
+        task_id: UUID,
+        tenant_id: UUID | None = None,
+    ) -> TaskModel | None:
+        """Fetch a specific task, verifying it belongs to the job and tenant.
+
+        Args:
+            db: Database session
+            job_id: Job UUID
+            task_id: Task UUID
+            tenant_id: Optional tenant UUID for isolation check
+
+        Returns:
+            TaskModel or None if not found or unauthorized
+        """
+        # First verify job exists and belongs to tenant
+        job = await self.get_job(db, job_id, tenant_id)
+        if job is None:
+            return None
+
+        # Fetch the task
+        query = select(TaskModel).where(
+            TaskModel.id == task_id,
+            TaskModel.job_id == job_id,
+        )
+        result = await db.execute(query)
+        return result.scalar_one_or_none()
+
+    def _topological_sort_tasks(self, tasks: list[TaskModel]) -> list[TaskModel]:
+        """Sort tasks in topological order based on dependencies.
+
+        Tasks at the same dependency level are sorted alphabetically by stage.
+        """
+        if not tasks:
+            return []
+
+        # Build lookup maps
+        task_by_id = {task.id: task for task in tasks}
+        in_degree = {task.id: 0 for task in tasks}
+
+        # Calculate in-degrees
+        for task in tasks:
+            for dep_id in task.dependencies:
+                if dep_id in task_by_id:
+                    in_degree[task.id] += 1
+
+        # Kahn's algorithm with alphabetical tie-breaking
+        result = []
+        ready = sorted(
+            [t for t in tasks if in_degree[t.id] == 0],
+            key=lambda t: t.stage,
+        )
+
+        while ready:
+            # Take the first (alphabetically) ready task
+            current = ready.pop(0)
+            result.append(current)
+
+            # Find tasks that depend on this one and reduce their in-degree
+            next_ready = []
+            for task in tasks:
+                if current.id in task.dependencies:
+                    in_degree[task.id] -= 1
+                    if in_degree[task.id] == 0:
+                        next_ready.append(task)
+
+            # Sort new ready tasks and merge with existing ready list
+            next_ready.sort(key=lambda t: t.stage)
+            ready = sorted(ready + next_ready, key=lambda t: t.stage)
+
+        return result
