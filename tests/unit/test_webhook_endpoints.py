@@ -57,8 +57,6 @@ class TestSigningSecretFormat:
         """Test that generated secrets have whsec_ prefix."""
         import secrets as stdlib_secrets
 
-        from dalston.gateway.services.webhook_endpoints import WebhookEndpointService
-
         # Simulate what create_endpoint does
         raw_secret = f"whsec_{stdlib_secrets.token_urlsafe(32)}"
         assert raw_secret.startswith("whsec_")
