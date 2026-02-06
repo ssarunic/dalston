@@ -6,6 +6,7 @@
 | **Duration** | 3-4 days |
 | **Dependencies** | None (can start immediately, applies to all existing components) |
 | **Deliverable** | Filter logs for a single request across gateway, orchestrator, and engines |
+| **Status** | In Progress |
 
 ## User Story
 

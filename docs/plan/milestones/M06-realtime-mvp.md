@@ -6,6 +6,7 @@
 | **Duration** | 5-6 days |
 | **Dependencies** | M2 complete (can start parallel with M3-M5) |
 | **Deliverable** | WebSocket streaming transcription |
+| **Status** | In Progress |
 
 ## User Story
 

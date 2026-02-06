@@ -6,6 +6,7 @@
 | **Duration** | 2-3 days |
 | **Dependencies** | Core services working locally (M1-M5) |
 | **Deliverable** | Single EC2 running all services, private access via Tailscale, S3 for artifacts |
+| **Status** | In Progress |
 
 ## User Story
 

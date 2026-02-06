@@ -6,6 +6,7 @@
 | **Duration** | 2-3 days |
 | **Dependencies** | M6 complete (real-time working) |
 | **Deliverable** | ElevenLabs clients work unchanged |
+| **Status** | In Progress |
 
 ## User Story
 

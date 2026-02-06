@@ -6,6 +6,7 @@
 | **Duration** | 2-3 days |
 | **Dependencies** | None (first milestone) |
 | **Deliverable** | Submit file → get stub transcript back |
+| **Status** | Completed (January 2026) |
 
 ## User Story
 

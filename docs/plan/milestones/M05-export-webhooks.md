@@ -6,6 +6,7 @@
 | **Duration** | 2 days |
 | **Dependencies** | M4 complete |
 | **Deliverable** | SRT/VTT downloads, webhook notifications |
+| **Status** | Completed (January 2026) |
 
 ## User Story
 
@@ -142,8 +143,6 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 ---
 
 ## Implementation Notes
-
-**Completed**: January 2026
 
 ### Files Changed
 

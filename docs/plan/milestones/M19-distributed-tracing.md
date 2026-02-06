@@ -6,6 +6,7 @@
 | **Duration** | 3-4 days |
 | **Dependencies** | M18 complete (correlation IDs and structured logging) |
 | **Deliverable** | View a job's waterfall trace in Jaeger showing gateway → orchestrator → engine spans |
+| **Status** | Not Started |
 
 ## User Story
 

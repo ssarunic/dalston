@@ -6,6 +6,7 @@
 | **Duration** | 3-4 days |
 | **Dependencies** | M3 complete |
 | **Deliverable** | Transcripts include speaker labels |
+| **Status** | Completed (2026-01-30) |
 
 ## User Story
 

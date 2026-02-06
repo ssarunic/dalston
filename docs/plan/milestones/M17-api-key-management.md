@@ -6,6 +6,7 @@
 | **Duration** | 2-3 days |
 | **Dependencies** | M10 (web console), M11 (API authentication), M15 (console auth) |
 | **Deliverable** | Full CRUD UI for API keys with scope selection and security safeguards |
+| **Status** | Completed (February 2026) |
 
 ## User Story
 
@@ -460,8 +461,6 @@ curl -H "Authorization: Bearer $ADMIN_KEY" \
 ---
 
 ## Implementation Summary
-
-**Completed:** February 2026
 
 ### Backend Changes
 

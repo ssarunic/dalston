@@ -6,6 +6,7 @@
 | **Duration** | 3-4 days |
 | **Dependencies** | M18 complete (shared logging module), M19 recommended but not required |
 | **Deliverable** | Grafana dashboard showing request rates, queue depths, engine latency, and error rates |
+| **Status** | Not Started |
 
 ## User Story
 

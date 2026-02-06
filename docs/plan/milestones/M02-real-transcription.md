@@ -6,6 +6,7 @@
 | **Duration** | 3-4 days |
 | **Dependencies** | M1 complete |
 | **Deliverable** | Upload audio → get actual transcript |
+| **Status** | Completed (2026-01-30) |
 
 ## User Story
 

@@ -12,25 +12,64 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 
 ---
 
+## Status Overview
+
+### Completed (8)
+
+| # | Milestone | Completed |
+|---|-----------|-----------|
+| [M1](milestones/M01-hello-world.md) | Hello World | January 2026 |
+| [M2](milestones/M02-real-transcription.md) | Real Transcription | 2026-01-30 |
+| [M3](milestones/M03-word-timestamps.md) | Word Timestamps | 2026-01-30 |
+| [M4](milestones/M04-speaker-diarization.md) | Speaker Diarization | 2026-01-30 |
+| [M5](milestones/M05-export-webhooks.md) | Export & Webhooks | January 2026 |
+| [M10](milestones/M10-web-console.md) | Web Console | 2026-01-30 |
+| [M11](milestones/M11-api-authentication.md) | API Authentication | February 2026 |
+| [M17](milestones/M17-api-key-management.md) | API Key Management | February 2026 |
+
+### In Progress (7)
+
+| # | Milestone | Notes |
+|---|-----------|-------|
+| [M6](milestones/M06-realtime-mvp.md) | Real-Time MVP | `realtime_sdk/`, `session_router/`, `engines/realtime/` |
+| [M7](milestones/M07-hybrid-mode.md) | Hybrid Mode | `enhance_on_end` parameter implemented |
+| [M8](milestones/M08-elevenlabs-compat.md) | ElevenLabs Compat | `gateway/api/v1/speech_to_text.py` |
+| [M12](milestones/M12-python-sdk.md) | Python SDK | `sdk/dalston_sdk/` |
+| [M13](milestones/M13-cli.md) | CLI | `cli/dalston_cli/` |
+| [M16](milestones/M16-aws-deployment.md) | AWS Deployment | `infra/terraform/` |
+| [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
+
+### Not Started (5)
+
+| # | Milestone | Goal |
+|---|-----------|------|
+| [M9](milestones/M09-enrichment.md) | Enrichment | Emotions, events, LLM cleanup |
+| [M14](milestones/M14-model-selection.md) | Model Selection | User-selectable transcription models |
+| [M15](milestones/M15-console-authentication.md) | Console Auth | Secure web console access |
+| [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | OpenTelemetry spans |
+| [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | Prometheus + Grafana |
+
+---
+
 ## Milestone Overview
 
-| # | Milestone | Goal | Days |
-|---|-----------|------|------|
-| [M1](milestones/M01-hello-world.md) | Hello World | Stub end-to-end flow proves architecture | 2-3 |
-| [M2](milestones/M02-real-transcription.md) | Real Transcription | Actually transcribe with faster-whisper | 3-4 |
-| [M3](milestones/M03-word-timestamps.md) | Word Timestamps | WhisperX alignment for word-level timing | 2-3 |
-| [M4](milestones/M04-speaker-diarization.md) | Speaker Diarization | Identify speakers with pyannote | 3-4 |
-| [M5](milestones/M05-export-webhooks.md) | Export & Webhooks | SRT/VTT export, async notifications | 2 |
-| [M6](milestones/M06-realtime-mvp.md) | Real-Time MVP | Stream audio → live transcripts | 5-6 |
-| [M7](milestones/M07-hybrid-mode.md) | Hybrid Mode | Real-time + batch enhancement | 2-3 |
-| [M8](milestones/M08-elevenlabs-compat.md) | ElevenLabs Compat | Drop-in API replacement | 2-3 |
-| [M9](milestones/M09-enrichment.md) | Enrichment | Emotions, events, LLM cleanup | 4-5 |
-| [M10](milestones/M10-web-console.md) | Web Console | Monitoring UI | 3-4 |
-| [M11](milestones/M11-api-authentication.md) | API Authentication | Secure endpoints with API keys | 2-3 |
-| [M12](milestones/M12-python-sdk.md) | Python SDK | Native SDK for Dalston features | 3-4 |
-| [M13](milestones/M13-cli.md) | CLI | Command-line interface | 2-3 |
-| [M14](milestones/M14-model-selection.md) | Model Selection | User-selectable transcription models | 2-3 |
-| [M15](milestones/M15-console-authentication.md) | Console Auth | Secure web console access | 2-3 |
+| # | Milestone | Goal | Days | Status |
+|---|-----------|------|------|--------|
+| [M1](milestones/M01-hello-world.md) | Hello World | Stub end-to-end flow proves architecture | 2-3 | Completed |
+| [M2](milestones/M02-real-transcription.md) | Real Transcription | Actually transcribe with faster-whisper | 3-4 | Completed |
+| [M3](milestones/M03-word-timestamps.md) | Word Timestamps | WhisperX alignment for word-level timing | 2-3 | Completed |
+| [M4](milestones/M04-speaker-diarization.md) | Speaker Diarization | Identify speakers with pyannote | 3-4 | Completed |
+| [M5](milestones/M05-export-webhooks.md) | Export & Webhooks | SRT/VTT export, async notifications | 2 | Completed |
+| [M6](milestones/M06-realtime-mvp.md) | Real-Time MVP | Stream audio → live transcripts | 5-6 | In Progress |
+| [M7](milestones/M07-hybrid-mode.md) | Hybrid Mode | Real-time + batch enhancement | 2-3 | In Progress |
+| [M8](milestones/M08-elevenlabs-compat.md) | ElevenLabs Compat | Drop-in API replacement | 2-3 | In Progress |
+| [M9](milestones/M09-enrichment.md) | Enrichment | Emotions, events, LLM cleanup | 4-5 | Not Started |
+| [M10](milestones/M10-web-console.md) | Web Console | Monitoring UI | 3-4 | Completed |
+| [M11](milestones/M11-api-authentication.md) | API Authentication | Secure endpoints with API keys | 2-3 | Completed |
+| [M12](milestones/M12-python-sdk.md) | Python SDK | Native SDK for Dalston features | 3-4 | In Progress |
+| [M13](milestones/M13-cli.md) | CLI | Command-line interface | 2-3 | In Progress |
+| [M14](milestones/M14-model-selection.md) | Model Selection | User-selectable transcription models | 2-3 | Not Started |
+| [M15](milestones/M15-console-authentication.md) | Console Auth | Secure web console access | 2-3 | Not Started |
 
 **Total: ~42-55 days (~8-11 weeks)**
 
@@ -38,23 +77,23 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 
 ## Operations Milestones
 
-| #                                        | Milestone      | Goal                                       | Days |
-|------------------------------------------|----------------|--------------------------------------------|------|
-| [M16](milestones/M16-aws-deployment.md)  | AWS Deployment | Single EC2 + Tailscale + S3 via Terraform  | 2-3  |
+| # | Milestone | Goal | Days | Status |
+|---|-----------|------|------|--------|
+| [M16](milestones/M16-aws-deployment.md) | AWS Deployment | Single EC2 + Tailscale + S3 via Terraform | 2-3 | In Progress |
 
 ## Console Feature Milestones
 
-| #                                              | Milestone          | Goal                                      | Days |
-|------------------------------------------------|--------------------|-------------------------------------------|------|
-| [M17](milestones/M17-api-key-management.md)    | API Key Management | Web UI for creating/revoking API keys     | 2-3  |
+| # | Milestone | Goal | Days | Status |
+|---|-----------|------|------|--------|
+| [M17](milestones/M17-api-key-management.md) | API Key Management | Web UI for creating/revoking API keys | 2-3 | Completed |
 
 ## Observability Milestones
 
-| # | Milestone | Goal | Days |
-|---|-----------|------|------|
-| [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | Structlog everywhere, correlation IDs, JSON output | 3-4 |
-| [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | OpenTelemetry spans across all services | 3-4 |
-| [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | Prometheus metrics, Grafana dashboards | 3-4 |
+| # | Milestone | Goal | Days | Status |
+|---|-----------|------|------|--------|
+| [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | Structlog everywhere, correlation IDs, JSON output | 3-4 | In Progress |
+| [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | OpenTelemetry spans across all services | 3-4 | Not Started |
+| [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | Prometheus metrics, Grafana dashboards | 3-4 | Not Started |
 
 ---
 

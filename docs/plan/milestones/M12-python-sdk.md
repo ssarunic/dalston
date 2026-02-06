@@ -6,6 +6,7 @@
 | **Duration** | 3-4 days |
 | **Dependencies** | M5 (webhooks), M6 (real-time), M8 (ElevenLabs compat) |
 | **Deliverable** | `dalston-sdk` PyPI package with batch, real-time, and webhook verification |
+| **Status** | In Progress |
 
 ## User Story
 

@@ -6,6 +6,7 @@
 | **Duration** | 2-3 days |
 | **Dependencies** | M2 complete |
 | **Deliverable** | Transcripts include exact word timestamps |
+| **Status** | Completed (2026-01-30) |
 
 ## User Story
 
@@ -98,8 +99,6 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 ---
 
 ## Implementation Summary
-
-**Completed**: 2026-01-30
 
 ### Files Created
 

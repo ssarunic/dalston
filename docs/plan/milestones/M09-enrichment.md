@@ -6,6 +6,7 @@
 | **Duration** | 4-5 days |
 | **Dependencies** | M4 complete (diarization) |
 | **Deliverable** | Emotion detection, audio events, LLM cleanup |
+| **Status** | Not Started |
 
 ## User Story
 

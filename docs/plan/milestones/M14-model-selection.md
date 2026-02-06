@@ -6,6 +6,7 @@
 | **Duration** | 2-3 days |
 | **Dependencies** | M2 (transcription working) |
 | **Deliverable** | `model` parameter in REST/WebSocket APIs, `/v1/models` endpoint |
+| **Status** | Not Started |
 
 ## User Story
 

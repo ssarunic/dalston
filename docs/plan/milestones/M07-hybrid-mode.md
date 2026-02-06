@@ -6,6 +6,7 @@
 | **Duration** | 2-3 days |
 | **Dependencies** | M6 complete |
 | **Deliverable** | Sessions can trigger batch enhancement on end |
+| **Status** | In Progress |
 
 ## User Story
 
