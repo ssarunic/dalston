@@ -7,12 +7,12 @@ sessions across available workers.
 from __future__ import annotations
 
 import json
-import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import redis.asyncio as redis
+import structlog
 
 from dalston.session_router.registry import (
     ACTIVE_SESSIONS_KEY,
@@ -22,7 +22,7 @@ from dalston.session_router.registry import (
     WorkerRegistry,
 )
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 @dataclass
@@ -133,9 +133,7 @@ class SessionAllocator:
         available = await self._registry.get_available_workers(model, language)
 
         if not available:
-            logger.warning(
-                f"No workers available for model={model}, language={language}"
-            )
+            logger.warning("no_workers_available", model=model, language=language)
             return None
 
         # Select best worker (first in list = most available capacity)
@@ -152,9 +150,7 @@ class SessionAllocator:
         if new_count > worker.capacity:
             # Rollback
             await self._redis.hincrby(worker_key, "active_sessions", -1)
-            logger.warning(
-                f"Worker {worker.worker_id} at capacity after increment, rolling back"
-            )
+            logger.warning("worker_at_capacity_rollback", worker_id=worker.worker_id)
             # Try next worker
             if len(available) > 1:
                 return await self._acquire_from_list(
@@ -180,8 +176,11 @@ class SessionAllocator:
         await self._redis.sadd(ACTIVE_SESSIONS_KEY, session_id)
 
         logger.info(
-            f"Allocated session {session_id} to worker {worker.worker_id} "
-            f"(capacity: {new_count}/{worker.capacity})"
+            "session_allocated",
+            session_id=session_id,
+            worker_id=worker.worker_id,
+            active=new_count,
+            capacity=worker.capacity,
         )
 
         return WorkerAllocation(
@@ -221,7 +220,9 @@ class SessionAllocator:
                 await self._redis.sadd(ACTIVE_SESSIONS_KEY, session_id)
 
                 logger.info(
-                    f"Allocated session {session_id} to worker {worker.worker_id}"
+                    "session_allocated",
+                    session_id=session_id,
+                    worker_id=worker.worker_id,
                 )
 
                 return WorkerAllocation(
@@ -277,12 +278,12 @@ class SessionAllocator:
         # Get session data
         data = await self._redis.hgetall(session_key)
         if not data:
-            logger.warning(f"Session {session_id} not found in Redis")
+            logger.warning("session_not_found", session_id=session_id)
             return None
 
         worker_id = data.get("worker_id")
         if not worker_id:
-            logger.warning(f"Session {session_id} has no worker_id")
+            logger.warning("session_no_worker_id", session_id=session_id)
             return None
 
         # Decrement worker's active sessions
@@ -302,7 +303,7 @@ class SessionAllocator:
         # Set short TTL for cleanup
         await self._redis.expire(session_key, 60)  # 1 minute
 
-        logger.info(f"Released session {session_id} from worker {worker_id}")
+        logger.info("session_released", session_id=session_id, worker_id=worker_id)
 
         return SessionState(
             session_id=session_id,

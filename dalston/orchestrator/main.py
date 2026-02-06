@@ -15,6 +15,7 @@ from uuid import UUID
 import structlog
 from redis import asyncio as aioredis
 
+import dalston.logging
 from dalston.common.events import EVENTS_CHANNEL
 from dalston.config import get_settings
 from dalston.db.models import JobModel
@@ -25,21 +26,11 @@ from dalston.orchestrator.handlers import (
     handle_job_created,
     handle_task_completed,
     handle_task_failed,
+    handle_task_started,
 )
 
-# Configure structlog for JSON output
-structlog.configure(
-    processors=[
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.JSONRenderer(),
-    ],
-    wrapper_class=structlog.make_filtering_bound_logger(0),
-    context_class=dict,
-    logger_factory=structlog.PrintLoggerFactory(),
-    cache_logger_on_first_use=True,
-)
+# Configure structured logging via shared module
+dalston.logging.configure("orchestrator")
 
 logger = structlog.get_logger()
 
@@ -129,6 +120,11 @@ async def _dispatch_event(
     event_type = event.get("type")
     log = logger.bind(event_type=event_type)
 
+    # Reset structlog context for this event, preserving the service name.
+    dalston.logging.reset_context(
+        **({"request_id": event["request_id"]} if "request_id" in event else {})
+    )
+
     log.debug("received_event", payload=event)
 
     # Get a fresh database session for each event
@@ -137,6 +133,10 @@ async def _dispatch_event(
             if event_type == "job.created":
                 job_id = UUID(event["job_id"])
                 await handle_job_created(job_id, db, redis, settings)
+
+            elif event_type == "task.started":
+                task_id = UUID(event["task_id"])
+                await handle_task_started(task_id, db)
 
             elif event_type == "task.completed":
                 task_id = UUID(event["task_id"])

@@ -4,14 +4,14 @@ Uses the faster-whisper library (CTranslate2-based) for efficient
 speech-to-text transcription with GPU acceleration.
 """
 
-import logging
 from typing import Any
 
+import structlog
 from faster_whisper import WhisperModel
 
 from dalston.engine_sdk import Engine, TaskInput, TaskOutput
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 class FasterWhisperEngine(Engine):
@@ -37,7 +37,7 @@ class FasterWhisperEngine(Engine):
         # Auto-detect device and compute type
         self._device, self._compute_type = self._detect_device()
         logger.info(
-            f"Detected device: {self._device}, compute_type: {self._compute_type}"
+            "detected_device", device=self._device, compute_type=self._compute_type
         )
 
     def _detect_device(self) -> tuple[str, str]:
@@ -69,7 +69,12 @@ class FasterWhisperEngine(Engine):
         if self._model is not None and self._model_size == model_size:
             return
 
-        logger.info(f"Loading Whisper model: {model_size} on {device} ({compute_type})")
+        logger.info(
+            "loading_whisper_model",
+            model_size=model_size,
+            device=device,
+            compute_type=compute_type,
+        )
 
         self._model = WhisperModel(
             model_size,
@@ -78,7 +83,7 @@ class FasterWhisperEngine(Engine):
         )
         self._model_size = model_size
 
-        logger.info(f"Model {model_size} loaded successfully")
+        logger.info("model_loaded_successfully", model_size=model_size)
 
     def process(self, input: TaskInput) -> TaskOutput:
         """Transcribe audio using Faster-Whisper.
@@ -106,9 +111,13 @@ class FasterWhisperEngine(Engine):
         # Load model (lazy loading, cached)
         self._load_model(model_size, device, compute_type)
 
-        logger.info(f"Transcribing: {audio_path}")
+        logger.info("transcribing", audio_path=str(audio_path))
         logger.info(
-            f"Config: model={model_size}, language={language}, beam_size={beam_size}, vad_filter={vad_filter}"
+            "transcribe_config",
+            model=model_size,
+            language=language,
+            beam_size=beam_size,
+            vad_filter=vad_filter,
         )
 
         # Transcribe audio
@@ -150,10 +159,14 @@ class FasterWhisperEngine(Engine):
         full_text = " ".join(full_text_parts)
 
         logger.info(
-            f"Transcription complete: {len(segments)} segments, {len(full_text)} chars"
+            "transcription_complete",
+            segment_count=len(segments),
+            char_count=len(full_text),
         )
         logger.info(
-            f"Detected language: {info.language} (confidence: {info.language_probability:.2f})"
+            "detected_language",
+            language=info.language,
+            confidence=round(info.language_probability, 2),
         )
 
         return TaskOutput(

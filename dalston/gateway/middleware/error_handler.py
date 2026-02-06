@@ -1,12 +1,11 @@
 """Global error handling middleware."""
 
-import logging
-
+import structlog
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 def setup_exception_handlers(app: FastAPI) -> None:
@@ -42,7 +41,9 @@ def setup_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def general_exception_handler(request: Request, exc: Exception):
         """Handle unexpected exceptions."""
-        logger.exception("Unhandled exception: %s", exc)
+        logger.exception(
+            "unhandled_exception", error=str(exc), path=str(request.url.path)
+        )
         return JSONResponse(
             status_code=500,
             content={

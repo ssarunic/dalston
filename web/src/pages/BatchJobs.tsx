@@ -1,11 +1,15 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Trash2 } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useJobs } from '@/hooks/useJobs'
+import { apiClient } from '@/api/client'
+import type { JobStatus } from '@/api/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 import {
   Table,
   TableBody,
@@ -14,9 +18,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import type { JobStatus } from '@/api/types'
 
 const PAGE_SIZE = 20
+
+const TERMINAL_STATUSES: Set<JobStatus> = new Set(['completed', 'failed', 'cancelled'])
 
 const STATUS_FILTERS: { label: string; value: JobStatus | '' }[] = [
   { label: 'All', value: '' },
@@ -39,6 +44,10 @@ function formatDate(dateStr: string): string {
 export function BatchJobs() {
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [page, setPage] = useState(0)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string } | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
 
   const { data, isLoading, error } = useJobs({
     limit: PAGE_SIZE,
@@ -47,6 +56,23 @@ export function BatchJobs() {
   })
 
   const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0
+
+  async function handleDelete() {
+    if (!deleteTarget) return
+    setIsDeleting(true)
+    setDeleteError(null)
+    try {
+      await apiClient.deleteJob(deleteTarget.id)
+      setDeleteTarget(null)
+      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to delete job'
+      setDeleteError(message)
+    } finally {
+      setIsDeleting(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -131,12 +157,22 @@ export function BatchJobs() {
                     <TableCell className="text-muted-foreground text-sm">
                       {formatDate(job.created_at)}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right space-x-1">
                       <Link to={`/jobs/${job.id}`}>
                         <Button variant="ghost" size="sm">
                           View
                         </Button>
                       </Link>
+                      {TERMINAL_STATUSES.has(job.status as JobStatus) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-400 hover:text-red-300 hover:bg-red-950"
+                          onClick={() => setDeleteTarget({ id: job.id })}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -174,6 +210,51 @@ export function BatchJobs() {
           )}
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) { setDeleteTarget(null); setDeleteError(null) } }}>
+        <DialogContent>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Delete Job</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                This will permanently delete the job and all its artifacts
+                (audio, transcripts, intermediate outputs). This action cannot
+                be undone.
+              </p>
+              {deleteTarget && (
+                <p className="text-sm font-mono text-muted-foreground">
+                  {deleteTarget.id}
+                </p>
+              )}
+              {deleteError && (
+                <p className="text-sm text-red-400">{deleteError}</p>
+              )}
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { setDeleteTarget(null); setDeleteError(null) }}
+                  disabled={isDeleting}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="bg-red-600 hover:bg-red-700"
+                  onClick={handleDelete}
+                  disabled={isDeleting}
+                >
+                  {isDeleting ? 'Deleting...' : 'Delete'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

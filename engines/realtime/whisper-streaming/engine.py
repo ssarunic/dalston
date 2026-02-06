@@ -4,15 +4,15 @@ Uses faster-whisper for transcription with Silero VAD for speech detection.
 Supports both "fast" (distil-whisper) and "accurate" (large-v3) model variants.
 """
 
-import logging
 from typing import Any
 
 import numpy as np
+import structlog
 from faster_whisper import WhisperModel
 
 from dalston.realtime_sdk import RealtimeEngine, TranscribeResult, Word
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 class WhisperStreamingEngine(RealtimeEngine):
@@ -48,29 +48,31 @@ class WhisperStreamingEngine(RealtimeEngine):
         """
         # Detect device
         self._device, self._compute_type = self._detect_device()
-        logger.info(f"Using device: {self._device}, compute_type: {self._compute_type}")
+        logger.info(
+            "using_device", device=self._device, compute_type=self._compute_type
+        )
 
         # Load fast model (distil-whisper)
         import os
 
         fast_model_name = os.environ.get("FAST_MODEL", self.FAST_MODEL)
-        logger.info(f"Loading fast model: {fast_model_name}")
+        logger.info("loading_fast_model", model_name=fast_model_name)
         self._models["fast"] = WhisperModel(
             fast_model_name,
             device=self._device,
             compute_type=self._compute_type,
         )
-        logger.info("Fast model loaded")
+        logger.info("fast_model_loaded")
 
         # Load accurate model (large-v3)
         accurate_model_name = os.environ.get("ACCURATE_MODEL", self.ACCURATE_MODEL)
-        logger.info(f"Loading accurate model: {accurate_model_name}")
+        logger.info("loading_accurate_model", model_name=accurate_model_name)
         self._models["accurate"] = WhisperModel(
             accurate_model_name,
             device=self._device,
             compute_type=self._compute_type,
         )
-        logger.info("Accurate model loaded")
+        logger.info("accurate_model_loaded")
 
     def _detect_device(self) -> tuple[str, str]:
         """Detect the best available device and compute type.

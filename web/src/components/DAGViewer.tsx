@@ -115,7 +115,9 @@ export function DAGViewer({ tasks, jobId, className }: DAGViewerProps) {
   const stageGroups: StageGroup[] = stageOrder
     .map((stage) => ({
       stage,
-      tasks: tasks.filter((t) => t.stage === stage),
+      tasks: tasks.filter(
+        (t) => t.stage === stage || t.stage.startsWith(`${stage}_ch`)
+      ),
     }))
     .filter((group) => group.tasks.length > 0)
 
@@ -173,7 +175,7 @@ export function DAGViewer({ tasks, jobId, className }: DAGViewerProps) {
       </div>
 
       {/* DAG visualization */}
-      <div className="flex items-start gap-0 overflow-x-auto py-2 px-1">
+      <div className="flex items-center gap-0 overflow-x-auto py-2 px-1">
         {stageGroups.map((group, idx) => (
           <StageColumn
             key={group.stage}

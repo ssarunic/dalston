@@ -4,6 +4,7 @@ import type {
   APIKeyListResponse,
   ConsoleJobListResponse,
   CreateAPIKeyRequest,
+  DashboardResponse,
   EnginesResponse,
   HealthResponse,
   JobDetail,
@@ -56,6 +57,9 @@ export const apiClient = {
   // Job stats (for dashboard)
   getJobStats: () => currentClient.get('v1/jobs/stats').json<JobStatsResponse>(),
 
+  // Console dashboard (aggregated, consistent tenant filtering)
+  getDashboard: () => currentClient.get('api/console/dashboard').json<DashboardResponse>(),
+
   // Jobs list - use console endpoint (admin required, shows all tenants)
   getJobs: (params: JobListParams = {}) => {
     const searchParams = new URLSearchParams()
@@ -84,6 +88,10 @@ export const apiClient = {
   // Engines (admin required)
   getEngines: () =>
     currentClient.get('api/console/engines').json<EnginesResponse>(),
+
+  // Delete a job (admin required, job must be in terminal state)
+  deleteJob: (jobId: string) =>
+    currentClient.delete(`api/console/jobs/${jobId}`),
 
   // Export URL (needs API key as query param for download links)
   getExportUrl: (jobId: string, format: 'srt' | 'vtt' | 'txt' | 'json') => {

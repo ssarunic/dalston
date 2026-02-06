@@ -1,47 +1,42 @@
-import { useQueries } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
+import { useAuth } from '@/contexts/AuthContext'
 
 export function useDashboard() {
-  const results = useQueries({
-    queries: [
-      {
-        queryKey: ['health'],
-        queryFn: () => apiClient.getHealth(),
-        refetchInterval: 10000,
-        retry: false,
-      },
-      {
-        queryKey: ['jobStats'],
-        queryFn: () => apiClient.getJobStats(),
-        refetchInterval: 5000,
-        retry: false,
-      },
-      {
-        queryKey: ['realtimeStatus'],
-        queryFn: () => apiClient.getRealtimeStatus(),
-        refetchInterval: 5000,
-        retry: false,
-      },
-      {
-        queryKey: ['recentJobs'],
-        queryFn: () => apiClient.getJobs({ limit: 5 }),
-        refetchInterval: 5000,
-        retry: false,
-      },
-    ],
+  const { isAuthenticated, isLoading: authLoading } = useAuth()
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['dashboard'],
+    queryFn: () => apiClient.getDashboard(),
+    refetchInterval: 5000,
+    retry: 1,
+    enabled: isAuthenticated && !authLoading,
   })
 
-  const [healthResult, jobStatsResult, realtimeResult, recentJobsResult] = results
-
-  const isLoading = results.some((r) => r.isLoading)
-  const error = results.find((r) => r.error)?.error
-
   return {
-    health: healthResult.data,
-    jobStats: jobStatsResult.data,
-    realtime: realtimeResult.data,
-    recentJobs: recentJobsResult.data?.jobs ?? [],
+    health: data
+      ? { status: data.system.healthy ? 'healthy' : 'unhealthy', version: data.system.version }
+      : undefined,
+    jobStats: data
+      ? {
+          running: data.batch.running_jobs,
+          queued: data.batch.queued_jobs,
+          completed_today: data.batch.completed_today,
+          failed_today: data.batch.failed_today,
+        }
+      : undefined,
+    realtime: data
+      ? {
+          status: 'ready' as const,
+          total_capacity: data.realtime.total_capacity,
+          active_sessions: data.realtime.used_capacity,
+          available_capacity: data.realtime.available_capacity,
+          worker_count: data.realtime.worker_count,
+          ready_workers: data.realtime.ready_workers,
+        }
+      : undefined,
+    recentJobs: data?.recent_jobs ?? [],
     isLoading,
-    error,
+    error: error ?? undefined,
   }
 }

@@ -2,4 +2,4 @@
 #
 # No additional Python dependencies required.
 # ffmpeg is installed via apt in Dockerfile.
-# boto3, redis are already in engine-base image.
+# boto3, redis, structlog are already in engine-base image.

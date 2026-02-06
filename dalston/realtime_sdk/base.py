@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import os
 import signal
 from abc import ABC, abstractmethod
@@ -16,13 +15,14 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import numpy as np
+import structlog
 from websockets.asyncio.server import ServerConnection, serve
 
 from dalston.realtime_sdk.assembler import TranscribeResult
 from dalston.realtime_sdk.registry import WorkerInfo, WorkerRegistry
 from dalston.realtime_sdk.session import SessionConfig, SessionHandler
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 class RealtimeEngine(ABC):
@@ -108,12 +108,6 @@ class RealtimeEngine(ABC):
         self._registry: WorkerRegistry | None = None
         self._running = False
         self._server = None
-
-        # Setup logging
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        )
 
     @abstractmethod
     def load_models(self) -> None:
@@ -231,18 +225,18 @@ class RealtimeEngine(ABC):
                 engine = MyEngine()
                 asyncio.run(engine.run())
         """
-        logger.info(f"Starting realtime engine {self.worker_id}")
+        logger.info("starting_realtime_engine", worker_id=self.worker_id)
 
         # Load models
-        logger.info("Loading models...")
+        logger.info("loading_models")
         self.load_models()
-        logger.info("Models loaded")
+        logger.info("models_loaded")
 
         # Initialize registry client
         self._registry = WorkerRegistry(self.redis_url)
 
         # Register with Session Router
-        logger.info(f"Registering with endpoint: {self._worker_endpoint}")
+        logger.info("registering_with_session_router", endpoint=self._worker_endpoint)
         await self._registry.register(
             WorkerInfo(
                 worker_id=self.worker_id,
@@ -264,7 +258,7 @@ class RealtimeEngine(ABC):
         heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
         # Start WebSocket server
-        logger.info(f"Starting WebSocket server on port {self.port}")
+        logger.info("starting_websocket_server", port=self.port)
 
         def capture_request_path(connection, request):
             """Capture request path for use in handler (websockets v16+ API)."""
@@ -280,7 +274,7 @@ class RealtimeEngine(ABC):
             process_request=capture_request_path,
         ) as server:
             self._server = server
-            logger.info(f"Realtime engine {self.worker_id} ready")
+            logger.info("realtime_engine_ready", worker_id=self.worker_id)
 
             # Wait until shutdown
             while self._running:
@@ -293,7 +287,7 @@ class RealtimeEngine(ABC):
         except asyncio.CancelledError:
             pass
 
-        logger.info("Engine stopped")
+        logger.info("engine_stopped")
 
     async def shutdown(self) -> None:
         """Graceful shutdown.
@@ -304,7 +298,7 @@ class RealtimeEngine(ABC):
         if not self._running:
             return
 
-        logger.info("Shutting down...")
+        logger.info("shutting_down")
         self._running = False
 
         # Unregister from Session Router
@@ -331,7 +325,7 @@ class RealtimeEngine(ABC):
                         status=status,
                     )
             except Exception as e:
-                logger.error(f"Heartbeat error: {e}")
+                logger.error("heartbeat_error", error=str(e))
 
             await asyncio.sleep(10)
 

@@ -1,10 +1,11 @@
 """Unit tests for JobsService."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
 
+from dalston.common.models import JobStatus
 from dalston.gateway.services.jobs import JobsService, JobStats
 
 
@@ -145,3 +146,105 @@ class TestJobsServiceGetStats:
         assert stats.queued == 0
         assert stats.completed_today == 0
         assert stats.failed_today == 0
+
+
+class TestJobsServiceDeleteJob:
+    """Tests for JobsService.delete_job method."""
+
+    @pytest.fixture
+    def jobs_service(self) -> JobsService:
+        return JobsService()
+
+    @pytest.fixture
+    def mock_db(self):
+        """Create a mock async database session."""
+        db = AsyncMock()
+        return db
+
+    def _make_job(self, status: str, job_id: UUID | None = None, tenant_id: UUID | None = None):
+        """Create a mock JobModel with the given status."""
+        job = MagicMock()
+        job.id = job_id or UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        job.tenant_id = tenant_id or UUID("00000000-0000-0000-0000-000000000000")
+        job.status = status
+        return job
+
+    @pytest.mark.asyncio
+    async def test_delete_completed_job(self, jobs_service: JobsService, mock_db):
+        """Test deleting a completed job succeeds."""
+        job = self._make_job(JobStatus.COMPLETED.value)
+
+        with patch.object(jobs_service, "get_job", return_value=job):
+            result = await jobs_service.delete_job(mock_db, job.id)
+
+        assert result is job
+        mock_db.delete.assert_awaited_once_with(job)
+        mock_db.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_delete_failed_job(self, jobs_service: JobsService, mock_db):
+        """Test deleting a failed job succeeds."""
+        job = self._make_job(JobStatus.FAILED.value)
+
+        with patch.object(jobs_service, "get_job", return_value=job):
+            result = await jobs_service.delete_job(mock_db, job.id)
+
+        assert result is job
+        mock_db.delete.assert_awaited_once_with(job)
+
+    @pytest.mark.asyncio
+    async def test_delete_cancelled_job(self, jobs_service: JobsService, mock_db):
+        """Test deleting a cancelled job succeeds."""
+        job = self._make_job(JobStatus.CANCELLED.value)
+
+        with patch.object(jobs_service, "get_job", return_value=job):
+            result = await jobs_service.delete_job(mock_db, job.id)
+
+        assert result is job
+        mock_db.delete.assert_awaited_once_with(job)
+
+    @pytest.mark.asyncio
+    async def test_delete_running_job_raises(self, jobs_service: JobsService, mock_db):
+        """Test that deleting a running job raises ValueError."""
+        job = self._make_job(JobStatus.RUNNING.value)
+
+        with patch.object(jobs_service, "get_job", return_value=job):
+            with pytest.raises(ValueError, match="Cannot delete job in 'running' state"):
+                await jobs_service.delete_job(mock_db, job.id)
+
+        mock_db.delete.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_delete_pending_job_raises(self, jobs_service: JobsService, mock_db):
+        """Test that deleting a pending job raises ValueError."""
+        job = self._make_job(JobStatus.PENDING.value)
+
+        with patch.object(jobs_service, "get_job", return_value=job):
+            with pytest.raises(ValueError, match="Cannot delete job in 'pending' state"):
+                await jobs_service.delete_job(mock_db, job.id)
+
+        mock_db.delete.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_delete_nonexistent_job_returns_none(self, jobs_service: JobsService, mock_db):
+        """Test that deleting a nonexistent job returns None."""
+        with patch.object(jobs_service, "get_job", return_value=None):
+            result = await jobs_service.delete_job(
+                mock_db, UUID("ffffffff-ffff-ffff-ffff-ffffffffffff")
+            )
+
+        assert result is None
+        mock_db.delete.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_delete_with_tenant_isolation(self, jobs_service: JobsService, mock_db):
+        """Test that delete passes tenant_id for isolation."""
+        tenant_id = UUID("12345678-1234-1234-1234-123456789abc")
+        job_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        job = self._make_job(JobStatus.COMPLETED.value, job_id=job_id, tenant_id=tenant_id)
+
+        with patch.object(jobs_service, "get_job", return_value=job) as mock_get:
+            result = await jobs_service.delete_job(mock_db, job_id, tenant_id=tenant_id)
+
+        mock_get.assert_awaited_once_with(mock_db, job_id, tenant_id=tenant_id)
+        assert result is job

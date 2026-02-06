@@ -6,6 +6,7 @@ Handles Redis pub/sub events:
 - task.failed: Retry or fail job
 """
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -116,6 +117,33 @@ async def handle_job_created(
             log.info("queued_initial_task", task_id=str(task.id), stage=task.stage)
 
 
+async def handle_task_started(
+    task_id: UUID,
+    db: AsyncSession,
+) -> None:
+    """Handle task.started event.
+
+    Marks the task as RUNNING and records the start time.
+
+    Args:
+        task_id: UUID of the started task
+        db: Database session
+    """
+    log = logger.bind(task_id=str(task_id))
+    log.info("handling_task_started")
+
+    task = await db.get(TaskModel, task_id)
+    if task is None:
+        log.error("task_not_found")
+        return
+
+    task.status = TaskStatus.RUNNING.value
+    task.started_at = datetime.now(UTC)
+    await db.commit()
+
+    log.info("marked_task_running", stage=task.stage)
+
+
 async def handle_task_completed(
     task_id: UUID,
     db: AsyncSession,
@@ -148,6 +176,7 @@ async def handle_task_completed(
 
     task.status = TaskStatus.COMPLETED.value
     task.completed_at = datetime.now(UTC)
+    task.error = None  # Clear any error from a previous failed attempt
     await db.commit()
 
     job_id = task.job_id
@@ -182,12 +211,20 @@ async def handle_task_completed(
                 settings=settings,
             )
 
-            # Determine input_uri (use job's audio_uri if not set)
+            # Determine input_uri
             if not dependent.input_uri:
-                job = await db.get(JobModel, job_id)
-                if job:
-                    dependent.input_uri = job.audio_uri
-                    await db.commit()
+                # For per-channel tasks, use the channel-specific audio
+                # from prepare output instead of the original stereo file
+                channel_uri = _resolve_channel_audio_uri(
+                    dependent.stage, previous_outputs
+                )
+                if channel_uri:
+                    dependent.input_uri = channel_uri
+                else:
+                    job = await db.get(JobModel, job_id)
+                    if job:
+                        dependent.input_uri = job.audio_uri
+                await db.commit()
 
             # Convert to Pydantic model for queue_task
             from dalston.common.models import Task
@@ -343,6 +380,13 @@ async def _gather_previous_outputs(
         if output and "data" in output:
             previous_outputs[dep_task.stage] = output["data"]
 
+            # For per-channel stages (e.g. transcribe_ch0), also add the
+            # base stage key (e.g. "transcribe") so downstream engines that
+            # look up previous_outputs["transcribe"] can find the data.
+            base_stage = re.sub(r"_ch\d+$", "", dep_task.stage)
+            if base_stage != dep_task.stage:
+                previous_outputs[base_stage] = output["data"]
+
     return previous_outputs
 
 
@@ -402,3 +446,29 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
             await publish_job_failed(redis, job_id, job.error or "Unknown error")
         else:
             await publish_job_completed(redis, job_id)
+
+
+def _resolve_channel_audio_uri(
+    stage: str, previous_outputs: dict[str, Any]
+) -> str | None:
+    """Resolve per-channel audio URI for channel-specific tasks.
+
+    For stages like transcribe_ch0 or align_ch0, extracts the matching
+    channel audio URI from the prepare output's channel_files.
+
+    Returns:
+        The channel's audio URI, or None if not a per-channel task.
+    """
+    match = re.match(r"(?:transcribe|align)_ch(\d+)", stage)
+    if not match:
+        return None
+
+    channel = int(match.group(1))
+    prepare_output = previous_outputs.get("prepare", {})
+    channel_files = prepare_output.get("channel_files", [])
+
+    for cf in channel_files:
+        if cf.get("channel") == channel:
+            return cf["audio_uri"]
+
+    return None

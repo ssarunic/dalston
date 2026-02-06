@@ -3,6 +3,8 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
+import structlog
+
 from dalston.engine_sdk.types import TaskInput, TaskOutput
 
 
@@ -11,6 +13,11 @@ class Engine(ABC):
 
     Engines implement the `process` method to handle specific pipeline stages.
     The SDK runner handles queue polling, S3 I/O, and event publishing.
+
+    The base class provides ``self.logger``, a structlog bound logger
+    pre-configured with the engine_id.  Engine authors can use it directly::
+
+        self.logger.info("model_loaded", model="large-v3")
 
     Example:
         class MyTranscriptionEngine(Engine):
@@ -34,6 +41,11 @@ class Engine(ABC):
     def __init__(self) -> None:
         """Initialize the engine."""
         self._runner = None
+        # structlog loggers are lazy proxies — configuration is resolved on
+        # first log call, not at creation time.  EngineRunner.__init__() calls
+        # dalston.logging.configure() before any logging happens, so this is
+        # safe despite being created before configure() runs.
+        self.logger = structlog.get_logger()
 
     @abstractmethod
     def process(self, input: TaskInput) -> TaskOutput:

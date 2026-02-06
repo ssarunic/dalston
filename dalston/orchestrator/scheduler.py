@@ -11,6 +11,7 @@ from typing import Any
 from uuid import UUID
 
 import structlog
+import structlog.contextvars
 from redis.asyncio import Redis
 
 from dalston.common.models import Task
@@ -48,15 +49,19 @@ async def queue_task(
 
     log = logger.bind(task_id=task_id_str, job_id=job_id_str, engine_id=task.engine_id)
 
-    # 1. Store task metadata in Redis hash
+    # 1. Store task metadata in Redis hash (includes request_id for correlation)
     metadata_key = TASK_METADATA_KEY.format(task_id=task_id_str)
+    ctx = structlog.contextvars.get_contextvars()
+    metadata_mapping: dict[str, str] = {
+        "job_id": job_id_str,
+        "stage": task.stage,
+        "engine_id": task.engine_id,
+    }
+    if "request_id" in ctx:
+        metadata_mapping["request_id"] = ctx["request_id"]
     await redis.hset(
         metadata_key,
-        mapping={
-            "job_id": job_id_str,
-            "stage": task.stage,
-            "engine_id": task.engine_id,
-        },
+        mapping=metadata_mapping,
     )
     # Set TTL of 24 hours (tasks should complete much faster)
     await redis.expire(metadata_key, 86400)

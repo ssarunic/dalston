@@ -10,6 +10,7 @@ This directory contains Architecture Decision Records (ADRs) documenting signifi
 | [ADR-002](ADR-002-engine-isolation.md) | Engine Isolation via Docker Containers | Accepted |
 | [ADR-003](ADR-003-two-level-queues.md) | Two-Level Queue Model (Jobs → Tasks) | Accepted |
 | [ADR-004](ADR-004-task-level-observability.md) | Two-Tier Task Observability (Stage Breakdown + Artifact Inspection) | Accepted |
+| [ADR-005](ADR-005-unified-logging.md) | Unified Logging and Observability | Proposed |
 
 ## ADR Template
 

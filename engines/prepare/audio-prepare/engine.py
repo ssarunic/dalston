@@ -5,16 +5,17 @@ Extracts duration and metadata using ffprobe.
 """
 
 import json
-import logging
 import os
 import subprocess
 from pathlib import Path
 from uuid import UUID
 
+import structlog
+
 from dalston.engine_sdk import Engine, TaskInput, TaskOutput
 from dalston.engine_sdk import io as s3_io
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 class AudioPrepareEngine(Engine):
@@ -72,11 +73,11 @@ class AudioPrepareEngine(Engine):
         target_sample_rate = config.get("target_sample_rate", self.DEFAULT_SAMPLE_RATE)
         split_channels = config.get("split_channels", False)
 
-        logger.info(f"Processing audio: {audio_path}")
+        logger.info("processing_audio", audio_path=str(audio_path))
 
         # Step 1: Probe original audio metadata
         original_metadata = self._probe_audio(audio_path)
-        logger.info(f"Original audio: {original_metadata}")
+        logger.info("original_audio_metadata", metadata=original_metadata)
 
         s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
 
@@ -108,23 +109,25 @@ class AudioPrepareEngine(Engine):
             sample_rate=target_sample_rate,
             channels=target_channels,
         )
-        logger.info(f"Converted audio saved to: {prepared_path}")
+        logger.info("converted_audio_saved", prepared_path=str(prepared_path))
 
         # Step 3: Probe converted audio to verify
         prepared_metadata = self._probe_audio(prepared_path)
-        logger.info(f"Prepared audio: {prepared_metadata}")
+        logger.info("prepared_audio_metadata", metadata=prepared_metadata)
 
         # Step 4: Upload prepared audio to S3
         audio_uri = f"s3://{s3_bucket}/jobs/{job_id}/audio/prepared.wav"
         s3_io.upload_file(prepared_path, audio_uri)
-        logger.info(f"Uploaded prepared audio to: {audio_uri}")
+        logger.info("uploaded_prepared_audio", audio_uri=audio_uri)
 
         # Step 5: Clean up local temp file to prevent accumulation
         try:
             prepared_path.unlink()
-            logger.debug(f"Cleaned up temporary file: {prepared_path}")
+            logger.debug("cleaned_up_temporary_file", path=str(prepared_path))
         except OSError as e:
-            logger.warning(f"Failed to clean up temp file {prepared_path}: {e}")
+            logger.warning(
+                "failed_to_clean_up_temp_file", path=str(prepared_path), error=str(e)
+            )
 
         # Build output data
         output_data = {
@@ -164,8 +167,13 @@ class AudioPrepareEngine(Engine):
         Returns:
             TaskOutput with channel_files array
         """
-        num_channels = min(original_metadata["channels"], 2)  # Limit to stereo
-        logger.info(f"Splitting audio into {num_channels} channels")
+        num_channels = original_metadata["channels"]
+        if num_channels > 2:
+            raise ValueError(
+                f"per_channel mode supports stereo (2 channels), but input has "
+                f"{num_channels} channels. Use speaker_detection=diarize instead."
+            )
+        logger.info("splitting_audio_into_channels", num_channels=num_channels)
 
         channel_files = []
         channel_uris = []
@@ -182,14 +190,16 @@ class AudioPrepareEngine(Engine):
 
             # Probe the channel file
             channel_metadata = self._probe_audio(channel_path)
-            logger.info(f"Channel {channel_idx}: {channel_metadata}")
+            logger.info(
+                "channel_metadata", channel=channel_idx, metadata=channel_metadata
+            )
 
             # Upload to S3
             audio_uri = (
                 f"s3://{s3_bucket}/jobs/{job_id}/audio/prepared_ch{channel_idx}.wav"
             )
             s3_io.upload_file(channel_path, audio_uri)
-            logger.info(f"Uploaded channel {channel_idx} to: {audio_uri}")
+            logger.info("uploaded_channel", channel=channel_idx, audio_uri=audio_uri)
 
             channel_files.append(
                 {
@@ -204,7 +214,11 @@ class AudioPrepareEngine(Engine):
             try:
                 channel_path.unlink()
             except OSError as e:
-                logger.warning(f"Failed to clean up {channel_path}: {e}")
+                logger.warning(
+                    "failed_to_clean_up_channel_file",
+                    path=str(channel_path),
+                    error=str(e),
+                )
 
         # Build output data
         output_data = {
@@ -256,7 +270,7 @@ class AudioPrepareEngine(Engine):
             str(output_path),
         ]
 
-        logger.debug(f"Extracting channel {channel}: {' '.join(cmd)}")
+        logger.debug("extracting_channel", channel=channel, cmd=" ".join(cmd))
 
         try:
             result = subprocess.run(
@@ -381,7 +395,7 @@ class AudioPrepareEngine(Engine):
             str(output_path),
         ]
 
-        logger.debug(f"Running ffmpeg: {' '.join(cmd)}")
+        logger.debug("running_ffmpeg", cmd=" ".join(cmd))
 
         try:
             result = subprocess.run(

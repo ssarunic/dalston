@@ -132,6 +132,49 @@ class JobsService:
 
         return jobs, total
 
+    # Terminal states where deletion is allowed
+    TERMINAL_STATES = {
+        JobStatus.COMPLETED.value,
+        JobStatus.FAILED.value,
+        JobStatus.CANCELLED.value,
+    }
+
+    async def delete_job(
+        self,
+        db: AsyncSession,
+        job_id: UUID,
+        tenant_id: UUID | None = None,
+    ) -> JobModel | None:
+        """Delete a job record and its associated tasks.
+
+        Only jobs in terminal states (completed, failed, cancelled) can be deleted.
+        S3 artifact cleanup is the caller's responsibility.
+
+        Args:
+            db: Database session
+            job_id: Job UUID
+            tenant_id: Optional tenant UUID for isolation check
+
+        Returns:
+            The deleted JobModel (detached) or None if not found
+
+        Raises:
+            ValueError: If job is not in a terminal state
+        """
+        job = await self.get_job(db, job_id, tenant_id=tenant_id)
+        if job is None:
+            return None
+
+        if job.status not in self.TERMINAL_STATES:
+            raise ValueError(
+                f"Cannot delete job in '{job.status}' state. "
+                f"Only completed, failed, or cancelled jobs can be deleted."
+            )
+
+        await db.delete(job)
+        await db.commit()
+        return job
+
     async def update_job_status(
         self,
         db: AsyncSession,

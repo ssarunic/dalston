@@ -43,7 +43,8 @@ docs/
 │   ├── ADR-001-storage-architecture.md
 │   ├── ADR-002-engine-isolation.md
 │   ├── ADR-003-two-level-queues.md
-│   └── ADR-004-task-level-observability.md
+│   ├── ADR-004-task-level-observability.md
+│   └── ADR-005-unified-logging.md
 │
 └── plan/                   # How we BUILD it (implementation)
     ├── README.md               # Timeline, principles, overview
@@ -58,7 +59,11 @@ docs/
         ├── M08-elevenlabs-compat.md
         ├── M09-enrichment.md
         ├── M10-web-console.md
-        └── M11-api-authentication.md
+        ├── M11-api-authentication.md
+        ├── ...
+        ├── M18-unified-structured-logging.md
+        ├── M19-distributed-tracing.md
+        └── M20-metrics-dashboards.md
 ```
 
 ## Quick Links
