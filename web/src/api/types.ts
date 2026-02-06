@@ -231,3 +231,58 @@ export interface EnginesResponse {
   batch_engines: BatchEngine[]
   realtime_engines: WorkerStatus[]
 }
+
+// Webhook types
+export interface WebhookEndpoint {
+  id: string
+  url: string
+  events: string[]
+  description: string | null
+  is_active: boolean
+  disabled_reason: string | null
+  consecutive_failures: number
+  last_success_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface WebhookEndpointCreated extends WebhookEndpoint {
+  signing_secret: string
+}
+
+export interface WebhookEndpointListResponse {
+  endpoints: WebhookEndpoint[]
+}
+
+export interface WebhookDelivery {
+  id: string
+  endpoint_id: string | null
+  job_id: string | null
+  event_type: string
+  status: 'pending' | 'success' | 'failed'
+  attempts: number
+  last_attempt_at: string | null
+  last_status_code: number | null
+  last_error: string | null
+  created_at: string
+}
+
+export interface DeliveryListResponse {
+  deliveries: WebhookDelivery[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface CreateWebhookRequest {
+  url: string
+  events: string[]
+  description?: string | null
+}
+
+export interface UpdateWebhookRequest {
+  url?: string
+  events?: string[]
+  description?: string | null
+  is_active?: boolean
+}

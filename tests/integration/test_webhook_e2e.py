@@ -1,9 +1,10 @@
 """End-to-end tests for webhook delivery flow.
 
 Tests the complete webhook flow from job creation to webhook delivery,
-including signature verification.
+including signature verification. Uses Standard Webhooks format.
 """
 
+import base64
 import hashlib
 import hmac
 import json
@@ -16,7 +17,7 @@ from dalston.gateway.services.webhook import WebhookService
 
 
 class TestWebhookEndToEnd:
-    """End-to-end tests for webhook delivery."""
+    """End-to-end tests for webhook delivery (Standard Webhooks format)."""
 
     @pytest.fixture
     def webhook_secret(self) -> str:
@@ -38,21 +39,24 @@ class TestWebhookEndToEnd:
     def webhook_metadata(self) -> dict:
         return {"user_id": "user_123", "project": "podcast-transcription"}
 
-    @pytest.fixture
-    def transcript_text(self) -> str:
-        return "Welcome to the show. Today we're discussing webhooks and how they make async workflows possible."
-
     def verify_signature(
-        self, payload_json: str, signature: str, timestamp: str, secret: str
+        self,
+        payload_json: str,
+        signature: str,
+        msg_id: str,
+        timestamp: str,
+        secret: str,
     ) -> bool:
-        """Verify webhook signature (simulating what client would do)."""
-        signed_payload = f"{timestamp}.{payload_json}"
+        """Verify webhook signature per Standard Webhooks spec."""
+        # Standard Webhooks: sign "{msg_id}.{timestamp}.{body}"
+        signed_payload = f"{msg_id}.{timestamp}.{payload_json}"
         expected = hmac.new(
             secret.encode(),
             signed_payload.encode(),
             hashlib.sha256,
-        ).hexdigest()
-        return hmac.compare_digest(f"sha256={expected}", signature)
+        ).digest()
+        expected_sig = f"v1,{base64.b64encode(expected).decode()}"
+        return hmac.compare_digest(expected_sig, signature)
 
     @pytest.mark.asyncio
     async def test_completed_webhook_e2e(
@@ -62,7 +66,6 @@ class TestWebhookEndToEnd:
         job_id: UUID,
         webhook_url: str,
         webhook_metadata: dict,
-        transcript_text: str,
         httpx_mock,
     ):
         """Test complete flow: job completes -> webhook delivered with valid signature."""
@@ -73,43 +76,48 @@ class TestWebhookEndToEnd:
             event="transcription.completed",
             job_id=job_id,
             status="completed",
-            text=transcript_text,
             duration=125.5,
             webhook_metadata=webhook_metadata,
         )
 
         # Deliver webhook
-        success = await webhook_service.deliver(webhook_url, payload)
+        success, status_code, error = await webhook_service.deliver(
+            webhook_url, payload
+        )
 
         # Verify delivery succeeded
         assert success is True
+        assert status_code == 200
 
         # Get the captured request
         request = httpx_mock.get_request()
         assert request is not None
 
-        # Verify headers
+        # Verify Standard Webhooks headers
         headers = request.headers
         assert headers["content-type"] == "application/json"
-        assert "x-dalston-signature" in headers
-        assert "x-dalston-timestamp" in headers
+        assert "webhook-signature" in headers
+        assert "webhook-timestamp" in headers
+        assert "webhook-id" in headers
 
-        signature = headers["x-dalston-signature"]
-        timestamp = headers["x-dalston-timestamp"]
+        signature = headers["webhook-signature"]
+        timestamp = headers["webhook-timestamp"]
+        msg_id = headers["webhook-id"]
         body = request.content.decode()
 
         # Verify signature (as client would)
-        assert self.verify_signature(body, signature, timestamp, webhook_secret)
+        assert self.verify_signature(body, signature, msg_id, timestamp, webhook_secret)
 
-        # Verify payload content
+        # Verify payload content (Standard Webhooks envelope)
         received_payload = json.loads(body)
-        assert received_payload["event"] == "transcription.completed"
-        assert received_payload["transcription_id"] == str(job_id)
-        assert received_payload["status"] == "completed"
-        assert received_payload["text"] == transcript_text
-        assert received_payload["duration"] == 125.5
-        assert received_payload["webhook_metadata"] == webhook_metadata
-        assert "timestamp" in received_payload
+        assert received_payload["object"] == "event"
+        assert received_payload["type"] == "transcription.completed"
+        assert "id" in received_payload  # evt_...
+        assert "created_at" in received_payload
+        assert received_payload["data"]["transcription_id"] == str(job_id)
+        assert received_payload["data"]["status"] == "completed"
+        assert received_payload["data"]["duration"] == 125.5
+        assert received_payload["data"]["webhook_metadata"] == webhook_metadata
 
     @pytest.mark.asyncio
     async def test_failed_webhook_e2e(
@@ -134,45 +142,19 @@ class TestWebhookEndToEnd:
             webhook_metadata=webhook_metadata,
         )
 
-        success = await webhook_service.deliver(webhook_url, payload)
-
-        assert success is True
-
-        request = httpx_mock.get_request()
-        received_payload = json.loads(request.content.decode())
-        assert received_payload["event"] == "transcription.failed"
-        assert received_payload["status"] == "failed"
-        assert received_payload["error"] == error_message
-        assert received_payload["webhook_metadata"] == webhook_metadata
-        assert "text" not in received_payload
-        assert "duration" not in received_payload
-
-    @pytest.mark.asyncio
-    async def test_long_text_truncated(
-        self,
-        webhook_service: WebhookService,
-        job_id: UUID,
-        webhook_url: str,
-        httpx_mock,
-    ):
-        """Test that long transcript text is truncated to 500 chars."""
-        httpx_mock.add_response(status_code=200)
-
-        # Create very long text
-        long_text = "This is a test. " * 100  # ~1600 chars
-
-        payload = webhook_service.build_payload(
-            event="transcription.completed",
-            job_id=job_id,
-            status="completed",
-            text=long_text,
+        success, status_code, error = await webhook_service.deliver(
+            webhook_url, payload
         )
 
-        await webhook_service.deliver(webhook_url, payload)
+        assert success is True
+        assert status_code == 200
 
         request = httpx_mock.get_request()
         received_payload = json.loads(request.content.decode())
-        assert len(received_payload["text"]) == 500
+        assert received_payload["type"] == "transcription.failed"
+        assert received_payload["data"]["status"] == "failed"
+        assert received_payload["data"]["error"] == error_message
+        assert received_payload["data"]["webhook_metadata"] == webhook_metadata
 
     @pytest.mark.asyncio
     async def test_invalid_signature_rejected(
@@ -199,11 +181,14 @@ class TestWebhookEndToEnd:
 
         # Verify with WRONG secret
         wrong_secret = "wrong-secret"
-        signature = headers["x-dalston-signature"]
-        timestamp = headers["x-dalston-timestamp"]
+        signature = headers["webhook-signature"]
+        timestamp = headers["webhook-timestamp"]
+        msg_id = headers["webhook-id"]
 
         # Should fail verification with wrong secret
-        assert not self.verify_signature(body, signature, timestamp, wrong_secret)
+        assert not self.verify_signature(
+            body, signature, msg_id, timestamp, wrong_secret
+        )
 
     @pytest.mark.asyncio
     async def test_webhook_delivery_with_nested_metadata(
@@ -230,12 +215,15 @@ class TestWebhookEndToEnd:
             webhook_metadata=complex_metadata,
         )
 
-        success = await webhook_service.deliver(webhook_url, payload)
+        success, status_code, error = await webhook_service.deliver(
+            webhook_url, payload
+        )
         assert success is True
+        assert status_code == 200
 
         request = httpx_mock.get_request()
         received_payload = json.loads(request.content.decode())
-        assert received_payload["webhook_metadata"] == complex_metadata
+        assert received_payload["data"]["webhook_metadata"] == complex_metadata
 
 
 class TestWebhookEventFlow:
@@ -283,35 +271,37 @@ class TestWebhookEventFlow:
 
 
 class TestWebhookPayloadSpec:
-    """Test webhook payload matches M05 specification."""
+    """Test webhook payload matches Standard Webhooks specification."""
 
     @pytest.fixture
     def service(self) -> WebhookService:
         return WebhookService(secret="spec-test-secret")
 
     def test_completed_payload_matches_spec(self, service: WebhookService):
-        """Verify completed payload matches M05 spec."""
+        """Verify completed payload matches Standard Webhooks spec."""
         job_id = uuid4()
         payload = service.build_payload(
             event="transcription.completed",
             job_id=job_id,
             status="completed",
-            text="First 500 chars of transcript...",
             duration=45.2,
             webhook_metadata={"user_id": "123"},
         )
 
-        # Verify all required fields per M05 spec
-        assert payload["event"] == "transcription.completed"
-        assert payload["transcription_id"] == str(job_id)
-        assert payload["status"] == "completed"
-        assert "timestamp" in payload
-        assert payload["text"] == "First 500 chars of transcript..."
-        assert payload["duration"] == 45.2
-        assert payload["webhook_metadata"] == {"user_id": "123"}
+        # Verify Standard Webhooks envelope
+        assert payload["object"] == "event"
+        assert payload["type"] == "transcription.completed"
+        assert payload["id"].startswith("evt_")
+        assert isinstance(payload["created_at"], int)
+
+        # Verify data payload
+        assert payload["data"]["transcription_id"] == str(job_id)
+        assert payload["data"]["status"] == "completed"
+        assert payload["data"]["duration"] == 45.2
+        assert payload["data"]["webhook_metadata"] == {"user_id": "123"}
 
     def test_failed_payload_matches_spec(self, service: WebhookService):
-        """Verify failed payload matches M05 spec."""
+        """Verify failed payload matches Standard Webhooks spec."""
         job_id = uuid4()
         payload = service.build_payload(
             event="transcription.failed",
@@ -321,21 +311,24 @@ class TestWebhookPayloadSpec:
             webhook_metadata={"user_id": "123"},
         )
 
-        assert payload["event"] == "transcription.failed"
-        assert payload["status"] == "failed"
-        assert payload["error"] == "Transcription failed: timeout"
-        assert payload["webhook_metadata"] == {"user_id": "123"}
+        assert payload["object"] == "event"
+        assert payload["type"] == "transcription.failed"
+        assert payload["data"]["status"] == "failed"
+        assert payload["data"]["error"] == "Transcription failed: timeout"
+        assert payload["data"]["webhook_metadata"] == {"user_id": "123"}
 
-    def test_headers_match_spec(self, service: WebhookService):
-        """Verify signature format matches M05 spec."""
+    def test_signature_format_matches_spec(self, service: WebhookService):
+        """Verify signature format matches Standard Webhooks spec."""
         payload_json = '{"test": "data"}'
+        msg_id = "msg_test123"
         timestamp = 1706443350
 
-        signature = service.sign_payload(payload_json, timestamp)
+        signature = service.sign_payload(payload_json, msg_id, timestamp)
 
-        # M05 spec: X-Dalston-Signature: sha256={hmac_hex}
-        assert signature.startswith("sha256=")
-        # Hex digest should be 64 chars
-        hex_part = signature.replace("sha256=", "")
-        assert len(hex_part) == 64
-        assert all(c in "0123456789abcdef" for c in hex_part)
+        # Standard Webhooks: v1,{base64}
+        assert signature.startswith("v1,")
+        # Base64 part should be decodable
+        b64_part = signature[3:]
+        decoded = base64.b64decode(b64_part)
+        # SHA256 produces 32 bytes
+        assert len(decoded) == 32

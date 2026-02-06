@@ -40,7 +40,14 @@ class Settings(BaseSettings):
     webhook_secret: str = Field(
         default=WEBHOOK_SECRET_DEFAULT,
         alias="WEBHOOK_SECRET",
-        description="HMAC secret for signing webhook payloads",
+        description="HMAC secret for signing webhook payloads (legacy per-job webhooks)",
+    )
+
+    # Admin Webhooks (M21)
+    allow_per_job_webhooks: bool = Field(
+        default=True,
+        alias="ALLOW_PER_JOB_WEBHOOKS",
+        description="Allow webhook_url parameter on job submission (legacy behavior)",
     )
 
 

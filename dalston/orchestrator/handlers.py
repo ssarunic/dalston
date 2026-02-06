@@ -342,9 +342,8 @@ async def handle_task_failed(
         job.completed_at = datetime.now(UTC)
         await db.commit()
 
-        # Trigger webhook if configured
-        if job.webhook_url:
-            await publish_job_failed(redis, job_id, job.error)
+        # Publish job failed event for webhook delivery
+        await publish_job_failed(redis, job_id, job.error)
 
     log.error("job_failed", reason=f"Task {task.stage} failed: {error}")
 
@@ -440,12 +439,12 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
     job.completed_at = datetime.now(UTC)
     await db.commit()
 
-    # Trigger webhook if configured
-    if job.webhook_url:
-        if any_failed:
-            await publish_job_failed(redis, job_id, job.error or "Unknown error")
-        else:
-            await publish_job_completed(redis, job_id)
+    # Publish job completion event for webhook delivery
+    # This triggers both admin-registered webhooks and per-job webhook_url (legacy)
+    if any_failed:
+        await publish_job_failed(redis, job_id, job.error or "Unknown error")
+    else:
+        await publish_job_completed(redis, job_id)
 
 
 def _resolve_channel_audio_uri(

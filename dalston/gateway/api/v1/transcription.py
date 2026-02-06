@@ -63,6 +63,7 @@ router = APIRouter(prefix="/audio/transcriptions", tags=["transcriptions"])
 )
 async def create_transcription(
     request: Request,
+    response: Response,
     file: Annotated[UploadFile, File(description="Audio file to transcribe")],
     api_key: RequireJobsWrite,
     language: Annotated[
@@ -78,7 +79,10 @@ async def create_transcription(
         str, Form(description="Timestamp granularity: 'none', 'segment', 'word'")
     ] = "word",
     webhook_url: Annotated[
-        str | None, Form(description="Webhook URL for completion callback")
+        str | None,
+        Form(
+            description="Webhook URL for completion callback (deprecated, use registered webhooks)"
+        ),
     ] = None,
     webhook_metadata: Annotated[
         str | None,
@@ -99,6 +103,19 @@ async def create_transcription(
     # Validate file
     if not file.filename:
         raise HTTPException(status_code=400, detail="File must have a filename")
+
+    # Check per-job webhook_url deprecation
+    if webhook_url:
+        if not settings.allow_per_job_webhooks:
+            raise HTTPException(
+                status_code=400,
+                detail="Per-job webhook_url is disabled. Use registered webhooks via POST /v1/webhooks instead.",
+            )
+        # Add deprecation warning header
+        response.headers["Deprecation"] = "true"
+        response.headers["X-Deprecation-Notice"] = (
+            "webhook_url parameter is deprecated. Use registered webhooks via POST /v1/webhooks."
+        )
 
     # Parse webhook_metadata JSON string
     parsed_webhook_metadata: dict | None = None

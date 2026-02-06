@@ -105,15 +105,29 @@ class StageResponse(BaseModel):
     Represents the status and timing of a single processing stage.
     """
 
-    stage: str = Field(description="Pipeline stage name (e.g., prepare, transcribe, align)")
+    stage: str = Field(
+        description="Pipeline stage name (e.g., prepare, transcribe, align)"
+    )
     task_id: UUID = Field(description="UUID of the underlying task")
     engine_id: str = Field(description="Engine that executed this task")
-    status: str = Field(description="Task status: pending, ready, running, completed, failed, skipped")
-    required: bool = Field(description="Whether this stage was required for job success")
-    started_at: datetime | None = Field(default=None, description="When execution began")
-    completed_at: datetime | None = Field(default=None, description="When execution finished")
-    duration_ms: int | None = Field(default=None, description="Wall-clock duration in milliseconds")
-    retries: int | None = Field(default=None, description="Number of retries attempted (omitted if 0)")
+    status: str = Field(
+        description="Task status: pending, ready, running, completed, failed, skipped"
+    )
+    required: bool = Field(
+        description="Whether this stage was required for job success"
+    )
+    started_at: datetime | None = Field(
+        default=None, description="When execution began"
+    )
+    completed_at: datetime | None = Field(
+        default=None, description="When execution finished"
+    )
+    duration_ms: int | None = Field(
+        default=None, description="Wall-clock duration in milliseconds"
+    )
+    retries: int | None = Field(
+        default=None, description="Number of retries attempted (omitted if 0)"
+    )
     error: str | None = Field(default=None, description="Error message if failed")
 
 

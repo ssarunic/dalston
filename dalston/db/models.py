@@ -3,7 +3,16 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import ARRAY, TIMESTAMP, ForeignKey, Integer, String, Text, func
+from sqlalchemy import (
+    ARRAY,
+    TIMESTAMP,
+    Boolean,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -42,6 +51,9 @@ class TenantModel(Base):
     # Relationships
     jobs: Mapped[list["JobModel"]] = relationship(back_populates="tenant")
     api_keys: Mapped[list["APIKeyModel"]] = relationship(back_populates="tenant")
+    webhook_endpoints: Mapped[list["WebhookEndpointModel"]] = relationship(
+        back_populates="tenant"
+    )
 
 
 class JobModel(Base):
@@ -188,3 +200,109 @@ class APIKeyModel(Base):
 
     # Relationships
     tenant: Mapped["TenantModel"] = relationship(back_populates="api_keys")
+
+
+class WebhookEndpointModel(Base):
+    """Registered webhook endpoint for event delivery."""
+
+    __tablename__ = "webhook_endpoints"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id"),
+        nullable=False,
+        index=True,
+    )
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    events: Mapped[list[str]] = mapped_column(
+        ARRAY(String),
+        nullable=False,
+    )
+    signing_secret: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    disabled_reason: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    consecutive_failures: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    last_success_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    # Relationships
+    tenant: Mapped["TenantModel"] = relationship(back_populates="webhook_endpoints")
+    deliveries: Mapped[list["WebhookDeliveryModel"]] = relationship(
+        back_populates="endpoint",
+        cascade="all, delete-orphan",
+    )
+
+
+class WebhookDeliveryModel(Base):
+    """Webhook delivery attempt record."""
+
+    __tablename__ = "webhook_deliveries"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+    )
+    endpoint_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("webhook_endpoints.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    job_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    url_override: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="pending",
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    last_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_retry_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    # Relationships
+    endpoint: Mapped["WebhookEndpointModel | None"] = relationship(
+        back_populates="deliveries"
+    )
+    job: Mapped["JobModel | None"] = relationship()

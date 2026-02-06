@@ -259,21 +259,46 @@ class RealtimeMessage:
 
 
 class WebhookEventType(str, Enum):
-    """Webhook event types."""
+    """Webhook event types (Standard Webhooks format)."""
 
-    JOB_COMPLETED = "job.completed"
-    JOB_FAILED = "job.failed"
+    TRANSCRIPTION_COMPLETED = "transcription.completed"
+    TRANSCRIPTION_FAILED = "transcription.failed"
 
 
 @dataclass
 class WebhookPayload:
-    """Webhook callback payload."""
+    """Webhook callback payload (Standard Webhooks format).
 
-    event: WebhookEventType
-    job_id: UUID
-    timestamp: datetime
-    data: dict[str, Any]
-    metadata: dict[str, Any] | None = None  # Echoed from job creation
+    See: https://github.com/standard-webhooks/standard-webhooks
+
+    The payload follows the Standard Webhooks envelope:
+    - object: Always "event"
+    - id: Unique event ID (evt_...)
+    - type: Event type string
+    - created_at: Unix timestamp
+    - data: Event-specific data
+    """
+
+    object: str  # Always "event"
+    id: str  # Event ID (evt_...)
+    type: WebhookEventType
+    created_at: int  # Unix timestamp
+    data: dict[str, Any]  # Contains transcription_id, status, etc.
+
+    @property
+    def transcription_id(self) -> str | None:
+        """Get transcription_id from data."""
+        return self.data.get("transcription_id")
+
+    @property
+    def status(self) -> str | None:
+        """Get status from data."""
+        return self.data.get("status")
+
+    @property
+    def webhook_metadata(self) -> dict[str, Any] | None:
+        """Get echoed webhook_metadata from data."""
+        return self.data.get("webhook_metadata")
 
 
 # -----------------------------------------------------------------------------

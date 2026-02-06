@@ -11,6 +11,8 @@ import { TaskDetail } from '@/pages/TaskDetail'
 import { RealtimeSessions } from '@/pages/RealtimeSessions'
 import { Engines } from '@/pages/Engines'
 import { ApiKeys } from '@/pages/ApiKeys'
+import { Webhooks } from '@/pages/Webhooks'
+import { WebhookDetail } from '@/pages/WebhookDetail'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -44,6 +46,8 @@ export default function App() {
                       <Route path="/realtime" element={<RealtimeSessions />} />
                       <Route path="/engines" element={<Engines />} />
                       <Route path="/keys" element={<ApiKeys />} />
+                      <Route path="/webhooks" element={<Webhooks />} />
+                      <Route path="/webhooks/:endpointId" element={<WebhookDetail />} />
                     </Routes>
                   </Layout>
                 </ProtectedRoute>

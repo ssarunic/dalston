@@ -12,6 +12,7 @@ This directory contains Architecture Decision Records (ADRs) documenting signifi
 | [ADR-004](ADR-004-task-level-observability.md) | Two-Tier Task Observability (Stage Breakdown + Artifact Inspection) | Accepted |
 | [ADR-005](ADR-005-unified-logging.md) | Unified Logging and Observability | Proposed |
 | [ADR-006](ADR-006-api-key-storage-migration.md) | Migrate API Key Storage from Redis to PostgreSQL | Accepted |
+| [ADR-007](ADR-007-admin-webhook-design.md) | Admin Webhook Design (Storage, Signing, Delivery) | Proposed |
 
 ## ADR Template
 
