@@ -7,6 +7,7 @@ import { Login } from '@/pages/Login'
 import { Dashboard } from '@/pages/Dashboard'
 import { BatchJobs } from '@/pages/BatchJobs'
 import { JobDetail } from '@/pages/JobDetail'
+import { TaskDetail } from '@/pages/TaskDetail'
 import { RealtimeSessions } from '@/pages/RealtimeSessions'
 import { Engines } from '@/pages/Engines'
 import { ApiKeys } from '@/pages/ApiKeys'
@@ -39,6 +40,7 @@ export default function App() {
                       <Route path="/" element={<Dashboard />} />
                       <Route path="/jobs" element={<BatchJobs />} />
                       <Route path="/jobs/:jobId" element={<JobDetail />} />
+                      <Route path="/jobs/:jobId/tasks/:taskId" element={<TaskDetail />} />
                       <Route path="/realtime" element={<RealtimeSessions />} />
                       <Route path="/engines" element={<Engines />} />
                       <Route path="/keys" element={<ApiKeys />} />

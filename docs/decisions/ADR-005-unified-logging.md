@@ -1,4 +1,4 @@
-# ADR-004: Unified Logging and Observability
+# ADR-005: Unified Logging and Observability
 
 ## Status
 

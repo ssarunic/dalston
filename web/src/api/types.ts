@@ -99,6 +99,24 @@ export interface TaskListResponse {
   tasks: Task[]
 }
 
+export interface TaskArtifact {
+  task_id: string
+  job_id: string
+  stage: string
+  engine_id: string
+  status: TaskStatus
+  required: boolean
+  started_at?: string
+  completed_at?: string
+  duration_ms?: number
+  retries: number
+  max_retries: number
+  error?: string
+  dependencies: string[]
+  input?: Record<string, unknown>
+  output?: Record<string, unknown>
+}
+
 // Realtime types
 export interface WorkerStatus {
   worker_id: string

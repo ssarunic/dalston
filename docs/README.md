@@ -11,6 +11,7 @@ docs/
 │
 ├── specs/                  # What the system IS (reference)
 │   ├── ARCHITECTURE.md         # System overview, components, data flow
+│   ├── OBSERVABILITY.md        # Task-level observability, stage breakdown, artifacts
 │   ├── PROJECT_STRUCTURE.md    # Directory layout, packages
 │   │
 │   ├── batch/                  # Batch transcription specs
@@ -42,7 +43,8 @@ docs/
 │   ├── ADR-001-storage-architecture.md
 │   ├── ADR-002-engine-isolation.md
 │   ├── ADR-003-two-level-queues.md
-│   └── ADR-004-unified-logging.md
+│   ├── ADR-004-task-level-observability.md
+│   └── ADR-005-unified-logging.md
 │
 └── plan/                   # How we BUILD it (implementation)
     ├── README.md               # Timeline, principles, overview
@@ -71,6 +73,7 @@ docs/
 - [Architecture Overview](specs/ARCHITECTURE.md) — Start here
 - [REST API](specs/batch/API.md) — Batch transcription endpoints
 - [WebSocket API](specs/realtime/WEBSOCKET_API.md) — Real-time streaming protocol
+- [Task-Level Observability](specs/OBSERVABILITY.md) — Stage breakdown and artifact inspection
 - [Glossary](GLOSSARY.md) — Terminology definitions
 
 ### Architecture Decisions

@@ -245,8 +245,8 @@ export function JobDetail() {
           <CardTitle className="text-base font-medium">Pipeline</CardTitle>
         </CardHeader>
         <CardContent>
-          {tasksData?.tasks ? (
-            <DAGViewer tasks={tasksData.tasks} />
+          {tasksData?.tasks && jobId ? (
+            <DAGViewer tasks={tasksData.tasks} jobId={jobId} />
           ) : (
             <p className="text-sm text-muted-foreground">
               {job.current_stage ? `Current stage: ${job.current_stage}` : 'Loading pipeline...'}
