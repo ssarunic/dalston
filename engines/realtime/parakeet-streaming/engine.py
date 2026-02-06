@@ -117,7 +117,6 @@ class ParakeetStreamingEngine(RealtimeEngine):
 
         # Convert to tensor
         audio_tensor = torch.from_numpy(audio).unsqueeze(0).to(self._device)
-        audio_length = torch.tensor([audio.shape[0]], device=self._device)
 
         # Transcribe with streaming-aware inference
         with torch.cuda.amp.autocast():
@@ -153,7 +152,9 @@ class ParakeetStreamingEngine(RealtimeEngine):
             timesteps = hypothesis.timestep
             frame_shift_seconds = 0.01  # 10ms frame shift
 
-            for i, (token, frame_idx) in enumerate(zip(tokens, timesteps)):
+            for i, (token, frame_idx) in enumerate(
+                zip(tokens, timesteps, strict=False)
+            ):
                 word_start = frame_idx * frame_shift_seconds
                 if i + 1 < len(timesteps):
                     word_end = timesteps[i + 1] * frame_shift_seconds
@@ -177,10 +178,13 @@ class ParakeetStreamingEngine(RealtimeEngine):
         )
 
     def get_models(self) -> list[str]:
-        """Return list of loaded model variants."""
-        if self._model_name:
-            return [self._model_name]
-        return []
+        """Return list of supported model variants.
+
+        Returns "parakeet" plus "fast" and "accurate" aliases for session
+        router compatibility. This allows clients to request any variant
+        and be routed to Parakeet workers for English audio.
+        """
+        return ["parakeet", "fast", "accurate"]
 
     def get_languages(self) -> list[str]:
         """Return list of supported languages.

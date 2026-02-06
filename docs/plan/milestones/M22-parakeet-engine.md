@@ -299,4 +299,4 @@ docker compose exec redis redis-cli HGETALL dalston:realtime:worker:realtime-par
 
 ---
 
-**Next**: This milestone can proceed independently once M2, M6, and M14 are complete. The batch engine (21.1) and real-time engine (21.2) can be developed in parallel since they share no code dependencies beyond the SDKs.
+**Next**: This milestone can proceed independently once M2, M6, and M14 are complete. The batch engine (22.1) and real-time engine (22.2) can be developed in parallel since they share no code dependencies beyond the SDKs.
