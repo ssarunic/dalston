@@ -69,11 +69,6 @@ class ParakeetEngine(Engine):
                 f"Unknown device: {requested_device}. Use 'cuda' or 'cpu'."
             )
 
-        # Pre-load the default model at startup to avoid first-task latency
-        default_model = os.environ.get("PARAKEET_MODEL", self.DEFAULT_MODEL)
-        logger.info("preloading_model", model_name=default_model)
-        self._load_model(default_model)
-
     def _load_model(self, model_name: str) -> None:
         """Load the Parakeet model if not already loaded.
 
