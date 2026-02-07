@@ -1,25 +1,43 @@
 # NVIDIA Parakeet Transcription Engine
 #
 # FastConformer RNNT transcription using NeMo toolkit.
-# Requires NVIDIA GPU with CUDA support.
+# Supports both GPU (CUDA) and CPU inference via build argument.
 #
 # Build from repo root:
-#   docker compose build engine-parakeet
+#   GPU (default): docker compose build engine-parakeet
+#   CPU:           docker compose --profile parakeet-cpu build engine-parakeet-cpu
 #
-# Note: This image is GPU-only. No CPU fallback is provided.
+# Or directly:
+#   GPU: docker build -t dalston/engine-parakeet:gpu .
+#   CPU: docker build --build-arg DEVICE=cpu -t dalston/engine-parakeet:cpu .
 
-# Use NVIDIA CUDA base image for GPU support
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+# Build argument to select device (cuda or cpu)
+ARG DEVICE=cuda
 
-# Install Python and system dependencies
+# Base images for each device type
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04 AS base-cuda
+FROM python:3.11-slim AS base-cpu
+
+# Select the appropriate base image
+FROM base-${DEVICE} AS base
+
+# Re-declare ARG after FROM (it gets reset)
+ARG DEVICE=cuda
+
+# Install system dependencies
+# For CUDA base: need to install Python
+# For CPU base: Python already installed, just need audio libs
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.11 \
-    python3.11-venv \
-    python3-pip \
     ffmpeg \
     libsndfile1 \
-    && rm -rf /var/lib/apt/lists/* \
-    && ln -s /usr/bin/python3.11 /usr/bin/python
+    && if [ "$DEVICE" = "cuda" ]; then \
+        apt-get install -y --no-install-recommends \
+            python3.11 \
+            python3.11-venv \
+            python3-pip \
+        && ln -s /usr/bin/python3.11 /usr/bin/python; \
+    fi \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory for dalston package
 WORKDIR /opt/dalston
@@ -36,6 +54,14 @@ WORKDIR /engine
 
 # Copy engine requirements first for better caching
 COPY engines/transcribe/parakeet/requirements.txt .
+
+# Install PyTorch with appropriate backend
+# CPU: Use CPU-only wheels (smaller, faster install)
+# CUDA: Use default wheels with CUDA support
+ARG DEVICE=cuda
+RUN if [ "$DEVICE" = "cpu" ]; then \
+        pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu; \
+    fi
 
 # Install NeMo and dependencies
 # This is a large installation (~2GB+)
@@ -57,7 +83,7 @@ ENV NEMO_CACHE=/models
 ENV HF_HOME=/models
 RUN mkdir -p /models
 
-# Set CUDA visible devices (can be overridden at runtime)
+# Set CUDA visible devices (only relevant for GPU builds)
 ENV NVIDIA_VISIBLE_DEVICES=all
 
 CMD ["python", "engine.py"]
