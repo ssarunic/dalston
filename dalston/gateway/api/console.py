@@ -371,6 +371,7 @@ class EnginesResponse(BaseModel):
 BATCH_ENGINES = {
     "audio-prepare": "prepare",
     "faster-whisper": "transcribe",
+    "parakeet": "transcribe",
     "whisperx-align": "align",
     "pyannote-3.1": "diarize",
     "pyannote-4.0": "diarize",
