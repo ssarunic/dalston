@@ -189,7 +189,6 @@ class AudioPrepareEngine(Engine):
         logger.info("splitting_audio_into_channels", num_channels=num_channels)
 
         channel_files: list[ChannelFile] = []
-        channel_uris: list[str] = []
 
         for channel_idx in range(num_channels):
             # Extract single channel to mono WAV
@@ -221,7 +220,6 @@ class AudioPrepareEngine(Engine):
                     duration=channel_metadata["duration"],
                 )
             )
-            channel_uris.append(audio_uri)
 
             # Clean up temp file
             try:
@@ -235,9 +233,7 @@ class AudioPrepareEngine(Engine):
 
         # Build typed output
         output = PrepareOutput(
-            channel_uris=channel_uris,
             channel_files=channel_files,
-            channel_count=num_channels,
             split_channels=True,
             duration=original_metadata["duration"],
             sample_rate=target_sample_rate,

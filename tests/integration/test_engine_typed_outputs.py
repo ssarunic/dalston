@@ -205,9 +205,19 @@ class TestFinalMergerEngineOutput:
                 audio_path=audio_file,
                 previous_outputs={
                     "prepare": {
-                        "channel_uris": ["s3://bucket/ch0.wav", "s3://bucket/ch1.wav"],
+                        "channel_files": [
+                            {
+                                "channel": 0,
+                                "audio_uri": "s3://bucket/ch0.wav",
+                                "duration": 10.0,
+                            },
+                            {
+                                "channel": 1,
+                                "audio_uri": "s3://bucket/ch1.wav",
+                                "duration": 10.0,
+                            },
+                        ],
                         "split_channels": True,
-                        "channel_count": 2,
                         "duration": 10.0,
                         "sample_rate": 16000,
                         "channels": 1,
@@ -220,6 +230,7 @@ class TestFinalMergerEngineOutput:
                         ],
                         "text": "Agent speaking",
                         "language": "en",
+                        "channel": 0,
                         "engine_id": "faster-whisper",
                     },
                     "transcribe_ch1": {
@@ -228,6 +239,7 @@ class TestFinalMergerEngineOutput:
                         ],
                         "text": "Customer here",
                         "language": "en",
+                        "channel": 1,
                         "engine_id": "faster-whisper",
                     },
                 },

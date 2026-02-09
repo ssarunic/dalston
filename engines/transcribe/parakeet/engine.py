@@ -124,6 +124,7 @@ class ParakeetEngine(Engine):
         """
         audio_path = input.audio_path
         config = input.config
+        channel = config.get("channel")  # For per_channel mode
 
         # Get model configuration
         model_name = config.get("model", self.DEFAULT_MODEL)
@@ -165,6 +166,7 @@ class ParakeetEngine(Engine):
                     segments=[],
                     language="en",
                     language_confidence=1.0,
+                    channel=channel,
                     engine_id="parakeet",
                     skipped=False,
                     warnings=[],
@@ -303,6 +305,7 @@ class ParakeetEngine(Engine):
             timestamp_granularity_requested=TimestampGranularity.WORD,
             timestamp_granularity_actual=timestamp_granularity_actual,
             alignment_method=alignment_method,
+            channel=channel,
             engine_id="parakeet",
             skipped=False,
             skip_reason=None,

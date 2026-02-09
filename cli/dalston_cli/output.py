@@ -47,6 +47,7 @@ def output_transcript(
     fmt: str,
     output_path: str | None,
     include_speakers: bool = True,
+    show_words: bool = False,
 ) -> None:
     """Output transcript in specified format.
 
@@ -55,6 +56,7 @@ def output_transcript(
         fmt: Output format (txt, json, srt, vtt).
         output_path: Path to write output, or None for stdout.
         include_speakers: Include speaker labels in output.
+        show_words: Show word-level timestamps in text output.
 
     Raises:
         click.ClickException: If format is not supported.
@@ -64,7 +66,10 @@ def output_transcript(
     if fmt == "json":
         content = _job_to_json(job)
     elif fmt == "txt":
-        content = job.transcript.text if job.transcript else ""
+        if show_words:
+            content = _format_words_text(job, include_speakers)
+        else:
+            content = job.transcript.text if job.transcript else ""
     elif fmt in ("srt", "vtt"):
         error_console.print(
             f"[red]Error:[/red] Format '{fmt}' requires the export endpoint. "
@@ -121,6 +126,19 @@ def _job_to_json(job: Job) -> str:
                     "start": s.start,
                     "end": s.end,
                     "speaker_id": s.speaker_id,
+                    "words": (
+                        [
+                            {
+                                "text": w.text,
+                                "start": w.start,
+                                "end": w.end,
+                                "confidence": w.confidence,
+                            }
+                            for w in s.words
+                        ]
+                        if s.words
+                        else None
+                    ),
                 }
                 for s in job.transcript.segments
             ]
@@ -136,6 +154,66 @@ def _job_to_json(job: Job) -> str:
             ]
 
     return json.dumps(data, indent=2)
+
+
+def _format_words_text(job: Job, include_speakers: bool = True) -> str:
+    """Format transcript with word-level timestamps.
+
+    Args:
+        job: Job with transcript.
+        include_speakers: Include speaker labels.
+
+    Returns:
+        Formatted text with word timestamps.
+    """
+    if not job.transcript:
+        return ""
+
+    lines: list[str] = []
+
+    # If segments have words, format by segment
+    if job.transcript.segments:
+        for segment in job.transcript.segments:
+            # Segment header with timestamp
+            start_time = _format_timestamp(segment.start)
+            end_time = _format_timestamp(segment.end)
+            header = f"[{start_time} - {end_time}]"
+            if include_speakers and segment.speaker_id:
+                header += f" {segment.speaker_id}:"
+            lines.append(header)
+
+            # Words with timestamps
+            if segment.words:
+                word_parts = []
+                for word in segment.words:
+                    word_parts.append(f"{word.text}({word.start:.2f})")
+                lines.append("  " + " ".join(word_parts))
+            else:
+                lines.append(f"  {segment.text}")
+            lines.append("")  # Blank line between segments
+
+    # Fallback to transcript-level words
+    elif job.transcript.words:
+        for word in job.transcript.words:
+            speaker_prefix = ""
+            if include_speakers and word.speaker_id:
+                speaker_prefix = f"{word.speaker_id}: "
+            lines.append(
+                f"[{word.start:.2f}-{word.end:.2f}] {speaker_prefix}{word.text}"
+            )
+
+    # Fallback to plain text
+    else:
+        return job.transcript.text
+
+    return "\n".join(lines)
+
+
+def _format_timestamp(seconds: float) -> str:
+    """Format seconds as MM:SS.ms."""
+    mins = int(seconds // 60)
+    secs = seconds % 60
+    return f"{mins:02d}:{secs:05.2f}"
 
 
 def wait_with_progress(

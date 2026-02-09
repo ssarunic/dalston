@@ -355,15 +355,10 @@ class TestPrepareOutput:
     def test_prepare_output_split_channels(self):
         """Test prepare output with split channels."""
         out = PrepareOutput(
-            channel_uris=[
-                "s3://bucket/ch0.wav",
-                "s3://bucket/ch1.wav",
-            ],
             channel_files=[
                 ChannelFile(channel=0, audio_uri="s3://bucket/ch0.wav", duration=60.0),
                 ChannelFile(channel=1, audio_uri="s3://bucket/ch1.wav", duration=60.0),
             ],
-            channel_count=2,
             split_channels=True,
             duration=60.0,
             sample_rate=16000,
@@ -371,7 +366,6 @@ class TestPrepareOutput:
             engine_id="audio-prepare",
         )
         assert out.split_channels is True
-        assert out.channel_count == 2
         assert len(out.channel_files) == 2
 
     def test_prepare_output_with_vad(self):

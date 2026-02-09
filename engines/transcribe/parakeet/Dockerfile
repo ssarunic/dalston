@@ -47,6 +47,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fi \
     && rm -rf /var/lib/apt/lists/*
 
+# Upgrade pip to ensure it finds pre-built wheels correctly
+# Use python -m pip to ensure we use Python 3.11's pip (not system Python 3.10)
+RUN python -m pip install --no-cache-dir --upgrade pip
+
 # Set working directory for dalston package
 WORKDIR /opt/dalston
 
@@ -55,7 +59,7 @@ COPY pyproject.toml .
 COPY dalston/ dalston/
 
 # Install the dalston engine SDK
-RUN pip install --no-cache-dir -e ".[engine-sdk]"
+RUN python -m pip install --no-cache-dir -e ".[engine-sdk]"
 
 # Set working directory for engine
 WORKDIR /engine
@@ -68,12 +72,12 @@ COPY engines/transcribe/parakeet/requirements.txt .
 # CUDA: Use default wheels with CUDA support
 ARG DEVICE=cuda
 RUN if [ "$DEVICE" = "cpu" ]; then \
-        pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu; \
+        python -m pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu; \
     fi
 
 # Install NeMo and dependencies
 # This is a large installation (~2GB+)
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir -r requirements.txt
 
 # Pre-download the default model (110M TDT_CTC) at build time
 # This makes container startup faster at the cost of larger image size

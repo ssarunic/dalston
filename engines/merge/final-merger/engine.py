@@ -256,9 +256,6 @@ class FinalMergerEngine(Engine):
         """
         job_id = input.job_id
         word_timestamps = config.get("word_timestamps", False)
-        channel_count = config.get("channel_count", 2)
-
-        logger.info("merging_per_channel_outputs", channel_count=channel_count)
 
         # Get prepare output
         prepare_output = input.get_prepare_output()
@@ -266,11 +263,18 @@ class FinalMergerEngine(Engine):
             audio_duration = prepare_output.duration
             audio_channels = prepare_output.original_channels or 2
             sample_rate = prepare_output.sample_rate
+            # Derive channel_count from channel_files if available
+            channel_files = prepare_output.channel_files or []
+            channel_count = config.get("channel_count") or len(channel_files) or 2
         else:
             raw_prepare = input.get_raw_output("prepare") or {}
             audio_duration = raw_prepare.get("duration", 0.0)
             audio_channels = raw_prepare.get("original_channels", 2)
             sample_rate = raw_prepare.get("sample_rate", 16000)
+            channel_files = raw_prepare.get("channel_files", [])
+            channel_count = config.get("channel_count") or len(channel_files) or 2
+
+        logger.info("merging_per_channel_outputs", channel_count=channel_count)
 
         # Collect segments from all channels
         all_segments: list[dict] = []
@@ -313,8 +317,13 @@ class FinalMergerEngine(Engine):
             if align_output and align_output.skipped:
                 pipeline_warnings.extend(align_output.warnings)
 
+            # Get source channel from transcribe output, with fallback to loop index
+            source_channel = channel  # Default to loop index
+            if transcribe_output and transcribe_output.channel is not None:
+                source_channel = transcribe_output.channel
+
             # Add channel/speaker info to each segment
-            speaker_id = f"SPEAKER_{channel:02d}"
+            speaker_id = f"SPEAKER_{source_channel:02d}"
             for seg in raw_segments:
                 if hasattr(seg, "start"):
                     all_segments.append(
@@ -324,7 +333,7 @@ class FinalMergerEngine(Engine):
                             "text": seg.text,
                             "speaker": speaker_id,
                             "words": seg.words if has_words else None,
-                            "channel": channel,
+                            "channel": source_channel,
                         }
                     )
                 else:
@@ -335,7 +344,7 @@ class FinalMergerEngine(Engine):
                             "text": seg.get("text", ""),
                             "speaker": speaker_id,
                             "words": seg.get("words") if has_words else None,
-                            "channel": channel,
+                            "channel": source_channel,
                         }
                     )
 

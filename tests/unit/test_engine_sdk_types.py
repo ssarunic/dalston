@@ -114,8 +114,18 @@ class TestTaskInputGetPrepareOutput:
             audio_path=Path("/tmp/audio.wav"),
             previous_outputs={
                 "prepare": {
-                    "channel_uris": ["s3://bucket/ch0.wav", "s3://bucket/ch1.wav"],
-                    "channel_count": 2,
+                    "channel_files": [
+                        {
+                            "channel": 0,
+                            "audio_uri": "s3://bucket/ch0.wav",
+                            "duration": 60.0,
+                        },
+                        {
+                            "channel": 1,
+                            "audio_uri": "s3://bucket/ch1.wav",
+                            "duration": 60.0,
+                        },
+                    ],
                     "split_channels": True,
                     "duration": 60.0,
                     "sample_rate": 16000,
@@ -127,7 +137,7 @@ class TestTaskInputGetPrepareOutput:
         output = task_input.get_prepare_output()
         assert output is not None
         assert output.split_channels is True
-        assert output.channel_count == 2
+        assert len(output.channel_files) == 2
 
 
 class TestTaskInputGetTranscribeOutput:

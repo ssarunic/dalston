@@ -116,6 +116,7 @@ class FasterWhisperEngine(Engine):
             language = None  # faster-whisper uses None for auto-detect
         beam_size = config.get("beam_size", self.DEFAULT_BEAM_SIZE)
         vad_filter = config.get("vad_filter", self.DEFAULT_VAD_FILTER)
+        channel = config.get("channel")  # For per_channel mode
 
         # Load model (lazy loading, cached)
         self._load_model(model_size, device, compute_type)
@@ -197,6 +198,7 @@ class FasterWhisperEngine(Engine):
             duration=info.duration,
             timestamp_granularity_requested=TimestampGranularity.WORD,
             timestamp_granularity_actual=timestamp_granularity_actual,
+            channel=channel,
             engine_id="faster-whisper",
             skipped=False,
             skip_reason=None,

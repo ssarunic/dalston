@@ -338,14 +338,8 @@ class PrepareOutput(BaseModel):
     )
 
     # Per-channel mode output
-    channel_uris: list[str] | None = Field(
-        default=None, description="Per-channel file URIs if split"
-    )
     channel_files: list[ChannelFile] | None = Field(
-        default=None, description="Per-channel file details"
-    )
-    channel_count: int | None = Field(
-        default=None, description="Number of channels if split"
+        default=None, description="Per-channel file details (audio_uri per channel)"
     )
     split_channels: bool = Field(
         default=False, description="Whether channels were split"
@@ -405,6 +399,12 @@ class TranscribeOutput(BaseModel):
     )
     alignment_method: AlignmentMethod | None = Field(
         default=None, description="How timestamps were produced"
+    )
+
+    # Per-channel mode
+    channel: int | None = Field(
+        default=None,
+        description="Source audio channel (0=left, 1=right) for per_channel mode",
     )
 
     # Standard output fields

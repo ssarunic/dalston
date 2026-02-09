@@ -126,6 +126,13 @@ def transcribe(
             help="Exclude speaker labels from output.",
         ),
     ] = False,
+    show_words: Annotated[
+        bool,
+        typer.Option(
+            "--show-words",
+            help="Display word-level timestamps in text output.",
+        ),
+    ] = False,
 ) -> None:
     """Transcribe audio files.
 
@@ -150,6 +157,8 @@ def transcribe(
         dalston transcribe medical.mp3 -p "cardiology, ECG, arrhythmia"  # Domain hints
 
         dalston transcribe call.mp3 --speakers diarize --min-speakers 2 --max-speakers 4
+
+        dalston transcribe audio.mp3 --show-words  # Display word-level timestamps
     """
     client = state.client
     quiet = state.quiet
@@ -217,9 +226,11 @@ def transcribe(
 
             # Output result
             if json_output:
-                output_transcript(result, "json", file_output, not no_speakers)
+                output_transcript(
+                    result, "json", file_output, not no_speakers, show_words
+                )
             else:
-                output_transcript(result, fmt, file_output, not no_speakers)
+                output_transcript(result, fmt, file_output, not no_speakers, show_words)
 
         except typer.Exit:
             raise
