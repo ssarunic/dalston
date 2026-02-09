@@ -4,6 +4,9 @@
 # Pin to a known working version for stability
 nemo_toolkit[asr]>=1.23.0
 
+# Pin Lhotse to version compatible with NeMo (prevents __init__ TypeError)
+lhotse>=1.24.2,<1.30.0
+
 # PyTorch with CUDA support (installed via nemo_toolkit)
 # torch>=2.0.0
 

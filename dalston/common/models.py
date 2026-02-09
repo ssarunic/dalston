@@ -6,7 +6,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 # =============================================================================
 # Model Selection Registry (M14)
 # =============================================================================
@@ -124,7 +123,20 @@ MODEL_REGISTRY: dict[str, ModelDefinition] = {
         vram_gb=5.0,
         speed_factor=6.0,
     ),
-    # NVIDIA Parakeet FastConformer RNNT models
+    # NVIDIA Parakeet FastConformer models
+    "parakeet-110m": ModelDefinition(
+        id="parakeet-110m",
+        engine="parakeet",
+        engine_model="nvidia/parakeet-tdt_ctc-110m",
+        name="Parakeet 110M",
+        description="Lightweight English-only, low memory footprint",
+        tier="fast",
+        languages=1,
+        streaming=True,
+        word_timestamps=True,
+        vram_gb=1.0,
+        speed_factor=12.0,
+    ),
     "parakeet-0.6b": ModelDefinition(
         id="parakeet-0.6b",
         engine="parakeet",
@@ -161,7 +173,7 @@ MODEL_ALIASES: dict[str, str] = {
     "small": "whisper-small",
     "base": "whisper-base",
     "tiny": "whisper-tiny",
-    "parakeet": "parakeet-0.6b",
+    "parakeet": "parakeet-110m",
 }
 
 DEFAULT_MODEL = "whisper-large-v3"

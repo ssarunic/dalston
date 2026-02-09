@@ -27,15 +27,23 @@ ARG DEVICE=cuda
 # Install system dependencies
 # For CUDA base: need to install Python
 # For CPU base: Python already installed, just need audio libs
+# Build tools needed for C extensions (ctc_segmentation, texterrors)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
+    build-essential \
+    gcc \
+    g++ \
     && if [ "$DEVICE" = "cuda" ]; then \
         apt-get install -y --no-install-recommends \
             python3.11 \
             python3.11-venv \
+            python3.11-dev \
             python3-pip \
         && ln -s /usr/bin/python3.11 /usr/bin/python; \
+    else \
+        apt-get install -y --no-install-recommends \
+            python3-dev; \
     fi \
     && rm -rf /var/lib/apt/lists/*
 
@@ -67,12 +75,13 @@ RUN if [ "$DEVICE" = "cpu" ]; then \
 # This is a large installation (~2GB+)
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download the default model (0.6B) at build time
+# Pre-download the default model (110M TDT_CTC) at build time
 # This makes container startup faster at the cost of larger image size
+# Using 110M model for lower memory requirements on CPU
 RUN python -c "\
 import nemo.collections.asr as nemo_asr; \
-model = nemo_asr.models.ASRModel.from_pretrained('nvidia/parakeet-rnnt-0.6b'); \
-print('Model nvidia/parakeet-rnnt-0.6b downloaded successfully')"
+model = nemo_asr.models.ASRModel.from_pretrained('nvidia/parakeet-tdt_ctc-110m'); \
+print('Model nvidia/parakeet-tdt_ctc-110m downloaded successfully')"
 
 # Copy engine files
 COPY engines/transcribe/parakeet/engine.yaml .

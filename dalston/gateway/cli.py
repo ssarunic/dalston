@@ -33,18 +33,23 @@ async def _create_key(name: str, scopes: list[Scope]) -> tuple[str, str, list[Sc
         Tuple of (raw_key, key_id, scopes)
     """
     from dalston.common.redis import get_redis
+    from dalston.db.session import async_session, init_db
+
+    # Initialize database (creates tables if needed)
+    await init_db()
 
     redis = await get_redis()
-    auth_service = AuthService(redis)
+    async with async_session() as db:
+        auth_service = AuthService(db, redis)
 
-    raw_key, api_key = await auth_service.create_api_key(
-        name=name,
-        tenant_id=DEFAULT_TENANT_ID,
-        scopes=scopes,
-        rate_limit=None,
-    )
+        raw_key, api_key = await auth_service.create_api_key(
+            name=name,
+            tenant_id=DEFAULT_TENANT_ID,
+            scopes=scopes,
+            rate_limit=None,
+        )
 
-    return raw_key, str(api_key.id), api_key.scopes
+        return raw_key, str(api_key.id), api_key.scopes
 
 
 def parse_scopes(scopes_str: str | None) -> list[Scope]:
@@ -172,13 +177,15 @@ def list_keys(
 
     async def _list_keys():
         from dalston.common.redis import get_redis
+        from dalston.db.session import async_session
 
         redis = await get_redis()
-        auth_service = AuthService(redis)
-        return await auth_service.list_api_keys(
-            DEFAULT_TENANT_ID,
-            include_revoked=include_revoked,
-        )
+        async with async_session() as db:
+            auth_service = AuthService(db, redis)
+            return await auth_service.list_api_keys(
+                DEFAULT_TENANT_ID,
+                include_revoked=include_revoked,
+            )
 
     try:
         keys = asyncio.run(_list_keys())
@@ -234,10 +241,12 @@ def revoke_key(
 
     async def _revoke_key():
         from dalston.common.redis import get_redis
+        from dalston.db.session import async_session
 
         redis = await get_redis()
-        auth_service = AuthService(redis)
-        return await auth_service.revoke_api_key(key_uuid)
+        async with async_session() as db:
+            auth_service = AuthService(db, redis)
+            return await auth_service.revoke_api_key(key_uuid)
 
     try:
         success = asyncio.run(_revoke_key())
