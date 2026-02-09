@@ -30,6 +30,7 @@ async def queue_task(
     task: Task,
     settings: Settings,
     previous_outputs: dict[str, Any] | None = None,
+    audio_metadata: dict[str, Any] | None = None,
 ) -> None:
     """Queue a task for execution by its engine.
 
@@ -43,6 +44,7 @@ async def queue_task(
         task: Task to queue
         settings: Application settings (for S3 bucket)
         previous_outputs: Outputs from dependency tasks (keyed by stage)
+        audio_metadata: Audio file metadata (format, duration, sample_rate, channels)
     """
     task_id_str = str(task.id)
     job_id_str = str(task.job_id)
@@ -73,6 +75,7 @@ async def queue_task(
         task=task,
         settings=settings,
         previous_outputs=previous_outputs or {},
+        audio_metadata=audio_metadata,
     )
 
     # 3. Push task_id to engine queue
@@ -86,6 +89,7 @@ async def write_task_input(
     task: Task,
     settings: Settings,
     previous_outputs: dict[str, Any],
+    audio_metadata: dict[str, Any] | None = None,
 ) -> str:
     """Write task input.json to S3.
 
@@ -93,6 +97,7 @@ async def write_task_input(
         task: Task to write input for
         settings: Application settings
         previous_outputs: Outputs from dependency tasks
+        audio_metadata: Audio file metadata (for prepare stage)
 
     Returns:
         S3 URI of the written input.json
@@ -101,13 +106,17 @@ async def write_task_input(
     job_id_str = str(task.job_id)
 
     # Build input document
-    input_data = {
+    input_data: dict[str, Any] = {
         "task_id": task_id_str,
         "job_id": job_id_str,
         "audio_uri": task.input_uri,
         "previous_outputs": previous_outputs,
         "config": task.config,
     }
+
+    # Include audio metadata for prepare stage (already probed at upload)
+    if audio_metadata:
+        input_data.update(audio_metadata)
 
     # S3 path: jobs/{job_id}/tasks/{task_id}/input.json
     s3_key = f"jobs/{job_id_str}/tasks/{task_id_str}/input.json"

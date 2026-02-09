@@ -22,6 +22,7 @@ gateway = [
     "aioboto3>=13.0.0",
     "types-aiobotocore-s3>=2.13.0",
     "websockets>=12.0",  # For realtime WebSocket proxy
+    "tinytag>=2.0.0",  # Audio metadata extraction
 ]
 orchestrator = [
     "redis>=5.0.0",
@@ -32,6 +33,7 @@ orchestrator = [
     "fastapi>=0.109.0",  # Required for importing gateway.services
     "python-multipart>=0.0.6",  # Required by FastAPI for form data
     "websockets>=12.0",  # Required by gateway module
+    "tinytag>=2.0.0",  # Required by gateway.services.audio_probe
 ]
 engine-sdk = [
     "redis>=5.0.0",

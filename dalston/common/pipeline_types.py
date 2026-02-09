@@ -345,22 +345,10 @@ class PrepareOutput(BaseModel):
         default=False, description="Whether channels were split"
     )
 
-    # Audio metadata
-    duration: float = Field(..., ge=0, description="Total duration in seconds")
-    sample_rate: int = Field(..., gt=0, description="Actual sample rate")
-    channels: int = Field(..., ge=1, description="Actual channel count")
-
-    # Original audio metadata
-    original_format: str | None = Field(default=None, description="Original codec")
-    original_duration: float | None = Field(
-        default=None, ge=0, description="Original duration"
-    )
-    original_sample_rate: int | None = Field(
-        default=None, gt=0, description="Original sample rate"
-    )
-    original_channels: int | None = Field(
-        default=None, ge=1, description="Original channel count"
-    )
+    # Prepared audio metadata (after conversion to target format)
+    duration: float = Field(..., ge=0, description="Duration in seconds")
+    sample_rate: int = Field(..., gt=0, description="Sample rate (e.g., 16000)")
+    channels: int = Field(..., ge=1, description="Channel count (1 for mono output)")
 
     # VAD output (if detect_speech_regions=True)
     speech_regions: list[SpeechRegion] | None = Field(

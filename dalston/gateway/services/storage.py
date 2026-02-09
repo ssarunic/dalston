@@ -20,12 +20,18 @@ class StorageService:
         self.settings = settings
         self.bucket = settings.s3_bucket
 
-    async def upload_audio(self, job_id: UUID, file: UploadFile) -> str:
+    async def upload_audio(
+        self,
+        job_id: UUID,
+        file: UploadFile,
+        file_content: bytes | None = None,
+    ) -> str:
         """Upload audio file to S3.
 
         Args:
             job_id: Job UUID for path construction
             file: Uploaded file from FastAPI
+            file_content: Pre-read file content (avoids re-reading if already probed)
 
         Returns:
             S3 URI: s3://{bucket}/jobs/{job_id}/audio/original.{ext}
@@ -44,8 +50,8 @@ class StorageService:
         # Build S3 key
         key = f"jobs/{job_id}/audio/original.{ext}"
 
-        # Read file content
-        content = await file.read()
+        # Use provided content or read from file
+        content = file_content if file_content is not None else await file.read()
 
         # Upload to S3
         async with get_s3_client(self.settings) as s3:

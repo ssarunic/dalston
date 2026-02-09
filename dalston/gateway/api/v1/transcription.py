@@ -47,6 +47,10 @@ from dalston.gateway.models.responses import (
     JobSummary,
     StageResponse,
 )
+from dalston.gateway.services.audio_probe import (
+    InvalidAudioError,
+    probe_audio,
+)
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
@@ -177,6 +181,24 @@ async def create_transcription(
                 detail=f"Invalid JSON in webhook_metadata: {e}",
             ) from e
 
+    # Read file content for probing
+    file_content = await file.read()
+
+    # Probe audio to extract metadata and validate
+    try:
+        audio_metadata = probe_audio(file_content, file.filename)
+    except InvalidAudioError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    # Validate per_channel mode requires stereo audio
+    if speaker_detection == "per_channel" and audio_metadata.channels < 2:
+        raise HTTPException(
+            status_code=400,
+            detail=f"per_channel speaker detection requires stereo audio, "
+            f"but file has {audio_metadata.channels} channel(s). "
+            f"Use speaker_detection=diarize for mono audio.",
+        )
+
     # Build parameters with resolved model info
     parameters = {
         "model": model_def.id,
@@ -200,10 +222,10 @@ async def create_transcription(
     audio_uri = await storage.upload_audio(
         job_id=UUID("00000000-0000-0000-0000-000000000000"),  # Temporary, will update
         file=file,
+        file_content=file_content,
     )
 
     # Create job in database
-    # Note: We create the job first to get the ID, then re-upload with correct path
     job = await jobs_service.create_job(
         db=db,
         tenant_id=api_key.tenant_id,
@@ -211,11 +233,17 @@ async def create_transcription(
         parameters=parameters,
         webhook_url=webhook_url,
         webhook_metadata=parsed_webhook_metadata,
+        audio_format=audio_metadata.format,
+        audio_duration=audio_metadata.duration,
+        audio_sample_rate=audio_metadata.sample_rate,
+        audio_channels=audio_metadata.channels,
+        audio_bit_depth=audio_metadata.bit_depth,
     )
 
     # Re-upload with correct job ID path
-    await file.seek(0)  # Reset file position
-    audio_uri = await storage.upload_audio(job_id=job.id, file=file)
+    audio_uri = await storage.upload_audio(
+        job_id=job.id, file=file, file_content=file_content
+    )
 
     # Update job with correct audio URI
     job.audio_uri = audio_uri

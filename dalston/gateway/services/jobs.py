@@ -39,6 +39,11 @@ class JobsService:
         parameters: dict[str, Any],
         webhook_url: str | None = None,
         webhook_metadata: dict | None = None,
+        audio_format: str | None = None,
+        audio_duration: float | None = None,
+        audio_sample_rate: int | None = None,
+        audio_channels: int | None = None,
+        audio_bit_depth: int | None = None,
     ) -> JobModel:
         """Create a new transcription job.
 
@@ -49,6 +54,11 @@ class JobsService:
             parameters: Job configuration parameters
             webhook_url: Optional webhook URL for completion callback
             webhook_metadata: Optional custom data echoed in webhook callback
+            audio_format: Audio codec/format (e.g., "mp3", "wav")
+            audio_duration: Duration in seconds
+            audio_sample_rate: Sample rate in Hz
+            audio_channels: Number of audio channels
+            audio_bit_depth: Bits per sample (e.g., 16, 24)
 
         Returns:
             Created JobModel instance
@@ -60,6 +70,11 @@ class JobsService:
             webhook_url=webhook_url,
             webhook_metadata=webhook_metadata,
             status=JobStatus.PENDING.value,
+            audio_format=audio_format,
+            audio_duration=audio_duration,
+            audio_sample_rate=audio_sample_rate,
+            audio_channels=audio_channels,
+            audio_bit_depth=audio_bit_depth,
         )
         db.add(job)
         await db.commit()

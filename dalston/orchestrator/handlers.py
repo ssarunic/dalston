@@ -97,6 +97,17 @@ async def handle_job_created(
 
     log.info("saved_tasks_and_updated_job", status="running")
 
+    # Build audio metadata from job (already probed at upload)
+    audio_metadata: dict[str, Any] | None = None
+    if job.audio_format is not None:
+        audio_metadata = {
+            "format": job.audio_format,
+            "duration": job.audio_duration,
+            "sample_rate": job.audio_sample_rate,
+            "channels": job.audio_channels,
+            "bit_depth": job.audio_bit_depth,
+        }
+
     # 5. Queue tasks with no dependencies
     for task in tasks:
         if not task.dependencies:
@@ -106,12 +117,13 @@ async def handle_job_created(
                 task_model.status = TaskStatus.READY.value
                 await db.commit()
 
-            # Queue for execution
+            # Queue for execution (include audio metadata for prepare stage)
             await queue_task(
                 redis=redis,
                 task=task,
                 settings=settings,
                 previous_outputs={},
+                audio_metadata=audio_metadata if task.stage == "prepare" else None,
             )
 
             log.info("queued_initial_task", task_id=str(task.id), stage=task.stage)
