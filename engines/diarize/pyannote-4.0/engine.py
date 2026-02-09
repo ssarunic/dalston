@@ -11,7 +11,13 @@ from typing import Any
 
 import structlog
 
-from dalston.engine_sdk import Engine, TaskInput, TaskOutput
+from dalston.engine_sdk import (
+    DiarizeOutput,
+    Engine,
+    SpeakerTurn,
+    TaskInput,
+    TaskOutput,
+)
 
 logger = structlog.get_logger()
 
@@ -115,7 +121,7 @@ class PyannoteEngine(Engine):
             input: Task input with audio path and config
 
         Returns:
-            TaskOutput with speakers list and diarization_segments
+            TaskOutput with DiarizeOutput containing speakers and turns
         """
         # Check if diarization is disabled (for local dev/testing)
         if self._disabled:
@@ -159,33 +165,43 @@ class PyannoteEngine(Engine):
             diarization = diarization.exclusive_speaker_diarization
 
         # Convert pyannote output to our format
-        speakers, segments = self._convert_annotation(diarization)
+        speakers, turns = self._convert_annotation(diarization)
+
+        # Calculate overlap statistics using pyannote's native overlap detection
+        overlap_duration, overlap_ratio = self._calculate_overlap_stats(diarization)
 
         logger.info(
             "diarization_complete",
             speaker_count=len(speakers),
-            segment_count=len(segments),
+            segment_count=len(turns),
+            overlap_ratio=round(overlap_ratio, 3),
         )
 
-        return TaskOutput(
-            data={
-                "speakers": speakers,
-                "diarization_segments": segments,
-                "exclusive_mode": exclusive,
-            }
+        output = DiarizeOutput(
+            speakers=speakers,
+            turns=turns,
+            num_speakers=len(speakers),
+            overlap_duration=round(overlap_duration, 3),
+            overlap_ratio=round(overlap_ratio, 3),
+            engine_id="pyannote-4.0",
+            skipped=False,
+            skip_reason=None,
+            warnings=[],
         )
 
-    def _convert_annotation(self, diarization) -> tuple[list[str], list[dict]]:
-        """Convert pyannote diarization output to speakers list and segments.
+        return TaskOutput(data=output)
+
+    def _convert_annotation(self, diarization) -> tuple[list[str], list[SpeakerTurn]]:
+        """Convert pyannote diarization output to speakers list and turns.
 
         Args:
             diarization: pyannote Annotation or DiarizeOutput object
 
         Returns:
-            Tuple of (speakers list, segments list)
+            Tuple of (speakers list, speaker turns list)
         """
-        speakers_set = set()
-        segments = []
+        speakers_set: set[str] = set()
+        turns: list[SpeakerTurn] = []
 
         # Pyannote 4.0 community pipeline returns DiarizeOutput with .speaker_diarization
         # Fall back to the object itself if it's already an Annotation (3.x compatibility)
@@ -196,41 +212,80 @@ class PyannoteEngine(Engine):
 
         for turn, _, speaker in annotation.itertracks(yield_label=True):
             speakers_set.add(speaker)
-            segments.append(
-                {
-                    "start": round(turn.start, 3),
-                    "end": round(turn.end, 3),
-                    "speaker": speaker,
-                }
+            turns.append(
+                SpeakerTurn(
+                    start=round(turn.start, 3),
+                    end=round(turn.end, 3),
+                    speaker=speaker,
+                )
             )
 
         # Sort speakers for consistent ordering
         speakers = sorted(speakers_set)
 
-        # Sort segments by start time
-        segments.sort(key=lambda s: s["start"])
+        # Sort turns by start time
+        turns.sort(key=lambda t: t.start)
 
-        return speakers, segments
+        return speakers, turns
+
+    def _calculate_overlap_stats(self, diarization) -> tuple[float, float]:
+        """Calculate overlap statistics using pyannote's native overlap detection.
+
+        Args:
+            diarization: pyannote DiarizeOutput or Annotation object
+
+        Returns:
+            Tuple of (overlap_duration, overlap_ratio)
+        """
+        try:
+            # Extract annotation from DiarizeOutput if needed (4.0 format)
+            if hasattr(diarization, "speaker_diarization"):
+                annotation = diarization.speaker_diarization
+            else:
+                annotation = diarization
+
+            # Use pyannote's native overlap detection
+            # get_overlap() returns a Timeline of overlapping regions
+            overlap_timeline = annotation.get_overlap()
+            overlap_duration = (
+                sum(segment.duration for segment in overlap_timeline)
+                if overlap_timeline
+                else 0.0
+            )
+
+            # Get total duration from annotation
+            total_duration = (
+                annotation.get_timeline().duration()
+                if annotation.get_timeline()
+                else 0.0
+            )
+            overlap_ratio = (
+                overlap_duration / total_duration if total_duration > 0 else 0.0
+            )
+
+            return overlap_duration, overlap_ratio
+        except Exception as e:
+            logger.warning("failed_to_calculate_overlap", error=str(e))
+            return 0.0, 0.0
 
     def _mock_output(self) -> TaskOutput:
         """Return mock output when diarization is disabled.
 
         Useful for testing the pipeline without running actual diarization.
         """
-        return TaskOutput(
-            data={
-                "speakers": ["SPEAKER_00"],
-                "diarization_segments": [
-                    {"start": 0.0, "end": 999999.0, "speaker": "SPEAKER_00"}
-                ],
-                "exclusive_mode": False,
-                "warning": {
-                    "stage": "diarize",
-                    "status": "skipped",
-                    "reason": "DIARIZATION_DISABLED=true",
-                },
-            }
+        output = DiarizeOutput(
+            speakers=["SPEAKER_00"],
+            turns=[SpeakerTurn(start=0.0, end=999999.0, speaker="SPEAKER_00")],
+            num_speakers=1,
+            overlap_duration=0.0,
+            overlap_ratio=0.0,
+            engine_id="pyannote-4.0",
+            skipped=True,
+            skip_reason="DIARIZATION_DISABLED=true",
+            warnings=["Diarization disabled via environment variable"],
         )
+
+        return TaskOutput(data=output)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status including device and model info."""

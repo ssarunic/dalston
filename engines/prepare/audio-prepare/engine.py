@@ -8,12 +8,16 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from uuid import UUID
 
 import structlog
 
-from dalston.engine_sdk import Engine, TaskInput, TaskOutput
-from dalston.engine_sdk import io as s3_io
+from dalston.engine_sdk import (
+    ChannelFile,
+    Engine,
+    PrepareOutput,
+    TaskInput,
+    TaskOutput,
+)
 
 logger = structlog.get_logger()
 
@@ -63,7 +67,7 @@ class AudioPrepareEngine(Engine):
             input: Task input with audio file path
 
         Returns:
-            TaskOutput with prepared audio URI and metadata
+            TaskOutput with PrepareOutput containing audio URI and metadata
         """
         audio_path = input.audio_path
         job_id = input.job_id
@@ -116,6 +120,8 @@ class AudioPrepareEngine(Engine):
         logger.info("prepared_audio_metadata", metadata=prepared_metadata)
 
         # Step 4: Upload prepared audio to S3
+        from dalston.engine_sdk import io as s3_io
+
         audio_uri = f"s3://{s3_bucket}/jobs/{job_id}/audio/prepared.wav"
         s3_io.upload_file(prepared_path, audio_uri)
         logger.info("uploaded_prepared_audio", audio_uri=audio_uri)
@@ -129,25 +135,30 @@ class AudioPrepareEngine(Engine):
                 "failed_to_clean_up_temp_file", path=str(prepared_path), error=str(e)
             )
 
-        # Build output data
-        output_data = {
-            "audio_uri": audio_uri,
-            "duration": prepared_metadata["duration"],
-            "sample_rate": prepared_metadata["sample_rate"],
-            "channels": prepared_metadata["channels"],
-            "original_format": original_metadata.get("codec_name", "unknown"),
-            "original_duration": original_metadata["duration"],
-            "original_sample_rate": original_metadata["sample_rate"],
-            "original_channels": original_metadata["channels"],
-            "split_channels": False,
-        }
+        # Build typed output
+        output = PrepareOutput(
+            audio_uri=audio_uri,
+            duration=prepared_metadata["duration"],
+            sample_rate=prepared_metadata["sample_rate"],
+            channels=prepared_metadata["channels"],
+            original_format=original_metadata.get("codec_name", "unknown"),
+            original_duration=original_metadata["duration"],
+            original_sample_rate=original_metadata["sample_rate"],
+            original_channels=original_metadata["channels"],
+            split_channels=False,
+            engine_id="audio-prepare",
+            skipped=False,
+            skip_reason=None,
+            warnings=[],
+        )
 
-        return TaskOutput(data=output_data)
+        return TaskOutput(data=output)
 
     def _process_split_channels(
         self,
+        *,
         audio_path: Path,
-        job_id: UUID,
+        job_id: str,
         original_metadata: dict,
         target_sample_rate: int,
         s3_bucket: str,
@@ -165,8 +176,10 @@ class AudioPrepareEngine(Engine):
             s3_bucket: S3 bucket for uploads
 
         Returns:
-            TaskOutput with channel_files array
+            TaskOutput with PrepareOutput containing channel_files array
         """
+        from dalston.engine_sdk import io as s3_io
+
         num_channels = original_metadata["channels"]
         if num_channels > 2:
             raise ValueError(
@@ -175,8 +188,8 @@ class AudioPrepareEngine(Engine):
             )
         logger.info("splitting_audio_into_channels", num_channels=num_channels)
 
-        channel_files = []
-        channel_uris = []
+        channel_files: list[ChannelFile] = []
+        channel_uris: list[str] = []
 
         for channel_idx in range(num_channels):
             # Extract single channel to mono WAV
@@ -202,11 +215,11 @@ class AudioPrepareEngine(Engine):
             logger.info("uploaded_channel", channel=channel_idx, audio_uri=audio_uri)
 
             channel_files.append(
-                {
-                    "channel": channel_idx,
-                    "audio_uri": audio_uri,
-                    "duration": channel_metadata["duration"],
-                }
+                ChannelFile(
+                    channel=channel_idx,
+                    audio_uri=audio_uri,
+                    duration=channel_metadata["duration"],
+                )
             )
             channel_uris.append(audio_uri)
 
@@ -220,22 +233,26 @@ class AudioPrepareEngine(Engine):
                     error=str(e),
                 )
 
-        # Build output data
-        output_data = {
-            "audio_uri": channel_uris[0],  # Primary audio for compatibility
-            "duration": original_metadata["duration"],
-            "sample_rate": target_sample_rate,
-            "channels": 1,  # Each output file is mono
-            "original_format": original_metadata.get("codec_name", "unknown"),
-            "original_duration": original_metadata["duration"],
-            "original_sample_rate": original_metadata["sample_rate"],
-            "original_channels": original_metadata["channels"],
-            "split_channels": True,
-            "channel_count": num_channels,
-            "channel_files": channel_files,
-        }
+        # Build typed output
+        output = PrepareOutput(
+            channel_uris=channel_uris,
+            channel_files=channel_files,
+            channel_count=num_channels,
+            split_channels=True,
+            duration=original_metadata["duration"],
+            sample_rate=target_sample_rate,
+            channels=1,  # Each output file is mono
+            original_format=original_metadata.get("codec_name", "unknown"),
+            original_duration=original_metadata["duration"],
+            original_sample_rate=original_metadata["sample_rate"],
+            original_channels=original_metadata["channels"],
+            engine_id="audio-prepare",
+            skipped=False,
+            skip_reason=None,
+            warnings=[],
+        )
 
-        return TaskOutput(data=output_data)
+        return TaskOutput(data=output)
 
     def _extract_channel(
         self,

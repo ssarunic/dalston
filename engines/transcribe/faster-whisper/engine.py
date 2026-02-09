@@ -9,7 +9,16 @@ from typing import Any
 import structlog
 from faster_whisper import WhisperModel
 
-from dalston.engine_sdk import Engine, TaskInput, TaskOutput
+from dalston.engine_sdk import (
+    AlignmentMethod,
+    Engine,
+    Segment,
+    TaskInput,
+    TaskOutput,
+    TimestampGranularity,
+    TranscribeOutput,
+    Word,
+)
 
 logger = structlog.get_logger()
 
@@ -92,7 +101,7 @@ class FasterWhisperEngine(Engine):
             input: Task input with audio file path and config
 
         Returns:
-            TaskOutput with transcription text, segments, and language
+            TaskOutput with TranscribeOutput containing text, segments, and language
         """
         audio_path = input.audio_path
         config = input.config
@@ -130,29 +139,32 @@ class FasterWhisperEngine(Engine):
         )
 
         # Collect segments
-        segments = []
-        full_text_parts = []
+        segments: list[Segment] = []
+        full_text_parts: list[str] = []
 
         for segment in segments_generator:
-            segment_data: dict[str, Any] = {
-                "start": round(segment.start, 3),
-                "end": round(segment.end, 3),
-                "text": segment.text.strip(),
-            }
-
-            # Add word-level timestamps if available
+            # Build word list if available
+            words: list[Word] | None = None
             if segment.words:
-                segment_data["words"] = [
-                    {
-                        "word": word.word.strip(),
-                        "start": round(word.start, 3),
-                        "end": round(word.end, 3),
-                        "confidence": round(word.probability, 3),
-                    }
+                words = [
+                    Word(
+                        text=word.word.strip(),
+                        start=round(word.start, 3),
+                        end=round(word.end, 3),
+                        confidence=round(word.probability, 3),
+                        alignment_method=AlignmentMethod.ATTENTION,
+                    )
                     for word in segment.words
                 ]
 
-            segments.append(segment_data)
+            segments.append(
+                Segment(
+                    start=round(segment.start, 3),
+                    end=round(segment.end, 3),
+                    text=segment.text.strip(),
+                    words=words,
+                )
+            )
             full_text_parts.append(segment.text.strip())
 
         # Build full text
@@ -169,14 +181,29 @@ class FasterWhisperEngine(Engine):
             confidence=round(info.language_probability, 2),
         )
 
-        return TaskOutput(
-            data={
-                "text": full_text,
-                "segments": segments,
-                "language": info.language,
-                "language_confidence": round(info.language_probability, 3),
-            }
+        # Determine actual granularity produced
+        has_word_timestamps = any(seg.words for seg in segments)
+        timestamp_granularity_actual = (
+            TimestampGranularity.WORD
+            if has_word_timestamps
+            else TimestampGranularity.SEGMENT
         )
+
+        output = TranscribeOutput(
+            text=full_text,
+            segments=segments,
+            language=info.language,
+            language_confidence=round(info.language_probability, 3),
+            duration=info.duration,
+            timestamp_granularity_requested=TimestampGranularity.WORD,
+            timestamp_granularity_actual=timestamp_granularity_actual,
+            engine_id="faster-whisper",
+            skipped=False,
+            skip_reason=None,
+            warnings=[],
+        )
+
+        return TaskOutput(data=output)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status including GPU availability."""

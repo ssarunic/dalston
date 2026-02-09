@@ -283,7 +283,7 @@ class EngineRunner:
             "task_id": task_id,
             "completed_at": datetime.now(UTC).isoformat(),
             "processing_time_seconds": round(processing_time, 2),
-            "data": output.data,
+            "data": output.to_dict(),
         }
 
         # Upload any additional artifacts

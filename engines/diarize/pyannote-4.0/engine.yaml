@@ -55,14 +55,15 @@ output_schema:
   type: object
   required:
     - speakers
-    - diarization_segments
+    - turns
+    - num_speakers
   properties:
     speakers:
       type: array
       description: List of detected speaker IDs
       items:
         type: string
-    diarization_segments:
+    turns:
       type: array
       description: Speaker turns with timestamps
       items:
@@ -81,6 +82,29 @@ output_schema:
           speaker:
             type: string
             description: Speaker ID (e.g., "SPEAKER_00")
+    num_speakers:
+      type: integer
+      description: Number of speakers detected
+    overlap_duration:
+      type: number
+      description: Total duration of overlapping speech in seconds
+    overlap_ratio:
+      type: number
+      description: Fraction of audio with overlapping speech
     exclusive_mode:
       type: boolean
       description: Whether exclusive diarization mode was used
+    engine_id:
+      type: string
+      description: Engine identifier
+    skipped:
+      type: boolean
+      description: Whether processing was skipped
+    skip_reason:
+      type: string
+      description: Reason for skipping if skipped
+    warnings:
+      type: array
+      items:
+        type: string
+      description: Any processing warnings

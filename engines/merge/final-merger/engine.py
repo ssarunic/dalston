@@ -9,7 +9,19 @@ from datetime import UTC, datetime
 
 import structlog
 
-from dalston.engine_sdk import Engine, TaskInput, TaskOutput, io
+from dalston.engine_sdk import (
+    Engine,
+    MergedSegment,
+    MergeOutput,
+    Speaker,
+    SpeakerDetectionMode,
+    SpeakerTurn,
+    TaskInput,
+    TaskOutput,
+    TranscriptMetadata,
+    Word,
+    io,
+)
 
 logger = structlog.get_logger()
 
@@ -37,161 +49,176 @@ class FinalMergerEngine(Engine):
                    and optionally align stages
 
         Returns:
-            TaskOutput with merged transcript data
+            TaskOutput with MergeOutput containing the final transcript
         """
         job_id = input.job_id
         config = input.config
 
-        # Extract outputs from upstream stages
-        prepare_output = input.previous_outputs.get("prepare", {})
-
         # Get speaker detection mode from config
-        speaker_detection = config.get("speaker_detection", "none")
+        speaker_detection_str = config.get("speaker_detection", "none")
+        speaker_detection = SpeakerDetectionMode(speaker_detection_str)
 
         logger.info("merging_outputs", job_id=str(job_id))
-        logger.debug("prepare_output_keys", keys=list(prepare_output.keys()))
 
         # Handle per_channel mode separately
-        if speaker_detection == "per_channel":
-            return self._merge_per_channel(input, prepare_output, config)
+        if speaker_detection == SpeakerDetectionMode.PER_CHANNEL:
+            return self._merge_per_channel(input, config)
 
-        # Standard mode: single transcribe/align/diarize outputs
-        transcribe_output = input.previous_outputs.get("transcribe", {})
-        align_output = input.previous_outputs.get("align")
-        diarize_output = input.previous_outputs.get("diarize")
+        # Get typed outputs from upstream stages
+        prepare_output = input.get_prepare_output()
+        transcribe_output = input.get_transcribe_output()
+        align_output = input.get_align_output()
+        diarize_output = input.get_diarize_output()
 
-        logger.debug("transcribe_output_keys", keys=list(transcribe_output.keys()))
-        if align_output:
-            logger.debug("align_output_keys", keys=list(align_output.keys()))
-        if diarize_output:
-            logger.debug("diarize_output_keys", keys=list(diarize_output.keys()))
+        # Fall back to raw dict if typed parsing fails
+        if not prepare_output:
+            raw_prepare = input.get_raw_output("prepare") or {}
+            audio_duration = raw_prepare.get("duration", 0.0)
+            audio_channels = raw_prepare.get("channels", 1)
+            sample_rate = raw_prepare.get("sample_rate", 16000)
+        else:
+            audio_duration = prepare_output.duration
+            audio_channels = prepare_output.channels
+            sample_rate = prepare_output.sample_rate
 
-        # Extract audio metadata from prepare stage
-        audio_duration = prepare_output.get("duration", 0.0)
-        audio_channels = prepare_output.get("channels", 1)
-        sample_rate = prepare_output.get("sample_rate", 16000)
+        if not transcribe_output:
+            raw_transcribe = input.get_raw_output("transcribe") or {}
+            text = raw_transcribe.get("text", "")
+            language = raw_transcribe.get("language", "en")
+            language_confidence = raw_transcribe.get("language_confidence", 1.0)
+            raw_segments = raw_transcribe.get("segments", [])
+        else:
+            text = transcribe_output.text
+            language = transcribe_output.language
+            language_confidence = transcribe_output.language_confidence or 1.0
+            raw_segments = None  # Will use typed segments
 
         # Determine which output to use for segments
-        # Use aligned segments if alignment ran successfully, otherwise transcribe
-        pipeline_warnings = []
+        pipeline_warnings: list = []
         word_timestamps_requested = config.get("word_timestamps", False)
 
         if align_output:
-            # Check if alignment produced a warning (graceful degradation)
-            align_warning = align_output.get("warning")
-            if align_warning:
-                logger.warning("alignment_warning", reason=align_warning.get("reason"))
-                pipeline_warnings.append(align_warning)
+            if align_output.skipped:
+                logger.warning("alignment_skipped", reason=align_output.skip_reason)
+                pipeline_warnings.extend(align_output.warnings)
                 # Use transcribe segments as fallback
-                raw_segments = transcribe_output.get("segments", [])
+                segments_source = (
+                    transcribe_output.segments if transcribe_output else []
+                )
                 word_timestamps_available = False
             else:
-                # Use aligned segments
-                raw_segments = align_output.get("segments", [])
-                word_timestamps_available = align_output.get("word_timestamps", True)
+                segments_source = align_output.segments
+                word_timestamps_available = align_output.word_timestamps
                 logger.info("using_aligned_segments")
+        elif transcribe_output:
+            segments_source = transcribe_output.segments
+            word_timestamps_available = any(s.words for s in segments_source)
         else:
-            # No alignment stage ran
-            raw_segments = transcribe_output.get("segments", [])
+            # Fall back to raw segments
+            segments_source = raw_segments or []
             word_timestamps_available = False
 
-        # Extract other transcription data
-        text = transcribe_output.get("text", "")
-        language = transcribe_output.get("language", "en")
-        language_confidence = transcribe_output.get("language_confidence", 1.0)
-
         # Extract diarization data if available
-        diarization_segments = []
-        diarization_speakers = []
-        diarization_warning = None
+        diarization_turns: list[SpeakerTurn] = []
+        diarization_speakers: list[str] = []
 
-        if diarize_output and speaker_detection == "diarize":
-            diarization_warning = diarize_output.get("warning")
-            if diarization_warning:
-                logger.warning(
-                    "diarization_warning", reason=diarization_warning.get("reason")
-                )
-                pipeline_warnings.append(diarization_warning)
+        if diarize_output and speaker_detection == SpeakerDetectionMode.DIARIZE:
+            if diarize_output.skipped:
+                skip_reason = diarize_output.skip_reason or "Unknown reason"
+                logger.warning("diarization_skipped", reason=skip_reason)
+                pipeline_warnings.extend(diarize_output.warnings)
             else:
-                diarization_segments = diarize_output.get("diarization_segments", [])
-                diarization_speakers = diarize_output.get("speakers", [])
+                diarization_turns = diarize_output.turns
+                diarization_speakers = diarize_output.speakers
                 logger.info(
                     "using_diarization",
                     speaker_count=len(diarization_speakers),
-                    segment_count=len(diarization_segments),
+                    segment_count=len(diarization_turns),
                 )
 
         # Build segments with IDs and speaker assignments
-        segments = []
-        for idx, seg in enumerate(raw_segments):
-            seg_start = seg.get("start", 0.0)
-            seg_end = seg.get("end", 0.0)
+        segments: list[MergedSegment] = []
+        for idx, seg in enumerate(segments_source):
+            # Handle both typed Segment and raw dict
+            if hasattr(seg, "start"):
+                seg_start = seg.start
+                seg_end = seg.end
+                seg_text = seg.text
+                seg_words = seg.words
+            else:
+                seg_start = seg.get("start", 0.0)
+                seg_end = seg.get("end", 0.0)
+                seg_text = seg.get("text", "")
+                seg_words = seg.get("words")
 
             # Assign speaker based on diarization overlap
             speaker = None
-            if diarization_segments:
+            if diarization_turns:
                 speaker = self._find_speaker_by_overlap(
-                    seg_start, seg_end, diarization_segments
+                    seg_start, seg_end, diarization_turns
                 )
 
-            segment = {
-                "id": f"seg_{idx:03d}",
-                "start": seg_start,
-                "end": seg_end,
-                "text": seg.get("text", ""),
-                "speaker": speaker,
-                "words": seg.get("words") if word_timestamps_available else None,
-                "emotion": None,  # Will be populated by detect stage
-                "emotion_confidence": None,
-                "events": [],  # Will be populated by detect stage
-            }
+            # Normalize words
+            words: list[Word] | None = None
+            if word_timestamps_available and seg_words:
+                words = self._normalize_words(seg_words)
+
+            segment = MergedSegment(
+                id=f"seg_{idx:03d}",
+                start=seg_start,
+                end=seg_end,
+                text=seg_text,
+                speaker=speaker,
+                words=words,
+                emotion=None,
+                emotion_confidence=None,
+                events=[],
+            )
             segments.append(segment)
 
         # Build speakers array
-        speakers = []
+        speakers: list[Speaker] = []
         if diarization_speakers:
             for speaker_id in diarization_speakers:
-                speakers.append(
-                    {
-                        "id": speaker_id,
-                        "label": None,  # User can assign labels later
-                    }
-                )
+                speakers.append(Speaker(id=speaker_id, label=None))
             logger.info("built_speakers_array", speaker_count=len(speakers))
 
         # Determine pipeline stages that ran
         pipeline_stages = ["prepare", "transcribe"]
         if align_output:
             pipeline_stages.append("align")
-        if diarize_output and speaker_detection == "diarize":
+        if diarize_output and speaker_detection == SpeakerDetectionMode.DIARIZE:
             pipeline_stages.append("diarize")
         pipeline_stages.append("merge")
 
+        # Build metadata
+        metadata = TranscriptMetadata(
+            audio_duration=audio_duration,
+            audio_channels=audio_channels,
+            sample_rate=sample_rate,
+            language=language,
+            language_confidence=round(language_confidence, 3),
+            word_timestamps=word_timestamps_available,
+            word_timestamps_requested=word_timestamps_requested,
+            speaker_detection=speaker_detection,
+            speaker_count=len(speakers),
+            created_at=datetime.now(UTC).isoformat(),
+            completed_at=datetime.now(UTC).isoformat(),
+            pipeline_stages=pipeline_stages,
+            pipeline_warnings=pipeline_warnings,
+        )
+
         # Build the final transcript structure
-        transcript = {
-            "job_id": str(job_id),
-            "version": "1.0",
-            "metadata": {
-                "audio_duration": audio_duration,
-                "audio_channels": audio_channels,
-                "sample_rate": sample_rate,
-                "language": language,
-                "language_confidence": round(language_confidence, 3),
-                "word_timestamps": word_timestamps_available,
-                "word_timestamps_requested": word_timestamps_requested,
-                "speaker_detection": speaker_detection,
-                "speaker_count": len(speakers),
-                "created_at": datetime.now(UTC).isoformat(),
-                "completed_at": datetime.now(UTC).isoformat(),
-                "pipeline_stages": pipeline_stages,
-                "pipeline_warnings": pipeline_warnings,
-            },
-            "text": text,
-            "speakers": speakers,
-            "segments": segments,
-            "paragraphs": [],  # Empty for now, populated by refine in later milestones
-            "summary": None,  # Empty for now, populated by refine in later milestones
-        }
+        transcript = MergeOutput(
+            job_id=str(job_id),
+            version="1.0",
+            metadata=metadata,
+            text=text,
+            speakers=speakers,
+            segments=segments,
+            paragraphs=[],
+            summary=None,
+        )
 
         logger.info(
             "merged_transcript",
@@ -205,7 +232,7 @@ class FinalMergerEngine(Engine):
         # Write to the canonical transcript location for the Gateway
         s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
         transcript_uri = f"s3://{s3_bucket}/jobs/{job_id}/transcript.json"
-        io.upload_json(transcript, transcript_uri)
+        io.upload_json(transcript.model_dump(mode="json"), transcript_uri)
         logger.info("uploaded_transcript", transcript_uri=transcript_uri)
 
         return TaskOutput(data=transcript)
@@ -213,7 +240,6 @@ class FinalMergerEngine(Engine):
     def _merge_per_channel(
         self,
         input: TaskInput,
-        prepare_output: dict,
         config: dict,
     ) -> TaskOutput:
         """Merge transcripts from per-channel processing.
@@ -223,11 +249,10 @@ class FinalMergerEngine(Engine):
 
         Args:
             input: Task input with previous_outputs containing channel data
-            prepare_output: Output from prepare stage
             config: Merge task config
 
         Returns:
-            TaskOutput with merged transcript
+            TaskOutput with MergeOutput containing merged transcript
         """
         job_id = input.job_id
         word_timestamps = config.get("word_timestamps", False)
@@ -235,85 +260,113 @@ class FinalMergerEngine(Engine):
 
         logger.info("merging_per_channel_outputs", channel_count=channel_count)
 
-        # Extract audio metadata
-        audio_duration = prepare_output.get("duration", 0.0)
-        audio_channels = prepare_output.get("original_channels", 2)
-        sample_rate = prepare_output.get("sample_rate", 16000)
+        # Get prepare output
+        prepare_output = input.get_prepare_output()
+        if prepare_output:
+            audio_duration = prepare_output.duration
+            audio_channels = prepare_output.original_channels or 2
+            sample_rate = prepare_output.sample_rate
+        else:
+            raw_prepare = input.get_raw_output("prepare") or {}
+            audio_duration = raw_prepare.get("duration", 0.0)
+            audio_channels = raw_prepare.get("original_channels", 2)
+            sample_rate = raw_prepare.get("sample_rate", 16000)
 
         # Collect segments from all channels
-        all_segments = []
-        pipeline_warnings = []
+        all_segments: list[dict] = []
+        pipeline_warnings: list = []
         language = "en"
         language_confidence = 1.0
 
         for channel in range(channel_count):
-            # Get transcribe output for this channel
             transcribe_key = f"transcribe_ch{channel}"
             align_key = f"align_ch{channel}"
 
-            transcribe_output = input.previous_outputs.get(transcribe_key, {})
-            align_output = input.previous_outputs.get(align_key)
+            transcribe_output = input.get_transcribe_output(transcribe_key)
+            align_output = input.get_align_output(align_key)
 
             if not transcribe_output and not align_output:
-                logger.warning("missing_channel_output", channel=channel)
-                continue
+                # Try raw access
+                raw_transcribe = input.get_raw_output(transcribe_key)
+                raw_align = input.get_raw_output(align_key)
+                if not raw_transcribe and not raw_align:
+                    logger.warning("missing_channel_output", channel=channel)
+                    continue
 
             # Use first channel's language detection
-            if channel == 0:
-                language = transcribe_output.get("language", "en")
-                language_confidence = transcribe_output.get("language_confidence", 1.0)
+            if channel == 0 and transcribe_output:
+                language = transcribe_output.language
+                language_confidence = transcribe_output.language_confidence or 1.0
 
             # Get segments from align or transcribe
-            if align_output and not align_output.get("warning"):
-                raw_segments = align_output.get("segments", [])
-                has_words = align_output.get("word_timestamps", True)
+            if align_output and not align_output.skipped:
+                raw_segments = align_output.segments
+                has_words = align_output.word_timestamps
+            elif transcribe_output:
+                raw_segments = transcribe_output.segments
+                has_words = any(s.words for s in raw_segments)
             else:
-                raw_segments = transcribe_output.get("segments", [])
+                raw_transcribe = input.get_raw_output(transcribe_key) or {}
+                raw_segments = raw_transcribe.get("segments", [])
                 has_words = False
-                if align_output and align_output.get("warning"):
-                    pipeline_warnings.append(align_output["warning"])
+
+            if align_output and align_output.skipped:
+                pipeline_warnings.extend(align_output.warnings)
 
             # Add channel/speaker info to each segment
             speaker_id = f"SPEAKER_{channel:02d}"
             for seg in raw_segments:
-                all_segments.append(
-                    {
-                        "start": seg.get("start", 0.0),
-                        "end": seg.get("end", 0.0),
-                        "text": seg.get("text", ""),
-                        "speaker": speaker_id,
-                        "words": seg.get("words") if has_words else None,
-                        "channel": channel,
-                    }
-                )
+                if hasattr(seg, "start"):
+                    all_segments.append(
+                        {
+                            "start": seg.start,
+                            "end": seg.end,
+                            "text": seg.text,
+                            "speaker": speaker_id,
+                            "words": seg.words if has_words else None,
+                            "channel": channel,
+                        }
+                    )
+                else:
+                    all_segments.append(
+                        {
+                            "start": seg.get("start", 0.0),
+                            "end": seg.get("end", 0.0),
+                            "text": seg.get("text", ""),
+                            "speaker": speaker_id,
+                            "words": seg.get("words") if has_words else None,
+                            "channel": channel,
+                        }
+                    )
 
         # Sort all segments by start time (interleave)
         all_segments.sort(key=lambda s: s["start"])
 
         # Build final segments with IDs
-        segments = []
+        segments: list[MergedSegment] = []
         for idx, seg in enumerate(all_segments):
-            segment = {
-                "id": f"seg_{idx:03d}",
-                "start": seg["start"],
-                "end": seg["end"],
-                "text": seg["text"],
-                "speaker": seg["speaker"],
-                "words": seg.get("words"),
-                "emotion": None,
-                "emotion_confidence": None,
-                "events": [],
-            }
+            words = self._normalize_words(seg["words"]) if seg.get("words") else None
+            segment = MergedSegment(
+                id=f"seg_{idx:03d}",
+                start=seg["start"],
+                end=seg["end"],
+                text=seg["text"],
+                speaker=seg["speaker"],
+                words=words,
+                emotion=None,
+                emotion_confidence=None,
+                events=[],
+            )
             segments.append(segment)
 
         # Build speakers array
         speakers = [
-            {"id": f"SPEAKER_{ch:02d}", "label": None, "channel": ch}
+            Speaker(id=f"SPEAKER_{ch:02d}", label=None, channel=ch)
             for ch in range(channel_count)
         ]
 
         # Combine text from all segments
-        text = " ".join(seg["text"] for seg in segments if seg["text"])
+        text = " ".join(seg.text for seg in segments if seg.text)
 
         # Determine pipeline stages
         pipeline_stages = ["prepare"]
@@ -323,31 +376,34 @@ class FinalMergerEngine(Engine):
                 pipeline_stages.append(f"align_ch{ch}")
         pipeline_stages.append("merge")
 
+        # Build metadata
+        metadata = TranscriptMetadata(
+            audio_duration=audio_duration,
+            audio_channels=audio_channels,
+            sample_rate=sample_rate,
+            language=language,
+            language_confidence=round(language_confidence, 3),
+            word_timestamps=word_timestamps,
+            word_timestamps_requested=word_timestamps,
+            speaker_detection=SpeakerDetectionMode.PER_CHANNEL,
+            speaker_count=len(speakers),
+            created_at=datetime.now(UTC).isoformat(),
+            completed_at=datetime.now(UTC).isoformat(),
+            pipeline_stages=pipeline_stages,
+            pipeline_warnings=pipeline_warnings,
+        )
+
         # Build transcript
-        transcript = {
-            "job_id": str(job_id),
-            "version": "1.0",
-            "metadata": {
-                "audio_duration": audio_duration,
-                "audio_channels": audio_channels,
-                "sample_rate": sample_rate,
-                "language": language,
-                "language_confidence": round(language_confidence, 3),
-                "word_timestamps": word_timestamps,
-                "word_timestamps_requested": word_timestamps,
-                "speaker_detection": "per_channel",
-                "speaker_count": len(speakers),
-                "created_at": datetime.now(UTC).isoformat(),
-                "completed_at": datetime.now(UTC).isoformat(),
-                "pipeline_stages": pipeline_stages,
-                "pipeline_warnings": pipeline_warnings,
-            },
-            "text": text,
-            "speakers": speakers,
-            "segments": segments,
-            "paragraphs": [],
-            "summary": None,
-        }
+        transcript = MergeOutput(
+            job_id=str(job_id),
+            version="1.0",
+            metadata=metadata,
+            text=text,
+            speakers=speakers,
+            segments=segments,
+            paragraphs=[],
+            summary=None,
+        )
 
         logger.info(
             "merged_per_channel_transcript",
@@ -358,59 +414,80 @@ class FinalMergerEngine(Engine):
         # Upload to S3
         s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
         transcript_uri = f"s3://{s3_bucket}/jobs/{job_id}/transcript.json"
-        io.upload_json(transcript, transcript_uri)
+        io.upload_json(transcript.model_dump(mode="json"), transcript_uri)
         logger.info("uploaded_transcript", transcript_uri=transcript_uri)
 
         return TaskOutput(data=transcript)
+
+    def _normalize_words(self, words: list) -> list[Word]:
+        """Normalize word structures per pipeline interface spec.
+
+        Args:
+            words: List of Word objects or word dicts from transcription/alignment
+
+        Returns:
+            List of normalized Word objects
+        """
+        normalized: list[Word] = []
+        for w in words:
+            if hasattr(w, "text"):
+                # Already a Word object
+                normalized.append(w)
+            else:
+                # Raw dict
+                normalized.append(
+                    Word(
+                        text=w.get("text", ""),
+                        start=w.get("start", 0.0),
+                        end=w.get("end", 0.0),
+                        confidence=w.get("confidence"),
+                        alignment_method=w.get("alignment_method"),
+                    )
+                )
+        return normalized
 
     def _find_speaker_by_overlap(
         self,
         seg_start: float,
         seg_end: float,
-        diarization_segments: list[dict],
+        speaker_turns: list[SpeakerTurn],
     ) -> str | None:
         """Find the speaker with maximum overlap for a transcript segment.
 
-        Uses a simple overlap calculation: for each diarization segment that
+        Uses a simple overlap calculation: for each speaker turn that
         overlaps with the transcript segment, calculate the overlap duration.
         Return the speaker with the most total overlap.
 
         Args:
             seg_start: Transcript segment start time (seconds)
             seg_end: Transcript segment end time (seconds)
-            diarization_segments: List of diarization segments with
-                                  start, end, and speaker fields
+            speaker_turns: List of SpeakerTurn objects
 
         Returns:
             Speaker ID with maximum overlap, or None if no overlap found
         """
-        if not diarization_segments:
+        if not speaker_turns:
             return None
 
         # Calculate overlap for each speaker
         speaker_overlaps: dict[str, float] = {}
 
-        for diar_seg in diarization_segments:
-            diar_start = diar_seg.get("start", 0.0)
-            diar_end = diar_seg.get("end", 0.0)
-            speaker = diar_seg.get("speaker")
-
-            if not speaker:
-                continue
-
+        for turn in speaker_turns:
             # Calculate overlap: max(0, min(end1, end2) - max(start1, start2))
-            overlap_start = max(seg_start, diar_start)
-            overlap_end = min(seg_end, diar_end)
+            overlap_start = max(seg_start, turn.start)
+            overlap_end = min(seg_end, turn.end)
             overlap = max(0.0, overlap_end - overlap_start)
 
             if overlap > 0:
-                speaker_overlaps[speaker] = speaker_overlaps.get(speaker, 0.0) + overlap
+                speaker_overlaps[turn.speaker] = (
+                    speaker_overlaps.get(turn.speaker, 0.0) + overlap
+                )
 
         if not speaker_overlaps:
             return None
 
         # Return speaker with maximum overlap
-        return max(speaker_overlaps, key=speaker_overlaps.get)
+        return max(speaker_overlaps, key=lambda k: speaker_overlaps[k])
 
 
 if __name__ == "__main__":

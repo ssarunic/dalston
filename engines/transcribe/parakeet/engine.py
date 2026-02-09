@@ -16,7 +16,16 @@ from typing import Any
 import structlog
 import torch
 
-from dalston.engine_sdk import Engine, TaskInput, TaskOutput
+from dalston.engine_sdk import (
+    AlignmentMethod,
+    Engine,
+    Segment,
+    TaskInput,
+    TaskOutput,
+    TimestampGranularity,
+    TranscribeOutput,
+    Word,
+)
 
 logger = structlog.get_logger()
 
@@ -33,11 +42,18 @@ class ParakeetEngine(Engine):
     """
 
     # Model variants (NeMo model identifiers)
+    # TDT_CTC models are faster and lighter than RNNT
     MODEL_VARIANTS = {
+        # TDT_CTC (lightweight, faster)
+        "nvidia/parakeet-tdt_ctc-110m": "nvidia/parakeet-tdt_ctc-110m",
+        "parakeet-110m": "nvidia/parakeet-tdt_ctc-110m",  # Alias
+        # RNNT (more accurate, heavier)
         "nvidia/parakeet-rnnt-0.6b": "nvidia/parakeet-rnnt-0.6b",
+        "parakeet-0.6b": "nvidia/parakeet-rnnt-0.6b",  # Alias
         "nvidia/parakeet-rnnt-1.1b": "nvidia/parakeet-rnnt-1.1b",
+        "parakeet-1.1b": "nvidia/parakeet-rnnt-1.1b",  # Alias
     }
-    DEFAULT_MODEL = "nvidia/parakeet-rnnt-0.6b"
+    DEFAULT_MODEL = "nvidia/parakeet-tdt_ctc-110m"
 
     def __init__(self) -> None:
         super().__init__()
@@ -104,7 +120,7 @@ class ParakeetEngine(Engine):
             input: Task input with audio file path and config
 
         Returns:
-            TaskOutput with transcription text, segments, and words
+            TaskOutput with TranscribeOutput containing text, segments, and words
         """
         audio_path = input.audio_path
         config = input.config
@@ -133,23 +149,26 @@ class ParakeetEngine(Engine):
             else torch.inference_mode()
         )
         with autocast_ctx:
-            # Use transcribe method which returns text
-            # For word timestamps, we use transcribe_with_timestamps
+            # Use transcribe method with timestamps=True for word-level timing
             transcriptions = self._model.transcribe(
                 [str(audio_path)],
                 batch_size=1,
                 return_hypotheses=True,
+                timestamps=True,  # Enable word-level timestamps
             )
 
         # Process the hypothesis
         if not transcriptions:
             return TaskOutput(
-                data={
-                    "text": "",
-                    "segments": [],
-                    "language": "en",
-                    "language_confidence": 1.0,
-                }
+                data=TranscribeOutput(
+                    text="",
+                    segments=[],
+                    language="en",
+                    language_confidence=1.0,
+                    engine_id="parakeet",
+                    skipped=False,
+                    warnings=[],
+                )
             )
 
         hypothesis = transcriptions[0]
@@ -160,76 +179,137 @@ class ParakeetEngine(Engine):
         else:
             full_text = str(hypothesis)
 
-        # Build segments with word-level timestamps
-        segments = []
-        words = []
+        # Determine alignment method based on model type
+        alignment_method = (
+            AlignmentMethod.TDT if "tdt" in model_name.lower() else AlignmentMethod.RNNT
+        )
 
-        # Check if hypothesis has timesteps (word-level alignment)
-        if hasattr(hypothesis, "timestep") and hypothesis.timestep is not None:
-            # RNNT provides frame-level alignment that can be converted to timestamps
-            # Each timestep corresponds to a token emission
+        # Build segments with word-level timestamps
+        segments: list[Segment] = []
+        all_words: list[Word] = []
+
+        # Check for timestamp dict (TDT models with timestamps=True)
+        if hasattr(hypothesis, "timestamp") and isinstance(hypothesis.timestamp, dict):
+            word_timestamps = hypothesis.timestamp.get("word", [])
+            segment_timestamps = hypothesis.timestamp.get("segment", [])
+
+            # Extract word-level data
+            for wt in word_timestamps:
+                word = Word(
+                    text=wt.get("word", ""),
+                    start=round(wt.get("start", 0.0), 3),
+                    end=round(wt.get("end", 0.0), 3),
+                    confidence=None,  # TDT doesn't provide per-word confidence
+                    alignment_method=alignment_method,
+                )
+                all_words.append(word)
+
+            # Use segment timestamps if available, otherwise create from words
+            if segment_timestamps:
+                for seg in segment_timestamps:
+                    seg_start = seg.get("start", 0.0)
+                    seg_end = seg.get("end", 0.0)
+                    seg_text = seg.get("segment", "")
+                    # Find words that fall within this segment
+                    seg_words = [
+                        w
+                        for w in all_words
+                        if w.start >= seg_start - 0.01 and w.end <= seg_end + 0.01
+                    ]
+                    segments.append(
+                        Segment(
+                            start=round(seg_start, 3),
+                            end=round(seg_end, 3),
+                            text=seg_text,
+                            words=seg_words if seg_words else None,
+                        )
+                    )
+            elif all_words:
+                # Create a single segment with all words
+                segments.append(
+                    Segment(
+                        start=all_words[0].start,
+                        end=all_words[-1].end,
+                        text=full_text.strip(),
+                        words=all_words,
+                    )
+                )
+
+        # Fallback: check for legacy timestep format (RNNT models)
+        elif hasattr(hypothesis, "timestep") and hypothesis.timestep is not None:
             timesteps = hypothesis.timestep
             tokens = hypothesis.text.split()
-
-            # Convert frame indices to seconds (assuming 10ms frame shift)
             frame_shift_seconds = 0.01
 
-            current_words = []
+            current_words: list[Word] = []
             for i, (token, frame_idx) in enumerate(
                 zip(tokens, timesteps, strict=False)
             ):
                 word_start = frame_idx * frame_shift_seconds
-                # Estimate word end from next token or add small duration
                 if i + 1 < len(timesteps):
                     word_end = timesteps[i + 1] * frame_shift_seconds
                 else:
-                    word_end = word_start + 0.1  # Default duration
+                    word_end = word_start + 0.1
 
-                word_data = {
-                    "word": token,
-                    "start": round(word_start, 3),
-                    "end": round(word_end, 3),
-                    "confidence": 0.95,  # RNNT doesn't provide per-word confidence
-                }
-                current_words.append(word_data)
-                words.append(word_data)
+                word = Word(
+                    text=token,
+                    start=round(word_start, 3),
+                    end=round(word_end, 3),
+                    confidence=None,
+                    alignment_method=AlignmentMethod.RNNT,
+                )
+                current_words.append(word)
+                all_words.append(word)
 
-            # Create a single segment with all words
             if current_words:
                 segments.append(
-                    {
-                        "start": current_words[0]["start"],
-                        "end": current_words[-1]["end"],
-                        "text": full_text.strip(),
-                        "words": current_words,
-                    }
+                    Segment(
+                        start=current_words[0].start,
+                        end=current_words[-1].end,
+                        text=full_text.strip(),
+                        words=current_words,
+                    )
                 )
         else:
             # Fallback: create segment without word timestamps
-            # This happens if the model doesn't support timestamp extraction
             segments.append(
-                {
-                    "start": 0.0,
-                    "end": 0.0,  # Unknown duration
-                    "text": full_text.strip(),
-                }
+                Segment(
+                    start=0.0,
+                    end=0.0,
+                    text=full_text.strip(),
+                )
             )
 
         logger.info(
             "transcription_complete",
             segment_count=len(segments),
-            word_count=len(words),
+            word_count=len(all_words),
             char_count=len(full_text),
         )
 
-        return TaskOutput(
-            data={
-                "text": full_text.strip(),
-                "segments": segments,
-                "language": "en",  # Parakeet is English-only
-                "language_confidence": 1.0,
-            }
+        # Determine actual granularity produced
+        has_word_timestamps = any(seg.words for seg in segments)
+        timestamp_granularity_actual = (
+            TimestampGranularity.WORD
+            if has_word_timestamps
+            else TimestampGranularity.SEGMENT
         )
+
+        output = TranscribeOutput(
+            text=full_text.strip(),
+            segments=segments,
+            language="en",  # Parakeet is English-only
+            language_confidence=1.0,
+            timestamp_granularity_requested=TimestampGranularity.WORD,
+            timestamp_granularity_actual=timestamp_granularity_actual,
+            alignment_method=alignment_method,
+            engine_id="parakeet",
+            skipped=False,
+            skip_reason=None,
+            warnings=[],
+        )
+
+        return TaskOutput(data=output)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status including GPU availability."""
