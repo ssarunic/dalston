@@ -49,22 +49,24 @@ from .types import (
 )
 
 
+def _parse_word(w: dict[str, Any]) -> Word:
+    """Parse a word dict into Word object."""
+    return Word(
+        text=w["text"],
+        start=w["start"],
+        end=w["end"],
+        confidence=w.get("confidence"),
+        speaker_id=w.get("speaker"),
+    )
+
+
 def _parse_job(data: dict[str, Any]) -> Job:
     """Parse job response JSON into Job object."""
     transcript = None
     if data.get("text") is not None:
         words = None
         if data.get("words"):
-            words = [
-                Word(
-                    text=w["word"],
-                    start=w["start"],
-                    end=w["end"],
-                    confidence=w.get("confidence"),
-                    speaker_id=w.get("speaker_id"),
-                )
-                for w in data["words"]
-            ]
+            words = [_parse_word(w) for w in data["words"]]
 
         segments = None
         if data.get("segments"):
@@ -74,17 +76,8 @@ def _parse_job(data: dict[str, Any]) -> Job:
                     text=s["text"],
                     start=s["start"],
                     end=s["end"],
-                    speaker_id=s.get("speaker_id"),
-                    words=[
-                        Word(
-                            text=w["word"],
-                            start=w["start"],
-                            end=w["end"],
-                            confidence=w.get("confidence"),
-                            speaker_id=w.get("speaker_id"),
-                        )
-                        for w in s.get("words", [])
-                    ]
+                    speaker_id=s.get("speaker"),
+                    words=[_parse_word(w) for w in s.get("words", [])]
                     if s.get("words")
                     else None,
                 )
@@ -246,8 +239,11 @@ class Dalston:
         audio_url: str | None = None,
         model: str = "whisper-large-v3",
         language: str = "auto",
+        initial_prompt: str | None = None,
         speaker_detection: SpeakerDetection | str = SpeakerDetection.NONE,
         num_speakers: int | None = None,
+        min_speakers: int | None = None,
+        max_speakers: int | None = None,
         timestamps_granularity: TimestampGranularity | str = TimestampGranularity.WORD,
         webhook_url: str | None = None,
         webhook_metadata: dict[str, Any] | None = None,
@@ -260,8 +256,12 @@ class Dalston:
             model: Transcription model ID or alias (e.g., "whisper-large-v3",
                    "whisper-base", "fast", "accurate"). Defaults to "whisper-large-v3".
             language: Language code or "auto" for detection.
+            initial_prompt: Domain vocabulary hints to improve accuracy
+                (e.g., technical terms, proper names).
             speaker_detection: Speaker detection mode.
-            num_speakers: Expected number of speakers (for diarization).
+            num_speakers: Exact number of speakers (for diarization).
+            min_speakers: Minimum speakers for diarization auto-detection.
+            max_speakers: Maximum speakers for diarization auto-detection.
             timestamps_granularity: Level of timestamp detail.
             webhook_url: URL for completion callback.
             webhook_metadata: Custom data to include in webhook.
@@ -292,8 +292,14 @@ class Dalston:
             ),
         }
 
+        if initial_prompt is not None:
+            data["initial_prompt"] = initial_prompt
         if num_speakers is not None:
             data["num_speakers"] = num_speakers
+        if min_speakers is not None:
+            data["min_speakers"] = min_speakers
+        if max_speakers is not None:
+            data["max_speakers"] = max_speakers
         if webhook_url is not None:
             data["webhook_url"] = webhook_url
         if webhook_metadata is not None:
@@ -772,8 +778,11 @@ class AsyncDalston:
         audio_url: str | None = None,
         model: str = "whisper-large-v3",
         language: str = "auto",
+        initial_prompt: str | None = None,
         speaker_detection: SpeakerDetection | str = SpeakerDetection.NONE,
         num_speakers: int | None = None,
+        min_speakers: int | None = None,
+        max_speakers: int | None = None,
         timestamps_granularity: TimestampGranularity | str = TimestampGranularity.WORD,
         webhook_url: str | None = None,
         webhook_metadata: dict[str, Any] | None = None,
@@ -786,8 +795,12 @@ class AsyncDalston:
             model: Transcription model ID or alias (e.g., "whisper-large-v3",
                    "whisper-base", "fast", "accurate"). Defaults to "whisper-large-v3".
             language: Language code or "auto" for detection.
+            initial_prompt: Domain vocabulary hints to improve accuracy
+                (e.g., technical terms, proper names).
             speaker_detection: Speaker detection mode.
-            num_speakers: Expected number of speakers (for diarization).
+            num_speakers: Exact number of speakers (for diarization).
+            min_speakers: Minimum speakers for diarization auto-detection.
+            max_speakers: Maximum speakers for diarization auto-detection.
             timestamps_granularity: Level of timestamp detail.
             webhook_url: URL for completion callback.
             webhook_metadata: Custom data to include in webhook.
@@ -814,8 +827,14 @@ class AsyncDalston:
             ),
         }
 
+        if initial_prompt is not None:
+            data["initial_prompt"] = initial_prompt
         if num_speakers is not None:
             data["num_speakers"] = num_speakers
+        if min_speakers is not None:
+            data["min_speakers"] = min_speakers
+        if max_speakers is not None:
+            data["max_speakers"] = max_speakers
         if webhook_url is not None:
             data["webhook_url"] = webhook_url
         if webhook_metadata is not None:

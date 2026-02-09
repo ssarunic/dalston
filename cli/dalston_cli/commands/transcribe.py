@@ -45,6 +45,14 @@ def transcribe(
             help="Language code (en, es, etc.) or 'auto' for detection.",
         ),
     ] = "auto",
+    initial_prompt: Annotated[
+        str | None,
+        typer.Option(
+            "--prompt",
+            "-p",
+            help="Domain vocabulary hints (e.g., technical terms, proper names).",
+        ),
+    ] = None,
     output: Annotated[
         Path | None,
         typer.Option(
@@ -87,7 +95,23 @@ def transcribe(
         typer.Option(
             min=1,
             max=32,
-            help="Expected number of speakers (for diarization).",
+            help="Exact number of speakers (for diarization).",
+        ),
+    ] = None,
+    min_speakers: Annotated[
+        int | None,
+        typer.Option(
+            min=1,
+            max=32,
+            help="Minimum speakers for diarization auto-detection.",
+        ),
+    ] = None,
+    max_speakers: Annotated[
+        int | None,
+        typer.Option(
+            min=1,
+            max=32,
+            help="Maximum speakers for diarization auto-detection.",
         ),
     ] = None,
     timestamps: Annotated[
@@ -122,6 +146,10 @@ def transcribe(
         dalston transcribe audio.mp3 --model whisper-base  # Use faster model
 
         dalston transcribe audio.mp3 -m fast  # Use 'fast' alias (distil-whisper)
+
+        dalston transcribe medical.mp3 -p "cardiology, ECG, arrhythmia"  # Domain hints
+
+        dalston transcribe call.mp3 --speakers diarize --min-speakers 2 --max-speakers 4
     """
     client = state.client
     quiet = state.quiet
@@ -160,8 +188,11 @@ def transcribe(
                 file=str(file_path),
                 model=model,
                 language=language,
+                initial_prompt=initial_prompt,
                 speaker_detection=speaker_detection,
                 num_speakers=num_speakers,
+                min_speakers=min_speakers,
+                max_speakers=max_speakers,
                 timestamps_granularity=timestamps_granularity,
             )
 

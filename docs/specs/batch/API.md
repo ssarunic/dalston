@@ -476,7 +476,9 @@ Submit audio for transcription.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `speaker_detection` | string | `"none"` | `"none"`, `"diarize"`, `"per_channel"` |
-| `num_speakers` | integer | `null` | Expected speaker count hint (1-32) |
+| `num_speakers` | integer | `null` | Exact speaker count hint (1-32) |
+| `min_speakers` | integer | `null` | Minimum speakers for auto-detection (1-32) |
+| `max_speakers` | integer | `null` | Maximum speakers for auto-detection (1-32) |
 | `diarization_threshold` | float | `0.5` | Sensitivity 0.0-2.0 |
 
 #### Timestamps & Output
@@ -496,10 +498,10 @@ Submit audio for transcription.
 
 #### Transcription Hints
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `prompt` | string | `null` | Initial context/vocabulary hint (max 1000 chars) |
-| `keyterms` | array | `[]` | Bias terms (max 100 terms, 50 chars each) |
+| Field            | Type   | Default | Description                                                  |
+|------------------|--------|---------|--------------------------------------------------------------|
+| `initial_prompt` | string | `null`  | Domain vocabulary hints to improve accuracy (max 1000 chars) |
+| `keyterms`       | array  | `[]`    | Bias terms (max 100 terms, 50 chars each)                    |
 
 #### Processing Control
 
@@ -543,12 +545,21 @@ Submit audio for transcription.
 ### Example
 
 ```bash
+# Basic transcription with diarization
 curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -F "file=@interview.wav" \
   -F "language=en" \
   -F "speaker_detection=diarize" \
   -F "num_speakers=2" \
   -F "timestamps_granularity=word"
+
+# With domain vocabulary hints and speaker range
+curl -X POST http://localhost:8000/v1/audio/transcriptions \
+  -F "file=@medical-consultation.wav" \
+  -F "initial_prompt=cardiology, ECG, arrhythmia, myocardial infarction" \
+  -F "speaker_detection=diarize" \
+  -F "min_speakers=2" \
+  -F "max_speakers=4"
 ```
 
 ---
@@ -584,34 +595,19 @@ Get job status and results.
   "language_confidence": 0.98,
   "text": "Welcome to the show. Thanks for having me...",
 
-  "words": [
-    {
-      "text": "Welcome",
-      "start": 0.0,
-      "end": 0.4,
-      "type": "word",
-      "speaker_id": "SPEAKER_00",
-      "confidence": 0.98,
-      "logprob": -0.02
-    },
-    {
-      "text": "(laughter)",
-      "start": 5.2,
-      "end": 6.8,
-      "type": "audio_event",
-      "speaker_id": null,
-      "confidence": 0.87
-    }
-  ],
-
   "segments": [
     {
       "id": "seg_001",
       "start": 0.0,
       "end": 3.5,
       "text": "Welcome to the show.",
-      "speaker_id": "SPEAKER_00",
-      "confidence": 0.97,
+      "speaker": "SPEAKER_00",
+      "words": [
+        { "text": "Welcome", "start": 0.0, "end": 0.4, "confidence": 0.98 },
+        { "text": "to", "start": 0.45, "end": 0.55, "confidence": 0.99 },
+        { "text": "the", "start": 0.6, "end": 0.7, "confidence": 0.99 },
+        { "text": "show.", "start": 0.75, "end": 1.1, "confidence": 0.97 }
+      ],
       "emotion": "positive",
       "emotion_confidence": 0.85
     }
@@ -903,10 +899,14 @@ For clients migrating between APIs:
 | `model_id` = `scribe_v2` | `model_id` = `whisperx-large-v3` |
 | `language_code` | `language` |
 | `cloud_storage_url` | `audio_url` |
+| `keyterms` | `initial_prompt` |
 | `diarize` = `true` | `speaker_detection` = `"diarize"` |
+| `num_speakers` | `num_speakers`, `min_speakers`, `max_speakers` |
 | `use_multi_channel` = `true` | `speaker_detection` = `"per_channel"` |
 | `tag_audio_events` | `detect_events` |
 | `webhook` = `true` | *(uses webhook_url or webhook_id)* |
 | `timestamps_granularity` = `"character"` | *(not supported, falls back to word)* |
 | Response: `transcription_id` | Response: `id` |
 | Response: `speaker_1` | Response: `SPEAKER_00` |
+| Response: `word[].text` | Response: `word.text` |
+| Response: `segment.speaker_id` | Response: `segment.speaker` |

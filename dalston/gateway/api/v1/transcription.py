@@ -75,11 +75,30 @@ async def create_transcription(
     language: Annotated[
         str, Form(description="Language code or 'auto' for detection")
     ] = "auto",
+    initial_prompt: Annotated[
+        str | None,
+        Form(
+            description="Domain vocabulary hints to improve accuracy (e.g., technical terms, names)",
+            max_length=1000,
+        ),
+    ] = None,
     speaker_detection: Annotated[
         str, Form(description="Speaker detection: 'none', 'diarize', 'per_channel'")
     ] = "none",
     num_speakers: Annotated[
-        int | None, Form(description="Expected number of speakers", ge=1, le=32)
+        int | None, Form(description="Exact number of speakers", ge=1, le=32)
+    ] = None,
+    min_speakers: Annotated[
+        int | None,
+        Form(
+            description="Minimum speakers for diarization auto-detection", ge=1, le=32
+        ),
+    ] = None,
+    max_speakers: Annotated[
+        int | None,
+        Form(
+            description="Maximum speakers for diarization auto-detection", ge=1, le=32
+        ),
     ] = None,
     timestamps_granularity: Annotated[
         str, Form(description="Timestamp granularity: 'none', 'segment', 'word'")
@@ -134,7 +153,7 @@ async def create_transcription(
                 "message": str(e),
                 "param": "model",
             },
-        )
+        ) from e
 
     # Parse webhook_metadata JSON string
     parsed_webhook_metadata: dict | None = None
@@ -168,8 +187,13 @@ async def create_transcription(
         "language": language,
         "speaker_detection": speaker_detection,
         "num_speakers": num_speakers,
+        "min_speakers": min_speakers,
+        "max_speakers": max_speakers,
         "timestamps_granularity": timestamps_granularity,
     }
+    # Only include optional parameters if set
+    if initial_prompt is not None:
+        parameters["initial_prompt"] = initial_prompt
 
     # Upload audio to S3
     storage = StorageService(settings)

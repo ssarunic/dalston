@@ -384,7 +384,7 @@ Fast Whisper implementation using CTranslate2 for optimized inference.
       "start": 0.0,
       "end": 3.5,
       "text": "Segment text",
-      "words": [{"word": "...", "start": 0.0, "end": 0.4, "confidence": 0.98}]
+      "words": [{"text": "...", "start": 0.0, "end": 0.4, "confidence": 0.98}]
     }
   ],
   "language": "en",

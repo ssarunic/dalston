@@ -426,8 +426,8 @@ Workers download models to local cache on startup:
         "end": 3.5,
         "text": "Welcome to the show.",
         "words": [
-          { "word": "Welcome", "start": 0.0, "end": 0.4, "confidence": 0.98 },
-          { "word": "to", "start": 0.45, "end": 0.55, "confidence": 0.99 }
+          { "text": "Welcome", "start": 0.0, "end": 0.4, "confidence": 0.98 },
+          { "text": "to", "start": 0.45, "end": 0.55, "confidence": 0.99 }
         ]
       }
     ],
@@ -482,10 +482,10 @@ Workers download models to local cache on startup:
       "text": "Welcome to the show.",
       "speaker": "SPEAKER_00",
       "words": [
-        { "word": "Welcome", "start": 0.0, "end": 0.4, "confidence": 0.98 },
-        { "word": "to", "start": 0.45, "end": 0.55, "confidence": 0.99 },
-        { "word": "the", "start": 0.6, "end": 0.7, "confidence": 0.99 },
-        { "word": "show", "start": 0.75, "end": 1.1, "confidence": 0.97 }
+        { "text": "Welcome", "start": 0.0, "end": 0.4, "confidence": 0.98 },
+        { "text": "to", "start": 0.45, "end": 0.55, "confidence": 0.99 },
+        { "text": "the", "start": 0.6, "end": 0.7, "confidence": 0.99 },
+        { "text": "show", "start": 0.75, "end": 1.1, "confidence": 0.97 }
       ],
       "emotion": "positive",
       "emotion_confidence": 0.85,
@@ -552,7 +552,7 @@ Workers download models to local cache on startup:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `word` | string | The word |
+| `text` | string | The word text |
 | `start` | number | Start time in seconds |
 | `end` | number | End time in seconds |
 | `confidence` | number | Recognition confidence (0-1) |
