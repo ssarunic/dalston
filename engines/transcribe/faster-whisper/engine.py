@@ -6,7 +6,6 @@ speech-to-text transcription with GPU acceleration.
 
 from typing import Any
 
-import structlog
 from faster_whisper import WhisperModel
 
 from dalston.engine_sdk import (
@@ -19,8 +18,6 @@ from dalston.engine_sdk import (
     TranscribeOutput,
     Word,
 )
-
-logger = structlog.get_logger()
 
 
 class FasterWhisperEngine(Engine):
@@ -45,7 +42,7 @@ class FasterWhisperEngine(Engine):
 
         # Auto-detect device and compute type
         self._device, self._compute_type = self._detect_device()
-        logger.info(
+        self.logger.info(
             "detected_device", device=self._device, compute_type=self._compute_type
         )
 
@@ -78,7 +75,7 @@ class FasterWhisperEngine(Engine):
         if self._model is not None and self._model_size == model_size:
             return
 
-        logger.info(
+        self.logger.info(
             "loading_whisper_model",
             model_size=model_size,
             device=device,
@@ -92,7 +89,7 @@ class FasterWhisperEngine(Engine):
         )
         self._model_size = model_size
 
-        logger.info("model_loaded_successfully", model_size=model_size)
+        self.logger.info("model_loaded_successfully", model_size=model_size)
 
     def process(self, input: TaskInput) -> TaskOutput:
         """Transcribe audio using Faster-Whisper.
@@ -121,8 +118,8 @@ class FasterWhisperEngine(Engine):
         # Load model (lazy loading, cached)
         self._load_model(model_size, device, compute_type)
 
-        logger.info("transcribing", audio_path=str(audio_path))
-        logger.info(
+        self.logger.info("transcribing", audio_path=str(audio_path))
+        self.logger.info(
             "transcribe_config",
             model=model_size,
             language=language,
@@ -171,12 +168,12 @@ class FasterWhisperEngine(Engine):
         # Build full text
         full_text = " ".join(full_text_parts)
 
-        logger.info(
+        self.logger.info(
             "transcription_complete",
             segment_count=len(segments),
             char_count=len(full_text),
         )
-        logger.info(
+        self.logger.info(
             "detected_language",
             language=info.language,
             confidence=round(info.language_probability, 2),

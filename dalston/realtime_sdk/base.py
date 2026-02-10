@@ -18,6 +18,7 @@ import numpy as np
 import structlog
 from websockets.asyncio.server import ServerConnection, serve
 
+import dalston.logging
 from dalston.realtime_sdk.assembler import TranscribeResult
 from dalston.realtime_sdk.registry import WorkerInfo, WorkerRegistry
 from dalston.realtime_sdk.session import SessionConfig, SessionHandler
@@ -225,7 +226,13 @@ class RealtimeEngine(ABC):
                 engine = MyEngine()
                 asyncio.run(engine.run())
         """
-        logger.info("starting_realtime_engine", worker_id=self.worker_id)
+        # Configure unified structured logging for this worker
+        dalston.logging.configure(f"realtime-{self.worker_id}")
+
+        # Bind worker_id to logging context for all subsequent log calls
+        structlog.contextvars.bind_contextvars(worker_id=self.worker_id)
+
+        logger.info("starting_realtime_engine")
 
         # Load models
         logger.info("loading_models")
@@ -374,12 +381,17 @@ class RealtimeEngine(ABC):
         if self._registry:
             await self._registry.session_started(self.worker_id, config.session_id)
 
+        # Bind session_id to logging context for this session
+        structlog.contextvars.bind_contextvars(session_id=config.session_id)
+
         try:
             # Run session
             await handler.run()
         finally:
             # Remove from tracking
             del self._sessions[config.session_id]
+            # Unbind session_id from context
+            structlog.contextvars.unbind_contextvars("session_id")
 
     async def _on_session_end(
         self,

@@ -7,8 +7,6 @@ Requires HuggingFace token for accessing gated models.
 import os
 from typing import Any
 
-import structlog
-
 from dalston.engine_sdk import (
     DiarizeOutput,
     Engine,
@@ -16,8 +14,6 @@ from dalston.engine_sdk import (
     TaskInput,
     TaskOutput,
 )
-
-logger = structlog.get_logger()
 
 
 class PyannoteEngine(Engine):
@@ -40,9 +36,9 @@ class PyannoteEngine(Engine):
         self._disabled = os.environ.get("DIARIZATION_DISABLED", "").lower() == "true"
 
         if self._disabled:
-            logger.warning("diarization_disabled")
+            self.logger.warning("diarization_disabled")
         else:
-            logger.info("pyannote_engine_initialized", device=self._device)
+            self.logger.info("pyannote_engine_initialized", device=self._device)
 
     def _detect_device(self) -> str:
         """Detect the best available device (CUDA or CPU)."""
@@ -50,12 +46,12 @@ class PyannoteEngine(Engine):
             import torch
 
             if torch.cuda.is_available():
-                logger.info("cuda_available_using_gpu")
+                self.logger.info("cuda_available_using_gpu")
                 return "cuda"
         except ImportError:
             pass
 
-        logger.info("cuda_not_available_using_cpu")
+        self.logger.info("cuda_not_available_using_cpu")
         return "cpu"
 
     def _get_hf_token(self, config: dict[str, Any]) -> str:
@@ -85,7 +81,7 @@ class PyannoteEngine(Engine):
         if self._pipeline is not None:
             return self._pipeline
 
-        logger.info("loading_pyannote_pipeline", model_id=self.MODEL_ID)
+        self.logger.info("loading_pyannote_pipeline", model_id=self.MODEL_ID)
 
         from pyannote.audio import Pipeline
 
@@ -100,7 +96,7 @@ class PyannoteEngine(Engine):
 
             self._pipeline = self._pipeline.to(torch.device("cuda"))
 
-        logger.info("pyannote_pipeline_loaded_successfully")
+        self.logger.info("pyannote_pipeline_loaded_successfully")
         return self._pipeline
 
     def process(self, input: TaskInput) -> TaskOutput:
@@ -114,22 +110,22 @@ class PyannoteEngine(Engine):
         """
         # Check if diarization is disabled (for local dev/testing)
         if self._disabled:
-            logger.info("diarization_disabled_returning_mock_output")
+            self.logger.info("diarization_disabled_returning_mock_output")
             return self._mock_output()
 
         audio_path = input.audio_path
         config = input.config
 
-        logger.info("processing_diarization", audio_path=str(audio_path))
+        self.logger.info("processing_diarization", audio_path=str(audio_path))
 
         # Get speaker count hints
         min_speakers = config.get("min_speakers")
         max_speakers = config.get("max_speakers")
 
         if min_speakers:
-            logger.info("min_speakers_hint", min_speakers=min_speakers)
+            self.logger.info("min_speakers_hint", min_speakers=min_speakers)
         if max_speakers:
-            logger.info("max_speakers_hint", max_speakers=max_speakers)
+            self.logger.info("max_speakers_hint", max_speakers=max_speakers)
 
         # Load pipeline (lazy)
         hf_token = self._get_hf_token(config)
@@ -142,7 +138,7 @@ class PyannoteEngine(Engine):
         if max_speakers is not None:
             diarization_params["max_speakers"] = max_speakers
 
-        logger.info("running_diarization")
+        self.logger.info("running_diarization")
         diarization = pipeline(str(audio_path), **diarization_params)
 
         # Convert pyannote Annotation to our output format
@@ -151,7 +147,7 @@ class PyannoteEngine(Engine):
         # Calculate overlap statistics using pyannote's native detection
         overlap_duration, overlap_ratio = self._calculate_overlap_stats(diarization)
 
-        logger.info(
+        self.logger.info(
             "diarization_complete",
             speaker_count=len(speakers),
             segment_count=len(turns),
@@ -233,7 +229,7 @@ class PyannoteEngine(Engine):
 
             return overlap_duration, overlap_ratio
         except Exception as e:
-            logger.warning("failed_to_calculate_overlap", error=str(e))
+            self.logger.warning("failed_to_calculate_overlap", error=str(e))
             return 0.0, 0.0
 
     def _mock_output(self) -> TaskOutput:

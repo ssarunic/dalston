@@ -13,7 +13,6 @@ Environment variables:
 import os
 from typing import Any
 
-import structlog
 import torch
 
 from dalston.engine_sdk import (
@@ -26,8 +25,6 @@ from dalston.engine_sdk import (
     TranscribeOutput,
     Word,
 )
-
-logger = structlog.get_logger()
 
 
 class ParakeetEngine(Engine):
@@ -66,17 +63,19 @@ class ParakeetEngine(Engine):
 
         if requested_device == "cpu":
             self._device = "cpu"
-            logger.warning(
+            self.logger.warning(
                 "using_cpu_device",
                 message="Running on CPU - inference will be significantly slower",
             )
         elif requested_device == "cuda" or requested_device == "":
             if cuda_available:
                 self._device = "cuda"
-                logger.info("cuda_available", device_count=torch.cuda.device_count())
+                self.logger.info(
+                    "cuda_available", device_count=torch.cuda.device_count()
+                )
             else:
                 self._device = "cpu"
-                logger.warning(
+                self.logger.warning(
                     "cuda_not_available",
                     message="CUDA not available, falling back to CPU - inference will be slower",
                 )
@@ -95,7 +94,7 @@ class ParakeetEngine(Engine):
         if self._model is not None and self._model_name == model_name:
             return
 
-        logger.info("loading_parakeet_model", model_name=model_name)
+        self.logger.info("loading_parakeet_model", model_name=model_name)
 
         # Import NeMo ASR module
         try:
@@ -111,7 +110,7 @@ class ParakeetEngine(Engine):
         self._model.eval()
         self._model_name = model_name
 
-        logger.info("model_loaded_successfully", model_name=model_name)
+        self.logger.info("model_loaded_successfully", model_name=model_name)
 
     def process(self, input: TaskInput) -> TaskOutput:
         """Transcribe audio using Parakeet RNNT.
@@ -129,7 +128,7 @@ class ParakeetEngine(Engine):
         # Get model configuration
         model_name = config.get("model", self.DEFAULT_MODEL)
         if model_name not in self.MODEL_VARIANTS:
-            logger.warning(
+            self.logger.warning(
                 "unknown_model_variant",
                 requested=model_name,
                 using=self.DEFAULT_MODEL,
@@ -139,7 +138,7 @@ class ParakeetEngine(Engine):
         # Load model
         self._load_model(model_name)
 
-        logger.info("transcribing", audio_path=str(audio_path))
+        self.logger.info("transcribing", audio_path=str(audio_path))
 
         # Transcribe with word-level timestamps
         # NeMo RNNT models can return word timestamps via the alignment
@@ -282,7 +281,7 @@ class ParakeetEngine(Engine):
                 )
             )
 
-        logger.info(
+        self.logger.info(
             "transcription_complete",
             segment_count=len(segments),
             word_count=len(all_words),

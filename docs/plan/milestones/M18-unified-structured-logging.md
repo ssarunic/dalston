@@ -6,7 +6,7 @@
 | **Duration** | 3-4 days |
 | **Dependencies** | None (can start immediately, applies to all existing components) |
 | **Deliverable** | Filter logs for a single request across gateway, orchestrator, and engines |
-| **Status** | In Progress |
+| **Status** | Complete |
 
 ## User Story
 
@@ -262,13 +262,13 @@ docker compose logs orchestrator | grep '"level":"debug"'
 
 ## Checkpoint
 
-- [ ] **Shared module** `dalston.logging.configure()` works with both JSON and console output
-- [ ] **Correlation ID** middleware generates and propagates `request_id`
-- [ ] **Gateway** emits structured JSON with `request_id` on every log line
-- [ ] **Orchestrator** uses shared config, includes `request_id` from job metadata
-- [ ] **Engines** automatically include `request_id`, `job_id`, `task_id` via SDK
-- [ ] **Session Router** emits structured JSON with `session_id`, `worker_id`
-- [ ] **LOG_LEVEL** and **LOG_FORMAT** environment variables work across all services
-- [ ] **No** `logging.basicConfig()` calls remain anywhere in the codebase
+- [x] **Shared module** `dalston.logging.configure()` works with both JSON and console output
+- [x] **Correlation ID** middleware generates and propagates `request_id`
+- [x] **Gateway** emits structured JSON with `request_id` on every log line
+- [x] **Orchestrator** uses shared config, includes `request_id` from job metadata
+- [x] **Engines** automatically include `request_id`, `job_id`, `task_id` via SDK
+- [x] **Session Router** emits structured JSON with `session_id`, `worker_id`
+- [x] **LOG_LEVEL** and **LOG_FORMAT** environment variables work across all services
+- [x] **No** `logging.basicConfig()` calls remain anywhere in the codebase
 
 **Next**: [M19: Distributed Tracing](M19-distributed-tracing.md) — OpenTelemetry instrumentation

@@ -6,7 +6,6 @@ accurate word boundaries from transcription segments.
 
 from typing import Any
 
-import structlog
 import whisperx
 
 from dalston.engine_sdk import (
@@ -19,8 +18,6 @@ from dalston.engine_sdk import (
     TimestampGranularity,
     Word,
 )
-
-logger = structlog.get_logger()
 
 
 class WhisperXAlignEngine(Engine):
@@ -38,7 +35,7 @@ class WhisperXAlignEngine(Engine):
 
         # Detect device
         self._device, self._compute_type = self._detect_device()
-        logger.info(
+        self.logger.info(
             "detected_device", device=self._device, compute_type=self._compute_type
         )
 
@@ -68,10 +65,12 @@ class WhisperXAlignEngine(Engine):
             Tuple of (model, metadata) or None if language unsupported
         """
         if language in self._align_models:
-            logger.debug("using_cached_alignment_model", language=language)
+            self.logger.debug("using_cached_alignment_model", language=language)
             return self._align_models[language]
 
-        logger.info("loading_alignment_model", language=language, device=self._device)
+        self.logger.info(
+            "loading_alignment_model", language=language, device=self._device
+        )
 
         try:
             model, metadata = whisperx.load_align_model(
@@ -79,11 +78,11 @@ class WhisperXAlignEngine(Engine):
                 device=self._device,
             )
             self._align_models[language] = (model, metadata)
-            logger.info("alignment_model_loaded_successfully", language=language)
+            self.logger.info("alignment_model_loaded_successfully", language=language)
             return model, metadata
 
         except Exception as e:
-            logger.warning(
+            self.logger.warning(
                 "failed_to_load_alignment_model", language=language, error=str(e)
             )
             return None
@@ -118,17 +117,17 @@ class WhisperXAlignEngine(Engine):
             raw_segments = raw_output.get("segments", [])
             language = raw_output.get("language", "en")
 
-        logger.info(
+        self.logger.info(
             "aligning_segments", segment_count=len(raw_segments), language=language
         )
-        logger.info("audio_path", audio_path=str(audio_path))
+        self.logger.info("audio_path", audio_path=str(audio_path))
 
         # Try to load alignment model for this language
         model_result = self._load_align_model(language)
 
         if model_result is None:
             # Graceful degradation: return original segments with warning
-            logger.warning(
+            self.logger.warning(
                 "no_alignment_model",
                 language=language,
                 fallback="original_transcription_timestamps",
@@ -180,7 +179,7 @@ class WhisperXAlignEngine(Engine):
             total_count = aligned_count + unaligned_count
             unaligned_ratio = unaligned_count / total_count if total_count > 0 else 0.0
 
-            logger.info(
+            self.logger.info(
                 "alignment_complete",
                 segment_count=len(output_segments),
                 aligned_words=aligned_count,
@@ -208,7 +207,7 @@ class WhisperXAlignEngine(Engine):
 
         except Exception as e:
             # Graceful degradation on alignment failure
-            logger.error("alignment_failed", error=str(e), exc_info=True)
+            self.logger.error("alignment_failed", error=str(e), exc_info=True)
             return self._fallback_output(
                 text, raw_segments, language, reason=f"Alignment failed: {str(e)}"
             )
@@ -287,7 +286,7 @@ class WhisperXAlignEngine(Engine):
             )
 
         if filtered_words > 0:
-            logger.debug(
+            self.logger.debug(
                 "filtered_empty_words",
                 filtered_count=filtered_words,
                 total_count=total_words,

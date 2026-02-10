@@ -255,6 +255,9 @@ class SessionHandler:
 
         Sends session.begin, processes messages, sends session.end.
         """
+        # Bind session_id to logging context for all log calls in this session
+        structlog.contextvars.bind_contextvars(session_id=self.config.session_id)
+
         # Send session.begin
         await self._send_session_begin()
 
@@ -270,9 +273,7 @@ class SessionHandler:
 
         except Exception as e:
             self._error = str(e)
-            logger.exception(
-                "session_error", session_id=self.config.session_id, error=str(e)
-            )
+            logger.exception("session_error", error=str(e))
             await self._send_error(
                 ErrorCode.INTERNAL_ERROR,
                 f"Internal error: {e}",

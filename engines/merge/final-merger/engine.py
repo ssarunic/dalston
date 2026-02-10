@@ -7,8 +7,6 @@ into the standard Dalston transcript format with segment IDs and metadata.
 import os
 from datetime import UTC, datetime
 
-import structlog
-
 from dalston.engine_sdk import (
     Engine,
     MergedSegment,
@@ -22,8 +20,6 @@ from dalston.engine_sdk import (
     Word,
     io,
 )
-
-logger = structlog.get_logger()
 
 
 class FinalMergerEngine(Engine):
@@ -58,7 +54,7 @@ class FinalMergerEngine(Engine):
         speaker_detection_str = config.get("speaker_detection", "none")
         speaker_detection = SpeakerDetectionMode(speaker_detection_str)
 
-        logger.info("merging_outputs", job_id=str(job_id))
+        self.logger.info("merging_outputs", job_id=str(job_id))
 
         # Handle per_channel mode separately
         if speaker_detection == SpeakerDetectionMode.PER_CHANNEL:
@@ -99,7 +95,9 @@ class FinalMergerEngine(Engine):
 
         if align_output:
             if align_output.skipped:
-                logger.warning("alignment_skipped", reason=align_output.skip_reason)
+                self.logger.warning(
+                    "alignment_skipped", reason=align_output.skip_reason
+                )
                 pipeline_warnings.extend(align_output.warnings)
                 # Use transcribe segments as fallback
                 segments_source = (
@@ -109,7 +107,7 @@ class FinalMergerEngine(Engine):
             else:
                 segments_source = align_output.segments
                 word_timestamps_available = align_output.word_timestamps
-                logger.info("using_aligned_segments")
+                self.logger.info("using_aligned_segments")
         elif transcribe_output:
             segments_source = transcribe_output.segments
             word_timestamps_available = any(s.words for s in segments_source)
@@ -125,12 +123,12 @@ class FinalMergerEngine(Engine):
         if diarize_output and speaker_detection == SpeakerDetectionMode.DIARIZE:
             if diarize_output.skipped:
                 skip_reason = diarize_output.skip_reason or "Unknown reason"
-                logger.warning("diarization_skipped", reason=skip_reason)
+                self.logger.warning("diarization_skipped", reason=skip_reason)
                 pipeline_warnings.extend(diarize_output.warnings)
             else:
                 diarization_turns = diarize_output.turns
                 diarization_speakers = diarize_output.speakers
-                logger.info(
+                self.logger.info(
                     "using_diarization",
                     speaker_count=len(diarization_speakers),
                     segment_count=len(diarization_turns),
@@ -181,7 +179,7 @@ class FinalMergerEngine(Engine):
         if diarization_speakers:
             for speaker_id in diarization_speakers:
                 speakers.append(Speaker(id=speaker_id, label=None))
-            logger.info("built_speakers_array", speaker_count=len(speakers))
+            self.logger.info("built_speakers_array", speaker_count=len(speakers))
 
         # Determine pipeline stages that ran
         pipeline_stages = ["prepare", "transcribe"]
@@ -220,7 +218,7 @@ class FinalMergerEngine(Engine):
             summary=None,
         )
 
-        logger.info(
+        self.logger.info(
             "merged_transcript",
             segment_count=len(segments),
             char_count=len(text),
@@ -233,7 +231,7 @@ class FinalMergerEngine(Engine):
         s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
         transcript_uri = f"s3://{s3_bucket}/jobs/{job_id}/transcript.json"
         io.upload_json(transcript.model_dump(mode="json"), transcript_uri)
-        logger.info("uploaded_transcript", transcript_uri=transcript_uri)
+        self.logger.info("uploaded_transcript", transcript_uri=transcript_uri)
 
         return TaskOutput(data=transcript)
 
@@ -274,7 +272,7 @@ class FinalMergerEngine(Engine):
             channel_files = raw_prepare.get("channel_files", [])
             channel_count = config.get("channel_count") or len(channel_files) or 2
 
-        logger.info("merging_per_channel_outputs", channel_count=channel_count)
+        self.logger.info("merging_per_channel_outputs", channel_count=channel_count)
 
         # Collect segments from all channels
         all_segments: list[dict] = []
@@ -294,7 +292,7 @@ class FinalMergerEngine(Engine):
                 raw_transcribe = input.get_raw_output(transcribe_key)
                 raw_align = input.get_raw_output(align_key)
                 if not raw_transcribe and not raw_align:
-                    logger.warning("missing_channel_output", channel=channel)
+                    self.logger.warning("missing_channel_output", channel=channel)
                     continue
 
             # Use first channel's language detection
@@ -414,7 +412,7 @@ class FinalMergerEngine(Engine):
             summary=None,
         )
 
-        logger.info(
+        self.logger.info(
             "merged_per_channel_transcript",
             segment_count=len(segments),
             speaker_count=len(speakers),
@@ -424,7 +422,7 @@ class FinalMergerEngine(Engine):
         s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
         transcript_uri = f"s3://{s3_bucket}/jobs/{job_id}/transcript.json"
         io.upload_json(transcript.model_dump(mode="json"), transcript_uri)
-        logger.info("uploaded_transcript", transcript_uri=transcript_uri)
+        self.logger.info("uploaded_transcript", transcript_uri=transcript_uri)
 
         return TaskOutput(data=transcript)
 
