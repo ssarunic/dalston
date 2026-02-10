@@ -1,5 +1,6 @@
 """Job lifecycle management service."""
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -8,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from dalston.common.models import JobStatus
+from dalston.common.models import JobStatus, TaskStatus
 from dalston.db.models import JobModel, TaskModel
 
 
@@ -26,6 +27,16 @@ class JobStats:
         self.queued = queued
         self.completed_today = completed_today
         self.failed_today = failed_today
+
+
+@dataclass
+class CancelResult:
+    """Result of a job cancellation request."""
+
+    job: JobModel
+    status: JobStatus
+    message: str
+    running_task_count: int
 
 
 class JobsService:
@@ -189,6 +200,82 @@ class JobsService:
         await db.delete(job)
         await db.commit()
         return job
+
+    # States that can be cancelled
+    CANCELLABLE_STATES = {
+        JobStatus.PENDING.value,
+        JobStatus.RUNNING.value,
+    }
+
+    async def cancel_job(
+        self,
+        db: AsyncSession,
+        job_id: UUID,
+        tenant_id: UUID | None = None,
+    ) -> CancelResult | None:
+        """Request cancellation of a pending or running job.
+
+        Cancellation is "soft": running tasks complete naturally, only
+        queued/pending tasks are cancelled. The orchestrator handles
+        removing tasks from Redis queues.
+
+        Args:
+            db: Database session
+            job_id: Job UUID
+            tenant_id: Optional tenant UUID for isolation check
+
+        Returns:
+            CancelResult with job and status info, or None if not found
+
+        Raises:
+            ValueError: If job is not in a cancellable state
+        """
+        # Fetch job with tasks
+        job = await self.get_job_with_tasks(db, job_id, tenant_id=tenant_id)
+        if job is None:
+            return None
+
+        # Check if job can be cancelled
+        if job.status not in self.CANCELLABLE_STATES:
+            raise ValueError(
+                f"Cannot cancel job in '{job.status}' state. "
+                f"Only pending or running jobs can be cancelled."
+            )
+
+        # Count tasks by status
+        running_count = 0
+        pending_count = 0
+
+        for task in job.tasks:
+            if task.status == TaskStatus.RUNNING.value:
+                running_count += 1
+            elif task.status in (TaskStatus.PENDING.value, TaskStatus.READY.value):
+                # Mark PENDING and READY tasks as CANCELLED
+                task.status = TaskStatus.CANCELLED.value
+                pending_count += 1
+
+        # Determine new job status
+        if running_count > 0:
+            # Tasks still running - set to CANCELLING
+            job.status = JobStatus.CANCELLING.value
+            new_status = JobStatus.CANCELLING
+            message = f"Cancellation requested. {running_count} task(s) still running."
+        else:
+            # No running tasks - can immediately set to CANCELLED
+            job.status = JobStatus.CANCELLED.value
+            job.completed_at = datetime.now(UTC)
+            new_status = JobStatus.CANCELLED
+            message = "Job cancelled."
+
+        await db.commit()
+        await db.refresh(job)
+
+        return CancelResult(
+            job=job,
+            status=new_status,
+            message=message,
+            running_task_count=running_count,
+        )
 
     async def update_job_status(
         self,

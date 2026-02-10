@@ -19,6 +19,14 @@ class JobCreatedResponse(BaseModel):
     created_at: datetime
 
 
+class JobCancelledResponse(BaseModel):
+    """Response for POST /v1/audio/transcriptions/{job_id}/cancel."""
+
+    id: UUID
+    status: JobStatus
+    message: str
+
+
 class JobResponse(BaseModel):
     """Response for GET /v1/audio/transcriptions/{id}.
 

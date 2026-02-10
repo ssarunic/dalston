@@ -1,6 +1,6 @@
 // Job types (matching backend responses)
-export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
-export type TaskStatus = 'pending' | 'ready' | 'running' | 'completed' | 'failed' | 'skipped'
+export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelling' | 'cancelled'
+export type TaskStatus = 'pending' | 'ready' | 'running' | 'completed' | 'failed' | 'skipped' | 'cancelled'
 
 export interface Word {
   word: string

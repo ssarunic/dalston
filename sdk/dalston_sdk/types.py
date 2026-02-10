@@ -20,6 +20,7 @@ class JobStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLING = "cancelling"
     CANCELLED = "cancelled"
 
 
@@ -263,6 +264,7 @@ class WebhookEventType(str, Enum):
 
     TRANSCRIPTION_COMPLETED = "transcription.completed"
     TRANSCRIPTION_FAILED = "transcription.failed"
+    TRANSCRIPTION_CANCELLED = "transcription.cancelled"
 
 
 @dataclass

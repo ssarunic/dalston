@@ -422,6 +422,42 @@ class Dalston:
             offset=data["offset"],
         )
 
+    def cancel(self, job_id: UUID | str) -> Job:
+        """Cancel a pending or running job.
+
+        Cancellation is "soft": running tasks complete naturally, only
+        queued/pending work is cancelled.
+
+        Args:
+            job_id: Job ID to cancel.
+
+        Returns:
+            Job object with updated status (cancelling or cancelled).
+
+        Raises:
+            NotFoundError: If job doesn't exist.
+            ValidationError: If job is not in a cancellable state.
+        """
+        try:
+            response = self._client.post(
+                f"{self.base_url}/v1/audio/transcriptions/{job_id}/cancel",
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        data = response.json()
+        return Job(
+            id=UUID(data["id"]) if isinstance(data["id"], str) else data["id"],
+            status=JobStatus(data["status"]),
+            created_at=_parse_datetime(None),  # Not in cancel response
+        )
+
     def wait_for_completion(
         self,
         job_id: UUID | str,
@@ -951,6 +987,42 @@ class AsyncDalston:
             total=data["total"],
             limit=data["limit"],
             offset=data["offset"],
+        )
+
+    async def cancel(self, job_id: UUID | str) -> Job:
+        """Cancel a pending or running job.
+
+        Cancellation is "soft": running tasks complete naturally, only
+        queued/pending work is cancelled.
+
+        Args:
+            job_id: Job ID to cancel.
+
+        Returns:
+            Job object with updated status (cancelling or cancelled).
+
+        Raises:
+            NotFoundError: If job doesn't exist.
+            ValidationError: If job is not in a cancellable state.
+        """
+        try:
+            response = await self._client.post(
+                f"{self.base_url}/v1/audio/transcriptions/{job_id}/cancel",
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        data = response.json()
+        return Job(
+            id=UUID(data["id"]) if isinstance(data["id"], str) else data["id"],
+            status=JobStatus(data["status"]),
+            created_at=_parse_datetime(None),  # Not in cancel response
         )
 
     async def wait_for_completion(

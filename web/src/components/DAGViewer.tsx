@@ -15,6 +15,7 @@ const statusConfig: Record<TaskStatus, { bg: string; text: string; ring?: string
   completed: { bg: 'bg-green-500/20', text: 'text-green-400' },
   failed: { bg: 'bg-red-500/20', text: 'text-red-400', ring: 'ring-red-500/50' },
   skipped: { bg: 'bg-zinc-500/10', text: 'text-zinc-500' },
+  cancelled: { bg: 'bg-orange-500/20', text: 'text-orange-400' },
 }
 
 const stageOrder = ['prepare', 'transcribe', 'align', 'diarize', 'detect', 'refine', 'merge']
@@ -51,7 +52,8 @@ function TaskNode({ task, jobId }: { task: Task; jobId: string }) {
               task.status === 'ready' && 'bg-yellow-400',
               task.status === 'failed' && 'bg-red-400',
               task.status === 'pending' && 'bg-zinc-400',
-              task.status === 'skipped' && 'bg-zinc-500'
+              task.status === 'skipped' && 'bg-zinc-500',
+              task.status === 'cancelled' && 'bg-orange-400'
             )}
           />
           <span className={cn('text-xs font-semibold uppercase', config.text)}>
@@ -211,6 +213,10 @@ export function DAGViewer({ tasks, jobId, className }: DAGViewerProps) {
         <div className="flex items-center gap-1.5">
           <div className="w-2 h-2 rounded-full bg-zinc-500" />
           <span>Skipped</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-2 rounded-full bg-orange-400" />
+          <span>Cancelled</span>
         </div>
       </div>
     </div>

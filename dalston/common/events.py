@@ -95,3 +95,28 @@ async def publish_job_completed(redis: Redis, job_id: UUID) -> None:
 async def publish_job_failed(redis: Redis, job_id: UUID, error: str) -> None:
     """Publish a job.failed event for webhook delivery."""
     await publish_event(redis, "job.failed", {"job_id": job_id, "error": error})
+
+
+async def publish_job_cancel_requested(redis: Redis, job_id: UUID) -> None:
+    """Publish a job.cancel_requested event.
+
+    Notifies the orchestrator to stop queuing new tasks and remove
+    READY tasks from Redis queues.
+
+    Args:
+        redis: Async Redis client
+        job_id: Job UUID
+    """
+    await publish_event(redis, "job.cancel_requested", {"job_id": job_id})
+
+
+async def publish_job_cancelled(redis: Redis, job_id: UUID) -> None:
+    """Publish a job.cancelled event for webhook delivery.
+
+    Published when all tasks have reached terminal state after cancellation.
+
+    Args:
+        redis: Async Redis client
+        job_id: Job UUID
+    """
+    await publish_event(redis, "job.cancelled", {"job_id": job_id})

@@ -12,7 +12,8 @@ const statusStyles: Record<string, string> = {
   running: 'bg-blue-500/20 text-blue-400 animate-pulse',
   completed: 'bg-green-500/20 text-green-400',
   failed: 'bg-red-500/20 text-red-400',
-  cancelled: 'bg-zinc-500/20 text-zinc-400',
+  cancelling: 'bg-amber-500/20 text-amber-400 animate-pulse',
+  cancelled: 'bg-orange-500/20 text-orange-400',
   skipped: 'bg-zinc-500/20 text-zinc-400',
 }
 

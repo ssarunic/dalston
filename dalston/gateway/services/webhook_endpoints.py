@@ -18,7 +18,14 @@ from dalston.gateway.services.webhook import (
 )
 
 # Allowed event types for webhook subscriptions
-ALLOWED_EVENTS = frozenset({"transcription.completed", "transcription.failed", "*"})
+ALLOWED_EVENTS = frozenset(
+    {
+        "transcription.completed",
+        "transcription.failed",
+        "transcription.cancelled",
+        "*",
+    }
+)
 
 
 class WebhookEndpointService:

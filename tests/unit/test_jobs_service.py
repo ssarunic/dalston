@@ -5,8 +5,8 @@ from uuid import UUID
 
 import pytest
 
-from dalston.common.models import JobStatus
-from dalston.gateway.services.jobs import JobsService, JobStats
+from dalston.common.models import JobStatus, TaskStatus
+from dalston.gateway.services.jobs import CancelResult, JobsService, JobStats
 
 
 class TestJobStats:
@@ -260,3 +260,171 @@ class TestJobsServiceDeleteJob:
 
         mock_get.assert_awaited_once_with(mock_db, job_id, tenant_id=tenant_id)
         assert result is job
+
+
+class TestJobsServiceCancelJob:
+    """Tests for JobsService.cancel_job method."""
+
+    @pytest.fixture
+    def jobs_service(self) -> JobsService:
+        return JobsService()
+
+    @pytest.fixture
+    def mock_db(self):
+        """Create a mock async database session."""
+        db = AsyncMock()
+        return db
+
+    def _make_job(
+        self, status: str, job_id: UUID | None = None, tenant_id: UUID | None = None
+    ):
+        """Create a mock JobModel with the given status."""
+        job = MagicMock()
+        job.id = job_id or UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        job.tenant_id = tenant_id or UUID("00000000-0000-0000-0000-000000000000")
+        job.status = status
+        job.tasks = []
+        return job
+
+    def _make_task(self, status: str):
+        """Create a mock TaskModel with the given status."""
+        task = MagicMock()
+        task.id = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+        task.status = status
+        return task
+
+    @pytest.mark.asyncio
+    async def test_cancel_pending_job_immediate(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test cancelling a pending job with no running tasks is immediate."""
+        job = self._make_job(JobStatus.PENDING.value)
+
+        with patch.object(jobs_service, "get_job_with_tasks", return_value=job):
+            result = await jobs_service.cancel_job(mock_db, job.id)
+
+        assert result is not None
+        assert isinstance(result, CancelResult)
+        assert result.status == JobStatus.CANCELLED
+        assert job.status == JobStatus.CANCELLED.value
+        mock_db.commit.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_cancel_running_job_with_running_tasks(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test cancelling a running job with running tasks sets CANCELLING."""
+        job = self._make_job(JobStatus.RUNNING.value)
+        running_task = self._make_task(TaskStatus.RUNNING.value)
+        pending_task = self._make_task(TaskStatus.PENDING.value)
+        job.tasks = [running_task, pending_task]
+
+        with patch.object(jobs_service, "get_job_with_tasks", return_value=job):
+            result = await jobs_service.cancel_job(mock_db, job.id)
+
+        assert result is not None
+        assert result.status == JobStatus.CANCELLING
+        assert job.status == JobStatus.CANCELLING.value
+        assert pending_task.status == TaskStatus.CANCELLED.value
+        assert running_task.status == TaskStatus.RUNNING.value  # Not changed
+        assert "1 task(s) still running" in result.message
+
+    @pytest.mark.asyncio
+    async def test_cancel_running_job_no_running_tasks(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test cancelling a running job with only pending tasks is immediate."""
+        job = self._make_job(JobStatus.RUNNING.value)
+        pending_task = self._make_task(TaskStatus.PENDING.value)
+        job.tasks = [pending_task]
+
+        with patch.object(jobs_service, "get_job_with_tasks", return_value=job):
+            result = await jobs_service.cancel_job(mock_db, job.id)
+
+        assert result is not None
+        assert result.status == JobStatus.CANCELLED
+        assert job.status == JobStatus.CANCELLED.value
+        assert pending_task.status == TaskStatus.CANCELLED.value
+        assert result.message == "Job cancelled."
+
+    @pytest.mark.asyncio
+    async def test_cancel_completed_job_raises(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test that cancelling a completed job raises ValueError."""
+        job = self._make_job(JobStatus.COMPLETED.value)
+
+        with patch.object(jobs_service, "get_job_with_tasks", return_value=job):
+            with pytest.raises(
+                ValueError, match="Cannot cancel job in 'completed' state"
+            ):
+                await jobs_service.cancel_job(mock_db, job.id)
+
+    @pytest.mark.asyncio
+    async def test_cancel_failed_job_raises(self, jobs_service: JobsService, mock_db):
+        """Test that cancelling a failed job raises ValueError."""
+        job = self._make_job(JobStatus.FAILED.value)
+
+        with patch.object(jobs_service, "get_job_with_tasks", return_value=job):
+            with pytest.raises(ValueError, match="Cannot cancel job in 'failed' state"):
+                await jobs_service.cancel_job(mock_db, job.id)
+
+    @pytest.mark.asyncio
+    async def test_cancel_cancelled_job_raises(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test that cancelling an already cancelled job raises ValueError."""
+        job = self._make_job(JobStatus.CANCELLED.value)
+
+        with patch.object(jobs_service, "get_job_with_tasks", return_value=job):
+            with pytest.raises(
+                ValueError, match="Cannot cancel job in 'cancelled' state"
+            ):
+                await jobs_service.cancel_job(mock_db, job.id)
+
+    @pytest.mark.asyncio
+    async def test_cancel_nonexistent_job_returns_none(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test that cancelling a nonexistent job returns None."""
+        with patch.object(jobs_service, "get_job_with_tasks", return_value=None):
+            result = await jobs_service.cancel_job(
+                mock_db, UUID("ffffffff-ffff-ffff-ffff-ffffffffffff")
+            )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_cancel_with_tenant_isolation(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test that cancel passes tenant_id for isolation."""
+        tenant_id = UUID("12345678-1234-1234-1234-123456789abc")
+        job_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        job = self._make_job(
+            JobStatus.PENDING.value, job_id=job_id, tenant_id=tenant_id
+        )
+
+        with patch.object(
+            jobs_service, "get_job_with_tasks", return_value=job
+        ) as mock_get:
+            result = await jobs_service.cancel_job(mock_db, job_id, tenant_id=tenant_id)
+
+        mock_get.assert_awaited_once_with(mock_db, job_id, tenant_id=tenant_id)
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_cancel_marks_ready_tasks_cancelled(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test that READY tasks are also marked as CANCELLED."""
+        job = self._make_job(JobStatus.RUNNING.value)
+        ready_task = self._make_task(TaskStatus.READY.value)
+        job.tasks = [ready_task]
+
+        with patch.object(jobs_service, "get_job_with_tasks", return_value=job):
+            result = await jobs_service.cancel_job(mock_db, job.id)
+
+        assert result is not None
+        assert result.status == JobStatus.CANCELLED
+        assert ready_task.status == TaskStatus.CANCELLED.value

@@ -16,12 +16,20 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dalston.common.events import publish_job_completed, publish_job_failed
+from dalston.common.events import (
+    publish_job_cancelled,
+    publish_job_completed,
+    publish_job_failed,
+)
 from dalston.common.models import JobStatus, TaskStatus
 from dalston.config import Settings
 from dalston.db.models import JobModel, TaskModel
 from dalston.orchestrator.dag import build_task_dag
-from dalston.orchestrator.scheduler import get_task_output, queue_task
+from dalston.orchestrator.scheduler import (
+    get_task_output,
+    queue_task,
+    remove_task_from_queue,
+)
 
 logger = structlog.get_logger()
 
@@ -54,6 +62,11 @@ async def handle_job_created(
     job = await db.get(JobModel, job_id)
     if job is None:
         log.error("job_not_found")
+        return
+
+    # Check if job was cancelled before we could start
+    if job.status in (JobStatus.CANCELLING.value, JobStatus.CANCELLED.value):
+        log.info("job_already_cancelled_skipping_dag_build")
         return
 
     # 2. Build task DAG
@@ -202,6 +215,19 @@ async def handle_task_completed(
     # Build lookup maps
     task_by_id = {t.id: t for t in all_tasks}
     completed_ids = {t.id for t in all_tasks if t.status == TaskStatus.COMPLETED.value}
+
+    # Check if job is being cancelled - don't queue new tasks
+    job = await db.get(JobModel, job_id)
+    if job and job.status == JobStatus.CANCELLING.value:
+        log.info("job_cancelling_skipping_dependent_tasks")
+        # Mark all pending dependents as cancelled
+        for dependent in all_tasks:
+            if dependent.status == TaskStatus.PENDING.value:
+                dependent.status = TaskStatus.CANCELLED.value
+        await db.commit()
+        # Check if cancellation is complete
+        await _check_job_cancellation_complete(job_id, db, redis)
+        return
 
     # 3. Find dependent tasks and check if they're ready
     for dependent in all_tasks:
@@ -410,9 +436,7 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
     """
     log = logger.bind(job_id=str(job_id))
 
-    # Expire all cached objects to ensure we read fresh data from DB
-    db.expire_all()
-
+    # Fetch fresh data from DB (explicit SELECT avoids stale identity map)
     result = await db.execute(select(TaskModel).where(TaskModel.job_id == job_id))
     all_tasks = list(result.scalars().all())
 
@@ -435,7 +459,8 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
         t.status == TaskStatus.FAILED.value and t.required for t in all_tasks
     )
 
-    job = await db.get(JobModel, job_id)
+    job_result = await db.execute(select(JobModel).where(JobModel.id == job_id))
+    job = job_result.scalar_one_or_none()
     if job is None:
         return
 
@@ -485,3 +510,103 @@ def _resolve_audio_uri_from_prepare(
 
     # Regular stage - use first (and only) channel file
     return channel_files[0].get("uri")
+
+
+async def handle_job_cancel_requested(
+    job_id: UUID,
+    db: AsyncSession,
+    redis: Redis,
+) -> None:
+    """Handle job.cancel_requested event.
+
+    Steps:
+    1. Fetch all tasks for the job
+    2. For each READY task: remove from Redis queue, mark as CANCELLED
+    3. Check if cancellation is complete
+
+    Args:
+        job_id: UUID of the job to cancel
+        db: Database session
+        redis: Redis client
+    """
+    log = logger.bind(job_id=str(job_id))
+    log.info("handling_job_cancel_requested")
+
+    # Fetch all tasks for this job
+    result = await db.execute(select(TaskModel).where(TaskModel.job_id == job_id))
+    all_tasks = list(result.scalars().all())
+
+    cancelled_count = 0
+
+    for task in all_tasks:
+        if task.status == TaskStatus.READY.value:
+            # Remove from Redis queue.
+            # Note: There's a small race window where an engine may have already
+            # dequeued this task but hasn't updated DB status to RUNNING yet.
+            # This is acceptable because running tasks complete naturally under
+            # our soft cancellation semantics.
+            await remove_task_from_queue(redis, task.id, task.engine_id)
+
+            # Mark as cancelled
+            task.status = TaskStatus.CANCELLED.value
+            cancelled_count += 1
+
+    await db.commit()
+
+    log.info("cancelled_ready_tasks", cancelled_count=cancelled_count)
+
+    # Check if cancellation is complete
+    await _check_job_cancellation_complete(job_id, db, redis)
+
+
+async def _check_job_cancellation_complete(
+    job_id: UUID,
+    db: AsyncSession,
+    redis: Redis,
+) -> None:
+    """Check if job cancellation is complete and finalize if so.
+
+    A job cancellation is complete when:
+    - Job status is CANCELLING
+    - No tasks are RUNNING
+
+    Args:
+        job_id: Job UUID to check
+        db: Database session
+        redis: Redis client for publishing webhook events
+    """
+    log = logger.bind(job_id=str(job_id))
+
+    # Fetch fresh data from DB (explicit SELECT avoids stale identity map)
+    job_result = await db.execute(select(JobModel).where(JobModel.id == job_id))
+    job = job_result.scalar_one_or_none()
+    if job is None:
+        return
+
+    # Only process if job is in CANCELLING state
+    if job.status != JobStatus.CANCELLING.value:
+        return
+
+    # Check if any tasks are still running
+    result = await db.execute(select(TaskModel).where(TaskModel.job_id == job_id))
+    all_tasks = list(result.scalars().all())
+
+    running_tasks = [t for t in all_tasks if t.status == TaskStatus.RUNNING.value]
+
+    if running_tasks:
+        log.debug(
+            "cancellation_waiting_for_tasks",
+            running_count=len(running_tasks),
+            running_stages=[t.stage for t in running_tasks],
+        )
+        return
+
+    # All tasks are terminal - finalize cancellation
+    job.status = JobStatus.CANCELLED.value
+    job.completed_at = datetime.now(UTC)
+    await db.commit()
+
+    log.info("job_cancelled")
+
+    # Publish job.cancelled event for webhook delivery
+    await publish_job_cancelled(redis, job_id)

@@ -35,6 +35,7 @@ import type { WebhookEndpoint, WebhookEndpointCreated } from '@/api/types'
 const EVENT_COLORS: Record<string, string> = {
   'transcription.completed': 'bg-green-500/10 text-green-500 border-green-500/20',
   'transcription.failed': 'bg-red-500/10 text-red-500 border-red-500/20',
+  'transcription.cancelled': 'bg-orange-500/10 text-orange-400 border-orange-500/20',
   '*': 'bg-purple-500/10 text-purple-500 border-purple-500/20',
 }
 

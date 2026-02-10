@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Trash2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Trash2, X } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useJobs } from '@/hooks/useJobs'
 import { apiClient } from '@/api/client'
@@ -22,6 +22,7 @@ import {
 const PAGE_SIZE = 20
 
 const TERMINAL_STATUSES: Set<JobStatus> = new Set(['completed', 'failed', 'cancelled'])
+const CANCELLABLE_STATUSES: Set<JobStatus> = new Set(['pending', 'running'])
 
 const STATUS_FILTERS: { label: string; value: JobStatus | '' }[] = [
   { label: 'All', value: '' },
@@ -29,6 +30,7 @@ const STATUS_FILTERS: { label: string; value: JobStatus | '' }[] = [
   { label: 'Running', value: 'running' },
   { label: 'Completed', value: 'completed' },
   { label: 'Failed', value: 'failed' },
+  { label: 'Cancelled', value: 'cancelled' },
 ]
 
 function formatDate(dateStr: string): string {
@@ -47,6 +49,10 @@ export function BatchJobs() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string } | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [cancelTarget, setCancelTarget] = useState<{ id: string } | null>(null)
+  const [isCancelling, setIsCancelling] = useState(false)
+  const [cancelError, setCancelError] = useState<string | null>(null)
+  const [cancelSuccess, setCancelSuccess] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
   const { data, isLoading, error } = useJobs({
@@ -71,6 +77,26 @@ export function BatchJobs() {
       setDeleteError(message)
     } finally {
       setIsDeleting(false)
+    }
+  }
+
+  async function handleCancel() {
+    if (!cancelTarget) return
+    setIsCancelling(true)
+    setCancelError(null)
+    try {
+      const result = await apiClient.cancelJob(cancelTarget.id)
+      setCancelTarget(null)
+      setCancelSuccess(result.message)
+      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+      // Clear success message after 3 seconds
+      setTimeout(() => setCancelSuccess(null), 3000)
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to cancel job'
+      setCancelError(message)
+    } finally {
+      setIsCancelling(false)
     }
   }
 
@@ -157,22 +183,40 @@ export function BatchJobs() {
                     <TableCell className="text-muted-foreground text-sm">
                       {formatDate(job.created_at)}
                     </TableCell>
-                    <TableCell className="text-right space-x-1">
-                      <Link to={`/jobs/${job.id}`}>
-                        <Button variant="ghost" size="sm">
-                          View
-                        </Button>
-                      </Link>
-                      {TERMINAL_STATUSES.has(job.status as JobStatus) && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-red-400 hover:text-red-300 hover:bg-red-950"
-                          onClick={() => setDeleteTarget({ id: job.id })}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      )}
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Link to={`/jobs/${job.id}`}>
+                          <Button variant="ghost" size="sm">
+                            View
+                          </Button>
+                        </Link>
+                        <div className="w-8">
+                          {CANCELLABLE_STATUSES.has(job.status as JobStatus) && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-amber-400 hover:text-amber-300 hover:bg-amber-950"
+                              onClick={() => setCancelTarget({ id: job.id })}
+                              title="Cancel job"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                        <div className="w-8">
+                          {TERMINAL_STATUSES.has(job.status as JobStatus) && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-400 hover:text-red-300 hover:bg-red-950"
+                              onClick={() => setDeleteTarget({ id: job.id })}
+                              title="Delete job"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -210,6 +254,57 @@ export function BatchJobs() {
           )}
         </CardContent>
       </Card>
+
+      {/* Success Toast */}
+      {cancelSuccess && (
+        <div className="fixed bottom-4 right-4 bg-green-600 text-white px-4 py-2 rounded-md shadow-lg">
+          {cancelSuccess}
+        </div>
+      )}
+
+      {/* Cancel Confirmation Dialog */}
+      <Dialog open={cancelTarget !== null} onOpenChange={(open) => { if (!open) { setCancelTarget(null); setCancelError(null) } }}>
+        <DialogContent>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Cancel Job</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                This will cancel the job. Running tasks will complete naturally,
+                but no new tasks will be started.
+              </p>
+              {cancelTarget && (
+                <p className="text-sm font-mono text-muted-foreground">
+                  {cancelTarget.id}
+                </p>
+              )}
+              {cancelError && (
+                <p className="text-sm text-red-400">{cancelError}</p>
+              )}
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { setCancelTarget(null); setCancelError(null) }}
+                  disabled={isCancelling}
+                >
+                  Close
+                </Button>
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="bg-amber-600 hover:bg-amber-700"
+                  onClick={handleCancel}
+                  disabled={isCancelling}
+                >
+                  {isCancelling ? 'Cancelling...' : 'Cancel Job'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) { setDeleteTarget(null); setDeleteError(null) } }}>
