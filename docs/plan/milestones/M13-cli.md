@@ -6,7 +6,7 @@
 | **Duration** | 2-3 days |
 | **Dependencies** | M12 (Python SDK) |
 | **Deliverable** | `dalston` CLI command with transcribe, listen, jobs, export, status |
-| **Status** | In Progress |
+| **Status** | Completed (February 2026) |
 
 ## User Story
 

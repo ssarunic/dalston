@@ -6,6 +6,7 @@
 | **Duration** | 3-4 days |
 | **Dependencies** | M5 (webhooks), M11 (API authentication) |
 | **Deliverable** | CRUD API for webhook endpoints, persistent delivery with retries, delivery log, per-endpoint signing secrets |
+| **Status** | Completed (February 2026) |
 
 ## User Story
 
