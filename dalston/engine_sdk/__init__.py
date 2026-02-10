@@ -42,7 +42,7 @@ Environment variables:
 from dalston.common.pipeline_types import (
     AlignmentMethod,
     AlignOutput,
-    ChannelFile,
+    AudioMedia,
     DiarizeOutput,
     MergedSegment,
     MergeOutput,
@@ -53,6 +53,7 @@ from dalston.common.pipeline_types import (
     SpeakerDetectionMode,
     SpeakerTurn,
     SpeechRegion,
+    TaskInputData,
     TimestampGranularity,
     TranscribeOutput,
     TranscriptMetadata,
@@ -73,13 +74,14 @@ __all__ = [
     "SpeakerDetectionMode",
     "TimestampGranularity",
     # Core structures
-    "ChannelFile",
+    "AudioMedia",
     "MergedSegment",
     "Phoneme",
     "Segment",
     "Speaker",
     "SpeakerTurn",
     "SpeechRegion",
+    "TaskInputData",
     "TranscriptMetadata",
     "Word",
     # Stage outputs

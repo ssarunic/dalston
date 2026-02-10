@@ -15,6 +15,7 @@ import structlog.contextvars
 from redis.asyncio import Redis
 
 from dalston.common.models import Task
+from dalston.common.pipeline_types import AudioMedia, TaskInputData
 from dalston.common.s3 import get_s3_client
 from dalston.config import Settings
 
@@ -105,18 +106,26 @@ async def write_task_input(
     task_id_str = str(task.id)
     job_id_str = str(task.job_id)
 
-    # Build input document
-    input_data: dict[str, Any] = {
-        "task_id": task_id_str,
-        "job_id": job_id_str,
-        "audio_uri": task.input_uri,
-        "previous_outputs": previous_outputs,
-        "config": task.config,
-    }
-
-    # Include audio metadata for prepare stage (already probed at upload)
+    # Build typed input document
     if audio_metadata:
-        input_data.update(audio_metadata)
+        # Prepare stage: include full media object
+        media = AudioMedia(uri=task.input_uri, **audio_metadata)
+        input_data = TaskInputData(
+            task_id=task_id_str,
+            job_id=job_id_str,
+            media=media,
+            previous_outputs=previous_outputs,
+            config=task.config,
+        )
+    else:
+        # Non-prepare stages: just audio_uri
+        input_data = TaskInputData(
+            task_id=task_id_str,
+            job_id=job_id_str,
+            audio_uri=task.input_uri,
+            previous_outputs=previous_outputs,
+            config=task.config,
+        )
 
     # S3 path: jobs/{job_id}/tasks/{task_id}/input.json
     s3_key = f"jobs/{job_id_str}/tasks/{task_id_str}/input.json"
@@ -125,7 +134,9 @@ async def write_task_input(
         await s3.put_object(
             Bucket=settings.s3_bucket,
             Key=s3_key,
-            Body=json.dumps(input_data, indent=2, default=str).encode("utf-8"),
+            Body=input_data.model_dump_json(indent=2, exclude_none=True).encode(
+                "utf-8"
+            ),
             ContentType="application/json",
         )
 

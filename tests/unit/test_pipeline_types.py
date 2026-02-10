@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from dalston.common.pipeline_types import (
     AlignmentMethod,
     AlignOutput,
-    ChannelFile,
+    AudioMedia,
     Character,
     DiarizeOutput,
     MergedSegment,
@@ -254,19 +254,36 @@ class TestSpeechRegionModel:
         assert r.confidence == 0.99
 
 
-class TestChannelFileModel:
-    """Tests for ChannelFile data model."""
+class TestAudioMediaModel:
+    """Tests for AudioMedia data model."""
 
-    def test_create_channel_file(self):
-        """Test creating a channel file entry."""
-        cf = ChannelFile(
-            channel=0,
-            audio_uri="s3://bucket/jobs/123/audio/prepared_ch0.wav",
+    def test_create_audio_media(self):
+        """Test creating an audio media entry."""
+        am = AudioMedia(
+            uri="s3://bucket/jobs/123/audio/prepared_ch0.wav",
+            format="wav",
             duration=60.5,
+            sample_rate=16000,
+            channels=1,
+            bit_depth=16,
         )
-        assert cf.channel == 0
-        assert "prepared_ch0.wav" in cf.audio_uri
-        assert cf.duration == 60.5
+        assert "prepared_ch0.wav" in am.uri
+        assert am.format == "wav"
+        assert am.duration == 60.5
+        assert am.sample_rate == 16000
+        assert am.channels == 1
+        assert am.bit_depth == 16
+
+    def test_audio_media_without_bit_depth(self):
+        """Test audio media for lossy formats (no bit depth)."""
+        am = AudioMedia(
+            uri="s3://bucket/audio.mp3",
+            format="mp3",
+            duration=120.0,
+            sample_rate=44100,
+            channels=2,
+        )
+        assert am.bit_depth is None
 
 
 class TestSpeakerModel:
@@ -320,65 +337,73 @@ class TestPrepareOutput:
     """Tests for PrepareOutput stage model."""
 
     def test_create_basic_prepare_output(self):
-        """Test creating basic prepare output."""
-        out = PrepareOutput(
-            audio_uri="s3://bucket/jobs/123/audio/prepared.wav",
+        """Test creating basic prepare output with single channel file."""
+        prepared = AudioMedia(
+            uri="s3://bucket/jobs/123/audio/prepared.wav",
+            format="wav",
             duration=60.0,
             sample_rate=16000,
             channels=1,
+            bit_depth=16,
+        )
+        out = PrepareOutput(
+            channel_files=[prepared],
+            split_channels=False,
             engine_id="audio-prepare",
         )
-        assert out.audio_uri is not None
-        assert out.duration == 60.0
-        assert out.sample_rate == 16000
-        assert out.channels == 1
+        assert len(out.channel_files) == 1
+        assert out.channel_files[0].duration == 60.0
+        assert out.channel_files[0].sample_rate == 16000
+        assert out.channel_files[0].channels == 1
         assert out.skipped is False
         assert out.warnings == []
 
-    def test_prepare_output_with_original_metadata(self):
-        """Test prepare output with original audio metadata."""
-        out = PrepareOutput(
-            audio_uri="s3://bucket/audio.wav",
-            duration=60.0,
-            sample_rate=16000,
-            channels=1,
-            original_format="mp3",
-            original_duration=60.5,
-            original_sample_rate=44100,
-            original_channels=2,
-            engine_id="audio-prepare",
-        )
-        assert out.original_format == "mp3"
-        assert out.original_sample_rate == 44100
-        assert out.original_channels == 2
-
     def test_prepare_output_split_channels(self):
-        """Test prepare output with split channels."""
-        out = PrepareOutput(
-            channel_files=[
-                ChannelFile(channel=0, audio_uri="s3://bucket/ch0.wav", duration=60.0),
-                ChannelFile(channel=1, audio_uri="s3://bucket/ch1.wav", duration=60.0),
-            ],
-            split_channels=True,
+        """Test prepare output with split channels as AudioMedia array."""
+        ch0 = AudioMedia(
+            uri="s3://bucket/ch0.wav",
+            format="wav",
             duration=60.0,
             sample_rate=16000,
             channels=1,
+            bit_depth=16,
+        )
+        ch1 = AudioMedia(
+            uri="s3://bucket/ch1.wav",
+            format="wav",
+            duration=60.0,
+            sample_rate=16000,
+            channels=1,
+            bit_depth=16,
+        )
+        out = PrepareOutput(
+            channel_files=[ch0, ch1],
+            split_channels=True,
             engine_id="audio-prepare",
         )
         assert out.split_channels is True
         assert len(out.channel_files) == 2
+        # Channel is implicit from array index
+        assert out.channel_files[0].uri == "s3://bucket/ch0.wav"
+        assert out.channel_files[1].uri == "s3://bucket/ch1.wav"
 
     def test_prepare_output_with_vad(self):
         """Test prepare output with VAD regions."""
+        prepared = AudioMedia(
+            uri="s3://bucket/audio.wav",
+            format="wav",
+            duration=60.0,
+            sample_rate=16000,
+            channels=1,
+            bit_depth=16,
+        )
         regions = [
             SpeechRegion(start=1.0, end=5.0),
             SpeechRegion(start=10.0, end=25.0),
         ]
         out = PrepareOutput(
-            audio_uri="s3://bucket/audio.wav",
-            duration=60.0,
-            sample_rate=16000,
-            channels=1,
+            channel_files=[prepared],
+            split_channels=False,
             speech_regions=regions,
             speech_ratio=0.32,
             engine_id="audio-prepare",
@@ -705,13 +730,13 @@ class TestModelValidation:
                 engine_id="test",
             )
 
-    def test_prepare_output_sample_rate_positive(self):
-        """Test that sample rate must be positive."""
+    def test_audio_media_sample_rate_positive(self):
+        """Test that sample rate must be positive in AudioMedia."""
         with pytest.raises(ValidationError):
-            PrepareOutput(
-                audio_uri="s3://test",
+            AudioMedia(
+                uri="s3://test",
+                format="wav",
                 duration=60.0,
                 sample_rate=0,
                 channels=1,
-                engine_id="test",
             )

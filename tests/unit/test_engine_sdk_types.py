@@ -7,6 +7,7 @@ from pathlib import Path
 
 from dalston.common.pipeline_types import (
     AlignOutput,
+    AudioMedia,
     DiarizeOutput,
     PrepareOutput,
     Segment,
@@ -67,10 +68,17 @@ class TestTaskInputGetPrepareOutput:
             audio_path=Path("/tmp/audio.wav"),
             previous_outputs={
                 "prepare": {
-                    "audio_uri": "s3://bucket/audio.wav",
-                    "duration": 60.5,
-                    "sample_rate": 16000,
-                    "channels": 1,
+                    "channel_files": [
+                        {
+                            "uri": "s3://bucket/audio.wav",
+                            "format": "wav",
+                            "duration": 60.5,
+                            "sample_rate": 16000,
+                            "channels": 1,
+                            "bit_depth": 16,
+                        },
+                    ],
+                    "split_channels": False,
                     "engine_id": "audio-prepare",
                 },
             },
@@ -78,9 +86,10 @@ class TestTaskInputGetPrepareOutput:
         output = task_input.get_prepare_output()
         assert output is not None
         assert isinstance(output, PrepareOutput)
-        assert output.duration == 60.5
-        assert output.sample_rate == 16000
-        assert output.channels == 1
+        assert len(output.channel_files) == 1
+        assert output.channel_files[0].duration == 60.5
+        assert output.channel_files[0].sample_rate == 16000
+        assert output.channel_files[0].channels == 1
 
     def test_get_prepare_output_missing(self):
         """Test getting prepare output when not present."""
@@ -116,20 +125,23 @@ class TestTaskInputGetPrepareOutput:
                 "prepare": {
                     "channel_files": [
                         {
-                            "channel": 0,
-                            "audio_uri": "s3://bucket/ch0.wav",
+                            "uri": "s3://bucket/ch0.wav",
+                            "format": "wav",
                             "duration": 60.0,
+                            "sample_rate": 16000,
+                            "channels": 1,
+                            "bit_depth": 16,
                         },
                         {
-                            "channel": 1,
-                            "audio_uri": "s3://bucket/ch1.wav",
+                            "uri": "s3://bucket/ch1.wav",
+                            "format": "wav",
                             "duration": 60.0,
+                            "sample_rate": 16000,
+                            "channels": 1,
+                            "bit_depth": 16,
                         },
                     ],
                     "split_channels": True,
-                    "duration": 60.0,
-                    "sample_rate": 16000,
-                    "channels": 1,
                     "engine_id": "audio-prepare",
                 },
             },
@@ -554,10 +566,17 @@ class TestTaskInputTypedOutputIntegration:
         """Test all stage outputs can be consumed by merge stage."""
         # Simulate all upstream outputs
         prepare_output = PrepareOutput(
-            audio_uri="s3://bucket/audio.wav",
-            duration=60.0,
-            sample_rate=16000,
-            channels=1,
+            channel_files=[
+                AudioMedia(
+                    uri="s3://bucket/audio.wav",
+                    format="wav",
+                    duration=60.0,
+                    sample_rate=16000,
+                    channels=1,
+                    bit_depth=16,
+                ),
+            ],
+            split_channels=False,
             engine_id="audio-prepare",
         )
 
@@ -610,7 +629,8 @@ class TestTaskInputTypedOutputIntegration:
         diarize = task_input.get_diarize_output()
 
         assert prepare is not None
-        assert prepare.duration == 60.0
+        assert len(prepare.channel_files) == 1
+        assert prepare.channel_files[0].duration == 60.0
 
         assert transcribe is not None
         assert transcribe.text == "Hello"

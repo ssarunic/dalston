@@ -12,6 +12,7 @@ Design principles:
 """
 
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -169,14 +170,50 @@ class SpeechRegion(BaseModel):
     )
 
 
-class ChannelFile(BaseModel):
-    """Per-channel audio file information."""
+class AudioMedia(BaseModel):
+    """Audio file with metadata.
+
+    Groups URI with its audio properties for self-describing media references.
+    Used for both input (original audio) and output (prepared/channel files).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    channel: int = Field(..., ge=0, description="Channel index (0=left, 1=right)")
-    audio_uri: str = Field(..., description="S3 URI to channel audio file")
+    uri: str = Field(..., description="S3 URI to audio file")
+    format: str = Field(..., description="Audio format (e.g., 'wav', 'mp3')")
     duration: float = Field(..., ge=0, description="Duration in seconds")
+    sample_rate: int = Field(..., gt=0, description="Sample rate in Hz")
+    channels: int = Field(..., ge=1, description="Number of channels")
+    bit_depth: int | None = Field(
+        default=None, description="Bits per sample (None for lossy formats)"
+    )
+
+
+class TaskInputData(BaseModel):
+    """Task input data written to S3 for engine consumption.
+
+    This is the schema for task input.json files that engines read.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str = Field(..., description="Task identifier")
+    job_id: str = Field(..., description="Parent job identifier")
+
+    # Audio source - one of these is set
+    media: AudioMedia | None = Field(
+        default=None, description="Input audio with metadata (prepare stage)"
+    )
+    audio_uri: str | None = Field(
+        default=None, description="Audio URI (non-prepare stages)"
+    )
+
+    previous_outputs: dict[str, Any] = Field(
+        default_factory=dict, description="Results from dependency stages"
+    )
+    config: dict[str, Any] = Field(
+        default_factory=dict, description="Engine-specific configuration"
+    )
 
 
 class Speaker(BaseModel):
@@ -332,23 +369,14 @@ class PrepareOutput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # Standard mode output
-    audio_uri: str | None = Field(
-        default=None, description="Location of processed audio"
+    # Audio files - always an array (1 element for mono, N for per-channel)
+    channel_files: list[AudioMedia] = Field(
+        ..., description="Prepared audio files (1 for mono, N for per-channel)"
     )
 
-    # Per-channel mode output
-    channel_files: list[ChannelFile] | None = Field(
-        default=None, description="Per-channel file details (audio_uri per channel)"
-    )
     split_channels: bool = Field(
-        default=False, description="Whether channels were split"
+        default=False, description="Whether per-channel processing is enabled"
     )
-
-    # Prepared audio metadata (after conversion to target format)
-    duration: float = Field(..., ge=0, description="Duration in seconds")
-    sample_rate: int = Field(..., gt=0, description="Sample rate (e.g., 16000)")
-    channels: int = Field(..., ge=1, description="Channel count (1 for mono output)")
 
     # VAD output (if detect_speech_regions=True)
     speech_regions: list[SpeechRegion] | None = Field(

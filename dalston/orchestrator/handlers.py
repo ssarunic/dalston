@@ -223,16 +223,15 @@ async def handle_task_completed(
                 settings=settings,
             )
 
-            # Determine input_uri
+            # Determine input_uri from prepare output
             if not dependent.input_uri:
-                # For per-channel tasks, use the channel-specific audio
-                # from prepare output instead of the original stereo file
-                channel_uri = _resolve_channel_audio_uri(
+                audio_uri = _resolve_audio_uri_from_prepare(
                     dependent.stage, previous_outputs
                 )
-                if channel_uri:
-                    dependent.input_uri = channel_uri
+                if audio_uri:
+                    dependent.input_uri = audio_uri
                 else:
+                    # Fallback to original audio (shouldn't happen normally)
                     job = await db.get(JobModel, job_id)
                     if job:
                         dependent.input_uri = job.audio_uri
@@ -459,27 +458,30 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
         await publish_job_completed(redis, job_id)
 
 
-def _resolve_channel_audio_uri(
+def _resolve_audio_uri_from_prepare(
     stage: str, previous_outputs: dict[str, Any]
 ) -> str | None:
-    """Resolve per-channel audio URI for channel-specific tasks.
+    """Resolve audio URI from prepare output.
 
-    For stages like transcribe_ch0 or align_ch0, extracts the matching
-    channel audio URI from the prepare output's channel_files.
+    For per-channel stages (transcribe_ch0, align_ch0), returns the matching
+    channel's audio URI. For regular stages, returns channel_files[0].
 
     Returns:
-        The channel's audio URI, or None if not a per-channel task.
+        The audio URI from prepare output, or None if not available.
     """
-    match = re.match(r"(?:transcribe|align)_ch(\d+)", stage)
-    if not match:
-        return None
-
-    channel = int(match.group(1))
     prepare_output = previous_outputs.get("prepare", {})
     channel_files = prepare_output.get("channel_files", [])
 
-    for cf in channel_files:
-        if cf.get("channel") == channel:
-            return cf["audio_uri"]
+    if not channel_files:
+        return None
 
-    return None
+    # Check for per-channel stage (e.g., transcribe_ch0, align_ch1)
+    match = re.match(r"(?:transcribe|align)_ch(\d+)", stage)
+    if match:
+        channel = int(match.group(1))
+        if channel < len(channel_files):
+            return channel_files[channel].get("uri")
+        return None
+
+    # Regular stage - use first (and only) channel file
+    return channel_files[0].get("uri")

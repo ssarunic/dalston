@@ -27,6 +27,7 @@ class TaskInput:
         audio_path: Path to the audio file (downloaded from S3 to local temp)
         previous_outputs: Results from dependency tasks, keyed by stage name
         config: Engine-specific configuration from job parameters
+        media: Audio file metadata (for prepare stage - format, duration, etc.)
     """
 
     task_id: str
@@ -34,6 +35,7 @@ class TaskInput:
     audio_path: Path
     previous_outputs: dict[str, Any] = field(default_factory=dict)
     config: dict[str, Any] = field(default_factory=dict)
+    media: dict[str, Any] | None = None
 
     def get_prepare_output(self) -> PrepareOutput | None:
         """Get typed prepare stage output.

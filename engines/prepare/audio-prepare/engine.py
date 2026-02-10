@@ -12,7 +12,7 @@ from pathlib import Path
 import structlog
 
 from dalston.engine_sdk import (
-    ChannelFile,
+    AudioMedia,
     Engine,
     PrepareOutput,
     TaskInput,
@@ -135,17 +135,20 @@ class AudioPrepareEngine(Engine):
                 "failed_to_clean_up_temp_file", path=str(prepared_path), error=str(e)
             )
 
-        # Build typed output
-        output = PrepareOutput(
-            audio_uri=audio_uri,
+        # Build typed output with AudioMedia (single-element array for mono)
+        prepared = AudioMedia(
+            uri=audio_uri,
+            format="wav",
             duration=prepared_metadata["duration"],
             sample_rate=prepared_metadata["sample_rate"],
             channels=prepared_metadata["channels"],
+            bit_depth=prepared_metadata["bit_depth"],
+        )
+
+        output = PrepareOutput(
+            channel_files=[prepared],
             split_channels=False,
             engine_id="audio-prepare",
-            skipped=False,
-            skip_reason=None,
-            warnings=[],
         )
 
         return TaskOutput(data=output)
@@ -184,7 +187,7 @@ class AudioPrepareEngine(Engine):
             )
         logger.info("splitting_audio_into_channels", num_channels=num_channels)
 
-        channel_files: list[ChannelFile] = []
+        channel_files: list[AudioMedia] = []
 
         for channel_idx in range(num_channels):
             # Extract single channel to mono WAV
@@ -210,10 +213,13 @@ class AudioPrepareEngine(Engine):
             logger.info("uploaded_channel", channel=channel_idx, audio_uri=audio_uri)
 
             channel_files.append(
-                ChannelFile(
-                    channel=channel_idx,
-                    audio_uri=audio_uri,
+                AudioMedia(
+                    uri=audio_uri,
+                    format="wav",
                     duration=channel_metadata["duration"],
+                    sample_rate=channel_metadata["sample_rate"],
+                    channels=channel_metadata["channels"],
+                    bit_depth=channel_metadata["bit_depth"],
                 )
             )
 
@@ -231,13 +237,7 @@ class AudioPrepareEngine(Engine):
         output = PrepareOutput(
             channel_files=channel_files,
             split_channels=True,
-            duration=original_metadata["duration"],
-            sample_rate=target_sample_rate,
-            channels=1,  # Each output file is mono
             engine_id="audio-prepare",
-            skipped=False,
-            skip_reason=None,
-            warnings=[],
         )
 
         return TaskOutput(data=output)
@@ -362,10 +362,16 @@ class AudioPrepareEngine(Engine):
         if channels is None:
             raise RuntimeError(f"Could not determine channels for {audio_path}")
 
+        # Get bit depth (bits_per_sample or bits_per_raw_sample)
+        bit_depth = stream.get("bits_per_sample") or stream.get("bits_per_raw_sample")
+        if bit_depth:
+            bit_depth = int(bit_depth)
+
         return {
             "duration": duration,
             "sample_rate": sample_rate,
             "channels": channels,
+            "bit_depth": bit_depth,
             "codec_name": stream.get("codec_name", "unknown"),
         }
 

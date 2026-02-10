@@ -227,7 +227,9 @@ class EngineRunner:
         input_data = io.download_json(input_uri)
 
         # Download audio file to temp
-        audio_uri = input_data.get("audio_uri")
+        # Check for media.uri (prepare stage) or audio_uri (other stages)
+        media = input_data.get("media")
+        audio_uri = media["uri"] if media else input_data.get("audio_uri")
         if audio_uri:
             audio_path = temp_dir / "audio.wav"
             io.download_file(audio_uri, audio_path)
@@ -241,6 +243,7 @@ class EngineRunner:
             audio_path=audio_path,
             previous_outputs=input_data.get("previous_outputs", {}),
             config=input_data.get("config", {}),
+            media=media,
         )
 
     def _get_task_metadata(self, task_id: str) -> dict[str, Any]:
