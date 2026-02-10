@@ -81,12 +81,14 @@ async def orchestrator_loop() -> None:
         while not _shutdown_event.is_set():
             try:
                 # Get message with timeout to allow shutdown check
-                message = await asyncio.wait_for(
-                    pubsub.get_message(ignore_subscribe_messages=True),
+                # Note: timeout must be passed directly to get_message() for proper blocking
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=True,
                     timeout=1.0,
                 )
 
                 if message is None:
+                    # Timeout expired with no message, loop back to check shutdown flag
                     continue
 
                 if message["type"] != "message":
@@ -94,9 +96,6 @@ async def orchestrator_loop() -> None:
 
                 await _dispatch_event(message["data"], redis, settings)
 
-            except TimeoutError:
-                # Normal timeout, check shutdown flag and continue
-                continue
             except Exception as e:
                 logger.exception("event_processing_error", error=str(e))
                 # Continue processing other events
