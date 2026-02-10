@@ -98,6 +98,10 @@ export const apiClient = {
   deleteJob: (jobId: string) =>
     currentClient.delete(`api/console/jobs/${jobId}`),
 
+  // Cancel a job (admin required, job must be pending or running)
+  cancelJob: (jobId: string) =>
+    currentClient.post(`api/console/jobs/${jobId}/cancel`).json<{ id: string; status: string; message: string }>(),
+
   // Export URL (needs API key as query param for download links)
   getExportUrl: (jobId: string, format: 'srt' | 'vtt' | 'txt' | 'json') => {
     const base = `/v1/audio/transcriptions/${jobId}/export/${format}`

@@ -25,6 +25,7 @@ from dalston.gateway.services.webhook import WebhookService
 from dalston.gateway.services.webhook_endpoints import WebhookEndpointService
 from dalston.orchestrator.delivery import DeliveryWorker, create_webhook_delivery
 from dalston.orchestrator.handlers import (
+    handle_job_cancel_requested,
     handle_job_created,
     handle_task_completed,
     handle_task_failed,
@@ -168,6 +169,14 @@ async def _dispatch_event(
                 job_id = UUID(event["job_id"])
                 error = event.get("error", "Unknown error")
                 await _handle_job_webhook(job_id, "failed", db, settings, error)
+
+            elif event_type == "job.cancel_requested":
+                job_id = UUID(event["job_id"])
+                await handle_job_cancel_requested(job_id, db, redis)
+
+            elif event_type == "job.cancelled":
+                job_id = UUID(event["job_id"])
+                await _handle_job_webhook(job_id, "cancelled", db, settings)
 
             else:
                 log.debug("unknown_event_type")

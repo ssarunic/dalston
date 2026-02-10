@@ -169,10 +169,50 @@ def wait_job(
         raise typer.Exit(code=1) from e
 
 
-# Note: cancel command deferred - requires gateway endpoint
-# @app.command("cancel")
-# def cancel_job(job_id: str) -> None:
-#     """Cancel a pending or running job."""
-#     client = state.client
-#     client.cancel_job(job_id)
-#     console.print(f"Job {job_id} cancelled")
+@app.command("cancel")
+def cancel_job(
+    job_id: Annotated[
+        str,
+        typer.Argument(help="Job ID to cancel."),
+    ],
+    as_json: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Output as JSON.",
+        ),
+    ] = False,
+) -> None:
+    """Cancel a pending or running job.
+
+    Cancellation is "soft": running tasks complete naturally, only
+    queued/pending work is cancelled.
+
+    Examples:
+
+        dalston jobs cancel abc123
+
+        dalston jobs cancel abc123 --json
+    """
+    client = state.client
+
+    try:
+        job = client.cancel(job_id)
+
+        if as_json:
+            import json
+
+            print(json.dumps({"id": str(job.id), "status": job.status.value}))
+        else:
+            from dalston_cli.output import console
+
+            if job.status == JobStatus.CANCELLED:
+                console.print(f"[green]Job {job_id} cancelled[/green]")
+            else:
+                console.print(
+                    f"[yellow]Cancellation requested for {job_id} "
+                    f"(status: {job.status.value})[/yellow]"
+                )
+    except Exception as e:
+        error_console.print(f"[red]Error:[/red] Failed to cancel job: {e}")
+        raise typer.Exit(code=1) from e

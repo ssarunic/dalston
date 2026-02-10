@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from dalston.common.events import publish_job_cancel_requested
 from dalston.common.models import JobStatus
 from dalston.config import Settings
 from dalston.db.models import JobModel
@@ -594,3 +595,51 @@ async def delete_console_job(
         )
 
     return Response(status_code=204)
+
+
+class JobCancelledResponse(BaseModel):
+    """Response for cancel endpoint."""
+
+    id: UUID
+    status: str
+    message: str
+
+
+@router.post(
+    "/jobs/{job_id}/cancel",
+    response_model=JobCancelledResponse,
+    summary="Cancel a job",
+    description="Cancel a pending or running job. Running tasks complete naturally. Admin only.",
+    responses={
+        200: {"description": "Cancellation requested"},
+        404: {"description": "Job not found"},
+        409: {"description": "Job is not in a cancellable state"},
+    },
+)
+async def cancel_console_job(
+    job_id: UUID,
+    api_key: RequireAdmin,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    jobs_service: JobsService = Depends(get_jobs_service),
+) -> JobCancelledResponse:
+    """Cancel a job (admin endpoint).
+
+    No tenant filter — admins can cancel any job.
+    """
+    try:
+        result = await jobs_service.cancel_job(db, job_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from None
+
+    if result is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Publish event for orchestrator
+    await publish_job_cancel_requested(redis, job_id)
+
+    return JobCancelledResponse(
+        id=result.job.id,
+        status=result.status.value,
+        message=result.message,
+    )

@@ -27,7 +27,7 @@ from fastapi import (
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dalston.common.events import publish_job_created
+from dalston.common.events import publish_job_cancel_requested, publish_job_created
 from dalston.common.models import DEFAULT_MODEL, JobStatus, resolve_model
 from dalston.common.utils import compute_duration_ms
 from dalston.config import WEBHOOK_METADATA_MAX_SIZE, Settings
@@ -41,6 +41,7 @@ from dalston.gateway.dependencies import (
     get_settings,
 )
 from dalston.gateway.models.responses import (
+    JobCancelledResponse,
     JobCreatedResponse,
     JobListResponse,
     JobResponse,
@@ -446,6 +447,54 @@ async def export_transcription(
 
 
 logger = logging.getLogger(__name__)
+
+
+@router.post(
+    "/{job_id}/cancel",
+    response_model=JobCancelledResponse,
+    summary="Cancel transcription job",
+    description="Cancel a pending or running transcription job. Running tasks complete naturally.",
+    responses={
+        200: {"description": "Cancellation requested"},
+        404: {"description": "Job not found"},
+        409: {"description": "Job is not in a cancellable state"},
+    },
+)
+async def cancel_transcription(
+    job_id: UUID,
+    api_key: RequireJobsWrite,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    jobs_service: JobsService = Depends(get_jobs_service),
+) -> JobCancelledResponse:
+    """Cancel a transcription job.
+
+    Cancellation is "soft": running tasks complete naturally, only
+    queued/pending work is cancelled. This follows industry practice
+    (AWS, Google, AssemblyAI) since ML inference has no safe interruption points.
+
+    Steps:
+    1. Validate job exists and is cancellable (PENDING or RUNNING)
+    2. Mark PENDING/READY tasks as CANCELLED
+    3. Set job status to CANCELLING (or CANCELLED if nothing running)
+    4. Publish job.cancel_requested event for orchestrator
+    """
+    try:
+        result = await jobs_service.cancel_job(db, job_id, tenant_id=api_key.tenant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from None
+
+    if result is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Publish event for orchestrator to remove tasks from Redis queues
+    await publish_job_cancel_requested(redis, job_id)
+
+    return JobCancelledResponse(
+        id=result.job.id,
+        status=result.status,
+        message=result.message,
+    )
 
 
 @router.delete(

@@ -27,6 +27,7 @@ const statusConfig: Record<TaskStatus, { icon: React.ElementType; color: string;
   completed: { icon: CheckCircle, color: 'text-green-400', bg: 'bg-green-500/20' },
   failed: { icon: XCircle, color: 'text-red-400', bg: 'bg-red-500/20' },
   skipped: { icon: Clock, color: 'text-zinc-500', bg: 'bg-zinc-500/10' },
+  cancelled: { icon: XCircle, color: 'text-orange-400', bg: 'bg-orange-500/20' },
 }
 
 function MetricCard({

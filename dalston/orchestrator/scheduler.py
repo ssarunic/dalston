@@ -86,6 +86,41 @@ async def queue_task(
     log.info("task_queued", queue=queue_key)
 
 
+async def remove_task_from_queue(
+    redis: Redis,
+    task_id: UUID,
+    engine_id: str,
+) -> bool:
+    """Remove a task from its engine queue.
+
+    Used during job cancellation to prevent READY tasks from being picked up.
+
+    Args:
+        redis: Async Redis client
+        task_id: Task UUID to remove
+        engine_id: Engine queue to remove from
+
+    Returns:
+        True if task was found and removed, False otherwise
+    """
+    task_id_str = str(task_id)
+    queue_key = ENGINE_QUEUE_KEY.format(engine_id=engine_id)
+
+    # LREM removes all occurrences of value from list (count=0 means all)
+    removed = await redis.lrem(queue_key, 0, task_id_str)
+
+    if removed > 0:
+        logger.info(
+            "task_removed_from_queue",
+            task_id=task_id_str,
+            engine_id=engine_id,
+            queue=queue_key,
+        )
+        return True
+
+    return False
+
+
 async def write_task_input(
     task: Task,
     settings: Settings,

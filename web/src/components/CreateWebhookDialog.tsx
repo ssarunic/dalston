@@ -23,6 +23,11 @@ const AVAILABLE_EVENTS = [
     description: 'Triggered when a job fails permanently',
   },
   {
+    value: 'transcription.cancelled',
+    label: 'Transcription Cancelled',
+    description: 'Triggered when a job is cancelled by the user',
+  },
+  {
     value: '*',
     label: 'All Events',
     description: 'Subscribe to all event types (current and future)',
@@ -35,6 +40,7 @@ export function CreateWebhookDialog({ open, onOpenChange, onCreated }: CreateWeb
   const [selectedEvents, setSelectedEvents] = useState<string[]>([
     'transcription.completed',
     'transcription.failed',
+    'transcription.cancelled',
   ])
   const [error, setError] = useState<string | null>(null)
 
@@ -44,7 +50,7 @@ export function CreateWebhookDialog({ open, onOpenChange, onCreated }: CreateWeb
     if (event === '*') {
       // Wildcard is exclusive
       if (selectedEvents.includes('*')) {
-        setSelectedEvents(['transcription.completed', 'transcription.failed'])
+        setSelectedEvents(['transcription.completed', 'transcription.failed', 'transcription.cancelled'])
       } else {
         setSelectedEvents(['*'])
       }
@@ -96,7 +102,7 @@ export function CreateWebhookDialog({ open, onOpenChange, onCreated }: CreateWeb
       // Reset form
       setUrl('')
       setDescription('')
-      setSelectedEvents(['transcription.completed', 'transcription.failed'])
+      setSelectedEvents(['transcription.completed', 'transcription.failed', 'transcription.cancelled'])
       onCreated(result)
     } catch (err) {
       if (err instanceof Error) {
@@ -110,7 +116,7 @@ export function CreateWebhookDialog({ open, onOpenChange, onCreated }: CreateWeb
   const handleClose = () => {
     setUrl('')
     setDescription('')
-    setSelectedEvents(['transcription.completed', 'transcription.failed'])
+    setSelectedEvents(['transcription.completed', 'transcription.failed', 'transcription.cancelled'])
     setError(null)
     onOpenChange(false)
   }
