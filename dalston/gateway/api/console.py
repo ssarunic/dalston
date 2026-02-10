@@ -30,6 +30,7 @@ from dalston.gateway.dependencies import (
     get_session_router,
     get_settings,
 )
+from dalston.gateway.models.responses import JobCancelledResponse
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
 from dalston.session_router import SessionRouter
@@ -597,14 +598,6 @@ async def delete_console_job(
     return Response(status_code=204)
 
 
-class JobCancelledResponse(BaseModel):
-    """Response for cancel endpoint."""
-
-    id: UUID
-    status: str
-    message: str
-
-
 @router.post(
     "/jobs/{job_id}/cancel",
     response_model=JobCancelledResponse,
@@ -640,6 +633,6 @@ async def cancel_console_job(
 
     return JobCancelledResponse(
         id=result.job.id,
-        status=result.status.value,
+        status=result.status,
         message=result.message,
     )

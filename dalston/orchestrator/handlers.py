@@ -541,7 +541,11 @@ async def handle_job_cancel_requested(
 
     for task in all_tasks:
         if task.status == TaskStatus.READY.value:
-            # Remove from Redis queue
+            # Remove from Redis queue.
+            # Note: There's a small race window where an engine may have already
+            # dequeued this task but hasn't updated DB status to RUNNING yet.
+            # This is acceptable because running tasks complete naturally under
+            # our soft cancellation semantics.
             await remove_task_from_queue(redis, task.id, task.engine_id)
 
             # Mark as cancelled
