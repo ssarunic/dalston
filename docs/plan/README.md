@@ -14,7 +14,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 
 ## Status Overview
 
-### Completed (8)
+### Completed (9)
 
 | # | Milestone | Completed |
 |---|-----------|-----------|
@@ -26,6 +26,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M10](milestones/M10-web-console.md) | Web Console | 2026-01-30 |
 | [M11](milestones/M11-api-authentication.md) | API Authentication | February 2026 |
 | [M17](milestones/M17-api-key-management.md) | API Key Management | February 2026 |
+| [M21](milestones/M21-admin-webhooks.md) | Admin Webhooks | February 2026 |
 
 ### In Progress (7)
 
@@ -39,7 +40,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M16](milestones/M16-aws-deployment.md) | AWS Deployment | `infra/terraform/` |
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 
-### Not Started (6)
+### Not Started (5)
 
 | # | Milestone | Goal |
 |---|-----------|------|
@@ -48,8 +49,6 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M15](milestones/M15-console-authentication.md) | Console Auth | Secure web console access |
 | [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | OpenTelemetry spans |
 | [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | Prometheus + Grafana |
-| [M21](milestones/M21-admin-webhooks.md) | Admin Webhooks | Admin-registered webhook endpoints |
-| [M22](milestones/M22-parakeet-engine.md) | Parakeet Engine | NVIDIA Parakeet batch + real-time engines |
 
 ---
 
@@ -101,7 +100,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 
 | # | Milestone | Goal | Days | Status |
 |---|-----------|------|------|--------|
-| [M21](milestones/M21-admin-webhooks.md) | Admin Webhooks | Admin-registered webhook endpoints with persistent delivery | 3-4 | Not Started |
+| [M21](milestones/M21-admin-webhooks.md) | Admin Webhooks | Admin-registered webhook endpoints with persistent delivery | 3-4 | Completed |
 
 ## Engine Milestones
 

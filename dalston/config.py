@@ -45,9 +45,9 @@ class Settings(BaseSettings):
 
     # Admin Webhooks (M21)
     allow_per_job_webhooks: bool = Field(
-        default=True,
+        default=False,
         alias="ALLOW_PER_JOB_WEBHOOKS",
-        description="Allow webhook_url parameter on job submission (legacy behavior)",
+        description="Allow webhook_url parameter on job submission (legacy behavior, disabled by default)",
     )
 
 
