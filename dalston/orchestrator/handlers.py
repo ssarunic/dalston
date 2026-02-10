@@ -436,9 +436,7 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
     """
     log = logger.bind(job_id=str(job_id))
 
-    # Expire all cached objects to ensure we read fresh data from DB
-    db.expire_all()
-
+    # Fetch fresh data from DB (explicit SELECT avoids stale identity map)
     result = await db.execute(select(TaskModel).where(TaskModel.job_id == job_id))
     all_tasks = list(result.scalars().all())
 
@@ -461,7 +459,8 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
         t.status == TaskStatus.FAILED.value and t.required for t in all_tasks
     )
 
-    job = await db.get(JobModel, job_id)
+    job_result = await db.execute(select(JobModel).where(JobModel.id == job_id))
+    job = job_result.scalar_one_or_none()
     if job is None:
         return
 
@@ -578,10 +577,9 @@ async def _check_job_cancellation_complete(
     """
     log = logger.bind(job_id=str(job_id))
 
-    # Expire all cached objects to ensure we read fresh data from DB
-    db.expire_all()
-
-    job = await db.get(JobModel, job_id)
+    # Fetch fresh data from DB (explicit SELECT avoids stale identity map)
+    job_result = await db.execute(select(JobModel).where(JobModel.id == job_id))
+    job = job_result.scalar_one_or_none()
     if job is None:
         return
 
