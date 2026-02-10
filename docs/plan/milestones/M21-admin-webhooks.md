@@ -118,6 +118,7 @@ Secondary concerns: no delivery observability (no logs, no manual retry), and in
 |-------|------------|
 | `transcription.completed` | Batch job finished successfully |
 | `transcription.failed` | Batch job failed permanently |
+| `transcription.cancelled` | Batch job cancelled by user (requires M23) |
 | `*` | Wildcard — all events |
 
 ---
