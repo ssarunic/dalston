@@ -6,7 +6,7 @@
 | **Duration**  | 3-4 days                                                                    |
 | **Dependencies** | None (core feature, unblocks M12/M13)                                    |
 | **Deliverable** | Cancel API endpoint, orchestrator support, SDK/CLI/Console integration    |
-| **Status**    | Not Started                                                                 |
+| **Status**    | Completed                                                                   |
 
 ## User Story
 
@@ -242,30 +242,62 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions/$JOB_ID/cancel
 
 ## Checkpoint
 
-- [ ] `CANCELLING` status added to JobStatus enums (backend + SDK + web types)
-- [ ] Event functions for cancel_requested and cancelled
-- [ ] Gateway cancel endpoint with proper error handling
-- [ ] Orchestrator handler removes tasks from queues
-- [ ] Cancellation checks prevent queuing new tasks
-- [ ] Job transitions to CANCELLED when all tasks terminal
-- [ ] `transcription.cancelled` webhook delivered
-- [ ] `transcription.cancelled` added to M21 allowed event types
-- [ ] SDK `cancel()` method
-- [ ] CLI `dalston jobs cancel` command
-- [ ] Console API `POST /jobs/{job_id}/cancel` endpoint
-- [ ] Console StatusBadge shows `cancelling` (amber) and `cancelled` (grey) states
-- [ ] Console BatchJobs page has Cancel button for PENDING/RUNNING jobs
-- [ ] Console BatchJobs page has 'Cancelled' status filter
-- [ ] Unit and integration tests passing
+- [x] `CANCELLING` status added to JobStatus enums (backend + SDK + web types)
+- [x] Event functions for cancel_requested and cancelled
+- [x] Gateway cancel endpoint with proper error handling
+- [x] Orchestrator handler removes tasks from queues
+- [x] Cancellation checks prevent queuing new tasks
+- [x] Job transitions to CANCELLED when all tasks terminal
+- [x] `transcription.cancelled` webhook delivered
+- [x] `transcription.cancelled` added to M21 allowed event types
+- [x] SDK `cancel()` method
+- [x] CLI `dalston jobs cancel` command
+- [x] Console API `POST /jobs/{job_id}/cancel` endpoint
+- [x] Console StatusBadge shows `cancelling` (amber) and `cancelled` (orange) states
+- [x] Console BatchJobs page has Cancel button for PENDING/RUNNING jobs
+- [x] Console BatchJobs page has 'Cancelled' status filter
+- [x] Unit and integration tests passing
 
 ---
 
-## Unblocks
+## Implementation Notes
 
-This milestone unblocks:
+### Files Changed
 
-- **M12 (Python SDK)**: `cancel_job()` method can now be implemented
-- **M13 (CLI)**: `dalston jobs cancel` command can now be implemented
+| File | Description |
+|------|-------------|
+| `dalston/common/models.py` | Added `CANCELLING` to JobStatus, `CANCELLED` to TaskStatus |
+| `dalston/common/events.py` | Added `publish_job_cancel_requested()`, `publish_job_cancelled()` |
+| `dalston/gateway/api/v1/transcription.py` | Added `POST /{job_id}/cancel` endpoint |
+| `dalston/gateway/api/console.py` | Added `POST /jobs/{job_id}/cancel` admin endpoint |
+| `dalston/gateway/services/jobs.py` | Added `cancel_job()` service method |
+| `dalston/gateway/models/responses.py` | Added `JobCancelledResponse` model |
+| `dalston/gateway/services/webhook_endpoints.py` | Added `transcription.cancelled` to allowed events |
+| `dalston/orchestrator/handlers.py` | Added `handle_job_cancel_requested()`, `_check_job_cancellation_complete()`, cancellation checks |
+| `dalston/orchestrator/main.py` | Subscribed to `job.cancel_requested` event |
+| `dalston/orchestrator/scheduler.py` | Added `remove_task_from_queue()` for Redis LREM |
+| `sdk/dalston_sdk/types.py` | Added `CANCELLING` to JobStatus, `TRANSCRIPTION_CANCELLED` to WebhookEvent |
+| `sdk/dalston_sdk/client.py` | Added `cancel()` method to sync and async clients |
+| `cli/dalston_cli/commands/jobs.py` | Added `cancel` command |
+| `web/src/api/types.ts` | Added `cancelling` to JobStatus type |
+| `web/src/api/client.ts` | Added `cancelJob()` method |
+| `web/src/components/StatusBadge.tsx` | Added `cancelling` (amber) and updated `cancelled` (orange) styles |
+| `web/src/pages/BatchJobs.tsx` | Added Cancel button, 'Cancelled' filter, cancel dialog |
+
+### Test Coverage
+
+- `tests/integration/test_cancel_job_api.py` — Integration tests for cancel endpoint
+- `tests/e2e/test_job_cancellation_e2e.py` — E2E tests for full cancellation flow
+- `tests/unit/test_jobs_service.py` — Unit tests for cancel_job service method
+
+---
+
+## Unblocked
+
+This milestone unblocked M12 (Python SDK) and M13 (CLI), which now include:
+
+- **SDK**: `client.cancel(job_id)` method (sync and async)
+- **CLI**: `dalston jobs cancel <job_id>` command
 
 ---
 
