@@ -107,7 +107,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 
 | # | Milestone | Goal | Days | Status |
 |---|-----------|------|------|--------|
-| [M22](milestones/M22-parakeet-engine.md) | Parakeet Engine | NVIDIA Parakeet batch + real-time transcription engines | 4-5 | Not Started |
+| [M22](milestones/M22-parakeet-engine.md) | Parakeet Engine | NVIDIA Parakeet batch + real-time transcription engines | 4-5 | Complete |
 
 ---
 

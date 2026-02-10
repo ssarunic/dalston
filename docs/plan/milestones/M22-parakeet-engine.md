@@ -6,6 +6,7 @@
 | **Duration** | 4-5 days |
 | **Dependencies** | M2 (batch transcription), M6 (real-time infrastructure), M14 (model selection) |
 | **Deliverable** | Parakeet batch engine, Parakeet streaming engine, model registry entries |
+| **Status** | Complete |
 
 ## User Story
 

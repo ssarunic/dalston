@@ -6,7 +6,7 @@
 | **Duration** | 2-3 days |
 | **Dependencies** | M2 (transcription working) |
 | **Deliverable** | `model` parameter in REST/WebSocket APIs, `/v1/models` endpoint |
-| **Status** | Not Started |
+| **Status** | Complete |
 
 ## User Story
 
@@ -33,7 +33,8 @@ Uses **provider-style model names** (like OpenAI's `gpt-4o`, Anthropic's `claude
 whisper-large-v3      # Default, most accurate
 whisper-base          # Faster, less accurate
 distil-whisper        # English-only, very fast
-parakeet-1.1b         # Future: NVIDIA streaming model
+parakeet-0.6b         # NVIDIA English-only, streaming capable
+parakeet-1.1b         # NVIDIA English-only, balanced streaming
 ```
 
 Model name implies which engine to use - no separate `engine_transcribe` parameter needed for most users.
@@ -131,14 +132,14 @@ websocat "ws://localhost:8000/v1/audio/transcriptions/stream?model=whisper-base"
 
 ## Checkpoint
 
-- [ ] **Model registry** created with whisper variants
-- [ ] **Batch API** accepts `model` parameter
-- [ ] **Orchestrator** routes to correct engine based on model
-- [ ] **Models endpoint** returns available models
-- [ ] **Real-time** accepts full model IDs
-- [ ] **Aliases** work (fast, accurate, large, base)
-- [ ] **Validation** returns helpful error for invalid models
-- [ ] **Tests** cover model selection flow
+- [x] **Model registry** created with whisper and Parakeet variants
+- [x] **Batch API** accepts `model` parameter
+- [x] **Orchestrator** routes to correct engine based on model
+- [x] **Models endpoint** returns available models
+- [x] **Real-time** accepts full model IDs
+- [x] **Aliases** work (fast, accurate, large, base, parakeet)
+- [x] **Validation** returns helpful error for invalid models
+- [x] **Tests** cover model selection flow
 
 ---
 
@@ -147,4 +148,11 @@ websocat "ws://localhost:8000/v1/audio/transcriptions/stream?model=whisper-base"
 1. **Dynamic registry** - Load models from engine.yaml files at startup
 2. **Model routing by capability** - `model=auto` with `language=hr` picks best Croatian model
 3. **Version pinning** - `whisper-large-v3@20240101` for reproducibility
-4. **Per-engine model variants** - When Parakeet is added, registry expands automatically
+
+---
+
+## Implementation Notes
+
+- **Parakeet models** added in M22 - `parakeet-110m`, `parakeet-0.6b`, `parakeet-1.1b`
+- **CLI support** - `dalston models` command lists available models
+- Registry located in `dalston/common/models.py`

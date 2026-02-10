@@ -120,8 +120,10 @@ class ModelDefinition:
 | `whisper-small` | faster-whisper | small | fast | 99 | No |
 | `whisper-base` | faster-whisper | base | fast | 99 | No |
 | `whisper-tiny` | faster-whisper | tiny | fast | 99 | No |
-| `whisper-turbo` | faster-whisper | large-v3-turbo | balanced | 99 | No |
 | `distil-whisper` | faster-whisper | distil-large-v3 | fast | 1 (en) | No |
+| `parakeet-110m` | parakeet | nvidia/parakeet-tdt_ctc-110m | fast | 1 (en) | Yes |
+| `parakeet-0.6b` | parakeet | nvidia/parakeet-rnnt-0.6b | fast | 1 (en) | Yes |
+| `parakeet-1.1b` | parakeet | nvidia/parakeet-rnnt-1.1b | balanced | 1 (en) | Yes |
 
 ### Aliases
 
@@ -131,6 +133,7 @@ class ModelDefinition:
 | `accurate` | `whisper-large-v3` | Quality-optimized |
 | `large` | `whisper-large-v3` | Backwards compat |
 | `base` | `whisper-base` | Backwards compat |
+| `parakeet` | `parakeet-110m` | Default Parakeet model |
 
 ---
 
@@ -243,15 +246,15 @@ ElevenLabs API uses the `model_id` parameter. For compatibility:
 
 ---
 
-## Future Extensions
+## Adding New Engines
 
-### Adding New Engines
+When adding a new engine:
 
-When adding a new engine (e.g., Parakeet):
-
-1. Implement engine in `engines/transcribe/parakeet/`
-2. Add model entries to registry
+1. Implement engine in `engines/transcribe/{engine-id}/`
+2. Add model entries to `MODEL_REGISTRY` in `dalston/common/models.py`
 3. Models automatically appear in `/v1/models` endpoint
+
+See [M22 Parakeet Engine](../plan/milestones/M22-parakeet-engine.md) for a complete example of adding a new transcription engine.
 
 ### Language-Specific Models
 

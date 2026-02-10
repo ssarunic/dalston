@@ -523,14 +523,19 @@ Submit audio for transcription.
 | Value | Description |
 |-------|-------------|
 | `null` (default) | Orchestrator chooses optimal engine |
-| `"whisperx-tiny"` | Fastest, lower accuracy |
-| `"whisperx-base"` | Good balance (default choice) |
-| `"whisperx-small"` | Better accuracy |
-| `"whisperx-medium"` | High accuracy |
-| `"whisperx-large-v2"` | Best accuracy (v2) |
-| `"whisperx-large-v3"` | Best accuracy (v3) |
-| `"fast"` | Alias for whisperx-base |
-| `"accurate"` | Alias for whisperx-large-v3 |
+| `"whisper-large-v3"` | Most accurate multilingual (99 languages) |
+| `"whisper-large-v2"` | Previous generation large model |
+| `"whisper-medium"` | Balanced accuracy and speed |
+| `"whisper-small"` | Fast multilingual transcription |
+| `"whisper-base"` | Very fast, lower accuracy |
+| `"whisper-tiny"` | Fastest, minimal accuracy |
+| `"distil-whisper"` | Fast English-only, near large-v3 accuracy |
+| `"parakeet-110m"` | Lightweight English-only, low memory |
+| `"parakeet-0.6b"` | Fast English-only with native streaming |
+| `"parakeet-1.1b"` | Balanced English-only with native streaming |
+| `"fast"` | Alias for distil-whisper |
+| `"accurate"` | Alias for whisper-large-v3 |
+| `"parakeet"` | Alias for parakeet-110m |
 
 ### Response (Immediate)
 
@@ -709,32 +714,38 @@ List available transcription models.
 
 ```json
 {
-  "models": [
+  "object": "list",
+  "data": [
     {
-      "model_id": "whisperx-tiny",
-      "name": "WhisperX Tiny",
-      "languages": ["multilingual"],
-      "features": ["word_timestamps", "diarization"],
-      "loaded": false,
-      "vram_mb": 1024
+      "id": "whisper-large-v3",
+      "object": "model",
+      "name": "Whisper Large v3",
+      "description": "Most accurate multilingual model, 99 languages",
+      "capabilities": {
+        "languages": 99,
+        "streaming": false,
+        "word_timestamps": true
+      },
+      "tier": "accurate"
     },
     {
-      "model_id": "whisperx-base",
-      "name": "WhisperX Base",
-      "languages": ["multilingual"],
-      "features": ["word_timestamps", "diarization"],
-      "loaded": true,
-      "vram_mb": 1024
-    },
-    {
-      "model_id": "whisperx-large-v3",
-      "name": "WhisperX Large v3",
-      "languages": ["multilingual"],
-      "features": ["word_timestamps", "diarization"],
-      "loaded": false,
-      "vram_mb": 10240
+      "id": "parakeet-0.6b",
+      "object": "model",
+      "name": "Parakeet 0.6B",
+      "description": "Fast English-only with native streaming, low latency",
+      "capabilities": {
+        "languages": 1,
+        "streaming": true,
+        "word_timestamps": true
+      },
+      "tier": "fast"
     }
-  ]
+  ],
+  "aliases": {
+    "fast": "distil-whisper",
+    "accurate": "whisper-large-v3",
+    "parakeet": "parakeet-110m"
+  }
 }
 ```
 
