@@ -272,6 +272,8 @@ async def realtime_transcription(
         log.info("session_released")
 
         # Update session stats from session.end message
+        audio_uri = None
+        transcript_uri = None
         if session_service and session_end_data:
             try:
                 # Extract stats from session.end message
@@ -280,11 +282,17 @@ async def realtime_transcription(
                 transcript = session_end_data.get("transcript", "")
                 word_count = len(transcript.split()) if transcript else 0
 
+                # Extract storage URIs
+                audio_uri = session_end_data.get("audio_uri")
+                transcript_uri = session_end_data.get("transcript_uri")
+
                 log.info(
                     "session_stats_captured",
                     audio_duration=audio_duration,
                     utterance_count=len(segments),
                     word_count=word_count,
+                    audio_uri=audio_uri,
+                    transcript_uri=transcript_uri,
                 )
 
                 await session_service.update_stats(
@@ -308,6 +316,8 @@ async def realtime_transcription(
                     session_id=allocation.session_id,
                     status=session_status,
                     error=session_error,
+                    audio_uri=audio_uri,
+                    transcript_uri=transcript_uri,
                 )
             except Exception as e:
                 log.warning("session_db_finalize_failed", error=str(e))

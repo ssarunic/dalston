@@ -174,6 +174,8 @@ class SessionEndMessage:
     transcript: str
     segments: list[SegmentInfo]
     enhancement_job_id: str | None = None
+    audio_uri: str | None = None
+    transcript_uri: str | None = None
     type: str = field(default="session.end", init=False)
 
     def to_dict(self) -> dict[str, Any]:
@@ -187,6 +189,10 @@ class SessionEndMessage:
         }
         if self.enhancement_job_id is not None:
             result["enhancement_job_id"] = self.enhancement_job_id
+        if self.audio_uri is not None:
+            result["audio_uri"] = self.audio_uri
+        if self.transcript_uri is not None:
+            result["transcript_uri"] = self.transcript_uri
         return result
 
     def to_json(self) -> str:

@@ -504,6 +504,12 @@ services:
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
+      # S3 storage for audio/transcript persistence (M24)
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
     volumes:
       - realtime-models:/models
     depends_on:
@@ -527,6 +533,12 @@ services:
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
+      # S3 storage for audio/transcript persistence (M24)
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
     volumes:
       - realtime-models:/models
     depends_on:
@@ -551,6 +563,12 @@ services:
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
+      # S3 storage for audio/transcript persistence (M24)
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
     volumes:
       - realtime-models:/models
     depends_on:
@@ -590,6 +608,12 @@ services:
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
+      # S3 storage for audio/transcript persistence (M24)
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
     volumes:
       - parakeet-models:/models
     depends_on:
@@ -623,6 +647,12 @@ services:
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
+      # S3 storage for audio/transcript persistence (M24)
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
     volumes:
       - parakeet-models:/models
     depends_on:
@@ -661,6 +691,12 @@ services:
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
+      # S3 storage for audio/transcript persistence (M24)
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
     volumes:
       - parakeet-models:/models
     depends_on:

@@ -40,6 +40,7 @@ from dalston.realtime_sdk.protocol import (
 from dalston.realtime_sdk.vad import VADConfig, VADProcessor
 
 if TYPE_CHECKING:
+    from types_aiobotocore_s3 import S3Client
     from websockets import WebSocketServerProtocol
 
 logger = structlog.get_logger()
@@ -63,6 +64,10 @@ class SessionConfig:
         vad_threshold: VAD speech probability threshold (0.0-1.0)
         min_speech_duration_ms: Min speech duration before valid utterance (ms)
         min_silence_duration_ms: Silence duration to trigger endpoint (ms)
+        store_audio: Whether to record audio to S3
+        store_transcript: Whether to save transcript to S3
+        s3_bucket: S3 bucket for storage
+        s3_endpoint_url: Custom S3 endpoint (for MinIO)
     """
 
     session_id: str
@@ -79,6 +84,11 @@ class SessionConfig:
     vad_threshold: float = 0.5  # Speech detection threshold (0.0-1.0)
     min_speech_duration_ms: int = 250  # Min speech duration (ms)
     min_silence_duration_ms: int = 500  # Silence to trigger endpoint (ms)
+    # Storage options
+    store_audio: bool = False
+    store_transcript: bool = False
+    s3_bucket: str = ""
+    s3_endpoint_url: str | None = None
 
 
 class AudioBuffer:
@@ -278,6 +288,14 @@ class SessionHandler:
         self._chunks_since_partial = 0
         self._speech_audio_buffer: list[np.ndarray] = []
 
+        # Storage recorders (initialized in run() when S3 client available)
+        self._s3_client: S3Client | None = None
+        self._audio_recorder = None  # AudioRecorder when store_audio=True
+        self._transcript_recorder = (
+            None  # TranscriptRecorder when store_transcript=True
+        )
+        self._raw_audio_buffer: list[bytes] = []  # Buffer until S3 client ready
+
     async def run(self) -> None:
         """Main session processing loop.
 
@@ -288,6 +306,9 @@ class SessionHandler:
 
         # Send session.begin
         await self._send_session_begin()
+
+        # Initialize storage recorders if enabled
+        await self._init_storage()
 
         try:
             async for message in self.websocket:
@@ -326,6 +347,17 @@ class SessionHandler:
         Args:
             data: Raw audio bytes
         """
+        # Record raw audio if enabled
+        if self.config.store_audio:
+            if self._audio_recorder:
+                try:
+                    await self._audio_recorder.write(data)
+                except Exception as e:
+                    logger.warning("audio_write_failed", error=str(e))
+            else:
+                # Buffer until S3 client initialized
+                self._raw_audio_buffer.append(data)
+
         # Add to buffer
         self._buffer.add(data)
 
@@ -578,6 +610,84 @@ class SessionHandler:
             )
         )
 
+    async def _init_storage(self) -> None:
+        """Initialize storage recorders if enabled.
+
+        Creates S3 client and AudioRecorder/TranscriptRecorder instances.
+        Flushes any buffered raw audio to the recorder.
+        """
+        if not self.config.store_audio and not self.config.store_transcript:
+            return
+
+        if not self.config.s3_bucket:
+            logger.warning(
+                "storage_disabled_no_bucket",
+                msg="store_audio/store_transcript enabled but S3_BUCKET not set",
+            )
+            return
+
+        try:
+            from dalston.realtime_sdk.audio_recorder import (
+                AudioRecorder,
+                TranscriptRecorder,
+            )
+            from dalston.realtime_sdk.s3 import get_s3_client
+
+            # Create S3 client
+            self._s3_client = await get_s3_client(
+                bucket=self.config.s3_bucket,
+                endpoint_url=self.config.s3_endpoint_url,
+            ).__aenter__()
+
+            if self.config.store_audio:
+                self._audio_recorder = AudioRecorder(
+                    session_id=self.config.session_id,
+                    s3_client=self._s3_client,
+                    bucket=self.config.s3_bucket,
+                    sample_rate=self.config.sample_rate,
+                )
+                await self._audio_recorder.start()
+
+                # Flush any buffered raw audio
+                for chunk in self._raw_audio_buffer:
+                    await self._audio_recorder.write(chunk)
+                self._raw_audio_buffer.clear()
+
+                logger.info(
+                    "audio_recorder_initialized",
+                    bucket=self.config.s3_bucket,
+                )
+
+            if self.config.store_transcript:
+                self._transcript_recorder = TranscriptRecorder(
+                    session_id=self.config.session_id,
+                    s3_client=self._s3_client,
+                    bucket=self.config.s3_bucket,
+                )
+                logger.info(
+                    "transcript_recorder_initialized",
+                    bucket=self.config.s3_bucket,
+                )
+
+        except Exception as e:
+            logger.error("storage_init_failed", error=str(e))
+            # Continue without storage - don't fail the session
+
+    async def _cleanup_storage(self) -> None:
+        """Cleanup S3 client and abort any incomplete uploads."""
+        if self._audio_recorder and not self._audio_recorder._finalized:
+            try:
+                await self._audio_recorder.abort()
+            except Exception:
+                pass
+
+        if self._s3_client:
+            try:
+                await self._s3_client.__aexit__(None, None, None)
+            except Exception:
+                pass
+            self._s3_client = None
+
     async def _send_session_end(self) -> None:
         """Send session.end message."""
         # Flush any remaining audio
@@ -590,6 +700,52 @@ class SessionHandler:
             for s in self._assembler.get_segments()
         ]
 
+        # Finalize storage and get URIs
+        audio_uri = None
+        transcript_uri = None
+
+        if self._audio_recorder:
+            try:
+                audio_uri = await self._audio_recorder.finalize()
+                logger.info("audio_recorded", audio_uri=audio_uri)
+            except Exception as e:
+                logger.error("audio_finalize_failed", error=str(e))
+
+        if self._transcript_recorder:
+            try:
+                # Build transcript data matching batch format
+                transcript_data = {
+                    "session_id": self.config.session_id,
+                    "language": self.config.language,
+                    "duration_seconds": self._assembler.current_time,
+                    "text": self._assembler.get_full_transcript(),
+                    "utterances": [
+                        {
+                            "id": i,
+                            "start": s.start,
+                            "end": s.end,
+                            "text": s.text,
+                            "words": [
+                                {
+                                    "word": w.word,
+                                    "start": w.start,
+                                    "end": w.end,
+                                    "confidence": w.confidence,
+                                }
+                                for w in (s.words or [])
+                            ],
+                        }
+                        for i, s in enumerate(self._assembler.get_segments())
+                    ],
+                }
+                transcript_uri = await self._transcript_recorder.save(transcript_data)
+                logger.info("transcript_saved", transcript_uri=transcript_uri)
+            except Exception as e:
+                logger.error("transcript_save_failed", error=str(e))
+
+        # Cleanup S3 client
+        await self._cleanup_storage()
+
         await self._send(
             SessionEndMessage(
                 session_id=self.config.session_id,
@@ -597,6 +753,8 @@ class SessionHandler:
                 total_speech_duration=self._assembler.current_time,
                 transcript=self._assembler.get_full_transcript(),
                 segments=segments,
+                audio_uri=audio_uri,
+                transcript_uri=transcript_uri,
             )
         )
 

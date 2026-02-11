@@ -529,4 +529,9 @@ class RealtimeEngine(ABC):
             min_silence_duration_ms=get_int_param(
                 "min_silence_duration_ms", 500, min_val=50, max_val=2000
             ),
+            # Storage options
+            store_audio=get_bool_param("store_audio", False),
+            store_transcript=get_bool_param("store_transcript", False),
+            s3_bucket=os.environ.get("S3_BUCKET", "dalston-artifacts"),
+            s3_endpoint_url=os.environ.get("S3_ENDPOINT_URL"),
         )
