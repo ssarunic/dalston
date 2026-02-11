@@ -388,6 +388,35 @@ GET /v1/realtime/sessions/{session_id}/transcript
 
 Returns transcript JSON.
 
+### Delete Session
+
+```
+DELETE /v1/realtime/sessions/{session_id}
+```
+
+Deletes a session and its associated data. Only non-active sessions can be deleted.
+
+**Constraints:**
+
+- Active sessions cannot be deleted (returns 409 Conflict)
+- Only the tenant that owns the session can delete it
+
+**Response:**
+
+```json
+{
+  "deleted": true,
+  "session_id": "sess_abc123"
+}
+```
+
+**Error Responses:**
+
+| Status | Description                   |
+|--------|-------------------------------|
+| 404    | Session not found             |
+| 409    | Cannot delete active session  |
+
 ---
 
 ## Statistics Tracking

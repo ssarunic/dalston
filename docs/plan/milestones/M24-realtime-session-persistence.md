@@ -6,7 +6,7 @@
 | **Duration** | 3-4 days |
 | **Dependencies** | M6 in progress |
 | **Deliverable** | Sessions stored in DB, audio/transcript saved to S3, console visibility |
-| **Status** | Not Started |
+| **Status** | In Progress |
 
 ## User Story
 
@@ -193,6 +193,7 @@ WS /v1/audio/transcriptions/stream?store_transcript=true
 ```text
 GET /v1/realtime/sessions
 GET /v1/realtime/sessions/{session_id}
+DELETE /v1/realtime/sessions/{session_id}
 ```
 
 **List response:**
@@ -230,6 +231,16 @@ GET /v1/realtime/sessions/{session_id}
 | `until` | datetime | Sessions started before this time |
 | `limit` | int | Max results (default 50) |
 | `offset` | int | Pagination offset |
+
+**Delete endpoint:**
+
+Only non-active sessions (completed, error, interrupted) can be deleted. Attempting to delete an active session returns 409 Conflict.
+
+```text
+DELETE /v1/realtime/sessions/{session_id}
+
+Response: {"deleted": true, "session_id": "sess_abc123"}
+```
 
 ---
 
@@ -305,12 +316,15 @@ curl http://localhost:8000/v1/realtime/sessions/sess_abc123/transcript
 
 ## Checkpoint
 
-- [ ] **RealtimeSessionModel** created in PostgreSQL on session start
-- [ ] **Session stats** updated during session (duration, utterances, words)
+- [x] **RealtimeSessionModel** created in PostgreSQL on session start
+- [x] **Session stats** updated during session (duration, utterances, words)
 - [ ] **Audio recording** streams to S3 during session (opt-in)
 - [ ] **Transcript saved** to S3 on session end (opt-in)
-- [ ] **Session list API** returns past and active sessions
-- [ ] **Web console** shows realtime sessions page
+- [x] **Session list API** returns past and active sessions
+- [x] **Session delete API** removes non-active sessions
+- [x] **Web console** shows realtime sessions page with delete functionality
+- [x] **SDK support** for list, get, and delete session operations
+- [x] **CLI support** via `dalston sessions list|get|delete` commands
 - [ ] **Resume parameter** links sessions together
 
 **Next**: [M7: Hybrid Mode](M07-hybrid-mode.md) — Create batch enhancement jobs from recorded sessions

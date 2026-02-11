@@ -409,6 +409,20 @@ All spec features implemented:
 
 The Python package was renamed from `dalston` to `dalston_sdk` to avoid import conflicts with the `dalston/` server package in the repo root. Users import as `from dalston_sdk import Dalston`. The PyPI distribution name remains `dalston-sdk`.
 
+### Session Management (M24)
+
+Added realtime session management methods to both `Dalston` and `AsyncDalston`:
+
+- `list_realtime_sessions(limit, status)` — List realtime sessions with optional filtering
+- `get_realtime_session(session_id)` — Get detailed session information
+- `delete_realtime_session(session_id)` — Delete a non-active session
+
+New types added:
+
+- `RealtimeSessionStatus` — Enum for session status (active, completed, error, interrupted)
+- `RealtimeSessionInfo` — Dataclass with full session metadata
+- `RealtimeSessionList` — Paginated list response
+
 ### Deferred
 
 - `audio_url` parameter — In SDK but gateway doesn't support yet
