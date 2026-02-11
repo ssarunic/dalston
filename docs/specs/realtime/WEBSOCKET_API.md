@@ -275,6 +275,10 @@ Authentication is required via the `api_key` query parameter. See the [Authentic
 | `interim_results` | boolean | `true` | Return partial transcripts |
 | `word_timestamps` | boolean | `false` | Include word-level timing |
 | `enhance_on_end` | boolean | `false` | Trigger batch enhancement on session end |
+| `max_utterance_duration` | float | `60.0` | Max seconds before forcing utterance end (0=unlimited) |
+| `vad_threshold` | float | `0.5` | Speech detection threshold (0.0-1.0, lower=more sensitive) |
+| `min_speech_duration_ms` | integer | `250` | Min speech duration before valid utterance (50-2000) |
+| `min_silence_duration_ms` | integer | `500` | Silence duration to trigger endpoint (50-2000) |
 
 ### Supported Encodings
 

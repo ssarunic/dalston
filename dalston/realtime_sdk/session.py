@@ -60,6 +60,9 @@ class SessionConfig:
         interim_results: Whether partial transcripts are sent
         word_timestamps: Whether word-level timing is included
         max_utterance_duration: Max seconds before forcing utterance end (0=unlimited)
+        vad_threshold: VAD speech probability threshold (0.0-1.0)
+        min_speech_duration_ms: Min speech duration before valid utterance (ms)
+        min_silence_duration_ms: Silence duration to trigger endpoint (ms)
     """
 
     session_id: str
@@ -72,6 +75,10 @@ class SessionConfig:
     interim_results: bool = True
     word_timestamps: bool = False
     max_utterance_duration: float = 60.0  # Force utterance end after 60s
+    # VAD tuning parameters (ElevenLabs-compatible naming)
+    vad_threshold: float = 0.5  # Speech detection threshold (0.0-1.0)
+    min_speech_duration_ms: int = 250  # Min speech duration (ms)
+    min_silence_duration_ms: int = 500  # Silence to trigger endpoint (ms)
 
 
 class AudioBuffer:
@@ -252,7 +259,14 @@ class SessionHandler:
             sample_rate=config.sample_rate,
             encoding=config.encoding,
         )
-        self._vad = VADProcessor(VADConfig(sample_rate=config.sample_rate))
+        self._vad = VADProcessor(
+            VADConfig(
+                sample_rate=config.sample_rate,
+                speech_threshold=config.vad_threshold,
+                min_speech_duration=config.min_speech_duration_ms / 1000.0,
+                min_silence_duration=config.min_silence_duration_ms / 1000.0,
+            )
+        )
         self._assembler = TranscriptAssembler()
 
         # Session state

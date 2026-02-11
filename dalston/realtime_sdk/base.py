@@ -376,7 +376,11 @@ class RealtimeEngine(ABC):
             return
 
         # Parse query parameters
-        config = self._parse_connection_params(path)
+        try:
+            config = self._parse_connection_params(path)
+        except ValueError as e:
+            await websocket.close(1002, f"Invalid parameter: {e}")
+            return
 
         # Create session handler
         handler = SessionHandler(
@@ -450,17 +454,37 @@ class RealtimeEngine(ABC):
             value = get_param(name, str(default).lower())
             return value.lower() in ("true", "1", "yes")
 
-        def get_int_param(name: str, default: int) -> int:
+        def get_int_param(
+            name: str,
+            default: int,
+            min_val: int | None = None,
+            max_val: int | None = None,
+        ) -> int:
             try:
-                return int(get_param(name, str(default)))
+                value = int(get_param(name, str(default)))
             except ValueError:
                 return default
+            if min_val is not None and value < min_val:
+                raise ValueError(f"{name} must be >= {min_val}, got {value}")
+            if max_val is not None and value > max_val:
+                raise ValueError(f"{name} must be <= {max_val}, got {value}")
+            return value
 
-        def get_float_param(name: str, default: float) -> float:
+        def get_float_param(
+            name: str,
+            default: float,
+            min_val: float | None = None,
+            max_val: float | None = None,
+        ) -> float:
             try:
-                return float(get_param(name, str(default)))
+                value = float(get_param(name, str(default)))
             except ValueError:
                 return default
+            if min_val is not None and value < min_val:
+                raise ValueError(f"{name} must be >= {min_val}, got {value}")
+            if max_val is not None and value > max_val:
+                raise ValueError(f"{name} must be <= {max_val}, got {value}")
+            return value
 
         # Use session_id from Gateway if provided, otherwise generate one
         # (Gateway passes session_id for coordination with Session Router)
@@ -473,10 +497,24 @@ class RealtimeEngine(ABC):
             language=get_param("language", "auto"),
             model=get_param("model", "fast"),
             encoding=get_param("encoding", "pcm_s16le"),
-            sample_rate=get_int_param("sample_rate", 16000),
-            channels=get_int_param("channels", 1),
+            sample_rate=get_int_param(
+                "sample_rate", 16000, min_val=8000, max_val=48000
+            ),
+            channels=get_int_param("channels", 1, min_val=1, max_val=2),
             enable_vad=get_bool_param("enable_vad", True),
             interim_results=get_bool_param("interim_results", True),
             word_timestamps=get_bool_param("word_timestamps", False),
-            max_utterance_duration=get_float_param("max_utterance_duration", 60.0),
+            max_utterance_duration=get_float_param(
+                "max_utterance_duration", 60.0, min_val=0.0, max_val=300.0
+            ),
+            # VAD tuning parameters (ElevenLabs-compatible)
+            vad_threshold=get_float_param(
+                "vad_threshold", 0.5, min_val=0.0, max_val=1.0
+            ),
+            min_speech_duration_ms=get_int_param(
+                "min_speech_duration_ms", 250, min_val=50, max_val=2000
+            ),
+            min_silence_duration_ms=get_int_param(
+                "min_silence_duration_ms", 500, min_val=50, max_val=2000
+            ),
         )
