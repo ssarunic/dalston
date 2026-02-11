@@ -155,6 +155,18 @@ class RealtimeEngine(ABC):
         """
         raise NotImplementedError
 
+    def supports_streaming(self) -> bool:
+        """Whether this engine supports native streaming with partial results.
+
+        Override to return True for engines like Parakeet that support
+        incremental transcription. When True, SessionHandler will send
+        partial results during speech.
+
+        Returns:
+            True if engine supports streaming partials. Default: False
+        """
+        return False
+
     def get_models(self) -> list[str]:
         """Return list of loaded model variants.
 
@@ -276,8 +288,8 @@ class RealtimeEngine(ABC):
             self._handle_connection,
             "0.0.0.0",
             self.port,
-            ping_interval=30,
-            ping_timeout=10,
+            ping_interval=20,
+            ping_timeout=20,
             process_request=capture_request_path,
         ) as server:
             self._server = server
@@ -372,6 +384,7 @@ class RealtimeEngine(ABC):
             config=config,
             transcribe_fn=self.transcribe,
             on_session_end=self._on_session_end,
+            supports_streaming=self.supports_streaming(),
         )
 
         # Track session
