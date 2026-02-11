@@ -1,31 +1,404 @@
 """ElevenLabs-compatible Speech-to-Text API endpoints.
 
-GET /v1/speech-to-text/transcripts/{transcription_id}/export/{format}
+POST /v1/speech-to-text - Submit audio for transcription
+GET /v1/speech-to-text/transcripts/{transcription_id} - Get transcript
+GET /v1/speech-to-text/transcripts/{transcription_id}/export/{format} - Export transcript
 
 Note: ElevenLabs uses xi-api-key header for authentication.
 This is supported by the auth middleware alongside Bearer tokens.
 """
 
-from typing import Annotated
+import asyncio
+from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+)
+from pydantic import BaseModel
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dalston.common.models import JobStatus
+from dalston.common.events import publish_job_created
+from dalston.common.models import JobStatus, resolve_model
 from dalston.config import Settings
 from dalston.gateway.dependencies import (
     RequireJobsRead,
+    RequireJobsWrite,
     get_db,
     get_export_service,
     get_jobs_service,
+    get_redis,
     get_settings,
 )
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
 
-router = APIRouter(prefix="/speech-to-text", tags=["speech-to-text"])
+router = APIRouter(prefix="/speech-to-text", tags=["speech-to-text", "elevenlabs"])
+
+
+# =============================================================================
+# ElevenLabs Response Models
+# =============================================================================
+
+
+class ElevenLabsWord(BaseModel):
+    """ElevenLabs word format."""
+
+    text: str
+    start: float
+    end: float
+    type: str = "word"
+    speaker_id: str | None = None
+
+
+class ElevenLabsTranscript(BaseModel):
+    """ElevenLabs transcript response format."""
+
+    language_code: str | None = None
+    language_probability: float | None = None
+    text: str
+    words: list[ElevenLabsWord] | None = None
+    transcription_id: str
+
+
+class ElevenLabsAsyncResponse(BaseModel):
+    """ElevenLabs async submission response."""
+
+    message: str = "Request processed successfully"
+    request_id: str | None = None
+    transcription_id: str
+
+
+class ElevenLabsProcessingResponse(BaseModel):
+    """Response when transcript is still processing."""
+
+    status: str
+    transcription_id: str
+    message: str | None = None
+
+
+# =============================================================================
+# Model ID Mapping
+# =============================================================================
+
+
+def map_elevenlabs_model(model_id: str) -> str:
+    """Map ElevenLabs model_id to Dalston model."""
+    model_map = {
+        "scribe_v1": "fast",
+        "scribe_v1_experimental": "fast",
+        "scribe_v2": "accurate",
+    }
+    return model_map.get(model_id, model_id)
+
+
+def map_timestamps_granularity(granularity: str) -> str:
+    """Map ElevenLabs timestamps_granularity to Dalston format."""
+    granularity_map = {
+        "none": "none",
+        "word": "word",
+        "character": "word",  # Dalston doesn't support character-level, use word
+    }
+    return granularity_map.get(granularity, "word")
+
+
+# =============================================================================
+# POST /v1/speech-to-text - Create Transcription
+# =============================================================================
+
+
+@router.post(
+    "",
+    response_model=ElevenLabsTranscript | ElevenLabsAsyncResponse,
+    status_code=200,
+    summary="Create transcription (ElevenLabs compatible)",
+    description="Transcribe audio file. ElevenLabs-compatible endpoint.",
+    responses={
+        200: {
+            "description": "Transcription result (sync) or submission confirmation (async)"
+        },
+        202: {"description": "Async transcription started"},
+        400: {"description": "Invalid request"},
+        401: {"description": "Invalid API key"},
+        422: {"description": "Invalid file format"},
+    },
+)
+async def create_transcription(
+    file: Annotated[UploadFile, File(description="Audio file to transcribe")],
+    api_key: RequireJobsWrite,
+    model_id: Annotated[
+        str,
+        Form(description="Model ID: scribe_v1, scribe_v1_experimental, or scribe_v2"),
+    ] = "scribe_v1",
+    language_code: Annotated[
+        str | None,
+        Form(
+            description="Language code (ISO-639-1 or ISO-639-3) or null for auto-detect"
+        ),
+    ] = None,
+    diarize: Annotated[
+        bool,
+        Form(description="Enable speaker diarization"),
+    ] = False,
+    num_speakers: Annotated[
+        int | None,
+        Form(description="Exact number of speakers (1-32)", ge=1, le=32),
+    ] = None,
+    timestamps_granularity: Annotated[
+        str,
+        Form(description="Timestamp granularity: none, word, or character"),
+    ] = "word",
+    tag_audio_events: Annotated[
+        bool,
+        Form(description="Detect audio events (laughter, etc.)"),
+    ] = True,
+    webhook: Annotated[
+        bool,
+        Form(description="Process asynchronously with webhook callback"),
+    ] = False,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    settings: Settings = Depends(get_settings),
+    jobs_service: JobsService = Depends(get_jobs_service),
+) -> ElevenLabsTranscript | ElevenLabsAsyncResponse:
+    """Create a transcription using ElevenLabs-compatible API.
+
+    This endpoint accepts ElevenLabs parameters and translates them
+    to Dalston's internal format.
+    """
+    # Validate file
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="File must have a filename")
+
+    # Map ElevenLabs parameters to Dalston parameters
+    dalston_model = map_elevenlabs_model(model_id)
+    dalston_language = language_code or "auto"
+    dalston_speaker_detection = "diarize" if diarize else "none"
+    dalston_timestamps = map_timestamps_granularity(timestamps_granularity)
+
+    # Resolve model to get engine configuration
+    try:
+        model_def = resolve_model(dalston_model)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "type": "invalid_request_error",
+                "message": str(e),
+                "param": "model_id",
+            },
+        ) from e
+
+    # Read file content for upload
+    file_content = await file.read()
+    await file.seek(0)
+
+    # Build parameters dict (matching native API format with transcribe_config)
+    parameters = {
+        "model": model_def.id,
+        "engine_transcribe": model_def.engine,
+        "transcribe_config": {
+            "model": model_def.engine_model,
+        },
+        "language": dalston_language,
+        "speaker_detection": dalston_speaker_detection,
+        "timestamps_granularity": dalston_timestamps,
+    }
+    if num_speakers is not None:
+        parameters["num_speakers"] = num_speakers
+
+    # Upload audio to S3 (use temp job ID, will re-upload)
+    storage = StorageService(settings)
+    audio_uri = await storage.upload_audio(
+        job_id=UUID("00000000-0000-0000-0000-000000000000"),
+        file=file,
+        file_content=file_content,
+    )
+
+    # Create job in database
+    job = await jobs_service.create_job(
+        db=db,
+        tenant_id=api_key.tenant_id,
+        audio_uri="pending",  # Will update
+        parameters=parameters,
+    )
+
+    # Re-upload with correct job ID path
+    await file.seek(0)
+    audio_uri = await storage.upload_audio(
+        job_id=job.id,
+        file=file,
+        file_content=file_content,
+    )
+
+    # Update job with correct audio URI
+    job.audio_uri = audio_uri
+    await db.commit()
+    await db.refresh(job)
+
+    # Publish job.created event for orchestrator
+    await publish_job_created(redis, job.id)
+
+    # If async/webhook mode, return immediately
+    if webhook:
+        return ElevenLabsAsyncResponse(
+            message="Request processed successfully",
+            transcription_id=str(job.id),
+        )
+
+    # For sync mode, wait for completion (with timeout)
+    job_id = job.id  # Store for polling
+    max_wait_seconds = 300  # 5 minute timeout for sync
+    poll_interval = 1.0
+    elapsed = 0.0
+
+    while elapsed < max_wait_seconds:
+        await asyncio.sleep(poll_interval)
+        elapsed += poll_interval
+
+        # Expire cached job object and refresh from database
+        db.expire(job)
+        await db.refresh(job)
+
+        if job.status == JobStatus.COMPLETED.value:
+            # Fetch transcript and return ElevenLabs format
+            transcript = await storage.get_transcript(job_id)
+            return _format_elevenlabs_response(job_id, transcript)
+
+        if job.status == JobStatus.FAILED.value:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Transcription failed: {job.error or 'Unknown error'}",
+            )
+
+        if job.status == JobStatus.CANCELLED.value:
+            raise HTTPException(status_code=400, detail="Transcription was cancelled")
+
+    # Timeout - return async response
+    raise HTTPException(
+        status_code=408,
+        detail="Transcription timeout. Use webhook=true for long files.",
+    )
+
+
+# =============================================================================
+# GET /v1/speech-to-text/transcripts/{id} - Get Transcript
+# =============================================================================
+
+
+@router.get(
+    "/transcripts/{transcription_id}",
+    response_model=ElevenLabsTranscript | ElevenLabsProcessingResponse,
+    summary="Get transcript (ElevenLabs compatible)",
+    description="Retrieve transcription result. ElevenLabs-compatible endpoint.",
+    responses={
+        200: {"description": "Transcription result or processing status"},
+        404: {"description": "Transcription not found"},
+    },
+)
+async def get_transcript(
+    transcription_id: UUID,
+    api_key: RequireJobsRead,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    jobs_service: JobsService = Depends(get_jobs_service),
+) -> ElevenLabsTranscript | ElevenLabsProcessingResponse:
+    """Get transcription result in ElevenLabs format.
+
+    Returns the transcript if completed, or processing status if still running.
+    """
+    job = await jobs_service.get_job(db, transcription_id, tenant_id=api_key.tenant_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Transcription not found")
+
+    # If not completed, return status
+    if job.status != JobStatus.COMPLETED.value:
+        status_map = {
+            JobStatus.PENDING.value: "pending",
+            JobStatus.RUNNING.value: "processing",
+            JobStatus.FAILED.value: "failed",
+            JobStatus.CANCELLING.value: "cancelling",
+            JobStatus.CANCELLED.value: "cancelled",
+        }
+        return ElevenLabsProcessingResponse(
+            status=status_map.get(job.status, job.status),
+            transcription_id=str(transcription_id),
+            message=job.error if job.status == JobStatus.FAILED.value else None,
+        )
+
+    # Fetch transcript from storage
+    storage = StorageService(settings)
+    transcript = await storage.get_transcript(transcription_id)
+
+    return _format_elevenlabs_response(transcription_id, transcript)
+
+
+def _format_elevenlabs_response(
+    transcription_id: UUID,
+    transcript: dict[str, Any],
+) -> ElevenLabsTranscript:
+    """Format Dalston transcript as ElevenLabs response."""
+    # Extract words in ElevenLabs format
+    # First check top-level words, then extract from segments
+    words = None
+    word_list = transcript.get("words")
+
+    if not word_list:
+        # Extract words from segments
+        word_list = []
+        for segment in transcript.get("segments", []):
+            segment_words = segment.get("words", [])
+            speaker = segment.get("speaker")
+            for w in segment_words:
+                w_copy = dict(w)
+                if speaker and not w_copy.get("speaker"):
+                    w_copy["speaker"] = speaker
+                word_list.append(w_copy)
+
+    if word_list:
+        words = [
+            ElevenLabsWord(
+                text=w.get("text", w.get("word", "")),
+                start=w.get("start", 0),
+                end=w.get("end", 0),
+                type="word",
+                speaker_id=w.get("speaker") or w.get("speaker_id"),
+            )
+            for w in word_list
+        ]
+
+    # Get language from metadata (matches native API structure)
+    metadata = transcript.get("metadata", {})
+    language_code = (
+        metadata.get("language")
+        or transcript.get("language_code")
+        or transcript.get("language")
+    )
+    language_probability = metadata.get("language_confidence") or transcript.get(
+        "language_probability"
+    )
+
+    return ElevenLabsTranscript(
+        language_code=language_code,
+        language_probability=language_probability,
+        text=transcript.get("text", ""),
+        words=words,
+        transcription_id=str(transcription_id),
+    )
+
+
+# =============================================================================
+# GET /v1/speech-to-text/transcripts/{id}/export/{format} - Export Transcript
+# =============================================================================
 
 
 @router.get(
