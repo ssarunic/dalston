@@ -132,26 +132,27 @@ class ParakeetStreamingEngine(RealtimeEngine):
                 using="en",
             )
 
-        # Prepare audio for NeMo (expects float32)
+        # Prepare audio for NeMo (expects float32 numpy array)
         if audio.dtype != np.float32:
             audio = audio.astype(np.float32)
 
-        # Convert to tensor
-        audio_tensor = torch.from_numpy(audio).unsqueeze(0).to(self._device)
+        # Ensure audio is 1D (NeMo expects shape (samples,))
+        if audio.ndim > 1:
+            audio = audio.squeeze()
 
-        # Transcribe with streaming-aware inference
-        # Use autocast for GPU, inference_mode for CPU
+        # Transcribe using NeMo's transcribe method
+        # NeMo expects a list of numpy arrays or file paths
         with torch.inference_mode():
             if self._device == "cuda":
                 with torch.cuda.amp.autocast():
                     hypotheses = self._model.transcribe(
-                        audio_tensor,
+                        [audio],  # Pass as list of numpy arrays
                         batch_size=1,
                         return_hypotheses=True,
                     )
             else:
                 hypotheses = self._model.transcribe(
-                    audio_tensor,
+                    [audio],  # Pass as list of numpy arrays
                     batch_size=1,
                     return_hypotheses=True,
                 )
@@ -204,6 +205,10 @@ class ParakeetStreamingEngine(RealtimeEngine):
             language="en",
             confidence=1.0,  # Parakeet is English-only, confidence is implicit
         )
+
+    def supports_streaming(self) -> bool:
+        """Parakeet supports native streaming with partial results."""
+        return True
 
     def get_models(self) -> list[str]:
         """Return list of supported model variants.

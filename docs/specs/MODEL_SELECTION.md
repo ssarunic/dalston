@@ -17,7 +17,8 @@ This specification defines how users select transcription models in Dalston's AP
 ### Real-time API (WebSocket)
 
 - **Model selection**: `model=fast|accurate` query parameter
-- **Mapping**: `fast` → distil-whisper, `accurate` → faster-whisper-large-v3
+- **Default engine**: Parakeet (native streaming, not VAD-chunked Whisper)
+- **Mapping**: `fast` → parakeet-0.6b, `accurate` → parakeet-1.1b
 
 ### Engine Level
 
@@ -50,12 +51,12 @@ This specification defines how users select transcription models in Dalston's AP
 
 ### Alternatives Considered
 
-| Approach | Example | Pros | Cons |
-|----------|---------|------|------|
-| **Abstract tiers** | `model="large"` | Simple | Doesn't map across architectures |
-| **Engine + size** | `engine="whisper"`, `size="large"` | Explicit | Two params, validation complexity |
-| **HuggingFace paths** | `model="Systran/faster-whisper-large-v3"` | Precise | Verbose, couples to HF |
-| **Provider-style** | `model="whisper-large-v3"` | Clear, extensible | Requires registry |
+| Approach              | Example                                     | Pros              | Cons                              |
+| --------------------- | ------------------------------------------- | ----------------- | --------------------------------- |
+| **Abstract tiers**    | `model="large"`                             | Simple            | Doesn't map across architectures  |
+| **Engine + size**     | `engine="whisper"`, `size="large"`          | Explicit          | Two params, validation complexity |
+| **HuggingFace paths** | `model="Systran/faster-whisper-large-v3"`   | Precise           | Verbose, couples to HF            |
+| **Provider-style**    | `model="whisper-large-v3"`                  | Clear, extensible | Requires registry                 |
 
 ### Selected Approach: Provider-Style Names
 
@@ -70,6 +71,7 @@ distil-whisper        # Distilled Whisper (English-only)
 parakeet-1.1b         # NVIDIA Parakeet 1.1B
 parakeet-0.6b         # NVIDIA Parakeet 0.6B
 canary-qwen           # NVIDIA Canary-Qwen
+voxtral-4b            # Mistral Voxtral (multilingual streaming)
 ```
 
 ### Rationale
@@ -127,13 +129,13 @@ class ModelDefinition:
 
 ### Aliases
 
-| Alias | Resolves To | Use Case |
-|-------|-------------|----------|
-| `fast` | `distil-whisper` | Speed-optimized |
-| `accurate` | `whisper-large-v3` | Quality-optimized |
-| `large` | `whisper-large-v3` | Backwards compat |
-| `base` | `whisper-base` | Backwards compat |
-| `parakeet` | `parakeet-110m` | Default Parakeet model |
+| Alias | Resolves To (Batch) | Resolves To (Realtime) | Use Case |
+|-------|---------------------|------------------------|----------|
+| `fast` | `distil-whisper` | `parakeet-0.6b` | Speed-optimized |
+| `accurate` | `whisper-large-v3` | `parakeet-1.1b` | Quality-optimized |
+| `large` | `whisper-large-v3` | — | Backwards compat |
+| `base` | `whisper-base` | — | Backwards compat |
+| `parakeet` | — | `parakeet-0.6b` | Default Parakeet model |
 
 ---
 
@@ -275,6 +277,78 @@ model="auto"
 language="hr"           # Route to best Croatian model
 streaming=True          # Route to streaming-capable model
 ```
+
+---
+
+## Models of Interest
+
+Future models being evaluated for integration into Dalston.
+
+### Voxtral Mini 4B Realtime (Mistral AI)
+
+**Released:** February 2026 as open weights (Apache 2.0)
+**HuggingFace:** [mistralai/Voxtral-Mini-4B-Realtime-2602](https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602)
+
+Voxtral Mini 4B Realtime 2602 is a multilingual, natively-streaming speech transcription model - among the first open-source solutions to achieve accuracy comparable to offline systems with sub-500ms latency.
+
+| Attribute | Value |
+|-----------|-------|
+| **Architecture** | ~3.4B LLM + ~0.6B causal audio encoder |
+| **Parameters** | ~4B total |
+| **Languages** | 13: English, Chinese, Hindi, Spanish, Arabic, French, Portuguese, Russian, German, Japanese, Korean, Italian, Dutch |
+| **Latency** | Configurable 80ms-2400ms (sweet spot: 480ms) |
+| **Streaming** | Native (causal encoder, sliding window attention) |
+| **Word timestamps** | Yes |
+| **VRAM** | ≥16GB minimum (~35GB practical) |
+| **Throughput** | >12.5 tokens/second |
+
+**Performance (WER at 480ms latency):**
+
+| Benchmark | Voxtral Realtime | Voxtral Offline |
+|-----------|------------------|-----------------|
+| FLEURS avg (13 langs) | 8.72% | 5.90% |
+| English | 4.90% | 3.32% |
+| Spanish | 3.31% | 2.63% |
+| Meanwhile (long-form EN) | 5.05% | 4.08% |
+
+**Why it matters for Dalston:**
+
+- First viable **multilingual streaming** model (Parakeet is English-only)
+- True streaming architecture (not VAD-chunked like Whisper)
+- Competitive accuracy with offline models at <500ms latency
+- Open weights under Apache 2.0 license
+
+**Proposed registry entry:**
+
+```python
+"voxtral-4b": ModelDefinition(
+    id="voxtral-4b",
+    engine="voxtral",
+    engine_model="mistralai/Voxtral-Mini-4B-Realtime-2602",
+    name="Voxtral Mini 4B Realtime",
+    description="Multilingual streaming transcription, 13 languages, <500ms latency",
+    tier="balanced",
+    languages=13,
+    streaming=True,
+    word_timestamps=True,
+    vram_gb=16.0,
+    speed_factor=5.0,  # Estimated vs Whisper baseline
+),
+```
+
+**Proposed aliases:**
+
+| Alias | Resolves To | Use Case |
+|-------|-------------|----------|
+| `streaming` | `voxtral-4b` | Default multilingual streaming model |
+| `realtime` | `voxtral-4b` | Alias for streaming |
+
+**Integration considerations:**
+
+1. Requires new `engines/realtime/voxtral-streaming/` engine implementation
+2. WebSocket protocol compatible with existing realtime SDK
+3. May need vLLM or similar for efficient inference
+4. Could become default for `model=auto` when `streaming=true` and language is in supported set
 
 ---
 

@@ -174,6 +174,9 @@ MODEL_ALIASES: dict[str, str] = {
     "base": "whisper-base",
     "tiny": "whisper-tiny",
     "parakeet": "parakeet-110m",
+    # ElevenLabs compatibility aliases (map to Parakeet for realtime)
+    "scribe_v1": "parakeet-0.6b",
+    "scribe_v2": "parakeet-1.1b",
 }
 
 DEFAULT_MODEL = "whisper-large-v3"

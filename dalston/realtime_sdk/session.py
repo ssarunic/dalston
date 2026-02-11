@@ -6,6 +6,7 @@ audio buffering, VAD, ASR, and transcript assembly.
 
 from __future__ import annotations
 
+import asyncio
 import audioop
 import time
 from collections.abc import Awaitable, Callable
@@ -30,6 +31,7 @@ from dalston.realtime_sdk.protocol import (
     SessionConfigInfo,
     SessionEndMessage,
     TranscriptFinalMessage,
+    TranscriptPartialMessage,
     VADSpeechEndMessage,
     VADSpeechStartMessage,
     WordInfo,
@@ -217,12 +219,16 @@ class SessionHandler:
         await handler.run()
     """
 
+    # Number of chunks between partial results for streaming models
+    PARTIAL_RESULT_INTERVAL_CHUNKS = 5  # ~500ms at 100ms chunks
+
     def __init__(
         self,
         websocket: WebSocketServerProtocol,
         config: SessionConfig,
         transcribe_fn: TranscribeCallback,
         on_session_end: Callable[[str, float, str], Awaitable[None]] | None = None,
+        supports_streaming: bool = False,
     ) -> None:
         """Initialize session handler.
 
@@ -231,11 +237,13 @@ class SessionHandler:
             config: Session configuration
             transcribe_fn: Callback to engine's transcribe method
             on_session_end: Optional async callback when session ends
+            supports_streaming: Whether engine supports streaming partial results
         """
         self.websocket = websocket
         self.config = config
         self._transcribe_fn = transcribe_fn
         self._on_session_end = on_session_end
+        self._supports_streaming = supports_streaming
 
         # Initialize components
         self._buffer = AudioBuffer(
@@ -249,6 +257,10 @@ class SessionHandler:
         self._started_at = time.time()
         self._error: str | None = None
         self._ended = False
+
+        # Streaming partial results state
+        self._chunks_since_partial = 0
+        self._speech_audio_buffer: list[np.ndarray] = []
 
     async def run(self) -> None:
         """Main session processing loop.
@@ -318,6 +330,10 @@ class SessionHandler:
         vad_result = self._vad.process_chunk(audio)
 
         if vad_result.event == "speech_start":
+            # Reset streaming state
+            self._chunks_since_partial = 0
+            self._speech_audio_buffer = []
+
             if self.config.enable_vad:
                 await self._send(
                     VADSpeechStartMessage(timestamp=self._assembler.current_time)
@@ -329,9 +345,69 @@ class SessionHandler:
                     VADSpeechEndMessage(timestamp=self._assembler.current_time)
                 )
 
+            # Clear streaming state
+            self._speech_audio_buffer = []
+            self._chunks_since_partial = 0
+
             # Transcribe if we have speech audio
             if vad_result.speech_audio is not None and len(vad_result.speech_audio) > 0:
                 await self._transcribe_and_send(vad_result.speech_audio)
+
+        # Handle streaming partial results during speech
+        elif (
+            self._vad.is_speaking
+            and self._supports_streaming
+            and self.config.interim_results
+        ):
+            # Accumulate audio for partial transcription
+            self._speech_audio_buffer.append(audio.copy())
+            self._chunks_since_partial += 1
+
+            # Send partial result every N chunks
+            if self._chunks_since_partial >= self.PARTIAL_RESULT_INTERVAL_CHUNKS:
+                await self._send_partial_result()
+                self._chunks_since_partial = 0
+
+    async def _send_partial_result(self) -> None:
+        """Send partial transcription result during speech.
+
+        Called periodically for streaming models while VAD is in speech state.
+        """
+        if not self._speech_audio_buffer:
+            return
+
+        try:
+            # Concatenate accumulated audio
+            audio = np.concatenate(self._speech_audio_buffer)
+
+            # Transcribe in thread pool to avoid blocking event loop
+            result = await asyncio.to_thread(
+                self._transcribe_fn,
+                audio,
+                self.config.language,
+                self.config.model,
+            )
+
+            if not result.text:
+                return
+
+            # Calculate timing
+            audio_duration = len(audio) / self.config.sample_rate
+            start_time = self._assembler.current_time
+            end_time = start_time + audio_duration
+
+            # Send partial result
+            await self._send(
+                TranscriptPartialMessage(
+                    text=result.text,
+                    start=start_time,
+                    end=end_time,
+                )
+            )
+
+        except Exception as e:
+            logger.debug("partial_transcription_error", error=str(e))
+            # Don't send error for partial - it's best-effort
 
     async def _transcribe_and_send(self, audio: np.ndarray) -> None:
         """Transcribe audio and send result.
@@ -340,8 +416,11 @@ class SessionHandler:
             audio: Speech audio to transcribe
         """
         try:
-            # Call ASR
-            result = self._transcribe_fn(
+            # Call ASR in thread pool to avoid blocking event loop
+            # This is critical for slow models (e.g., CPU inference) to
+            # prevent WebSocket keepalive ping timeouts
+            result = await asyncio.to_thread(
+                self._transcribe_fn,
                 audio,
                 self.config.language,
                 self.config.model,

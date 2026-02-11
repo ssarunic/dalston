@@ -127,11 +127,20 @@ engines/realtime/whisper-streaming/
 **Deliverables:**
 
 - Receive audio chunks (16-bit PCM @ 16kHz)
-- Run VAD to detect speech boundaries
-- Transcribe on speech end
-- Send partial results every 500ms during speech
+- Run VAD to detect speech boundaries (non-streaming models only)
+- Transcribe on speech end (non-streaming) or incrementally (streaming)
+- Send partial results for streaming models only (Parakeet, Voxtral)
 - Track full transcript with assembler
 - Send session end message with full transcript
+
+**Model-dependent behavior:**
+
+| Model Type                | VAD      | Partial Results | Behavior                                        |
+| ------------------------- | -------- | --------------- | ----------------------------------------------- |
+| Streaming (Parakeet)      | Optional | Native support  | Incremental transcription as audio arrives      |
+| Non-streaming (Whisper)   | Required | Not supported   | VAD detects utterance end → transcribe → final  |
+
+Note: `interim_results` parameter is ignored for non-streaming models.
 
 ---
 

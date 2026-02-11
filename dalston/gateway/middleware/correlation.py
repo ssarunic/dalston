@@ -72,8 +72,14 @@ class CorrelationIdMiddleware:
         dalston.logging.reset_context(request_id=request_id)
 
         # Store on scope state so route handlers can access request.state.request_id.
-        # Delegate to Starlette's Request which handles State creation/wrapping.
-        Request(scope).state.request_id = request_id
+        # For HTTP, use Request; for WebSocket, set directly on scope state dict.
+        if scope["type"] == "http":
+            Request(scope).state.request_id = request_id
+        else:
+            # WebSocket - ensure state dict exists and set request_id
+            if "state" not in scope:
+                scope["state"] = {}
+            scope["state"]["request_id"] = request_id
 
         if scope["type"] == "http":
             # Wrap send to inject the X-Request-ID response header

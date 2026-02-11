@@ -59,10 +59,12 @@ COPY engines/realtime/parakeet-streaming/requirements.txt .
 # Install PyTorch with appropriate backend
 # CPU: Use CPU-only wheels (smaller, faster install)
 # CUDA: Use default wheels with CUDA support
+# torchaudio is installed from regular PyPI (works for both)
 ARG DEVICE=cuda
 RUN if [ "$DEVICE" = "cpu" ]; then \
         pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu; \
-    fi
+    fi && \
+    pip install --no-cache-dir torchaudio
 
 # Install NeMo and dependencies
 RUN pip install --no-cache-dir -r requirements.txt
@@ -74,7 +76,7 @@ model = nemo_asr.models.ASRModel.from_pretrained('nvidia/parakeet-rnnt-0.6b'); \
 print('Model nvidia/parakeet-rnnt-0.6b downloaded successfully')"
 
 # Download Silero VAD model
-RUN python -c "import torch; torch.hub.load('snakers4/silero-vad', 'silero_vad', force_reload=False)" \
+RUN python -c "import torch; torch.hub.load('snakers4/silero-vad', 'silero_vad', trust_repo=True)" \
     && echo "Silero VAD model downloaded successfully"
 
 # Copy engine files

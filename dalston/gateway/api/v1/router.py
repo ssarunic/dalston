@@ -31,6 +31,9 @@ router.include_router(speech_to_text.router)
 
 # Mount real-time transcription routes
 router.include_router(realtime.stream_router)  # WS /v1/audio/transcriptions/stream
+router.include_router(
+    realtime.elevenlabs_router
+)  # WS /v1/speech-to-text/realtime (ElevenLabs)
 router.include_router(realtime.management_router)  # GET /v1/realtime/*
 
 # Mount webhook management routes

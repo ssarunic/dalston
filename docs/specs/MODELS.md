@@ -245,6 +245,20 @@ Comprehensive reference for speech-to-text model selection in Dalston's modular 
 - **Pros:** Ready-to-use via TorchAudio, good accuracy/efficiency balance
 - **Cons:** English only, no punctuation, research baseline (limited production features)
 
+#### 8. Mistral Voxtral Mini 4B Realtime
+
+- **Developer:** Mistral AI (February 2026)
+- **License:** Apache 2.0 (fully permissive)
+- **Hardware:** ~4B params; ≥16GB VRAM (practical: ~35GB for full performance)
+- **Languages:** 13: English, Chinese, Hindi, Spanish, Arabic, French, Portuguese, Russian, German, Japanese, Korean, Italian, Dutch
+- **WER:** 8.72% FLEURS average at 480ms; 4.90% English; approaches offline Whisper accuracy
+- **Speed:** Configurable latency 80ms-2400ms (sweet spot: 480ms); >12.5 tokens/second throughput
+- **Architecture:** ~3.4B LLM + ~0.6B causal audio encoder with sliding window attention
+- **Features:** Native streaming (not chunked), configurable latency/accuracy tradeoff, word timestamps
+- **Pros:** First viable multilingual streaming model, matches offline accuracy at <500ms, Apache license, handles infinite audio via sliding window
+- **Cons:** High VRAM requirements, 13 languages (not 99 like Whisper), requires vLLM or similar for inference
+- **HuggingFace:** [mistralai/Voxtral-Mini-4B-Realtime-2602](https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602)
+
 ---
 
 ## Dalston Primary Stack
@@ -265,7 +279,8 @@ Comprehensive reference for speech-to-text model selection in Dalston's modular 
 | Max English accuracy | Canary-Qwen 2.5B | English-only workloads with high accuracy requirements |
 | Massive multilingual | Omnilingual ASR | Need 100+ languages beyond Whisper's 99 |
 | Edge/mobile | Moonshine | On-device privacy requirements |
-| Low-latency multilingual streaming | Kyutai STT | Need streaming in French + English |
+| Low-latency multilingual streaming | **Voxtral Mini 4B** | Need streaming in 13 major languages at <500ms |
+| Low-latency EN/FR streaming | Kyutai STT | Need streaming in French + English with smaller footprint |
 
 ---
 
@@ -308,7 +323,7 @@ Comprehensive reference for speech-to-text model selection in Dalston's modular 
 | License | Commercial | Models |
 |---------|------------|--------|
 | **MIT** | ✓ | Whisper, Distil-Whisper, pyannote, Phi-4, Moonshine (EN) |
-| **Apache 2.0** | ✓ | Granite Speech, Omnilingual ASR, wav2vec2, WeNet, Sherpa, Vosk |
+| **Apache 2.0** | ✓ | Granite Speech, Omnilingual ASR, wav2vec2, WeNet, Sherpa, Vosk, Voxtral |
 | **CC-BY-4.0** | ✓ (attribution) | Canary-Qwen, Kyutai STT |
 | **NVIDIA Open** | ✓ (attribution) | Parakeet/Nemotron |
 | **CC-BY-NC** | ✗ | MMS, CrisperWhisper |
