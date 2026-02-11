@@ -178,7 +178,7 @@ curl http://localhost:8000/v1/audio/transcriptions/stream/{session_id}/enhanceme
 - Validates: requires `store_audio=true` for audio to exist
 - Validates: session must be in terminal state (not active)
 - Validates: session cannot already have an enhancement job
-- Maps realtime models (fast, parakeet) to batch model (large-v3)
+- Maps realtime models (fast, parakeet) to batch model (whisper-large-v3)
 
 **Gateway Integration (7.2):**
 
@@ -230,7 +230,7 @@ When creating enhancement jobs from realtime sessions:
 ```python
 parameters = {
     "language": session.language or "auto",
-    "model": "large-v3",  # Use full model for accuracy
+    "model": "whisper-large-v3",  # Use full model for accuracy
     "speaker_detection": "diarize",
     "timestamps_granularity": "word",
     "llm_cleanup": enhance_llm_cleanup,  # Optional

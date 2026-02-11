@@ -30,6 +30,7 @@ from dalston.gateway.dependencies import (
 )
 from dalston.gateway.middleware.auth import authenticate_websocket
 from dalston.gateway.services.auth import AuthService, Scope
+from dalston.gateway.services.enhancement import EnhancementService
 from dalston.gateway.services.realtime_sessions import RealtimeSessionService
 from dalston.session_router import SessionRouter
 
@@ -326,8 +327,6 @@ async def realtime_transcription(
             and audio_uri
         ):
             try:
-                from dalston.gateway.services.enhancement import EnhancementService
-
                 enhancement_service = EnhancementService(db_session, get_settings())
 
                 # Get the session from DB to pass to enhancement service
@@ -335,17 +334,16 @@ async def realtime_transcription(
                     allocation.session_id
                 )
                 if session_record:
-                    # Temporarily set fields since session hasn't been finalized yet
-                    session_record.audio_uri = audio_uri
-                    session_record.status = session_status  # Must not be "active"
-
-                    enhancement_job = await enhancement_service.create_enhancement_job(
-                        session=session_record,
-                        enhance_diarization=True,
-                        enhance_word_timestamps=True,
-                        # TODO: Read these from session parameters when we add them
-                        enhance_llm_cleanup=False,
-                        enhance_emotions=False,
+                    enhancement_job = (
+                        await enhancement_service.create_enhancement_job_with_audio(
+                            session=session_record,
+                            audio_uri=audio_uri,
+                            enhance_diarization=True,
+                            enhance_word_timestamps=True,
+                            # TODO: Read these from session parameters when we add them
+                            enhance_llm_cleanup=False,
+                            enhance_emotions=False,
+                        )
                     )
                     enhancement_job_id = enhancement_job.id
 

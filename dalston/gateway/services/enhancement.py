@@ -136,6 +136,94 @@ class EnhancementService:
 
         return job
 
+    async def create_enhancement_job_with_audio(
+        self,
+        session: RealtimeSessionModel,
+        audio_uri: str,
+        enhance_diarization: bool = True,
+        enhance_word_timestamps: bool = True,
+        enhance_llm_cleanup: bool = False,
+        enhance_emotions: bool = False,
+    ) -> JobModel:
+        """Create a batch enhancement job with an explicit audio URI.
+
+        This method is used when the session's audio_uri hasn't been persisted yet
+        (e.g., during the session finalization flow). It avoids mutating the session
+        object by accepting the audio URI as a parameter.
+
+        Args:
+            session: The realtime session to enhance
+            audio_uri: URI of the recorded audio (e.g., s3://bucket/path/audio.wav)
+            enhance_diarization: Enable speaker diarization (default: True)
+            enhance_word_timestamps: Enable word-level timestamps (default: True)
+            enhance_llm_cleanup: Enable LLM-based cleanup (default: False)
+            enhance_emotions: Enable emotion detection (default: False)
+
+        Returns:
+            Created JobModel
+
+        Raises:
+            EnhancementError: If enhancement cannot be created
+        """
+        log = logger.bind(session_id=str(session.id))
+
+        # Validate: must have audio URI
+        if not audio_uri:
+            raise EnhancementError(
+                "Cannot create enhancement job: no audio URI provided."
+            )
+
+        # Validate: session must not be active
+        if session.status == "active":
+            raise EnhancementError(
+                "Cannot create enhancement job: session is still active."
+            )
+
+        # Validate: session should not already have an enhancement job
+        if session.enhancement_job_id is not None:
+            raise EnhancementError(
+                f"Session already has enhancement job: {session.enhancement_job_id}"
+            )
+
+        # Build enhancement job parameters
+        batch_model = self._get_batch_model(session.model)
+
+        parameters = {
+            "language": session.language or "auto",
+            "model": batch_model,
+            "speaker_detection": "diarize" if enhance_diarization else "none",
+            "timestamps_granularity": "word" if enhance_word_timestamps else "segment",
+            "llm_cleanup": enhance_llm_cleanup,
+            "emotion_detection": enhance_emotions,
+            "_enhancement": {
+                "source_session_id": str(session.id),
+                "original_model": session.model,
+                "original_engine": session.engine,
+            },
+        }
+
+        log.info(
+            "creating_enhancement_job",
+            audio_uri=audio_uri,
+            parameters=parameters,
+        )
+
+        job = await self.jobs_service.create_job(
+            db=self.db,
+            tenant_id=session.tenant_id,
+            audio_uri=audio_uri,
+            parameters=parameters,
+            webhook_url=None,
+            webhook_metadata=None,
+        )
+
+        log.info(
+            "enhancement_job_created",
+            job_id=str(job.id),
+        )
+
+        return job
+
     def _get_batch_model(self, realtime_model: str | None) -> str:
         """Map realtime model to appropriate batch model.
 
@@ -149,23 +237,23 @@ class EnhancementService:
             Model ID to use for batch processing
         """
         # Map fast/distil models to full-size equivalents
-        # Default to large-v3 for best quality
+        # Default to whisper-large-v3 for best quality
         model_mapping = {
-            "fast": "large-v3",
-            "distil-whisper-large-v3-en": "large-v3",
-            "distil-whisper-large-v2": "large-v3",
-            "parakeet": "large-v3",
-            "parakeet-0.6b": "large-v3",
-            "parakeet-1.1b": "large-v3",
-            "scribe_v1": "large-v3",
-            "scribe_v2": "large-v3",
+            "fast": "whisper-large-v3",
+            "distil-whisper-large-v3-en": "whisper-large-v3",
+            "distil-whisper-large-v2": "whisper-large-v3",
+            "parakeet": "whisper-large-v3",
+            "parakeet-0.6b": "whisper-large-v3",
+            "parakeet-1.1b": "whisper-large-v3",
+            "scribe_v1": "whisper-large-v3",
+            "scribe_v2": "whisper-large-v3",
         }
 
         if realtime_model and realtime_model.lower() in model_mapping:
             return model_mapping[realtime_model.lower()]
 
-        # If already a full model or unknown, default to large-v3
-        return "large-v3"
+        # If already a full model or unknown, default to whisper-large-v3
+        return "whisper-large-v3"
 
 
 async def create_enhancement_for_session(
@@ -176,6 +264,10 @@ async def create_enhancement_for_session(
     enhance_emotions: bool = False,
 ) -> JobModel | None:
     """Convenience function to create enhancement job for a session by ID.
+
+    TODO: This function is currently unused in production but available for
+    future use cases where enhancement needs to be triggered programmatically
+    (e.g., background workers, scheduled jobs, or admin tools).
 
     Args:
         db: Database session

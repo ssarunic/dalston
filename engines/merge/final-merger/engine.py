@@ -72,6 +72,12 @@ class FinalMergerEngine(Engine):
             audio_duration = raw_prepare.get("duration", 0.0)
             audio_channels = raw_prepare.get("channels", 1)
             sample_rate = raw_prepare.get("sample_rate", 16000)
+            if not raw_prepare:
+                self.logger.warning(
+                    "using_default_audio_metadata",
+                    reason="No prepare output available",
+                    defaults={"duration": 0.0, "channels": 1, "sample_rate": 16000},
+                )
         else:
             # Get audio metadata from the first channel file
             if prepare_output.channel_files:
@@ -84,6 +90,11 @@ class FinalMergerEngine(Engine):
                 audio_duration = 0.0
                 audio_channels = 1
                 sample_rate = 16000
+                self.logger.warning(
+                    "using_default_audio_metadata",
+                    reason="Prepare output has no channel files",
+                    defaults={"duration": 0.0, "channels": 1, "sample_rate": 16000},
+                )
 
         if not transcribe_output:
             raw_transcribe = input.get_raw_output("transcribe") or {}
@@ -279,6 +290,11 @@ class FinalMergerEngine(Engine):
                 audio_duration = 0.0
                 audio_channels = 2
                 sample_rate = 16000
+                self.logger.warning(
+                    "using_default_audio_metadata",
+                    reason="Prepare output has no channel files (per-channel mode)",
+                    defaults={"duration": 0.0, "channels": 2, "sample_rate": 16000},
+                )
             channel_count = config.get("channel_count") or len(channel_files) or 2
         else:
             raw_prepare = input.get_raw_output("prepare") or {}
@@ -287,6 +303,12 @@ class FinalMergerEngine(Engine):
             sample_rate = raw_prepare.get("sample_rate", 16000)
             channel_files = raw_prepare.get("channel_files", [])
             channel_count = config.get("channel_count") or len(channel_files) or 2
+            if not raw_prepare:
+                self.logger.warning(
+                    "using_default_audio_metadata",
+                    reason="No prepare output available (per-channel mode)",
+                    defaults={"duration": 0.0, "channels": 2, "sample_rate": 16000},
+                )
 
         self.logger.info("merging_per_channel_outputs", channel_count=channel_count)
 
