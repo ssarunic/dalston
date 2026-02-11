@@ -52,7 +52,7 @@ def models(
                 console.print(json.dumps({"error": str(e)}, indent=2))
             else:
                 console.print(f"[red]Error:[/red] {e}")
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
 
         if as_json:
             console.print(
@@ -90,7 +90,7 @@ def models(
                 console.print(json.dumps({"error": str(e)}, indent=2))
             else:
                 console.print(f"[red]Error:[/red] {e}")
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
 
         if as_json:
             console.print(

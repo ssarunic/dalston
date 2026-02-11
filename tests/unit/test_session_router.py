@@ -29,6 +29,7 @@ class TestWorkerState:
             active_sessions=2,
             models_loaded=["fast"],
             languages_supported=["auto"],
+            engine="whisper",
             gpu_memory_used="2GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
@@ -46,6 +47,7 @@ class TestWorkerState:
             active_sessions=4,
             models_loaded=["fast"],
             languages_supported=["auto"],
+            engine="whisper",
             gpu_memory_used="4GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
@@ -63,6 +65,7 @@ class TestWorkerState:
             active_sessions=5,  # Over capacity
             models_loaded=["fast"],
             languages_supported=["auto"],
+            engine="whisper",
             gpu_memory_used="4GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
@@ -80,6 +83,7 @@ class TestWorkerState:
             active_sessions=2,
             models_loaded=["fast"],
             languages_supported=["auto"],
+            engine="whisper",
             gpu_memory_used="2GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
@@ -97,6 +101,7 @@ class TestWorkerState:
             active_sessions=3,
             models_loaded=["fast"],
             languages_supported=["auto"],
+            engine="whisper",
             gpu_memory_used="3GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
@@ -114,6 +119,7 @@ class TestWorkerState:
             active_sessions=0,
             models_loaded=["fast"],
             languages_supported=["auto"],
+            engine="whisper",
             gpu_memory_used="0GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
@@ -131,6 +137,7 @@ class TestWorkerState:
             active_sessions=1,
             models_loaded=["fast"],
             languages_supported=["auto"],
+            engine="whisper",
             gpu_memory_used="1GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
@@ -148,6 +155,7 @@ class TestWorkerState:
             active_sessions=4,
             models_loaded=["fast"],
             languages_supported=["auto"],
+            engine="whisper",
             gpu_memory_used="4GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
@@ -391,6 +399,7 @@ class TestSessionAllocator:
             active_sessions=2,
             models_loaded=["fast"],
             languages_supported=["auto"],
+            engine="whisper",
             gpu_memory_used="2GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
@@ -439,6 +448,7 @@ class TestSessionAllocator:
             active_sessions=4,  # Already at capacity
             models_loaded=["fast"],
             languages_supported=["auto"],
+            engine="whisper",
             gpu_memory_used="4GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
@@ -544,8 +554,10 @@ class TestWorkerAllocation:
             worker_id="worker-1",
             endpoint="ws://localhost:9000",
             session_id="sess_abc123",
+            engine="whisper",
         )
 
         assert allocation.worker_id == "worker-1"
+        assert allocation.engine == "whisper"
         assert allocation.endpoint == "ws://localhost:9000"
         assert allocation.session_id == "sess_abc123"

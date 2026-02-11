@@ -97,81 +97,63 @@ class TestVADProcessor:
 
         assert processor.config.speech_threshold == 0.7
 
-    @patch("dalston.realtime_sdk.vad.torch")
-    def test_silence_to_speech_transition(
-        self, mock_torch, vad_processor, mock_silero_model
-    ):
+    def test_silence_to_speech_transition(self, vad_processor, mock_silero_model):
         """Test transition from silence to speech state."""
-        # Mock high speech probability
-        mock_silero_model.return_value.item.return_value = 0.9
-        mock_torch.from_numpy.return_value = MagicMock()
-        mock_torch.no_grad.return_value.__enter__ = MagicMock()
-        mock_torch.no_grad.return_value.__exit__ = MagicMock()
+        # Mock _get_speech_prob to return high probability (speech)
+        with patch.object(vad_processor, "_get_speech_prob", return_value=0.9):
+            # Create audio chunk (100ms at 16kHz = 1600 samples)
+            audio = np.zeros(1600, dtype=np.float32)
 
-        # Create audio chunk (100ms at 16kHz = 1600 samples)
-        audio = np.zeros(1600, dtype=np.float32)
+            result = vad_processor.process_chunk(audio)
 
-        result = vad_processor.process_chunk(audio)
+            assert result.event == "speech_start"
+            assert vad_processor.state == VADState.SPEECH
+            assert vad_processor.is_speaking is True
 
-        assert result.event == "speech_start"
-        assert vad_processor.state == VADState.SPEECH
-        assert vad_processor.is_speaking is True
-
-    @patch("dalston.realtime_sdk.vad.torch")
-    def test_speech_continues(self, mock_torch, vad_processor, mock_silero_model):
+    def test_speech_continues(self, vad_processor, mock_silero_model):
         """Test speech continues without event."""
         # Start in speech state
         vad_processor._state = VADState.SPEECH
         vad_processor._speech_duration = 0.5
 
-        # Mock high speech probability
-        mock_silero_model.return_value.item.return_value = 0.9
-        mock_torch.from_numpy.return_value = MagicMock()
-        mock_torch.no_grad.return_value.__enter__ = MagicMock()
-        mock_torch.no_grad.return_value.__exit__ = MagicMock()
+        # Mock _get_speech_prob to return high probability (speech)
+        with patch.object(vad_processor, "_get_speech_prob", return_value=0.9):
+            audio = np.zeros(1600, dtype=np.float32)
+            result = vad_processor.process_chunk(audio)
 
-        audio = np.zeros(1600, dtype=np.float32)
-        result = vad_processor.process_chunk(audio)
+            assert result.event is None
+            assert vad_processor.state == VADState.SPEECH
 
-        assert result.event is None
-        assert vad_processor.state == VADState.SPEECH
-
-    @patch("dalston.realtime_sdk.vad.torch")
-    def test_speech_to_silence_transition(
-        self, mock_torch, vad_processor, mock_silero_model
-    ):
+    def test_speech_to_silence_transition(self, vad_processor, mock_silero_model):
         """Test transition from speech to silence with endpoint detection."""
-        config = VADConfig(min_silence_duration=0.2, min_speech_duration=0.1)
+        # Use 0.25s min_silence_duration so we need 3 chunks of 0.1s each
+        config = VADConfig(min_silence_duration=0.25, min_speech_duration=0.1)
         vad_processor.config = config
 
         # Start in speech state with accumulated audio
         vad_processor._state = VADState.SPEECH
         vad_processor._speech_duration = 0.5  # Enough speech duration
+        vad_processor._silence_duration = 0.0
         vad_processor._speech_buffer = [np.zeros(1600, dtype=np.float32)]
 
-        # Mock low speech probability (silence)
-        mock_silero_model.return_value.item.return_value = 0.1
-        mock_torch.from_numpy.return_value = MagicMock()
-        mock_torch.no_grad.return_value.__enter__ = MagicMock()
-        mock_torch.no_grad.return_value.__exit__ = MagicMock()
+        # Mock _get_speech_prob to return low probability (silence)
+        with patch.object(vad_processor, "_get_speech_prob", return_value=0.1):
+            audio = np.zeros(1600, dtype=np.float32)
 
-        audio = np.zeros(1600, dtype=np.float32)
+            # First chunk of silence (0.1s) - not enough for endpoint
+            result1 = vad_processor.process_chunk(audio)
+            assert result1.event is None
+            assert vad_processor._silence_duration == 0.1
 
-        # First chunk of silence - not enough for endpoint
-        vad_processor._silence_duration = 0.0
-        vad_processor.process_chunk(audio)
+            # Second chunk of silence (0.2s total) - still not enough
+            result2 = vad_processor.process_chunk(audio)
+            assert result2.event is None
+            assert vad_processor._silence_duration == 0.2
 
-        # Second chunk - still accumulating silence
-        vad_processor._silence_duration = 0.15
-        vad_processor.process_chunk(audio)
-
-        # Third chunk - should trigger endpoint
-        vad_processor._silence_duration = 0.25
-        result3 = vad_processor.process_chunk(audio)
-
-        # The third should trigger speech_end
-        assert result3.event == "speech_end"
-        assert vad_processor.state == VADState.SILENCE
+            # Third chunk of silence (0.3s total) - should trigger endpoint
+            result3 = vad_processor.process_chunk(audio)
+            assert result3.event == "speech_end"
+            assert vad_processor.state == VADState.SILENCE
 
     def test_flush_during_speech(self, vad_processor):
         """Test flushing remaining audio during speech."""
@@ -224,12 +206,8 @@ class TestVADProcessor:
 
     def test_lookback_buffer_maintained(self, vad_processor, mock_silero_model):
         """Test lookback buffer is maintained at correct size."""
-        with patch("dalston.realtime_sdk.vad.torch") as mock_torch:
-            mock_silero_model.return_value.item.return_value = 0.1  # Silence
-            mock_torch.from_numpy.return_value = MagicMock()
-            mock_torch.no_grad.return_value.__enter__ = MagicMock()
-            mock_torch.no_grad.return_value.__exit__ = MagicMock()
-
+        # Mock _get_speech_prob to return low probability (silence)
+        with patch.object(vad_processor, "_get_speech_prob", return_value=0.1):
             # Process more chunks than lookback_chunks
             for _ in range(5):
                 audio = np.zeros(1600, dtype=np.float32)

@@ -8,6 +8,7 @@ from unittest.mock import patch
 from dalston.common.pipeline_types import (
     AlignmentMethod,
     AlignOutput,
+    AudioMedia,
     DiarizeOutput,
     MergeOutput,
     PrepareOutput,
@@ -436,21 +437,25 @@ class TestOutputValidation:
     def test_prepare_output_validates_correctly(self):
         """Test PrepareOutput validates against the spec."""
         output = PrepareOutput(
-            audio_uri="s3://bucket/audio.wav",
-            duration=60.5,
-            sample_rate=16000,
-            channels=1,
-            original_format="mp3",
-            original_duration=60.5,
-            original_sample_rate=44100,
-            original_channels=2,
+            channel_files=[
+                AudioMedia(
+                    uri="s3://bucket/audio.wav",
+                    format="wav",
+                    duration=60.5,
+                    sample_rate=16000,
+                    channels=1,
+                    bit_depth=16,
+                )
+            ],
+            split_channels=False,
             engine_id="audio-prepare",
         )
 
         data = output.model_dump(mode="json")
-        assert data["duration"] == 60.5
-        assert data["sample_rate"] == 16000
-        assert data["original_format"] == "mp3"
+        assert len(data["channel_files"]) == 1
+        assert data["channel_files"][0]["duration"] == 60.5
+        assert data["channel_files"][0]["sample_rate"] == 16000
+        assert data["channel_files"][0]["format"] == "wav"
 
     def test_transcribe_output_roundtrip(self):
         """Test TranscribeOutput can be serialized and deserialized."""

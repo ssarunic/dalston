@@ -4,12 +4,33 @@ Tests the ParakeetStreamingEngine implementation with mocked NeMo models and CUD
 Run with: uv run --extra dev pytest tests/unit/test_parakeet_streaming.py
 """
 
+import importlib.util
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 # Skip all tests if torch not installed
 torch = pytest.importorskip("torch")
+
+
+def load_parakeet_streaming_engine():
+    """Load ParakeetStreamingEngine from engines directory using importlib."""
+    engine_path = Path("engines/realtime/parakeet-streaming/engine.py")
+    if not engine_path.exists():
+        pytest.skip("Parakeet streaming engine not found")
+
+    spec = importlib.util.spec_from_file_location(
+        "parakeet_streaming_engine", engine_path
+    )
+    if spec is None or spec.loader is None:
+        pytest.skip("Could not load parakeet streaming engine spec")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["parakeet_streaming_engine"] = module
+    spec.loader.exec_module(module)
+    return module.ParakeetStreamingEngine
 
 
 @pytest.fixture
@@ -53,12 +74,7 @@ class TestParakeetStreamingEngineGetModels:
 
     def test_get_models_returns_compatibility_aliases(self, mock_cuda_available):
         """Test that get_models returns parakeet, fast, and accurate."""
-        # Import with mocked CUDA
-        import sys
-
-        sys.path.insert(0, "engines/realtime/parakeet-streaming")
-        from engine import ParakeetStreamingEngine
-
+        ParakeetStreamingEngine = load_parakeet_streaming_engine()
         engine = ParakeetStreamingEngine()
         models = engine.get_models()
 
@@ -72,11 +88,7 @@ class TestParakeetStreamingEngineGetLanguages:
 
     def test_get_languages_returns_english_only(self, mock_cuda_available):
         """Test that get_languages returns only English."""
-        import sys
-
-        sys.path.insert(0, "engines/realtime/parakeet-streaming")
-        from engine import ParakeetStreamingEngine
-
+        ParakeetStreamingEngine = load_parakeet_streaming_engine()
         engine = ParakeetStreamingEngine()
         languages = engine.get_languages()
 
@@ -90,11 +102,7 @@ class TestParakeetStreamingEngineHealthCheck:
 
     def test_health_check_includes_required_fields(self, mock_cuda_available):
         """Test that health check includes GPU and model info."""
-        import sys
-
-        sys.path.insert(0, "engines/realtime/parakeet-streaming")
-        from engine import ParakeetStreamingEngine
-
+        ParakeetStreamingEngine = load_parakeet_streaming_engine()
         engine = ParakeetStreamingEngine()
         health = engine.health_check()
 
@@ -108,11 +116,7 @@ class TestParakeetStreamingEngineGPUMemory:
 
     def test_get_gpu_memory_usage_format(self, mock_cuda_available):
         """Test that GPU memory usage is returned in correct format."""
-        import sys
-
-        sys.path.insert(0, "engines/realtime/parakeet-streaming")
-        from engine import ParakeetStreamingEngine
-
+        ParakeetStreamingEngine = load_parakeet_streaming_engine()
         engine = ParakeetStreamingEngine()
         usage = engine.get_gpu_memory_usage()
 

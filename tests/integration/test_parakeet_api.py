@@ -29,9 +29,9 @@ class TestParakeetModelRegistry:
         assert "parakeet-1.1b" in MODEL_REGISTRY
 
     def test_parakeet_alias_resolves(self):
-        """Test that 'parakeet' alias resolves to parakeet-0.6b."""
+        """Test that 'parakeet' alias resolves to parakeet-110m."""
         model = resolve_model("parakeet")
-        assert model.id == "parakeet-0.6b"
+        assert model.id == "parakeet-110m"
 
     def test_parakeet_model_properties(self):
         """Test Parakeet model properties are correct."""
@@ -179,7 +179,7 @@ class TestTranscriptionAPIParakeet:
         """Test that 'parakeet' alias resolves correctly."""
         model = resolve_model("parakeet")
 
-        assert model.id == "parakeet-0.6b"
+        assert model.id == "parakeet-110m"
         assert model.engine == "parakeet"
 
     def test_invalid_parakeet_model_raises_error(self):

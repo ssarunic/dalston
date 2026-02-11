@@ -63,7 +63,9 @@ async def get_model(model_id: str):
     try:
         model = resolve_model(model_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Model not found: {model_id}"
+        ) from None
 
     return {
         "id": model.id,

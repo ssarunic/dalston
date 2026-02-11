@@ -82,13 +82,13 @@ class TestModelAliases:
     def test_all_aliases_resolve_to_valid_models(self):
         """Test that all aliases point to valid models."""
         for alias, model_id in MODEL_ALIASES.items():
-            assert (
-                model_id in MODEL_REGISTRY
-            ), f"Alias '{alias}' points to unknown model '{model_id}'"
+            assert model_id in MODEL_REGISTRY, (
+                f"Alias '{alias}' points to unknown model '{model_id}'"
+            )
 
     def test_parakeet_alias(self):
-        """Test that 'parakeet' alias points to parakeet-0.6b."""
-        assert MODEL_ALIASES["parakeet"] == "parakeet-0.6b"
+        """Test that 'parakeet' alias points to parakeet-110m."""
+        assert MODEL_ALIASES["parakeet"] == "parakeet-110m"
 
 
 class TestResolveModel:
@@ -222,13 +222,17 @@ class TestModelDefinitionFields:
         """Test that all Parakeet models are English-only."""
         parakeet_models = [m for m in MODEL_REGISTRY.values() if m.engine == "parakeet"]
         for model in parakeet_models:
-            assert model.languages == 1, f"Parakeet model {model.id} should be English-only"
+            assert model.languages == 1, (
+                f"Parakeet model {model.id} should be English-only"
+            )
 
     def test_parakeet_models_support_streaming(self):
         """Test that all Parakeet models support native streaming."""
         parakeet_models = [m for m in MODEL_REGISTRY.values() if m.engine == "parakeet"]
         for model in parakeet_models:
-            assert model.streaming is True, f"Parakeet model {model.id} should support streaming"
+            assert model.streaming is True, (
+                f"Parakeet model {model.id} should support streaming"
+            )
 
     def test_model_speed_factors_ordered(self):
         """Test that smaller models have higher speed factors."""
