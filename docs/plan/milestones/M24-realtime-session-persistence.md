@@ -6,7 +6,7 @@
 | **Duration** | 3-4 days |
 | **Dependencies** | M6 in progress |
 | **Deliverable** | Sessions stored in DB, audio/transcript saved to S3, console visibility |
-| **Status** | In Progress |
+| **Status** | Nearly Complete |
 
 ## User Story
 
@@ -328,3 +328,80 @@ curl http://localhost:8000/v1/realtime/sessions/sess_abc123/transcript
 - [ ] **Resume parameter** links sessions together
 
 **Next**: [M7: Hybrid Mode](M07-hybrid-mode.md) — Create batch enhancement jobs from recorded sessions
+
+---
+
+## Implementation Summary (February 2026)
+
+### What Was Built
+
+**Database & Session Lifecycle (24.1-24.2):**
+
+- `RealtimeSessionModel` in PostgreSQL with full session metadata
+- Session created on WebSocket connect, finalized on disconnect
+- Stats (duration, utterance count, word count) updated on session end
+- Engine tracking added to differentiate whisper vs parakeet workers
+
+**Audio Recording (24.3):**
+
+- `AudioRecorder` class using S3 multipart upload for streaming
+- Raw PCM buffered during session, converted to WAV on finalize
+- Storage path: `s3://{bucket}/sessions/{session_id}/audio.wav`
+- Graceful abort on session interruption
+
+**Transcript Persistence (24.4):**
+
+- `TranscriptRecorder` saves final transcript JSON to S3
+- Format matches batch job output for consistency
+- Storage path: `s3://{bucket}/sessions/{session_id}/transcript.json`
+
+**API & Console (24.5-24.6):**
+
+- `GET /v1/realtime/sessions` - List sessions with filtering
+- `GET /v1/realtime/sessions/{id}` - Session details with URIs
+- `DELETE /v1/realtime/sessions/{id}` - Delete non-active sessions
+- Web console "Realtime Sessions" page with detail view
+- SDK and CLI support for session management
+
+**Key Technical Decisions:**
+
+1. **Unified S3 Configuration**: Removed duplicate S3 config from `SessionConfig`, now uses `dalston.config.Settings` for consistent configuration across gateway and workers
+2. **Async Context Manager Lifecycle**: Proper handling of aioboto3 client lifecycle by storing context manager reference
+3. **Container Networking**: Hardcoded `S3_ENDPOINT_URL=http://minio:9000` in docker-compose for container-to-container communication
+
+### Files Changed
+
+| Component | Key Files |
+|-----------|-----------|
+| Database | `dalston/gateway/models/realtime.py`, migrations |
+| Storage | `dalston/realtime_sdk/audio_recorder.py`, `dalston/common/s3.py` |
+| Session Handler | `dalston/realtime_sdk/session.py` |
+| Gateway | `dalston/gateway/api/v1/realtime.py` |
+| Protocol | `dalston/realtime_sdk/protocol.py` (SessionEndMessage with URIs) |
+| Config | `docker-compose.yml`, `pyproject.toml` |
+
+---
+
+## Future Work
+
+### Session Resume (24.7) - Not Yet Implemented
+
+The `resume_session_id` parameter for linking sessions together is not yet implemented. This would allow:
+
+- Linking a new session to a previous one via `previous_session_id`
+- Returning `resumed_from` in `session.begin` message
+- Post-processing merge of linked session audio/transcripts
+
+### Potential Enhancements
+
+1. **Audio Download Endpoints**: Add `GET /sessions/{id}/audio` and `GET /sessions/{id}/transcript` for direct download (currently only URIs returned)
+
+2. **Real-time Stats Updates**: Currently stats are captured only on session end. Could add periodic updates during session for long-running transcriptions.
+
+3. **Presigned URLs**: Generate time-limited presigned S3 URLs for audio/transcript access instead of returning raw S3 URIs.
+
+4. **Session Retention Policy**: Add configurable TTL for sessions and automatic cleanup of old sessions/artifacts.
+
+5. **Session Merge API**: Merge multiple linked sessions into a single audio file and transcript.
+
+6. **Hard Resume**: True session resume with state restoration (requires transcript checkpoints, audio position tracking, state serialization).

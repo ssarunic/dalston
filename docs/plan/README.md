@@ -28,7 +28,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M17](milestones/M17-api-key-management.md) | API Key Management | February 2026 |
 | [M21](milestones/M21-admin-webhooks.md) | Admin Webhooks | February 2026 |
 
-### In Progress (7)
+### In Progress (8)
 
 | # | Milestone | Notes |
 |---|-----------|-------|
@@ -39,8 +39,9 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M13](milestones/M13-cli.md) | CLI | `cli/dalston_cli/` |
 | [M16](milestones/M16-aws-deployment.md) | AWS Deployment | `infra/terraform/` |
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
+| [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Audio/transcript S3 storage working; session resume pending |
 
-### Not Started (6)
+### Not Started (5)
 
 | # | Milestone | Goal |
 |---|-----------|------|
@@ -49,7 +50,6 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M15](milestones/M15-console-authentication.md) | Console Auth | Secure web console access |
 | [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | OpenTelemetry spans |
 | [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | Prometheus + Grafana |
-| [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Session DB, audio/transcript storage, console visibility |
 
 ---
 
@@ -113,7 +113,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 
 | # | Milestone | Goal | Days | Status |
 |---|-----------|------|------|--------|
-| [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Session DB, audio/transcript S3 storage, console visibility | 3-4 | Not Started |
+| [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Session DB, audio/transcript S3 storage, console visibility | 3-4 | Nearly Complete |
 
 ---
 
