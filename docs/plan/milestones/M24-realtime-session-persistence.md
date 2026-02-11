@@ -318,8 +318,8 @@ curl http://localhost:8000/v1/realtime/sessions/sess_abc123/transcript
 
 - [x] **RealtimeSessionModel** created in PostgreSQL on session start
 - [x] **Session stats** updated during session (duration, utterances, words)
-- [ ] **Audio recording** streams to S3 during session (opt-in)
-- [ ] **Transcript saved** to S3 on session end (opt-in)
+- [x] **Audio recording** streams to S3 during session (opt-in)
+- [x] **Transcript saved** to S3 on session end (opt-in)
 - [x] **Session list API** returns past and active sessions
 - [x] **Session delete API** removes non-active sessions
 - [x] **Web console** shows realtime sessions page with delete functionality
