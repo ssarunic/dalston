@@ -200,7 +200,6 @@ async def create_transcription(
 
     # Read file content for upload
     file_content = await file.read()
-    await file.seek(0)
 
     # Build parameters dict (matching native API format with transcribe_config)
     parameters = {
@@ -216,23 +215,16 @@ async def create_transcription(
     if num_speakers is not None:
         parameters["num_speakers"] = num_speakers
 
-    # Upload audio to S3 (use temp job ID, will re-upload)
-    storage = StorageService(settings)
-    audio_uri = await storage.upload_audio(
-        job_id=UUID("00000000-0000-0000-0000-000000000000"),
-        file=file,
-        file_content=file_content,
-    )
-
-    # Create job in database
+    # Create job first with placeholder URI to get real job ID
     job = await jobs_service.create_job(
         db=db,
         tenant_id=api_key.tenant_id,
-        audio_uri="pending",  # Will update
+        audio_uri="pending",
         parameters=parameters,
     )
 
-    # Re-upload with correct job ID path
+    # Upload once with correct job ID
+    storage = StorageService(settings)
     await file.seek(0)
     audio_uri = await storage.upload_audio(
         job_id=job.id,

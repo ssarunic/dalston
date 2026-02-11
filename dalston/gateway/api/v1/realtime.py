@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import json
 from typing import Annotated
 
@@ -18,15 +19,31 @@ from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from dalston.common.models import resolve_model
+from dalston.common.redis import get_redis as _get_redis
+from dalston.db.session import get_db as _get_db
 from dalston.gateway.dependencies import (
     RequireJobsRead,
     get_session_router,
 )
 from dalston.gateway.middleware.auth import authenticate_websocket
-from dalston.gateway.services.auth import Scope
+from dalston.gateway.services.auth import AuthService, Scope
 from dalston.session_router import SessionRouter
 
 logger = structlog.get_logger()
+
+
+async def _get_auth_service() -> tuple[AuthService, any]:
+    """Get AuthService for WebSocket authentication.
+
+    Returns:
+        Tuple of (AuthService, db_session) for use in WebSocket endpoints.
+        Caller should ensure db_session lifecycle is managed properly.
+    """
+    redis = await _get_redis()
+    db_gen = _get_db()
+    db = await db_gen.__anext__()
+    return AuthService(db, redis), db_gen
+
 
 # Router for WebSocket endpoint (mounted under /audio/transcriptions)
 stream_router = APIRouter(prefix="/audio/transcriptions", tags=["realtime"])
@@ -89,22 +106,17 @@ async def realtime_transcription(
 
     # Authenticate BEFORE accepting the connection
     # This allows us to reject with proper close codes
-    # Use the same dependency pattern as REST endpoints
-    from dalston.common.redis import get_redis as _get_redis
-    from dalston.db.session import get_db as _get_db
-    from dalston.gateway.services.auth import AuthService
-
-    redis = await _get_redis()
-    async for db in _get_db():
-        auth_service = AuthService(db, redis)
-        break
-
-    api_key = await authenticate_websocket(
-        websocket, auth_service, required_scope=Scope.REALTIME
-    )
-    if api_key is None:
-        # Connection was closed with appropriate error code
-        return
+    auth_service, db_gen = await _get_auth_service()
+    try:
+        api_key = await authenticate_websocket(
+            websocket, auth_service, required_scope=Scope.REALTIME
+        )
+        if api_key is None:
+            # Connection was closed with appropriate error code
+            return
+    finally:
+        # Ensure the database generator is properly closed
+        await db_gen.aclose()
 
     # Accept WebSocket connection after successful auth
     await websocket.accept()
@@ -242,21 +254,16 @@ async def elevenlabs_realtime_transcription(
         await websocket.close(code=4503, reason="Service unavailable")
         return
 
-    # Authenticate
-    from dalston.common.redis import get_redis as _get_redis
-    from dalston.db.session import get_db as _get_db
-    from dalston.gateway.services.auth import AuthService
-
-    redis = await _get_redis()
-    async for db in _get_db():
-        auth_service = AuthService(db, redis)
-        break
-
-    api_key = await authenticate_websocket(
-        websocket, auth_service, required_scope=Scope.REALTIME
-    )
-    if api_key is None:
-        return
+    # Authenticate BEFORE accepting the connection
+    auth_service, db_gen = await _get_auth_service()
+    try:
+        api_key = await authenticate_websocket(
+            websocket, auth_service, required_scope=Scope.REALTIME
+        )
+        if api_key is None:
+            return
+    finally:
+        await db_gen.aclose()
 
     # Accept connection
     await websocket.accept()
@@ -594,9 +601,21 @@ async def _elevenlabs_client_to_worker(
                             await worker_ws.send(json.dumps({"type": "end"}))
                             break
 
-                    except (json.JSONDecodeError, Exception) as e:
+                    except json.JSONDecodeError as e:
                         logger.debug(
-                            "elevenlabs_parse_error",
+                            "elevenlabs_json_parse_error",
+                            session_id=session_id,
+                            error=str(e),
+                        )
+                    except binascii.Error as e:
+                        logger.debug(
+                            "elevenlabs_base64_decode_error",
+                            session_id=session_id,
+                            error=str(e),
+                        )
+                    except KeyError as e:
+                        logger.warning(
+                            "elevenlabs_missing_field",
                             session_id=session_id,
                             error=str(e),
                         )
