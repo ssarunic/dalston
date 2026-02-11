@@ -73,9 +73,17 @@ class FinalMergerEngine(Engine):
             audio_channels = raw_prepare.get("channels", 1)
             sample_rate = raw_prepare.get("sample_rate", 16000)
         else:
-            audio_duration = prepare_output.duration
-            audio_channels = prepare_output.channels
-            sample_rate = prepare_output.sample_rate
+            # Get audio metadata from the first channel file
+            if prepare_output.channel_files:
+                first_channel = prepare_output.channel_files[0]
+                audio_duration = first_channel.duration
+                audio_channels = first_channel.channels
+                sample_rate = first_channel.sample_rate
+            else:
+                # Fallback if no channel files
+                audio_duration = 0.0
+                audio_channels = 1
+                sample_rate = 16000
 
         if not transcribe_output:
             raw_transcribe = input.get_raw_output("transcribe") or {}
@@ -258,11 +266,19 @@ class FinalMergerEngine(Engine):
         # Get prepare output
         prepare_output = input.get_prepare_output()
         if prepare_output:
-            audio_duration = prepare_output.duration
-            audio_channels = prepare_output.original_channels or 2
-            sample_rate = prepare_output.sample_rate
-            # Derive channel_count from channel_files if available
+            # Get audio metadata from the first channel file
             channel_files = prepare_output.channel_files or []
+            if channel_files:
+                first_channel = channel_files[0]
+                audio_duration = first_channel.duration
+                audio_channels = len(
+                    channel_files
+                )  # Number of channels = number of files
+                sample_rate = first_channel.sample_rate
+            else:
+                audio_duration = 0.0
+                audio_channels = 2
+                sample_rate = 16000
             channel_count = config.get("channel_count") or len(channel_files) or 2
         else:
             raw_prepare = input.get_raw_output("prepare") or {}

@@ -9,6 +9,10 @@ Usage:
     python scripts/test_native_realtime.py
     python scripts/test_native_realtime.py --model accurate
     python scripts/test_native_realtime.py --list-devices
+
+    # Hybrid mode (realtime + batch enhancement):
+    python scripts/test_native_realtime.py --hybrid
+    python scripts/test_native_realtime.py --store-audio --store-transcript
 """
 
 from __future__ import annotations
@@ -88,23 +92,46 @@ async def transcribe(
     language: str,
     device: int | None,
     sample_rate: int,
+    store_audio: bool = False,
+    store_transcript: bool = False,
+    enhance_on_end: bool = False,
 ) -> None:
     """Run realtime transcription session."""
-    params = "&".join(
-        [
-            f"api_key={api_key}",
-            f"model={model}",
-            f"language={language}",
-            f"sample_rate={sample_rate}",
-            "encoding=pcm_s16le",
-            "enable_vad=true",
-            "interim_results=true",
-        ]
-    )
-    ws_url = f"{url}?{params}"
+    params = [
+        f"api_key={api_key}",
+        f"model={model}",
+        f"language={language}",
+        f"sample_rate={sample_rate}",
+        "encoding=pcm_s16le",
+        "enable_vad=true",
+        "interim_results=true",
+    ]
+
+    # Add storage/enhancement parameters
+    if store_audio:
+        params.append("store_audio=true")
+    if store_transcript:
+        params.append("store_transcript=true")
+    if enhance_on_end:
+        params.append("enhance_on_end=true")
+        # enhance_on_end requires store_audio
+        if not store_audio:
+            params.append("store_audio=true")
+            store_audio = True
+
+    ws_url = f"{url}?{'&'.join(params)}"
 
     print(f"Endpoint: {url}")
     print(f"Model: {model}, Language: {language}")
+    if store_audio or store_transcript or enhance_on_end:
+        features = []
+        if store_audio:
+            features.append("store_audio")
+        if store_transcript:
+            features.append("store_transcript")
+        if enhance_on_end:
+            features.append("enhance_on_end (hybrid mode)")
+        print(f"Features: {', '.join(features)}")
     print("-" * 50)
 
     mic = MicrophoneCapture(device=device, sample_rate=sample_rate)
@@ -214,7 +241,23 @@ async def receive_transcripts(ws: websockets.ClientConnection) -> None:
                     print(f"{clear}> {text}")
 
             elif msg_type == "session.end":
-                print("\n[Server ended session]")
+                session_id = data.get("session_id", "")
+                duration = data.get("total_duration", 0)
+                enhancement_job_id = data.get("enhancement_job_id")
+
+                print(f"\n[Session ended - duration: {duration:.1f}s]")
+
+                if enhancement_job_id:
+                    print("\n*** HYBRID MODE: Enhancement job created ***")
+                    print(f"    Job ID: {enhancement_job_id}")
+                    print("\n    Check status:")
+                    print(
+                        f"    curl http://localhost:8000/v1/realtime/sessions/{session_id}/enhancement"
+                    )
+                    print("\n    Or poll job directly:")
+                    print(
+                        f"    curl http://localhost:8000/v1/audio/transcriptions/{enhancement_job_id}"
+                    )
                 break
 
             elif msg_type == "error":
@@ -253,6 +296,28 @@ def main() -> None:
         "--list-devices", action="store_true", help="List audio devices"
     )
 
+    # Storage and enhancement options
+    parser.add_argument(
+        "--store-audio",
+        action="store_true",
+        help="Record audio to S3",
+    )
+    parser.add_argument(
+        "--store-transcript",
+        action="store_true",
+        help="Save transcript to S3",
+    )
+    parser.add_argument(
+        "--enhance-on-end",
+        action="store_true",
+        help="Trigger batch enhancement when session ends (implies --store-audio)",
+    )
+    parser.add_argument(
+        "--hybrid",
+        action="store_true",
+        help="Shortcut for --store-audio --store-transcript --enhance-on-end",
+    )
+
     args = parser.parse_args()
 
     if args.list_devices:
@@ -267,6 +332,11 @@ def main() -> None:
             )
         return
 
+    # Handle --hybrid shortcut
+    store_audio = args.store_audio or args.hybrid
+    store_transcript = args.store_transcript or args.hybrid
+    enhance_on_end = args.enhance_on_end or args.hybrid
+
     try:
         asyncio.run(
             transcribe(
@@ -276,6 +346,9 @@ def main() -> None:
                 language=args.language,
                 device=args.device,
                 sample_rate=args.sample_rate,
+                store_audio=store_audio,
+                store_transcript=store_transcript,
+                enhance_on_end=enhance_on_end,
             )
         )
     except KeyboardInterrupt:
