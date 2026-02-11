@@ -125,11 +125,20 @@ def main(
 
 
 # Import and register commands after app is defined
-from dalston_cli.commands import export, jobs, listen, models, status, transcribe  # noqa: E402
+from dalston_cli.commands import (  # noqa: E402
+    export,
+    jobs,
+    listen,
+    models,
+    sessions,
+    status,
+    transcribe,
+)
 
 app.command()(transcribe.transcribe)
 app.command()(listen.listen)
 app.add_typer(jobs.app, name="jobs")
+app.add_typer(sessions.app, name="sessions")
 app.command()(export.export)
 app.command()(status.status)
 app.command()(models.models)

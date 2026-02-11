@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Radio, Clock, MessageSquare, Mic, ExternalLink } from 'lucide-react'
+import { Radio, Clock, MessageSquare, Mic, ExternalLink, Trash2 } from 'lucide-react'
+import { apiClient } from '@/api/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -59,11 +60,28 @@ function formatDate(dateStr: string): string {
 
 export function RealtimeSessions() {
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const { data: statusData, isLoading: statusLoading, error: statusError } = useRealtimeStatus()
-  const { data: sessionsData, isLoading: sessionsLoading } = useRealtimeSessions({
+  const { data: sessionsData, isLoading: sessionsLoading, refetch } = useRealtimeSessions({
     status: statusFilter === 'all' ? undefined : statusFilter,
     limit: 50,
   })
+
+  const handleDelete = async (sessionId: string) => {
+    if (!confirm('Are you sure you want to delete this session?')) {
+      return
+    }
+    setDeletingId(sessionId)
+    try {
+      await apiClient.deleteRealtimeSession(sessionId)
+      refetch()
+    } catch (error) {
+      console.error('Failed to delete session:', error)
+      alert('Failed to delete session')
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -259,12 +277,24 @@ export function RealtimeSessions() {
                       {formatDate(session.started_at)}
                     </TableCell>
                     <TableCell>
-                      <Link
-                        to={`/realtime/sessions/${session.id}`}
-                        className="text-primary hover:underline"
-                      >
-                        <ExternalLink className="h-4 w-4" />
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          to={`/realtime/sessions/${session.id}`}
+                          className="text-primary hover:underline"
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                        </Link>
+                        {session.status !== 'active' && (
+                          <button
+                            onClick={() => handleDelete(session.id)}
+                            disabled={deletingId === session.id}
+                            className="text-muted-foreground hover:text-destructive disabled:opacity-50"
+                            title="Delete session"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

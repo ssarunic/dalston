@@ -68,6 +68,9 @@ from .types import (
     RealtimeError,
     RealtimeMessage,
     RealtimeMessageType,
+    RealtimeSessionInfo,
+    RealtimeSessionList,
+    RealtimeSessionStatus,
     RealtimeStatus,
     Segment,
     SessionBegin,
@@ -137,6 +140,11 @@ __all__ = [
     # System status types
     "HealthStatus",
     "RealtimeStatus",
+    # Realtime session types
+    "RealtimeSession",
+    "RealtimeSessionInfo",
+    "RealtimeSessionList",
+    "RealtimeSessionStatus",
     # Session token types
     "SessionToken",
     # Webhook types

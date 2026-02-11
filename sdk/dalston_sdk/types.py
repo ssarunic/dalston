@@ -327,6 +327,44 @@ class RealtimeStatus:
     ready_workers: int
 
 
+class RealtimeSessionStatus(str, Enum):
+    """Realtime session status."""
+
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    ERROR = "error"
+    INTERRUPTED = "interrupted"
+
+
+@dataclass
+class RealtimeSessionInfo:
+    """Realtime transcription session information."""
+
+    id: str
+    status: RealtimeSessionStatus
+    language: str | None
+    model: str | None
+    engine: str | None
+    audio_duration_seconds: float
+    utterance_count: int
+    word_count: int
+    store_audio: bool
+    store_transcript: bool
+    started_at: datetime
+    ended_at: datetime | None = None
+    error: str | None = None
+
+
+@dataclass
+class RealtimeSessionList:
+    """Paginated list of realtime sessions."""
+
+    sessions: list[RealtimeSessionInfo]
+    total: int
+    limit: int
+    offset: int
+
+
 # -----------------------------------------------------------------------------
 # Session Token Types
 # -----------------------------------------------------------------------------

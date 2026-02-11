@@ -196,4 +196,7 @@ export const apiClient = {
 
   getSessionAudioUrl: (sessionId: string) =>
     currentClient.get(`v1/realtime/sessions/${sessionId}/audio`).json<{ url: string; expires_in: number }>(),
+
+  deleteRealtimeSession: (sessionId: string) =>
+    currentClient.delete(`v1/realtime/sessions/${sessionId}`).json<{ deleted: boolean; session_id: string }>(),
 }

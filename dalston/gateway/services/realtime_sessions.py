@@ -274,6 +274,58 @@ class RealtimeSessionService:
 
         return sessions, total
 
+    async def delete_session(
+        self,
+        session_id: str,
+        tenant_id: UUID,
+    ) -> bool:
+        """Delete a session by ID.
+
+        Only allows deletion of non-active sessions (completed, error, interrupted).
+
+        Args:
+            session_id: Session ID
+            tenant_id: Tenant UUID (for access control)
+
+        Returns:
+            True if deleted, False if not found
+
+        Raises:
+            ValueError: If session is still active
+        """
+        from sqlalchemy import delete
+
+        session_uuid = self._parse_session_id(session_id)
+
+        # First check if session exists and verify access + status
+        session = await self.get_session(session_id)
+
+        if session is None:
+            return False
+
+        # Verify tenant access
+        if session.tenant_id != tenant_id:
+            return False
+
+        # Don't allow deletion of active sessions
+        if session.status == "active":
+            raise ValueError("Cannot delete active session")
+
+        # Delete the session
+        stmt = delete(RealtimeSessionModel).where(
+            RealtimeSessionModel.id == session_uuid
+        )
+        await self.db.execute(stmt)
+        await self.db.commit()
+
+        logger.info(
+            "realtime_session_deleted",
+            session_id=session_id,
+            tenant_id=str(tenant_id),
+        )
+
+        return True
+
     def _parse_session_id(self, session_id: str) -> UUID:
         """Parse session ID string to UUID.
 

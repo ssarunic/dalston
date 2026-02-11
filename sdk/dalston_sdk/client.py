@@ -38,6 +38,9 @@ from .types import (
     Model,
     ModelCapabilities,
     ModelList,
+    RealtimeSessionInfo,
+    RealtimeSessionList,
+    RealtimeSessionStatus,
     RealtimeStatus,
     Segment,
     SessionToken,
@@ -746,6 +749,139 @@ class Dalston:
             tenant_id=UUID(data["tenant_id"]),
         )
 
+    def list_realtime_sessions(
+        self,
+        status: RealtimeSessionStatus | str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> RealtimeSessionList:
+        """List realtime transcription sessions.
+
+        Args:
+            status: Filter by session status.
+            limit: Maximum number of sessions to return (1-100).
+            offset: Pagination offset.
+
+        Returns:
+            RealtimeSessionList with sessions and pagination info.
+        """
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if status is not None:
+            params["status"] = (
+                status.value if isinstance(status, RealtimeSessionStatus) else status
+            )
+
+        try:
+            response = self._client.get(
+                f"{self.base_url}/v1/realtime/sessions",
+                params=params,
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        data = response.json()
+        return RealtimeSessionList(
+            sessions=[
+                RealtimeSessionInfo(
+                    id=s["id"],
+                    status=RealtimeSessionStatus(s["status"]),
+                    language=s.get("language"),
+                    model=s.get("model"),
+                    engine=s.get("engine"),
+                    audio_duration_seconds=s.get("audio_duration_seconds", 0),
+                    utterance_count=s.get("utterance_count", 0),
+                    word_count=s.get("word_count", 0),
+                    store_audio=s.get("store_audio", False),
+                    store_transcript=s.get("store_transcript", False),
+                    started_at=_parse_datetime(s["started_at"]),
+                    ended_at=_parse_datetime(s.get("ended_at")),
+                    error=s.get("error"),
+                )
+                for s in data["sessions"]
+            ],
+            total=data["total"],
+            limit=data["limit"],
+            offset=data["offset"],
+        )
+
+    def get_realtime_session(self, session_id: str) -> RealtimeSessionInfo:
+        """Get realtime session details.
+
+        Args:
+            session_id: Session ID to retrieve.
+
+        Returns:
+            RealtimeSessionInfo with full details.
+
+        Raises:
+            NotFoundError: If session doesn't exist.
+        """
+        try:
+            response = self._client.get(
+                f"{self.base_url}/v1/realtime/sessions/{session_id}",
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        s = response.json()
+        return RealtimeSessionInfo(
+            id=s["id"],
+            status=RealtimeSessionStatus(s["status"]),
+            language=s.get("language"),
+            model=s.get("model"),
+            engine=s.get("engine"),
+            audio_duration_seconds=s.get("audio_duration_seconds", 0),
+            utterance_count=s.get("utterance_count", 0),
+            word_count=s.get("word_count", 0),
+            store_audio=s.get("store_audio", False),
+            store_transcript=s.get("store_transcript", False),
+            started_at=_parse_datetime(s["started_at"]),
+            ended_at=_parse_datetime(s.get("ended_at")),
+            error=s.get("error"),
+        )
+
+    def delete_realtime_session(self, session_id: str) -> bool:
+        """Delete a realtime session.
+
+        Only non-active sessions (completed, error, interrupted) can be deleted.
+
+        Args:
+            session_id: Session ID to delete.
+
+        Returns:
+            True if deleted successfully.
+
+        Raises:
+            NotFoundError: If session doesn't exist.
+            ValidationError: If session is still active (status code 409).
+        """
+        try:
+            response = self._client.delete(
+                f"{self.base_url}/v1/realtime/sessions/{session_id}",
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        return True
+
 
 class AsyncDalston:
     """Asynchronous client for Dalston batch transcription API.
@@ -1306,3 +1442,136 @@ class AsyncDalston:
             scopes=data["scopes"],
             tenant_id=UUID(data["tenant_id"]),
         )
+
+    async def list_realtime_sessions(
+        self,
+        status: RealtimeSessionStatus | str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> RealtimeSessionList:
+        """List realtime transcription sessions.
+
+        Args:
+            status: Filter by session status.
+            limit: Maximum number of sessions to return (1-100).
+            offset: Pagination offset.
+
+        Returns:
+            RealtimeSessionList with sessions and pagination info.
+        """
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if status is not None:
+            params["status"] = (
+                status.value if isinstance(status, RealtimeSessionStatus) else status
+            )
+
+        try:
+            response = await self._client.get(
+                f"{self.base_url}/v1/realtime/sessions",
+                params=params,
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        data = response.json()
+        return RealtimeSessionList(
+            sessions=[
+                RealtimeSessionInfo(
+                    id=s["id"],
+                    status=RealtimeSessionStatus(s["status"]),
+                    language=s.get("language"),
+                    model=s.get("model"),
+                    engine=s.get("engine"),
+                    audio_duration_seconds=s.get("audio_duration_seconds", 0),
+                    utterance_count=s.get("utterance_count", 0),
+                    word_count=s.get("word_count", 0),
+                    store_audio=s.get("store_audio", False),
+                    store_transcript=s.get("store_transcript", False),
+                    started_at=_parse_datetime(s["started_at"]),
+                    ended_at=_parse_datetime(s.get("ended_at")),
+                    error=s.get("error"),
+                )
+                for s in data["sessions"]
+            ],
+            total=data["total"],
+            limit=data["limit"],
+            offset=data["offset"],
+        )
+
+    async def get_realtime_session(self, session_id: str) -> RealtimeSessionInfo:
+        """Get realtime session details.
+
+        Args:
+            session_id: Session ID to retrieve.
+
+        Returns:
+            RealtimeSessionInfo with full details.
+
+        Raises:
+            NotFoundError: If session doesn't exist.
+        """
+        try:
+            response = await self._client.get(
+                f"{self.base_url}/v1/realtime/sessions/{session_id}",
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        s = response.json()
+        return RealtimeSessionInfo(
+            id=s["id"],
+            status=RealtimeSessionStatus(s["status"]),
+            language=s.get("language"),
+            model=s.get("model"),
+            engine=s.get("engine"),
+            audio_duration_seconds=s.get("audio_duration_seconds", 0),
+            utterance_count=s.get("utterance_count", 0),
+            word_count=s.get("word_count", 0),
+            store_audio=s.get("store_audio", False),
+            store_transcript=s.get("store_transcript", False),
+            started_at=_parse_datetime(s["started_at"]),
+            ended_at=_parse_datetime(s.get("ended_at")),
+            error=s.get("error"),
+        )
+
+    async def delete_realtime_session(self, session_id: str) -> bool:
+        """Delete a realtime session.
+
+        Only non-active sessions (completed, error, interrupted) can be deleted.
+
+        Args:
+            session_id: Session ID to delete.
+
+        Returns:
+            True if deleted successfully.
+
+        Raises:
+            NotFoundError: If session doesn't exist.
+            ValidationError: If session is still active (status code 409).
+        """
+        try:
+            response = await self._client.delete(
+                f"{self.base_url}/v1/realtime/sessions/{session_id}",
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        return True

@@ -1303,6 +1303,47 @@ async def get_realtime_session(
         await db_gen.aclose()
 
 
+@management_router.delete(
+    "/sessions/{session_id}",
+    summary="Delete a session",
+    description="Delete a realtime session. Only completed, error, or interrupted sessions can be deleted.",
+    responses={
+        404: {"description": "Session not found"},
+        409: {"description": "Cannot delete active session"},
+    },
+)
+async def delete_realtime_session(
+    session_id: str,
+    api_key: RequireJobsRead,
+) -> dict:
+    """Delete a realtime session.
+
+    Only non-active sessions (completed, error, interrupted) can be deleted.
+    """
+    from fastapi import HTTPException
+
+    from dalston.config import get_settings
+    from dalston.db.session import get_db as _get_db_session
+
+    db_gen = _get_db_session()
+    db = await db_gen.__anext__()
+    try:
+        settings = get_settings()
+        service = RealtimeSessionService(db, settings)
+
+        try:
+            deleted = await service.delete_session(session_id, api_key.tenant_id)
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from None
+
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        return {"deleted": True, "session_id": session_id}
+    finally:
+        await db_gen.aclose()
+
+
 @management_router.get(
     "/sessions/{session_id}/transcript",
     summary="Get session transcript",
