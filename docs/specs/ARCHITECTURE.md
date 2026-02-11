@@ -271,8 +271,10 @@ Audio Stream → VAD → Streaming ASR → Transcript Assembly → WebSocket Out
 
 | Variant | Model | Latency | Quality |
 |---------|-------|---------|---------|
-| `fast` | distil-whisper | ~200ms | Good |
-| `accurate` | faster-whisper large-v3 | ~400ms | Excellent |
+| `fast` | Parakeet 0.6B | ~200ms | Good |
+| `accurate` | Parakeet 1.1B | ~300ms | Excellent |
+
+Parakeet models provide native streaming with true partial results during speech. Non-streaming models (Whisper) use VAD-chunked transcription.
 
 ---
 

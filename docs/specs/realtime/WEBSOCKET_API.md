@@ -66,8 +66,10 @@ The API key must have the `realtime` scope. If authentication fails, the connect
 
 | ElevenLabs Model | Dalston Backend |
 |------------------|-----------------|
-| `scribe_v1` | WhisperX base (~16x realtime) |
-| `scribe_v2` | WhisperX large-v3 (~1x realtime) |
+| `scribe_v1` | Parakeet 0.6B (native streaming) |
+| `scribe_v2` | Parakeet 1.1B (native streaming) |
+
+Note: Parakeet models provide native streaming support (not VAD-chunked like Whisper), enabling true partial results during speech.
 
 ### Example Connection
 
@@ -747,4 +749,4 @@ When a rate limit is exceeded:
 | `4029` | Rate limit exceeded |
 | `4008` | Session timeout |
 | `4500` | Internal server error |
-| `4503` | Service unavailable (no workers)
+| `4503` | Service unavailable (no workers) |

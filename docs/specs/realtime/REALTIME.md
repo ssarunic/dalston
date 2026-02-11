@@ -144,10 +144,19 @@ Real-time transcription provides streaming speech-to-text with sub-500ms latency
 
 | Variant | Model | Latency | Quality | Use Case |
 |---------|-------|---------|---------|----------|
-| `fast` | distil-whisper | ~200ms | Good | Voice assistants, live captioning |
-| `accurate` | faster-whisper large-v3 | ~400ms | Excellent | Important meetings, legal/medical |
+| `fast` | Parakeet 0.6B | ~200ms | Good | Voice assistants, live captioning |
+| `accurate` | Parakeet 1.1B | ~300ms | Excellent | Important meetings, English-only |
 
 Workers can load multiple models and switch based on session requirements.
+
+### Streaming vs Non-Streaming Models
+
+| Model Type | VAD | Partial Results | Behavior |
+|------------|-----|-----------------|----------|
+| **Streaming** (Parakeet) | Optional | Native support | Incremental transcription as audio arrives |
+| **Non-streaming** (Whisper) | Required | Not supported | VAD detects utterance end → transcribe → final |
+
+The default realtime engine uses Parakeet for native streaming. The `interim_results` parameter is ignored for non-streaming models like Whisper.
 
 ---
 

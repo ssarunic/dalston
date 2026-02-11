@@ -33,8 +33,8 @@ Real-time engines are WebSocket servers that handle streaming audio transcriptio
 │   │   • Support multiple model variants                                     │   │
 │   │                                                                          │   │
 │   │   Loaded models:                                                        │   │
-│   │     - distil-whisper (fast, low latency)                               │   │
-│   │     - faster-whisper large-v3 (accurate)                               │   │
+│   │     - parakeet-0.6b (fast, native streaming)                           │   │
+│   │     - parakeet-1.1b (accurate, native streaming)                       │   │
 │   │                                                                          │   │
 │   └─────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                  │
@@ -97,7 +97,7 @@ Real-time engines are WebSocket servers that handle streaming audio transcriptio
 │           │ On endpoint: trigger ASR                                            │
 │           ▼                                                                      │
 │   ┌───────────────┐                                                             │
-│   │  ASR Engine   │  Whisper / faster-whisper                                  │
+│   │  ASR Engine   │  Parakeet (streaming) / Whisper (VAD-chunked)              │
 │   │               │                                                             │
 │   │ • Transcribe  │  Process accumulated speech audio                          │
 │   │               │                                                             │
@@ -145,18 +145,14 @@ class ModelManager:
 
     async def load_models(self):
         """Load configured models into GPU memory."""
-        # Load fast model (distil-whisper)
-        self.models["fast"] = WhisperModel(
-            "distil-whisper/distil-large-v3",
-            device="cuda",
-            compute_type="float16"
+        # Load fast model (Parakeet 0.6B - native streaming)
+        self.models["fast"] = nemo_asr.models.ASRModel.from_pretrained(
+            "nvidia/parakeet-rnnt-0.6b"
         )
 
-        # Load accurate model (faster-whisper large-v3)
-        self.models["accurate"] = WhisperModel(
-            "large-v3",
-            device="cuda",
-            compute_type="float16"
+        # Load accurate model (Parakeet 1.1B - native streaming)
+        self.models["accurate"] = nemo_asr.models.ASRModel.from_pretrained(
+            "nvidia/parakeet-rnnt-1.1b"
         )
 
     def get_model(self, variant: str) -> WhisperModel:
@@ -244,7 +240,14 @@ class VADResult:
 
 ### ASR Engine
 
-Streaming-optimized Whisper transcription.
+Streaming transcription using Parakeet (native streaming) or Whisper (VAD-chunked).
+
+**Streaming vs Non-Streaming Models:**
+
+| Model Type | Partial Results | Behavior |
+|------------|-----------------|----------|
+| **Parakeet** (streaming) | Native support | Incremental transcription as audio arrives |
+| **Whisper** (non-streaming) | Not supported | VAD detects utterance end → transcribe → final |
 
 ```python
 class ASREngine:
@@ -663,8 +666,8 @@ container:
 
 capabilities:
   models:
-    - fast       # distil-whisper
-    - accurate   # faster-whisper large-v3
+    - fast       # parakeet-0.6b
+    - accurate   # parakeet-1.1b
   languages:
     - all
   max_sessions: 4
@@ -721,8 +724,8 @@ COPY engine.py /app/
 
 # Pre-download models
 ENV HF_HOME=/models
-RUN python3 -c "from faster_whisper import WhisperModel; WhisperModel('distil-whisper/distil-large-v3')"
-RUN python3 -c "from faster_whisper import WhisperModel; WhisperModel('large-v3')"
+RUN python3 -c "import nemo.collections.asr as nemo_asr; nemo_asr.models.ASRModel.from_pretrained('nvidia/parakeet-rnnt-0.6b')"
+RUN python3 -c "import nemo.collections.asr as nemo_asr; nemo_asr.models.ASRModel.from_pretrained('nvidia/parakeet-rnnt-1.1b')"
 
 # Download Silero VAD
 RUN python3 -c "import torch; torch.hub.load('snakers4/silero-vad', 'silero_vad')"
@@ -738,14 +741,16 @@ CMD ["python3", "engine.py"]
 ## Requirements
 
 ```
-# engines/realtime/whisper-streaming/requirements.txt
+# engines/realtime/parakeet-streaming/requirements.txt
 
-faster-whisper>=1.0.0
+nemo_toolkit[asr]>=1.23.0
 torch>=2.0.0
+torchaudio
 websockets>=12.0
 numpy>=1.24.0
 redis>=5.0.0
-silero-vad>=4.0.0
+librosa>=0.10.0
+soundfile>=0.12.0
 ```
 
 ---

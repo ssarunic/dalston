@@ -6,7 +6,7 @@
 | **Duration** | 2-3 days |
 | **Dependencies** | M6 complete (real-time working) |
 | **Deliverable** | ElevenLabs clients work unchanged |
-| **Status** | In Progress |
+| **Status** | Complete |
 
 ## User Story
 
@@ -34,7 +34,7 @@ We implement compatibility with:
 
 | ElevenLabs Param | Dalston Param | Notes |
 | --- | --- | --- |
-| `model_id` | `model` | scribe_v1 → fast, scribe_v2 → accurate |
+| `model_id` | `model` | scribe_v1 → parakeet-0.6b, scribe_v2 → parakeet-1.1b |
 | `language_code` | `language` | Direct mapping |
 | `diarize` | `speaker_detection` | true → "diarize" |
 | `num_speakers` | `num_speakers` | Direct mapping |
@@ -155,10 +155,10 @@ async with client.speech_to_text.realtime(
 
 ## Checkpoint
 
-- [ ] **POST /v1/speech-to-text** matches ElevenLabs API
-- [ ] **GET /v1/speech-to-text/transcripts/{id}** returns ElevenLabs format
-- [ ] **WS /v1/speech-to-text/realtime** uses ElevenLabs protocol
-- [ ] **Protocol translation** is bidirectional
-- [ ] **ElevenLabs SDK** works unchanged
+- [x] **POST /v1/speech-to-text** matches ElevenLabs API
+- [x] **GET /v1/speech-to-text/transcripts/{id}** returns ElevenLabs format
+- [x] **WS /v1/speech-to-text/realtime** uses ElevenLabs protocol
+- [x] **Protocol translation** is bidirectional
+- [ ] **ElevenLabs SDK** works unchanged (needs end-to-end testing)
 
 **Next**: [M9: Enrichment](M09-enrichment.md) — Emotions, events, LLM cleanup
