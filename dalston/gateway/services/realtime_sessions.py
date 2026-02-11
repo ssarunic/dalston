@@ -10,6 +10,7 @@ import structlog
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dalston.common.utils import parse_session_id
 from dalston.db.models import RealtimeSessionModel
 
 if TYPE_CHECKING:
@@ -329,21 +330,6 @@ class RealtimeSessionService:
     def _parse_session_id(self, session_id: str) -> UUID:
         """Parse session ID string to UUID.
 
-        Session IDs can be:
-        - sess_<hex16> format (e.g., sess_abc123def456)
-        - Raw UUID string
-
-        Args:
-            session_id: Session ID string
-
-        Returns:
-            UUID
+        Delegates to dalston.common.utils.parse_session_id.
         """
-        if session_id.startswith("sess_"):
-            # Extract hex part and pad to 32 chars for UUID
-            hex_part = session_id[5:]
-            # Pad to 32 chars
-            padded = hex_part.ljust(32, "0")
-            return UUID(padded)
-        else:
-            return UUID(session_id)
+        return parse_session_id(session_id)

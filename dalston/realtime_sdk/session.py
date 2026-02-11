@@ -292,6 +292,10 @@ class SessionHandler:
             None  # TranscriptRecorder when store_transcript=True
         )
         self._raw_audio_buffer: list[bytes] = []  # Buffer until S3 client ready
+        self._raw_audio_buffer_bytes = 0  # Track buffer size
+        # Max 10MB buffer - if storage init fails, stop buffering to prevent OOM
+        self._max_raw_audio_buffer_bytes = 10 * 1024 * 1024
+        self._storage_init_failed = False  # Track if storage init failed
 
     async def run(self) -> None:
         """Main session processing loop.
@@ -325,10 +329,15 @@ class SessionHandler:
                 f"Internal error: {e}",
                 recoverable=False,
             )
-
-        # Send session.end if not already sent
-        if not self._ended:
-            await self._send_session_end()
+        finally:
+            # Send session.end if not already sent
+            if not self._ended:
+                try:
+                    await self._send_session_end()
+                except Exception as e:
+                    logger.error("session_end_failed", error=str(e))
+                    # Ensure cleanup happens even if session end fails
+                    await self._cleanup_storage()
 
         # Notify callback
         if self._on_session_end:
@@ -351,9 +360,22 @@ class SessionHandler:
                     await self._audio_recorder.write(data)
                 except Exception as e:
                     logger.warning("audio_write_failed", error=str(e))
-            else:
-                # Buffer until S3 client initialized
-                self._raw_audio_buffer.append(data)
+            elif not self._storage_init_failed:
+                # Buffer until S3 client initialized (with size limit)
+                new_size = self._raw_audio_buffer_bytes + len(data)
+                if new_size <= self._max_raw_audio_buffer_bytes:
+                    self._raw_audio_buffer.append(data)
+                    self._raw_audio_buffer_bytes = new_size
+                else:
+                    # Buffer limit reached - clear and disable to prevent OOM
+                    logger.warning(
+                        "audio_buffer_limit_reached",
+                        buffer_bytes=self._raw_audio_buffer_bytes,
+                        max_bytes=self._max_raw_audio_buffer_bytes,
+                    )
+                    self._raw_audio_buffer.clear()
+                    self._raw_audio_buffer_bytes = 0
+                    self._storage_init_failed = True
 
         # Add to buffer
         self._buffer.add(data)
@@ -672,6 +694,10 @@ class SessionHandler:
         except Exception as e:
             logger.error("storage_init_failed", error=str(e))
             # Continue without storage - don't fail the session
+            self._storage_init_failed = True
+            # Clear any buffered audio to free memory
+            self._raw_audio_buffer.clear()
+            self._raw_audio_buffer_bytes = 0
 
     async def _cleanup_storage(self) -> None:
         """Cleanup S3 client and abort any incomplete uploads."""

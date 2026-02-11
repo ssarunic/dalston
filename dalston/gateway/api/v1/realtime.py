@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from dalston.common.models import resolve_model
 from dalston.common.redis import get_redis as _get_redis
+from dalston.common.utils import parse_session_id
 from dalston.config import get_settings
 from dalston.db.session import get_db as _get_db
 from dalston.gateway.dependencies import (
@@ -199,17 +200,7 @@ async def realtime_transcription(
 
         if resume_session_id:
             try:
-                # Parse resume_session_id to UUID
-                if resume_session_id.startswith("sess_"):
-                    hex_part = resume_session_id[5:]
-                    padded = hex_part.ljust(32, "0")
-                    from uuid import UUID as parse_uuid
-
-                    previous_session_uuid = parse_uuid(padded)
-                else:
-                    from uuid import UUID as parse_uuid
-
-                    previous_session_uuid = parse_uuid(resume_session_id)
+                previous_session_uuid = parse_session_id(resume_session_id)
             except ValueError:
                 log.warning(
                     "invalid_resume_session_id", resume_session_id=resume_session_id
