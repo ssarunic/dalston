@@ -44,6 +44,8 @@ realtime-sdk = [
     "redis>=5.0.0",
     "numpy>=1.24.0",
     "torch>=2.0.0",
+    "aioboto3>=13.0.0",  # S3 storage for audio/transcript persistence
+    "types-aiobotocore-s3>=2.13.0",
 ]
 session-router = [
     "redis>=5.0.0",

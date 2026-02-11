@@ -276,6 +276,9 @@ async def realtime_transcription(
         transcript_uri = None
         if session_service and session_end_data:
             try:
+                # Debug: log the full session_end_data
+                log.debug("session_end_data_content", data=session_end_data)
+
                 # Extract stats from session.end message
                 audio_duration = session_end_data.get("total_duration", 0)
                 segments = session_end_data.get("segments", [])

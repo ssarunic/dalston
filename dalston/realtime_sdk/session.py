@@ -64,10 +64,8 @@ class SessionConfig:
         vad_threshold: VAD speech probability threshold (0.0-1.0)
         min_speech_duration_ms: Min speech duration before valid utterance (ms)
         min_silence_duration_ms: Silence duration to trigger endpoint (ms)
-        store_audio: Whether to record audio to S3
-        store_transcript: Whether to save transcript to S3
-        s3_bucket: S3 bucket for storage
-        s3_endpoint_url: Custom S3 endpoint (for MinIO)
+        store_audio: Whether to record audio to S3 (uses S3_BUCKET from env)
+        store_transcript: Whether to save transcript to S3 (uses S3_BUCKET from env)
     """
 
     session_id: str
@@ -84,11 +82,9 @@ class SessionConfig:
     vad_threshold: float = 0.5  # Speech detection threshold (0.0-1.0)
     min_speech_duration_ms: int = 250  # Min speech duration (ms)
     min_silence_duration_ms: int = 500  # Silence to trigger endpoint (ms)
-    # Storage options
+    # Storage options (S3 bucket/endpoint read from Settings env vars)
     store_audio: bool = False
     store_transcript: bool = False
-    s3_bucket: str = ""
-    s3_endpoint_url: str | None = None
 
 
 class AudioBuffer:
@@ -289,6 +285,7 @@ class SessionHandler:
         self._speech_audio_buffer: list[np.ndarray] = []
 
         # Storage recorders (initialized in run() when S3 client available)
+        self._s3_context_manager = None  # Context manager for S3 client
         self._s3_client: S3Client | None = None
         self._audio_recorder = None  # AudioRecorder when store_audio=True
         self._transcript_recorder = (
@@ -619,31 +616,34 @@ class SessionHandler:
         if not self.config.store_audio and not self.config.store_transcript:
             return
 
-        if not self.config.s3_bucket:
-            logger.warning(
-                "storage_disabled_no_bucket",
-                msg="store_audio/store_transcript enabled but S3_BUCKET not set",
-            )
-            return
-
         try:
+            from dalston.common.s3 import get_s3_client
+            from dalston.config import get_settings
             from dalston.realtime_sdk.audio_recorder import (
                 AudioRecorder,
                 TranscriptRecorder,
             )
-            from dalston.realtime_sdk.s3 import get_s3_client
 
-            # Create S3 client
-            self._s3_client = await get_s3_client(
-                bucket=self.config.s3_bucket,
-                endpoint_url=self.config.s3_endpoint_url,
-            ).__aenter__()
+            settings = get_settings()
+            bucket = settings.s3_bucket
+
+            if not bucket:
+                logger.warning(
+                    "storage_disabled_no_bucket",
+                    msg="store_audio/store_transcript enabled but S3_BUCKET not set",
+                )
+                return
+
+            # Create S3 client context manager (uses Settings from env vars)
+            # We store the context manager to properly manage its lifecycle
+            self._s3_context_manager = get_s3_client(settings)
+            self._s3_client = await self._s3_context_manager.__aenter__()
 
             if self.config.store_audio:
                 self._audio_recorder = AudioRecorder(
                     session_id=self.config.session_id,
                     s3_client=self._s3_client,
-                    bucket=self.config.s3_bucket,
+                    bucket=bucket,
                     sample_rate=self.config.sample_rate,
                 )
                 await self._audio_recorder.start()
@@ -655,18 +655,18 @@ class SessionHandler:
 
                 logger.info(
                     "audio_recorder_initialized",
-                    bucket=self.config.s3_bucket,
+                    bucket=bucket,
                 )
 
             if self.config.store_transcript:
                 self._transcript_recorder = TranscriptRecorder(
                     session_id=self.config.session_id,
                     s3_client=self._s3_client,
-                    bucket=self.config.s3_bucket,
+                    bucket=bucket,
                 )
                 logger.info(
                     "transcript_recorder_initialized",
-                    bucket=self.config.s3_bucket,
+                    bucket=bucket,
                 )
 
         except Exception as e:
@@ -681,11 +681,12 @@ class SessionHandler:
             except Exception:
                 pass
 
-        if self._s3_client:
+        if self._s3_context_manager:
             try:
-                await self._s3_client.__aexit__(None, None, None)
+                await self._s3_context_manager.__aexit__(None, None, None)
             except Exception:
                 pass
+            self._s3_context_manager = None
             self._s3_client = None
 
     async def _send_session_end(self) -> None:
