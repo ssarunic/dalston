@@ -4,9 +4,9 @@
 |---|---|
 | **Goal** | Real-time results + batch enhancement |
 | **Duration** | 2-3 days |
-| **Dependencies** | M6 complete |
+| **Dependencies** | M6 complete, M24 complete |
 | **Deliverable** | Sessions can trigger batch enhancement on end |
-| **Status** | In Progress |
+| **Status** | Not Started |
 
 ## User Story
 
@@ -35,31 +35,31 @@
 
 ---
 
-## Steps
+## Prerequisites from M24
 
-### 7.1: Session Recording
+This milestone builds on M24's session persistence:
 
-**Deliverables:**
-
-- `SessionRecorder` class that accumulates audio chunks during session
-- Write WAV file on session end (16kHz, 16-bit PCM)
-- Storage location: `/data/sessions/{session_id}/audio.wav`
-- Optional: checkpoint writes every N seconds for fault tolerance
+- **Audio recording**: Sessions with `store_audio=true` have audio in S3
+- **Session model**: `RealtimeSessionModel` tracks session metadata
+- **S3 storage**: Audio at `s3://{bucket}/sessions/{session_id}/audio.wav`
 
 ---
 
-### 7.2: Enhancement Job Creation
+## Steps
+
+### 7.1: Enhancement Job Creation
 
 **Deliverables:**
 
 - When `enhance_on_end=true`, create batch job from recorded audio
+- Requires `store_audio=true` (error if audio not recorded)
 - Job parameters: `speaker_detection=diarize`, `word_timestamps=true`
 - Optional LLM cleanup and emotion detection via additional params
-- Link session to enhancement job in Redis
+- Link `enhancement_job_id` back to `RealtimeSessionModel`
 
 ---
 
-### 7.3: Gateway Enhancement Parameters
+### 7.2: Gateway Enhancement Parameters
 
 **New query parameters:**
 
@@ -71,7 +71,7 @@
 
 ---
 
-### 7.4: Enhancement Status Endpoint
+### 7.3: Enhancement Status Endpoint
 
 **New endpoint:**
 
@@ -92,7 +92,7 @@ GET /v1/audio/transcriptions/stream/{session_id}/enhancement
 
 ---
 
-### 7.5: Session End Message
+### 7.4: Session End Message
 
 **Updated `session.end` message:**
 
@@ -139,24 +139,28 @@ GET /v1/audio/transcriptions/stream/{session_id}/enhancement
 ## Verification
 
 ```bash
-# Connect with enhancement enabled
-wscat -c "ws://localhost:8000/v1/audio/transcriptions/stream?enhance_on_end=true"
+# Connect with enhancement enabled (requires store_audio=true)
+wscat -c "ws://localhost:8000/v1/audio/transcriptions/stream?store_audio=true&enhance_on_end=true"
 
 # Stream audio, end session
 # Note enhancement_job_id in session.end message
 
 # Poll for enhanced result
 curl http://localhost:8000/v1/audio/transcriptions/{job_id}
+
+# Check enhancement status via session
+curl http://localhost:8000/v1/audio/transcriptions/stream/{session_id}/enhancement
 ```
 
 ---
 
 ## Checkpoint
 
-- [ ] **Session recording** saves all streamed audio
-- [ ] **Enhancement job** created automatically on session end
-- [ ] **Job linked** to session for status tracking
-- [ ] **Full batch pipeline** runs on recorded audio
-- [ ] **Client receives** both real-time and enhanced results
+- [ ] **Enhancement job** created automatically on session end (when `enhance_on_end=true`)
+- [ ] **Job uses recorded audio** from M24's S3 storage
+- [ ] **Job linked** to session via `enhancement_job_id`
+- [ ] **Full batch pipeline** runs (diarization, alignment, optional LLM cleanup)
+- [ ] **Enhancement status endpoint** returns job status and result
+- [ ] **Session end message** includes `enhancement_job_id`
 
 **Next**: [M8: ElevenLabs Compatibility](M08-elevenlabs-compat.md) — Drop-in API replacement

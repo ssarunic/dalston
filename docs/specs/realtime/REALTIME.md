@@ -261,6 +261,7 @@ GET /v1/audio/transcriptions/job_xyz789
 | **Gateway** | WebSocket endpoint, request routing | [WebSocket API](./WEBSOCKET_API.md) |
 | **Session Router** | Worker pool management, allocation | [Session Router](./SESSION_ROUTER.md) |
 | **Realtime Workers** | Streaming transcription | [Realtime Engines](./REALTIME_ENGINES.md) |
+| **Session Persistence** | Audio/transcript storage, session history | [Session Persistence](./SESSION_PERSISTENCE.md) |
 
 ---
 

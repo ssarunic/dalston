@@ -40,7 +40,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M16](milestones/M16-aws-deployment.md) | AWS Deployment | `infra/terraform/` |
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 
-### Not Started (5)
+### Not Started (6)
 
 | # | Milestone | Goal |
 |---|-----------|------|
@@ -49,6 +49,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M15](milestones/M15-console-authentication.md) | Console Auth | Secure web console access |
 | [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | OpenTelemetry spans |
 | [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | Prometheus + Grafana |
+| [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Session DB, audio/transcript storage, console visibility |
 
 ---
 
@@ -107,6 +108,12 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | # | Milestone | Goal | Days | Status |
 |---|-----------|------|------|--------|
 | [M22](milestones/M22-parakeet-engine.md) | Parakeet Engine | NVIDIA Parakeet batch + real-time transcription engines | 4-5 | Complete |
+
+## Realtime Feature Milestones
+
+| # | Milestone | Goal | Days | Status |
+|---|-----------|------|------|--------|
+| [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Session DB, audio/transcript S3 storage, console visibility | 3-4 | Not Started |
 
 ---
 
@@ -172,7 +179,7 @@ Week 6:
 ```
 M1 ──► M2 ──► M3 ──► M4 ──► M5
  │            │
- │            └──► M6 ──► M7
+ │            └──► M6 ──► M24 ──► M7
  │                  │
  │                  └──► M8
  │
@@ -190,6 +197,8 @@ M18 ──► M20 (M19 recommended but not required)
 M5 + M11 ──► M21
 
 M2 + M6 + M14 ──► M22
+
+M6 ──► M24 (realtime session persistence, prerequisite for M7)
 ```
 
 - **M1-M5**: Core batch pipeline (sequential)
@@ -201,6 +210,7 @@ M2 + M6 + M14 ──► M22
 - **M18-M20**: Observability (can start immediately, M19 and M20 depend on M18)
 - **M21**: Admin Webhooks (needs M5 webhooks, M11 auth)
 - **M22**: Parakeet Engine (needs M2 batch, M6 real-time, M14 model selection)
+- **M24**: Realtime Session Persistence (needs M6 real-time, prerequisite for M7 hybrid)
 
 ---
 
@@ -228,3 +238,4 @@ Each milestone has a verification section. Key checkpoints:
 | M20 | Grafana dashboard shows request rates, queue depths, and engine latency |
 | M21 | Registered webhook endpoints receive notifications without per-job URL |
 | M22 | English audio transcribed with Parakeet; real-time streaming with sub-100ms latency |
+| M24 | Realtime sessions stored in DB; audio/transcript saved to S3; sessions visible in console |
