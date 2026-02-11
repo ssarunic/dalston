@@ -109,8 +109,14 @@ class TestBuildTaskDagModelSelection:
 
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
         assert transcribe_task.config["model"] == "small"
-        assert transcribe_task.config["beam_size"] == DEFAULT_TRANSCRIBE_CONFIG["beam_size"]
-        assert transcribe_task.config["vad_filter"] == DEFAULT_TRANSCRIBE_CONFIG["vad_filter"]
+        assert (
+            transcribe_task.config["beam_size"]
+            == DEFAULT_TRANSCRIBE_CONFIG["beam_size"]
+        )
+        assert (
+            transcribe_task.config["vad_filter"]
+            == DEFAULT_TRANSCRIBE_CONFIG["vad_filter"]
+        )
 
     def test_legacy_model_parameter(self, job_id: UUID, audio_uri: str):
         """Test legacy behavior with top-level model parameter."""
