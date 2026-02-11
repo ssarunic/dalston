@@ -65,14 +65,18 @@ class SessionBeginMessage:
 
     session_id: str
     config: SessionConfigInfo
+    resumed_from: str | None = None
     type: str = field(default="session.begin", init=False)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "type": self.type,
             "session_id": self.session_id,
             "config": self.config.to_dict(),
         }
+        if self.resumed_from is not None:
+            result["resumed_from"] = self.resumed_from
+        return result
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict())

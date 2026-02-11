@@ -36,6 +36,7 @@ class WorkerState:
         active_sessions: Current active session count
         models_loaded: List of available model variants
         languages_supported: List of supported language codes
+        engine: Engine type identifier (e.g., "parakeet", "whisper")
         gpu_memory_used: GPU memory usage string
         gpu_memory_total: Total GPU memory string
         last_heartbeat: Last heartbeat timestamp
@@ -49,6 +50,7 @@ class WorkerState:
     active_sessions: int
     models_loaded: list[str]
     languages_supported: list[str]
+    engine: str
     gpu_memory_used: str
     gpu_memory_total: str
     last_heartbeat: datetime
@@ -205,6 +207,7 @@ class WorkerRegistry:
             active_sessions=int(data.get("active_sessions", "0")),
             models_loaded=json.loads(data.get("models_loaded", "[]")),
             languages_supported=json.loads(data.get("languages_supported", "[]")),
+            engine=data.get("engine", "unknown"),
             gpu_memory_used=data.get("gpu_memory_used", "0GB"),
             gpu_memory_total=data.get("gpu_memory_total", "0GB"),
             last_heartbeat=self._parse_datetime(data.get("last_heartbeat")),

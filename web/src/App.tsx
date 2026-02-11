@@ -9,6 +9,7 @@ import { BatchJobs } from '@/pages/BatchJobs'
 import { JobDetail } from '@/pages/JobDetail'
 import { TaskDetail } from '@/pages/TaskDetail'
 import { RealtimeSessions } from '@/pages/RealtimeSessions'
+import { RealtimeSessionDetail } from '@/pages/RealtimeSessionDetail'
 import { Engines } from '@/pages/Engines'
 import { ApiKeys } from '@/pages/ApiKeys'
 import { Webhooks } from '@/pages/Webhooks'
@@ -44,6 +45,7 @@ export default function App() {
                       <Route path="/jobs/:jobId" element={<JobDetail />} />
                       <Route path="/jobs/:jobId/tasks/:taskId" element={<TaskDetail />} />
                       <Route path="/realtime" element={<RealtimeSessions />} />
+                      <Route path="/realtime/sessions/:sessionId" element={<RealtimeSessionDetail />} />
                       <Route path="/engines" element={<Engines />} />
                       <Route path="/keys" element={<ApiKeys />} />
                       <Route path="/webhooks" element={<Webhooks />} />

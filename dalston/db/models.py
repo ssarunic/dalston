@@ -7,6 +7,7 @@ from sqlalchemy import (
     ARRAY,
     TIMESTAMP,
     Boolean,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -52,6 +53,9 @@ class TenantModel(Base):
     jobs: Mapped[list["JobModel"]] = relationship(back_populates="tenant")
     api_keys: Mapped[list["APIKeyModel"]] = relationship(back_populates="tenant")
     webhook_endpoints: Mapped[list["WebhookEndpointModel"]] = relationship(
+        back_populates="tenant"
+    )
+    realtime_sessions: Mapped[list["RealtimeSessionModel"]] = relationship(
         back_populates="tenant"
     )
 
@@ -312,3 +316,89 @@ class WebhookDeliveryModel(Base):
         back_populates="deliveries"
     )
     job: Mapped["JobModel | None"] = relationship()
+
+
+class RealtimeSessionModel(Base):
+    """Real-time transcription session with optional persistence."""
+
+    __tablename__ = "realtime_sessions"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id"),
+        nullable=False,
+        index=True,
+    )
+
+    # Status: active, completed, error, interrupted
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="active",
+        index=True,
+    )
+
+    # Parameters (immutable after creation)
+    language: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    engine: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    encoding: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    sample_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Feature flags
+    store_audio: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    store_transcript: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    enhance_on_end: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # Results (populated during/after session)
+    audio_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transcript_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enhancement_job_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Stats (updated periodically during session)
+    audio_duration_seconds: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0
+    )
+    utterance_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Tracking
+    worker_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    client_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    previous_session_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("realtime_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Timestamps
+    started_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
+    ended_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+
+    # Error tracking
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    tenant: Mapped["TenantModel"] = relationship()
+    enhancement_job: Mapped["JobModel | None"] = relationship()
+    previous_session: Mapped["RealtimeSessionModel | None"] = relationship(
+        remote_side="RealtimeSessionModel.id"
+    )

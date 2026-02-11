@@ -226,6 +226,10 @@ class ParakeetStreamingEngine(RealtimeEngine):
         """
         return ["en"]
 
+    def get_engine(self) -> str:
+        """Return engine type identifier."""
+        return "parakeet"
+
     def get_gpu_memory_usage(self) -> str:
         """Return GPU memory usage string."""
         if torch.cuda.is_available():

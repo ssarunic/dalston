@@ -11,7 +11,11 @@ import type {
   HealthResponse,
   JobDetail,
   JobStatsResponse,
+  RealtimeSessionDetail,
+  RealtimeSessionListParams,
+  RealtimeSessionListResponse,
   RealtimeStatusResponse,
+  SessionTranscript,
   TaskArtifact,
   TaskListResponse,
   UpdateWebhookRequest,
@@ -172,4 +176,24 @@ export const apiClient = {
 
   retryWebhookDelivery: (endpointId: string, deliveryId: string) =>
     currentClient.post(`v1/webhooks/${endpointId}/deliveries/${deliveryId}/retry`).json(),
+
+  // Realtime session management
+  getRealtimeSessions: (params: RealtimeSessionListParams = {}) => {
+    const searchParams = new URLSearchParams()
+    if (params.status) searchParams.set('status', params.status)
+    if (params.since) searchParams.set('since', params.since)
+    if (params.until) searchParams.set('until', params.until)
+    if (params.limit) searchParams.set('limit', String(params.limit))
+    if (params.offset) searchParams.set('offset', String(params.offset))
+    return currentClient.get('v1/realtime/sessions', { searchParams }).json<RealtimeSessionListResponse>()
+  },
+
+  getRealtimeSession: (sessionId: string) =>
+    currentClient.get(`v1/realtime/sessions/${sessionId}`).json<RealtimeSessionDetail>(),
+
+  getSessionTranscript: (sessionId: string) =>
+    currentClient.get(`v1/realtime/sessions/${sessionId}/transcript`).json<SessionTranscript>(),
+
+  getSessionAudioUrl: (sessionId: string) =>
+    currentClient.get(`v1/realtime/sessions/${sessionId}/audio`).json<{ url: string; expires_in: number }>(),
 }

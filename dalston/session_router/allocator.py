@@ -33,11 +33,13 @@ class WorkerAllocation:
         worker_id: Allocated worker identifier
         endpoint: Worker WebSocket endpoint URL
         session_id: Newly created session ID
+        engine: Engine type (e.g., "parakeet", "whisper")
     """
 
     worker_id: str
     endpoint: str
     session_id: str
+    engine: str
 
 
 @dataclass
@@ -187,6 +189,7 @@ class SessionAllocator:
             worker_id=worker.worker_id,
             endpoint=worker.endpoint,
             session_id=session_id,
+            engine=worker.engine,
         )
 
     async def _acquire_from_list(
@@ -229,6 +232,7 @@ class SessionAllocator:
                     worker_id=worker.worker_id,
                     endpoint=worker.endpoint,
                     session_id=session_id,
+                    engine=worker.engine,
                 )
 
             # Rollback and try next

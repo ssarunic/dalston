@@ -286,3 +286,61 @@ export interface UpdateWebhookRequest {
   description?: string | null
   is_active?: boolean
 }
+
+// Realtime Session types
+export type RealtimeSessionStatus = 'active' | 'completed' | 'error' | 'interrupted'
+
+export interface RealtimeSessionSummary {
+  id: string
+  status: RealtimeSessionStatus
+  language: string | null
+  model: string | null
+  engine: string | null
+  audio_duration_seconds: number
+  utterance_count: number
+  word_count: number
+  store_audio: boolean
+  store_transcript: boolean
+  started_at: string
+  ended_at: string | null
+}
+
+export interface RealtimeSessionDetail extends RealtimeSessionSummary {
+  encoding: string | null
+  sample_rate: number | null
+  enhance_on_end: boolean
+  audio_uri: string | null
+  transcript_uri: string | null
+  enhancement_job_id: string | null
+  worker_id: string | null
+  client_ip: string | null
+  previous_session_id: string | null
+  error: string | null
+}
+
+export interface RealtimeSessionListResponse {
+  sessions: RealtimeSessionSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface RealtimeSessionListParams {
+  status?: string
+  since?: string
+  until?: string
+  limit?: number
+  offset?: number
+}
+
+export interface SessionUtterance {
+  id: number
+  start: number
+  end: number
+  text: string
+}
+
+export interface SessionTranscript {
+  text: string
+  utterances?: SessionUtterance[]
+}

@@ -34,6 +34,7 @@ class WorkerInfo:
         capacity: Maximum concurrent sessions this worker can handle
         models: List of model variants this worker supports (e.g., ["fast", "accurate"])
         languages: List of language codes supported (e.g., ["en", "es", "auto"])
+        engine: Engine type identifier (e.g., "parakeet", "whisper")
     """
 
     worker_id: str
@@ -41,6 +42,7 @@ class WorkerInfo:
     capacity: int
     models: list[str]
     languages: list[str]
+    engine: str = "unknown"
 
 
 class WorkerRegistry:
@@ -122,6 +124,7 @@ class WorkerRegistry:
                 "gpu_memory_total": "0GB",
                 "models_loaded": json.dumps(info.models),
                 "languages_supported": json.dumps(info.languages),
+                "engine": info.engine,
                 "last_heartbeat": datetime.now(UTC).isoformat(),
                 "started_at": datetime.now(UTC).isoformat(),
             },

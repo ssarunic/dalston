@@ -189,6 +189,17 @@ class RealtimeEngine(ABC):
         """
         return ["auto"]
 
+    def get_engine(self) -> str:
+        """Return engine type identifier.
+
+        Override to report the engine type (e.g., "parakeet", "whisper").
+        Used when registering with Session Router.
+
+        Returns:
+            Engine type string. Default: "unknown"
+        """
+        return "unknown"
+
     def get_gpu_memory_usage(self) -> str:
         """Return GPU memory usage string.
 
@@ -263,6 +274,7 @@ class RealtimeEngine(ABC):
                 capacity=self.max_sessions,
                 models=self.get_models(),
                 languages=self.get_languages(),
+                engine=self.get_engine(),
             )
         )
 

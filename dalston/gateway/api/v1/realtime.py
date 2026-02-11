@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from dalston.common.models import resolve_model
 from dalston.common.redis import get_redis as _get_redis
+from dalston.config import get_settings
 from dalston.db.session import get_db as _get_db
 from dalston.gateway.dependencies import (
     RequireJobsRead,
@@ -27,6 +28,7 @@ from dalston.gateway.dependencies import (
 )
 from dalston.gateway.middleware.auth import authenticate_websocket
 from dalston.gateway.services.auth import AuthService, Scope
+from dalston.gateway.services.realtime_sessions import RealtimeSessionService
 from dalston.session_router import SessionRouter
 
 logger = structlog.get_logger()
@@ -78,6 +80,13 @@ async def realtime_transcription(
     enhance_on_end: Annotated[
         bool, Query(description="Trigger batch enhancement")
     ] = False,
+    store_audio: Annotated[bool, Query(description="Record audio to S3")] = False,
+    store_transcript: Annotated[
+        bool, Query(description="Save final transcript to S3")
+    ] = False,
+    resume_session_id: Annotated[
+        str | None, Query(description="Link to previous session for resume")
+    ] = None,
 ):
     """WebSocket endpoint for real-time streaming transcription.
 
@@ -95,6 +104,9 @@ async def realtime_transcription(
     - interim_results: Send transcript.partial messages
     - word_timestamps: Include word-level timing in results
     - enhance_on_end: Trigger batch enhancement when session ends
+    - store_audio: Record audio to S3 during session
+    - store_transcript: Save final transcript to S3 on end
+    - resume_session_id: Link to previous session for continuity
     """
     # Get session router via dependency (note: WebSocket endpoints can't use Depends
     # in the same way as REST endpoints, so we import directly)
@@ -170,12 +182,70 @@ async def realtime_transcription(
     )
     log.info("session_allocated")
 
-    # Bind session_id into structlog contextvars for downstream log calls
-    structlog.contextvars.bind_contextvars(session_id=allocation.session_id)
+    # Wrap everything after acquire_worker in try/finally to ensure cleanup
+    db_session = None
+    db_gen = None
+    session_service = None
+    session_error = None
+    session_status = "completed"
+    session_end_data = None
 
-    # Connect to worker and proxy bidirectionally
     try:
-        await _proxy_to_worker(
+        # Bind session_id into structlog contextvars for downstream log calls
+        structlog.contextvars.bind_contextvars(session_id=allocation.session_id)
+
+        # Create session record in PostgreSQL for persistence/visibility
+        previous_session_uuid = None
+
+        if resume_session_id:
+            try:
+                # Parse resume_session_id to UUID
+                if resume_session_id.startswith("sess_"):
+                    hex_part = resume_session_id[5:]
+                    padded = hex_part.ljust(32, "0")
+                    from uuid import UUID as parse_uuid
+
+                    previous_session_uuid = parse_uuid(padded)
+                else:
+                    from uuid import UUID as parse_uuid
+
+                    previous_session_uuid = parse_uuid(resume_session_id)
+            except ValueError:
+                log.warning(
+                    "invalid_resume_session_id", resume_session_id=resume_session_id
+                )
+
+        try:
+            # Get fresh DB session for persistence
+            db_gen = _get_db()
+            db_session = await db_gen.__anext__()
+            settings = get_settings()
+            session_service = RealtimeSessionService(db_session, settings)
+
+            # Create session record
+            # Store user's original model parameter (e.g., "fast", "parakeet-0.6b")
+            # and the actual engine that handled it (e.g., "parakeet", "whisper")
+            await session_service.create_session(
+                session_id=allocation.session_id,
+                tenant_id=api_key.tenant_id,
+                worker_id=allocation.worker_id,
+                client_ip=client_ip,
+                language=language,
+                model=model,
+                engine=allocation.engine,
+                encoding=encoding,
+                sample_rate=sample_rate,
+                store_audio=store_audio,
+                store_transcript=store_transcript,
+                enhance_on_end=enhance_on_end,
+                previous_session_id=previous_session_uuid,
+            )
+        except Exception as e:
+            log.warning("session_db_create_failed", error=str(e))
+            # Continue without persistence - session still works via Redis
+
+        # Connect to worker and proxy bidirectionally
+        session_end_data = await _proxy_to_worker(
             client_ws=websocket,
             worker_endpoint=allocation.endpoint,
             session_id=allocation.session_id,
@@ -186,15 +256,68 @@ async def realtime_transcription(
             enable_vad=enable_vad,
             interim_results=interim_results,
             word_timestamps=word_timestamps,
+            store_audio=store_audio,
+            store_transcript=store_transcript,
         )
     except WebSocketDisconnect:
         log.info("client_disconnected")
+        session_status = "interrupted"
     except Exception as e:
         log.error("session_error", error=str(e))
+        session_error = str(e)
+        session_status = "error"
     finally:
         # Release worker
         await session_router.release_worker(allocation.session_id)
         log.info("session_released")
+
+        # Update session stats from session.end message
+        if session_service and session_end_data:
+            try:
+                # Extract stats from session.end message
+                audio_duration = session_end_data.get("total_duration", 0)
+                segments = session_end_data.get("segments", [])
+                transcript = session_end_data.get("transcript", "")
+                word_count = len(transcript.split()) if transcript else 0
+
+                log.info(
+                    "session_stats_captured",
+                    audio_duration=audio_duration,
+                    utterance_count=len(segments),
+                    word_count=word_count,
+                )
+
+                await session_service.update_stats(
+                    session_id=allocation.session_id,
+                    audio_duration_seconds=audio_duration,
+                    utterance_count=len(segments),
+                    word_count=word_count,
+                )
+            except Exception as e:
+                log.warning("session_stats_update_failed", error=str(e))
+        elif session_service:
+            log.warning(
+                "session_end_data_missing",
+                msg="No session.end data received from worker",
+            )
+
+        # Finalize session in PostgreSQL
+        if session_service:
+            try:
+                await session_service.finalize_session(
+                    session_id=allocation.session_id,
+                    status=session_status,
+                    error=session_error,
+                )
+            except Exception as e:
+                log.warning("session_db_finalize_failed", error=str(e))
+
+        # Close DB session
+        if db_session:
+            try:
+                await db_gen.aclose()
+            except Exception:
+                pass
 
 
 # -----------------------------------------------------------------------------
@@ -310,23 +433,24 @@ async def elevenlabs_realtime_transcription(
     )
     log.info("elevenlabs_session_allocated")
 
-    # Send session_started message (ElevenLabs format)
-    await websocket.send_json(
-        {
-            "message_type": "session_started",
-            "session_id": allocation.session_id,
-            "config": {
-                "sample_rate": sample_rate,
-                "audio_format": audio_format,
-                "language_code": language_code,
-                "model_id": model_id,
-                "commit_strategy": commit_strategy,
-            },
-        }
-    )
-
-    # Connect to worker with ElevenLabs protocol translation
+    # Wrap everything after acquire_worker in try/finally to ensure cleanup
     try:
+        # Send session_started message (ElevenLabs format)
+        await websocket.send_json(
+            {
+                "message_type": "session_started",
+                "session_id": allocation.session_id,
+                "config": {
+                    "sample_rate": sample_rate,
+                    "audio_format": audio_format,
+                    "language_code": language_code,
+                    "model_id": model_id,
+                    "commit_strategy": commit_strategy,
+                },
+            }
+        )
+
+        # Connect to worker with ElevenLabs protocol translation
         await _proxy_to_worker_elevenlabs(
             client_ws=websocket,
             worker_endpoint=allocation.endpoint,
@@ -358,7 +482,9 @@ async def _proxy_to_worker(
     enable_vad: bool,
     interim_results: bool,
     word_timestamps: bool,
-) -> None:
+    store_audio: bool = False,
+    store_transcript: bool = False,
+) -> dict | None:
     """Proxy WebSocket connection between client and worker.
 
     Args:
@@ -372,6 +498,9 @@ async def _proxy_to_worker(
         enable_vad: Enable VAD events
         interim_results: Enable interim results
         word_timestamps: Enable word timestamps
+
+    Returns:
+        Session end data with stats if received, None otherwise
     """
     from urllib.parse import urlencode
 
@@ -388,6 +517,8 @@ async def _proxy_to_worker(
             "enable_vad": str(enable_vad).lower(),
             "interim_results": str(interim_results).lower(),
             "word_timestamps": str(word_timestamps).lower(),
+            "store_audio": str(store_audio).lower(),
+            "store_transcript": str(store_transcript).lower(),
         }
     )
     worker_url = f"{worker_endpoint}/session?{params}"
@@ -414,19 +545,75 @@ async def _proxy_to_worker(
             return_when=asyncio.FIRST_COMPLETED,
         )
 
-        # Cancel pending tasks
-        for task in pending:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        # Log which task completed first for debugging
+        first_done = (
+            "client_to_worker" if client_to_worker in done else "worker_to_client"
+        )
+        logger.info(
+            "proxy_task_completed", first_done=first_done, session_id=session_id
+        )
 
-        # Re-raise any exceptions from completed tasks
+        # If client_to_worker finished first, give worker time to send session.end
+        # This handles the case where client disconnects but we still want stats
+        # Worker may need to flush VAD buffer and do final transcription, so allow 10s
+        session_end_data = None
+        if client_to_worker in done and worker_to_client in pending:
+            # Client disconnected/ended - wait for session.end from worker
+            logger.info(
+                "waiting_for_session_end",
+                msg="Client finished, waiting for worker session.end",
+            )
+            try:
+                await asyncio.wait_for(worker_to_client, timeout=10.0)
+                session_end_data = worker_to_client.result()
+                logger.info(
+                    "session_end_received", has_data=session_end_data is not None
+                )
+            except TimeoutError:
+                logger.warning(
+                    "session_end_timeout", msg="Worker didn't send session.end in 10s"
+                )
+                worker_to_client.cancel()
+                try:
+                    await worker_to_client
+                except asyncio.CancelledError:
+                    pass
+            except Exception as e:
+                # Worker task failed
+                logger.warning("session_end_error", error=str(e))
+                pass
+        else:
+            # Worker finished first - this happens when worker closes connection
+            logger.info("worker_finished_first", session_id=session_id)
+
+            # Cancel remaining pending tasks
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+            # Get result from worker_to_client if it completed
+            if worker_to_client in done:
+                try:
+                    session_end_data = worker_to_client.result()
+                    logger.info(
+                        "session_end_from_worker", has_data=session_end_data is not None
+                    )
+                except Exception as e:
+                    logger.warning("session_end_result_error", error=str(e))
+
+        # Check for exceptions in completed tasks
+        # Don't re-raise client_to_worker exceptions if we got session data
+        # (client disconnect is expected and we still want to return stats)
         for task in done:
-            exc = task.exception()
-            if exc is not None:
-                raise exc
+            if task is not worker_to_client:  # Already handled above
+                exc = task.exception()
+                if exc is not None and session_end_data is None:
+                    raise exc
+
+        return session_end_data
 
 
 async def _forward_client_to_worker(
@@ -435,6 +622,7 @@ async def _forward_client_to_worker(
     session_id: str,
 ) -> None:
     """Forward messages from client to worker."""
+    end_sent = False
     try:
         while True:
             # Receive from client (can be binary or text)
@@ -443,16 +631,31 @@ async def _forward_client_to_worker(
             if message["type"] == "websocket.disconnect":
                 # Client disconnected, send end to worker
                 await worker_ws.send(json.dumps({"type": "end"}))
+                end_sent = True
                 break
             elif message["type"] == "websocket.receive":
                 if "bytes" in message:
                     # Binary audio data
                     await worker_ws.send(message["bytes"])
                 elif "text" in message:
-                    # JSON control message
+                    # JSON control message - check if client sent "end"
                     await worker_ws.send(message["text"])
+                    try:
+                        data = json.loads(message["text"])
+                        if data.get("type") == "end":
+                            end_sent = True
+                    except json.JSONDecodeError:
+                        pass
     except Exception as e:
         logger.debug("client_to_worker_ended", session_id=session_id, error=str(e))
+        # On abrupt disconnect, still try to send end to worker so it can finalize
+        if not end_sent:
+            try:
+                await worker_ws.send(json.dumps({"type": "end"}))
+                logger.debug("sent_end_after_disconnect", session_id=session_id)
+            except Exception:
+                # Worker connection might also be closed
+                pass
         raise
 
 
@@ -460,27 +663,52 @@ async def _forward_worker_to_client(
     worker_ws,
     client_ws: WebSocket,
     session_id: str,
-) -> None:
-    """Forward messages from worker to client."""
+) -> dict | None:
+    """Forward messages from worker to client.
+
+    Returns:
+        Session end data if received, None otherwise
+    """
+    session_end_data = None
+    client_closed = False
     try:
         async for message in worker_ws:
             if isinstance(message, bytes):
                 # Binary data (unusual for worker->client)
-                await client_ws.send_bytes(message)
+                if not client_closed:
+                    try:
+                        await client_ws.send_bytes(message)
+                    except Exception:
+                        client_closed = True
             else:
-                # JSON message
-                await client_ws.send_text(message)
-
-                # Check if session ended
+                # JSON message - capture session.end data before trying to forward
                 try:
                     data = json.loads(message)
                     if data.get("type") == "session.end":
-                        break
+                        session_end_data = data
                 except json.JSONDecodeError:
                     pass
+
+                # Try to forward to client (may fail if client disconnected)
+                if not client_closed:
+                    try:
+                        await client_ws.send_text(message)
+                    except Exception:
+                        client_closed = True
+                        logger.debug(
+                            "client_closed_during_forward",
+                            session_id=session_id,
+                        )
+
+                # If we got session.end, we're done (whether or not client received it)
+                if session_end_data is not None:
+                    break
     except Exception as e:
         logger.debug("worker_to_client_ended", session_id=session_id, error=str(e))
-        raise
+        # Only raise if we don't have session data to return
+        if session_end_data is None:
+            raise
+    return session_end_data
 
 
 # -----------------------------------------------------------------------------
@@ -572,12 +800,14 @@ async def _elevenlabs_client_to_worker(
     Dalston expects:
         Binary audio frames
     """
+    end_sent = False
     try:
         while True:
             message = await client_ws.receive()
 
             if message["type"] == "websocket.disconnect":
                 await worker_ws.send(json.dumps({"type": "end"}))
+                end_sent = True
                 break
             elif message["type"] == "websocket.receive":
                 if "text" in message:
@@ -599,6 +829,7 @@ async def _elevenlabs_client_to_worker(
 
                         elif msg_type == "close_stream":
                             await worker_ws.send(json.dumps({"type": "end"}))
+                            end_sent = True
                             break
 
                     except json.JSONDecodeError as e:
@@ -629,6 +860,16 @@ async def _elevenlabs_client_to_worker(
             session_id=session_id,
             error=str(e),
         )
+        # On abrupt disconnect, still try to send end to worker so it can finalize
+        if not end_sent:
+            try:
+                await worker_ws.send(json.dumps({"type": "end"}))
+                logger.debug(
+                    "elevenlabs_sent_end_after_disconnect", session_id=session_id
+                )
+            except Exception:
+                # Worker connection might also be closed
+                pass
         raise
 
 
@@ -858,3 +1099,311 @@ async def get_worker_status(
         models=worker.models,
         languages=worker.languages,
     )
+
+
+# -----------------------------------------------------------------------------
+# Session History Endpoints
+# -----------------------------------------------------------------------------
+
+
+class SessionSummary(BaseModel):
+    """Session summary for list view."""
+
+    id: str
+    status: str
+    language: str | None
+    model: str | None
+    engine: str | None
+    audio_duration_seconds: float
+    utterance_count: int
+    word_count: int
+    store_audio: bool
+    store_transcript: bool
+    started_at: str
+    ended_at: str | None
+
+
+class SessionDetail(BaseModel):
+    """Full session details."""
+
+    id: str
+    status: str
+    language: str | None
+    model: str | None
+    engine: str | None
+    encoding: str | None
+    sample_rate: int | None
+    audio_duration_seconds: float
+    utterance_count: int
+    word_count: int
+    store_audio: bool
+    store_transcript: bool
+    enhance_on_end: bool
+    audio_uri: str | None
+    transcript_uri: str | None
+    enhancement_job_id: str | None
+    worker_id: str | None
+    client_ip: str | None
+    previous_session_id: str | None
+    started_at: str
+    ended_at: str | None
+    error: str | None
+
+
+class SessionsListResponse(BaseModel):
+    """List of sessions."""
+
+    sessions: list[SessionSummary]
+    total: int
+    limit: int
+    offset: int
+
+
+@management_router.get(
+    "/sessions",
+    response_model=SessionsListResponse,
+    summary="List realtime sessions",
+    description="List past and active realtime transcription sessions.",
+)
+async def list_realtime_sessions(
+    api_key: RequireJobsRead,
+    status: Annotated[str | None, Query(description="Filter by status")] = None,
+    since: Annotated[
+        str | None, Query(description="Sessions started after (ISO 8601)")
+    ] = None,
+    until: Annotated[
+        str | None, Query(description="Sessions started before (ISO 8601)")
+    ] = None,
+    limit: Annotated[int, Query(ge=1, le=100, description="Max results")] = 50,
+    offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
+) -> SessionsListResponse:
+    """List realtime sessions for the authenticated tenant."""
+    from datetime import datetime
+
+    from dalston.config import get_settings
+    from dalston.db.session import get_db as _get_db_session
+
+    # Parse datetime filters
+    since_dt = None
+    until_dt = None
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    if until:
+        try:
+            until_dt = datetime.fromisoformat(until.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+
+    # Get database session
+    db_gen = _get_db_session()
+    db = await db_gen.__anext__()
+    try:
+        settings = get_settings()
+        service = RealtimeSessionService(db, settings)
+
+        sessions, total = await service.list_sessions(
+            tenant_id=api_key.tenant_id,
+            status=status,
+            since=since_dt,
+            until=until_dt,
+            limit=limit,
+            offset=offset,
+        )
+
+        return SessionsListResponse(
+            sessions=[
+                SessionSummary(
+                    id=str(s.id),
+                    status=s.status,
+                    language=s.language,
+                    model=s.model,
+                    engine=s.engine,
+                    audio_duration_seconds=s.audio_duration_seconds,
+                    utterance_count=s.utterance_count,
+                    word_count=s.word_count,
+                    store_audio=s.store_audio,
+                    store_transcript=s.store_transcript,
+                    started_at=s.started_at.isoformat(),
+                    ended_at=s.ended_at.isoformat() if s.ended_at else None,
+                )
+                for s in sessions
+            ],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+    finally:
+        await db_gen.aclose()
+
+
+@management_router.get(
+    "/sessions/{session_id}",
+    response_model=SessionDetail,
+    summary="Get session details",
+    description="Get full details of a realtime session.",
+    responses={404: {"description": "Session not found"}},
+)
+async def get_realtime_session(
+    session_id: str,
+    api_key: RequireJobsRead,
+) -> SessionDetail:
+    """Get details of a specific realtime session."""
+    from fastapi import HTTPException
+
+    from dalston.config import get_settings
+    from dalston.db.session import get_db as _get_db_session
+
+    db_gen = _get_db_session()
+    db = await db_gen.__anext__()
+    try:
+        settings = get_settings()
+        service = RealtimeSessionService(db, settings)
+
+        session = await service.get_session(session_id)
+
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Verify tenant access
+        if session.tenant_id != api_key.tenant_id:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        return SessionDetail(
+            id=str(session.id),
+            status=session.status,
+            language=session.language,
+            model=session.model,
+            engine=session.engine,
+            encoding=session.encoding,
+            sample_rate=session.sample_rate,
+            audio_duration_seconds=session.audio_duration_seconds,
+            utterance_count=session.utterance_count,
+            word_count=session.word_count,
+            store_audio=session.store_audio,
+            store_transcript=session.store_transcript,
+            enhance_on_end=session.enhance_on_end,
+            audio_uri=session.audio_uri,
+            transcript_uri=session.transcript_uri,
+            enhancement_job_id=str(session.enhancement_job_id)
+            if session.enhancement_job_id
+            else None,
+            worker_id=session.worker_id,
+            client_ip=session.client_ip,
+            previous_session_id=str(session.previous_session_id)
+            if session.previous_session_id
+            else None,
+            started_at=session.started_at.isoformat(),
+            ended_at=session.ended_at.isoformat() if session.ended_at else None,
+            error=session.error,
+        )
+    finally:
+        await db_gen.aclose()
+
+
+@management_router.get(
+    "/sessions/{session_id}/transcript",
+    summary="Get session transcript",
+    description="Download the transcript for a session (if stored).",
+    responses={
+        404: {"description": "Session or transcript not found"},
+    },
+)
+async def get_session_transcript(
+    session_id: str,
+    api_key: RequireJobsRead,
+):
+    """Get transcript JSON for a session."""
+    from fastapi import HTTPException
+    from fastapi.responses import JSONResponse
+
+    from dalston.common.s3 import get_s3_client
+    from dalston.config import get_settings
+    from dalston.db.session import get_db as _get_db_session
+
+    db_gen = _get_db_session()
+    db = await db_gen.__anext__()
+    try:
+        settings = get_settings()
+        service = RealtimeSessionService(db, settings)
+
+        session = await service.get_session(session_id)
+
+        if session is None or session.tenant_id != api_key.tenant_id:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        if not session.transcript_uri:
+            raise HTTPException(status_code=404, detail="Transcript not available")
+
+        # Parse S3 URI and fetch transcript
+        # Format: s3://bucket/key
+        uri_parts = session.transcript_uri.replace("s3://", "").split("/", 1)
+        bucket = uri_parts[0]
+        key = uri_parts[1] if len(uri_parts) > 1 else ""
+
+        async with get_s3_client(settings) as s3:
+            try:
+                response = await s3.get_object(Bucket=bucket, Key=key)
+                body = await response["Body"].read()
+                transcript = json.loads(body.decode("utf-8"))
+                return JSONResponse(content=transcript)
+            except Exception:
+                raise HTTPException(
+                    status_code=404, detail="Transcript not found"
+                ) from None
+    finally:
+        await db_gen.aclose()
+
+
+@management_router.get(
+    "/sessions/{session_id}/audio",
+    summary="Get session audio URL",
+    description="Get a presigned URL to download the audio for a session (if stored).",
+    responses={
+        404: {"description": "Session or audio not found"},
+    },
+)
+async def get_session_audio(
+    session_id: str,
+    api_key: RequireJobsRead,
+):
+    """Get presigned URL for session audio."""
+    from fastapi import HTTPException
+
+    from dalston.common.s3 import get_s3_client
+    from dalston.config import get_settings
+    from dalston.db.session import get_db as _get_db_session
+
+    db_gen = _get_db_session()
+    db = await db_gen.__anext__()
+    try:
+        settings = get_settings()
+        service = RealtimeSessionService(db, settings)
+
+        session = await service.get_session(session_id)
+
+        if session is None or session.tenant_id != api_key.tenant_id:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        if not session.audio_uri:
+            raise HTTPException(status_code=404, detail="Audio not available")
+
+        # Parse S3 URI and generate presigned URL
+        uri_parts = session.audio_uri.replace("s3://", "").split("/", 1)
+        bucket = uri_parts[0]
+        key = uri_parts[1] if len(uri_parts) > 1 else ""
+
+        async with get_s3_client(settings) as s3:
+            try:
+                url = await s3.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": bucket, "Key": key},
+                    ExpiresIn=3600,  # 1 hour
+                )
+                return {"url": url, "expires_in": 3600}
+            except Exception:
+                raise HTTPException(status_code=404, detail="Audio not found") from None
+    finally:
+        await db_gen.aclose()
