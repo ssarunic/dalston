@@ -456,6 +456,12 @@ class RealtimeEngine(ABC):
             except ValueError:
                 return default
 
+        def get_float_param(name: str, default: float) -> float:
+            try:
+                return float(get_param(name, str(default)))
+            except ValueError:
+                return default
+
         # Use session_id from Gateway if provided, otherwise generate one
         # (Gateway passes session_id for coordination with Session Router)
         session_id = get_param("session_id", "")
@@ -472,4 +478,5 @@ class RealtimeEngine(ABC):
             enable_vad=get_bool_param("enable_vad", True),
             interim_results=get_bool_param("interim_results", True),
             word_timestamps=get_bool_param("word_timestamps", False),
+            max_utterance_duration=get_float_param("max_utterance_duration", 60.0),
         )

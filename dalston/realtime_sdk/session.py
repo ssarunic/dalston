@@ -59,6 +59,7 @@ class SessionConfig:
         enable_vad: Whether VAD events are sent to client
         interim_results: Whether partial transcripts are sent
         word_timestamps: Whether word-level timing is included
+        max_utterance_duration: Max seconds before forcing utterance end (0=unlimited)
     """
 
     session_id: str
@@ -70,6 +71,7 @@ class SessionConfig:
     enable_vad: bool = True
     interim_results: bool = True
     word_timestamps: bool = False
+    max_utterance_duration: float = 60.0  # Force utterance end after 60s
 
 
 class AudioBuffer:
@@ -368,6 +370,10 @@ class SessionHandler:
                 await self._send_partial_result()
                 self._chunks_since_partial = 0
 
+        # Check for max utterance duration exceeded (prevents unbounded accumulation)
+        if self._vad.is_speaking and self.config.max_utterance_duration > 0:
+            await self._check_max_utterance_duration()
+
     async def _send_partial_result(self) -> None:
         """Send partial transcription result during speech.
 
@@ -408,6 +414,44 @@ class SessionHandler:
         except Exception as e:
             logger.debug("partial_transcription_error", error=str(e))
             # Don't send error for partial - it's best-effort
+
+    async def _check_max_utterance_duration(self) -> None:
+        """Force utterance end if max duration exceeded.
+
+        Prevents unbounded memory growth and transcription latency
+        when speech continues without natural pauses.
+        """
+        # Calculate accumulated speech duration from VAD buffer
+        speech_samples = self._vad.get_speech_buffer_samples()
+        speech_duration = speech_samples / self.config.sample_rate
+
+        if speech_duration >= self.config.max_utterance_duration:
+            logger.info(
+                "max_utterance_duration_exceeded",
+                duration=speech_duration,
+                max_duration=self.config.max_utterance_duration,
+            )
+
+            # Send VAD speech_end event
+            if self.config.enable_vad:
+                await self._send(
+                    VADSpeechEndMessage(timestamp=self._assembler.current_time)
+                )
+
+            # Get accumulated speech audio from VAD and transcribe
+            speech_audio = self._vad.force_endpoint()
+            if speech_audio is not None and len(speech_audio) > 0:
+                await self._transcribe_and_send(speech_audio)
+
+            # Clear streaming state
+            self._speech_audio_buffer = []
+            self._chunks_since_partial = 0
+
+            # Send VAD speech_start event (speech continues)
+            if self.config.enable_vad:
+                await self._send(
+                    VADSpeechStartMessage(timestamp=self._assembler.current_time)
+                )
 
     async def _transcribe_and_send(self, audio: np.ndarray) -> None:
         """Transcribe audio and send result.

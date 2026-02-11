@@ -286,3 +286,40 @@ class VADProcessor:
     def is_speaking(self) -> bool:
         """Whether currently in speech state."""
         return self._state == VADState.SPEECH
+
+    def get_speech_buffer_samples(self) -> int:
+        """Get total samples in speech buffer.
+
+        Returns:
+            Total number of audio samples accumulated in speech buffer
+        """
+        return sum(len(chunk) for chunk in self._speech_buffer)
+
+    def force_endpoint(self) -> np.ndarray | None:
+        """Force an endpoint and return accumulated speech.
+
+        Used when max utterance duration is exceeded. Returns the
+        accumulated speech and resets to SPEECH state (not SILENCE)
+        since speech is continuing.
+
+        Returns:
+            Accumulated speech audio if any, None otherwise
+        """
+        if not self._speech_buffer:
+            return None
+
+        speech_audio = np.concatenate(self._speech_buffer)
+        duration = len(speech_audio) / self.config.sample_rate
+
+        logger.debug(
+            "forced_endpoint",
+            duration=round(duration, 2),
+        )
+
+        # Reset buffers but stay in SPEECH state (speech is continuing)
+        self._speech_buffer.clear()
+        self._speech_duration = 0.0
+        self._silence_duration = 0.0
+        # State remains SPEECH - caller sends speech_start to indicate continuation
+
+        return speech_audio
