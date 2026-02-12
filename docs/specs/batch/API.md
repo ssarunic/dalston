@@ -60,17 +60,17 @@ python -m dalston.gateway.cli create-admin-key --name "My Key"
 
 ## Rate Limits
 
-Rate limits are applied per API key to ensure fair usage.
+Rate limits are applied per tenant (API key) to ensure fair usage.
 
 ### Default Limits
 
-| Limit | Default | Configurable |
-|-------|---------|--------------|
-| Requests per minute | 60 | Yes |
-| Concurrent jobs | 5 | Yes |
-| Upload size | 500 MB | Yes |
-| Audio duration per job | 4 hours | Yes |
-| Jobs per day | 1000 | Yes |
+| Limit | Default | Environment Variable |
+|-------|---------|---------------------|
+| Requests per minute | 600 | `RATE_LIMIT_REQUESTS_PER_MINUTE` |
+| Concurrent batch jobs | 10 | `RATE_LIMIT_CONCURRENT_JOBS` |
+| Concurrent realtime sessions | 5 | `RATE_LIMIT_CONCURRENT_SESSIONS` |
+| Upload size | 500 MB | — |
+| Audio duration per job | 4 hours | — |
 
 ### Rate Limit Response
 
@@ -79,43 +79,48 @@ When a rate limit is exceeded, the API returns `429 Too Many Requests`:
 ```json
 {
   "error": {
-    "type": "rate_limit_exceeded",
-    "message": "Too many requests. Please wait before retrying.",
-    "limit_type": "requests_per_minute",
-    "current": 61,
-    "limit": 60,
-    "retry_after": 32
+    "code": "rate_limit_exceeded",
+    "message": "Rate limit exceeded"
+  }
+}
+```
+
+Or for concurrent limits:
+
+```json
+{
+  "error": {
+    "code": "rate_limit_exceeded",
+    "message": "Concurrent job limit exceeded (10 max)"
   }
 }
 ```
 
 ### Rate Limit Headers
 
-All responses include rate limit information:
+Rate limit responses include headers:
 
 ```
-X-RateLimit-Limit: 60
-X-RateLimit-Remaining: 45
-X-RateLimit-Reset: 1706540000
-Retry-After: 32              # Only on 429 responses
+X-RateLimit-Limit: 600
+X-RateLimit-Remaining: 42
+Retry-After: 32              # Only on 429 responses (requests/minute)
 ```
 
 | Header | Description |
 |--------|-------------|
-| `X-RateLimit-Limit` | Maximum requests allowed in window |
-| `X-RateLimit-Remaining` | Requests remaining in current window |
-| `X-RateLimit-Reset` | Unix timestamp when the window resets |
+| `X-RateLimit-Limit` | Maximum allowed in window |
+| `X-RateLimit-Remaining` | Remaining in current window |
 | `Retry-After` | Seconds to wait before retrying (429 only) |
 
 ### Limit Types
 
-| `limit_type` | Meaning | Resolution |
-|--------------|---------|------------|
-| `requests_per_minute` | Too many API calls | Wait `retry_after` seconds |
-| `concurrent_jobs` | Too many jobs processing | Wait for jobs to complete |
-| `upload_size` | File too large | Reduce file size or split audio |
-| `audio_duration` | Audio too long | Split into shorter segments |
-| `daily_quota` | Daily limit reached | Wait until midnight UTC |
+| Limit | Meaning | Resolution |
+|-------|---------|------------|
+| Requests per minute | Too many API calls | Wait `Retry-After` seconds |
+| Concurrent jobs | Too many jobs processing | Wait for jobs to complete |
+| Concurrent sessions | Too many realtime sessions | Close sessions or wait |
+| Upload size | File too large | Reduce file size or split audio |
+| Audio duration | Audio too long | Split into shorter segments |
 
 ---
 

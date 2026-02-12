@@ -112,19 +112,86 @@ async def create_transcription(
 
 ## Rate Limiting with Redis
 
-```python
-async def check_rate_limit(redis, key_id: str, limit: int) -> bool:
-    """Sliding window rate limit using Redis INCR + EXPIRE."""
-    key = f"dalston:ratelimit:{key_id}"
+Dalston implements three types of rate limits per tenant:
 
-    # Atomic increment + expire
-    pipe = redis.pipeline()
-    pipe.incr(key)
-    pipe.expire(key, 60)  # 1 minute window
+| Limit Type | Algorithm | Redis Structure |
+|------------|-----------|-----------------|
+| Requests/minute | Sliding window | Sorted set with timestamps |
+| Concurrent jobs | Counter | Simple string (INCR/DECR) |
+| Concurrent sessions | Counter | Simple string (INCR/DECR) |
+
+### Configuration
+
+```bash
+RATE_LIMIT_REQUESTS_PER_MINUTE=600   # Default: 600
+RATE_LIMIT_CONCURRENT_JOBS=10        # Default: 10
+RATE_LIMIT_CONCURRENT_SESSIONS=5     # Default: 5
+```
+
+### Request Rate Limiting (Sliding Window)
+
+```python
+async def check_request_rate(self, tenant_id: UUID) -> RateLimitResult:
+    """Sliding window rate limit using sorted sets."""
+    key = f"dalston:ratelimit:requests:{tenant_id}"
+    now = time.time()
+    window_start = now - 60  # 1 minute window
+
+    pipe = self._redis.pipeline()
+    pipe.zremrangebyscore(key, 0, window_start)  # Remove old entries
+    pipe.zcard(key)                               # Count current
+    pipe.zadd(key, {str(now): now})              # Add this request
+    pipe.expire(key, 61)                          # TTL for cleanup
     results = await pipe.execute()
 
-    current_count = results[0]
-    return current_count <= limit
+    current_count = results[1]
+    allowed = current_count < self._requests_per_minute
+
+    if not allowed:
+        await self._redis.zrem(key, str(now))  # Remove if over limit
+
+    return RateLimitResult(
+        allowed=allowed,
+        limit=self._requests_per_minute,
+        remaining=max(0, self._requests_per_minute - current_count - 1),
+        reset_seconds=60 if not allowed else None,
+    )
+```
+
+### Concurrent Job/Session Limiting
+
+```python
+async def check_concurrent_jobs(self, tenant_id: UUID) -> RateLimitResult:
+    """Check concurrent job limit using simple counter."""
+    key = f"dalston:ratelimit:jobs:{tenant_id}"
+    current = await self._redis.get(key)
+    current_count = int(current) if current else 0
+
+    return RateLimitResult(
+        allowed=current_count < self._max_concurrent_jobs,
+        limit=self._max_concurrent_jobs,
+        remaining=max(0, self._max_concurrent_jobs - current_count),
+    )
+
+async def increment_concurrent_jobs(self, tenant_id: UUID) -> None:
+    """Increment when job starts."""
+    key = f"dalston:ratelimit:jobs:{tenant_id}"
+    await self._redis.incr(key)
+
+async def decrement_concurrent_jobs(self, tenant_id: UUID) -> None:
+    """Decrement when job completes/fails."""
+    key = f"dalston:ratelimit:jobs:{tenant_id}"
+    result = await self._redis.decr(key)
+    if result < 0:
+        await self._redis.set(key, 0)  # Prevent negative
+```
+
+### Redis Key Patterns
+
+```
+dalston:ratelimit:requests:{tenant_id}   # Sorted set (timestamps)
+dalston:ratelimit:jobs:{tenant_id}       # String (counter)
+dalston:ratelimit:sessions:{tenant_id}   # String (counter)
 ```
 
 ---
