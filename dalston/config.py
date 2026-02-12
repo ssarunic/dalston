@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -51,7 +53,13 @@ class Settings(BaseSettings):
     )
 
 
+@lru_cache
 def get_settings() -> Settings:
+    """Get cached application settings.
+
+    Settings are read from environment variables and .env file once,
+    then cached for the lifetime of the process.
+    """
     return Settings()
 
 
