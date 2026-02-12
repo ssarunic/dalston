@@ -352,6 +352,7 @@ class TestPerChannelTaskCompletion:
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         mock_redis = AsyncMock()
+        mock_redis.decr = AsyncMock(return_value=0)  # Rate limiter decrement
         mock_settings = MagicMock()
 
         await handle_task_completed(task_id, mock_db, mock_redis, mock_settings)

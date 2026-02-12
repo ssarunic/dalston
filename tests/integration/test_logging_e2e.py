@@ -68,10 +68,36 @@ class TestCorrelationIdGatewayFlow:
         return service
 
     @pytest.fixture
-    def app(self, mock_api_key, mock_db, mock_redis, mock_settings, mock_jobs_service):
+    def mock_rate_limiter(self):
+        from dalston.gateway.services.rate_limiter import (
+            RateLimitResult,
+            RedisRateLimiter,
+        )
+
+        limiter = AsyncMock(spec=RedisRateLimiter)
+        limiter.check_request_rate.return_value = RateLimitResult(
+            allowed=True, limit=600, remaining=599, reset_seconds=60
+        )
+        limiter.check_concurrent_jobs.return_value = RateLimitResult(
+            allowed=True, limit=10, remaining=9, reset_seconds=0
+        )
+        limiter.increment_concurrent_jobs.return_value = None
+        return limiter
+
+    @pytest.fixture
+    def app(
+        self,
+        mock_api_key,
+        mock_db,
+        mock_redis,
+        mock_settings,
+        mock_jobs_service,
+        mock_rate_limiter,
+    ):
         from dalston.gateway.dependencies import (
             get_db,
             get_jobs_service,
+            get_rate_limiter,
             get_redis,
             get_settings,
             require_auth,
@@ -85,6 +111,7 @@ class TestCorrelationIdGatewayFlow:
         app.dependency_overrides[get_redis] = lambda: mock_redis
         app.dependency_overrides[get_settings] = lambda: mock_settings
         app.dependency_overrides[get_jobs_service] = lambda: mock_jobs_service
+        app.dependency_overrides[get_rate_limiter] = lambda: mock_rate_limiter
         app.dependency_overrides[require_auth] = lambda: mock_api_key
 
         return app
