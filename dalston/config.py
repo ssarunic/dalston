@@ -49,7 +49,24 @@ class Settings(BaseSettings):
     allow_per_job_webhooks: bool = Field(
         default=False,
         alias="ALLOW_PER_JOB_WEBHOOKS",
-        description="Allow webhook_url parameter on job submission (legacy behavior, disabled by default)",
+        description="Allow webhook_url on job submission (legacy, disabled by default)",
+    )
+
+    # Rate Limiting
+    rate_limit_requests_per_minute: int = Field(
+        default=600,
+        alias="RATE_LIMIT_REQUESTS_PER_MINUTE",
+        description="Maximum API requests per minute per tenant",
+    )
+    rate_limit_concurrent_jobs: int = Field(
+        default=10,
+        alias="RATE_LIMIT_CONCURRENT_JOBS",
+        description="Maximum concurrent batch transcription jobs per tenant",
+    )
+    rate_limit_concurrent_sessions: int = Field(
+        default=5,
+        alias="RATE_LIMIT_CONCURRENT_SESSIONS",
+        description="Maximum concurrent realtime sessions per tenant",
     )
 
 

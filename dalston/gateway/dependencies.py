@@ -18,6 +18,7 @@ from dalston.gateway.middleware.auth import require_scope as _require_scope
 from dalston.gateway.services.auth import APIKey, AuthService, Scope
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.jobs import JobsService
+from dalston.gateway.services.rate_limiter import RedisRateLimiter
 
 if TYPE_CHECKING:
     from dalston.session_router import SessionRouter
@@ -143,3 +144,175 @@ RequireJobsWrite = Annotated[
 RequireRealtime = Annotated[APIKey, Depends(require_scope_dependency(Scope.REALTIME))]
 RequireWebhooks = Annotated[APIKey, Depends(require_scope_dependency(Scope.WEBHOOKS))]
 RequireAdmin = Annotated[APIKey, Depends(require_scope_dependency(Scope.ADMIN))]
+
+
+# Rate limiter singleton
+_rate_limiter: RedisRateLimiter | None = None
+
+
+async def get_rate_limiter(
+    redis: Redis = Depends(get_redis),
+    settings: Settings = Depends(get_settings),
+) -> RedisRateLimiter:
+    """Get RateLimiter instance.
+
+    Creates a singleton rate limiter with Redis backend.
+    """
+    global _rate_limiter
+    if _rate_limiter is None:
+        _rate_limiter = RedisRateLimiter(
+            redis=redis,
+            requests_per_minute=settings.rate_limit_requests_per_minute,
+            max_concurrent_jobs=settings.rate_limit_concurrent_jobs,
+            max_concurrent_sessions=settings.rate_limit_concurrent_sessions,
+        )
+    return _rate_limiter
+
+
+async def check_request_rate_limit(
+    api_key: APIKey = Depends(require_auth),
+    rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
+) -> APIKey:
+    """Dependency that checks request rate limit.
+
+    Raises HTTPException 429 if rate limit exceeded.
+    """
+    result = await rate_limiter.check_request_rate(api_key.tenant_id)
+    if not result.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded",
+            headers={
+                "Retry-After": str(result.reset_seconds),
+                "X-RateLimit-Limit": str(result.limit),
+                "X-RateLimit-Remaining": str(result.remaining),
+            },
+        )
+    return api_key
+
+
+async def check_concurrent_jobs_limit(
+    api_key: APIKey = Depends(require_auth),
+    rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
+) -> APIKey:
+    """Dependency that checks concurrent jobs limit.
+
+    Raises HTTPException 429 if too many concurrent jobs.
+    """
+    result = await rate_limiter.check_concurrent_jobs(api_key.tenant_id)
+    if not result.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Concurrent job limit exceeded ({result.limit} max)",
+            headers={
+                "X-RateLimit-Limit": str(result.limit),
+                "X-RateLimit-Remaining": str(result.remaining),
+            },
+        )
+    return api_key
+
+
+async def check_concurrent_sessions_limit(
+    api_key: APIKey = Depends(require_auth),
+    rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
+) -> APIKey:
+    """Dependency that checks concurrent sessions limit.
+
+    Raises HTTPException 429 if too many concurrent sessions.
+    """
+    result = await rate_limiter.check_concurrent_sessions(api_key.tenant_id)
+    if not result.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Concurrent session limit exceeded ({result.limit} max)",
+            headers={
+                "X-RateLimit-Limit": str(result.limit),
+                "X-RateLimit-Remaining": str(result.remaining),
+            },
+        )
+    return api_key
+
+
+def require_jobs_write_rate_limited_dependency() -> Callable:
+    """Dependency that requires JOBS_WRITE scope and checks rate limits."""
+
+    async def check(
+        api_key: APIKey = Depends(require_scope_dependency(Scope.JOBS_WRITE)),
+        rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
+    ) -> APIKey:
+        # Check request rate limit
+        rate_result = await rate_limiter.check_request_rate(api_key.tenant_id)
+        if not rate_result.allowed:
+            raise HTTPException(
+                status_code=429,
+                detail="Rate limit exceeded",
+                headers={
+                    "Retry-After": str(rate_result.reset_seconds),
+                    "X-RateLimit-Limit": str(rate_result.limit),
+                    "X-RateLimit-Remaining": str(rate_result.remaining),
+                },
+            )
+
+        # Check concurrent jobs limit
+        jobs_result = await rate_limiter.check_concurrent_jobs(api_key.tenant_id)
+        if not jobs_result.allowed:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Concurrent job limit exceeded ({jobs_result.limit} max)",
+                headers={
+                    "X-RateLimit-Limit": str(jobs_result.limit),
+                    "X-RateLimit-Remaining": str(jobs_result.remaining),
+                },
+            )
+
+        return api_key
+
+    return check
+
+
+def require_realtime_rate_limited_dependency() -> Callable:
+    """Dependency that requires REALTIME scope and checks rate limits."""
+
+    async def check(
+        api_key: APIKey = Depends(require_scope_dependency(Scope.REALTIME)),
+        rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
+    ) -> APIKey:
+        # Check request rate limit
+        rate_result = await rate_limiter.check_request_rate(api_key.tenant_id)
+        if not rate_result.allowed:
+            raise HTTPException(
+                status_code=429,
+                detail="Rate limit exceeded",
+                headers={
+                    "Retry-After": str(rate_result.reset_seconds),
+                    "X-RateLimit-Limit": str(rate_result.limit),
+                    "X-RateLimit-Remaining": str(rate_result.remaining),
+                },
+            )
+
+        # Check concurrent sessions limit
+        sessions_result = await rate_limiter.check_concurrent_sessions(
+            api_key.tenant_id
+        )
+        if not sessions_result.allowed:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Concurrent session limit exceeded ({sessions_result.limit} max)",
+                headers={
+                    "X-RateLimit-Limit": str(sessions_result.limit),
+                    "X-RateLimit-Remaining": str(sessions_result.remaining),
+                },
+            )
+
+        return api_key
+
+    return check
+
+
+# Rate-limited scope dependencies
+RequireJobsWriteRateLimited = Annotated[
+    APIKey, Depends(require_jobs_write_rate_limited_dependency())
+]
+RequireRealtimeRateLimited = Annotated[
+    APIKey, Depends(require_realtime_rate_limited_dependency())
+]

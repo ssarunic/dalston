@@ -34,9 +34,11 @@ from dalston.config import WEBHOOK_METADATA_MAX_SIZE, Settings
 from dalston.gateway.dependencies import (
     RequireJobsRead,
     RequireJobsWrite,
+    RequireJobsWriteRateLimited,
     get_db,
     get_export_service,
     get_jobs_service,
+    get_rate_limiter,
     get_redis,
     get_settings,
 )
@@ -54,6 +56,7 @@ from dalston.gateway.services.audio_probe import (
 )
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.jobs import JobsService
+from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.storage import StorageService
 
 router = APIRouter(prefix="/audio/transcriptions", tags=["transcriptions"])
@@ -70,7 +73,7 @@ async def create_transcription(
     request: Request,
     response: Response,
     file: Annotated[UploadFile, File(description="Audio file to transcribe")],
-    api_key: RequireJobsWrite,
+    api_key: RequireJobsWriteRateLimited,
     model: Annotated[
         str,
         Form(
@@ -122,6 +125,7 @@ async def create_transcription(
     redis: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
+    rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
 ) -> JobCreatedResponse:
     """Create a new transcription job.
 
@@ -258,6 +262,9 @@ async def create_transcription(
     request_id = getattr(request.state, "request_id", None)
     structlog.contextvars.bind_contextvars(job_id=str(job.id))
     await publish_job_created(redis, job.id, request_id=request_id)
+
+    # Track concurrent job for rate limiting
+    await rate_limiter.increment_concurrent_jobs(api_key.tenant_id)
 
     return JobCreatedResponse(
         id=job.id,

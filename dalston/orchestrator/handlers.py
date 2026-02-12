@@ -26,6 +26,9 @@ from dalston.common.events import (
 from dalston.common.models import JobStatus, TaskStatus
 from dalston.config import Settings
 from dalston.db.models import JobModel, TaskModel
+from dalston.gateway.services.rate_limiter import (
+    KEY_PREFIX_JOBS,
+)
 from dalston.orchestrator.dag import build_task_dag
 from dalston.orchestrator.scheduler import (
     get_task_output,
@@ -34,6 +37,18 @@ from dalston.orchestrator.scheduler import (
 )
 
 logger = structlog.get_logger()
+
+
+async def _decrement_concurrent_jobs(redis: Redis, tenant_id: UUID) -> None:
+    """Decrement concurrent job count for rate limiting.
+
+    Called when a job transitions to a terminal state (completed, failed, cancelled).
+    """
+    key = f"{KEY_PREFIX_JOBS}:{tenant_id}"
+    result = await redis.decr(key)
+    if result < 0:
+        await redis.set(key, 0)
+    logger.debug("decremented_concurrent_jobs", tenant_id=str(tenant_id))
 
 
 async def handle_job_created(
@@ -397,6 +412,9 @@ async def handle_task_failed(
         job.completed_at = datetime.now(UTC)
         await db.commit()
 
+        # Decrement concurrent job count for rate limiting
+        await _decrement_concurrent_jobs(redis, job.tenant_id)
+
         # Publish job failed event for webhook delivery
         await publish_job_failed(redis, job_id, job.error)
 
@@ -498,6 +516,9 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
 
     job.completed_at = datetime.now(UTC)
     await db.commit()
+
+    # Decrement concurrent job count for rate limiting
+    await _decrement_concurrent_jobs(redis, job.tenant_id)
 
     # Publish job completion event for webhook delivery
     # This triggers both admin-registered webhooks and per-job webhook_url (legacy)
@@ -629,6 +650,9 @@ async def _check_job_cancellation_complete(
     job.status = JobStatus.CANCELLED.value
     job.completed_at = datetime.now(UTC)
     await db.commit()
+
+    # Decrement concurrent job count for rate limiting
+    await _decrement_concurrent_jobs(redis, job.tenant_id)
 
     # Record job cancellation metric (M20)
     dalston.metrics.inc_orchestrator_jobs("cancelled")
