@@ -7,8 +7,10 @@ import os
 import shutil
 import signal
 import tempfile
+import threading
 import time
 from datetime import UTC, datetime
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +18,7 @@ import redis
 import structlog
 
 import dalston.logging
+import dalston.metrics
 import dalston.telemetry
 from dalston.engine_sdk import io
 from dalston.engine_sdk.types import TaskInput, TaskOutput
@@ -25,6 +28,39 @@ if TYPE_CHECKING:
 
 
 logger = structlog.get_logger()
+
+
+class _MetricsHandler(BaseHTTPRequestHandler):
+    """Simple HTTP handler for /metrics endpoint."""
+
+    def log_message(self, format: str, *args: Any) -> None:
+        """Suppress default logging."""
+        pass
+
+    def do_GET(self) -> None:
+        """Handle GET requests."""
+        if self.path == "/metrics":
+            try:
+                from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+                content = generate_latest()
+                self.send_response(200)
+                self.send_header("Content-Type", CONTENT_TYPE_LATEST)
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(f"Error: {e}".encode())
+        elif self.path == "/health":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"status": "healthy"}')
+        else:
+            self.send_response(404)
+            self.end_headers()
 
 
 class EngineRunner:
@@ -57,17 +93,23 @@ class EngineRunner:
         self.engine = engine
         self._redis: redis.Redis | None = None
         self._running = False
+        self._metrics_server: HTTPServer | None = None
+        self._metrics_thread: threading.Thread | None = None
 
         # Load configuration from environment
         self.engine_id = os.environ.get("ENGINE_ID", "unknown")
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
         self.s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
+        self.metrics_port = int(os.environ.get("METRICS_PORT", "9100"))
 
         # Configure structured logging
         dalston.logging.configure(f"engine-{self.engine_id}")
 
         # Configure distributed tracing (M19)
         dalston.telemetry.configure_tracing(f"dalston-engine-{self.engine_id}")
+
+        # Configure Prometheus metrics (M20)
+        dalston.metrics.configure_metrics(f"engine-{self.engine_id}")
 
         logger.info("engine_runner_initialized", engine_id=self.engine_id)
 
@@ -94,27 +136,59 @@ class EngineRunner:
         self._running = True
         self._setup_signal_handlers()
 
+        # Start metrics HTTP server in background thread (M20)
+        self._start_metrics_server()
+
         logger.info(
             "engine_loop_starting", engine_id=self.engine_id, queue=self.queue_key
         )
 
-        while self._running:
-            try:
-                self._poll_and_process()
-            except redis.ConnectionError as e:
-                logger.error("redis_connection_error", error=str(e))
-                time.sleep(5)  # Wait before reconnecting
-                self._redis = None  # Force reconnection
-            except Exception as e:
-                logger.exception("engine_loop_error", error=str(e))
-                time.sleep(1)
-
-        dalston.telemetry.shutdown_tracing()
-        logger.info("engine_loop_stopped")
+        try:
+            while self._running:
+                try:
+                    self._poll_and_process()
+                except redis.ConnectionError as e:
+                    logger.error("redis_connection_error", error=str(e))
+                    time.sleep(5)  # Wait before reconnecting
+                    self._redis = None  # Force reconnection
+                except Exception as e:
+                    logger.exception("engine_loop_error", error=str(e))
+                    time.sleep(1)
+        finally:
+            # Cleanup - ensure resources are released even on unexpected exit
+            self._stop_metrics_server()
+            dalston.telemetry.shutdown_tracing()
+            logger.info("engine_loop_stopped")
 
     def stop(self) -> None:
         """Stop the processing loop."""
         self._running = False
+
+    def _start_metrics_server(self) -> None:
+        """Start metrics HTTP server in a background thread."""
+        if not dalston.metrics.is_metrics_enabled():
+            logger.debug("metrics_disabled_skipping_server")
+            return
+
+        try:
+            self._metrics_server = HTTPServer(
+                ("0.0.0.0", self.metrics_port), _MetricsHandler
+            )
+            self._metrics_thread = threading.Thread(
+                target=self._metrics_server.serve_forever,
+                daemon=True,
+            )
+            self._metrics_thread.start()
+            logger.info("metrics_server_started", port=self.metrics_port)
+        except Exception as e:
+            logger.warning("metrics_server_failed", error=str(e))
+
+    def _stop_metrics_server(self) -> None:
+        """Stop the metrics HTTP server."""
+        if self._metrics_server:
+            self._metrics_server.shutdown()
+            self._metrics_server = None
+            logger.debug("metrics_server_stopped")
 
     def _setup_signal_handlers(self) -> None:
         """Setup handlers for graceful shutdown."""
@@ -154,6 +228,20 @@ class EngineRunner:
 
         # Extract trace context from task metadata (M19)
         task_metadata = self._get_task_metadata(task_id)
+
+        # Record queue wait time (M20) - time between enqueue and dequeue
+        enqueued_at_str = task_metadata.get("enqueued_at")
+        if enqueued_at_str:
+            try:
+                enqueued_at = datetime.fromisoformat(enqueued_at_str)
+                dequeued_at = datetime.now(UTC)
+                queue_wait_seconds = (dequeued_at - enqueued_at).total_seconds()
+                dalston.metrics.observe_engine_queue_wait(
+                    self.engine_id, queue_wait_seconds
+                )
+            except ValueError:
+                pass  # Skip if timestamp is malformed
+
         trace_context_raw = task_metadata.get("_trace_context")
         try:
             trace_context = json.loads(trace_context_raw) if trace_context_raw else {}
@@ -175,8 +263,12 @@ class EngineRunner:
                 temp_dir = Path(tempfile.mkdtemp(prefix=self.TEMP_DIR_PREFIX))
 
                 # Load task input from S3
+                download_start = time.time()
                 with dalston.telemetry.create_span("engine.download_input"):
                     task_input = self._load_task_input(task_id, temp_dir)
+                dalston.metrics.observe_engine_s3_download(
+                    self.engine_id, time.time() - download_start
+                )
                 job_id = task_input.job_id
 
                 # Set job_id on span
@@ -196,25 +288,41 @@ class EngineRunner:
 
                 # Process the task
                 logger.info("task_processing")
+                process_start = time.time()
                 with dalston.telemetry.create_span("engine.process"):
                     output = self.engine.process(task_input)
+                process_time = time.time() - process_start
 
-                # Calculate processing time
-                processing_time = time.time() - start_time
+                # Calculate total task time (for metrics)
+                total_task_time = time.time() - start_time
 
                 # Upload output to S3
+                upload_start = time.time()
                 with dalston.telemetry.create_span("engine.upload_output"):
-                    self._save_task_output(task_id, job_id, output, processing_time)
+                    self._save_task_output(task_id, job_id, output, total_task_time)
+                dalston.metrics.observe_engine_s3_upload(
+                    self.engine_id, time.time() - upload_start
+                )
+
+                # Record task success metrics (M20)
+                dalston.metrics.observe_engine_task_duration(
+                    self.engine_id, process_time
+                )
+                dalston.metrics.inc_engine_tasks(self.engine_id, "success")
 
                 # Publish success event
                 self._publish_task_completed(task_id, job_id)
 
-                logger.info("task_completed", processing_time=round(processing_time, 2))
+                logger.info("task_completed", processing_time=round(total_task_time, 2))
 
             except Exception as e:
                 dalston.telemetry.record_exception(e)
                 dalston.telemetry.set_span_status_error(str(e))
                 logger.exception("task_failed", error=str(e))
+
+                # Record task failure metric (M20)
+                dalston.metrics.inc_engine_tasks(self.engine_id, "failure")
+
                 # We need job_id for the event, try to extract from input
                 try:
                     job_id = task_input.job_id

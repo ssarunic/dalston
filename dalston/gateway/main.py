@@ -6,10 +6,11 @@ from pathlib import Path
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 import dalston.logging
+import dalston.metrics
 import dalston.telemetry
 from dalston.common.redis import close_redis, get_redis
 from dalston.common.s3 import ensure_bucket_exists
@@ -20,6 +21,7 @@ from dalston.gateway.api.console import router as console_router
 from dalston.gateway.api.v1 import router as v1_router
 from dalston.gateway.middleware import setup_exception_handlers
 from dalston.gateway.middleware.correlation import CorrelationIdMiddleware
+from dalston.gateway.middleware.metrics import MetricsMiddleware
 from dalston.gateway.services.auth import AuthService, Scope
 from dalston.session_router import SessionRouter
 
@@ -29,6 +31,11 @@ logger = structlog.get_logger()
 
 # Configure distributed tracing (M19)
 dalston.telemetry.configure_tracing("dalston-gateway")
+
+# Configure Prometheus metrics (M20)
+dalston.metrics.configure_metrics("gateway")
+# Gateway also hosts session router, so initialize those metrics too
+dalston.metrics.init_session_router_metrics()
 
 # Global session router instance (initialized in lifespan)
 session_router: SessionRouter | None = None
@@ -167,6 +174,10 @@ app.add_middleware(
 # Add correlation ID middleware (generates request_id for every request)
 app.add_middleware(CorrelationIdMiddleware)
 
+# Add metrics middleware (M20) - records request counts and latencies
+if dalston.metrics.is_metrics_enabled():
+    app.add_middleware(MetricsMiddleware)
+
 # Setup exception handlers
 setup_exception_handlers(app)
 
@@ -180,6 +191,17 @@ app.include_router(console_router)
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+@app.get("/metrics", tags=["system"], include_in_schema=False)
+async def metrics_endpoint():
+    """Prometheus metrics endpoint."""
+    if not dalston.metrics.is_metrics_enabled():
+        return Response(content="Metrics disabled", status_code=404)
+
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/", tags=["system"])

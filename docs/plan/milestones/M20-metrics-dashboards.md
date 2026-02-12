@@ -6,7 +6,7 @@
 | **Duration** | 3-4 days |
 | **Dependencies** | M18 complete (shared logging module), M19 recommended but not required |
 | **Deliverable** | Grafana dashboard showing request rates, queue depths, engine latency, and error rates |
-| **Status** | Not Started |
+| **Status** | Complete |
 
 ## User Story
 
@@ -259,14 +259,14 @@ curl -s http://localhost:9090/api/v1/query?query=dalston_queue_depth | jq '.data
 
 ## Checkpoint
 
-- [ ] **Gateway** exposes `/metrics` with request counters, latency histograms, and active connections
-- [ ] **Orchestrator** exposes `/metrics` with job/task counters and duration histograms
-- [ ] **Engines** expose `/metrics` with processing time and queue wait histograms (via SDK)
-- [ ] **Session Router** exposes `/metrics` with worker pool and session gauges
-- [ ] **Redis queue exporter** reports queue depth and oldest task age
-- [ ] **Prometheus** scrapes all services and shows targets as "UP"
-- [ ] **Grafana** dashboard shows request rates, engine performance, queue depths, and session counts
-- [ ] **Monitoring disabled by default** — no overhead when `--profile monitoring` is not used
-- [ ] **No code changes** required in engine `process()` methods
+- [x] **Gateway** exposes `/metrics` with request counters, latency histograms, and active connections
+- [x] **Orchestrator** exposes `/metrics` with job/task counters and duration histograms
+- [x] **Engines** expose `/metrics` with processing time and queue wait histograms (via SDK)
+- [x] **Session Router** exposes `/metrics` with worker pool and session gauges
+- [x] **Redis queue exporter** reports queue depth and oldest task age
+- [x] **Prometheus** scrapes all services and shows targets as "UP"
+- [x] **Grafana** dashboard shows request rates, engine performance, queue depths, and session counts
+- [x] **Monitoring disabled by default** — no overhead when `--profile monitoring` is not used
+- [x] **No code changes** required in engine `process()` methods
 
 **Previous**: [M19: Distributed Tracing](M19-distributed-tracing.md)

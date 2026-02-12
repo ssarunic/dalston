@@ -8,14 +8,17 @@ Runs the main event loop that:
 
 import asyncio
 import json
+import os
 import signal
 import sys
 from uuid import UUID
 
 import structlog
+from aiohttp import web
 from redis import asyncio as aioredis
 
 import dalston.logging
+import dalston.metrics
 import dalston.telemetry
 from dalston.common.events import EVENTS_CHANNEL
 from dalston.config import get_settings
@@ -41,9 +44,58 @@ logger = structlog.get_logger()
 # Configure distributed tracing (M19)
 dalston.telemetry.configure_tracing("dalston-orchestrator")
 
+# Configure Prometheus metrics (M20)
+dalston.metrics.configure_metrics("orchestrator")
+
 # Shutdown flag
 _shutdown_event: asyncio.Event | None = None
 _delivery_worker: DeliveryWorker | None = None
+_metrics_app: web.Application | None = None
+_metrics_runner: web.AppRunner | None = None
+
+
+async def _handle_metrics_endpoint(request: web.Request) -> web.Response:
+    """Handle /metrics endpoint for Prometheus scraping."""
+    if not dalston.metrics.is_metrics_enabled():
+        return web.Response(text="Metrics disabled", status=404)
+
+    from prometheus_client import generate_latest
+
+    # Use text/plain without charset in content_type (aiohttp handles charset separately)
+    return web.Response(
+        body=generate_latest(),
+        content_type="text/plain",
+        charset="utf-8",
+    )
+
+
+async def _start_metrics_server() -> None:
+    """Start lightweight HTTP server for /metrics endpoint."""
+    global _metrics_app, _metrics_runner
+
+    if not dalston.metrics.is_metrics_enabled():
+        return
+
+    _metrics_app = web.Application()
+    _metrics_app.router.add_get("/metrics", _handle_metrics_endpoint)
+    _metrics_app.router.add_get("/health", lambda r: web.Response(text="ok"))
+
+    _metrics_runner = web.AppRunner(_metrics_app)
+    await _metrics_runner.setup()
+
+    port = int(os.environ.get("METRICS_PORT", "8001"))
+    site = web.TCPSite(_metrics_runner, "0.0.0.0", port)
+    await site.start()
+
+    logger.info("metrics_server_started", port=port)
+
+
+async def _stop_metrics_server() -> None:
+    """Stop the metrics HTTP server."""
+    global _metrics_runner
+    if _metrics_runner:
+        await _metrics_runner.cleanup()
+        _metrics_runner = None
 
 
 async def orchestrator_loop() -> None:
@@ -72,6 +124,9 @@ async def orchestrator_loop() -> None:
         settings=settings,
     )
     await _delivery_worker.start()
+
+    # Start metrics HTTP server (M20)
+    await _start_metrics_server()
 
     # Connect to Redis
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
@@ -111,6 +166,9 @@ async def orchestrator_loop() -> None:
         if _delivery_worker:
             await _delivery_worker.stop()
 
+        # Stop metrics server
+        await _stop_metrics_server()
+
         await pubsub.unsubscribe(EVENTS_CHANNEL)
         await pubsub.close()
         await redis.close()
@@ -138,6 +196,9 @@ async def _dispatch_event(
 
     event_type = event.get("type")
     log = logger.bind(event_type=event_type)
+
+    # Record event metric (M20)
+    dalston.metrics.inc_orchestrator_events(event_type or "unknown")
 
     # Reset structlog context for this event, preserving the service name.
     dalston.logging.reset_context(

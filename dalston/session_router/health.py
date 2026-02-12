@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 import redis.asyncio as redis
 import structlog
 
+import dalston.metrics
 from dalston.session_router.registry import (
     EVENTS_CHANNEL,
     WorkerRegistry,
@@ -98,6 +99,10 @@ class HealthMonitor:
         workers = await self._registry.get_workers()
         now = datetime.now(UTC)
 
+        # Track worker counts for metrics
+        total_workers = len(workers)
+        healthy_workers = 0
+
         for worker in workers:
             # Skip already offline workers
             if worker.status == "offline":
@@ -127,6 +132,13 @@ class HealthMonitor:
                     await self._publish_worker_offline_event(
                         worker.worker_id, session_id
                     )
+            else:
+                # Worker is healthy (not stale)
+                healthy_workers += 1
+
+        # Update metrics (M20)
+        dalston.metrics.set_session_router_workers_registered(total_workers)
+        dalston.metrics.set_session_router_workers_healthy(healthy_workers)
 
     async def _publish_worker_offline_event(
         self,

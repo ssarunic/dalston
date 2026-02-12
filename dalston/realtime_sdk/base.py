@@ -16,9 +16,11 @@ from urllib.parse import parse_qs, urlparse
 
 import numpy as np
 import structlog
+from aiohttp import web
 from websockets.asyncio.server import ServerConnection, serve
 
 import dalston.logging
+import dalston.metrics
 import dalston.telemetry
 from dalston.realtime_sdk.assembler import TranscribeResult
 from dalston.realtime_sdk.registry import WorkerInfo, WorkerRegistry
@@ -96,6 +98,7 @@ class RealtimeEngine(ABC):
         self.port = int(os.environ.get("WORKER_PORT", "9000"))
         self.max_sessions = int(os.environ.get("MAX_SESSIONS", "4"))
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
+        self.metrics_port = int(os.environ.get("METRICS_PORT", "9100"))
 
         # Worker endpoint for registration - use env var or detect hostname
         self._worker_endpoint = os.environ.get("WORKER_ENDPOINT")
@@ -110,6 +113,7 @@ class RealtimeEngine(ABC):
         self._registry: WorkerRegistry | None = None
         self._running = False
         self._server = None
+        self._metrics_runner: web.AppRunner | None = None
 
     @abstractmethod
     def load_models(self) -> None:
@@ -256,6 +260,9 @@ class RealtimeEngine(ABC):
         # Configure distributed tracing (M19)
         dalston.telemetry.configure_tracing(f"dalston-realtime-{self.worker_id}")
 
+        # Configure Prometheus metrics (M20)
+        dalston.metrics.configure_metrics(f"realtime-{self.worker_id}")
+
         # Bind worker_id to logging context for all subsequent log calls
         structlog.contextvars.bind_contextvars(worker_id=self.worker_id)
 
@@ -288,6 +295,9 @@ class RealtimeEngine(ABC):
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, lambda: asyncio.create_task(self.shutdown()))
+
+        # Start metrics HTTP server (M20)
+        await self._start_metrics_server()
 
         # Start heartbeat loop
         heartbeat_task = asyncio.create_task(self._heartbeat_loop())
@@ -342,6 +352,9 @@ class RealtimeEngine(ABC):
             await self._registry.unregister(self.worker_id)
             await self._registry.close()
 
+        # Stop metrics server
+        await self._stop_metrics_server()
+
         # Close server (stops accepting new connections)
         if self._server:
             self._server.close()
@@ -364,6 +377,47 @@ class RealtimeEngine(ABC):
                 logger.error("heartbeat_error", error=str(e))
 
             await asyncio.sleep(10)
+
+    async def _start_metrics_server(self) -> None:
+        """Start metrics HTTP server for Prometheus scraping (M20)."""
+        if not dalston.metrics.is_metrics_enabled():
+            logger.debug("metrics_disabled_skipping_server")
+            return
+
+        try:
+            app = web.Application()
+            app.router.add_get("/metrics", self._handle_metrics)
+            app.router.add_get("/health", self._handle_health_http)
+
+            self._metrics_runner = web.AppRunner(app)
+            await self._metrics_runner.setup()
+            site = web.TCPSite(self._metrics_runner, "0.0.0.0", self.metrics_port)
+            await site.start()
+            logger.info("metrics_server_started", port=self.metrics_port)
+        except Exception as e:
+            logger.warning("metrics_server_failed", error=str(e))
+
+    async def _stop_metrics_server(self) -> None:
+        """Stop the metrics HTTP server."""
+        if self._metrics_runner:
+            await self._metrics_runner.cleanup()
+            self._metrics_runner = None
+            logger.debug("metrics_server_stopped")
+
+    async def _handle_metrics(self, request: web.Request) -> web.Response:
+        """Handle /metrics endpoint for Prometheus scraping."""
+        from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+        # aiohttp requires charset to be separate from content_type
+        # So we set the full Content-Type header directly
+        return web.Response(
+            body=generate_latest(),
+            headers={"Content-Type": CONTENT_TYPE_LATEST},
+        )
+
+    async def _handle_health_http(self, request: web.Request) -> web.Response:
+        """Handle /health endpoint via HTTP."""
+        return web.json_response(self.health_check())
 
     async def _handle_connection(
         self,
@@ -449,6 +503,10 @@ class RealtimeEngine(ABC):
             duration: Session duration in seconds
             status: End status ("completed" or "error")
         """
+        # Record session metrics (M20)
+        dalston.metrics.observe_realtime_session_duration(duration)
+        dalston.metrics.inc_session_router_sessions(status)
+
         if self._registry:
             await self._registry.session_ended(
                 worker_id=self.worker_id,

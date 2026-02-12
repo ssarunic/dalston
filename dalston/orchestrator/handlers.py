@@ -7,6 +7,7 @@ Handles Redis pub/sub events:
 """
 
 import re
+import time
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -16,6 +17,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import dalston.metrics
 from dalston.common.events import (
     publish_job_cancelled,
     publish_job_completed,
@@ -70,11 +72,13 @@ async def handle_job_created(
         return
 
     # 2. Build task DAG
+    dag_start = time.perf_counter()
     tasks = build_task_dag(
         job_id=job.id,
         audio_uri=job.audio_uri,
         parameters=job.parameters,
     )
+    dalston.metrics.observe_orchestrator_dag_build(time.perf_counter() - dag_start)
 
     log.info("built_task_dag", task_count=len(tasks))
 
@@ -138,6 +142,9 @@ async def handle_job_created(
                 previous_outputs={},
                 audio_metadata=audio_metadata if task.stage == "prepare" else None,
             )
+
+            # Record task scheduled metric (M20)
+            dalston.metrics.inc_orchestrator_tasks_scheduled(task.engine_id, task.stage)
 
             log.info("queued_initial_task", task_id=str(task.id), stage=task.stage)
 
@@ -208,6 +215,9 @@ async def handle_task_completed(
     log = log.bind(job_id=str(job_id), stage=task.stage)
     log.info("marked_task_completed")
 
+    # Record task completion metric (M20)
+    dalston.metrics.inc_orchestrator_tasks_completed(task.engine_id, "success")
+
     # 2. Find all tasks for this job
     result = await db.execute(select(TaskModel).where(TaskModel.job_id == job_id))
     all_tasks = list(result.scalars().all())
@@ -273,6 +283,11 @@ async def handle_task_completed(
                 task=task_model,
                 settings=settings,
                 previous_outputs=previous_outputs,
+            )
+
+            # Record task scheduled metric (M20)
+            dalston.metrics.inc_orchestrator_tasks_scheduled(
+                dependent.engine_id, dependent.stage
             )
 
             log.info(
@@ -372,6 +387,9 @@ async def handle_task_failed(
     task.error = error
     await db.commit()
 
+    # Record task failure metric (M20)
+    dalston.metrics.inc_orchestrator_tasks_completed(task.engine_id, "failure")
+
     job = await db.get(JobModel, job_id)
     if job:
         job.status = JobStatus.FAILED.value
@@ -467,9 +485,15 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
     if any_failed:
         job.status = JobStatus.FAILED.value
         job.error = job.error or "One or more required tasks failed"
+        dalston.metrics.inc_orchestrator_jobs("failed")
         log.error("job_failed", reason=job.error)
     else:
         job.status = JobStatus.COMPLETED.value
+        dalston.metrics.inc_orchestrator_jobs("completed")
+        # Record job duration (M20)
+        if job.started_at:
+            duration = (datetime.now(UTC) - job.started_at).total_seconds()
+            dalston.metrics.observe_orchestrator_job_duration(len(all_tasks), duration)
         log.info("job_completed")
 
     job.completed_at = datetime.now(UTC)
@@ -605,6 +629,9 @@ async def _check_job_cancellation_complete(
     job.status = JobStatus.CANCELLED.value
     job.completed_at = datetime.now(UTC)
     await db.commit()
+
+    # Record job cancellation metric (M20)
+    dalston.metrics.inc_orchestrator_jobs("cancelled")
 
     log.info("job_cancelled")
 

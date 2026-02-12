@@ -7,6 +7,7 @@ Handles:
 """
 
 import json
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -60,6 +61,9 @@ async def queue_task(
         "job_id": job_id_str,
         "stage": task.stage,
         "engine_id": task.engine_id,
+        "enqueued_at": datetime.now(
+            UTC
+        ).isoformat(),  # M20: For queue wait time metrics
     }
     if "request_id" in ctx:
         metadata_mapping["request_id"] = ctx["request_id"]

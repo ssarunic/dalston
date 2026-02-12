@@ -93,6 +93,65 @@ services:
       - tracing
     restart: unless-stopped
 
+  # Prometheus for metrics collection (M20)
+  # Enable with: docker compose --profile monitoring up -d
+  # UI available at: http://localhost:9090
+  prometheus:
+    image: prom/prometheus:v2.50.0
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+      - '--storage.tsdb.retention.time=1d'
+      - '--storage.tsdb.retention.size=500MB'
+    profiles:
+      - monitoring
+    restart: unless-stopped
+
+  # Grafana for dashboards (M20)
+  # Enable with: docker compose --profile monitoring up -d
+  # UI available at: http://localhost:3001 (admin/dalston)
+  grafana:
+    image: grafana/grafana:10.3.0
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=dalston
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+    restart: unless-stopped
+
+  # Metrics exporter for Redis queue depths (M20)
+  # Enable with: docker compose --profile monitoring up -d
+  metrics-exporter:
+    image: dalston/gateway:latest
+    command: python -m dalston.metrics_exporter
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - METRICS_PORT=9100
+      - SCRAPE_INTERVAL=15
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles:
+      - monitoring
+    restart: unless-stopped
+
   # ============================================================
   # CORE SERVICES
   # ============================================================
@@ -149,6 +208,9 @@ services:
       # Distributed tracing (M19) - enable with OTEL_ENABLED=true
       - OTEL_ENABLED=${OTEL_ENABLED:-false}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      # Prometheus metrics (M20) - enabled by default
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=8001
     depends_on:
       postgres:
         condition: service_healthy
@@ -177,6 +239,9 @@ services:
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - OTEL_ENABLED=${OTEL_ENABLED:-false}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
     depends_on:
       redis:
         condition: service_healthy
@@ -201,6 +266,9 @@ services:
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - OTEL_ENABLED=${OTEL_ENABLED:-false}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
     volumes:
       - whisper-models:/models
     depends_on:
@@ -259,6 +327,9 @@ services:
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - OTEL_ENABLED=${OTEL_ENABLED:-false}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
     volumes:
       - align-models:/models
     depends_on:
@@ -319,6 +390,9 @@ services:
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - OTEL_ENABLED=${OTEL_ENABLED:-false}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
     depends_on:
       redis:
         condition: service_healthy
@@ -346,6 +420,9 @@ services:
       - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
     volumes:
       - parakeet-models:/models
     depends_on:
@@ -383,6 +460,9 @@ services:
       - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
     volumes:
       - parakeet-models:/models
     depends_on:
@@ -415,6 +495,9 @@ services:
       - DIARIZATION_DISABLED=${DIARIZATION_DISABLED:-false}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
     volumes:
       - pyannote-models:/models
     depends_on:
@@ -475,6 +558,9 @@ services:
       - DIARIZATION_DISABLED=${DIARIZATION_DISABLED:-false}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
     volumes:
       - pyannote-models:/models
     depends_on:
@@ -543,6 +629,9 @@ services:
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
       - OTEL_ENABLED=${OTEL_ENABLED:-false}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
     volumes:
       - realtime-models:/models
     depends_on:
@@ -572,6 +661,9 @@ services:
       - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
     volumes:
       - realtime-models:/models
     depends_on:
@@ -647,6 +739,9 @@ services:
       - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
     volumes:
       - parakeet-models:/models
     depends_on:
@@ -686,6 +781,9 @@ services:
       - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
     volumes:
       - parakeet-models:/models
     depends_on:
@@ -731,6 +829,9 @@ services:
       - S3_ENDPOINT_URL=http://minio:9000
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
     volumes:
       - parakeet-models:/models
     depends_on:
@@ -753,3 +854,5 @@ volumes:
   pyannote-models:
   realtime-models:
   parakeet-models:
+  prometheus-data:
+  grafana-data:

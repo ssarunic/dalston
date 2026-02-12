@@ -11,6 +11,8 @@ dependencies = [
     "opentelemetry-api>=1.20.0,<2.0.0",
     "opentelemetry-sdk>=1.20.0,<2.0.0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.20.0,<2.0.0",
+    # Prometheus metrics (M20)
+    "prometheus-client>=0.19.0",
 ]
 
 [project.optional-dependencies]
@@ -43,6 +45,7 @@ orchestrator = [
     "python-multipart>=0.0.6",  # Required by FastAPI for form data
     "websockets>=12.0",  # Required by gateway module
     "tinytag>=2.0.0",  # Required by gateway.services.audio_probe
+    "aiohttp>=3.9.0",  # For lightweight HTTP server (metrics endpoint)
 ]
 engine-sdk = [
     "redis>=5.0.0",

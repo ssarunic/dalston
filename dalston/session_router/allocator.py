@@ -7,6 +7,7 @@ sessions across available workers.
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,6 +15,7 @@ from datetime import UTC, datetime
 import redis.asyncio as redis
 import structlog
 
+import dalston.metrics
 import dalston.telemetry
 from dalston.session_router.registry import (
     ACTIVE_SESSIONS_KEY,
@@ -132,6 +134,7 @@ class SessionAllocator:
         Returns:
             WorkerAllocation if successful, None if no capacity available
         """
+        allocation_start = time.perf_counter()
         with dalston.telemetry.create_span(
             "session_router.allocate",
             attributes={
@@ -192,6 +195,15 @@ class SessionAllocator:
             # Set span attributes for allocated session
             dalston.telemetry.set_span_attribute("dalston.session_id", session_id)
             dalston.telemetry.set_span_attribute("dalston.worker_id", worker.worker_id)
+
+            # Record allocation duration metric (M20)
+            dalston.metrics.observe_session_router_allocation(
+                time.perf_counter() - allocation_start
+            )
+            # Update active sessions gauge for this worker
+            dalston.metrics.set_session_router_sessions_active(
+                worker.worker_id, new_count
+            )
 
             logger.info(
                 "session_allocated",
@@ -308,7 +320,10 @@ class SessionAllocator:
 
         # Decrement worker's active sessions
         worker_key = f"{WORKER_KEY_PREFIX}{worker_id}"
-        await self._redis.hincrby(worker_key, "active_sessions", -1)
+        new_count = await self._redis.hincrby(worker_key, "active_sessions", -1)
+
+        # Update active sessions gauge for this worker (M20)
+        dalston.metrics.set_session_router_sessions_active(worker_id, max(0, new_count))
 
         # Remove from worker's session set
         sessions_key = f"{WORKER_KEY_PREFIX}{worker_id}{WORKER_SESSIONS_SUFFIX}"

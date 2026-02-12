@@ -1,0 +1,52 @@
+# Prometheus configuration for Dalston monitoring
+# Enable with: docker compose --profile monitoring up -d
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Gateway metrics
+  - job_name: 'dalston-gateway'
+    static_configs:
+      - targets: ['gateway:8000']
+    metrics_path: /metrics
+
+  # Orchestrator metrics
+  - job_name: 'dalston-orchestrator'
+    static_configs:
+      - targets: ['orchestrator:8001']
+    metrics_path: /metrics
+
+  # Queue metrics exporter
+  - job_name: 'dalston-queue-exporter'
+    static_configs:
+      - targets: ['metrics-exporter:9100']
+    metrics_path: /metrics
+
+  # Batch engine metrics (M20)
+  # Engines expose /metrics on port 9100 via lightweight HTTP server
+  - job_name: 'dalston-engines'
+    static_configs:
+      - targets:
+          - 'engine-audio-prepare:9100'
+          - 'engine-faster-whisper:9100'
+          - 'engine-whisperx-align:9100'
+          - 'engine-final-merger:9100'
+          - 'engine-parakeet:9100'
+          - 'engine-parakeet-cpu:9100'
+          - 'engine-pyannote-3.1:9100'
+          - 'engine-pyannote-4.0:9100'
+    metrics_path: /metrics
+
+  # Realtime worker metrics (M20)
+  # Workers expose /metrics on port 9100 via aiohttp HTTP server
+  - job_name: 'dalston-realtime'
+    static_configs:
+      - targets:
+          - 'realtime-whisper-1:9100'
+          - 'realtime-whisper-2:9100'
+          - 'realtime-parakeet-1:9100'
+          - 'realtime-parakeet-2:9100'
+          - 'realtime-parakeet-cpu:9100'
+    metrics_path: /metrics
