@@ -7,6 +7,7 @@ GET /v1/audio/transcriptions/{job_id}/export/{format} - Export transcript
 DELETE /v1/audio/transcriptions/{job_id} - Delete a completed/failed job
 """
 
+import asyncio
 import json
 import logging
 from typing import Annotated
@@ -186,8 +187,11 @@ async def create_transcription(
     file_content = await file.read()
 
     # Probe audio to extract metadata and validate
+    # Uses to_thread() because probe_audio calls ffprobe synchronously
     try:
-        audio_metadata = probe_audio(file_content, file.filename)
+        audio_metadata = await asyncio.to_thread(
+            probe_audio, file_content, file.filename
+        )
     except InvalidAudioError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

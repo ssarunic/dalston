@@ -6,6 +6,8 @@ from dalston.gateway.api.v1 import (
     jobs,
     models,
     realtime,
+    realtime_sessions,
+    realtime_status,
     speech_to_text,
     tasks,
     transcription,
@@ -34,7 +36,8 @@ router.include_router(realtime.stream_router)  # WS /v1/audio/transcriptions/str
 router.include_router(
     realtime.elevenlabs_router
 )  # WS /v1/speech-to-text/realtime (ElevenLabs)
-router.include_router(realtime.management_router)  # GET /v1/realtime/*
+router.include_router(realtime_status.router)  # GET /v1/realtime/status, /workers
+router.include_router(realtime_sessions.router)  # GET /v1/realtime/sessions/*
 
 # Mount webhook management routes
 router.include_router(webhooks.router)  # /v1/webhooks/*

@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -197,6 +197,8 @@ class JobsService:
                 f"Only completed, failed, or cancelled jobs can be deleted."
             )
 
+        # Explicitly delete tasks first (no CASCADE DELETE per CLAUDE.md)
+        await db.execute(delete(TaskModel).where(TaskModel.job_id == job_id))
         await db.delete(job)
         await db.commit()
         return job

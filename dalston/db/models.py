@@ -110,10 +110,7 @@ class JobModel(Base):
 
     # Relationships
     tenant: Mapped["TenantModel"] = relationship(back_populates="jobs")
-    tasks: Mapped[list["TaskModel"]] = relationship(
-        back_populates="job",
-        cascade="all, delete-orphan",
-    )
+    tasks: Mapped[list["TaskModel"]] = relationship(back_populates="job")
 
 
 class TaskModel(Base):
@@ -128,7 +125,7 @@ class TaskModel(Base):
     )
     job_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("jobs.id", ondelete="CASCADE"),
+        ForeignKey("jobs.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
@@ -258,8 +255,7 @@ class WebhookEndpointModel(Base):
     # Relationships
     tenant: Mapped["TenantModel"] = relationship(back_populates="webhook_endpoints")
     deliveries: Mapped[list["WebhookDeliveryModel"]] = relationship(
-        back_populates="endpoint",
-        cascade="all, delete-orphan",
+        back_populates="endpoint"
     )
 
 
@@ -275,7 +271,7 @@ class WebhookDeliveryModel(Base):
     )
     endpoint_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("webhook_endpoints.id", ondelete="CASCADE"),
+        ForeignKey("webhook_endpoints.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
     )

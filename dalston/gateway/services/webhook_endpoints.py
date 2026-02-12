@@ -200,6 +200,18 @@ class WebhookEndpointService:
         if endpoint is None:
             return False
 
+        # Check if endpoint has any deliveries (preserve audit trail)
+        has_deliveries = await db.scalar(
+            select(WebhookDeliveryModel.id)
+            .where(WebhookDeliveryModel.endpoint_id == endpoint_id)
+            .limit(1)
+        )
+        if has_deliveries:
+            raise ValueError(
+                "Cannot delete endpoint with delivery history. "
+                "Deactivate the endpoint instead to preserve audit trail."
+            )
+
         await db.delete(endpoint)
         await db.commit()
         return True
