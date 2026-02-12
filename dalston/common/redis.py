@@ -1,20 +1,32 @@
+import asyncio
+
 from redis.asyncio import Redis, from_url
 
 from dalston.config import get_settings
 
 _redis_client: Redis | None = None
+_redis_lock = asyncio.Lock()
 
 
 async def get_redis() -> Redis:
-    """Get or create async Redis client."""
+    """Get or create async Redis client.
+
+    Uses a lock to prevent race conditions where multiple coroutines
+    could create separate connections simultaneously.
+    """
     global _redis_client
-    if _redis_client is None:
-        settings = get_settings()
-        _redis_client = from_url(
-            settings.redis_url,
-            encoding="utf-8",
-            decode_responses=True,
-        )
+    if _redis_client is not None:
+        return _redis_client
+
+    async with _redis_lock:
+        # Double-check after acquiring lock
+        if _redis_client is None:
+            settings = get_settings()
+            _redis_client = from_url(
+                settings.redis_url,
+                encoding="utf-8",
+                decode_responses=True,
+            )
     return _redis_client
 
 
