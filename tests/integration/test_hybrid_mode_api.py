@@ -11,7 +11,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from dalston.gateway.api.v1.realtime import management_router
+from dalston.gateway.api.v1.realtime_sessions import (
+    EnhancementStatusResponse,
+)
+from dalston.gateway.api.v1.realtime_sessions import (
+    router as sessions_router,
+)
 from dalston.gateway.services.auth import DEFAULT_EXPIRES_AT, APIKey, Scope
 
 
@@ -41,8 +46,8 @@ class TestEnhancementEndpointsExist:
         from dalston.gateway.dependencies import require_auth
 
         app = FastAPI()
-        # management_router has prefix="/realtime", so mount without additional prefix
-        app.include_router(management_router)
+        # sessions_router has prefix="/realtime", so mount without additional prefix
+        app.include_router(sessions_router)
         app.dependency_overrides[require_auth] = lambda: mock_api_key
         return app
 
@@ -64,7 +69,7 @@ class TestEnhancementEndpointsExist:
         """Test that enhancement status endpoint requires authentication."""
         # Remove auth override to test auth requirement
         app_no_auth = FastAPI()
-        app_no_auth.include_router(management_router)
+        app_no_auth.include_router(sessions_router)
 
         client = TestClient(app_no_auth, raise_server_exceptions=False)
         response = client.get("/realtime/sessions/sess_12345/enhancement")
@@ -75,7 +80,7 @@ class TestEnhancementEndpointsExist:
     def test_trigger_enhancement_requires_auth(self, app, mock_api_key):
         """Test that trigger enhancement endpoint requires authentication."""
         app_no_auth = FastAPI()
-        app_no_auth.include_router(management_router)
+        app_no_auth.include_router(sessions_router)
 
         client = TestClient(app_no_auth, raise_server_exceptions=False)
         response = client.post("/realtime/sessions/sess_12345/enhance")
@@ -89,7 +94,6 @@ class TestEnhancementResponseModels:
 
     def test_enhancement_status_response_model(self):
         """Test EnhancementStatusResponse model has correct fields."""
-        from dalston.gateway.api.v1.realtime import EnhancementStatusResponse
 
         # Test model can be instantiated with required fields
         response = EnhancementStatusResponse(
@@ -105,7 +109,6 @@ class TestEnhancementResponseModels:
 
     def test_enhancement_status_response_with_job(self):
         """Test EnhancementStatusResponse with enhancement job."""
-        from dalston.gateway.api.v1.realtime import EnhancementStatusResponse
 
         response = EnhancementStatusResponse(
             session_id="sess_12345",
@@ -118,7 +121,6 @@ class TestEnhancementResponseModels:
 
     def test_enhancement_status_response_completed(self):
         """Test EnhancementStatusResponse with completed transcript."""
-        from dalston.gateway.api.v1.realtime import EnhancementStatusResponse
 
         transcript = {
             "text": "Hello world",
@@ -137,7 +139,6 @@ class TestEnhancementResponseModels:
 
     def test_enhancement_status_response_failed(self):
         """Test EnhancementStatusResponse with error."""
-        from dalston.gateway.api.v1.realtime import EnhancementStatusResponse
 
         response = EnhancementStatusResponse(
             session_id="sess_12345",

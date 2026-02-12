@@ -13,9 +13,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from dalston.gateway.api.v1.realtime import (
-    management_router,
-)
+from dalston.gateway.api.v1.realtime_status import router as status_router
 from dalston.gateway.services.auth import DEFAULT_EXPIRES_AT, APIKey, Scope
 from dalston.session_router import CapacityInfo, SessionRouter, WorkerStatus
 
@@ -50,8 +48,8 @@ class TestRealtimeManagementEndpoints:
         from dalston.gateway.dependencies import get_session_router, require_auth
 
         app = FastAPI()
-        # Note: management_router already has prefix="/realtime", so mount under /v1
-        app.include_router(management_router, prefix="/v1")
+        # Note: status_router already has prefix="/realtime", so mount under /v1
+        app.include_router(status_router, prefix="/v1")
 
         # Override dependencies
         app.dependency_overrides[get_session_router] = lambda: mock_session_router
