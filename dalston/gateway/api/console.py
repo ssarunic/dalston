@@ -6,10 +6,10 @@ GET /api/console/engines - Get batch and realtime engine status
 DELETE /api/console/jobs/{job_id} - Delete a job and its artifacts (admin)
 """
 
-import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from redis.asyncio import Redis
@@ -35,7 +35,7 @@ from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
 from dalston.session_router import SessionRouter
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 router = APIRouter(prefix="/api/console", tags=["console"])
 

@@ -9,7 +9,6 @@ DELETE /v1/audio/transcriptions/{job_id} - Delete a completed/failed job
 
 import asyncio
 import json
-import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -450,7 +449,7 @@ async def export_transcription(
     )
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 @router.post(

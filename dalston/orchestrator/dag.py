@@ -4,12 +4,13 @@ Converts job parameters into a directed acyclic graph of tasks.
 Each task represents a processing step executed by a specific engine.
 """
 
-import logging
 from uuid import UUID, uuid4
+
+import structlog
 
 from dalston.common.models import Task, TaskStatus
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 # Valid values for timestamps_granularity API parameter
 VALID_TIMESTAMPS_GRANULARITIES = {"word", "segment", "none"}
