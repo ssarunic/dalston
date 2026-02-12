@@ -12,7 +12,12 @@ from fastapi.staticfiles import StaticFiles
 import dalston.logging
 import dalston.metrics
 import dalston.telemetry
-from dalston.common.redis import close_redis, get_redis
+from dalston.common.redis import (
+    LocalRedisProvider,
+    get_redis,
+    reset_provider,
+    set_provider,
+)
 from dalston.common.s3 import ensure_bucket_exists
 from dalston.config import get_settings
 from dalston.db.session import DEFAULT_TENANT_ID, engine, init_db
@@ -108,6 +113,13 @@ async def lifespan(app: FastAPI):
 
     logger.info("Starting Dalston Gateway...")
 
+    # Initialize Redis provider and store on app.state for DI
+    settings = get_settings()
+    redis_provider = LocalRedisProvider(settings)
+    set_provider(redis_provider)
+    app.state.redis_provider = redis_provider
+    logger.info("Redis provider initialized")
+
     # Initialize database
     logger.info("Initializing database...")
     await init_db()
@@ -120,7 +132,6 @@ async def lifespan(app: FastAPI):
         logger.warning("Could not ensure S3 bucket exists: %s", e)
 
     # Start Session Router for real-time transcription
-    settings = get_settings()
     logger.info("Starting Session Router...")
     session_router = SessionRouter(redis_url=settings.redis_url)
     await session_router.start()
@@ -139,7 +150,8 @@ async def lifespan(app: FastAPI):
     if session_router:
         await session_router.stop()
 
-    await close_redis()
+    # Close Redis provider
+    await reset_provider()
     await engine.dispose()
     dalston.telemetry.shutdown_tracing()
     logger.info("Dalston Gateway shutdown complete")

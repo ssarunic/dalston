@@ -150,6 +150,18 @@ RequireAdmin = Annotated[APIKey, Depends(require_scope_dependency(Scope.ADMIN))]
 _rate_limiter: RedisRateLimiter | None = None
 
 
+def set_rate_limiter(limiter: RedisRateLimiter | None) -> None:
+    """Set the rate limiter instance (for testing)."""
+    global _rate_limiter
+    _rate_limiter = limiter
+
+
+def reset_rate_limiter() -> None:
+    """Reset the rate limiter singleton (for testing)."""
+    global _rate_limiter
+    _rate_limiter = None
+
+
 async def get_rate_limiter(
     redis: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),

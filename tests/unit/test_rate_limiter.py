@@ -43,8 +43,9 @@ class TestRequestRateLimit:
         tenant_id = uuid4()
 
         # Mock pipeline results: [zremrangebyscore, zcard, zadd, expire]
-        pipe = AsyncMock()
-        pipe.execute.return_value = [None, 50, True, True]
+        # Pipeline methods are sync, only execute() is async
+        pipe = MagicMock()
+        pipe.execute = AsyncMock(return_value=[None, 50, True, True])
         mock_redis.pipeline.return_value = pipe
 
         result = await rate_limiter.check_request_rate(tenant_id)
@@ -58,8 +59,9 @@ class TestRequestRateLimit:
         tenant_id = uuid4()
 
         # Mock pipeline results: at limit (100 requests)
-        pipe = AsyncMock()
-        pipe.execute.return_value = [None, 100, True, True]
+        # Pipeline methods are sync, only execute() is async
+        pipe = MagicMock()
+        pipe.execute = AsyncMock(return_value=[None, 100, True, True])
         mock_redis.pipeline.return_value = pipe
 
         result = await rate_limiter.check_request_rate(tenant_id)
@@ -73,8 +75,9 @@ class TestRequestRateLimit:
         """Should remove the added request when over limit."""
         tenant_id = uuid4()
 
-        pipe = AsyncMock()
-        pipe.execute.return_value = [None, 100, True, True]
+        # Pipeline methods are sync, only execute() is async
+        pipe = MagicMock()
+        pipe.execute = AsyncMock(return_value=[None, 100, True, True])
         mock_redis.pipeline.return_value = pipe
 
         await rate_limiter.check_request_rate(tenant_id)
