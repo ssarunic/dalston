@@ -6,6 +6,7 @@ Provides a single `configure()` function that sets up structlog with:
 - Configurable log level via LOG_LEVEL environment variable
 - Context variable merging for correlation IDs (request_id, job_id, etc.)
 - Standard library integration so third-party libraries emit structured output
+- Log-trace correlation (M19): Injects trace_id and span_id when tracing is enabled
 """
 
 from __future__ import annotations
@@ -15,6 +16,8 @@ import os
 import sys
 
 import structlog
+
+import dalston.telemetry
 
 # Stores the service name set by configure() so reset_context() can restore it.
 _configured_service_name: str | None = None
@@ -28,6 +31,30 @@ def _add_service_name(
     """Structlog processor that adds the service name to every log entry."""
     if "_service_name" in event_dict:
         event_dict["service"] = event_dict.pop("_service_name")
+    return event_dict
+
+
+def _add_trace_context(
+    logger: logging.Logger,
+    method_name: str,
+    event_dict: dict,
+) -> dict:
+    """Structlog processor that adds trace_id and span_id from OpenTelemetry span.
+
+    Only adds trace context when tracing is enabled and a span is active.
+    This enables log-trace correlation in observability platforms like Jaeger.
+    """
+    if not dalston.telemetry.is_tracing_enabled():
+        return event_dict
+
+    trace_id = dalston.telemetry.get_current_trace_id()
+    span_id = dalston.telemetry.get_current_span_id()
+
+    if trace_id:
+        event_dict["trace_id"] = trace_id
+    if span_id:
+        event_dict["span_id"] = span_id
+
     return event_dict
 
 
@@ -58,6 +85,7 @@ def configure(service_name: str) -> None:
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),
         _add_service_name,
+        _add_trace_context,  # M19: Log-trace correlation
     ]
 
     if log_format == "console":

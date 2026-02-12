@@ -16,6 +16,7 @@ import structlog
 from redis import asyncio as aioredis
 
 import dalston.logging
+import dalston.telemetry
 from dalston.common.events import EVENTS_CHANNEL
 from dalston.config import get_settings
 from dalston.db.models import JobModel
@@ -36,6 +37,9 @@ from dalston.orchestrator.handlers import (
 dalston.logging.configure("orchestrator")
 
 logger = structlog.get_logger()
+
+# Configure distributed tracing (M19)
+dalston.telemetry.configure_tracing("dalston-orchestrator")
 
 # Shutdown flag
 _shutdown_event: asyncio.Event | None = None
@@ -110,6 +114,7 @@ async def orchestrator_loop() -> None:
         await pubsub.unsubscribe(EVENTS_CHANNEL)
         await pubsub.close()
         await redis.close()
+        dalston.telemetry.shutdown_tracing()
         logger.info("orchestrator_stopped")
 
 
@@ -141,49 +146,79 @@ async def _dispatch_event(
 
     log.debug("received_event", payload=event)
 
-    # Get a fresh database session for each event
-    async with async_session() as db:
-        try:
-            if event_type == "job.created":
-                job_id = UUID(event["job_id"])
-                await handle_job_created(job_id, db, redis, settings)
+    # Extract trace context from event (M19)
+    trace_context = event.pop("_trace_context", {})
 
-            elif event_type == "task.started":
-                task_id = UUID(event["task_id"])
-                await handle_task_started(task_id, db)
+    # Create span for event handling, linked to parent trace if available
+    with dalston.telemetry.span_from_context(
+        f"orchestrator.handle_{event_type}",
+        trace_context,
+        attributes={
+            "dalston.event_type": event_type,
+            "dalston.request_id": event.get("request_id", ""),
+        },
+    ):
+        # Get a fresh database session for each event
+        async with async_session() as db:
+            try:
+                if event_type == "job.created":
+                    job_id = UUID(event["job_id"])
+                    dalston.telemetry.set_span_attribute("dalston.job_id", str(job_id))
+                    await handle_job_created(job_id, db, redis, settings)
 
-            elif event_type == "task.completed":
-                task_id = UUID(event["task_id"])
-                await handle_task_completed(task_id, db, redis, settings)
+                elif event_type == "task.started":
+                    task_id = UUID(event["task_id"])
+                    dalston.telemetry.set_span_attribute(
+                        "dalston.task_id", str(task_id)
+                    )
+                    await handle_task_started(task_id, db)
 
-            elif event_type == "task.failed":
-                task_id = UUID(event["task_id"])
-                error = event.get("error", "Unknown error")
-                await handle_task_failed(task_id, error, db, redis, settings)
+                elif event_type == "task.completed":
+                    task_id = UUID(event["task_id"])
+                    dalston.telemetry.set_span_attribute(
+                        "dalston.task_id", str(task_id)
+                    )
+                    await handle_task_completed(task_id, db, redis, settings)
 
-            elif event_type == "job.completed":
-                job_id = UUID(event["job_id"])
-                await _handle_job_webhook(job_id, "completed", db, settings)
+                elif event_type == "task.failed":
+                    task_id = UUID(event["task_id"])
+                    error = event.get("error", "Unknown error")
+                    dalston.telemetry.set_span_attribute(
+                        "dalston.task_id", str(task_id)
+                    )
+                    dalston.telemetry.set_span_attribute("dalston.error", error)
+                    await handle_task_failed(task_id, error, db, redis, settings)
 
-            elif event_type == "job.failed":
-                job_id = UUID(event["job_id"])
-                error = event.get("error", "Unknown error")
-                await _handle_job_webhook(job_id, "failed", db, settings, error)
+                elif event_type == "job.completed":
+                    job_id = UUID(event["job_id"])
+                    dalston.telemetry.set_span_attribute("dalston.job_id", str(job_id))
+                    await _handle_job_webhook(job_id, "completed", db, settings)
 
-            elif event_type == "job.cancel_requested":
-                job_id = UUID(event["job_id"])
-                await handle_job_cancel_requested(job_id, db, redis)
+                elif event_type == "job.failed":
+                    job_id = UUID(event["job_id"])
+                    error = event.get("error", "Unknown error")
+                    dalston.telemetry.set_span_attribute("dalston.job_id", str(job_id))
+                    dalston.telemetry.set_span_attribute("dalston.error", error)
+                    await _handle_job_webhook(job_id, "failed", db, settings, error)
 
-            elif event_type == "job.cancelled":
-                job_id = UUID(event["job_id"])
-                await _handle_job_webhook(job_id, "cancelled", db, settings)
+                elif event_type == "job.cancel_requested":
+                    job_id = UUID(event["job_id"])
+                    dalston.telemetry.set_span_attribute("dalston.job_id", str(job_id))
+                    await handle_job_cancel_requested(job_id, db, redis)
 
-            else:
-                log.debug("unknown_event_type")
+                elif event_type == "job.cancelled":
+                    job_id = UUID(event["job_id"])
+                    dalston.telemetry.set_span_attribute("dalston.job_id", str(job_id))
+                    await _handle_job_webhook(job_id, "cancelled", db, settings)
 
-        except Exception as e:
-            log.exception("handler_error", error=str(e))
-            # Don't re-raise - continue processing other events
+                else:
+                    log.debug("unknown_event_type")
+
+            except Exception as e:
+                dalston.telemetry.record_exception(e)
+                dalston.telemetry.set_span_status_error(str(e))
+                log.exception("handler_error", error=str(e))
+                # Don't re-raise - continue processing other events
 
 
 async def _handle_job_webhook(

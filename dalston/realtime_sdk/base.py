@@ -19,6 +19,7 @@ import structlog
 from websockets.asyncio.server import ServerConnection, serve
 
 import dalston.logging
+import dalston.telemetry
 from dalston.realtime_sdk.assembler import TranscribeResult
 from dalston.realtime_sdk.registry import WorkerInfo, WorkerRegistry
 from dalston.realtime_sdk.session import SessionConfig, SessionHandler
@@ -252,6 +253,9 @@ class RealtimeEngine(ABC):
         # Configure unified structured logging for this worker
         dalston.logging.configure(f"realtime-{self.worker_id}")
 
+        # Configure distributed tracing (M19)
+        dalston.telemetry.configure_tracing(f"dalston-realtime-{self.worker_id}")
+
         # Bind worker_id to logging context for all subsequent log calls
         structlog.contextvars.bind_contextvars(worker_id=self.worker_id)
 
@@ -318,6 +322,7 @@ class RealtimeEngine(ABC):
         except asyncio.CancelledError:
             pass
 
+        dalston.telemetry.shutdown_tracing()
         logger.info("engine_stopped")
 
     async def shutdown(self) -> None:
@@ -413,14 +418,23 @@ class RealtimeEngine(ABC):
         # Bind session_id to logging context for this session
         structlog.contextvars.bind_contextvars(session_id=config.session_id)
 
-        try:
-            # Run session
-            await handler.run()
-        finally:
-            # Remove from tracking
-            del self._sessions[config.session_id]
-            # Unbind session_id from context
-            structlog.contextvars.unbind_contextvars("session_id")
+        # Create span for session lifetime (M19)
+        with dalston.telemetry.create_span(
+            "realtime.session",
+            attributes={
+                "dalston.session_id": config.session_id,
+                "dalston.language": config.language,
+                "dalston.model": config.model,
+            },
+        ):
+            try:
+                # Run session
+                await handler.run()
+            finally:
+                # Remove from tracking
+                del self._sessions[config.session_id]
+                # Unbind session_id from context
+                structlog.contextvars.unbind_contextvars("session_id")
 
     async def _on_session_end(
         self,

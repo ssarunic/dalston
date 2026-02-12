@@ -16,6 +16,7 @@ import redis
 import structlog
 
 import dalston.logging
+import dalston.telemetry
 from dalston.engine_sdk import io
 from dalston.engine_sdk.types import TaskInput, TaskOutput
 
@@ -64,6 +65,10 @@ class EngineRunner:
 
         # Configure structured logging
         dalston.logging.configure(f"engine-{self.engine_id}")
+
+        # Configure distributed tracing (M19)
+        dalston.telemetry.configure_tracing(f"dalston-engine-{self.engine_id}")
+
         logger.info("engine_runner_initialized", engine_id=self.engine_id)
 
     @property
@@ -104,6 +109,7 @@ class EngineRunner:
                 logger.exception("engine_loop_error", error=str(e))
                 time.sleep(1)
 
+        dalston.telemetry.shutdown_tracing()
         logger.info("engine_loop_stopped")
 
     def stop(self) -> None:
@@ -146,62 +152,87 @@ class EngineRunner:
         temp_dir = None
         start_time = time.time()
 
+        # Extract trace context from task metadata (M19)
+        task_metadata = self._get_task_metadata(task_id)
+        trace_context_raw = task_metadata.get("_trace_context")
         try:
-            # Create temp directory for this task
-            temp_dir = Path(tempfile.mkdtemp(prefix=self.TEMP_DIR_PREFIX))
+            trace_context = json.loads(trace_context_raw) if trace_context_raw else {}
+        except json.JSONDecodeError:
+            trace_context = {}
 
-            # Load task input from S3
-            task_input = self._load_task_input(task_id, temp_dir)
-            job_id = task_input.job_id
-
-            # Extract request_id from task metadata and bind to logger
-            task_metadata = self._get_task_metadata(task_id)
-            request_id = task_metadata.get("request_id")
-            structlog.contextvars.bind_contextvars(
-                task_id=task_id,
-                job_id=job_id,
-                engine_id=self.engine_id,
-                **({"request_id": request_id} if request_id else {}),
-            )
-
-            # Notify orchestrator that processing has started
-            self._publish_task_started(task_id, job_id)
-
-            # Process the task
-            logger.info("task_processing")
-            output = self.engine.process(task_input)
-
-            # Calculate processing time
-            processing_time = time.time() - start_time
-
-            # Upload output to S3
-            self._save_task_output(task_id, job_id, output, processing_time)
-
-            # Publish success event
-            self._publish_task_completed(task_id, job_id)
-
-            logger.info("task_completed", processing_time=round(processing_time, 2))
-
-        except Exception as e:
-            logger.exception("task_failed", error=str(e))
-            # We need job_id for the event, try to extract from input
+        # Create span linked to parent trace from orchestrator
+        with dalston.telemetry.span_from_context(
+            f"engine.{self.engine_id}.process",
+            trace_context,
+            attributes={
+                "dalston.task_id": task_id,
+                "dalston.engine_id": self.engine_id,
+                "dalston.stage": task_metadata.get("stage", "unknown"),
+            },
+        ):
             try:
-                job_id = task_input.job_id
-            except NameError:
-                job_id = "unknown"
-            self._publish_task_failed(task_id, job_id, str(e))
+                # Create temp directory for this task
+                temp_dir = Path(tempfile.mkdtemp(prefix=self.TEMP_DIR_PREFIX))
 
-        finally:
-            # Cleanup temp directory
-            if temp_dir and temp_dir.exists():
-                shutil.rmtree(temp_dir, ignore_errors=True)
-                logger.debug("temp_dir_cleaned", path=str(temp_dir))
-            # Clear per-task context
-            structlog.contextvars.unbind_contextvars(
-                "task_id",
-                "job_id",
-                "request_id",
-            )
+                # Load task input from S3
+                with dalston.telemetry.create_span("engine.download_input"):
+                    task_input = self._load_task_input(task_id, temp_dir)
+                job_id = task_input.job_id
+
+                # Set job_id on span
+                dalston.telemetry.set_span_attribute("dalston.job_id", job_id)
+
+                # Extract request_id from task metadata and bind to logger
+                request_id = task_metadata.get("request_id")
+                structlog.contextvars.bind_contextvars(
+                    task_id=task_id,
+                    job_id=job_id,
+                    engine_id=self.engine_id,
+                    **({"request_id": request_id} if request_id else {}),
+                )
+
+                # Notify orchestrator that processing has started
+                self._publish_task_started(task_id, job_id)
+
+                # Process the task
+                logger.info("task_processing")
+                with dalston.telemetry.create_span("engine.process"):
+                    output = self.engine.process(task_input)
+
+                # Calculate processing time
+                processing_time = time.time() - start_time
+
+                # Upload output to S3
+                with dalston.telemetry.create_span("engine.upload_output"):
+                    self._save_task_output(task_id, job_id, output, processing_time)
+
+                # Publish success event
+                self._publish_task_completed(task_id, job_id)
+
+                logger.info("task_completed", processing_time=round(processing_time, 2))
+
+            except Exception as e:
+                dalston.telemetry.record_exception(e)
+                dalston.telemetry.set_span_status_error(str(e))
+                logger.exception("task_failed", error=str(e))
+                # We need job_id for the event, try to extract from input
+                try:
+                    job_id = task_input.job_id
+                except NameError:
+                    job_id = "unknown"
+                self._publish_task_failed(task_id, job_id, str(e))
+
+            finally:
+                # Cleanup temp directory
+                if temp_dir and temp_dir.exists():
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    logger.debug("temp_dir_cleaned", path=str(temp_dir))
+                # Clear per-task context
+                structlog.contextvars.unbind_contextvars(
+                    "task_id",
+                    "job_id",
+                    "request_id",
+                )
 
     def _load_task_input(self, task_id: str, temp_dir: Path) -> TaskInput:
         """Load task input from S3 and download audio file.
@@ -315,6 +346,10 @@ class EngineRunner:
             "engine_id": self.engine_id,
             "timestamp": datetime.now(UTC).isoformat(),
         }
+        # Inject trace context for distributed tracing (M19)
+        trace_context = dalston.telemetry.inject_trace_context()
+        if trace_context:
+            event["_trace_context"] = trace_context
         self.redis_client.publish(self.EVENTS_CHANNEL, json.dumps(event))
         logger.debug("published_task_started")
 
@@ -332,6 +367,10 @@ class EngineRunner:
             "engine_id": self.engine_id,
             "timestamp": datetime.now(UTC).isoformat(),
         }
+        # Inject trace context for distributed tracing (M19)
+        trace_context = dalston.telemetry.inject_trace_context()
+        if trace_context:
+            event["_trace_context"] = trace_context
         self.redis_client.publish(self.EVENTS_CHANNEL, json.dumps(event))
         logger.debug("published_task_completed")
 
@@ -356,5 +395,9 @@ class EngineRunner:
             "error": error,
             "timestamp": datetime.now(UTC).isoformat(),
         }
+        # Inject trace context for distributed tracing (M19)
+        trace_context = dalston.telemetry.inject_trace_context()
+        if trace_context:
+            event["_trace_context"] = trace_context
         self.redis_client.publish(self.EVENTS_CHANNEL, json.dumps(event))
         logger.debug("published_task_failed")

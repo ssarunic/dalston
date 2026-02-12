@@ -17,6 +17,7 @@ from starlette.datastructures import MutableHeaders
 from starlette.requests import Request
 
 import dalston.logging
+import dalston.telemetry
 
 REQUEST_ID_HEADER = "X-Request-ID"
 _REQUEST_ID_HEADER_LOWER = REQUEST_ID_HEADER.lower().encode()
@@ -70,6 +71,9 @@ class CorrelationIdMiddleware:
         # Reset structlog context for this request/connection and bind request_id.
         # Uses reset_context() to preserve the service name set by configure().
         dalston.logging.reset_context(request_id=request_id)
+
+        # Link request_id to current trace span (M19)
+        dalston.telemetry.set_span_attribute("dalston.request_id", request_id)
 
         # Store on scope state so route handlers can access request.state.request_id.
         # For HTTP, use Request; for WebSocket, set directly on scope state dict.

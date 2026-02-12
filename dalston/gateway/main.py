@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 import dalston.logging
+import dalston.telemetry
 from dalston.common.redis import close_redis, get_redis
 from dalston.common.s3 import ensure_bucket_exists
 from dalston.config import get_settings
@@ -25,6 +26,9 @@ from dalston.session_router import SessionRouter
 # Configure structured logging
 dalston.logging.configure("gateway")
 logger = structlog.get_logger()
+
+# Configure distributed tracing (M19)
+dalston.telemetry.configure_tracing("dalston-gateway")
 
 # Global session router instance (initialized in lifespan)
 session_router: SessionRouter | None = None
@@ -130,6 +134,7 @@ async def lifespan(app: FastAPI):
 
     await close_redis()
     await engine.dispose()
+    dalston.telemetry.shutdown_tracing()
     logger.info("Dalston Gateway shutdown complete")
 
 
@@ -140,6 +145,15 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Add OpenTelemetry auto-instrumentation (M19)
+if dalston.telemetry.is_tracing_enabled():
+    try:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+        FastAPIInstrumentor.instrument_app(app)
+    except ImportError:
+        logger.warning("opentelemetry-instrumentation-fastapi not installed, skipping")
 
 # Add CORS middleware
 app.add_middleware(

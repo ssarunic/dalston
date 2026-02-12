@@ -14,6 +14,7 @@ import structlog
 import structlog.contextvars
 from redis.asyncio import Redis
 
+import dalston.telemetry
 from dalston.common.models import Task
 from dalston.common.pipeline_types import AudioMedia, TaskInputData
 from dalston.common.s3 import get_s3_client
@@ -62,6 +63,12 @@ async def queue_task(
     }
     if "request_id" in ctx:
         metadata_mapping["request_id"] = ctx["request_id"]
+
+    # Inject trace context for distributed tracing (M19)
+    trace_context = dalston.telemetry.inject_trace_context()
+    if trace_context:
+        metadata_mapping["_trace_context"] = json.dumps(trace_context)
+
     await redis.hset(
         metadata_key,
         mapping=metadata_mapping,

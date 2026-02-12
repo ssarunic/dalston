@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 import redis.asyncio as redis
 import structlog
 
+import dalston.telemetry
 from dalston.session_router.registry import (
     ACTIVE_SESSIONS_KEY,
     SESSION_KEY_PREFIX,
@@ -131,66 +132,81 @@ class SessionAllocator:
         Returns:
             WorkerAllocation if successful, None if no capacity available
         """
-        # Find available workers
-        available = await self._registry.get_available_workers(model, language)
+        with dalston.telemetry.create_span(
+            "session_router.allocate",
+            attributes={
+                "dalston.language": language,
+                "dalston.model": model,
+            },
+        ):
+            # Find available workers
+            available = await self._registry.get_available_workers(model, language)
 
-        if not available:
-            logger.warning("no_workers_available", model=model, language=language)
-            return None
+            if not available:
+                logger.warning("no_workers_available", model=model, language=language)
+                return None
 
-        # Select best worker (first in list = most available capacity)
-        worker = available[0]
+            # Select best worker (first in list = most available capacity)
+            worker = available[0]
 
-        # Generate session ID
-        session_id = f"sess_{uuid.uuid4().hex[:16]}"
+            # Generate session ID
+            session_id = f"sess_{uuid.uuid4().hex[:16]}"
 
-        # Atomically increment active_sessions
-        worker_key = f"{WORKER_KEY_PREFIX}{worker.worker_id}"
-        new_count = await self._redis.hincrby(worker_key, "active_sessions", 1)
+            # Atomically increment active_sessions
+            worker_key = f"{WORKER_KEY_PREFIX}{worker.worker_id}"
+            new_count = await self._redis.hincrby(worker_key, "active_sessions", 1)
 
-        # Verify we didn't exceed capacity (race condition check)
-        if new_count > worker.capacity:
-            # Rollback
-            await self._redis.hincrby(worker_key, "active_sessions", -1)
-            logger.warning("worker_at_capacity_rollback", worker_id=worker.worker_id)
-            # Try next worker
-            if len(available) > 1:
-                return await self._acquire_from_list(
-                    available[1:], language, model, client_ip, enhance_on_end
+            # Verify we didn't exceed capacity (race condition check)
+            if new_count > worker.capacity:
+                # Rollback
+                await self._redis.hincrby(worker_key, "active_sessions", -1)
+                logger.warning(
+                    "worker_at_capacity_rollback", worker_id=worker.worker_id
                 )
-            return None
+                # Try next worker
+                if len(available) > 1:
+                    return await self._acquire_from_list(
+                        available[1:], language, model, client_ip, enhance_on_end
+                    )
+                return None
 
-        # Create session record
-        await self._create_session(
-            session_id=session_id,
-            worker_id=worker.worker_id,
-            language=language,
-            model=model,
-            client_ip=client_ip,
-            enhance_on_end=enhance_on_end,
-        )
+            # Create session record
+            await self._create_session(
+                session_id=session_id,
+                worker_id=worker.worker_id,
+                language=language,
+                model=model,
+                client_ip=client_ip,
+                enhance_on_end=enhance_on_end,
+            )
 
-        # Add to worker's session set
-        sessions_key = f"{WORKER_KEY_PREFIX}{worker.worker_id}{WORKER_SESSIONS_SUFFIX}"
-        await self._redis.sadd(sessions_key, session_id)
+            # Add to worker's session set
+            sessions_key = (
+                f"{WORKER_KEY_PREFIX}{worker.worker_id}{WORKER_SESSIONS_SUFFIX}"
+            )
+            await self._redis.sadd(sessions_key, session_id)
 
-        # Add to active sessions index
-        await self._redis.sadd(ACTIVE_SESSIONS_KEY, session_id)
+            # Add to active sessions index
+            await self._redis.sadd(ACTIVE_SESSIONS_KEY, session_id)
 
-        logger.info(
-            "session_allocated",
-            session_id=session_id,
-            worker_id=worker.worker_id,
-            active=new_count,
-            capacity=worker.capacity,
-        )
+            # Set span attributes for allocated session
+            dalston.telemetry.set_span_attribute("dalston.session_id", session_id)
+            dalston.telemetry.set_span_attribute("dalston.worker_id", worker.worker_id)
 
-        return WorkerAllocation(
-            worker_id=worker.worker_id,
-            endpoint=worker.endpoint,
-            session_id=session_id,
-            engine=worker.engine,
-        )
+            logger.info(
+                "session_allocated",
+                session_id=session_id,
+                worker_id=worker.worker_id,
+                active=new_count,
+                capacity=worker.capacity,
+            )
+
+            return WorkerAllocation(
+                worker_id=worker.worker_id,
+                endpoint=worker.endpoint,
+                session_id=session_id,
+                engine=worker.engine,
+            )
 
     async def _acquire_from_list(
         self,

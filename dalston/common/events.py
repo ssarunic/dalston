@@ -7,6 +7,8 @@ from uuid import UUID
 
 from redis.asyncio import Redis
 
+import dalston.telemetry
+
 # Event channel for orchestrator communication
 EVENTS_CHANNEL = "dalston:events"
 
@@ -37,6 +39,12 @@ async def publish_event(
         "timestamp": datetime.now(UTC).isoformat(),
         **payload,
     }
+
+    # Inject trace context for distributed tracing (M19)
+    trace_context = dalston.telemetry.inject_trace_context()
+    if trace_context:
+        event["_trace_context"] = trace_context
+
     message = json.dumps(event, default=_json_serializer)
     await redis.publish(EVENTS_CHANNEL, message)
 
