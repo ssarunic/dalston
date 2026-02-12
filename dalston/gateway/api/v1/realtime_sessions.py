@@ -16,15 +16,16 @@ from datetime import datetime
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.events import publish_job_created
 from dalston.common.redis import get_redis as _get_redis
 from dalston.common.s3 import get_s3_client
 from dalston.config import get_settings
-from dalston.db.session import get_db as _get_db_session
+from dalston.db.session import get_db
 from dalston.gateway.dependencies import RequireJobsRead
 from dalston.gateway.services.enhancement import EnhancementError, EnhancementService
 from dalston.gateway.services.jobs import JobsService
@@ -33,6 +34,9 @@ from dalston.gateway.services.realtime_sessions import RealtimeSessionService
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/realtime", tags=["realtime"])
+
+# Presigned URL expiry time in seconds (1 hour)
+PRESIGNED_URL_EXPIRY_SECONDS = 3600
 
 
 # -----------------------------------------------------------------------------
@@ -117,6 +121,7 @@ class EnhancementStatusResponse(BaseModel):
 )
 async def list_realtime_sessions(
     api_key: RequireJobsRead,
+    db: Annotated[AsyncSession, Depends(get_db)],
     status: Annotated[str | None, Query(description="Filter by status")] = None,
     since: Annotated[
         str | None, Query(description="Sessions started after (ISO 8601)")
@@ -135,53 +140,51 @@ async def list_realtime_sessions(
         try:
             since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
         except ValueError:
-            pass
+            raise HTTPException(
+                status_code=400, detail="Invalid 'since' datetime format"
+            ) from None
     if until:
         try:
             until_dt = datetime.fromisoformat(until.replace("Z", "+00:00"))
         except ValueError:
-            pass
+            raise HTTPException(
+                status_code=400, detail="Invalid 'until' datetime format"
+            ) from None
 
-    # Get database session
-    db_gen = _get_db_session()
-    db = await db_gen.__anext__()
-    try:
-        settings = get_settings()
-        service = RealtimeSessionService(db, settings)
+    settings = get_settings()
+    service = RealtimeSessionService(db, settings)
 
-        sessions, total = await service.list_sessions(
-            tenant_id=api_key.tenant_id,
-            status=status,
-            since=since_dt,
-            until=until_dt,
-            limit=limit,
-            offset=offset,
-        )
+    sessions, total = await service.list_sessions(
+        tenant_id=api_key.tenant_id,
+        status=status,
+        since=since_dt,
+        until=until_dt,
+        limit=limit,
+        offset=offset,
+    )
 
-        return SessionsListResponse(
-            sessions=[
-                SessionSummary(
-                    id=str(s.id),
-                    status=s.status,
-                    language=s.language,
-                    model=s.model,
-                    engine=s.engine,
-                    audio_duration_seconds=s.audio_duration_seconds,
-                    utterance_count=s.utterance_count,
-                    word_count=s.word_count,
-                    store_audio=s.store_audio,
-                    store_transcript=s.store_transcript,
-                    started_at=s.started_at.isoformat(),
-                    ended_at=s.ended_at.isoformat() if s.ended_at else None,
-                )
-                for s in sessions
-            ],
-            total=total,
-            limit=limit,
-            offset=offset,
-        )
-    finally:
-        await db_gen.aclose()
+    return SessionsListResponse(
+        sessions=[
+            SessionSummary(
+                id=str(s.id),
+                status=s.status,
+                language=s.language,
+                model=s.model,
+                engine=s.engine,
+                audio_duration_seconds=s.audio_duration_seconds,
+                utterance_count=s.utterance_count,
+                word_count=s.word_count,
+                store_audio=s.store_audio,
+                store_transcript=s.store_transcript,
+                started_at=s.started_at.isoformat(),
+                ended_at=s.ended_at.isoformat() if s.ended_at else None,
+            )
+            for s in sessions
+        ],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get(
@@ -194,53 +197,49 @@ async def list_realtime_sessions(
 async def get_realtime_session(
     session_id: str,
     api_key: RequireJobsRead,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SessionDetail:
     """Get details of a specific realtime session."""
-    db_gen = _get_db_session()
-    db = await db_gen.__anext__()
-    try:
-        settings = get_settings()
-        service = RealtimeSessionService(db, settings)
+    settings = get_settings()
+    service = RealtimeSessionService(db, settings)
 
-        session = await service.get_session(session_id)
+    session = await service.get_session(session_id)
 
-        if session is None:
-            raise HTTPException(status_code=404, detail="Session not found")
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
 
-        # Verify tenant access
-        if session.tenant_id != api_key.tenant_id:
-            raise HTTPException(status_code=404, detail="Session not found")
+    # Verify tenant access
+    if session.tenant_id != api_key.tenant_id:
+        raise HTTPException(status_code=404, detail="Session not found")
 
-        return SessionDetail(
-            id=str(session.id),
-            status=session.status,
-            language=session.language,
-            model=session.model,
-            engine=session.engine,
-            encoding=session.encoding,
-            sample_rate=session.sample_rate,
-            audio_duration_seconds=session.audio_duration_seconds,
-            utterance_count=session.utterance_count,
-            word_count=session.word_count,
-            store_audio=session.store_audio,
-            store_transcript=session.store_transcript,
-            enhance_on_end=session.enhance_on_end,
-            audio_uri=session.audio_uri,
-            transcript_uri=session.transcript_uri,
-            enhancement_job_id=str(session.enhancement_job_id)
-            if session.enhancement_job_id
-            else None,
-            worker_id=session.worker_id,
-            client_ip=session.client_ip,
-            previous_session_id=str(session.previous_session_id)
-            if session.previous_session_id
-            else None,
-            started_at=session.started_at.isoformat(),
-            ended_at=session.ended_at.isoformat() if session.ended_at else None,
-            error=session.error,
-        )
-    finally:
-        await db_gen.aclose()
+    return SessionDetail(
+        id=str(session.id),
+        status=session.status,
+        language=session.language,
+        model=session.model,
+        engine=session.engine,
+        encoding=session.encoding,
+        sample_rate=session.sample_rate,
+        audio_duration_seconds=session.audio_duration_seconds,
+        utterance_count=session.utterance_count,
+        word_count=session.word_count,
+        store_audio=session.store_audio,
+        store_transcript=session.store_transcript,
+        enhance_on_end=session.enhance_on_end,
+        audio_uri=session.audio_uri,
+        transcript_uri=session.transcript_uri,
+        enhancement_job_id=str(session.enhancement_job_id)
+        if session.enhancement_job_id
+        else None,
+        worker_id=session.worker_id,
+        client_ip=session.client_ip,
+        previous_session_id=str(session.previous_session_id)
+        if session.previous_session_id
+        else None,
+        started_at=session.started_at.isoformat(),
+        ended_at=session.ended_at.isoformat() if session.ended_at else None,
+        error=session.error,
+    )
 
 
 @router.delete(
@@ -255,28 +254,24 @@ async def get_realtime_session(
 async def delete_realtime_session(
     session_id: str,
     api_key: RequireJobsRead,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Delete a realtime session.
 
     Only non-active sessions (completed, error, interrupted) can be deleted.
     """
-    db_gen = _get_db_session()
-    db = await db_gen.__anext__()
+    settings = get_settings()
+    service = RealtimeSessionService(db, settings)
+
     try:
-        settings = get_settings()
-        service = RealtimeSessionService(db, settings)
+        deleted = await service.delete_session(session_id, api_key.tenant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
 
-        try:
-            deleted = await service.delete_session(session_id, api_key.tenant_id)
-        except ValueError as e:
-            raise HTTPException(status_code=409, detail=str(e)) from None
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Session not found")
 
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Session not found")
-
-        return {"deleted": True, "session_id": session_id}
-    finally:
-        await db_gen.aclose()
+    return {"deleted": True, "session_id": session_id}
 
 
 @router.get(
@@ -290,40 +285,43 @@ async def delete_realtime_session(
 async def get_session_transcript(
     session_id: str,
     api_key: RequireJobsRead,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Get transcript JSON for a session."""
-    db_gen = _get_db_session()
-    db = await db_gen.__anext__()
-    try:
-        settings = get_settings()
-        service = RealtimeSessionService(db, settings)
+    settings = get_settings()
+    service = RealtimeSessionService(db, settings)
 
-        session = await service.get_session(session_id)
+    session = await service.get_session(session_id)
 
-        if session is None or session.tenant_id != api_key.tenant_id:
-            raise HTTPException(status_code=404, detail="Session not found")
+    if session is None or session.tenant_id != api_key.tenant_id:
+        raise HTTPException(status_code=404, detail="Session not found")
 
-        if not session.transcript_uri:
-            raise HTTPException(status_code=404, detail="Transcript not available")
+    if not session.transcript_uri:
+        raise HTTPException(status_code=404, detail="Transcript not available")
 
-        # Parse S3 URI and fetch transcript
-        # Format: s3://bucket/key
-        uri_parts = session.transcript_uri.replace("s3://", "").split("/", 1)
-        bucket = uri_parts[0]
-        key = uri_parts[1] if len(uri_parts) > 1 else ""
+    # Parse S3 URI and fetch transcript
+    # Format: s3://bucket/key
+    uri_parts = session.transcript_uri.replace("s3://", "").split("/", 1)
+    bucket = uri_parts[0]
+    key = uri_parts[1] if len(uri_parts) > 1 else ""
 
-        async with get_s3_client(settings) as s3:
-            try:
-                response = await s3.get_object(Bucket=bucket, Key=key)
-                body = await response["Body"].read()
-                transcript = json.loads(body.decode("utf-8"))
-                return JSONResponse(content=transcript)
-            except Exception:
-                raise HTTPException(
-                    status_code=404, detail="Transcript not found"
-                ) from None
-    finally:
-        await db_gen.aclose()
+    async with get_s3_client(settings) as s3:
+        try:
+            response = await s3.get_object(Bucket=bucket, Key=key)
+            body = await response["Body"].read()
+            transcript = json.loads(body.decode("utf-8"))
+            return JSONResponse(content=transcript)
+        except Exception as e:
+            logger.warning(
+                "transcript_fetch_failed",
+                session_id=session_id,
+                bucket=bucket,
+                key=key,
+                error=str(e),
+            )
+            raise HTTPException(
+                status_code=404, detail="Transcript not found"
+            ) from None
 
 
 @router.get(
@@ -337,39 +335,42 @@ async def get_session_transcript(
 async def get_session_audio(
     session_id: str,
     api_key: RequireJobsRead,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Get presigned URL for session audio."""
-    db_gen = _get_db_session()
-    db = await db_gen.__anext__()
-    try:
-        settings = get_settings()
-        service = RealtimeSessionService(db, settings)
+    settings = get_settings()
+    service = RealtimeSessionService(db, settings)
 
-        session = await service.get_session(session_id)
+    session = await service.get_session(session_id)
 
-        if session is None or session.tenant_id != api_key.tenant_id:
-            raise HTTPException(status_code=404, detail="Session not found")
+    if session is None or session.tenant_id != api_key.tenant_id:
+        raise HTTPException(status_code=404, detail="Session not found")
 
-        if not session.audio_uri:
-            raise HTTPException(status_code=404, detail="Audio not available")
+    if not session.audio_uri:
+        raise HTTPException(status_code=404, detail="Audio not available")
 
-        # Parse S3 URI and generate presigned URL
-        uri_parts = session.audio_uri.replace("s3://", "").split("/", 1)
-        bucket = uri_parts[0]
-        key = uri_parts[1] if len(uri_parts) > 1 else ""
+    # Parse S3 URI and generate presigned URL
+    uri_parts = session.audio_uri.replace("s3://", "").split("/", 1)
+    bucket = uri_parts[0]
+    key = uri_parts[1] if len(uri_parts) > 1 else ""
 
-        async with get_s3_client(settings) as s3:
-            try:
-                url = await s3.generate_presigned_url(
-                    "get_object",
-                    Params={"Bucket": bucket, "Key": key},
-                    ExpiresIn=3600,  # 1 hour
-                )
-                return {"url": url, "expires_in": 3600}
-            except Exception:
-                raise HTTPException(status_code=404, detail="Audio not found") from None
-    finally:
-        await db_gen.aclose()
+    async with get_s3_client(settings) as s3:
+        try:
+            url = await s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": bucket, "Key": key},
+                ExpiresIn=PRESIGNED_URL_EXPIRY_SECONDS,
+            )
+            return {"url": url, "expires_in": PRESIGNED_URL_EXPIRY_SECONDS}
+        except Exception as e:
+            logger.warning(
+                "audio_presigned_url_failed",
+                session_id=session_id,
+                bucket=bucket,
+                key=key,
+                error=str(e),
+            )
+            raise HTTPException(status_code=404, detail="Audio not found") from None
 
 
 # -----------------------------------------------------------------------------
@@ -389,6 +390,7 @@ async def get_session_audio(
 async def get_session_enhancement(
     session_id: str,
     api_key: RequireJobsRead,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> EnhancementStatusResponse:
     """Get enhancement job status for a realtime session.
 
@@ -396,107 +398,102 @@ async def get_session_enhancement(
     ended (if enhance_on_end was enabled). When the job is complete, includes
     the enhanced transcript with speaker diarization and word timestamps.
     """
-    db_gen = _get_db_session()
-    db = await db_gen.__anext__()
-    try:
-        settings = get_settings()
-        session_service = RealtimeSessionService(db, settings)
-        jobs_service = JobsService()
+    settings = get_settings()
+    session_service = RealtimeSessionService(db, settings)
+    jobs_service = JobsService()
 
-        # Get session
-        session = await session_service.get_session(session_id)
+    # Get session
+    session = await session_service.get_session(session_id)
 
-        if session is None or session.tenant_id != api_key.tenant_id:
-            raise HTTPException(status_code=404, detail="Session not found")
+    if session is None or session.tenant_id != api_key.tenant_id:
+        raise HTTPException(status_code=404, detail="Session not found")
 
-        # Check if enhancement was requested
-        if not session.enhance_on_end:
-            return EnhancementStatusResponse(
-                session_id=session_id,
-                status="not_requested",
-            )
-
-        # Check if enhancement job exists
-        if session.enhancement_job_id is None:
-            # Enhancement was requested but job not created yet
-            # This could happen if session is still active or job creation failed
-            if session.status == "active":
-                return EnhancementStatusResponse(
-                    session_id=session_id,
-                    status="pending",
-                )
-            else:
-                return EnhancementStatusResponse(
-                    session_id=session_id,
-                    status="failed",
-                    error="Enhancement job was not created. "
-                    "Check that store_audio=true was enabled.",
-                )
-
-        # Get the enhancement job
-        job = await jobs_service.get_job(
-            db, session.enhancement_job_id, tenant_id=api_key.tenant_id
+    # Check if enhancement was requested
+    if not session.enhance_on_end:
+        return EnhancementStatusResponse(
+            session_id=session_id,
+            status="not_requested",
         )
 
-        if job is None:
+    # Check if enhancement job exists
+    if session.enhancement_job_id is None:
+        # Enhancement was requested but job not created yet
+        # This could happen if session is still active or job creation failed
+        if session.status == "active":
+            return EnhancementStatusResponse(
+                session_id=session_id,
+                status="pending",
+            )
+        else:
             return EnhancementStatusResponse(
                 session_id=session_id,
                 status="failed",
-                enhancement_job_id=str(session.enhancement_job_id),
-                error="Enhancement job not found",
+                error="Enhancement job was not created. "
+                "Check that store_audio=true was enabled.",
             )
 
-        # Map job status to enhancement status
-        job_status = job.status
-        if job_status in ("pending", "running"):
-            status = "processing"
-        elif job_status == "completed":
-            status = "completed"
-        else:
-            status = "failed"
+    # Get the enhancement job
+    job = await jobs_service.get_job(
+        db, session.enhancement_job_id, tenant_id=api_key.tenant_id
+    )
 
-        response = EnhancementStatusResponse(
+    if job is None:
+        return EnhancementStatusResponse(
             session_id=session_id,
-            status=status,
-            enhancement_job_id=str(job.id),
-            job_status=job_status,
+            status="failed",
+            enhancement_job_id=str(session.enhancement_job_id),
+            error="Enhancement job not found",
         )
 
-        # If completed, fetch the enhanced transcript
-        if status == "completed":
-            # The merge task output contains the final transcript
-            # Find the merge task and get its output
-            tasks = await jobs_service.get_job_tasks(
-                db, job.id, tenant_id=api_key.tenant_id
-            )
-            merge_task = next((t for t in tasks if t.stage == "merge"), None)
+    # Map job status to enhancement status
+    job_status = job.status
+    if job_status in ("pending", "running"):
+        status = "processing"
+    elif job_status == "completed":
+        status = "completed"
+    else:
+        status = "failed"
 
-            if merge_task and merge_task.output_uri:
-                try:
-                    # Fetch transcript from S3
-                    uri_parts = merge_task.output_uri.replace("s3://", "").split("/", 1)
-                    bucket = uri_parts[0]
-                    key = uri_parts[1] if len(uri_parts) > 1 else ""
+    response = EnhancementStatusResponse(
+        session_id=session_id,
+        status=status,
+        enhancement_job_id=str(job.id),
+        job_status=job_status,
+    )
 
-                    async with get_s3_client(settings) as s3:
-                        obj = await s3.get_object(Bucket=bucket, Key=key)
-                        body = await obj["Body"].read()
-                        response.transcript = json.loads(body.decode("utf-8"))
-                except Exception as e:
-                    logger.warning(
-                        "enhancement_transcript_fetch_failed",
-                        session_id=session_id,
-                        job_id=str(job.id),
-                        error=str(e),
-                    )
+    # If completed, fetch the enhanced transcript
+    if status == "completed":
+        # The merge task output contains the final transcript
+        # Find the merge task and get its output
+        tasks = await jobs_service.get_job_tasks(
+            db, job.id, tenant_id=api_key.tenant_id
+        )
+        merge_task = next((t for t in tasks if t.stage == "merge"), None)
 
-        # If failed, include error
-        if status == "failed" and job.error:
-            response.error = job.error
+        if merge_task and merge_task.output_uri:
+            try:
+                # Fetch transcript from S3
+                uri_parts = merge_task.output_uri.replace("s3://", "").split("/", 1)
+                bucket = uri_parts[0]
+                key = uri_parts[1] if len(uri_parts) > 1 else ""
 
-        return response
-    finally:
-        await db_gen.aclose()
+                async with get_s3_client(settings) as s3:
+                    obj = await s3.get_object(Bucket=bucket, Key=key)
+                    body = await obj["Body"].read()
+                    response.transcript = json.loads(body.decode("utf-8"))
+            except Exception as e:
+                logger.warning(
+                    "enhancement_transcript_fetch_failed",
+                    session_id=session_id,
+                    job_id=str(job.id),
+                    error=str(e),
+                )
+
+    # If failed, include error
+    if status == "failed" and job.error:
+        response.error = job.error
+
+    return response
 
 
 @router.post(
@@ -512,6 +509,7 @@ async def get_session_enhancement(
 async def trigger_session_enhancement(
     session_id: str,
     api_key: RequireJobsRead,
+    db: Annotated[AsyncSession, Depends(get_db)],
     enable_diarization: Annotated[
         bool, Query(description="Enable speaker diarization")
     ] = True,
@@ -533,54 +531,54 @@ async def trigger_session_enhancement(
 
     Requires the session to have recorded audio (store_audio=true).
     """
-    db_gen = _get_db_session()
-    db = await db_gen.__anext__()
+    settings = get_settings()
+    session_service = RealtimeSessionService(db, settings)
+    enhancement_service = EnhancementService(db, settings)
+
+    # Get session
+    session = await session_service.get_session(session_id)
+
+    if session is None or session.tenant_id != api_key.tenant_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Check if session already has enhancement job
+    if session.enhancement_job_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Session already has enhancement job: {session.enhancement_job_id}",
+        )
+
+    # Create enhancement job
     try:
-        settings = get_settings()
-        session_service = RealtimeSessionService(db, settings)
-        enhancement_service = EnhancementService(db, settings)
-
-        # Get session
-        session = await session_service.get_session(session_id)
-
-        if session is None or session.tenant_id != api_key.tenant_id:
-            raise HTTPException(status_code=404, detail="Session not found")
-
-        # Check if session already has enhancement job
-        if session.enhancement_job_id is not None:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Session already has enhancement job: {session.enhancement_job_id}",
-            )
-
-        # Create enhancement job
-        try:
-            job = await enhancement_service.create_enhancement_job(
-                session=session,
-                enhance_diarization=enable_diarization,
-                enhance_word_timestamps=enable_word_timestamps,
-                enhance_llm_cleanup=enable_llm_cleanup,
-                enhance_emotions=enable_emotions,
-            )
-        except EnhancementError as e:
-            raise HTTPException(status_code=409, detail=str(e)) from None
-
-        # Publish event for orchestrator to pick up the job
-        redis = await _get_redis()
-        await publish_job_created(redis, job.id)
-
-        # Update session with enhancement job ID
-        await session_service.finalize_session(
-            session_id=session_id,
-            status=session.status,
-            enhancement_job_id=job.id,
+        job = await enhancement_service.create_enhancement_job(
+            session=session,
+            enhance_diarization=enable_diarization,
+            enhance_word_timestamps=enable_word_timestamps,
+            enhance_llm_cleanup=enable_llm_cleanup,
+            enhance_emotions=enable_emotions,
         )
-
-        return EnhancementStatusResponse(
+    except EnhancementError as e:
+        logger.warning(
+            "enhancement_job_creation_failed",
             session_id=session_id,
-            status="processing",
-            enhancement_job_id=str(job.id),
-            job_status=job.status,
+            error=str(e),
         )
-    finally:
-        await db_gen.aclose()
+        raise HTTPException(status_code=409, detail=str(e)) from None
+
+    # Publish event for orchestrator to pick up the job
+    redis = await _get_redis()
+    await publish_job_created(redis, job.id)
+
+    # Update session with enhancement job ID
+    await session_service.finalize_session(
+        session_id=session_id,
+        status=session.status,
+        enhancement_job_id=job.id,
+    )
+
+    return EnhancementStatusResponse(
+        session_id=session_id,
+        status="processing",
+        enhancement_job_id=str(job.id),
+        job_status=job.status,
+    )

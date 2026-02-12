@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 
 from dalston.gateway.services.rate_limiter import (
+    CONCURRENT_COUNTER_TTL_SECONDS,
     KEY_PREFIX_JOBS,
     KEY_PREFIX_SESSIONS,
     RedisRateLimiter,
@@ -16,9 +17,17 @@ from dalston.gateway.services.rate_limiter import (
 def mock_redis():
     """Create a mock Redis client."""
     redis = AsyncMock()
+
+    # Mock register_script to return a callable that returns an async result
+    mock_script = AsyncMock()
+    redis.register_script = MagicMock(return_value=mock_script)
+
     # Pipeline is created sync, methods are sync, but execute() is async
     pipe = MagicMock()
     pipe.execute = AsyncMock()
+    pipe.incr = MagicMock(return_value=pipe)
+    pipe.decr = MagicMock(return_value=pipe)
+    pipe.expire = MagicMock(return_value=pipe)
     # pipeline() is a sync method in redis-py
     redis.pipeline = MagicMock(return_value=pipe)
     return redis
@@ -42,27 +51,23 @@ class TestRequestRateLimit:
         """Should allow requests when under the limit."""
         tenant_id = uuid4()
 
-        # Mock pipeline results: [zremrangebyscore, zcard, zadd, expire]
-        # Pipeline methods are sync, only execute() is async
-        pipe = MagicMock()
-        pipe.execute = AsyncMock(return_value=[None, 50, True, True])
-        mock_redis.pipeline.return_value = pipe
+        # Mock Lua script result: [allowed=1, current_count=51, remaining=49]
+        mock_script = mock_redis.register_script.return_value
+        mock_script.return_value = [1, 51, 49]
 
         result = await rate_limiter.check_request_rate(tenant_id)
 
         assert result.allowed is True
         assert result.limit == 100
-        assert result.remaining == 49  # 100 - 50 - 1
+        assert result.remaining == 49
 
     async def test_denies_request_over_limit(self, rate_limiter, mock_redis):
         """Should deny requests when at or over the limit."""
         tenant_id = uuid4()
 
-        # Mock pipeline results: at limit (100 requests)
-        # Pipeline methods are sync, only execute() is async
-        pipe = MagicMock()
-        pipe.execute = AsyncMock(return_value=[None, 100, True, True])
-        mock_redis.pipeline.return_value = pipe
+        # Mock Lua script result: [allowed=0, current_count=100, remaining=0]
+        mock_script = mock_redis.register_script.return_value
+        mock_script.return_value = [0, 100, 0]
 
         result = await rate_limiter.check_request_rate(tenant_id)
 
@@ -71,19 +76,23 @@ class TestRequestRateLimit:
         assert result.remaining == 0
         assert result.reset_seconds == 60
 
-    async def test_removes_request_when_over_limit(self, rate_limiter, mock_redis):
-        """Should remove the added request when over limit."""
+    async def test_lua_script_called_with_correct_args(self, rate_limiter, mock_redis):
+        """Should call Lua script with correct keys and args."""
         tenant_id = uuid4()
 
-        # Pipeline methods are sync, only execute() is async
-        pipe = MagicMock()
-        pipe.execute = AsyncMock(return_value=[None, 100, True, True])
-        mock_redis.pipeline.return_value = pipe
+        mock_script = mock_redis.register_script.return_value
+        mock_script.return_value = [1, 1, 99]
 
         await rate_limiter.check_request_rate(tenant_id)
 
-        # Should have called zrem to remove the request
-        mock_redis.zrem.assert_called_once()
+        # Verify script was called with correct key
+        mock_script.assert_called_once()
+        call_kwargs = mock_script.call_args.kwargs
+        assert f"dalston:ratelimit:requests:{tenant_id}" in call_kwargs["keys"]
+        # Args should include: now, window_start, limit, window_seconds
+        assert len(call_kwargs["args"]) == 4
+        assert call_kwargs["args"][2] == 100  # requests_per_minute
+        assert call_kwargs["args"][3] == 60  # window_seconds
 
 
 class TestConcurrentJobsLimit:
@@ -122,33 +131,46 @@ class TestConcurrentJobsLimit:
         assert result.remaining == 5
 
     async def test_increment_concurrent_jobs(self, rate_limiter, mock_redis):
-        """Should increment the concurrent job counter."""
+        """Should increment the concurrent job counter with TTL."""
         tenant_id = uuid4()
+        pipe = mock_redis.pipeline.return_value
+        pipe.execute.return_value = [1, True]
 
         await rate_limiter.increment_concurrent_jobs(tenant_id)
 
         expected_key = f"{KEY_PREFIX_JOBS}:{tenant_id}"
-        mock_redis.incr.assert_called_once_with(expected_key)
+        pipe.incr.assert_called_once_with(expected_key)
+        pipe.expire.assert_called_once_with(
+            expected_key, CONCURRENT_COUNTER_TTL_SECONDS
+        )
+        pipe.execute.assert_called_once()
 
     async def test_decrement_concurrent_jobs(self, rate_limiter, mock_redis):
-        """Should decrement the concurrent job counter."""
+        """Should decrement the concurrent job counter with TTL."""
         tenant_id = uuid4()
-        mock_redis.decr.return_value = 2
+        pipe = mock_redis.pipeline.return_value
+        pipe.execute.return_value = [2, True]  # decr result, expire result
 
         await rate_limiter.decrement_concurrent_jobs(tenant_id)
 
         expected_key = f"{KEY_PREFIX_JOBS}:{tenant_id}"
-        mock_redis.decr.assert_called_once_with(expected_key)
+        pipe.decr.assert_called_once_with(expected_key)
+        pipe.expire.assert_called_once_with(
+            expected_key, CONCURRENT_COUNTER_TTL_SECONDS
+        )
 
     async def test_decrement_prevents_negative(self, rate_limiter, mock_redis):
         """Should reset to 0 if decrement would go negative."""
         tenant_id = uuid4()
-        mock_redis.decr.return_value = -1
+        pipe = mock_redis.pipeline.return_value
+        pipe.execute.return_value = [-1, True]  # decr result went negative
 
         await rate_limiter.decrement_concurrent_jobs(tenant_id)
 
         expected_key = f"{KEY_PREFIX_JOBS}:{tenant_id}"
-        mock_redis.set.assert_called_once_with(expected_key, 0)
+        mock_redis.set.assert_called_once_with(
+            expected_key, 0, ex=CONCURRENT_COUNTER_TTL_SECONDS
+        )
 
 
 class TestConcurrentSessionsLimit:
@@ -177,30 +199,43 @@ class TestConcurrentSessionsLimit:
         assert result.remaining == 0
 
     async def test_increment_concurrent_sessions(self, rate_limiter, mock_redis):
-        """Should increment the concurrent session counter."""
+        """Should increment the concurrent session counter with TTL."""
         tenant_id = uuid4()
+        pipe = mock_redis.pipeline.return_value
+        pipe.execute.return_value = [1, True]
 
         await rate_limiter.increment_concurrent_sessions(tenant_id)
 
         expected_key = f"{KEY_PREFIX_SESSIONS}:{tenant_id}"
-        mock_redis.incr.assert_called_once_with(expected_key)
+        pipe.incr.assert_called_once_with(expected_key)
+        pipe.expire.assert_called_once_with(
+            expected_key, CONCURRENT_COUNTER_TTL_SECONDS
+        )
+        pipe.execute.assert_called_once()
 
     async def test_decrement_concurrent_sessions(self, rate_limiter, mock_redis):
-        """Should decrement the concurrent session counter."""
+        """Should decrement the concurrent session counter with TTL."""
         tenant_id = uuid4()
-        mock_redis.decr.return_value = 1
+        pipe = mock_redis.pipeline.return_value
+        pipe.execute.return_value = [1, True]
 
         await rate_limiter.decrement_concurrent_sessions(tenant_id)
 
         expected_key = f"{KEY_PREFIX_SESSIONS}:{tenant_id}"
-        mock_redis.decr.assert_called_once_with(expected_key)
+        pipe.decr.assert_called_once_with(expected_key)
+        pipe.expire.assert_called_once_with(
+            expected_key, CONCURRENT_COUNTER_TTL_SECONDS
+        )
 
     async def test_decrement_prevents_negative(self, rate_limiter, mock_redis):
         """Should reset to 0 if decrement would go negative."""
         tenant_id = uuid4()
-        mock_redis.decr.return_value = -1
+        pipe = mock_redis.pipeline.return_value
+        pipe.execute.return_value = [-1, True]
 
         await rate_limiter.decrement_concurrent_sessions(tenant_id)
 
         expected_key = f"{KEY_PREFIX_SESSIONS}:{tenant_id}"
-        mock_redis.set.assert_called_once_with(expected_key, 0)
+        mock_redis.set.assert_called_once_with(
+            expected_key, 0, ex=CONCURRENT_COUNTER_TTL_SECONDS
+        )

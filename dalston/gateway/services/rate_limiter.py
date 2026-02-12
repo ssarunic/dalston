@@ -6,7 +6,7 @@ Provides three types of rate limiting:
 3. Concurrent realtime sessions
 """
 
-from abc import ABC, abstractmethod
+import time
 from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
@@ -21,6 +21,36 @@ KEY_PREFIX_REQUESTS = "dalston:ratelimit:requests"
 KEY_PREFIX_JOBS = "dalston:ratelimit:jobs"
 KEY_PREFIX_SESSIONS = "dalston:ratelimit:sessions"
 
+# TTL for concurrent counters (24 hours) - prevents zombie counters from crashed processes
+CONCURRENT_COUNTER_TTL_SECONDS = 86400
+
+# Lua script for atomic sliding window rate limiting
+# Returns: [allowed (0/1), current_count, remaining]
+SLIDING_WINDOW_SCRIPT = """
+local key = KEYS[1]
+local now = tonumber(ARGV[1])
+local window_start = tonumber(ARGV[2])
+local limit = tonumber(ARGV[3])
+local window_seconds = tonumber(ARGV[4])
+
+-- Remove old entries outside the window
+redis.call('ZREMRANGEBYSCORE', key, 0, window_start)
+
+-- Count current requests in window
+local current_count = redis.call('ZCARD', key)
+
+-- Check if under limit
+if current_count < limit then
+    -- Add new request
+    redis.call('ZADD', key, now, tostring(now))
+    -- Set expiry
+    redis.call('EXPIRE', key, window_seconds + 1)
+    return {1, current_count + 1, limit - current_count - 1}
+else
+    return {0, current_count, 0}
+end
+"""
+
 
 @dataclass
 class RateLimitResult:
@@ -32,8 +62,11 @@ class RateLimitResult:
     reset_seconds: int | None = None
 
 
-class RateLimiterProtocol(Protocol):
-    """Protocol for rate limiter implementations."""
+class RateLimiter(Protocol):
+    """Protocol for rate limiter implementations.
+
+    Use this for type hints to allow dependency injection and testing.
+    """
 
     async def check_request_rate(self, tenant_id: UUID) -> RateLimitResult:
         """Check if tenant is within request rate limit."""
@@ -64,46 +97,7 @@ class RateLimiterProtocol(Protocol):
         ...
 
 
-class RateLimiter(ABC):
-    """Abstract base class for rate limiters."""
-
-    @abstractmethod
-    async def check_request_rate(self, tenant_id: UUID) -> RateLimitResult:
-        """Check if tenant is within request rate limit."""
-        pass
-
-    @abstractmethod
-    async def check_concurrent_jobs(self, tenant_id: UUID) -> RateLimitResult:
-        """Check if tenant can start a new batch job."""
-        pass
-
-    @abstractmethod
-    async def increment_concurrent_jobs(self, tenant_id: UUID) -> None:
-        """Increment concurrent job count for tenant."""
-        pass
-
-    @abstractmethod
-    async def decrement_concurrent_jobs(self, tenant_id: UUID) -> None:
-        """Decrement concurrent job count for tenant."""
-        pass
-
-    @abstractmethod
-    async def check_concurrent_sessions(self, tenant_id: UUID) -> RateLimitResult:
-        """Check if tenant can start a new realtime session."""
-        pass
-
-    @abstractmethod
-    async def increment_concurrent_sessions(self, tenant_id: UUID) -> None:
-        """Increment concurrent session count for tenant."""
-        pass
-
-    @abstractmethod
-    async def decrement_concurrent_sessions(self, tenant_id: UUID) -> None:
-        """Decrement concurrent session count for tenant."""
-        pass
-
-
-class RedisRateLimiter(RateLimiter):
+class RedisRateLimiter:
     """Redis-backed rate limiter implementation.
 
     Uses sliding window for request rate limiting and simple counters
@@ -122,47 +116,30 @@ class RedisRateLimiter(RateLimiter):
         self._max_concurrent_jobs = max_concurrent_jobs
         self._max_concurrent_sessions = max_concurrent_sessions
         self._window_seconds = 60
+        self._sliding_window_script = self._redis.register_script(SLIDING_WINDOW_SCRIPT)
 
     async def check_request_rate(self, tenant_id: UUID) -> RateLimitResult:
-        """Check request rate using sliding window counter.
+        """Check request rate using atomic sliding window counter.
 
-        Uses Redis sorted set with timestamps as scores for sliding window.
+        Uses Lua script for atomic check-and-increment to prevent race conditions.
         """
-        import time
-
         key = f"{KEY_PREFIX_REQUESTS}:{tenant_id}"
         now = time.time()
         window_start = now - self._window_seconds
 
-        # Use pipeline for atomic operations
-        pipe = self._redis.pipeline()
-        # Remove old entries outside the window
-        pipe.zremrangebyscore(key, 0, window_start)
-        # Count requests in current window
-        pipe.zcard(key)
-        # Add current request (will be rolled back if over limit)
-        pipe.zadd(key, {str(now): now})
-        # Set expiry on the key
-        pipe.expire(key, self._window_seconds + 1)
+        # Execute atomic Lua script
+        result = await self._sliding_window_script(
+            keys=[key],
+            args=[now, window_start, self._requests_per_minute, self._window_seconds],
+        )
 
-        results = await pipe.execute()
-        current_count = results[1]
+        allowed = bool(result[0])
+        remaining = int(result[2])
 
-        if current_count >= self._requests_per_minute:
-            # Over limit - remove the request we just added
-            await self._redis.zrem(key, str(now))
-            return RateLimitResult(
-                allowed=False,
-                limit=self._requests_per_minute,
-                remaining=0,
-                reset_seconds=self._window_seconds,
-            )
-
-        remaining = self._requests_per_minute - current_count - 1
         return RateLimitResult(
-            allowed=True,
+            allowed=allowed,
             limit=self._requests_per_minute,
-            remaining=max(0, remaining),
+            remaining=remaining,
             reset_seconds=self._window_seconds,
         )
 
@@ -180,18 +157,30 @@ class RedisRateLimiter(RateLimiter):
         )
 
     async def increment_concurrent_jobs(self, tenant_id: UUID) -> None:
-        """Increment concurrent job count for tenant."""
+        """Increment concurrent job count for tenant.
+
+        Sets TTL to prevent zombie counters from crashed processes.
+        """
         key = f"{KEY_PREFIX_JOBS}:{tenant_id}"
-        await self._redis.incr(key)
+        pipe = self._redis.pipeline()
+        pipe.incr(key)
+        pipe.expire(key, CONCURRENT_COUNTER_TTL_SECONDS)
+        await pipe.execute()
         logger.debug("incremented_concurrent_jobs", tenant_id=str(tenant_id))
 
     async def decrement_concurrent_jobs(self, tenant_id: UUID) -> None:
-        """Decrement concurrent job count for tenant."""
+        """Decrement concurrent job count for tenant.
+
+        Refreshes TTL on decrement to keep active counters alive.
+        """
         key = f"{KEY_PREFIX_JOBS}:{tenant_id}"
-        result = await self._redis.decr(key)
+        pipe = self._redis.pipeline()
+        pipe.decr(key)
+        pipe.expire(key, CONCURRENT_COUNTER_TTL_SECONDS)
+        results = await pipe.execute()
         # Ensure we don't go negative
-        if result < 0:
-            await self._redis.set(key, 0)
+        if results[0] < 0:
+            await self._redis.set(key, 0, ex=CONCURRENT_COUNTER_TTL_SECONDS)
         logger.debug("decremented_concurrent_jobs", tenant_id=str(tenant_id))
 
     async def check_concurrent_sessions(self, tenant_id: UUID) -> RateLimitResult:
@@ -208,16 +197,28 @@ class RedisRateLimiter(RateLimiter):
         )
 
     async def increment_concurrent_sessions(self, tenant_id: UUID) -> None:
-        """Increment concurrent session count for tenant."""
+        """Increment concurrent session count for tenant.
+
+        Sets TTL to prevent zombie counters from crashed processes.
+        """
         key = f"{KEY_PREFIX_SESSIONS}:{tenant_id}"
-        await self._redis.incr(key)
+        pipe = self._redis.pipeline()
+        pipe.incr(key)
+        pipe.expire(key, CONCURRENT_COUNTER_TTL_SECONDS)
+        await pipe.execute()
         logger.debug("incremented_concurrent_sessions", tenant_id=str(tenant_id))
 
     async def decrement_concurrent_sessions(self, tenant_id: UUID) -> None:
-        """Decrement concurrent session count for tenant."""
+        """Decrement concurrent session count for tenant.
+
+        Refreshes TTL on decrement to keep active counters alive.
+        """
         key = f"{KEY_PREFIX_SESSIONS}:{tenant_id}"
-        result = await self._redis.decr(key)
+        pipe = self._redis.pipeline()
+        pipe.decr(key)
+        pipe.expire(key, CONCURRENT_COUNTER_TTL_SECONDS)
+        results = await pipe.execute()
         # Ensure we don't go negative
-        if result < 0:
-            await self._redis.set(key, 0)
+        if results[0] < 0:
+            await self._redis.set(key, 0, ex=CONCURRENT_COUNTER_TTL_SECONDS)
         logger.debug("decremented_concurrent_sessions", tenant_id=str(tenant_id))
