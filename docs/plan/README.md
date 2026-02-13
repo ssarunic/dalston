@@ -90,6 +90,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | # | Milestone | Goal | Days | Status |
 |---|-----------|------|------|--------|
 | [M17](milestones/M17-api-key-management.md) | API Key Management | Web UI for creating/revoking API keys | 2-3 | Completed |
+| [M27](milestones/M27-console-ux-improvements.md) | Console UX Improvements | Slide-over panels, audio player, search, responsive design | 8-10 | Not Started |
 
 ## Observability Milestones
 
