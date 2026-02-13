@@ -133,6 +133,13 @@ def transcribe(
             help="Display word-level timestamps in text output.",
         ),
     ] = False,
+    retention_policy: Annotated[
+        str | None,
+        typer.Option(
+            "--retention-policy",
+            help="Retention policy name (e.g., 'short', 'long'). Uses tenant default if not specified.",
+        ),
+    ] = None,
 ) -> None:
     """Transcribe audio files.
 
@@ -159,6 +166,8 @@ def transcribe(
         dalston transcribe call.mp3 --speakers diarize --min-speakers 2 --max-speakers 4
 
         dalston transcribe audio.mp3 --show-words  # Display word-level timestamps
+
+        dalston transcribe audio.mp3 --retention-policy short  # Use short retention policy
     """
     client = state.client
     quiet = state.quiet
@@ -203,6 +212,7 @@ def transcribe(
                 min_speakers=min_speakers,
                 max_speakers=max_speakers,
                 timestamps_granularity=timestamps_granularity,
+                retention_policy=retention_policy,
             )
 
             if not wait:

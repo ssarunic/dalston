@@ -68,6 +68,14 @@ def _create_mock_job(
     job.completed_at = datetime.now(UTC) + timedelta(seconds=10)
     job.error = None
     job.tasks = tasks or []
+    # Retention fields (M25)
+    job.retention_policy_id = None
+    job.retention_policy = None
+    job.retention_mode = "auto_delete"
+    job.retention_hours = 24
+    job.retention_scope = "all"
+    job.purge_after = None
+    job.purged_at = None
     return job
 
 

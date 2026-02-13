@@ -9,6 +9,26 @@ from pydantic import BaseModel, ConfigDict, Field
 from dalston.common.models import JobStatus
 
 
+class RetentionInfo(BaseModel):
+    """Retention information for a job or session."""
+
+    policy_id: UUID | None = Field(
+        default=None, description="Reference to retention policy"
+    )
+    policy_name: str | None = Field(default=None, description="Policy name at creation")
+    mode: str = Field(description="Retention mode: auto_delete, keep, none")
+    hours: int | None = Field(default=None, description="Hours to retain")
+    scope: str | None = Field(
+        default=None, description="Deletion scope: all, audio_only"
+    )
+    purge_after: datetime | None = Field(
+        default=None, description="Scheduled purge time (computed on completion)"
+    )
+    purged_at: datetime | None = Field(
+        default=None, description="Actual purge time (set when purged)"
+    )
+
+
 class JobCreatedResponse(BaseModel):
     """Response for POST /v1/audio/transcriptions."""
 
@@ -60,6 +80,11 @@ class JobResponse(BaseModel):
     words: list[dict[str, Any]] | None = None
     segments: list[dict[str, Any]] | None = None
     speakers: list[dict[str, Any]] | None = None
+
+    # Retention info (M25)
+    retention: RetentionInfo | None = Field(
+        default=None, description="Retention policy and status"
+    )
 
 
 class JobSummary(BaseModel):

@@ -69,6 +69,23 @@ class Settings(BaseSettings):
         description="Maximum concurrent realtime sessions per tenant",
     )
 
+    # Data Retention (M25)
+    retention_cleanup_interval_seconds: int = Field(
+        default=300,  # 5 minutes
+        alias="RETENTION_CLEANUP_INTERVAL_SECONDS",
+        description="Interval between cleanup worker sweeps",
+    )
+    retention_cleanup_batch_size: int = Field(
+        default=100,
+        alias="RETENTION_CLEANUP_BATCH_SIZE",
+        description="Maximum jobs to purge per cleanup sweep",
+    )
+    retention_min_hours: int = Field(
+        default=1,
+        alias="RETENTION_MIN_HOURS",
+        description="Minimum retention hours allowed (1 = 1 hour minimum)",
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:

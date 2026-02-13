@@ -27,6 +27,7 @@ from fastapi import (
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_cancel_requested, publish_job_created
 from dalston.common.models import DEFAULT_MODEL, JobStatus, resolve_model
 from dalston.common.utils import compute_duration_ms
@@ -35,11 +36,13 @@ from dalston.gateway.dependencies import (
     RequireJobsRead,
     RequireJobsWrite,
     RequireJobsWriteRateLimited,
+    get_audit_service,
     get_db,
     get_export_service,
     get_jobs_service,
     get_rate_limiter,
     get_redis,
+    get_retention_service,
     get_settings,
 )
 from dalston.gateway.models.responses import (
@@ -48,6 +51,7 @@ from dalston.gateway.models.responses import (
     JobListResponse,
     JobResponse,
     JobSummary,
+    RetentionInfo,
     StageResponse,
 )
 from dalston.gateway.services.audio_probe import (
@@ -57,6 +61,10 @@ from dalston.gateway.services.audio_probe import (
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.rate_limiter import RedisRateLimiter
+from dalston.gateway.services.retention import (
+    RetentionPolicyNotFoundError,
+    RetentionService,
+)
 from dalston.gateway.services.storage import StorageService
 
 router = APIRouter(prefix="/audio/transcriptions", tags=["transcriptions"])
@@ -121,11 +129,19 @@ async def create_transcription(
         str | None,
         Form(description="JSON object echoed in webhook callback (max 16KB)"),
     ] = None,
+    retention_policy: Annotated[
+        str | None,
+        Form(
+            description="Retention policy name (e.g., 'default', 'zero-retention', 'keep')"
+        ),
+    ] = None,
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
     rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
+    retention_service: RetentionService = Depends(get_retention_service),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> JobCreatedResponse:
     """Create a new transcription job.
 
@@ -225,6 +241,21 @@ async def create_transcription(
     if initial_prompt is not None:
         parameters["initial_prompt"] = initial_prompt
 
+    # Resolve retention policy
+    try:
+        policy = await retention_service.resolve_policy(
+            db, api_key.tenant_id, retention_policy
+        )
+    except RetentionPolicyNotFoundError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "type": "invalid_request_error",
+                "message": str(e),
+                "param": "retention_policy",
+            },
+        ) from e
+
     # Upload audio to S3
     storage = StorageService(settings)
     audio_uri = await storage.upload_audio(
@@ -233,7 +264,7 @@ async def create_transcription(
         file_content=file_content,
     )
 
-    # Create job in database
+    # Create job in database with retention policy snapshotted
     job = await jobs_service.create_job(
         db=db,
         tenant_id=api_key.tenant_id,
@@ -246,6 +277,10 @@ async def create_transcription(
         audio_sample_rate=audio_metadata.sample_rate,
         audio_channels=audio_metadata.channels,
         audio_bit_depth=audio_metadata.bit_depth,
+        retention_policy_id=policy.id,
+        retention_mode=policy.mode,
+        retention_hours=policy.hours,
+        retention_scope=policy.scope,
     )
 
     # Re-upload with correct job ID path
@@ -265,6 +300,18 @@ async def create_transcription(
 
     # Track concurrent job for rate limiting
     await rate_limiter.increment_concurrent_jobs(api_key.tenant_id)
+
+    # Audit log job creation
+    await audit_service.log_job_created(
+        job_id=job.id,
+        tenant_id=api_key.tenant_id,
+        actor_type="api_key",
+        actor_id=api_key.prefix,
+        correlation_id=request_id,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        retention_policy=policy.name,
+    )
 
     return JobCreatedResponse(
         id=job.id,
@@ -318,6 +365,17 @@ async def get_transcription(
             for task in sorted_tasks
         ]
 
+    # Build retention info
+    retention_info = RetentionInfo(
+        policy_id=job.retention_policy_id,
+        policy_name=job.retention_policy.name if job.retention_policy else None,
+        mode=job.retention_mode,
+        hours=job.retention_hours,
+        scope=job.retention_scope,
+        purge_after=job.purge_after,
+        purged_at=job.purged_at,
+    )
+
     # Build response
     response = JobResponse(
         id=job.id,
@@ -327,6 +385,7 @@ async def get_transcription(
         completed_at=job.completed_at,
         error=job.error,
         stages=stages,
+        retention=retention_info,
     )
 
     # If completed, fetch transcript from S3
@@ -508,6 +567,72 @@ async def cancel_transcription(
 
 
 @router.delete(
+    "/{job_id}/audio",
+    status_code=204,
+    summary="Delete job audio",
+    description="Delete audio and intermediate artifacts for a job, preserving the transcript. Job must be in terminal state.",
+    responses={
+        204: {"description": "Audio deleted successfully"},
+        404: {"description": "Job not found"},
+        409: {"description": "Job is not in a terminal state"},
+        410: {"description": "Audio already purged"},
+    },
+)
+async def delete_audio(
+    request: Request,
+    job_id: UUID,
+    api_key: RequireJobsWrite,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    jobs_service: JobsService = Depends(get_jobs_service),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> Response:
+    """Delete audio while preserving transcript.
+
+    1. Validate job exists and is in a terminal state
+    2. Check audio hasn't already been purged
+    3. Delete S3 audio and task artifacts (keep transcript)
+    4. Return 204 No Content
+    """
+    job = await jobs_service.get_job(db, job_id, tenant_id=api_key.tenant_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Check job is in terminal state
+    terminal_states = {
+        JobStatus.COMPLETED.value,
+        JobStatus.FAILED.value,
+        JobStatus.CANCELLED.value,
+    }
+    if job.status not in terminal_states:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Job not in terminal state. Current status: {job.status}",
+        )
+
+    # Check if audio already purged
+    storage = StorageService(settings)
+    if not await storage.has_audio(job_id):
+        raise HTTPException(status_code=410, detail="Audio already purged")
+
+    # Delete audio and task artifacts (preserves transcript)
+    await storage.delete_job_audio(job_id)
+
+    # Audit log
+    request_id = getattr(request.state, "request_id", None)
+    await audit_service.log_audio_deleted(
+        job_id=job_id,
+        tenant_id=api_key.tenant_id,
+        actor_type="api_key",
+        actor_id=api_key.prefix,
+        correlation_id=request_id,
+        ip_address=request.client.host if request.client else None,
+    )
+
+    return Response(status_code=204)
+
+
+@router.delete(
     "/{job_id}",
     status_code=204,
     summary="Delete transcription job",
@@ -519,11 +644,13 @@ async def cancel_transcription(
     },
 )
 async def delete_transcription(
+    request: Request,
     job_id: UUID,
     api_key: RequireJobsWrite,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Delete a job and all associated artifacts.
 
@@ -532,6 +659,12 @@ async def delete_transcription(
     3. Delete database record (cascades to tasks)
     4. Return 204 No Content
     """
+    # Save tenant_id before deletion
+    job_for_tenant = await jobs_service.get_job(db, job_id, tenant_id=api_key.tenant_id)
+    if job_for_tenant is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    tenant_id = job_for_tenant.tenant_id
+
     try:
         job = await jobs_service.delete_job(db, job_id, tenant_id=api_key.tenant_id)
     except ValueError as e:
@@ -548,5 +681,16 @@ async def delete_transcription(
         logger.warning(
             "Failed to delete S3 artifacts for job %s", job_id, exc_info=True
         )
+
+    # Audit log
+    request_id = getattr(request.state, "request_id", None)
+    await audit_service.log_job_deleted(
+        job_id=job_id,
+        tenant_id=tenant_id,
+        actor_type="api_key",
+        actor_id=api_key.prefix,
+        correlation_id=request_id,
+        ip_address=request.client.host if request.client else None,
+    )
 
     return Response(status_code=204)

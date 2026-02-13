@@ -36,6 +36,16 @@ export interface JobSummary {
   progress?: number
 }
 
+export interface RetentionInfo {
+  policy_id?: string
+  policy_name?: string
+  mode: 'auto_delete' | 'keep' | 'none'
+  hours?: number
+  scope: 'all' | 'audio_only'
+  purge_after?: string
+  purged_at?: string
+}
+
 export interface JobDetail extends JobSummary {
   error?: string
   current_stage?: string
@@ -44,6 +54,7 @@ export interface JobDetail extends JobSummary {
   words?: Word[]
   segments?: Segment[]
   speakers?: Speaker[]
+  retention?: RetentionInfo
 }
 
 export interface JobListResponse {

@@ -250,6 +250,7 @@ class Dalston:
         timestamps_granularity: TimestampGranularity | str = TimestampGranularity.WORD,
         webhook_url: str | None = None,
         webhook_metadata: dict[str, Any] | None = None,
+        retention_policy: str | None = None,
     ) -> Job:
         """Submit audio for transcription.
 
@@ -268,6 +269,8 @@ class Dalston:
             timestamps_granularity: Level of timestamp detail.
             webhook_url: URL for completion callback.
             webhook_metadata: Custom data to include in webhook.
+            retention_policy: Name of retention policy to apply (e.g., "short", "long").
+                If not specified, uses the tenant's default retention settings.
 
         Returns:
             Job object with ID and initial status.
@@ -309,6 +312,8 @@ class Dalston:
             import json
 
             data["webhook_metadata"] = json.dumps(webhook_metadata)
+        if retention_policy is not None:
+            data["retention_policy"] = retention_policy
 
         # Handle file upload
         files: dict[str, Any] | None = None
@@ -958,6 +963,7 @@ class AsyncDalston:
         timestamps_granularity: TimestampGranularity | str = TimestampGranularity.WORD,
         webhook_url: str | None = None,
         webhook_metadata: dict[str, Any] | None = None,
+        retention_policy: str | None = None,
     ) -> Job:
         """Submit audio for transcription.
 
@@ -976,6 +982,8 @@ class AsyncDalston:
             timestamps_granularity: Level of timestamp detail.
             webhook_url: URL for completion callback.
             webhook_metadata: Custom data to include in webhook.
+            retention_policy: Name of retention policy to apply (e.g., "short", "long").
+                If not specified, uses the tenant's default retention settings.
 
         Returns:
             Job object with ID and initial status.
@@ -1013,6 +1021,8 @@ class AsyncDalston:
             import json
 
             data["webhook_metadata"] = json.dumps(webhook_metadata)
+        if retention_policy is not None:
+            data["retention_policy"] = retention_policy
 
         # Handle file upload
         files: dict[str, Any] | None = None

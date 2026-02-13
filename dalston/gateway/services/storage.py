@@ -88,6 +88,8 @@ class StorageService:
     async def delete_job_artifacts(self, job_id: UUID) -> None:
         """Delete all S3 artifacts for a job.
 
+        Deletes: audio/*, tasks/*, transcript.json
+
         Args:
             job_id: Job UUID
         """
@@ -107,6 +109,73 @@ class StorageService:
                         Bucket=self.bucket,
                         Delete={"Objects": objects},
                     )
+
+    async def delete_job_audio(self, job_id: UUID) -> None:
+        """Delete audio and task intermediate artifacts for a job.
+
+        Deletes: audio/*, tasks/* (preserves transcript.json)
+
+        Args:
+            job_id: Job UUID
+        """
+        prefixes = [
+            f"jobs/{job_id}/audio/",
+            f"jobs/{job_id}/tasks/",
+        ]
+
+        async with get_s3_client(self.settings) as s3:
+            for prefix in prefixes:
+                paginator = s3.get_paginator("list_objects_v2")
+                async for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+                    if "Contents" not in page:
+                        continue
+
+                    objects = [{"Key": obj["Key"]} for obj in page["Contents"]]
+                    if objects:
+                        await s3.delete_objects(
+                            Bucket=self.bucket,
+                            Delete={"Objects": objects},
+                        )
+
+    async def delete_session_artifacts(self, session_id: UUID) -> None:
+        """Delete all S3 artifacts for a realtime session.
+
+        Args:
+            session_id: Session UUID
+        """
+        prefix = f"sessions/{session_id}/"
+
+        async with get_s3_client(self.settings) as s3:
+            paginator = s3.get_paginator("list_objects_v2")
+            async for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+                if "Contents" not in page:
+                    continue
+
+                objects = [{"Key": obj["Key"]} for obj in page["Contents"]]
+                if objects:
+                    await s3.delete_objects(
+                        Bucket=self.bucket,
+                        Delete={"Objects": objects},
+                    )
+
+    async def has_audio(self, job_id: UUID) -> bool:
+        """Check if audio exists for a job.
+
+        Args:
+            job_id: Job UUID
+
+        Returns:
+            True if audio files exist
+        """
+        prefix = f"jobs/{job_id}/audio/"
+
+        async with get_s3_client(self.settings) as s3:
+            response = await s3.list_objects_v2(
+                Bucket=self.bucket,
+                Prefix=prefix,
+                MaxKeys=1,
+            )
+            return response.get("KeyCount", 0) > 0
 
     async def get_task_input(
         self, job_id: UUID, task_id: UUID

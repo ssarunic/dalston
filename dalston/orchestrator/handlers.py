@@ -8,7 +8,7 @@ Handles Redis pub/sub events:
 
 import re
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -23,7 +23,7 @@ from dalston.common.events import (
     publish_job_completed,
     publish_job_failed,
 )
-from dalston.common.models import JobStatus, TaskStatus
+from dalston.common.models import JobStatus, RetentionMode, TaskStatus
 from dalston.config import Settings
 from dalston.db.models import JobModel, TaskModel
 from dalston.gateway.services.rate_limiter import (
@@ -462,6 +462,28 @@ async def _gather_previous_outputs(
     return previous_outputs
 
 
+async def _compute_purge_after(job: JobModel, log) -> None:
+    """Compute purge_after based on job's retention settings.
+
+    Args:
+        job: Job model with retention settings
+        log: Logger instance
+    """
+    if job.retention_mode == RetentionMode.AUTO_DELETE.value:
+        if job.retention_hours and job.completed_at:
+            job.purge_after = job.completed_at + timedelta(hours=job.retention_hours)
+            log.info(
+                "purge_scheduled",
+                purge_after=job.purge_after.isoformat(),
+                retention_hours=job.retention_hours,
+            )
+    elif job.retention_mode == RetentionMode.NONE.value:
+        # Immediate purge - set purge_after to now, cleanup worker will process
+        job.purge_after = datetime.now(UTC)
+        log.info("immediate_purge_scheduled", retention_mode="none")
+    # mode == "keep": purge_after stays NULL (never purge)
+
+
 async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) -> None:
     """Check if all tasks are done and mark job as completed.
 
@@ -515,6 +537,10 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
         log.info("job_completed")
 
     job.completed_at = datetime.now(UTC)
+
+    # Compute purge_after based on retention settings (M25)
+    await _compute_purge_after(job, log)
+
     await db.commit()
 
     # Decrement concurrent job count for rate limiting

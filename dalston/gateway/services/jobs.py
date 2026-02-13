@@ -55,6 +55,11 @@ class JobsService:
         audio_sample_rate: int | None = None,
         audio_channels: int | None = None,
         audio_bit_depth: int | None = None,
+        # Retention fields (M25)
+        retention_policy_id: UUID | None = None,
+        retention_mode: str = "auto_delete",
+        retention_hours: int | None = None,
+        retention_scope: str = "all",
     ) -> JobModel:
         """Create a new transcription job.
 
@@ -70,6 +75,10 @@ class JobsService:
             audio_sample_rate: Sample rate in Hz
             audio_channels: Number of audio channels
             audio_bit_depth: Bits per sample (e.g., 16, 24)
+            retention_policy_id: Reference to retention policy
+            retention_mode: Snapshotted mode (auto_delete, keep, none)
+            retention_hours: Snapshotted hours
+            retention_scope: Snapshotted scope (all, audio_only)
 
         Returns:
             Created JobModel instance
@@ -86,6 +95,10 @@ class JobsService:
             audio_sample_rate=audio_sample_rate,
             audio_channels=audio_channels,
             audio_bit_depth=audio_bit_depth,
+            retention_policy_id=retention_policy_id,
+            retention_mode=retention_mode,
+            retention_hours=retention_hours,
+            retention_scope=retention_scope,
         )
         db.add(job)
         await db.commit()
@@ -386,7 +399,7 @@ class JobsService:
         job_id: UUID,
         tenant_id: UUID | None = None,
     ) -> JobModel | None:
-        """Fetch a job with its tasks eagerly loaded.
+        """Fetch a job with its tasks and retention policy eagerly loaded.
 
         Args:
             db: Database session
@@ -394,11 +407,14 @@ class JobsService:
             tenant_id: Optional tenant UUID for isolation check
 
         Returns:
-            JobModel with tasks loaded, or None if not found
+            JobModel with tasks and retention_policy loaded, or None if not found
         """
         query = (
             select(JobModel)
-            .options(selectinload(JobModel.tasks))
+            .options(
+                selectinload(JobModel.tasks),
+                selectinload(JobModel.retention_policy),
+            )
             .where(JobModel.id == job_id)
         )
 

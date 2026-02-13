@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy import (
     ARRAY,
     TIMESTAMP,
+    BigInteger,
     Boolean,
     Float,
     ForeignKey,
@@ -14,7 +15,7 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -23,6 +24,90 @@ class Base(DeclarativeBase):
     """Base class for all ORM models."""
 
     pass
+
+
+class RetentionPolicyModel(Base):
+    """Retention policy for automated data lifecycle management."""
+
+    __tablename__ = "retention_policies"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+    )
+    tenant_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id"),
+        nullable=True,  # NULL for system policies
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    mode: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # auto_delete, keep, none
+    hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    scope: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="all"
+    )  # all, audio_only
+    realtime_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="inherit"
+    )
+    realtime_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    delete_realtime_on_enhancement: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true"
+    )
+    is_system: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    # Relationships
+    tenant: Mapped["TenantModel | None"] = relationship(
+        back_populates="retention_policies"
+    )
+
+
+class AuditLogModel(Base):
+    """Immutable audit log entry for compliance and security tracking."""
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+    timestamp: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
+    correlation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    tenant_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=True,
+        index=True,
+    )
+    actor_type: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # api_key, system, user
+    actor_id: Mapped[str] = mapped_column(Text, nullable=False)
+    action: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )  # job.created, etc.
+    resource_type: Mapped[str] = mapped_column(
+        String(30), nullable=False
+    )  # job, session, api_key
+    resource_id: Mapped[str] = mapped_column(Text, nullable=False)
+    detail: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(INET, nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class TenantModel(Base):
@@ -56,6 +141,9 @@ class TenantModel(Base):
         back_populates="tenant"
     )
     realtime_sessions: Mapped[list["RealtimeSessionModel"]] = relationship(
+        back_populates="tenant"
+    )
+    retention_policies: Mapped[list["RetentionPolicyModel"]] = relationship(
         back_populates="tenant"
     )
 
@@ -108,9 +196,30 @@ class JobModel(Base):
         nullable=True,
     )
 
+    # Retention fields (M25)
+    retention_policy_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("retention_policies.id"),
+        nullable=True,
+    )
+    retention_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="auto_delete"
+    )
+    retention_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    retention_scope: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="all"
+    )
+    purge_after: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    purged_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+
     # Relationships
     tenant: Mapped["TenantModel"] = relationship(back_populates="jobs")
     tasks: Mapped[list["TaskModel"]] = relationship(back_populates="job")
+    retention_policy: Mapped["RetentionPolicyModel | None"] = relationship()
 
 
 class TaskModel(Base):
@@ -392,9 +501,27 @@ class RealtimeSessionModel(Base):
     # Error tracking
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Retention fields (M25)
+    retention_policy_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("retention_policies.id"),
+        nullable=True,
+    )
+    retention_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="auto_delete"
+    )
+    retention_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    purge_after: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    purged_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+
     # Relationships
     tenant: Mapped["TenantModel"] = relationship()
     enhancement_job: Mapped["JobModel | None"] = relationship()
     previous_session: Mapped["RealtimeSessionModel | None"] = relationship(
         remote_side="RealtimeSessionModel.id"
     )
+    retention_policy: Mapped["RetentionPolicyModel | None"] = relationship()

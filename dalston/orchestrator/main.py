@@ -27,6 +27,7 @@ from dalston.db.session import async_session, init_db
 from dalston.gateway.services.storage import StorageService
 from dalston.gateway.services.webhook import WebhookService
 from dalston.gateway.services.webhook_endpoints import WebhookEndpointService
+from dalston.orchestrator.cleanup import CleanupWorker
 from dalston.orchestrator.delivery import DeliveryWorker, create_webhook_delivery
 from dalston.orchestrator.handlers import (
     handle_job_cancel_requested,
@@ -50,6 +51,7 @@ dalston.metrics.configure_metrics("orchestrator")
 # Shutdown flag
 _shutdown_event: asyncio.Event | None = None
 _delivery_worker: DeliveryWorker | None = None
+_cleanup_worker: CleanupWorker | None = None
 _metrics_app: web.Application | None = None
 _metrics_runner: web.AppRunner | None = None
 
@@ -103,7 +105,7 @@ async def orchestrator_loop() -> None:
 
     Subscribes to Redis pub/sub and dispatches events to handlers.
     """
-    global _shutdown_event, _delivery_worker
+    global _shutdown_event, _delivery_worker, _cleanup_worker
     _shutdown_event = asyncio.Event()
 
     settings = get_settings()
@@ -124,6 +126,13 @@ async def orchestrator_loop() -> None:
         settings=settings,
     )
     await _delivery_worker.start()
+
+    # Start cleanup worker (M25 - data retention)
+    _cleanup_worker = CleanupWorker(
+        db_session_factory=async_session,
+        settings=settings,
+    )
+    await _cleanup_worker.start()
 
     # Start metrics HTTP server (M20)
     await _start_metrics_server()
@@ -165,6 +174,10 @@ async def orchestrator_loop() -> None:
         # Stop delivery worker
         if _delivery_worker:
             await _delivery_worker.stop()
+
+        # Stop cleanup worker
+        if _cleanup_worker:
+            await _cleanup_worker.stop()
 
         # Stop metrics server
         await _stop_metrics_server()

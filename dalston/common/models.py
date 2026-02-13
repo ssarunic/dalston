@@ -7,6 +7,26 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 # =============================================================================
+# Retention Policy Types (M25)
+# =============================================================================
+
+
+class RetentionMode(str, Enum):
+    """Retention behavior mode for jobs and sessions."""
+
+    AUTO_DELETE = "auto_delete"  # Delete after hours expires
+    KEEP = "keep"  # Keep forever (purge_after stays NULL)
+    NONE = "none"  # Delete immediately on completion
+
+
+class RetentionScope(str, Enum):
+    """What to delete when purging."""
+
+    ALL = "all"  # Delete audio, intermediates, and transcript
+    AUDIO_ONLY = "audio_only"  # Delete audio and intermediates, keep transcript
+
+
+# =============================================================================
 # Model Selection Registry (M14)
 # =============================================================================
 

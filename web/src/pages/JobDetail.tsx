@@ -7,6 +7,7 @@ import {
   FileText,
   Download,
   AlertCircle,
+  Trash2,
 } from 'lucide-react'
 import { useJob } from '@/hooks/useJob'
 import { useJobTasks } from '@/hooks/useJobTasks'
@@ -16,7 +17,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/StatusBadge'
 import { DAGViewer } from '@/components/DAGViewer'
 import { apiClient } from '@/api/client'
-import type { Segment } from '@/api/types'
+import type { Segment, RetentionInfo } from '@/api/types'
 
 function MetadataCard({
   icon: Icon,
@@ -33,6 +34,69 @@ function MetadataCard({
       <div>
         <p className="text-xs text-muted-foreground">{label}</p>
         <p className="text-sm font-medium">{value ?? '-'}</p>
+      </div>
+    </div>
+  )
+}
+
+function RetentionCard({ retention }: { retention?: RetentionInfo }) {
+  if (!retention) {
+    return (
+      <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
+        <Trash2 className="h-4 w-4 text-muted-foreground" />
+        <div>
+          <p className="text-xs text-muted-foreground">Retention</p>
+          <p className="text-sm font-medium">-</p>
+        </div>
+      </div>
+    )
+  }
+
+  const { mode, policy_name, hours, purge_after, purged_at } = retention
+
+  let statusText = ''
+
+  if (purged_at) {
+    statusText = 'Purged'
+  } else if (mode === 'keep') {
+    statusText = 'Indefinitely'
+  } else if (mode === 'none') {
+    statusText = 'None'
+  } else if (purge_after) {
+    const purgeDate = new Date(purge_after)
+    const now = new Date()
+    const diffMs = purgeDate.getTime() - now.getTime()
+
+    if (diffMs <= 0) {
+      statusText = 'Pending'
+    } else {
+      const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+      const diffDays = Math.floor(diffHours / 24)
+
+      if (diffDays > 0) {
+        statusText = `In ${diffDays}d ${diffHours % 24}h`
+      } else if (diffHours > 0) {
+        statusText = `In ${diffHours}h`
+      } else {
+        const diffMins = Math.floor(diffMs / (1000 * 60))
+        statusText = `In ${diffMins}m`
+      }
+    }
+  } else {
+    statusText = hours ? `${hours}h` : 'Pending'
+  }
+
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
+      <Trash2 className="h-4 w-4 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <p className="text-xs text-muted-foreground">Retention</p>
+        <p className="text-sm font-medium">{statusText}</p>
+        {policy_name && (
+          <p className="text-xs text-muted-foreground truncate">
+            Policy: {policy_name}
+          </p>
+        )}
       </div>
     </div>
   )
@@ -127,8 +191,8 @@ export function JobDetail() {
     return (
       <div className="space-y-6">
         <Skeleton className="h-10 w-64" />
-        <div className="grid gap-4 md:grid-cols-4">
-          {[...Array(4)].map((_, i) => (
+        <div className="grid gap-4 md:grid-cols-5">
+          {[...Array(5)].map((_, i) => (
             <Skeleton key={i} className="h-20" />
           ))}
         </div>
@@ -216,7 +280,7 @@ export function JobDetail() {
       )}
 
       {/* Metadata */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         <MetadataCard
           icon={Clock}
           label="Duration"
@@ -237,6 +301,7 @@ export function JobDetail() {
           label="Segments"
           value={job.segments?.length ?? 0}
         />
+        <RetentionCard retention={job.retention} />
       </div>
 
       {/* Task Pipeline */}
