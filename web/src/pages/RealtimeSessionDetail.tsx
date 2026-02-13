@@ -7,6 +7,8 @@ import {
   Download,
   ExternalLink,
   AlertCircle,
+  Hash,
+  Cpu,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -140,7 +142,10 @@ export function RealtimeSessionDetail() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Words</CardTitle>
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Hash className="h-4 w-4" />
+              Words
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{session.word_count}</div>
@@ -149,7 +154,10 @@ export function RealtimeSessionDetail() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Model</CardTitle>
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Cpu className="h-4 w-4" />
+              Model
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{session.model ?? '-'}</div>

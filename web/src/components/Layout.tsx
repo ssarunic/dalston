@@ -1,16 +1,46 @@
+import { useState } from 'react'
+import { Menu } from 'lucide-react'
 import { Sidebar } from './Sidebar'
+import { Sheet, SheetContent, SheetTrigger } from './ui/sheet'
+import { Button } from './ui/button'
 
 interface LayoutProps {
   children: React.ReactNode
 }
 
 export function Layout({ children }: LayoutProps) {
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
   return (
     <div className="flex h-screen bg-background">
-      <Sidebar />
-      <main className="flex-1 overflow-auto p-6">
-        {children}
-      </main>
+      {/* Desktop sidebar - hidden on mobile */}
+      <div className="hidden md:flex h-full">
+        <Sidebar />
+      </div>
+
+      {/* Mobile header with hamburger menu */}
+      <div className="flex flex-col flex-1">
+        <header className="md:hidden flex items-center gap-4 border-b border-border px-4 py-3 bg-card">
+          <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon" className="shrink-0">
+                <Menu className="h-5 w-5" />
+                <span className="sr-only">Toggle navigation menu</span>
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="p-0 w-64">
+              <Sidebar onNavigate={() => setSidebarOpen(false)} className="border-r-0" />
+            </SheetContent>
+          </Sheet>
+          <div>
+            <h1 className="text-lg font-bold text-foreground">DALSTON</h1>
+          </div>
+        </header>
+
+        <main className="flex-1 overflow-auto p-4 md:p-6">
+          {children}
+        </main>
+      </div>
     </div>
   )
 }
