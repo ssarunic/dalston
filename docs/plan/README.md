@@ -41,7 +41,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Audio/transcript S3 storage working; session resume pending |
 
-### Not Started (5)
+### Not Started (6)
 
 | # | Milestone | Goal |
 |---|-----------|------|
@@ -50,6 +50,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M15](milestones/M15-console-authentication.md) | Console Auth | Secure web console access |
 | [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | OpenTelemetry spans |
 | [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | Prometheus + Grafana |
+| [M25](milestones/M25-data-retention.md) | Data Retention & Audit | Retention policies, cleanup, audit logging |
 
 ---
 
@@ -114,6 +115,12 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | # | Milestone | Goal | Days | Status |
 |---|-----------|------|------|--------|
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Session DB, audio/transcript S3 storage, console visibility | 3-4 | Nearly Complete |
+
+## Data Management Milestones
+
+| # | Milestone | Goal | Days | Status |
+|---|-----------|------|------|--------|
+| [M25](milestones/M25-data-retention.md) | Data Retention & Audit | Named retention policies, cleanup worker, audit logging | 5-6 | Not Started |
 
 ---
 
@@ -198,6 +205,8 @@ M5 + M11 ──► M21
 
 M2 + M6 + M14 ──► M22
 
+M11 + M21 ──► M25
+
 M6 ──► M24 (realtime session persistence, prerequisite for M7)
 ```
 
@@ -211,6 +220,7 @@ M6 ──► M24 (realtime session persistence, prerequisite for M7)
 - **M21**: Admin Webhooks (needs M5 webhooks, M11 auth)
 - **M22**: Parakeet Engine (needs M2 batch, M6 real-time, M14 model selection)
 - **M24**: Realtime Session Persistence (needs M6 real-time, prerequisite for M7 hybrid)
+- **M25**: Data Retention & Audit (needs M11 auth, M21 webhooks for purge events)
 
 ---
 
@@ -239,3 +249,4 @@ Each milestone has a verification section. Key checkpoints:
 | M21 | Registered webhook endpoints receive notifications without per-job URL |
 | M22 | English audio transcribed with Parakeet; real-time streaming with sub-100ms latency |
 | M24 | Realtime sessions stored in DB; audio/transcript saved to S3; sessions visible in console |
+| M25 | Jobs auto-purged after retention period; audit log shows full lifecycle |
