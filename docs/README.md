@@ -21,6 +21,10 @@ docs/
 │   │   ├── ENGINES.md              # Engine categories, SDK reference
 │   │   └── DOCKER.md               # Container composition
 │   │
+│   ├── PII_DETECTION.md        # PII detection & audio redaction spec
+│   ├── DATA_RETENTION.md       # Retention policies, cleanup worker
+│   ├── AUDIT_LOG.md            # Audit logging specification
+│   │
 │   ├── realtime/               # Real-time transcription specs
 │   │   ├── REALTIME.md             # Architecture overview
 │   │   ├── WEBSOCKET_API.md        # WebSocket protocol reference
@@ -73,6 +77,9 @@ docs/
 - [Architecture Overview](specs/ARCHITECTURE.md) — Start here
 - [REST API](specs/batch/API.md) — Batch transcription endpoints
 - [WebSocket API](specs/realtime/WEBSOCKET_API.md) — Real-time streaming protocol
+- [PII Detection & Redaction](specs/PII_DETECTION.md) — PII detection and audio redaction
+- [Data Retention](specs/DATA_RETENTION.md) — Retention policies and cleanup
+- [Audit Log](specs/AUDIT_LOG.md) — Audit logging specification
 - [Task-Level Observability](specs/OBSERVABILITY.md) — Stage breakdown and artifact inspection
 - [Glossary](GLOSSARY.md) — Terminology definitions
 

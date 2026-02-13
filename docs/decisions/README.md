@@ -14,6 +14,7 @@ This directory contains Architecture Decision Records (ADRs) documenting signifi
 | [ADR-006](ADR-006-api-key-storage-migration.md) | Migrate API Key Storage from Redis to PostgreSQL | Accepted |
 | [ADR-007](ADR-007-admin-webhook-design.md) | Admin Webhook Design (Storage, Signing, Delivery) | Proposed |
 | [ADR-008](ADR-008-data-retention-strategy.md) | Data Retention Strategy (Named Policies, Audit Logging) | Proposed |
+| [ADR-009](ADR-009-pii-detection-architecture.md) | PII Detection & Audio Redaction Architecture | Accepted |
 
 ## ADR Template
 

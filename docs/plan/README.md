@@ -41,7 +41,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Audio/transcript S3 storage working; session resume pending |
 
-### Not Started (6)
+### Not Started (7)
 
 | # | Milestone | Goal |
 |---|-----------|------|
@@ -51,6 +51,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | OpenTelemetry spans |
 | [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | Prometheus + Grafana |
 | [M25](milestones/M25-data-retention.md) | Data Retention & Audit | Retention policies, cleanup, audit logging |
+| [M26](milestones/M26-pii-detection-redaction.md) | PII Detection & Audio Redaction | Detect PII, redact text and audio |
 
 ---
 
@@ -121,6 +122,12 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | # | Milestone | Goal | Days | Status |
 |---|-----------|------|------|--------|
 | [M25](milestones/M25-data-retention.md) | Data Retention & Audit | Named retention policies, cleanup worker, audit logging | 5-6 | Not Started |
+
+## Compliance Milestones
+
+| # | Milestone | Goal | Days | Status |
+|---|-----------|------|------|--------|
+| [M26](milestones/M26-pii-detection-redaction.md) | PII Detection & Audio Redaction | Detect PII, redact text and audio | 8-10 | Not Started |
 
 ---
 
@@ -208,6 +215,8 @@ M2 + M6 + M14 ──► M22
 M11 + M21 ──► M25
 
 M6 ──► M24 (realtime session persistence, prerequisite for M7)
+
+M3 + M4 + M25 ──► M26
 ```
 
 - **M1-M5**: Core batch pipeline (sequential)
@@ -221,6 +230,7 @@ M6 ──► M24 (realtime session persistence, prerequisite for M7)
 - **M22**: Parakeet Engine (needs M2 batch, M6 real-time, M14 model selection)
 - **M24**: Realtime Session Persistence (needs M6 real-time, prerequisite for M7 hybrid)
 - **M25**: Data Retention & Audit (needs M11 auth, M21 webhooks for purge events)
+- **M26**: PII Detection & Audio Redaction (needs M3 word timestamps, M4 diarization, M25 retention)
 
 ---
 
@@ -250,3 +260,4 @@ Each milestone has a verification section. Key checkpoints:
 | M22 | English audio transcribed with Parakeet; real-time streaming with sub-100ms latency |
 | M24 | Realtime sessions stored in DB; audio/transcript saved to S3; sessions visible in console |
 | M25 | Jobs auto-purged after retention period; audit log shows full lifecycle |
+| M26 | PII detected in transcript; redacted audio produced with silence over PII spans |

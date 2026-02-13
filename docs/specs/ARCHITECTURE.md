@@ -198,7 +198,8 @@
 | TRANSCRIBE | faster-whisper, parakeet, whisper-openai |
 | ALIGN | whisperx-align, wav2vec-align |
 | DIARIZE | pyannote-3.1, pyannote-4.0 |
-| DETECT | emotion2vec, panns-events |
+| DETECT | emotion2vec, panns-events, pii-presidio |
+| REDACT | audio-redactor |
 | REFINE | llm-cleanup |
 | MERGE | final-merger |
 | MULTI-STAGE | whisperx-full |
