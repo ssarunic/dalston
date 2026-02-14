@@ -381,6 +381,10 @@ BATCH_ENGINES = {
 }
 
 
+# Heartbeat timeout thresholds (seconds)
+HEARTBEAT_STALE_THRESHOLD = 30  # Mark as stale after 30s without heartbeat
+
+
 @router.get(
     "/engines",
     response_model=EnginesResponse,
@@ -393,21 +397,86 @@ async def get_engines(
     session_router: SessionRouter = Depends(get_session_router),
 ) -> EnginesResponse:
     """Get status of all engines."""
-    # Get batch engine queue depths
+    # Discover engines from heartbeat keys
+    discovered_heartbeats: dict[str, dict[str, str]] = {}
+    cursor: int | bytes = 0
+    while True:
+        cursor, keys = await redis.scan(
+            cursor, match="dalston:batch_engine:*:heartbeat", count=100
+        )
+        for key in keys:
+            data = await redis.hgetall(key)
+            if data and "engine_id" in data:
+                discovered_heartbeats[data["engine_id"]] = data
+        if cursor == 0:
+            break
+
+    now = datetime.now(UTC)
     batch_engines = []
+
+    # Process known engines (may be offline if not in discovered_heartbeats)
     for engine_id, stage in BATCH_ENGINES.items():
         queue_key = f"dalston:queue:{engine_id}"
         queue_depth = await redis.llen(queue_key) or 0
+
+        heartbeat = discovered_heartbeats.get(engine_id)
+        if not heartbeat:
+            # No heartbeat = offline
+            status = "offline"
+            processing = 0
+        else:
+            # Check heartbeat age
+            try:
+                last_seen = datetime.fromisoformat(heartbeat["last_seen"])
+                age = (now - last_seen).total_seconds()
+            except (KeyError, ValueError):
+                age = float("inf")
+
+            if age > HEARTBEAT_STALE_THRESHOLD:
+                status = "stale"
+            else:
+                status = heartbeat.get("status", "idle")
+
+            processing = 1 if heartbeat.get("current_task") else 0
 
         batch_engines.append(
             BatchEngine(
                 engine_id=engine_id,
                 stage=stage,
-                status="healthy",  # We assume healthy if queue is accessible
+                status=status,
                 queue_depth=queue_depth,
-                processing=0,  # Not tracked currently
+                processing=processing,
             )
         )
+
+    # Add any discovered engines not in BATCH_ENGINES (dynamically registered)
+    for engine_id, heartbeat in discovered_heartbeats.items():
+        if engine_id not in BATCH_ENGINES:
+            queue_key = f"dalston:queue:{engine_id}"
+            queue_depth = await redis.llen(queue_key) or 0
+
+            try:
+                last_seen = datetime.fromisoformat(heartbeat["last_seen"])
+                age = (now - last_seen).total_seconds()
+            except (KeyError, ValueError):
+                age = float("inf")
+
+            if age > HEARTBEAT_STALE_THRESHOLD:
+                status = "stale"
+            else:
+                status = heartbeat.get("status", "idle")
+
+            processing = 1 if heartbeat.get("current_task") else 0
+
+            batch_engines.append(
+                BatchEngine(
+                    engine_id=engine_id,
+                    stage=heartbeat.get("stage", "unknown"),
+                    status=status,
+                    queue_depth=queue_depth,
+                    processing=processing,
+                )
+            )
 
     # Get realtime workers
     realtime_engines = []

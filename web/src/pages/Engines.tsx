@@ -6,11 +6,13 @@ import type { BatchEngine, WorkerStatus } from '@/api/types'
 
 function StatusDot({ status }: { status: string }) {
   const color =
-    status === 'healthy' || status === 'ready'
+    status === 'idle' || status === 'healthy' || status === 'ready'
       ? 'bg-green-500'
-      : status === 'busy'
+      : status === 'processing' || status === 'busy'
         ? 'bg-yellow-500'
-        : 'bg-red-500'
+        : status === 'stale'
+          ? 'bg-orange-500'
+          : 'bg-red-500' // offline or unknown
   return <span className={`inline-block w-2 h-2 rounded-full ${color}`} />
 }
 

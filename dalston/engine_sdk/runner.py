@@ -78,11 +78,14 @@ class EngineRunner:
 
     # Redis key patterns
     QUEUE_KEY = "dalston:queue:{engine_id}"
+    HEARTBEAT_KEY = "dalston:batch_engine:{engine_id}:heartbeat"
     EVENTS_CHANNEL = "dalston:events"
 
     # Configuration
     QUEUE_POLL_TIMEOUT = 30  # seconds
     TEMP_DIR_PREFIX = "dalston_task_"
+    HEARTBEAT_INTERVAL = 10  # seconds between heartbeats
+    HEARTBEAT_TTL = 60  # auto-expire heartbeat if engine crashes
 
     def __init__(self, engine: Engine) -> None:
         """Initialize the runner.
@@ -95,6 +98,8 @@ class EngineRunner:
         self._running = False
         self._metrics_server: HTTPServer | None = None
         self._metrics_thread: threading.Thread | None = None
+        self._heartbeat_thread: threading.Thread | None = None
+        self._current_task_id: str | None = None
 
         # Load configuration from environment
         self.engine_id = os.environ.get("ENGINE_ID", "unknown")
@@ -128,6 +133,11 @@ class EngineRunner:
         """Get the Redis queue key for this engine."""
         return self.QUEUE_KEY.format(engine_id=self.engine_id)
 
+    @property
+    def heartbeat_key(self) -> str:
+        """Get the Redis heartbeat key for this engine."""
+        return self.HEARTBEAT_KEY.format(engine_id=self.engine_id)
+
     def run(self) -> None:
         """Start the processing loop.
 
@@ -138,6 +148,9 @@ class EngineRunner:
 
         # Start metrics HTTP server in background thread (M20)
         self._start_metrics_server()
+
+        # Start heartbeat thread to advertise engine status
+        self._start_heartbeat_thread()
 
         logger.info(
             "engine_loop_starting", engine_id=self.engine_id, queue=self.queue_key
@@ -156,6 +169,7 @@ class EngineRunner:
                     time.sleep(1)
         finally:
             # Cleanup - ensure resources are released even on unexpected exit
+            self._stop_heartbeat_thread()
             self._stop_metrics_server()
             dalston.telemetry.shutdown_tracing()
             logger.info("engine_loop_stopped")
@@ -189,6 +203,46 @@ class EngineRunner:
             self._metrics_server.shutdown()
             self._metrics_server = None
             logger.debug("metrics_server_stopped")
+
+    def _start_heartbeat_thread(self) -> None:
+        """Start heartbeat thread to advertise engine status."""
+        self._heartbeat_thread = threading.Thread(
+            target=self._heartbeat_loop,
+            daemon=True,
+        )
+        self._heartbeat_thread.start()
+        logger.info("heartbeat_thread_started")
+
+    def _stop_heartbeat_thread(self) -> None:
+        """Stop heartbeat thread and clear heartbeat from Redis."""
+        if self._heartbeat_thread:
+            # Thread will exit when _running becomes False
+            self._heartbeat_thread = None
+        # Delete heartbeat key so engine shows as offline immediately
+        try:
+            self.redis_client.delete(self.heartbeat_key)
+            logger.debug("heartbeat_key_deleted")
+        except Exception:
+            pass  # Best effort cleanup
+
+    def _heartbeat_loop(self) -> None:
+        """Send heartbeats to Redis periodically."""
+        while self._running:
+            try:
+                self.redis_client.hset(
+                    self.heartbeat_key,
+                    mapping={
+                        "engine_id": self.engine_id,
+                        "stage": getattr(self.engine, "stage", "unknown"),
+                        "last_seen": datetime.now(UTC).isoformat(),
+                        "status": "processing" if self._current_task_id else "idle",
+                        "current_task": self._current_task_id or "",
+                    },
+                )
+                self.redis_client.expire(self.heartbeat_key, self.HEARTBEAT_TTL)
+            except Exception as e:
+                logger.warning("heartbeat_failed", error=str(e))
+            time.sleep(self.HEARTBEAT_INTERVAL)
 
     def _setup_signal_handlers(self) -> None:
         """Setup handlers for graceful shutdown."""
@@ -225,6 +279,7 @@ class EngineRunner:
         """
         temp_dir = None
         start_time = time.time()
+        self._current_task_id = task_id  # Track for heartbeat status
 
         # Extract trace context from task metadata (M19)
         task_metadata = self._get_task_metadata(task_id)
@@ -331,6 +386,8 @@ class EngineRunner:
                 self._publish_task_failed(task_id, job_id, str(e))
 
             finally:
+                # Clear current task tracking for heartbeat
+                self._current_task_id = None
                 # Cleanup temp directory
                 if temp_dir and temp_dir.exists():
                     shutil.rmtree(temp_dir, ignore_errors=True)
