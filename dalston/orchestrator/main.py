@@ -20,6 +20,7 @@ from redis import asyncio as aioredis
 import dalston.logging
 import dalston.metrics
 import dalston.telemetry
+from dalston.common.audit import AuditService
 from dalston.common.events import EVENTS_CHANNEL
 from dalston.config import get_settings
 from dalston.db.models import JobModel
@@ -128,9 +129,11 @@ async def orchestrator_loop() -> None:
     await _delivery_worker.start()
 
     # Start cleanup worker (M25 - data retention)
+    audit_service = AuditService(db_session_factory=async_session)
     _cleanup_worker = CleanupWorker(
         db_session_factory=async_session,
         settings=settings,
+        audit_service=audit_service,
     )
     await _cleanup_worker.start()
 

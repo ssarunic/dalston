@@ -401,3 +401,39 @@ export interface CreateRetentionPolicyRequest {
   realtime_hours?: number | null
   delete_realtime_on_enhancement?: boolean
 }
+
+// Audit Log types
+export type AuditActorType = 'api_key' | 'system' | 'console_user' | 'webhook'
+
+export interface AuditEvent {
+  id: number
+  timestamp: string
+  correlation_id: string | null
+  tenant_id: string | null
+  actor_type: AuditActorType
+  actor_id: string
+  action: string
+  resource_type: string
+  resource_id: string
+  detail: Record<string, unknown> | null
+  ip_address: string | null
+  user_agent: string | null
+}
+
+export interface AuditListResponse {
+  events: AuditEvent[]
+  cursor: string | null
+  has_more: boolean
+}
+
+export interface AuditListParams {
+  tenant_id?: string
+  action?: string
+  resource_type?: string
+  resource_id?: string
+  actor_id?: string
+  since?: string
+  until?: string
+  limit?: number
+  cursor?: string
+}

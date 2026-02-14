@@ -2,6 +2,8 @@ import ky, { type KyInstance } from 'ky'
 import type {
   APIKeyCreatedResponse,
   APIKeyListResponse,
+  AuditListParams,
+  AuditListResponse,
   ConsoleJobListResponse,
   CreateAPIKeyRequest,
   CreateRetentionPolicyRequest,
@@ -212,4 +214,22 @@ export const apiClient = {
 
   deleteRetentionPolicy: (policyId: string) =>
     currentClient.delete(`v1/retention-policies/${policyId}`),
+
+  // Audit log
+  getAuditEvents: (params: AuditListParams = {}) => {
+    const searchParams = new URLSearchParams()
+    if (params.tenant_id) searchParams.set('tenant_id', params.tenant_id)
+    if (params.action) searchParams.set('action', params.action)
+    if (params.resource_type) searchParams.set('resource_type', params.resource_type)
+    if (params.resource_id) searchParams.set('resource_id', params.resource_id)
+    if (params.actor_id) searchParams.set('actor_id', params.actor_id)
+    if (params.since) searchParams.set('since', params.since)
+    if (params.until) searchParams.set('until', params.until)
+    if (params.limit) searchParams.set('limit', String(params.limit))
+    if (params.cursor) searchParams.set('cursor', params.cursor)
+    return currentClient.get('v1/audit', { searchParams }).json<AuditListResponse>()
+  },
+
+  getResourceAuditTrail: (resourceType: string, resourceId: string) =>
+    currentClient.get(`v1/audit/resources/${resourceType}/${resourceId}`).json<AuditListResponse>(),
 }

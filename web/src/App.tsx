@@ -15,6 +15,7 @@ import { ApiKeys } from '@/pages/ApiKeys'
 import { Webhooks } from '@/pages/Webhooks'
 import { WebhookDetail } from '@/pages/WebhookDetail'
 import { RetentionPolicies } from '@/pages/RetentionPolicies'
+import { AuditLog } from '@/pages/AuditLog'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -52,6 +53,7 @@ export default function App() {
                       <Route path="/webhooks" element={<Webhooks />} />
                       <Route path="/webhooks/:endpointId" element={<WebhookDetail />} />
                       <Route path="/retention" element={<RetentionPolicies />} />
+                      <Route path="/audit" element={<AuditLog />} />
                     </Routes>
                   </Layout>
                 </ProtectedRoute>

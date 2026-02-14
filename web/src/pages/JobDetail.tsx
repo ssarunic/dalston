@@ -8,16 +8,19 @@ import {
   AlertCircle,
   Trash2,
   Mic,
+  ScrollText,
 } from 'lucide-react'
 import { useJob } from '@/hooks/useJob'
 import { useJobTasks } from '@/hooks/useJobTasks'
+import { useResourceAuditTrail } from '@/hooks/useAuditLog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/StatusBadge'
 import { DAGViewer } from '@/components/DAGViewer'
 import { apiClient } from '@/api/client'
-import type { Segment, RetentionInfo } from '@/api/types'
+import type { Segment, RetentionInfo, AuditEvent } from '@/api/types'
 
 function MetadataCard({
   icon: Icon,
@@ -182,10 +185,100 @@ function ExportButtons({ jobId }: { jobId: string }) {
   )
 }
 
+const ACTION_STYLES: Record<string, string> = {
+  created: 'bg-green-500/10 text-green-500 border-green-500/20',
+  completed: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
+  accessed: 'bg-slate-500/10 text-slate-400 border-slate-500/20',
+  exported: 'bg-purple-500/10 text-purple-500 border-purple-500/20',
+  deleted: 'bg-red-500/10 text-red-500 border-red-500/20',
+  purged: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
+  failed: 'bg-red-500/10 text-red-500 border-red-500/20',
+  uploaded: 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20',
+  cancelled: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
+}
+
+function getActionStyle(action: string): string {
+  const actionPart = action.split('.').pop() || action
+  return ACTION_STYLES[actionPart] || 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+}
+
+function AuditTrailSection({ events, isLoading }: { events?: AuditEvent[]; isLoading: boolean }) {
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base font-medium flex items-center gap-2">
+            <ScrollText className="h-4 w-4" />
+            Audit Trail
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            {[...Array(3)].map((_, i) => (
+              <Skeleton key={i} className="h-8 w-full" />
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (!events || events.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base font-medium flex items-center gap-2">
+            <ScrollText className="h-4 w-4" />
+            Audit Trail
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground text-center py-4">
+            No audit events recorded
+          </p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base font-medium flex items-center gap-2">
+          <ScrollText className="h-4 w-4" />
+          Audit Trail
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-3">
+          {events.map((event) => (
+            <div
+              key={event.id}
+              className="flex items-center gap-4 text-sm"
+            >
+              <div className="w-2 h-2 rounded-full bg-muted-foreground" />
+              <Badge variant="outline" className={getActionStyle(event.action)}>
+                {event.action}
+              </Badge>
+              <span className="text-muted-foreground">
+                {new Date(event.timestamp).toLocaleString()}
+              </span>
+              <span className="font-mono text-xs text-muted-foreground">
+                {event.actor_id}
+              </span>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 export function JobDetail() {
   const { jobId } = useParams()
   const { data: job, isLoading, error } = useJob(jobId)
   const { data: tasksData } = useJobTasks(jobId)
+  const { data: auditData, isLoading: auditLoading } = useResourceAuditTrail('job', jobId)
 
   if (isLoading) {
     return (
@@ -341,6 +434,9 @@ export function JobDetail() {
           </CardContent>
         </Card>
       )}
+
+      {/* Audit Trail */}
+      <AuditTrailSection events={auditData?.events} isLoading={auditLoading} />
     </div>
   )
 }
