@@ -173,7 +173,7 @@ export function RealtimeSessions() {
         <Card>
           <CardHeader className="py-4">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-medium">Filters</CardTitle>
+              <span className="text-sm font-medium text-muted-foreground">Filters</span>
               {hasActiveFilters && (
                 <Button variant="ghost" size="sm" onClick={() => handleFilterChange('all')}>
                   <X className="h-4 w-4 mr-1" />
@@ -216,7 +216,7 @@ export function RealtimeSessions() {
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Status</CardTitle>
+            <span className="text-sm font-medium text-muted-foreground">Status</span>
             <Radio className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -235,7 +235,7 @@ export function RealtimeSessions() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Sessions</CardTitle>
+            <span className="text-sm font-medium text-muted-foreground">Active Sessions</span>
           </CardHeader>
           <CardContent>
             {statusLoading ? (
@@ -255,7 +255,7 @@ export function RealtimeSessions() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Workers</CardTitle>
+            <span className="text-sm font-medium text-muted-foreground">Workers</span>
           </CardHeader>
           <CardContent>
             {statusLoading ? (
@@ -273,7 +273,7 @@ export function RealtimeSessions() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Capacity Overview</CardTitle>
+            <span className="text-sm font-medium text-muted-foreground">Capacity Overview</span>
           </CardHeader>
           <CardContent>
             {statusLoading ? (

@@ -198,7 +198,7 @@ export function BatchJobs() {
         <Card>
           <CardHeader className="py-4">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-medium">Filters</CardTitle>
+              <span className="text-sm font-medium text-muted-foreground">Filters</span>
               {hasActiveFilters && (
                 <Button variant="ghost" size="sm" onClick={() => handleFilterChange('')}>
                   <X className="h-4 w-4 mr-1" />

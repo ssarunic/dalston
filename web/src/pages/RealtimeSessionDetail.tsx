@@ -116,10 +116,10 @@ export function RealtimeSessionDetail() {
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <span className="text-sm font-medium text-muted-foreground flex items-center gap-2">
               <Clock className="h-4 w-4" />
               Duration
-            </CardTitle>
+            </span>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
@@ -130,10 +130,10 @@ export function RealtimeSessionDetail() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <span className="text-sm font-medium text-muted-foreground flex items-center gap-2">
               <MessageSquare className="h-4 w-4" />
               Segments
-            </CardTitle>
+            </span>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{session.segment_count}</div>
@@ -142,10 +142,10 @@ export function RealtimeSessionDetail() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <span className="text-sm font-medium text-muted-foreground flex items-center gap-2">
               <Hash className="h-4 w-4" />
               Words
-            </CardTitle>
+            </span>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{session.word_count}</div>
@@ -154,10 +154,10 @@ export function RealtimeSessionDetail() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <span className="text-sm font-medium text-muted-foreground flex items-center gap-2">
               <Cpu className="h-4 w-4" />
               Model
-            </CardTitle>
+            </span>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{session.model ?? '-'}</div>
