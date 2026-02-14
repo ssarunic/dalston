@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Trash2, X, RefreshCw } from 'lucide-react'
+import { Trash2, X, RefreshCw, Filter } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useJobs } from '@/hooks/useJobs'
 import { apiClient } from '@/api/client'
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/StatusBadge'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Badge } from '@/components/ui/badge'
 import {
   Table,
   TableBody,
@@ -18,6 +19,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 const PAGE_SIZE = 20
 
@@ -62,8 +70,11 @@ export function BatchJobs() {
   const [isCancelling, setIsCancelling] = useState(false)
   const [cancelError, setCancelError] = useState<string | null>(null)
   const [cancelSuccess, setCancelSuccess] = useState<string | null>(null)
+  const [showFilters, setShowFilters] = useState(false)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+
+  const hasActiveFilters = !!statusFilter
 
   const { data, isLoading, isFetching, error, refetch } = useJobs({
     limit: PAGE_SIZE,
@@ -97,10 +108,13 @@ export function BatchJobs() {
     }
   }
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setCursor(undefined)
     setAllJobs([])
-    refetch()
+    const { data: newData } = await refetch()
+    if (newData?.jobs) {
+      setAllJobs(newData.jobs)
+    }
   }
 
   async function handleDelete() {
@@ -148,36 +162,79 @@ export function BatchJobs() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Batch Jobs</h1>
-        <p className="text-muted-foreground">
-          Manage and monitor transcription jobs
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Batch Jobs</h1>
+          <p className="text-muted-foreground">
+            Manage and monitor transcription jobs
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowFilters(!showFilters)}
+          >
+            <Filter className="h-4 w-4 mr-2" />
+            Filters
+            {hasActiveFilters && (
+              <Badge variant="secondary" className="ml-2">
+                Active
+              </Badge>
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={isFetching}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-2">
-        <div className="flex gap-2">
-          {STATUS_FILTERS.map((filter) => (
-            <Button
-              key={filter.value}
-              variant={statusFilter === filter.value ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => handleFilterChange(filter.value)}
-            >
-              {filter.label}
-            </Button>
-          ))}
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleRefresh}
-          disabled={isFetching}
-        >
-          <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
-        </Button>
-      </div>
+      {showFilters && (
+        <Card>
+          <CardHeader className="py-4">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium">Filters</CardTitle>
+              {hasActiveFilters && (
+                <Button variant="ghost" size="sm" onClick={() => handleFilterChange('')}>
+                  <X className="h-4 w-4 mr-1" />
+                  Clear
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="grid gap-4 md:grid-cols-4">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Status
+                </label>
+                <Select
+                  value={statusFilter}
+                  onValueChange={handleFilterChange}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="All Statuses" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STATUS_FILTERS.map((filter) => (
+                      <SelectItem key={filter.value} value={filter.value}>
+                        {filter.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Jobs Table */}
       <Card>
@@ -187,7 +244,7 @@ export function BatchJobs() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {isLoading && cursor === undefined ? (
+          {(isLoading || (isFetching && allJobs.length === 0)) && cursor === undefined ? (
             <div className="space-y-3">
               {[...Array(5)].map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />

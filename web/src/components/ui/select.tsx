@@ -30,7 +30,7 @@ export function Select({ value, onValueChange, children }: SelectProps) {
 
   return (
     <SelectContext.Provider value={{ value, onValueChange, open, setOpen }}>
-      <div className="relative">{children}</div>
+      <div className={cn('relative', open && 'z-50')}>{children}</div>
     </SelectContext.Provider>
   )
 }
@@ -100,7 +100,7 @@ export function SelectContent({ children }: SelectContentProps) {
   return (
     <div
       ref={ref}
-      className="absolute z-50 mt-1 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
+      className="absolute z-50 mt-1 min-w-[8rem] overflow-hidden rounded-md border bg-background shadow-md animate-in fade-in-0 zoom-in-95"
     >
       <div className="p-1">{children}</div>
     </div>

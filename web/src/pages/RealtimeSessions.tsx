@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Radio, MessageSquare, Mic, Trash2, RefreshCw } from 'lucide-react'
+import { Radio, MessageSquare, Mic, Trash2, RefreshCw, Filter, X } from 'lucide-react'
 import { apiClient } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -70,6 +70,9 @@ export function RealtimeSessions() {
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [cursor, setCursor] = useState<string | undefined>(undefined)
   const [allSessions, setAllSessions] = useState<RealtimeSessionSummary[]>([])
+  const [showFilters, setShowFilters] = useState(false)
+
+  const hasActiveFilters = statusFilter !== 'all'
   const { data: statusData, isLoading: statusLoading, error: statusError } = useRealtimeStatus()
   const { data: sessionsData, isLoading: sessionsLoading, isFetching, refetch } = useRealtimeSessions({
     status: statusFilter === 'all' ? undefined : statusFilter,
@@ -103,10 +106,13 @@ export function RealtimeSessions() {
     }
   }
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setCursor(undefined)
     setAllSessions([])
-    refetch()
+    const { data: newData } = await refetch()
+    if (newData?.sessions) {
+      setAllSessions(newData.sessions)
+    }
   }
 
   const handleDelete = async () => {
@@ -131,12 +137,76 @@ export function RealtimeSessions() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Realtime</h1>
-        <p className="text-muted-foreground">
-          Real-time transcription workers, capacity, and session history
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Realtime</h1>
+          <p className="text-muted-foreground">
+            Real-time transcription workers, capacity, and session history
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowFilters(!showFilters)}
+          >
+            <Filter className="h-4 w-4 mr-2" />
+            Filters
+            {hasActiveFilters && (
+              <Badge variant="secondary" className="ml-2">
+                Active
+              </Badge>
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={isFetching}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
+
+      {/* Filters */}
+      {showFilters && (
+        <Card>
+          <CardHeader className="py-4">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium">Filters</CardTitle>
+              {hasActiveFilters && (
+                <Button variant="ghost" size="sm" onClick={() => handleFilterChange('all')}>
+                  <X className="h-4 w-4 mr-1" />
+                  Clear
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="grid gap-4 md:grid-cols-4">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Status
+                </label>
+                <Select value={statusFilter} onValueChange={handleFilterChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All Statuses" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="error">Error</SelectItem>
+                    <SelectItem value="interrupted">Interrupted</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {statusError && (
         <div className="p-4 bg-destructive/10 text-destructive rounded-md">
@@ -232,33 +302,11 @@ export function RealtimeSessions() {
 
       {/* Session History */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
+        <CardHeader>
           <CardTitle>Session History</CardTitle>
-          <div className="flex items-center gap-2">
-            <Select value={statusFilter} onValueChange={handleFilterChange}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="Filter status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
-                <SelectItem value="error">Error</SelectItem>
-                <SelectItem value="interrupted">Interrupted</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRefresh}
-              disabled={isFetching}
-            >
-              <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
-            </Button>
-          </div>
         </CardHeader>
         <CardContent>
-          {sessionsLoading && cursor === undefined ? (
+          {(sessionsLoading || (isFetching && allSessions.length === 0)) && cursor === undefined ? (
             <div className="space-y-2">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
