@@ -8,6 +8,7 @@ import {
   Server,
   Key,
   Webhook,
+  Clock,
   LogOut,
 } from 'lucide-react'
 
@@ -18,6 +19,7 @@ const navItems = [
   { to: '/engines', icon: Server, label: 'Engines' },
   { to: '/keys', icon: Key, label: 'API Keys' },
   { to: '/webhooks', icon: Webhook, label: 'Webhooks' },
+  { to: '/retention', icon: Clock, label: 'Retention' },
 ]
 
 interface SidebarProps {

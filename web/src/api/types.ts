@@ -369,3 +369,35 @@ export interface SessionTranscript {
   text: string
   utterances?: SessionUtterance[]
 }
+
+// Retention Policy types
+export type RetentionMode = 'auto_delete' | 'keep' | 'none'
+export type RetentionScope = 'all' | 'audio_only'
+
+export interface RetentionPolicy {
+  id: string
+  tenant_id: string | null
+  name: string
+  mode: RetentionMode
+  hours: number | null
+  scope: RetentionScope
+  realtime_mode: string
+  realtime_hours: number | null
+  delete_realtime_on_enhancement: boolean
+  is_system: boolean
+  created_at: string
+}
+
+export interface RetentionPolicyListResponse {
+  policies: RetentionPolicy[]
+}
+
+export interface CreateRetentionPolicyRequest {
+  name: string
+  mode: RetentionMode
+  hours?: number | null
+  scope?: RetentionScope
+  realtime_mode?: string
+  realtime_hours?: number | null
+  delete_realtime_on_enhancement?: boolean
+}

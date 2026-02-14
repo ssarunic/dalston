@@ -4,6 +4,7 @@ import type {
   APIKeyListResponse,
   ConsoleJobListResponse,
   CreateAPIKeyRequest,
+  CreateRetentionPolicyRequest,
   CreateWebhookRequest,
   DashboardResponse,
   DeliveryListResponse,
@@ -15,6 +16,8 @@ import type {
   RealtimeSessionListParams,
   RealtimeSessionListResponse,
   RealtimeStatusResponse,
+  RetentionPolicy,
+  RetentionPolicyListResponse,
   SessionTranscript,
   TaskArtifact,
   TaskListResponse,
@@ -199,4 +202,14 @@ export const apiClient = {
 
   deleteRealtimeSession: (sessionId: string) =>
     currentClient.delete(`v1/realtime/sessions/${sessionId}`).json<{ deleted: boolean; session_id: string }>(),
+
+  // Retention policy management
+  getRetentionPolicies: () =>
+    currentClient.get('v1/retention-policies').json<RetentionPolicyListResponse>(),
+
+  createRetentionPolicy: (request: CreateRetentionPolicyRequest) =>
+    currentClient.post('v1/retention-policies', { json: request }).json<RetentionPolicy>(),
+
+  deleteRetentionPolicy: (policyId: string) =>
+    currentClient.delete(`v1/retention-policies/${policyId}`),
 }
