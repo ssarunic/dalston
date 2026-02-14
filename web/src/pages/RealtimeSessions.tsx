@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Radio, MessageSquare, Mic, Trash2 } from 'lucide-react'
 import { apiClient } from '@/api/client'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -234,13 +235,13 @@ export function RealtimeSessions() {
                     className="cursor-pointer hover:bg-accent/50"
                     onClick={() => navigate(`/realtime/sessions/${session.id}`)}
                   >
-                    <TableCell className="font-mono text-xs">
+                    <TableCell className="font-mono text-sm">
                       {session.id.slice(0, 12)}...
                     </TableCell>
                     <TableCell>
                       <SessionStatusBadge status={session.status} />
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
                       <div className="flex flex-col">
                         <span>{session.model ?? '-'}</span>
                         {session.engine && (
@@ -248,13 +249,13 @@ export function RealtimeSessions() {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
                       {formatDuration(session.audio_duration_seconds)}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
                       {session.segment_count}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
                       <div className="flex items-center gap-2">
                         {session.store_audio && (
                           <span title="Audio stored">
@@ -271,22 +272,24 @@ export function RealtimeSessions() {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="text-muted-foreground text-sm">
                       {formatDate(session.started_at)}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="text-right">
                       {session.status !== 'active' && (
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-400 hover:text-red-300 hover:bg-red-950"
                           onClick={(e) => {
                             e.stopPropagation()
                             handleDelete(session.id)
                           }}
                           disabled={deletingId === session.id}
-                          className="text-red-400 hover:text-red-300 hover:bg-red-950 rounded p-1 disabled:opacity-50"
                           title="Delete session"
                         >
                           <Trash2 className="h-4 w-4" />
-                        </button>
+                        </Button>
                       )}
                     </TableCell>
                   </TableRow>
