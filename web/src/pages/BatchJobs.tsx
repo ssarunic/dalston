@@ -83,7 +83,6 @@ export function BatchJobs() {
   })
 
   // Accumulate jobs when data changes (intentional pattern for cursor pagination)
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (data?.jobs) {
       if (cursor === undefined) {
@@ -93,7 +92,6 @@ export function BatchJobs() {
       }
     }
   }, [data, cursor])
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Reset pagination when filter changes
   const handleFilterChange = useCallback((value: string) => {

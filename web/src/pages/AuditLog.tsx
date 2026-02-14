@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ScrollText,
@@ -146,14 +146,27 @@ export function AuditLog() {
     limit: 50,
   })
   const [showFilters, setShowFilters] = useState(false)
+  const sinceRef = useRef<HTMLInputElement>(null)
+  const untilRef = useRef<HTMLInputElement>(null)
 
-  const { data, isLoading, error, refetch, isFetching } = useAuditEvents(filters)
+  const { data, isLoading, error, isFetching } = useAuditEvents(filters)
+
+  const applyDateFilters = () => {
+    const sinceValue = sinceRef.current?.value || ''
+    const untilValue = untilRef.current?.value || ''
+    setFilters((prev) => ({
+      ...prev,
+      since: sinceValue ? new Date(sinceValue).toISOString() : undefined,
+      until: untilValue ? new Date(untilValue).toISOString() : undefined,
+      cursor: undefined,
+    }))
+  }
 
   const handleFilterChange = (key: keyof AuditListParams, value: string) => {
     setFilters((prev) => ({
       ...prev,
       [key]: value || undefined,
-      cursor: undefined, // Reset cursor when filters change
+      cursor: undefined,
     }))
   }
 
@@ -199,7 +212,7 @@ export function AuditLog() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => refetch()}
+            onClick={() => applyDateFilters()}
             disabled={isFetching}
           >
             <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
@@ -273,12 +286,11 @@ export function AuditLog() {
                   Since
                 </label>
                 <input
+                  ref={sinceRef}
                   type="datetime-local"
-                  value={filters.since?.slice(0, 16) || ''}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                    handleFilterChange('since', e.target.value ? new Date(e.target.value).toISOString() : '')
-                  }
-                  className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm h-10"
+                  defaultValue={filters.since?.slice(0, 16) || ''}
+                  key={`since-${filters.since || 'empty'}`}
+                  className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm h-10 dark:[color-scheme:dark]"
                 />
               </div>
               <div>
@@ -286,12 +298,11 @@ export function AuditLog() {
                   Until
                 </label>
                 <input
+                  ref={untilRef}
                   type="datetime-local"
-                  value={filters.until?.slice(0, 16) || ''}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                    handleFilterChange('until', e.target.value ? new Date(e.target.value).toISOString() : '')
-                  }
-                  className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm h-10"
+                  defaultValue={filters.until?.slice(0, 16) || ''}
+                  key={`until-${filters.until || 'empty'}`}
+                  className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm h-10 dark:[color-scheme:dark]"
                 />
               </div>
             </div>
@@ -308,7 +319,7 @@ export function AuditLog() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
+          {isLoading || isFetching ? (
             <div className="space-y-3">
               {[...Array(10)].map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />

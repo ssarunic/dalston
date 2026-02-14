@@ -4,8 +4,9 @@ import type { AuditListParams } from '@/api/types'
 
 export function useAuditEvents(params: AuditListParams = {}) {
   return useQuery({
-    queryKey: ['auditEvents', params],
+    queryKey: ['auditEvents', JSON.stringify(params)],
     queryFn: () => apiClient.getAuditEvents(params),
+    staleTime: 0,
   })
 }
 

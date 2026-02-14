@@ -81,7 +81,6 @@ export function RealtimeSessions() {
   })
 
   // Accumulate sessions when data changes (intentional pattern for cursor pagination)
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (sessionsData?.sessions) {
       if (cursor === undefined) {
@@ -91,7 +90,6 @@ export function RealtimeSessions() {
       }
     }
   }, [sessionsData, cursor])
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Reset pagination when filter changes
   const handleFilterChange = useCallback((value: string) => {
