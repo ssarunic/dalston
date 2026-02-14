@@ -270,7 +270,7 @@ export function Webhooks() {
                             setDeleteConfirm(webhook)
                           }}
                           title="Delete"
-                          className="text-destructive hover:text-destructive"
+                          className="text-red-400 hover:text-red-300 hover:bg-red-950"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>

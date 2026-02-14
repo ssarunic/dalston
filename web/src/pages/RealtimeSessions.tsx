@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Radio, Clock, MessageSquare, Mic, Trash2 } from 'lucide-react'
+import { Radio, MessageSquare, Mic, Trash2 } from 'lucide-react'
 import { apiClient } from '@/api/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -100,7 +100,7 @@ export function RealtimeSessions() {
       )}
 
       {/* Status Cards */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Status</CardTitle>
@@ -157,34 +157,33 @@ export function RealtimeSessions() {
             )}
           </CardContent>
         </Card>
-      </div>
 
-      {/* Capacity Bar */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Capacity Overview</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {statusLoading ? (
-            <Skeleton className="h-4 w-full" />
-          ) : (
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span>Used</span>
-                <span>{statusData?.active_sessions ?? 0} / {statusData?.total_capacity ?? 0}</span>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Capacity Overview</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {statusLoading ? (
+              <Skeleton className="h-4 w-full" />
+            ) : (
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Used</span>
+                  <span>{statusData?.active_sessions ?? 0} / {statusData?.total_capacity ?? 0}</span>
+                </div>
+                <div className="h-2 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all"
+                    style={{
+                      width: `${statusData?.total_capacity ? (statusData.active_sessions / statusData.total_capacity) * 100 : 0}%`,
+                    }}
+                  />
+                </div>
               </div>
-              <div className="h-2 bg-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary transition-all"
-                  style={{
-                    width: `${statusData?.total_capacity ? (statusData.active_sessions / statusData.total_capacity) * 100 : 0}%`,
-                  }}
-                />
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Session History */}
       <Card>
@@ -250,16 +249,10 @@ export function RealtimeSessions() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {formatDuration(session.audio_duration_seconds)}
-                      </div>
+                      {formatDuration(session.audio_duration_seconds)}
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1">
-                        <MessageSquare className="h-3 w-3" />
-                        {session.segment_count}
-                      </div>
+                      {session.segment_count}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -289,7 +282,7 @@ export function RealtimeSessions() {
                             handleDelete(session.id)
                           }}
                           disabled={deletingId === session.id}
-                          className="text-muted-foreground hover:text-destructive disabled:opacity-50"
+                          className="text-red-400 hover:text-red-300 hover:bg-red-950 rounded p-1 disabled:opacity-50"
                           title="Delete session"
                         >
                           <Trash2 className="h-4 w-4" />
