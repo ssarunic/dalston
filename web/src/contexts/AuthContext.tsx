@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
+/* eslint-disable react-refresh/only-export-components */
+import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
 import { setApiKey as setClientApiKey, apiClient } from '@/api/client'
 
 const API_KEY_STORAGE_KEY = 'dalston_api_key'
@@ -13,19 +14,20 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [apiKey, setApiKey] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+// Initialize from sessionStorage synchronously (avoids effect setState)
+function getInitialApiKey(): string | null {
+  if (typeof window === 'undefined') return null
+  const key = sessionStorage.getItem(API_KEY_STORAGE_KEY)
+  // Also initialize the API client synchronously
+  if (key) setClientApiKey(key)
+  return key
+}
 
-  // Load API key from sessionStorage on mount
-  useEffect(() => {
-    const storedKey = sessionStorage.getItem(API_KEY_STORAGE_KEY)
-    if (storedKey) {
-      setApiKey(storedKey)
-      setClientApiKey(storedKey)
-    }
-    setIsLoading(false)
-  }, [])
+export function AuthProvider({ children }: { children: ReactNode }) {
+  // Initialize state synchronously from sessionStorage - no loading needed
+  const [apiKey, setApiKey] = useState<string | null>(getInitialApiKey)
+  // isLoading is always false since we initialize synchronously
+  const isLoading = false
 
   const login = useCallback(async (key: string): Promise<{ success: boolean; error?: string }> => {
     // Validate the key
