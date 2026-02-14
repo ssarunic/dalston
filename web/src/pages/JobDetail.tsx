@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -9,6 +10,7 @@ import {
   Trash2,
   Mic,
   ScrollText,
+  Shield,
 } from 'lucide-react'
 import { useJob } from '@/hooks/useJob'
 import { useJobTasks } from '@/hooks/useJobTasks'
@@ -279,6 +281,7 @@ export function JobDetail() {
   const { data: job, isLoading, error } = useJob(jobId)
   const { data: tasksData } = useJobTasks(jobId)
   const { data: auditData, isLoading: auditLoading } = useResourceAuditTrail('job', jobId)
+  const [showRedacted, setShowRedacted] = useState(false)
 
   if (isLoading) {
     return (
@@ -417,14 +420,52 @@ export function JobDetail() {
       {job.status === 'completed' && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base font-medium">Transcript</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base font-medium">Transcript</CardTitle>
+              {job.pii?.enabled && job.redacted_text && (
+                <div className="flex items-center gap-2">
+                  <Shield className="h-4 w-4 text-muted-foreground" />
+                  <div className="flex rounded-md border border-border overflow-hidden">
+                    <button
+                      onClick={() => setShowRedacted(false)}
+                      className={`px-3 py-1 text-xs font-medium transition-colors ${
+                        !showRedacted
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-background text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
+                      Original
+                    </button>
+                    <button
+                      onClick={() => setShowRedacted(true)}
+                      className={`px-3 py-1 text-xs font-medium transition-colors ${
+                        showRedacted
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-background text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
+                      Redacted
+                    </button>
+                  </div>
+                  {job.pii.entities_detected && job.pii.entities_detected > 0 && (
+                    <Badge variant="secondary">
+                      {job.pii.entities_detected} PII
+                    </Badge>
+                  )}
+                </div>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
-            {job.segments && job.segments.length > 0 ? (
+            {job.segments && job.segments.length > 0 && !showRedacted ? (
               <TranscriptViewer segments={job.segments} speakers={job.speakers} />
+            ) : showRedacted && job.redacted_text ? (
+              <div className="prose prose-invert prose-sm max-w-none">
+                <p className="whitespace-pre-wrap">{job.redacted_text}</p>
+              </div>
             ) : job.text ? (
               <div className="prose prose-invert prose-sm max-w-none">
-                <p>{job.text}</p>
+                <p className="whitespace-pre-wrap">{job.text}</p>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground py-4 text-center">

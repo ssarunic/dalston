@@ -128,6 +128,23 @@ async def realtime_transcription(
             description="Retention policy name (e.g., 'default', 'zero-retention', 'keep')"
         ),
     ] = None,
+    # PII detection parameters (M26)
+    pii_detection: Annotated[
+        bool, Query(description="Enable PII detection on stored transcript")
+    ] = False,
+    pii_detection_tier: Annotated[
+        str, Query(description="PII detection tier: fast, standard, thorough")
+    ] = "standard",
+    pii_entity_types: Annotated[
+        str | None,
+        Query(description="Comma-separated PII entity types to detect"),
+    ] = None,
+    redact_pii_audio: Annotated[
+        bool, Query(description="Generate redacted audio file")
+    ] = False,
+    pii_redaction_mode: Annotated[
+        str, Query(description="Audio redaction mode: silence, beep")
+    ] = "silence",
 ):
     """WebSocket endpoint for real-time streaming transcription.
 
@@ -148,6 +165,11 @@ async def realtime_transcription(
     - store_audio: Record audio to S3 during session
     - store_transcript: Save final transcript to S3 on end
     - resume_session_id: Link to previous session for continuity
+    - pii_detection: Enable PII detection on stored/enhanced transcript
+    - pii_detection_tier: Detection tier (fast, standard, thorough)
+    - pii_entity_types: Comma-separated entity types to detect
+    - redact_pii_audio: Generate redacted audio file (requires store_audio)
+    - pii_redaction_mode: Audio redaction mode (silence, beep)
     """
     # Get session router via dependency (note: WebSocket endpoints can't use Depends
     # in the same way as REST endpoints, so we import directly)
@@ -182,6 +204,31 @@ async def realtime_transcription(
                 "code": "invalid_parameters",
                 "message": "enhance_on_end=true requires store_audio=true. "
                 "Audio must be recorded to enable batch enhancement.",
+            }
+        )
+        await websocket.close(code=4400, reason="Invalid parameters")
+        return
+
+    # Validate: PII detection requires enhance_on_end (batch processing)
+    if pii_detection and not enhance_on_end:
+        await websocket.send_json(
+            {
+                "type": "error",
+                "code": "invalid_parameters",
+                "message": "pii_detection=true requires enhance_on_end=true. "
+                "PII detection runs as part of the batch enhancement pipeline.",
+            }
+        )
+        await websocket.close(code=4400, reason="Invalid parameters")
+        return
+
+    # Validate: redact_pii_audio requires pii_detection and store_audio
+    if redact_pii_audio and not (pii_detection and store_audio):
+        await websocket.send_json(
+            {
+                "type": "error",
+                "code": "invalid_parameters",
+                "message": "redact_pii_audio=true requires pii_detection=true and store_audio=true.",
             }
         )
         await websocket.close(code=4400, reason="Invalid parameters")
@@ -406,15 +453,27 @@ async def realtime_transcription(
                     allocation.session_id
                 )
                 if session_record:
+                    # Parse PII entity types if provided
+                    pii_entity_types_list = None
+                    if pii_entity_types:
+                        pii_entity_types_list = [
+                            t.strip() for t in pii_entity_types.split(",")
+                        ]
+
                     enhancement_job = (
                         await enhancement_service.create_enhancement_job_with_audio(
                             session=session_record,
                             audio_uri=audio_uri,
                             enhance_diarization=True,
                             enhance_word_timestamps=True,
-                            # TODO: Read these from session parameters when we add them
                             enhance_llm_cleanup=False,
                             enhance_emotions=False,
+                            # PII parameters (M26)
+                            pii_detection=pii_detection,
+                            pii_detection_tier=pii_detection_tier,
+                            pii_entity_types=pii_entity_types_list,
+                            redact_pii_audio=redact_pii_audio,
+                            pii_redaction_mode=pii_redaction_mode,
                         )
                     )
                     enhancement_job_id = enhancement_job.id
@@ -660,7 +719,7 @@ async def _proxy_to_worker(
     async with websockets.connect(
         worker_url,
         open_timeout=10,
-        close_timeout=5,
+        close_timeout=10,
         ping_interval=20,
         ping_timeout=20,
     ) as worker_ws:

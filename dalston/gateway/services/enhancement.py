@@ -144,6 +144,12 @@ class EnhancementService:
         enhance_word_timestamps: bool = True,
         enhance_llm_cleanup: bool = False,
         enhance_emotions: bool = False,
+        # PII parameters (M26)
+        pii_detection: bool = False,
+        pii_detection_tier: str = "standard",
+        pii_entity_types: list[str] | None = None,
+        redact_pii_audio: bool = False,
+        pii_redaction_mode: str = "silence",
     ) -> JobModel:
         """Create a batch enhancement job with an explicit audio URI.
 
@@ -202,6 +208,16 @@ class EnhancementService:
             },
         }
 
+        # Add PII parameters if enabled (M26)
+        if pii_detection:
+            parameters["pii_detection"] = True
+            parameters["pii_detection_tier"] = pii_detection_tier
+            if pii_entity_types:
+                parameters["pii_entity_types"] = pii_entity_types
+            if redact_pii_audio:
+                parameters["redact_pii_audio"] = True
+                parameters["pii_redaction_mode"] = pii_redaction_mode
+
         log.info(
             "creating_enhancement_job",
             audio_uri=audio_uri,
@@ -215,6 +231,12 @@ class EnhancementService:
             parameters=parameters,
             webhook_url=None,
             webhook_metadata=None,
+            # PII columns (M26)
+            pii_detection_enabled=pii_detection,
+            pii_detection_tier=pii_detection_tier if pii_detection else None,
+            pii_entity_types=pii_entity_types if pii_detection else None,
+            pii_redact_audio=redact_pii_audio,
+            pii_redaction_mode=pii_redaction_mode if redact_pii_audio else None,
         )
 
         log.info(

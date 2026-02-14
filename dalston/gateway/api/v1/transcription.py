@@ -135,6 +135,29 @@ async def create_transcription(
             description="Retention policy name (e.g., 'default', 'zero-retention', 'keep')"
         ),
     ] = None,
+    # PII Detection (M26)
+    pii_detection: Annotated[
+        bool,
+        Form(description="Enable PII detection in transcript"),
+    ] = False,
+    pii_detection_tier: Annotated[
+        str,
+        Form(description="PII detection tier: 'fast', 'standard', 'thorough'"),
+    ] = "standard",
+    pii_entity_types: Annotated[
+        str | None,
+        Form(
+            description='JSON array of entity types to detect (e.g., \'["ssn","credit_card_number"]\')'
+        ),
+    ] = None,
+    redact_pii_audio: Annotated[
+        bool,
+        Form(description="Generate redacted audio file with PII removed"),
+    ] = False,
+    pii_redaction_mode: Annotated[
+        str,
+        Form(description="Audio redaction mode: 'silence', 'beep'"),
+    ] = "silence",
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
@@ -241,6 +264,24 @@ async def create_transcription(
     if initial_prompt is not None:
         parameters["initial_prompt"] = initial_prompt
 
+    # PII detection parameters (M26)
+    if pii_detection:
+        parameters["pii_detection"] = True
+        parameters["pii_detection_tier"] = pii_detection_tier
+        if pii_entity_types:
+            try:
+                parsed_entity_types = json.loads(pii_entity_types)
+                if isinstance(parsed_entity_types, list):
+                    parameters["pii_entity_types"] = parsed_entity_types
+            except json.JSONDecodeError:
+                # If it's not JSON, treat as comma-separated
+                parameters["pii_entity_types"] = [
+                    t.strip() for t in pii_entity_types.split(",")
+                ]
+        if redact_pii_audio:
+            parameters["redact_pii_audio"] = True
+            parameters["pii_redaction_mode"] = pii_redaction_mode
+
     # Resolve retention policy
     try:
         policy = await retention_service.resolve_policy(
@@ -264,6 +305,11 @@ async def create_transcription(
         file_content=file_content,
     )
 
+    # Parse PII entity types for dedicated column
+    pii_entity_types_list: list[str] | None = None
+    if pii_detection and pii_entity_types:
+        pii_entity_types_list = parameters.get("pii_entity_types")
+
     # Create job in database with retention policy snapshotted
     job = await jobs_service.create_job(
         db=db,
@@ -281,6 +327,12 @@ async def create_transcription(
         retention_mode=policy.mode,
         retention_hours=policy.hours,
         retention_scope=policy.scope,
+        # PII fields (M26)
+        pii_detection_enabled=pii_detection,
+        pii_detection_tier=pii_detection_tier if pii_detection else None,
+        pii_entity_types=pii_entity_types_list,
+        pii_redact_audio=redact_pii_audio,
+        pii_redaction_mode=pii_redaction_mode if redact_pii_audio else None,
     )
 
     # Re-upload with correct job ID path
@@ -406,6 +458,21 @@ async def get_transcription(
             response.words = transcript.get("words")
             response.segments = transcript.get("segments")
             response.speakers = transcript.get("speakers")
+            # PII data (M26)
+            response.redacted_text = transcript.get("redacted_text")
+            response.entities = transcript.get("pii_entities")
+            if transcript.get("pii_metadata"):
+                from dalston.gateway.models.responses import PIIInfo
+
+                pii_meta = transcript["pii_metadata"]
+                response.pii = PIIInfo(
+                    enabled=True,
+                    detection_tier=pii_meta.get("detection_tier"),
+                    entities_detected=pii_meta.get("entities_detected", 0),
+                    entity_summary=pii_meta.get("entity_count_by_type"),
+                    redacted_audio_available=pii_meta.get("redacted_audio_uri")
+                    is not None,
+                )
 
     return response
 

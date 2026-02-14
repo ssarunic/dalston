@@ -60,6 +60,12 @@ class JobsService:
         retention_mode: str = "auto_delete",
         retention_hours: int | None = None,
         retention_scope: str = "all",
+        # PII fields (M26)
+        pii_detection_enabled: bool = False,
+        pii_detection_tier: str | None = None,
+        pii_entity_types: list[str] | None = None,
+        pii_redact_audio: bool = False,
+        pii_redaction_mode: str | None = None,
     ) -> JobModel:
         """Create a new transcription job.
 
@@ -99,6 +105,11 @@ class JobsService:
             retention_mode=retention_mode,
             retention_hours=retention_hours,
             retention_scope=retention_scope,
+            pii_detection_enabled=pii_detection_enabled,
+            pii_detection_tier=pii_detection_tier,
+            pii_entity_types=pii_entity_types,
+            pii_redact_audio=pii_redact_audio,
+            pii_redaction_mode=pii_redaction_mode,
         )
         db.add(job)
         await db.commit()

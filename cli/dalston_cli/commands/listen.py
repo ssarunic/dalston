@@ -83,6 +83,52 @@ def listen(
             help="Disable voice activity detection events.",
         ),
     ] = False,
+    # Storage and enhancement options
+    store_audio: Annotated[
+        bool,
+        typer.Option(
+            "--store-audio",
+            help="Record audio to S3 during session.",
+        ),
+    ] = False,
+    enhance: Annotated[
+        bool,
+        typer.Option(
+            "--enhance",
+            help="Run batch enhancement after session ends (requires --store-audio).",
+        ),
+    ] = False,
+    # PII detection options
+    pii: Annotated[
+        bool,
+        typer.Option(
+            "--pii/--no-pii",
+            help="Enable PII detection on enhanced transcript (requires --enhance).",
+        ),
+    ] = False,
+    pii_tier: Annotated[
+        str,
+        typer.Option(
+            "--pii-tier",
+            help="PII detection tier: fast, standard, thorough.",
+        ),
+    ] = "standard",
+    redact_audio: Annotated[
+        bool,
+        typer.Option(
+            "--redact-audio",
+            help="Generate redacted audio file (requires --pii).",
+        ),
+    ] = False,
+    # File input for testing
+    input_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--file",
+            "-i",
+            help="Stream audio from file instead of microphone (for testing).",
+        ),
+    ] = None,
 ) -> None:
     """Real-time transcription from microphone.
 
@@ -144,7 +190,20 @@ def listen(
     else:
         handler = JsonOutputHandler(output_path)
 
-    # Create real-time session
+    # Validate PII options
+    if pii and not enhance:
+        error_console.print(
+            "[red]Error:[/red] --pii requires --enhance (batch enhancement)"
+        )
+        raise typer.Exit(code=1)
+    if enhance and not store_audio:
+        error_console.print("[red]Error:[/red] --enhance requires --store-audio")
+        raise typer.Exit(code=1)
+    if redact_audio and not pii:
+        error_console.print("[red]Error:[/red] --redact-audio requires --pii")
+        raise typer.Exit(code=1)
+
+    # Create real-time session with storage and PII options
     session = RealtimeSession(
         base_url=ws_url,
         api_key=client.api_key,
@@ -152,6 +211,12 @@ def listen(
         model=model,
         enable_vad=not no_vad,
         interim_results=not no_interim,
+        store_audio=store_audio,
+        store_transcript=store_audio,  # Store transcript if storing audio
+        enhance_on_end=enhance,
+        pii_detection=pii,
+        pii_detection_tier=pii_tier,
+        redact_pii_audio=redact_audio,
     )
 
     # Track session stats
@@ -168,21 +233,53 @@ def listen(
         speech_duration += data.end - data.start
         handler.final(data.text, data.start, data.end, data.confidence)
 
-    error_console.print("[Listening... Press Ctrl+C to stop]\n")
+    if input_file:
+        error_console.print(f"[Streaming file: {input_file}...]\n")
+    else:
+        error_console.print("[Listening... Press Ctrl+C to stop]\n")
 
     try:
         # Connect to server
         session.connect()
 
-        # Start capturing audio
-        with MicrophoneStream(device=device_id) as mic:
-            while True:
-                try:
-                    chunk = mic.read(timeout=0.5)
-                    session.send_audio(chunk)
-                except Exception:
-                    # Timeout or error - continue
-                    pass
+        if input_file:
+            # Stream from file
+            import time
+            import wave
+
+            try:
+                with wave.open(str(input_file), "rb") as wf:
+                    # Verify format
+                    if wf.getsampwidth() != 2:  # 16-bit
+                        error_console.print(
+                            "[red]Error:[/red] Audio file must be 16-bit PCM"
+                        )
+                        raise typer.Exit(code=1)
+
+                    file_sample_rate = wf.getframerate()
+                    chunk_size = int(file_sample_rate * 0.1)  # 100ms chunks
+
+                    while True:
+                        frames = wf.readframes(chunk_size)
+                        if not frames:
+                            break
+                        session.send_audio(frames)
+                        # Pace the sending to match real-time
+                        time.sleep(0.08)  # Slightly faster than real-time
+
+            except wave.Error as e:
+                error_console.print(f"[red]Error:[/red] Invalid audio file: {e}")
+                raise typer.Exit(code=1) from e
+        else:
+            # Start capturing audio from microphone
+            with MicrophoneStream(device=device_id) as mic:
+                while True:
+                    try:
+                        chunk = mic.read(timeout=0.5)
+                        session.send_audio(chunk)
+                    except Exception:
+                        # Timeout or error - continue
+                        pass
 
     except KeyboardInterrupt:
         # Graceful shutdown
@@ -196,6 +293,10 @@ def listen(
             end_data = session.close()
             if end_data:
                 total_duration = end_data.total_audio_seconds
+                if enhance:
+                    error_console.print(
+                        f"\n[Enhancement job created - PII detection: {pii}]"
+                    )
         except Exception:
             pass
 

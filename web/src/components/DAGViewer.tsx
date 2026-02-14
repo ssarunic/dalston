@@ -18,7 +18,7 @@ const statusConfig: Record<TaskStatus, { bg: string; text: string; ring?: string
   cancelled: { bg: 'bg-orange-500/20', text: 'text-orange-400' },
 }
 
-const stageOrder = ['prepare', 'transcribe', 'align', 'diarize', 'detect', 'refine', 'merge']
+const stageOrder = ['prepare', 'transcribe', 'align', 'diarize', 'pii_detect', 'audio_redact', 'refine', 'merge']
 
 interface StageGroup {
   stage: string

@@ -52,6 +52,27 @@ export interface RetentionInfo {
   purged_at?: string
 }
 
+export interface PIIEntity {
+  entity_type: string
+  category: string
+  start_offset: number
+  end_offset: number
+  start_time: number
+  end_time: number
+  confidence: number
+  speaker?: string
+  redacted_value: string
+  original_text?: string
+}
+
+export interface PIIInfo {
+  enabled: boolean
+  detection_tier?: string
+  entities_detected?: number
+  entity_summary?: Record<string, number>
+  redacted_audio_available: boolean
+}
+
 export interface JobDetail extends JobSummary {
   error?: string
   current_stage?: string
@@ -61,6 +82,10 @@ export interface JobDetail extends JobSummary {
   segments?: Segment[]
   speakers?: Speaker[]
   retention?: RetentionInfo
+  // PII detection results (M26)
+  pii?: PIIInfo
+  redacted_text?: string
+  entities?: PIIEntity[]
   // Additional result stats
   result_character_count?: number
 }

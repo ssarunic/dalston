@@ -173,6 +173,16 @@ class AsyncRealtimeSession:
         enable_vad: bool = True,
         interim_results: bool = True,
         word_timestamps: bool = False,
+        # Storage and enhancement options
+        store_audio: bool = False,
+        store_transcript: bool = False,
+        enhance_on_end: bool = False,
+        # PII detection options (M26)
+        pii_detection: bool = False,
+        pii_detection_tier: str = "standard",
+        pii_entity_types: list[str] | None = None,
+        redact_pii_audio: bool = False,
+        pii_redaction_mode: str = "silence",
     ) -> None:
         """Initialize the real-time session.
 
@@ -186,6 +196,14 @@ class AsyncRealtimeSession:
             enable_vad: Enable voice activity detection events.
             interim_results: Send partial transcripts.
             word_timestamps: Include word-level timing.
+            store_audio: Record audio to S3 during session.
+            store_transcript: Save final transcript to S3.
+            enhance_on_end: Trigger batch enhancement when session ends.
+            pii_detection: Enable PII detection on enhanced transcript.
+            pii_detection_tier: Detection tier (fast, standard, thorough).
+            pii_entity_types: Entity types to detect (None = all).
+            redact_pii_audio: Generate redacted audio file.
+            pii_redaction_mode: Audio redaction mode (silence, beep).
         """
         # Convert http(s) to ws(s) if needed
         if base_url.startswith("http://"):
@@ -202,6 +220,16 @@ class AsyncRealtimeSession:
         self.enable_vad = enable_vad
         self.interim_results = interim_results
         self.word_timestamps = word_timestamps
+        # Storage and enhancement
+        self.store_audio = store_audio
+        self.store_transcript = store_transcript
+        self.enhance_on_end = enhance_on_end
+        # PII detection
+        self.pii_detection = pii_detection
+        self.pii_detection_tier = pii_detection_tier
+        self.pii_entity_types = pii_entity_types
+        self.redact_pii_audio = redact_pii_audio
+        self.pii_redaction_mode = pii_redaction_mode
 
         self._ws: Any = None
         self._session_id: str | None = None
@@ -223,6 +251,24 @@ class AsyncRealtimeSession:
             "interim_results": str(self.interim_results).lower(),
             "word_timestamps": str(self.word_timestamps).lower(),
         }
+
+        # Storage and enhancement options
+        if self.store_audio:
+            params["store_audio"] = "true"
+        if self.store_transcript:
+            params["store_transcript"] = "true"
+        if self.enhance_on_end:
+            params["enhance_on_end"] = "true"
+
+        # PII detection options (M26)
+        if self.pii_detection:
+            params["pii_detection"] = "true"
+            params["pii_detection_tier"] = self.pii_detection_tier
+            if self.pii_entity_types:
+                params["pii_entity_types"] = ",".join(self.pii_entity_types)
+        if self.redact_pii_audio:
+            params["redact_pii_audio"] = "true"
+            params["pii_redaction_mode"] = self.pii_redaction_mode
 
         # Pass API key as query parameter (WebSocket auth standard)
         if self.api_key:
@@ -446,6 +492,16 @@ class RealtimeSession:
         enable_vad: bool = True,
         interim_results: bool = True,
         word_timestamps: bool = False,
+        # Storage and enhancement options
+        store_audio: bool = False,
+        store_transcript: bool = False,
+        enhance_on_end: bool = False,
+        # PII detection options (M26)
+        pii_detection: bool = False,
+        pii_detection_tier: str = "standard",
+        pii_entity_types: list[str] | None = None,
+        redact_pii_audio: bool = False,
+        pii_redaction_mode: str = "silence",
     ) -> None:
         """Initialize the real-time session.
 
@@ -459,6 +515,14 @@ class RealtimeSession:
             enable_vad: Enable voice activity detection events.
             interim_results: Send partial transcripts.
             word_timestamps: Include word-level timing.
+            store_audio: Record audio to S3 during session.
+            store_transcript: Save final transcript to S3.
+            enhance_on_end: Trigger batch enhancement when session ends.
+            pii_detection: Enable PII detection on enhanced transcript.
+            pii_detection_tier: Detection tier (fast, standard, thorough).
+            pii_entity_types: Entity types to detect (None = all).
+            redact_pii_audio: Generate redacted audio file.
+            pii_redaction_mode: Audio redaction mode (silence, beep).
         """
         self._async_session = AsyncRealtimeSession(
             base_url=base_url,
@@ -470,6 +534,14 @@ class RealtimeSession:
             enable_vad=enable_vad,
             interim_results=interim_results,
             word_timestamps=word_timestamps,
+            store_audio=store_audio,
+            store_transcript=store_transcript,
+            enhance_on_end=enhance_on_end,
+            pii_detection=pii_detection,
+            pii_detection_tier=pii_detection_tier,
+            pii_entity_types=pii_entity_types,
+            redact_pii_audio=redact_pii_audio,
+            pii_redaction_mode=pii_redaction_mode,
         )
 
         self._callbacks: dict[str, list[Callable[..., None]]] = defaultdict(list)
