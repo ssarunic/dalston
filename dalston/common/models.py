@@ -29,6 +29,61 @@ class RetentionScope(str, Enum):
 
 
 # =============================================================================
+# PII Detection Types (M26)
+# =============================================================================
+
+
+class PIIDetectionTier(str, Enum):
+    """PII detection tier controlling speed/accuracy tradeoff."""
+
+    FAST = "fast"  # Presidio regex only (<5ms)
+    STANDARD = "standard"  # Presidio + GLiNER (~100ms)
+    THOROUGH = "thorough"  # Presidio + GLiNER + LLM (1-3s)
+
+
+class PIIRedactionMode(str, Enum):
+    """Audio redaction mode."""
+
+    SILENCE = "silence"  # Replace with silence (volume=0)
+    BEEP = "beep"  # Replace with 1kHz tone
+
+
+class PIIEntityCategory(str, Enum):
+    """PII entity category for compliance classification."""
+
+    PII = "pii"  # Personal: name, email, phone, SSN, etc.
+    PCI = "pci"  # Payment: credit card, IBAN, CVV, etc.
+    PHI = "phi"  # Health: MRN, conditions, medications, etc.
+
+
+@dataclass
+class PIIEntity:
+    """Detected PII entity with position and timing information."""
+
+    entity_type: str  # e.g., "credit_card_number"
+    category: PIIEntityCategory  # pii, pci, phi
+    start_offset: int  # Character offset in text
+    end_offset: int  # Character offset in text
+    start_time: float  # Audio time (seconds)
+    end_time: float  # Audio time (seconds)
+    confidence: float  # Detection confidence 0.0-1.0
+    speaker: str | None  # Speaker ID if diarized
+    redacted_value: str  # e.g., "****7890"
+    original_text: str  # The original detected text
+
+
+@dataclass
+class PIIDetectionResult:
+    """Result of PII detection on a transcript."""
+
+    entities: list[PIIEntity]
+    redacted_text: str
+    entity_count_by_type: dict[str, int]
+    detection_tier: PIIDetectionTier
+    processing_time_ms: int
+
+
+# =============================================================================
 # Model Selection Registry (M14)
 # =============================================================================
 

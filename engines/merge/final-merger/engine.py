@@ -11,6 +11,8 @@ from dalston.engine_sdk import (
     Engine,
     MergedSegment,
     MergeOutput,
+    PIIEntity,
+    PIIMetadata,
     Speaker,
     SpeakerDetectionMode,
     SpeakerTurn,
@@ -206,6 +208,49 @@ class FinalMergerEngine(Engine):
             pipeline_stages.append("align")
         if diarize_output and speaker_detection == SpeakerDetectionMode.DIARIZE:
             pipeline_stages.append("diarize")
+
+        # PII detection integration (M26)
+        pii_detection_enabled = config.get("pii_detection", False)
+        redacted_text = None
+        pii_entities: list[PIIEntity] | None = None
+        pii_metadata: PIIMetadata | None = None
+
+        if pii_detection_enabled:
+            pii_detect_output = input.get_pii_detect_output()
+            audio_redact_output = input.get_audio_redact_output()
+
+            if pii_detect_output:
+                pipeline_stages.append("pii_detect")
+                redacted_text = pii_detect_output.redacted_text
+                pii_entities = pii_detect_output.entities
+
+                # Build PII metadata
+                redacted_audio_uri = None
+                if audio_redact_output:
+                    pipeline_stages.append("audio_redact")
+                    redacted_audio_uri = audio_redact_output.redacted_audio_uri
+
+                pii_metadata = PIIMetadata(
+                    detection_tier=pii_detect_output.detection_tier,
+                    entities_detected=len(pii_detect_output.entities),
+                    entity_count_by_type=pii_detect_output.entity_count_by_type,
+                    entity_count_by_category=pii_detect_output.entity_count_by_category,
+                    redacted_audio_uri=redacted_audio_uri,
+                    processing_time_ms=pii_detect_output.processing_time_ms,
+                )
+
+                self.logger.info(
+                    "pii_detection_integrated",
+                    entities_detected=len(pii_entities),
+                    redacted_audio=redacted_audio_uri is not None,
+                )
+            else:
+                # Try raw output
+                raw_pii = input.get_raw_output("pii_detect")
+                if raw_pii:
+                    pipeline_stages.append("pii_detect")
+                    redacted_text = raw_pii.get("redacted_text")
+
         pipeline_stages.append("merge")
 
         # Build metadata
@@ -235,6 +280,9 @@ class FinalMergerEngine(Engine):
             segments=segments,
             paragraphs=[],
             summary=None,
+            redacted_text=redacted_text,
+            pii_entities=pii_entities,
+            pii_metadata=pii_metadata,
         )
 
         self.logger.info(

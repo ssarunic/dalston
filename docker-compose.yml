@@ -480,6 +480,62 @@ services:
     restart: unless-stopped
 
   # ============================================================
+  # PII DETECTION & AUDIO REDACTION ENGINES (M26)
+  # ============================================================
+
+  engine-pii-presidio:
+    image: dalston/engine-pii-presidio:latest
+    build:
+      context: .
+      dockerfile: engines/detect/pii-presidio/Dockerfile
+    environment:
+      - ENGINE_ID=pii-presidio
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
+    volumes:
+      - gliner-models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  engine-audio-redactor:
+    image: dalston/engine-audio-redactor:latest
+    build:
+      context: .
+      dockerfile: engines/redact/audio-redactor/Dockerfile
+    environment:
+      - ENGINE_ID=audio-redactor
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # ============================================================
   # DIARIZATION ENGINES (M04)
   # ============================================================
 
@@ -859,5 +915,6 @@ volumes:
   pyannote-models:
   realtime-models:
   parakeet-models:
+  gliner-models:
   prometheus-data:
   grafana-data:

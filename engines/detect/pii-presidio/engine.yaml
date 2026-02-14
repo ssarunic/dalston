@@ -1,0 +1,86 @@
+id: pii-presidio
+stage: detect
+name: PII Detection (Presidio + GLiNER)
+version: 1.0.0
+description: |
+  Detects personally identifiable information using Microsoft Presidio
+  with GLiNER for ML-based entity recognition. Supports three detection
+  tiers: fast (regex only), standard (+ GLiNER), thorough (+ LLM).
+
+container:
+  gpu: optional  # GPU accelerates GLiNER
+  memory: 4G
+  model_cache: /models
+
+capabilities:
+  languages:
+    - all  # Regex works on any language
+  detection_tiers:
+    - fast
+    - standard
+    - thorough
+
+config_schema:
+  type: object
+  properties:
+    detection_tier:
+      type: string
+      enum: [fast, standard, thorough]
+      default: standard
+    entity_types:
+      type: array
+      items:
+        type: string
+      default: null  # null = all default entities
+    confidence_threshold:
+      type: number
+      default: 0.5
+      minimum: 0.0
+      maximum: 1.0
+  additionalProperties: false
+
+output_schema:
+  type: object
+  required:
+    - entities
+    - redacted_text
+    - detection_tier
+  properties:
+    entities:
+      type: array
+      description: Detected PII entities
+      items:
+        type: object
+        properties:
+          entity_type:
+            type: string
+          category:
+            type: string
+          start_offset:
+            type: integer
+          end_offset:
+            type: integer
+          start_time:
+            type: number
+          end_time:
+            type: number
+          confidence:
+            type: number
+          speaker:
+            type: string
+          redacted_value:
+            type: string
+          original_text:
+            type: string
+    redacted_text:
+      type: string
+      description: Text with PII replaced by placeholders
+    entity_count_by_type:
+      type: object
+      description: Count of each entity type detected
+    detection_tier:
+      type: string
+      description: Detection tier used
+    processing_time_ms:
+      type: integer
+      description: Processing time in milliseconds

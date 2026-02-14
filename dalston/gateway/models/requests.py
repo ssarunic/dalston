@@ -67,6 +67,32 @@ class TranscriptionCreateParams(BaseModel):
         description="Custom data echoed back in webhook callback (max 16KB)",
     )
 
+    # PII Detection (M26)
+    pii_detection: bool = Field(
+        default=False,
+        description="Enable PII detection in transcript",
+    )
+    pii_detection_tier: str = Field(
+        default="standard",
+        description="PII detection tier: 'fast', 'standard', 'thorough'",
+    )
+    pii_entity_types: list[str] | None = Field(
+        default=None,
+        description="Entity types to detect (null = all defaults)",
+    )
+    redact_pii: bool = Field(
+        default=False,
+        description="Generate redacted transcript text",
+    )
+    redact_pii_audio: bool = Field(
+        default=False,
+        description="Generate redacted audio file",
+    )
+    pii_redaction_mode: str = Field(
+        default="silence",
+        description="Audio redaction mode: 'silence', 'beep'",
+    )
+
     def to_job_parameters(self) -> dict:
         """Convert to job parameters dict for storage."""
         params = {
@@ -83,4 +109,17 @@ class TranscriptionCreateParams(BaseModel):
             params["min_speakers"] = self.min_speakers
         if self.max_speakers is not None:
             params["max_speakers"] = self.max_speakers
+
+        # PII detection parameters (M26)
+        if self.pii_detection:
+            params["pii_detection"] = True
+            params["pii_detection_tier"] = self.pii_detection_tier
+            if self.pii_entity_types:
+                params["pii_entity_types"] = self.pii_entity_types
+            if self.redact_pii:
+                params["redact_pii"] = True
+            if self.redact_pii_audio:
+                params["redact_pii_audio"] = True
+                params["pii_redaction_mode"] = self.pii_redaction_mode
+
         return params

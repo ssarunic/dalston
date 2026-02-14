@@ -223,6 +223,21 @@ class JobModel(Base):
     result_speaker_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     result_character_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # PII detection fields (M26)
+    pii_detection_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    pii_detection_tier: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    pii_entity_types: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String), nullable=True
+    )
+    pii_redact_audio: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    pii_redaction_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    pii_entities_detected: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pii_redacted_audio_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Relationships
     tenant: Mapped["TenantModel"] = relationship(back_populates="jobs")
     tasks: Mapped[list["TaskModel"]] = relationship(back_populates="job")
@@ -428,6 +443,21 @@ class WebhookDeliveryModel(Base):
         back_populates="deliveries"
     )
     job: Mapped["JobModel | None"] = relationship()
+
+
+class PIIEntityTypeModel(Base):
+    """PII entity type reference table for validation and UI display."""
+
+    __tablename__ = "pii_entity_types"
+
+    id: Mapped[str] = mapped_column(String(50), primary_key=True)
+    category: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detection_method: Mapped[str] = mapped_column(String(50), nullable=False)
+    is_default: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
 
 
 class RealtimeSessionModel(Base):

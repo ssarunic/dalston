@@ -538,6 +538,129 @@ class MergeOutput(BaseModel):
     paragraphs: list = Field(default_factory=list, description="Paragraph groupings")
     summary: str | None = Field(default=None, description="AI-generated summary")
 
+    # PII detection results (M26 - optional)
+    redacted_text: str | None = Field(
+        default=None, description="Transcript with PII redacted"
+    )
+    pii_entities: list["PIIEntity"] | None = Field(
+        default=None, description="Detected PII entities"
+    )
+    pii_metadata: "PIIMetadata | None" = Field(
+        default=None, description="PII detection metadata"
+    )
+
+
+# =============================================================================
+# PII Detection Types (M26)
+# =============================================================================
+
+
+class PIIEntityCategory(str, Enum):
+    """PII entity category for compliance classification."""
+
+    PII = "pii"  # Personal: name, email, phone, SSN, etc.
+    PCI = "pci"  # Payment: credit card, IBAN, CVV, etc.
+    PHI = "phi"  # Health: MRN, conditions, medications, etc.
+
+
+class PIIDetectionTier(str, Enum):
+    """PII detection tier controlling speed/accuracy tradeoff."""
+
+    FAST = "fast"  # Presidio regex only (<5ms)
+    STANDARD = "standard"  # Presidio + GLiNER (~100ms)
+    THOROUGH = "thorough"  # Presidio + GLiNER + LLM (1-3s)
+
+
+class PIIRedactionMode(str, Enum):
+    """Audio redaction mode."""
+
+    SILENCE = "silence"  # Replace with silence (volume=0)
+    BEEP = "beep"  # Replace with 1kHz tone
+
+
+class PIIEntity(BaseModel):
+    """Detected PII entity with position and timing information."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    entity_type: str = Field(
+        ..., description="Entity type (e.g., 'credit_card_number')"
+    )
+    category: PIIEntityCategory = Field(..., description="Category: pii, pci, phi")
+    start_offset: int = Field(..., ge=0, description="Character offset in text")
+    end_offset: int = Field(..., ge=0, description="Character offset in text")
+    start_time: float = Field(..., ge=0, description="Audio time in seconds")
+    end_time: float = Field(..., ge=0, description="Audio time in seconds")
+    confidence: float = Field(..., ge=0, le=1, description="Detection confidence")
+    speaker: str | None = Field(default=None, description="Speaker ID if diarized")
+    redacted_value: str = Field(
+        ..., description="Redacted representation (e.g., '****7890')"
+    )
+    original_text: str = Field(..., description="Original detected text")
+
+
+class PIIMetadata(BaseModel):
+    """Metadata about PII detection results."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    detection_tier: PIIDetectionTier = Field(..., description="Detection tier used")
+    entities_detected: int = Field(..., ge=0, description="Total entities detected")
+    entity_count_by_type: dict[str, int] = Field(
+        default_factory=dict, description="Count per entity type"
+    )
+    entity_count_by_category: dict[str, int] = Field(
+        default_factory=dict, description="Count per category"
+    )
+    redacted_audio_uri: str | None = Field(
+        default=None, description="URI to redacted audio file"
+    )
+    processing_time_ms: int = Field(..., ge=0, description="Processing time in ms")
+
+
+class PIIDetectOutput(BaseModel):
+    """Output from PII detection stage."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    entities: list[PIIEntity] = Field(..., description="Detected PII entities")
+    redacted_text: str = Field(..., description="Text with PII redacted")
+    entity_count_by_type: dict[str, int] = Field(
+        default_factory=dict, description="Count per entity type"
+    )
+    entity_count_by_category: dict[str, int] = Field(
+        default_factory=dict, description="Count per category"
+    )
+    detection_tier: PIIDetectionTier = Field(..., description="Detection tier used")
+    processing_time_ms: int = Field(..., ge=0, description="Processing time in ms")
+
+    # Standard output fields
+    engine_id: str = Field(..., description="Engine identifier")
+    skipped: bool = Field(default=False, description="Whether detection was skipped")
+    skip_reason: str | None = Field(default=None, description="Reason if skipped")
+    warnings: list[str] = Field(default_factory=list, description="Any warnings")
+
+
+class AudioRedactOutput(BaseModel):
+    """Output from audio redaction stage."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    redacted_audio_uri: str = Field(..., description="URI to redacted audio file")
+    redaction_mode: PIIRedactionMode = Field(..., description="Redaction mode used")
+    buffer_ms: int = Field(..., ge=0, description="Buffer padding in milliseconds")
+    entities_redacted: int = Field(..., ge=0, description="Number of entities redacted")
+    redaction_map: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Map of redacted time ranges with entity types",
+    )
+
+    # Standard output fields
+    engine_id: str = Field(..., description="Engine identifier")
+    skipped: bool = Field(default=False, description="Whether redaction was skipped")
+    skip_reason: str | None = Field(default=None, description="Reason if skipped")
+    warnings: list[str] = Field(default_factory=list, description="Any warnings")
+
 
 # =============================================================================
 # Type aliases for convenience
@@ -546,5 +669,11 @@ class MergeOutput(BaseModel):
 # Previous outputs dict with typed values
 PreviousOutputs = dict[
     str,
-    PrepareOutput | TranscribeOutput | AlignOutput | DiarizeOutput | None,
+    PrepareOutput
+    | TranscribeOutput
+    | AlignOutput
+    | DiarizeOutput
+    | PIIDetectOutput
+    | AudioRedactOutput
+    | None,
 ]

@@ -8,7 +8,9 @@ from pydantic import BaseModel
 
 from dalston.common.pipeline_types import (
     AlignOutput,
+    AudioRedactOutput,
     DiarizeOutput,
+    PIIDetectOutput,
     PrepareOutput,
     TranscribeOutput,
 )
@@ -76,6 +78,22 @@ class TaskInput:
             DiarizeOutput if present and valid, None otherwise
         """
         return self._get_typed_output("diarize", DiarizeOutput)
+
+    def get_pii_detect_output(self) -> PIIDetectOutput | None:
+        """Get typed PII detection stage output.
+
+        Returns:
+            PIIDetectOutput if present and valid, None otherwise
+        """
+        return self._get_typed_output("pii_detect", PIIDetectOutput)
+
+    def get_audio_redact_output(self) -> AudioRedactOutput | None:
+        """Get typed audio redaction stage output.
+
+        Returns:
+            AudioRedactOutput if present and valid, None otherwise
+        """
+        return self._get_typed_output("audio_redact", AudioRedactOutput)
 
     def _get_typed_output(self, key: str, model: type[T]) -> T | None:
         """Get a typed output from previous_outputs.

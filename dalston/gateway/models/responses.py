@@ -29,6 +29,38 @@ class RetentionInfo(BaseModel):
     )
 
 
+class PIIEntityResponse(BaseModel):
+    """Detected PII entity in response."""
+
+    entity_type: str = Field(description="Entity type (e.g., 'credit_card_number')")
+    category: str = Field(description="Category: pii, pci, phi")
+    start_offset: int = Field(description="Character offset in text")
+    end_offset: int = Field(description="Character offset in text")
+    start_time: float = Field(description="Audio time in seconds")
+    end_time: float = Field(description="Audio time in seconds")
+    confidence: float = Field(description="Detection confidence 0.0-1.0")
+    speaker: str | None = Field(default=None, description="Speaker ID if diarized")
+    redacted_value: str = Field(description="Redacted representation")
+
+
+class PIIInfo(BaseModel):
+    """PII detection information for a job."""
+
+    enabled: bool = Field(description="Whether PII detection was enabled")
+    detection_tier: str | None = Field(
+        default=None, description="Detection tier: fast, standard, thorough"
+    )
+    entities_detected: int | None = Field(
+        default=None, description="Total number of PII entities detected"
+    )
+    entity_summary: dict[str, int] | None = Field(
+        default=None, description="Count of entities by type"
+    )
+    redacted_audio_available: bool = Field(
+        default=False, description="Whether redacted audio is available"
+    )
+
+
 class JobCreatedResponse(BaseModel):
     """Response for POST /v1/audio/transcriptions."""
 
@@ -84,6 +116,17 @@ class JobResponse(BaseModel):
     # Retention info (M25)
     retention: RetentionInfo | None = Field(
         default=None, description="Retention policy and status"
+    )
+
+    # PII detection info (M26)
+    pii: PIIInfo | None = Field(
+        default=None, description="PII detection status and results"
+    )
+    redacted_text: str | None = Field(
+        default=None, description="Transcript with PII redacted"
+    )
+    entities: list[PIIEntityResponse] | None = Field(
+        default=None, description="Detected PII entities"
     )
 
     # Result summary stats (populated on successful completion)
@@ -237,3 +280,32 @@ class TaskArtifactResponse(BaseModel):
         default=None,
         description="Task output (from output.json in S3). Null if task has not completed.",
     )
+
+
+# =============================================================================
+# PII Entity Types (M26)
+# =============================================================================
+
+
+class PIIEntityTypeResponse(BaseModel):
+    """PII entity type for listing available types."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str = Field(description="Entity type identifier (e.g., 'credit_card_number')")
+    category: str = Field(description="Category: pii, pci, phi")
+    display_name: str = Field(description="Human-readable name")
+    description: str | None = Field(
+        default=None, description="Description of the entity type"
+    )
+    detection_method: str = Field(
+        description="Detection method: regex, gliner, regex+luhn, etc."
+    )
+    is_default: bool = Field(description="Whether included in default detection")
+
+
+class PIIEntityTypesResponse(BaseModel):
+    """Response for GET /v1/pii/entity-types."""
+
+    entity_types: list[PIIEntityTypeResponse]
+    total: int = Field(description="Total number of entity types")

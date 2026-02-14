@@ -25,8 +25,16 @@ DEFAULT_ENGINES = {
     "transcribe": "faster-whisper",
     "align": "whisperx-align",
     "diarize": "pyannote-3.1",
+    "pii_detect": "pii-presidio",
+    "audio_redact": "audio-redactor",
     "merge": "final-merger",
 }
+
+# Valid PII detection tiers
+VALID_PII_DETECTION_TIERS = {"fast", "standard", "thorough"}
+
+# Valid PII redaction modes
+VALID_PII_REDACTION_MODES = {"silence", "beep"}
 
 # Default transcription config
 DEFAULT_TRANSCRIBE_CONFIG = {
@@ -81,6 +89,12 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
         ),
         "align": parameters.get("engine_align", DEFAULT_ENGINES["align"]),
         "diarize": parameters.get("engine_diarize", DEFAULT_ENGINES["diarize"]),
+        "pii_detect": parameters.get(
+            "engine_pii_detect", DEFAULT_ENGINES["pii_detect"]
+        ),
+        "audio_redact": parameters.get(
+            "engine_audio_redact", DEFAULT_ENGINES["audio_redact"]
+        ),
         "merge": parameters.get("engine_merge", DEFAULT_ENGINES["merge"]),
     }
 
@@ -256,13 +270,100 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
         )
         tasks.append(align_task)
 
-    # Final task: Merge (depends on prepare, transcribe, optionally align and diarize)
+    # PII Detection (M26 - optional, after alignment/diarization)
+    pii_detect_task = None
+    audio_redact_task = None
+    pii_detection_enabled = parameters.get("pii_detection", False)
+
+    if pii_detection_enabled:
+        # PII detection requires word timestamps for audio timing
+        # Depends on align (if present) or transcribe, plus diarize (if present)
+        pii_dependencies = [transcribe_task.id]
+        if align_task is not None:
+            pii_dependencies.append(align_task.id)
+        if diarize_task is not None:
+            pii_dependencies.append(diarize_task.id)
+
+        # Get PII detection config
+        pii_tier = parameters.get("pii_detection_tier", "standard")
+        if pii_tier not in VALID_PII_DETECTION_TIERS:
+            logger.warning(
+                f"Unknown pii_detection_tier '{pii_tier}', "
+                f"expected one of {VALID_PII_DETECTION_TIERS}. Defaulting to 'standard'."
+            )
+            pii_tier = "standard"
+
+        pii_detect_config = {
+            "detection_tier": pii_tier,
+            "entity_types": parameters.get("pii_entity_types"),
+            "confidence_threshold": parameters.get("pii_confidence_threshold", 0.5),
+        }
+
+        pii_detect_task = Task(
+            id=uuid4(),
+            job_id=job_id,
+            stage="pii_detect",
+            engine_id=engines["pii_detect"],
+            status=TaskStatus.PENDING,
+            dependencies=pii_dependencies,
+            config=pii_detect_config,
+            input_uri=None,
+            output_uri=None,
+            retries=0,
+            max_retries=2,
+            required=True,
+        )
+        tasks.append(pii_detect_task)
+
+        # Audio redaction (optional, after PII detection)
+        if parameters.get("redact_pii_audio", False):
+            redaction_mode = parameters.get("pii_redaction_mode", "silence")
+            if redaction_mode not in VALID_PII_REDACTION_MODES:
+                logger.warning(
+                    f"Unknown pii_redaction_mode '{redaction_mode}', "
+                    f"expected one of {VALID_PII_REDACTION_MODES}. Defaulting to 'silence'."
+                )
+                redaction_mode = "silence"
+
+            audio_redact_config = {
+                "redaction_mode": redaction_mode,
+                "buffer_ms": parameters.get("pii_buffer_ms", 50),
+            }
+
+            audio_redact_task = Task(
+                id=uuid4(),
+                job_id=job_id,
+                stage="audio_redact",
+                engine_id=engines["audio_redact"],
+                status=TaskStatus.PENDING,
+                dependencies=[pii_detect_task.id],
+                config=audio_redact_config,
+                input_uri=None,
+                output_uri=None,
+                retries=0,
+                max_retries=2,
+                required=True,
+            )
+            tasks.append(audio_redact_task)
+
+    # Final task: Merge (depends on prepare, transcribe, optionally align, diarize, and PII)
     # Combines outputs into final transcript format
     merge_dependencies = [prepare_task.id, transcribe_task.id]
     if align_task is not None:
         merge_dependencies.append(align_task.id)
     if diarize_task is not None:
         merge_dependencies.append(diarize_task.id)
+    if pii_detect_task is not None:
+        merge_dependencies.append(pii_detect_task.id)
+    if audio_redact_task is not None:
+        merge_dependencies.append(audio_redact_task.id)
+
+    merge_config = {
+        "word_timestamps": word_timestamps,
+        "speaker_detection": speaker_detection,
+    }
+    if pii_detection_enabled:
+        merge_config["pii_detection"] = True
 
     merge_task = Task(
         id=uuid4(),
@@ -271,10 +372,7 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
         engine_id=engines["merge"],
         status=TaskStatus.PENDING,
         dependencies=merge_dependencies,
-        config={
-            "word_timestamps": word_timestamps,
-            "speaker_detection": speaker_detection,
-        },
+        config=merge_config,
         input_uri=None,  # Will use previous task outputs
         output_uri=None,
         retries=0,

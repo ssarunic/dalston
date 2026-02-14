@@ -6,6 +6,7 @@ from dalston.gateway.api.v1 import (
     audit,
     jobs,
     models,
+    pii,
     realtime,
     realtime_sessions,
     realtime_status,
@@ -49,3 +50,6 @@ router.include_router(retention_policies.router)  # /v1/retention-policies/*
 
 # Mount audit log routes (M25)
 router.include_router(audit.router)  # /v1/audit/*
+
+# Mount PII detection routes (M26)
+router.include_router(pii.router)  # /v1/pii/*

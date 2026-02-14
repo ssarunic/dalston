@@ -1,0 +1,66 @@
+id: audio-redactor
+stage: redact
+name: Audio Redaction (FFmpeg)
+version: 1.0.0
+description: |
+  Redacts audio by replacing PII segments with silence or beep tones.
+  Uses FFmpeg for efficient single-pass processing. Requires PII detection
+  output with entity timing information.
+
+container:
+  gpu: none
+  memory: 2G
+
+capabilities:
+  redaction_modes:
+    - silence
+    - beep
+
+config_schema:
+  type: object
+  properties:
+    redaction_mode:
+      type: string
+      enum: [silence, beep]
+      default: silence
+    buffer_ms:
+      type: integer
+      default: 50
+      minimum: 0
+      maximum: 500
+      description: Padding around PII segments in milliseconds
+  additionalProperties: false
+
+output_schema:
+  type: object
+  required:
+    - redacted_audio_uri
+    - redaction_mode
+    - entities_redacted
+  properties:
+    redacted_audio_uri:
+      type: string
+      description: S3 URI to the redacted audio file
+    redaction_mode:
+      type: string
+      description: Redaction mode used
+    buffer_ms:
+      type: integer
+      description: Buffer padding in milliseconds
+    entities_redacted:
+      type: integer
+      description: Number of PII entities redacted
+    redaction_map:
+      type: array
+      description: Map of redacted time ranges
+      items:
+        type: object
+        properties:
+          start_time:
+            type: number
+          end_time:
+            type: number
+          entity_types:
+            type: array
+            items:
+              type: string
