@@ -494,7 +494,7 @@ Every RETENTION_CLEANUP_INTERVAL_SECONDS:
   2. For each expired job:
      a. Delete S3 artifacts based on retention_scope:
         - scope "all":        delete jobs/{id}/audio/*, jobs/{id}/tasks/*, jobs/{id}/transcript.json
-        - scope "audio_only": delete jobs/{id}/audio/*, jobs/{id}/tasks/*
+        - scope "audio_only": delete jobs/{id}/audio/* (preserves tasks/* and transcript.json)
      b. Delete Redis keys: dalston:task:{task_id}:* for all tasks
      c. Set purged_at = NOW()
      d. Emit audit event: job.purged

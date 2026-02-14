@@ -391,7 +391,7 @@ async def cleanup_expired_jobs():
 | Scope | Paths Deleted |
 |-------|---------------|
 | `all` | `jobs/{id}/audio/*`, `jobs/{id}/tasks/*`, `jobs/{id}/transcript.json` |
-| `audio_only` | `jobs/{id}/audio/*`, `jobs/{id}/tasks/*` |
+| `audio_only` | `jobs/{id}/audio/*` (preserves `tasks/*` and `transcript.json`) |
 
 ---
 

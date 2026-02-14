@@ -171,9 +171,9 @@ class CleanupWorker:
             await storage.delete_job_artifacts(job.id)
             artifacts_deleted = ["audio", "tasks", "transcript"]
         elif job.retention_scope == RetentionScope.AUDIO_ONLY.value:
-            # Delete audio and task intermediates, keep transcript
+            # Delete audio only, keep tasks and transcript
             await storage.delete_job_audio(job.id)
-            artifacts_deleted = ["audio", "tasks"]
+            artifacts_deleted = ["audio"]
 
         return artifacts_deleted
 

@@ -22,8 +22,10 @@ class RetentionMode(str, Enum):
 class RetentionScope(str, Enum):
     """What to delete when purging."""
 
-    ALL = "all"  # Delete audio, intermediates, and transcript
-    AUDIO_ONLY = "audio_only"  # Delete audio and intermediates, keep transcript
+    ALL = "all"  # Delete audio, task intermediates, and transcript
+    AUDIO_ONLY = (
+        "audio_only"  # Delete audio only, keep task intermediates and transcript
+    )
 
 
 # =============================================================================
