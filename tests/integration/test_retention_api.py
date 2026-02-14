@@ -335,7 +335,7 @@ class TestAuditAPI:
         assert len(data["events"]) == 2
         assert data["events"][0]["action"] == "job.created"
         assert data["events"][1]["action"] == "job.completed"
-        assert "total" in data
+        assert "cursor" in data
         assert "has_more" in data
 
     def test_list_audit_events_with_filters(self, client, mock_db):

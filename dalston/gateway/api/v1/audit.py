@@ -40,9 +40,7 @@ class AuditListResponse(BaseModel):
     """Response for listing audit events."""
 
     events: list[AuditEventResponse]
-    total: int
-    limit: int
-    offset: int
+    cursor: str | None
     has_more: bool
 
 
@@ -94,12 +92,15 @@ async def list_audit_events(
         str | None, Query(description="Filter by correlation ID")
     ] = None,
     limit: Annotated[int, Query(ge=1, le=100, description="Max results")] = 25,
-    offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
+    cursor: Annotated[
+        str | None, Query(description="Cursor for pagination (last event ID)")
+    ] = None,
     db: AsyncSession = Depends(get_db),
 ) -> AuditListResponse:
-    """List audit events with filtering and pagination.
+    """List audit events with filtering and cursor-based pagination.
 
     Events are filtered to the tenant of the authenticated API key.
+    Pass the cursor from the previous response to fetch the next page.
     """
     # Build query with filters
     query = select(AuditLogModel).where(AuditLogModel.tenant_id == api_key.tenant_id)
@@ -119,23 +120,29 @@ async def list_audit_events(
     if end_time:
         query = query.where(AuditLogModel.timestamp < end_time)
 
-    # Get total count (with +1 for has_more)
-    count_query = query.order_by(AuditLogModel.timestamp.desc())
-    result = await db.execute(count_query.offset(offset).limit(limit + 1))
+    # Apply cursor filter (events older than cursor)
+    if cursor:
+        try:
+            cursor_id = int(cursor)
+            query = query.where(AuditLogModel.id < cursor_id)
+        except ValueError:
+            pass  # Invalid cursor, ignore
+
+    # Fetch limit + 1 to determine has_more
+    query = query.order_by(AuditLogModel.id.desc()).limit(limit + 1)
+    result = await db.execute(query)
     events = list(result.scalars().all())
 
     has_more = len(events) > limit
     if has_more:
         events = events[:limit]
 
-    # Count total (approximate for performance)
-    total = offset + len(events) + (1 if has_more else 0)
+    # Next cursor is the ID of the last event
+    next_cursor = str(events[-1].id) if events and has_more else None
 
     return AuditListResponse(
         events=[_audit_to_response(e) for e in events],
-        total=total,
-        limit=limit,
-        offset=offset,
+        cursor=next_cursor,
         has_more=has_more,
     )
 
@@ -151,7 +158,9 @@ async def get_resource_audit_trail(
     resource_id: str,
     api_key: RequireAdmin,
     limit: Annotated[int, Query(ge=1, le=100, description="Max results")] = 25,
-    offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
+    cursor: Annotated[
+        str | None, Query(description="Cursor for pagination (last event ID)")
+    ] = None,
     db: AsyncSession = Depends(get_db),
 ) -> AuditListResponse:
     """Get all audit events for a specific resource.
@@ -164,22 +173,28 @@ async def get_resource_audit_trail(
         .where(AuditLogModel.tenant_id == api_key.tenant_id)
         .where(AuditLogModel.resource_type == resource_type)
         .where(AuditLogModel.resource_id == resource_id)
-        .order_by(AuditLogModel.timestamp.desc())
     )
 
-    result = await db.execute(query.offset(offset).limit(limit + 1))
+    # Apply cursor filter
+    if cursor:
+        try:
+            cursor_id = int(cursor)
+            query = query.where(AuditLogModel.id < cursor_id)
+        except ValueError:
+            pass  # Invalid cursor, ignore
+
+    query = query.order_by(AuditLogModel.id.desc()).limit(limit + 1)
+    result = await db.execute(query)
     events = list(result.scalars().all())
 
     has_more = len(events) > limit
     if has_more:
         events = events[:limit]
 
-    total = offset + len(events) + (1 if has_more else 0)
+    next_cursor = str(events[-1].id) if events and has_more else None
 
     return AuditListResponse(
         events=[_audit_to_response(e) for e in events],
-        total=total,
-        limit=limit,
-        offset=offset,
+        cursor=next_cursor,
         has_more=has_more,
     )
