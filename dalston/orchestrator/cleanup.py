@@ -211,6 +211,8 @@ class CleanupWorker:
         storage = StorageService(self.settings)
 
         # Phase 0: Query jobs to purge
+        # Note: This query intentionally processes all tenants. The cleanup
+        # worker runs as a single system-wide service, not per-tenant.
         async with self.db_session_factory() as db:
             query = (
                 select(JobModel)

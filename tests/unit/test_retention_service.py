@@ -5,11 +5,13 @@ from uuid import UUID
 
 import pytest
 
-from dalston.common.models import RetentionMode, RetentionScope
-from dalston.gateway.services.retention import (
+from dalston.common.constants import (
     SYSTEM_POLICY_DEFAULT,
     SYSTEM_POLICY_KEEP,
     SYSTEM_POLICY_ZERO_RETENTION,
+)
+from dalston.common.models import RetentionMode, RetentionScope
+from dalston.gateway.services.retention import (
     RetentionPolicyInUseError,
     RetentionPolicyNotFoundError,
     RetentionService,

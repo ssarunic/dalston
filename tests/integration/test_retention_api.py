@@ -1,13 +1,15 @@
 """Integration tests for retention policy and audit API endpoints."""
 
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from dalston.common.models import RetentionScope
 from dalston.gateway.api.v1 import audit, retention_policies
 from dalston.gateway.services.auth import DEFAULT_EXPIRES_AT, APIKey, Scope
 from dalston.gateway.services.retention import (
@@ -477,3 +479,201 @@ class TestRetentionJobSubmission:
         assert result.name == "keep"
         assert result.mode == "keep"
         assert result.hours is None
+
+
+class TestCleanupWorkerScopes:
+    """Integration tests for cleanup worker with different retention scopes."""
+
+    @pytest.fixture
+    def mock_redis(self):
+        """Create mock Redis client for lock coordination."""
+        redis = AsyncMock()
+        redis.set = AsyncMock(return_value=True)  # Lock always acquired
+        redis.delete = AsyncMock()
+        redis.close = AsyncMock()
+        return redis
+
+    @pytest.fixture
+    def settings(self):
+        """Create test settings."""
+        from dalston.config import Settings
+
+        s = Settings()
+        s.retention_cleanup_interval_seconds = 300
+        s.retention_cleanup_batch_size = 100
+        return s
+
+    def _make_job(
+        self,
+        job_id: UUID,
+        tenant_id: UUID,
+        retention_scope: str,
+        purge_after: datetime | None = None,
+    ):
+        """Create a mock job with retention settings."""
+        job = MagicMock()
+        job.id = job_id
+        job.tenant_id = tenant_id
+        job.retention_scope = retention_scope
+        job.purge_after = purge_after or datetime.now(UTC) - timedelta(hours=1)
+        job.purged_at = None
+        return job
+
+    @pytest.mark.asyncio
+    async def test_audio_only_scope_deletes_only_audio(self, mock_redis, settings):
+        """Test that audio_only scope only deletes audio, keeping transcript."""
+        from dalston.orchestrator.cleanup import CleanupWorker
+
+        job_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        tenant_id = UUID("12345678-1234-1234-1234-123456789abc")
+        job = self._make_job(
+            job_id, tenant_id, retention_scope=RetentionScope.AUDIO_ONLY.value
+        )
+
+        # Query session returns job
+        query_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [job]
+        query_session.execute.return_value = mock_result
+
+        # Update session returns job record
+        update_session = AsyncMock()
+        job_record = MagicMock()
+        job_record.purged_at = None
+        update_session.get.return_value = job_record
+
+        session_calls = [query_session, update_session]
+        call_index = 0
+
+        @asynccontextmanager
+        async def session_factory():
+            nonlocal call_index
+            session = session_calls[call_index]
+            call_index += 1
+            yield session
+
+        worker = CleanupWorker(
+            db_session_factory=session_factory,
+            settings=settings,
+        )
+        worker._redis = mock_redis
+
+        with patch("dalston.orchestrator.cleanup.StorageService") as MockStorageService:
+            mock_storage = AsyncMock()
+            MockStorageService.return_value = mock_storage
+
+            purged = await worker._purge_expired_jobs()
+
+            assert purged == 1
+            # Audio deleted
+            mock_storage.delete_job_audio.assert_awaited_once_with(job_id)
+            # Full artifacts NOT deleted
+            mock_storage.delete_job_artifacts.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_all_scope_deletes_everything(self, mock_redis, settings):
+        """Test that 'all' scope deletes audio, tasks, and transcript."""
+        from dalston.orchestrator.cleanup import CleanupWorker
+
+        job_id = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+        tenant_id = UUID("12345678-1234-1234-1234-123456789abc")
+        job = self._make_job(
+            job_id, tenant_id, retention_scope=RetentionScope.ALL.value
+        )
+
+        query_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [job]
+        query_session.execute.return_value = mock_result
+
+        update_session = AsyncMock()
+        job_record = MagicMock()
+        job_record.purged_at = None
+        update_session.get.return_value = job_record
+
+        session_calls = [query_session, update_session]
+        call_index = 0
+
+        @asynccontextmanager
+        async def session_factory():
+            nonlocal call_index
+            session = session_calls[call_index]
+            call_index += 1
+            yield session
+
+        worker = CleanupWorker(
+            db_session_factory=session_factory,
+            settings=settings,
+        )
+        worker._redis = mock_redis
+
+        with patch("dalston.orchestrator.cleanup.StorageService") as MockStorageService:
+            mock_storage = AsyncMock()
+            MockStorageService.return_value = mock_storage
+
+            purged = await worker._purge_expired_jobs()
+
+            assert purged == 1
+            # Full artifacts deleted (includes audio, tasks, transcript)
+            mock_storage.delete_job_artifacts.assert_awaited_once_with(job_id)
+            # Individual audio delete NOT called
+            mock_storage.delete_job_audio.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_audio_only_preserves_transcript_for_compliance(
+        self, mock_redis, settings
+    ):
+        """Test audio_only scope preserves transcript for compliance needs.
+
+        This is important for scenarios where audio must be deleted for privacy
+        but the transcript needs to be retained for compliance/audit purposes.
+        """
+        from dalston.orchestrator.cleanup import CleanupWorker
+
+        job_id = UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
+        tenant_id = UUID("12345678-1234-1234-1234-123456789abc")
+        job = self._make_job(
+            job_id, tenant_id, retention_scope=RetentionScope.AUDIO_ONLY.value
+        )
+
+        query_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [job]
+        query_session.execute.return_value = mock_result
+
+        update_session = AsyncMock()
+        job_record = MagicMock()
+        job_record.purged_at = None
+        update_session.get.return_value = job_record
+
+        session_calls = [query_session, update_session]
+        call_index = 0
+
+        @asynccontextmanager
+        async def session_factory():
+            nonlocal call_index
+            session = session_calls[call_index]
+            call_index += 1
+            yield session
+
+        # Track what the worker returns as deleted artifacts
+        worker = CleanupWorker(
+            db_session_factory=session_factory,
+            settings=settings,
+        )
+        worker._redis = mock_redis
+
+        with patch("dalston.orchestrator.cleanup.StorageService") as MockStorageService:
+            mock_storage = AsyncMock()
+            MockStorageService.return_value = mock_storage
+
+            # Capture the artifacts that would be reported as deleted
+            artifacts_deleted = await worker._delete_job_artifacts(
+                job_id, RetentionScope.AUDIO_ONLY.value, mock_storage
+            )
+
+            # Only audio should be in the deleted list
+            assert artifacts_deleted == ["audio"]
+            # Transcript and tasks should NOT be deleted
+            assert "transcript" not in artifacts_deleted
+            assert "tasks" not in artifacts_deleted

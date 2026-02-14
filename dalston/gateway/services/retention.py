@@ -5,13 +5,9 @@ from uuid import UUID
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dalston.common.constants import SYSTEM_POLICY_DEFAULT
 from dalston.common.models import RetentionMode, RetentionScope
 from dalston.db.models import JobModel, RealtimeSessionModel, RetentionPolicyModel
-
-# System policy IDs (well-known UUIDs from migration)
-SYSTEM_POLICY_DEFAULT = UUID("00000000-0000-0000-0000-000000000001")
-SYSTEM_POLICY_ZERO_RETENTION = UUID("00000000-0000-0000-0000-000000000002")
-SYSTEM_POLICY_KEEP = UUID("00000000-0000-0000-0000-000000000003")
 
 
 class RetentionPolicyNotFoundError(Exception):

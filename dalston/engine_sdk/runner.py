@@ -100,6 +100,7 @@ class EngineRunner:
         self._metrics_thread: threading.Thread | None = None
         self._heartbeat_thread: threading.Thread | None = None
         self._current_task_id: str | None = None
+        self._task_lock = threading.Lock()  # Protects _current_task_id
 
         # Load configuration from environment
         self.engine_id = os.environ.get("ENGINE_ID", "unknown")
@@ -229,14 +230,18 @@ class EngineRunner:
         """Send heartbeats to Redis periodically."""
         while self._running:
             try:
+                # Read current task with lock for thread safety
+                with self._task_lock:
+                    current_task = self._current_task_id
+
                 self.redis_client.hset(
                     self.heartbeat_key,
                     mapping={
                         "engine_id": self.engine_id,
                         "stage": getattr(self.engine, "stage", "unknown"),
                         "last_seen": datetime.now(UTC).isoformat(),
-                        "status": "processing" if self._current_task_id else "idle",
-                        "current_task": self._current_task_id or "",
+                        "status": "processing" if current_task else "idle",
+                        "current_task": current_task or "",
                     },
                 )
                 self.redis_client.expire(self.heartbeat_key, self.HEARTBEAT_TTL)
@@ -279,7 +284,10 @@ class EngineRunner:
         """
         temp_dir = None
         start_time = time.time()
-        self._current_task_id = task_id  # Track for heartbeat status
+
+        # Track current task for heartbeat status (thread-safe)
+        with self._task_lock:
+            self._current_task_id = task_id
 
         # Extract trace context from task metadata (M19)
         task_metadata = self._get_task_metadata(task_id)
@@ -386,8 +394,9 @@ class EngineRunner:
                 self._publish_task_failed(task_id, job_id, str(e))
 
             finally:
-                # Clear current task tracking for heartbeat
-                self._current_task_id = None
+                # Clear current task tracking for heartbeat (thread-safe)
+                with self._task_lock:
+                    self._current_task_id = None
                 # Cleanup temp directory
                 if temp_dir and temp_dir.exists():
                     shutil.rmtree(temp_dir, ignore_errors=True)
