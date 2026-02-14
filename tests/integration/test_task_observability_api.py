@@ -76,6 +76,13 @@ def _create_mock_job(
     job.retention_scope = "all"
     job.purge_after = None
     job.purged_at = None
+    # Result stats fields
+    job.audio_duration = None
+    job.result_language_code = None
+    job.result_word_count = None
+    job.result_segment_count = None
+    job.result_speaker_count = None
+    job.result_character_count = None
     return job
 
 
