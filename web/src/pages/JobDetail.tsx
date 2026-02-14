@@ -1,13 +1,13 @@
 import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft,
-  Clock,
   Globe,
   Users,
   FileText,
   Download,
   AlertCircle,
   Trash2,
+  Mic,
 } from 'lucide-react'
 import { useJob } from '@/hooks/useJob'
 import { useJobTasks } from '@/hooks/useJobTasks'
@@ -225,10 +225,10 @@ export function JobDetail() {
   }
 
   const formatDuration = (secs: number) => {
-    if (secs < 60) return `${secs}s`
+    if (secs < 60) return `${secs.toFixed(1)}s`
     const mins = Math.floor(secs / 60)
     const remainingSecs = secs % 60
-    return `${mins}m ${remainingSecs}s`
+    return `${mins}m ${remainingSecs.toFixed(1)}s`
   }
 
   return (
@@ -272,14 +272,19 @@ export function JobDetail() {
       {/* Metadata */}
       <div className="grid gap-4 md:grid-cols-6">
         <MetadataCard
-          icon={Clock}
+          icon={Mic}
           label="Audio"
           value={job.audio_duration_seconds ? formatDuration(job.audio_duration_seconds) : '-'}
         />
         <MetadataCard
           icon={Globe}
           label="Language"
-          value={job.result_language_code?.toUpperCase() || job.language_code?.toUpperCase() || 'Auto'}
+          value={
+            // Don't show detected language if transcript is empty (unreliable detection)
+            job.result_word_count
+              ? job.result_language_code?.toUpperCase() || 'Auto'
+              : job.status === 'completed' ? '-' : 'Auto'
+          }
         />
         <MetadataCard
           icon={FileText}

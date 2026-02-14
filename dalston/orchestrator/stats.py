@@ -39,9 +39,6 @@ def extract_stats_from_transcript(transcript: dict[str, Any]) -> JobResultStats:
     speakers = transcript.get("speakers", [])
     text = transcript.get("text", "")
 
-    # Extract language from metadata
-    language_code = metadata.get("language")
-
     # Count segments
     segment_count = len(segments)
 
@@ -53,6 +50,9 @@ def extract_stats_from_transcript(transcript: dict[str, Any]) -> JobResultStats:
 
     # Count characters (excluding leading/trailing whitespace)
     character_count = len(text.strip()) if text else 0
+
+    # Only extract language if transcript has content (empty transcripts have unreliable detection)
+    language_code = metadata.get("language") if word_count > 0 else None
 
     logger.debug(
         "extracted_job_stats",

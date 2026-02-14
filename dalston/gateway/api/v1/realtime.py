@@ -10,7 +10,9 @@ import asyncio
 import base64
 import binascii
 import json
+from dataclasses import dataclass
 from typing import Annotated
+from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
@@ -26,8 +28,48 @@ from dalston.gateway.middleware.auth import authenticate_websocket
 from dalston.gateway.services.auth import AuthService, Scope
 from dalston.gateway.services.enhancement import EnhancementService
 from dalston.gateway.services.realtime_sessions import RealtimeSessionService
+from dalston.gateway.services.retention import (
+    RetentionPolicyNotFoundError,
+    RetentionService,
+)
 
 logger = structlog.get_logger()
+
+
+@dataclass
+class ResolvedRetention:
+    """Resolved retention settings for a realtime session."""
+
+    policy_id: UUID
+    mode: str
+    hours: int | None
+
+
+def _resolve_realtime_retention(policy) -> ResolvedRetention:
+    """Extract realtime-specific retention settings from a policy.
+
+    The policy has realtime_mode which can be:
+    - "inherit": Use the batch mode/hours
+    - "auto_delete", "keep", "none": Use this mode with realtime_hours
+
+    Args:
+        policy: RetentionPolicyModel
+
+    Returns:
+        ResolvedRetention with the effective mode and hours
+    """
+    if policy.realtime_mode == "inherit":
+        return ResolvedRetention(
+            policy_id=policy.id,
+            mode=policy.mode,
+            hours=policy.hours,
+        )
+    else:
+        return ResolvedRetention(
+            policy_id=policy.id,
+            mode=policy.realtime_mode,
+            hours=policy.realtime_hours if policy.realtime_hours else policy.hours,
+        )
 
 
 async def _get_auth_service() -> tuple[AuthService, any]:
@@ -79,6 +121,12 @@ async def realtime_transcription(
     ] = False,
     resume_session_id: Annotated[
         str | None, Query(description="Link to previous session for resume")
+    ] = None,
+    retention_policy: Annotated[
+        str | None,
+        Query(
+            description="Retention policy name (e.g., 'default', 'zero-retention', 'keep')"
+        ),
     ] = None,
 ):
     """WebSocket endpoint for real-time streaming transcription.
@@ -161,6 +209,31 @@ async def realtime_transcription(
     # Get client IP for logging
     client_ip = websocket.client.host if websocket.client else "unknown"
 
+    # Resolve retention policy (only matters if storing artifacts)
+    resolved_retention = None
+    if store_audio or store_transcript:
+        try:
+            db_gen_ret = _get_db()
+            db_ret = await db_gen_ret.__anext__()
+            try:
+                retention_service = RetentionService()
+                policy = await retention_service.resolve_policy(
+                    db_ret, api_key.tenant_id, retention_policy
+                )
+                resolved_retention = _resolve_realtime_retention(policy)
+            finally:
+                await db_gen_ret.aclose()
+        except RetentionPolicyNotFoundError as e:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "invalid_retention_policy",
+                    "message": str(e),
+                }
+            )
+            await websocket.close(code=4400, reason="Invalid retention policy")
+            return
+
     # Acquire worker from Session Router (use alias for matching)
     allocation = await session_router.acquire_worker(
         language=language,
@@ -235,6 +308,15 @@ async def realtime_transcription(
                 store_transcript=store_transcript,
                 enhance_on_end=enhance_on_end,
                 previous_session_id=previous_session_uuid,
+                retention_policy_id=resolved_retention.policy_id
+                if resolved_retention
+                else None,
+                retention_mode=resolved_retention.mode
+                if resolved_retention
+                else "auto_delete",
+                retention_hours=resolved_retention.hours
+                if resolved_retention
+                else None,
             )
         except Exception as e:
             log.warning("session_db_create_failed", error=str(e))

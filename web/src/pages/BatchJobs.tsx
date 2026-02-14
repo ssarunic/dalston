@@ -185,7 +185,7 @@ export function BatchJobs() {
                       {formatDuration(job.audio_duration_seconds)}
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
-                      {job.result_language_code?.toUpperCase() || '-'}
+                      {job.result_word_count ? job.result_language_code?.toUpperCase() || '-' : '-'}
                     </TableCell>
                     <TableCell className="text-right text-muted-foreground text-sm">
                       {job.result_word_count?.toLocaleString() || '-'}

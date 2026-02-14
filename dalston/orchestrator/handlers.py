@@ -89,6 +89,19 @@ async def handle_job_created(
         log.info("job_already_cancelled_skipping_dag_build")
         return
 
+    # Idempotency check: skip if job already running (another orchestrator got it first)
+    if job.status == JobStatus.RUNNING.value:
+        log.info("job_already_running_skipping_dag_build")
+        return
+
+    # Double-check: verify no tasks exist yet (handles race condition)
+    existing_tasks = await db.execute(
+        select(TaskModel.id).where(TaskModel.job_id == job_id).limit(1)
+    )
+    if existing_tasks.scalar_one_or_none() is not None:
+        log.info("tasks_already_exist_skipping_dag_build")
+        return
+
     # 2. Build task DAG
     dag_start = time.perf_counter()
     tasks = build_task_dag(

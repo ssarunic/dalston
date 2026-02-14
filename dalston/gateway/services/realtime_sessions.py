@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -10,6 +10,7 @@ import structlog
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dalston.common.models import RetentionMode
 from dalston.common.utils import parse_session_id
 from dalston.db.models import RealtimeSessionModel
 
@@ -48,6 +49,10 @@ class RealtimeSessionService:
         store_transcript: bool = False,
         enhance_on_end: bool = False,
         previous_session_id: UUID | None = None,
+        # Retention fields (M25)
+        retention_policy_id: UUID | None = None,
+        retention_mode: str = "auto_delete",
+        retention_hours: int | None = None,
     ) -> RealtimeSessionModel:
         """Create a new session record in PostgreSQL.
 
@@ -65,6 +70,9 @@ class RealtimeSessionService:
             store_transcript: Whether to save transcript to S3
             enhance_on_end: Whether to trigger batch enhancement
             previous_session_id: Previous session for resume linking
+            retention_policy_id: Reference to retention policy
+            retention_mode: Snapshotted mode (auto_delete, keep, none)
+            retention_hours: Snapshotted hours for auto_delete
 
         Returns:
             Created RealtimeSessionModel
@@ -88,6 +96,10 @@ class RealtimeSessionService:
             client_ip=client_ip,
             previous_session_id=previous_session_id,
             started_at=datetime.now(UTC),
+            # Retention fields
+            retention_policy_id=retention_policy_id,
+            retention_mode=retention_mode,
+            retention_hours=retention_hours,
         )
 
         self.db.add(session)
@@ -154,6 +166,11 @@ class RealtimeSessionService:
     ) -> RealtimeSessionModel | None:
         """Finalize a session on completion or error.
 
+        Computes purge_after based on session's retention settings:
+        - auto_delete: purge_after = ended_at + retention_hours
+        - none: purge_after = now (immediate purge)
+        - keep: purge_after stays NULL (never purge)
+
         Args:
             session_id: Session ID
             status: Final status (completed, error, interrupted)
@@ -170,9 +187,15 @@ class RealtimeSessionService:
         """
         session_uuid = self._parse_session_id(session_id)
 
+        # Fetch session to get retention settings
+        existing = await self.get_session(session_id)
+        if existing is None:
+            return None
+
+        ended_at = datetime.now(UTC)
         values = {
             "status": status,
-            "ended_at": datetime.now(UTC),
+            "ended_at": ended_at,
         }
 
         if audio_duration_seconds is not None:
@@ -190,6 +213,11 @@ class RealtimeSessionService:
         if error is not None:
             values["error"] = error
 
+        # Compute purge_after based on retention settings (M25)
+        purge_after = self._compute_purge_after(existing, ended_at)
+        if purge_after is not None:
+            values["purge_after"] = purge_after
+
         stmt = (
             update(RealtimeSessionModel)
             .where(RealtimeSessionModel.id == session_uuid)
@@ -206,9 +234,39 @@ class RealtimeSessionService:
                 session_id=session_id,
                 status=status,
                 audio_duration_seconds=audio_duration_seconds,
+                purge_after=purge_after.isoformat() if purge_after else None,
             )
 
         return session
+
+    def _compute_purge_after(
+        self,
+        session: RealtimeSessionModel,
+        ended_at: datetime,
+    ) -> datetime | None:
+        """Compute purge_after based on session's retention settings.
+
+        Args:
+            session: Session with retention settings
+            ended_at: When the session ended
+
+        Returns:
+            purge_after datetime, or None if should never be purged
+        """
+        # Only compute purge_after if session has stored artifacts
+        if not session.store_audio and not session.store_transcript:
+            return None
+
+        if session.retention_mode == RetentionMode.AUTO_DELETE.value:
+            if session.retention_hours:
+                return ended_at + timedelta(hours=session.retention_hours)
+            # No hours specified, use default (shouldn't happen with proper validation)
+            return None
+        elif session.retention_mode == RetentionMode.NONE.value:
+            # Immediate purge
+            return ended_at
+        # mode == "keep": never purge
+        return None
 
     async def get_session(self, session_id: str) -> RealtimeSessionModel | None:
         """Get session by ID.
