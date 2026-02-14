@@ -6,7 +6,12 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import typer
-from dalston_sdk import SpeakerDetection, TimestampGranularity
+from dalston_sdk import (
+    PIIDetectionTier,
+    PIIRedactionMode,
+    SpeakerDetection,
+    TimestampGranularity,
+)
 
 from dalston_cli.main import state
 from dalston_cli.output import (
@@ -19,6 +24,8 @@ from dalston_cli.output import (
 FormatType = Literal["txt", "json", "srt", "vtt"]
 SpeakerMode = Literal["none", "diarize", "per-channel"]
 TimestampMode = Literal["none", "segment", "word"]
+PIITier = Literal["fast", "standard", "thorough"]
+PIIRedactMode = Literal["silence", "beep"]
 
 
 def transcribe(
@@ -140,6 +147,42 @@ def transcribe(
             help="Retention policy name (e.g., 'short', 'long'). Uses tenant default if not specified.",
         ),
     ] = None,
+    # PII Detection Options
+    pii_detection: Annotated[
+        bool,
+        typer.Option(
+            "--pii/--no-pii",
+            help="Enable PII detection in transcript.",
+        ),
+    ] = False,
+    pii_tier: Annotated[
+        PIITier | None,
+        typer.Option(
+            "--pii-tier",
+            help="PII detection tier: fast (regex), standard (regex+ML), thorough (regex+ML+LLM).",
+        ),
+    ] = None,
+    pii_entities: Annotated[
+        str | None,
+        typer.Option(
+            "--pii-entities",
+            help="Comma-separated PII entity types to detect (e.g., 'ssn,credit_card_number,phone_number').",
+        ),
+    ] = None,
+    redact_audio: Annotated[
+        bool,
+        typer.Option(
+            "--redact-audio/--no-redact-audio",
+            help="Generate redacted audio file with PII removed.",
+        ),
+    ] = False,
+    redaction_mode: Annotated[
+        PIIRedactMode | None,
+        typer.Option(
+            "--redaction-mode",
+            help="Audio redaction mode: silence or beep.",
+        ),
+    ] = None,
 ) -> None:
     """Transcribe audio files.
 
@@ -168,6 +211,10 @@ def transcribe(
         dalston transcribe audio.mp3 --show-words  # Display word-level timestamps
 
         dalston transcribe audio.mp3 --retention-policy short  # Use short retention policy
+
+        dalston transcribe call.mp3 --pii --pii-tier standard  # Detect PII entities
+
+        dalston transcribe call.mp3 --pii --redact-audio --redaction-mode beep  # Detect and redact PII
     """
     client = state.client
     quiet = state.quiet
@@ -187,6 +234,30 @@ def transcribe(
         "word": TimestampGranularity.WORD,
     }
     timestamps_granularity = timestamps_map[timestamps]
+
+    # Map PII detection tier
+    pii_detection_tier = None
+    if pii_tier:
+        pii_tier_map = {
+            "fast": PIIDetectionTier.FAST,
+            "standard": PIIDetectionTier.STANDARD,
+            "thorough": PIIDetectionTier.THOROUGH,
+        }
+        pii_detection_tier = pii_tier_map[pii_tier]
+
+    # Parse PII entity types
+    pii_entity_types = None
+    if pii_entities:
+        pii_entity_types = [e.strip() for e in pii_entities.split(",")]
+
+    # Map PII redaction mode
+    pii_redaction_mode = None
+    if redaction_mode:
+        redaction_mode_map = {
+            "silence": PIIRedactionMode.SILENCE,
+            "beep": PIIRedactionMode.BEEP,
+        }
+        pii_redaction_mode = redaction_mode_map[redaction_mode]
 
     # Determine output handling for multiple files
     output_path = str(output) if output else None
@@ -213,6 +284,11 @@ def transcribe(
                 max_speakers=max_speakers,
                 timestamps_granularity=timestamps_granularity,
                 retention_policy=retention_policy,
+                pii_detection=pii_detection,
+                pii_detection_tier=pii_detection_tier,
+                pii_entity_types=pii_entity_types,
+                redact_pii_audio=redact_audio,
+                pii_redaction_mode=pii_redaction_mode,
             )
 
             if not wait:

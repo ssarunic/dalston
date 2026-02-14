@@ -59,6 +59,30 @@ class ExportFormat(str, Enum):
     JSON = "json"
 
 
+class PIIDetectionTier(str, Enum):
+    """PII detection thoroughness level.
+
+    - FAST: Regex-only detection (fastest, lower recall)
+    - STANDARD: Regex + GLiNER ML model (balanced)
+    - THOROUGH: Regex + GLiNER + LLM verification (highest accuracy, slowest)
+    """
+
+    FAST = "fast"
+    STANDARD = "standard"
+    THOROUGH = "thorough"
+
+
+class PIIRedactionMode(str, Enum):
+    """Audio redaction mode for detected PII.
+
+    - SILENCE: Replace PII audio segments with silence
+    - BEEP: Replace PII audio segments with a beep tone
+    """
+
+    SILENCE = "silence"
+    BEEP = "beep"
+
+
 # -----------------------------------------------------------------------------
 # Transcript Data Types
 # -----------------------------------------------------------------------------

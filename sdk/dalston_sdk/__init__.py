@@ -65,6 +65,8 @@ from .types import (
     Model,
     ModelCapabilities,
     ModelList,
+    PIIDetectionTier,
+    PIIRedactionMode,
     RealtimeError,
     RealtimeMessage,
     RealtimeMessageType,
@@ -114,6 +116,8 @@ __all__ = [
     "SpeakerDetection",
     "TimestampGranularity",
     "ExportFormat",
+    "PIIDetectionTier",
+    "PIIRedactionMode",
     "RealtimeMessageType",
     "WebhookEventType",
     # Transcript types

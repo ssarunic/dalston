@@ -21,10 +21,10 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # Drop existing FK constraints
-    op.drop_constraint("fk_jobs_retention_policy_id", "jobs", type_="foreignkey")
+    # Drop existing FK constraints (using actual constraint names from database)
+    op.drop_constraint("jobs_retention_policy_id_fkey", "jobs", type_="foreignkey")
     op.drop_constraint(
-        "fk_realtime_sessions_retention_policy_id",
+        "realtime_sessions_retention_policy_id_fkey",
         "realtime_sessions",
         type_="foreignkey",
     )

@@ -38,6 +38,8 @@ from .types import (
     Model,
     ModelCapabilities,
     ModelList,
+    PIIDetectionTier,
+    PIIRedactionMode,
     RealtimeSessionInfo,
     RealtimeSessionList,
     RealtimeSessionStatus,
@@ -251,6 +253,11 @@ class Dalston:
         webhook_url: str | None = None,
         webhook_metadata: dict[str, Any] | None = None,
         retention_policy: str | None = None,
+        pii_detection: bool = False,
+        pii_detection_tier: PIIDetectionTier | str | None = None,
+        pii_entity_types: list[str] | None = None,
+        redact_pii_audio: bool = False,
+        pii_redaction_mode: PIIRedactionMode | str | None = None,
     ) -> Job:
         """Submit audio for transcription.
 
@@ -271,6 +278,12 @@ class Dalston:
             webhook_metadata: Custom data to include in webhook.
             retention_policy: Name of retention policy to apply (e.g., "short", "long").
                 If not specified, uses the tenant's default retention settings.
+            pii_detection: Enable PII detection in transcript.
+            pii_detection_tier: Detection thoroughness (fast, standard, thorough).
+            pii_entity_types: Specific entity types to detect (e.g., ["ssn", "credit_card_number"]).
+                If not specified, uses default entity types.
+            redact_pii_audio: Generate redacted audio file with PII removed.
+            pii_redaction_mode: Audio redaction mode (silence or beep).
 
         Returns:
             Job object with ID and initial status.
@@ -314,6 +327,28 @@ class Dalston:
             data["webhook_metadata"] = json.dumps(webhook_metadata)
         if retention_policy is not None:
             data["retention_policy"] = retention_policy
+
+        # PII detection parameters
+        if pii_detection:
+            data["pii_detection"] = True
+        if pii_detection_tier is not None:
+            data["pii_detection_tier"] = (
+                pii_detection_tier.value
+                if isinstance(pii_detection_tier, PIIDetectionTier)
+                else pii_detection_tier
+            )
+        if pii_entity_types is not None:
+            import json as json_mod
+
+            data["pii_entity_types"] = json_mod.dumps(pii_entity_types)
+        if redact_pii_audio:
+            data["redact_pii_audio"] = True
+        if pii_redaction_mode is not None:
+            data["pii_redaction_mode"] = (
+                pii_redaction_mode.value
+                if isinstance(pii_redaction_mode, PIIRedactionMode)
+                else pii_redaction_mode
+            )
 
         # Handle file upload
         files: dict[str, Any] | None = None
@@ -966,6 +1001,11 @@ class AsyncDalston:
         webhook_url: str | None = None,
         webhook_metadata: dict[str, Any] | None = None,
         retention_policy: str | None = None,
+        pii_detection: bool = False,
+        pii_detection_tier: PIIDetectionTier | str | None = None,
+        pii_entity_types: list[str] | None = None,
+        redact_pii_audio: bool = False,
+        pii_redaction_mode: PIIRedactionMode | str | None = None,
     ) -> Job:
         """Submit audio for transcription.
 
@@ -986,6 +1026,12 @@ class AsyncDalston:
             webhook_metadata: Custom data to include in webhook.
             retention_policy: Name of retention policy to apply (e.g., "short", "long").
                 If not specified, uses the tenant's default retention settings.
+            pii_detection: Enable PII detection in transcript.
+            pii_detection_tier: Detection thoroughness (fast, standard, thorough).
+            pii_entity_types: Specific entity types to detect (e.g., ["ssn", "credit_card_number"]).
+                If not specified, uses default entity types.
+            redact_pii_audio: Generate redacted audio file with PII removed.
+            pii_redaction_mode: Audio redaction mode (silence or beep).
 
         Returns:
             Job object with ID and initial status.
@@ -1025,6 +1071,28 @@ class AsyncDalston:
             data["webhook_metadata"] = json.dumps(webhook_metadata)
         if retention_policy is not None:
             data["retention_policy"] = retention_policy
+
+        # PII detection parameters
+        if pii_detection:
+            data["pii_detection"] = True
+        if pii_detection_tier is not None:
+            data["pii_detection_tier"] = (
+                pii_detection_tier.value
+                if isinstance(pii_detection_tier, PIIDetectionTier)
+                else pii_detection_tier
+            )
+        if pii_entity_types is not None:
+            import json as json_mod
+
+            data["pii_entity_types"] = json_mod.dumps(pii_entity_types)
+        if redact_pii_audio:
+            data["redact_pii_audio"] = True
+        if pii_redaction_mode is not None:
+            data["pii_redaction_mode"] = (
+                pii_redaction_mode.value
+                if isinstance(pii_redaction_mode, PIIRedactionMode)
+                else pii_redaction_mode
+            )
 
         # Handle file upload
         files: dict[str, Any] | None = None

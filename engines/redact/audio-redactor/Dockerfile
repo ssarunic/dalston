@@ -1,20 +1,24 @@
-FROM python:3.12-slim
+# Audio Redactor Engine
+#
+# Redacts PII audio segments using FFmpeg.
+# Supports silence and beep redaction modes.
+#
+# Build from repo root:
+#   docker compose build engine-audio-redactor
 
-WORKDIR /app
+FROM dalston/engine-base:latest
 
 # Install FFmpeg
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for caching
-COPY requirements.txt .
+# Copy engine files
+COPY engines/redact/audio-redactor/requirements.txt .
+COPY engines/redact/audio-redactor/engine.yaml .
+COPY engines/redact/audio-redactor/engine.py .
+
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy engine code
-COPY . .
-
-ENV ENGINE_ID=audio-redactor
-ENV PYTHONUNBUFFERED=1
 
 CMD ["python", "engine.py"]
