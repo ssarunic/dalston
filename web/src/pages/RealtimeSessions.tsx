@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Radio, Clock, MessageSquare, Mic, ExternalLink, Trash2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Radio, Clock, MessageSquare, Mic, Trash2 } from 'lucide-react'
 import { apiClient } from '@/api/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -59,6 +59,7 @@ function formatDate(dateStr: string): string {
 }
 
 export function RealtimeSessions() {
+  const navigate = useNavigate()
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const { data: statusData, isLoading: statusLoading, error: statusError } = useRealtimeStatus()
@@ -229,7 +230,11 @@ export function RealtimeSessions() {
               </TableHeader>
               <TableBody>
                 {sessionsData?.sessions.map((session) => (
-                  <TableRow key={session.id}>
+                  <TableRow
+                    key={session.id}
+                    className="cursor-pointer hover:bg-accent/50"
+                    onClick={() => navigate(`/realtime/sessions/${session.id}`)}
+                  >
                     <TableCell className="font-mono text-xs">
                       {session.id.slice(0, 12)}...
                     </TableCell>
@@ -277,24 +282,19 @@ export function RealtimeSessions() {
                       {formatDate(session.started_at)}
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Link
-                          to={`/realtime/sessions/${session.id}`}
-                          className="text-primary hover:underline"
+                      {session.status !== 'active' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDelete(session.id)
+                          }}
+                          disabled={deletingId === session.id}
+                          className="text-muted-foreground hover:text-destructive disabled:opacity-50"
+                          title="Delete session"
                         >
-                          <ExternalLink className="h-4 w-4" />
-                        </Link>
-                        {session.status !== 'active' && (
-                          <button
-                            onClick={() => handleDelete(session.id)}
-                            disabled={deletingId === session.id}
-                            className="text-muted-foreground hover:text-destructive disabled:opacity-50"
-                            title="Delete session"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

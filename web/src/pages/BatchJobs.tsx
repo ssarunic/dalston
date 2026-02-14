@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Trash2, X } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useJobs } from '@/hooks/useJobs'
@@ -62,6 +62,7 @@ export function BatchJobs() {
   const [cancelError, setCancelError] = useState<string | null>(null)
   const [cancelSuccess, setCancelSuccess] = useState<string | null>(null)
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
 
   const { data, isLoading, error } = useJobs({
     limit: PAGE_SIZE,
@@ -169,14 +170,13 @@ export function BatchJobs() {
               </TableHeader>
               <TableBody>
                 {data?.jobs.map((job) => (
-                  <TableRow key={job.id}>
-                    <TableCell>
-                      <Link
-                        to={`/jobs/${job.id}`}
-                        className="font-mono text-sm hover:text-primary"
-                      >
-                        {job.id.slice(0, 12)}...
-                      </Link>
+                  <TableRow
+                    key={job.id}
+                    className="cursor-pointer hover:bg-accent/50"
+                    onClick={() => navigate(`/jobs/${job.id}`)}
+                  >
+                    <TableCell className="font-mono text-sm">
+                      {job.id.slice(0, 12)}...
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={job.status} />
@@ -195,18 +195,16 @@ export function BatchJobs() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <Link to={`/jobs/${job.id}`}>
-                          <Button variant="ghost" size="sm">
-                            View
-                          </Button>
-                        </Link>
                         <div className="w-8">
                           {CANCELLABLE_STATUSES.has(job.status as JobStatus) && (
                             <Button
                               variant="ghost"
                               size="sm"
                               className="text-amber-400 hover:text-amber-300 hover:bg-amber-950"
-                              onClick={() => setCancelTarget({ id: job.id })}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setCancelTarget({ id: job.id })
+                              }}
                               title="Cancel job"
                             >
                               <X className="h-4 w-4" />
@@ -219,7 +217,10 @@ export function BatchJobs() {
                               variant="ghost"
                               size="sm"
                               className="text-red-400 hover:text-red-300 hover:bg-red-950"
-                              onClick={() => setDeleteTarget({ id: job.id })}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setDeleteTarget({ id: job.id })
+                              }}
                               title="Delete job"
                             >
                               <Trash2 className="h-4 w-4" />

@@ -1,12 +1,11 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import {
   Webhook,
   Plus,
   Trash2,
   AlertCircle,
   RefreshCw,
-  ExternalLink,
   ToggleLeft,
   ToggleRight,
 } from 'lucide-react'
@@ -70,6 +69,7 @@ function truncateUrl(url: string, maxLength = 50): string {
 }
 
 export function Webhooks() {
+  const navigate = useNavigate()
   const [showInactive, setShowInactive] = useState(true)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [createdWebhook, setCreatedWebhook] = useState<WebhookEndpointCreated | null>(null)
@@ -185,7 +185,8 @@ export function Webhooks() {
                 {webhooks.map((webhook) => (
                   <TableRow
                     key={webhook.id}
-                    className={!webhook.is_active ? 'opacity-50' : undefined}
+                    className={`cursor-pointer hover:bg-accent/50 ${!webhook.is_active ? 'opacity-50' : ''}`}
+                    onClick={() => navigate(`/webhooks/${webhook.id}`)}
                   >
                     <TableCell>
                       <div className="flex flex-col">
@@ -236,7 +237,10 @@ export function Webhooks() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleToggleActive(webhook)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleToggleActive(webhook)
+                          }}
                           title={webhook.is_active ? 'Deactivate' : 'Activate'}
                           disabled={updateWebhook.isPending}
                         >
@@ -249,21 +253,22 @@ export function Webhooks() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleRotateSecret(webhook)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleRotateSecret(webhook)
+                          }}
                           title="Rotate secret"
                           disabled={rotateSecret.isPending}
                         >
                           <RefreshCw className="h-4 w-4" />
                         </Button>
-                        <Link to={`/webhooks/${webhook.id}`}>
-                          <Button variant="ghost" size="sm" title="View deliveries">
-                            <ExternalLink className="h-4 w-4" />
-                          </Button>
-                        </Link>
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => setDeleteConfirm(webhook)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setDeleteConfirm(webhook)
+                          }}
                           title="Delete"
                           className="text-destructive hover:text-destructive"
                         >
