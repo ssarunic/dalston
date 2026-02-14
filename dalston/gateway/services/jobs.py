@@ -135,41 +135,68 @@ class JobsService:
         db: AsyncSession,
         tenant_id: UUID,
         limit: int = 20,
-        offset: int = 0,
+        cursor: str | None = None,
         status: JobStatus | None = None,
-    ) -> tuple[list[JobModel], int]:
-        """List jobs for a tenant with pagination.
+    ) -> tuple[list[JobModel], bool]:
+        """List jobs for a tenant with cursor-based pagination.
 
         Args:
             db: Database session
             tenant_id: Tenant UUID for isolation
             limit: Maximum number of results
-            offset: Number of results to skip
+            cursor: Pagination cursor (format: created_at_iso:job_id)
             status: Optional status filter
 
         Returns:
-            Tuple of (jobs list, total count)
+            Tuple of (jobs list, has_more flag)
         """
         # Base query with tenant filter
-        base_query = select(JobModel).where(JobModel.tenant_id == tenant_id)
+        query = select(JobModel).where(JobModel.tenant_id == tenant_id)
 
         # Optional status filter
         if status is not None:
-            base_query = base_query.where(JobModel.status == status.value)
+            query = query.where(JobModel.status == status.value)
 
-        # Count total
-        count_query = select(func.count()).select_from(base_query.subquery())
-        total_result = await db.execute(count_query)
-        total = total_result.scalar_one()
+        # Apply cursor filter if provided
+        if cursor:
+            cursor_created_at, cursor_id = self._decode_job_cursor(cursor)
+            # Use composite cursor: created_at DESC, id DESC
+            query = query.where(
+                (JobModel.created_at < cursor_created_at)
+                | (
+                    (JobModel.created_at == cursor_created_at)
+                    & (JobModel.id < cursor_id)
+                )
+            )
 
-        # Fetch paginated results, ordered by created_at descending
-        query = (
-            base_query.order_by(JobModel.created_at.desc()).limit(limit).offset(offset)
+        # Fetch limit + 1 to determine has_more
+        query = query.order_by(JobModel.created_at.desc(), JobModel.id.desc()).limit(
+            limit + 1
         )
+
         result = await db.execute(query)
         jobs = list(result.scalars().all())
 
-        return jobs, total
+        # Check if there are more results
+        has_more = len(jobs) > limit
+        if has_more:
+            jobs = jobs[:limit]
+
+        return jobs, has_more
+
+    def encode_job_cursor(self, job: JobModel) -> str:
+        """Encode a job into a pagination cursor."""
+        return f"{job.created_at.isoformat()}:{job.id}"
+
+    def _decode_job_cursor(self, cursor: str) -> tuple[datetime, UUID]:
+        """Decode a pagination cursor into (created_at, id)."""
+        parts = cursor.rsplit(":", 1)
+        if len(parts) != 2:
+            raise ValueError("Invalid cursor format")
+        created_at_str, id_str = parts
+        created_at = datetime.fromisoformat(created_at_str)
+        job_id = UUID(id_str)
+        return created_at, job_id
 
     # Terminal states where deletion is allowed
     TERMINAL_STATES = {

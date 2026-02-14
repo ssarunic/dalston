@@ -146,12 +146,11 @@ class JobSummary:
 
 @dataclass
 class JobList:
-    """Paginated list of jobs."""
+    """Paginated list of jobs with cursor-based pagination."""
 
     jobs: list[JobSummary]
-    total: int
-    limit: int
-    offset: int
+    cursor: str | None
+    has_more: bool
 
 
 # -----------------------------------------------------------------------------
@@ -357,12 +356,11 @@ class RealtimeSessionInfo:
 
 @dataclass
 class RealtimeSessionList:
-    """Paginated list of realtime sessions."""
+    """Paginated list of realtime sessions with cursor-based pagination."""
 
     sessions: list[RealtimeSessionInfo]
-    total: int
-    limit: int
-    offset: int
+    cursor: str | None
+    has_more: bool
 
 
 # -----------------------------------------------------------------------------

@@ -196,7 +196,7 @@ class TestDalston:
         """Test list_jobs."""
         httpx_mock.add_response(
             method="GET",
-            url="http://test/v1/audio/transcriptions?limit=20&offset=0",
+            url="http://test/v1/audio/transcriptions?limit=20",
             json={
                 "jobs": [
                     {
@@ -211,9 +211,8 @@ class TestDalston:
                         "progress": 50,
                     },
                 ],
-                "total": 2,
-                "limit": 20,
-                "offset": 0,
+                "cursor": None,
+                "has_more": False,
             },
         )
 
@@ -221,7 +220,7 @@ class TestDalston:
 
         assert isinstance(result, JobList)
         assert len(result.jobs) == 2
-        assert result.total == 2
+        assert result.has_more is False
         assert result.jobs[0].status == JobStatus.COMPLETED
         assert result.jobs[1].status == JobStatus.RUNNING
         assert result.jobs[1].progress == 50
@@ -230,7 +229,7 @@ class TestDalston:
         """Test list_jobs with status filter."""
         httpx_mock.add_response(
             method="GET",
-            url="http://test/v1/audio/transcriptions?limit=10&offset=0&status=completed",
+            url="http://test/v1/audio/transcriptions?limit=10&status=completed",
             json={
                 "jobs": [
                     {
@@ -239,9 +238,8 @@ class TestDalston:
                         "created_at": "2024-01-01T00:00:00Z",
                     },
                 ],
-                "total": 1,
-                "limit": 10,
-                "offset": 0,
+                "cursor": None,
+                "has_more": False,
             },
         )
 
@@ -368,10 +366,10 @@ class TestAsyncDalston:
         """Test async context manager."""
         httpx_mock.add_response(
             method="GET",
-            url="http://test/v1/audio/transcriptions?limit=20&offset=0",
-            json={"jobs": [], "total": 0, "limit": 20, "offset": 0},
+            url="http://test/v1/audio/transcriptions?limit=20",
+            json={"jobs": [], "cursor": None, "has_more": False},
         )
 
         async with AsyncDalston(base_url="http://test") as client:
             result = await client.list_jobs()
-            assert result.total == 0
+            assert result.has_more is False

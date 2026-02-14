@@ -414,23 +414,30 @@ async def get_transcription(
     "",
     response_model=JobListResponse,
     summary="List transcription jobs",
-    description="List transcription jobs with pagination and optional status filter.",
+    description="List transcription jobs with cursor-based pagination and optional status filter.",
 )
 async def list_transcriptions(
     api_key: RequireJobsRead,
     limit: Annotated[int, Query(ge=1, le=100, description="Max results")] = 20,
-    offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
+    cursor: Annotated[
+        str | None, Query(description="Pagination cursor from previous response")
+    ] = None,
     status: Annotated[JobStatus | None, Query(description="Filter by status")] = None,
     db: AsyncSession = Depends(get_db),
     jobs_service: JobsService = Depends(get_jobs_service),
 ) -> JobListResponse:
-    """List jobs for the current tenant with pagination."""
-    jobs, total = await jobs_service.list_jobs(
+    """List jobs for the current tenant with cursor-based pagination."""
+    jobs, has_more = await jobs_service.list_jobs(
         db=db,
         tenant_id=api_key.tenant_id,
         limit=limit,
-        offset=offset,
+        cursor=cursor,
         status=status,
+    )
+
+    # Compute next cursor from last job
+    next_cursor = (
+        jobs_service.encode_job_cursor(jobs[-1]) if jobs and has_more else None
     )
 
     return JobListResponse(
@@ -449,9 +456,8 @@ async def list_transcriptions(
             )
             for job in jobs
         ],
-        total=total,
-        limit=limit,
-        offset=offset,
+        cursor=next_cursor,
+        has_more=has_more,
     )
 
 

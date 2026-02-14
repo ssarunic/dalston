@@ -381,20 +381,22 @@ class Dalston:
     def list_jobs(
         self,
         limit: int = 20,
-        offset: int = 0,
+        cursor: str | None = None,
         status: JobStatus | str | None = None,
     ) -> JobList:
         """List transcription jobs.
 
         Args:
             limit: Maximum number of jobs to return (1-100).
-            offset: Pagination offset.
+            cursor: Pagination cursor from previous response.
             status: Filter by job status.
 
         Returns:
             JobList with jobs and pagination info.
         """
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        params: dict[str, Any] = {"limit": limit}
+        if cursor is not None:
+            params["cursor"] = cursor
         if status is not None:
             params["status"] = status.value if isinstance(status, JobStatus) else status
 
@@ -425,9 +427,8 @@ class Dalston:
                 )
                 for j in data["jobs"]
             ],
-            total=data["total"],
-            limit=data["limit"],
-            offset=data["offset"],
+            cursor=data.get("cursor"),
+            has_more=data.get("has_more", False),
         )
 
     def cancel(self, job_id: UUID | str) -> Job:
@@ -758,19 +759,21 @@ class Dalston:
         self,
         status: RealtimeSessionStatus | str | None = None,
         limit: int = 50,
-        offset: int = 0,
+        cursor: str | None = None,
     ) -> RealtimeSessionList:
         """List realtime transcription sessions.
 
         Args:
             status: Filter by session status.
             limit: Maximum number of sessions to return (1-100).
-            offset: Pagination offset.
+            cursor: Pagination cursor from previous response.
 
         Returns:
             RealtimeSessionList with sessions and pagination info.
         """
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        params: dict[str, Any] = {"limit": limit}
+        if cursor is not None:
+            params["cursor"] = cursor
         if status is not None:
             params["status"] = (
                 status.value if isinstance(status, RealtimeSessionStatus) else status
@@ -810,9 +813,8 @@ class Dalston:
                 )
                 for s in data["sessions"]
             ],
-            total=data["total"],
-            limit=data["limit"],
-            offset=data["offset"],
+            cursor=data.get("cursor"),
+            has_more=data.get("has_more", False),
         )
 
     def get_realtime_session(self, session_id: str) -> RealtimeSessionInfo:
@@ -1086,20 +1088,22 @@ class AsyncDalston:
     async def list_jobs(
         self,
         limit: int = 20,
-        offset: int = 0,
+        cursor: str | None = None,
         status: JobStatus | str | None = None,
     ) -> JobList:
         """List transcription jobs.
 
         Args:
             limit: Maximum number of jobs to return (1-100).
-            offset: Pagination offset.
+            cursor: Pagination cursor from previous response.
             status: Filter by job status.
 
         Returns:
             JobList with jobs and pagination info.
         """
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        params: dict[str, Any] = {"limit": limit}
+        if cursor is not None:
+            params["cursor"] = cursor
         if status is not None:
             params["status"] = status.value if isinstance(status, JobStatus) else status
 
@@ -1130,9 +1134,8 @@ class AsyncDalston:
                 )
                 for j in data["jobs"]
             ],
-            total=data["total"],
-            limit=data["limit"],
-            offset=data["offset"],
+            cursor=data.get("cursor"),
+            has_more=data.get("has_more", False),
         )
 
     async def cancel(self, job_id: UUID | str) -> Job:
@@ -1457,19 +1460,21 @@ class AsyncDalston:
         self,
         status: RealtimeSessionStatus | str | None = None,
         limit: int = 50,
-        offset: int = 0,
+        cursor: str | None = None,
     ) -> RealtimeSessionList:
         """List realtime transcription sessions.
 
         Args:
             status: Filter by session status.
             limit: Maximum number of sessions to return (1-100).
-            offset: Pagination offset.
+            cursor: Pagination cursor from previous response.
 
         Returns:
             RealtimeSessionList with sessions and pagination info.
         """
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        params: dict[str, Any] = {"limit": limit}
+        if cursor is not None:
+            params["cursor"] = cursor
         if status is not None:
             params["status"] = (
                 status.value if isinstance(status, RealtimeSessionStatus) else status
@@ -1509,9 +1514,8 @@ class AsyncDalston:
                 )
                 for s in data["sessions"]
             ],
-            total=data["total"],
-            limit=data["limit"],
-            offset=data["offset"],
+            cursor=data.get("cursor"),
+            has_more=data.get("has_more", False),
         )
 
     async def get_realtime_session(self, session_id: str) -> RealtimeSessionInfo:

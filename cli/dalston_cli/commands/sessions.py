@@ -86,11 +86,11 @@ def list_sessions(
                 }
                 for s in result.sessions
             ]
-            print(json.dumps({"sessions": sessions_data, "total": result.total}))
+            print(json.dumps({"sessions": sessions_data, "has_more": result.has_more}))
         else:
             from rich.table import Table
 
-            table = Table(title=f"Realtime Sessions ({result.total} total)")
+            table = Table(title="Realtime Sessions")
             table.add_column("ID", style="cyan", no_wrap=True)
             table.add_column("Status")
             table.add_column("Model")
