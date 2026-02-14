@@ -4,6 +4,7 @@ import { Radio, MessageSquare, Mic, Trash2, RefreshCw } from 'lucide-react'
 import { apiClient } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -64,7 +65,9 @@ const PAGE_SIZE = 50
 export function RealtimeSessions() {
   const navigate = useNavigate()
   const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string } | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [cursor, setCursor] = useState<string | undefined>(undefined)
   const [allSessions, setAllSessions] = useState<RealtimeSessionSummary[]>([])
   const { data: statusData, isLoading: statusLoading, error: statusError } = useRealtimeStatus()
@@ -106,22 +109,23 @@ export function RealtimeSessions() {
     refetch()
   }
 
-  const handleDelete = async (sessionId: string) => {
-    if (!confirm('Are you sure you want to delete this session?')) {
-      return
-    }
-    setDeletingId(sessionId)
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    setIsDeleting(true)
+    setDeleteError(null)
     try {
-      await apiClient.deleteRealtimeSession(sessionId)
+      await apiClient.deleteRealtimeSession(deleteTarget.id)
+      setDeleteTarget(null)
       // Reset and refetch to get fresh data
       setCursor(undefined)
       setAllSessions([])
       refetch()
     } catch (error) {
-      console.error('Failed to delete session:', error)
-      alert('Failed to delete session')
+      const message =
+        error instanceof Error ? error.message : 'Failed to delete session'
+      setDeleteError(message)
     } finally {
-      setDeletingId(null)
+      setIsDeleting(false)
     }
   }
 
@@ -333,9 +337,8 @@ export function RealtimeSessions() {
                           className="text-red-400 hover:text-red-300 hover:bg-red-950"
                           onClick={(e) => {
                             e.stopPropagation()
-                            handleDelete(session.id)
+                            setDeleteTarget({ id: session.id })
                           }}
-                          disabled={deletingId === session.id}
                           title="Delete session"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -365,6 +368,50 @@ export function RealtimeSessions() {
           )}
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) { setDeleteTarget(null); setDeleteError(null) } }}>
+        <DialogContent>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Delete Session</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                This will permanently delete the session and all its stored data
+                (audio, transcripts). This action cannot be undone.
+              </p>
+              {deleteTarget && (
+                <p className="text-sm font-mono text-muted-foreground">
+                  {deleteTarget.id}
+                </p>
+              )}
+              {deleteError && (
+                <p className="text-sm text-red-400">{deleteError}</p>
+              )}
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { setDeleteTarget(null); setDeleteError(null) }}
+                  disabled={isDeleting}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="bg-red-600 hover:bg-red-700"
+                  onClick={handleDelete}
+                  disabled={isDeleting}
+                >
+                  {isDeleting ? 'Deleting...' : 'Delete'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
