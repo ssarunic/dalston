@@ -164,6 +164,8 @@ services:
       dockerfile: docker/Dockerfile.gateway
     ports:
       - "8000:8000"
+    profiles:
+      - prod
     environment:
       - DATABASE_URL=postgresql+asyncpg://dalston:${POSTGRES_PASSWORD:-password}@postgres:5432/dalston
       - REDIS_URL=redis://redis:6379
@@ -196,6 +198,8 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.orchestrator
+    profiles:
+      - prod
     environment:
       - DATABASE_URL=postgresql+asyncpg://dalston:${POSTGRES_PASSWORD:-password}@postgres:5432/dalston
       - REDIS_URL=redis://redis:6379

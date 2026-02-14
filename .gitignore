@@ -28,5 +28,9 @@ ENV/
 htmlcov/
 .pytest_cache/
 
+# Playwright MCP
+.playwright-output/
+.playwright-mcp/
+
 # OS
 Thumbs.db
