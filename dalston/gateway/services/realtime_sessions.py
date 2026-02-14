@@ -291,9 +291,9 @@ class RealtimeSessionService:
         since: datetime | None = None,
         until: datetime | None = None,
         limit: int = 50,
-        offset: int = 0,
-    ) -> tuple[list[RealtimeSessionModel], int]:
-        """List sessions for a tenant with optional filters.
+        cursor: str | None = None,
+    ) -> tuple[list[RealtimeSessionModel], bool]:
+        """List sessions for a tenant with optional filters and cursor pagination.
 
         Args:
             tenant_id: Tenant UUID
@@ -301,10 +301,10 @@ class RealtimeSessionService:
             since: Filter sessions started after this time
             until: Filter sessions started before this time
             limit: Max results
-            offset: Pagination offset
+            cursor: Pagination cursor (format: started_at_iso:session_id)
 
         Returns:
-            Tuple of (sessions, total_count)
+            Tuple of (sessions, has_more)
         """
         # Build base query
         stmt = select(RealtimeSessionModel).where(
@@ -318,20 +318,50 @@ class RealtimeSessionService:
         if until:
             stmt = stmt.where(RealtimeSessionModel.started_at <= until)
 
-        # Get total count
-        from sqlalchemy import func as sa_func
+        # Apply cursor filter (sessions older than cursor)
+        if cursor:
+            decoded = self._decode_session_cursor(cursor)
+            if decoded:
+                cursor_started_at, cursor_id = decoded
+                # Get sessions started before cursor OR same time but with smaller ID
+                stmt = stmt.where(
+                    (RealtimeSessionModel.started_at < cursor_started_at)
+                    | (
+                        (RealtimeSessionModel.started_at == cursor_started_at)
+                        & (RealtimeSessionModel.id < cursor_id)
+                    )
+                )
 
-        count_stmt = select(sa_func.count()).select_from(stmt.subquery())
-        total = (await self.db.execute(count_stmt)).scalar() or 0
-
-        # Apply pagination and ordering
-        stmt = stmt.order_by(RealtimeSessionModel.started_at.desc())
-        stmt = stmt.offset(offset).limit(limit)
+        # Fetch limit + 1 to determine has_more, order by started_at descending
+        stmt = stmt.order_by(
+            RealtimeSessionModel.started_at.desc(),
+            RealtimeSessionModel.id.desc(),
+        ).limit(limit + 1)
 
         result = await self.db.execute(stmt)
         sessions = list(result.scalars().all())
 
-        return sessions, total
+        has_more = len(sessions) > limit
+        if has_more:
+            sessions = sessions[:limit]
+
+        return sessions, has_more
+
+    def encode_session_cursor(self, session: RealtimeSessionModel) -> str:
+        """Encode a cursor from a session's started_at and id."""
+        return f"{session.started_at.isoformat()}:{session.id}"
+
+    def _decode_session_cursor(self, cursor: str) -> tuple[datetime, UUID] | None:
+        """Decode a cursor into started_at and id."""
+        try:
+            parts = cursor.rsplit(":", 1)
+            if len(parts) != 2:
+                return None
+            started_at = datetime.fromisoformat(parts[0])
+            session_id = UUID(parts[1])
+            return started_at, session_id
+        except (ValueError, TypeError):
+            return None
 
     async def delete_session(
         self,

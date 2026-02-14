@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -24,6 +24,8 @@ import {
 } from '@/components/ui/table'
 import { useWebhooks, useWebhookDeliveries, useRetryDelivery } from '@/hooks/useWebhooks'
 import type { WebhookDelivery } from '@/api/types'
+
+const PAGE_SIZE = 20
 
 const STATUS_CONFIG: Record<
   string,
@@ -69,20 +71,54 @@ function formatDateTime(dateStr: string): string {
 export function WebhookDetail() {
   const { endpointId } = useParams<{ endpointId: string }>()
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
-  const [page, setPage] = useState(0)
-  const limit = 20
+  const [cursor, setCursor] = useState<string | undefined>(undefined)
+  const [allDeliveries, setAllDeliveries] = useState<WebhookDelivery[]>([])
 
   const { data: webhooksData, isLoading: webhooksLoading } = useWebhooks()
   const {
     data: deliveriesData,
     isLoading: deliveriesLoading,
+    isFetching,
     error: deliveriesError,
+    refetch,
   } = useWebhookDeliveries(endpointId!, {
     status: statusFilter,
-    limit,
-    offset: page * limit,
+    limit: PAGE_SIZE,
+    cursor,
   })
   const retryDelivery = useRetryDelivery()
+
+  // Accumulate deliveries when data changes (intentional pattern for cursor pagination)
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (deliveriesData?.deliveries) {
+      if (cursor === undefined) {
+        setAllDeliveries(() => deliveriesData.deliveries)
+      } else {
+        setAllDeliveries((prev) => [...prev, ...deliveriesData.deliveries])
+      }
+    }
+  }, [deliveriesData, cursor])
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Reset pagination when filter changes
+  const handleFilterChange = useCallback((value: string | undefined) => {
+    setStatusFilter(value)
+    setCursor(undefined)
+    setAllDeliveries([])
+  }, [])
+
+  const loadMore = () => {
+    if (deliveriesData?.has_more && deliveriesData?.cursor) {
+      setCursor(deliveriesData.cursor)
+    }
+  }
+
+  const handleRefresh = () => {
+    setCursor(undefined)
+    setAllDeliveries([])
+    refetch()
+  }
 
   // Find the webhook endpoint from the list
   const webhook = webhooksData?.endpoints.find((e) => e.id === endpointId)
@@ -94,14 +130,14 @@ export function WebhookDetail() {
         endpointId,
         deliveryId: delivery.id,
       })
+      // Reset and refetch after retry
+      setCursor(undefined)
+      setAllDeliveries([])
+      refetch()
     } catch (err) {
       console.error('Failed to retry delivery:', err)
     }
   }
-
-  const deliveries = deliveriesData?.deliveries ?? []
-  const total = deliveriesData?.total ?? 0
-  const totalPages = Math.ceil(total / limit)
 
   if (webhooksLoading) {
     return (
@@ -219,10 +255,7 @@ export function WebhookDetail() {
           <div className="flex items-center gap-2">
             <select
               value={statusFilter || ''}
-              onChange={(e) => {
-                setStatusFilter(e.target.value || undefined)
-                setPage(0)
-              }}
+              onChange={(e) => handleFilterChange(e.target.value || undefined)}
               className="px-3 py-1.5 text-sm rounded-md border border-input bg-background"
             >
               <option value="">All statuses</option>
@@ -230,10 +263,18 @@ export function WebhookDetail() {
               <option value="success">Success</option>
               <option value="failed">Failed</option>
             </select>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isFetching}
+            >
+              <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
+            </Button>
           </div>
         </CardHeader>
         <CardContent>
-          {deliveriesLoading ? (
+          {deliveriesLoading && cursor === undefined ? (
             <div className="space-y-3">
               {[...Array(5)].map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
@@ -244,7 +285,7 @@ export function WebhookDetail() {
               <AlertCircle className="h-4 w-4" />
               <span>Failed to load deliveries</span>
             </div>
-          ) : deliveries.length === 0 ? (
+          ) : allDeliveries.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Clock className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No deliveries yet</p>
@@ -267,7 +308,7 @@ export function WebhookDetail() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {deliveries.map((delivery) => (
+                  {allDeliveries.map((delivery) => (
                     <TableRow key={delivery.id}>
                       <TableCell>
                         <Badge variant="outline" className="text-xs">
@@ -334,29 +375,20 @@ export function WebhookDetail() {
               </Table>
 
               {/* Pagination */}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between mt-4 pt-4 border-t">
+              {allDeliveries.length > 0 && (
+                <div className="flex flex-col items-center gap-3 pt-4 mt-4 border-t">
                   <p className="text-sm text-muted-foreground">
-                    Showing {page * limit + 1}-{Math.min((page + 1) * limit, total)} of {total}
+                    Showing {allDeliveries.length} deliveries
                   </p>
-                  <div className="flex items-center gap-2">
+                  {deliveriesData?.has_more && (
                     <Button
                       variant="outline"
-                      size="sm"
-                      onClick={() => setPage(page - 1)}
-                      disabled={page === 0}
+                      onClick={loadMore}
+                      disabled={isFetching}
                     >
-                      Previous
+                      {isFetching ? 'Loading...' : 'Load More'}
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPage(page + 1)}
-                      disabled={page >= totalPages - 1}
-                    >
-                      Next
-                    </Button>
-                  </div>
+                  )}
                 </div>
               )}
             </>

@@ -8,7 +8,7 @@ import secrets
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.db.models import WebhookDeliveryModel, WebhookEndpointModel
@@ -250,9 +250,9 @@ class WebhookEndpointService:
         tenant_id: UUID,
         status: str | None = None,
         limit: int = 20,
-        offset: int = 0,
-    ) -> tuple[list[WebhookDeliveryModel], int]:
-        """List delivery attempts for an endpoint.
+        cursor: str | None = None,
+    ) -> tuple[list[WebhookDeliveryModel], bool]:
+        """List delivery attempts for an endpoint with cursor-based pagination.
 
         Args:
             db: Database session
@@ -260,15 +260,15 @@ class WebhookEndpointService:
             tenant_id: Tenant UUID for isolation check
             status: Optional filter by status
             limit: Max results to return
-            offset: Pagination offset
+            cursor: Pagination cursor (format: created_at_iso:delivery_id)
 
         Returns:
-            Tuple of (deliveries list, total count)
+            Tuple of (deliveries list, has_more)
         """
         # Verify endpoint belongs to tenant
         endpoint = await self.get_endpoint(db, endpoint_id, tenant_id)
         if endpoint is None:
-            return [], 0
+            return [], False
 
         # Build query
         query = select(WebhookDeliveryModel).where(
@@ -277,18 +277,50 @@ class WebhookEndpointService:
         if status is not None:
             query = query.where(WebhookDeliveryModel.status == status)
 
-        # Get total count
-        count_query = select(func.count()).select_from(query.subquery())
-        count_result = await db.execute(count_query)
-        total = count_result.scalar() or 0
+        # Apply cursor filter (deliveries older than cursor)
+        if cursor:
+            decoded = self._decode_delivery_cursor(cursor)
+            if decoded:
+                cursor_created_at, cursor_id = decoded
+                # Get deliveries created before cursor OR same time but with smaller ID
+                query = query.where(
+                    (WebhookDeliveryModel.created_at < cursor_created_at)
+                    | (
+                        (WebhookDeliveryModel.created_at == cursor_created_at)
+                        & (WebhookDeliveryModel.id < cursor_id)
+                    )
+                )
 
-        # Get paginated results
-        query = query.order_by(WebhookDeliveryModel.created_at.desc())
-        query = query.limit(limit).offset(offset)
+        # Fetch limit + 1 to determine has_more, order by created_at descending
+        query = query.order_by(
+            WebhookDeliveryModel.created_at.desc(),
+            WebhookDeliveryModel.id.desc(),
+        ).limit(limit + 1)
+
         result = await db.execute(query)
         deliveries = list(result.scalars().all())
 
-        return deliveries, total
+        has_more = len(deliveries) > limit
+        if has_more:
+            deliveries = deliveries[:limit]
+
+        return deliveries, has_more
+
+    def encode_delivery_cursor(self, delivery: WebhookDeliveryModel) -> str:
+        """Encode a cursor from a delivery's created_at and id."""
+        return f"{delivery.created_at.isoformat()}:{delivery.id}"
+
+    def _decode_delivery_cursor(self, cursor: str) -> tuple[datetime, UUID] | None:
+        """Decode a cursor into created_at and id."""
+        try:
+            parts = cursor.rsplit(":", 1)
+            if len(parts) != 2:
+                return None
+            created_at = datetime.fromisoformat(parts[0])
+            delivery_id = UUID(parts[1])
+            return created_at, delivery_id
+        except (ValueError, TypeError):
+            return None
 
     async def retry_delivery(
         self,

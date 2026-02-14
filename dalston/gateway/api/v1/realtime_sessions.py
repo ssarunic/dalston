@@ -92,9 +92,8 @@ class SessionsListResponse(BaseModel):
     """List of sessions."""
 
     sessions: list[SessionSummary]
-    total: int
-    limit: int
-    offset: int
+    cursor: str | None
+    has_more: bool
 
 
 class EnhancementStatusResponse(BaseModel):
@@ -130,7 +129,9 @@ async def list_realtime_sessions(
         str | None, Query(description="Sessions started before (ISO 8601)")
     ] = None,
     limit: Annotated[int, Query(ge=1, le=100, description="Max results")] = 50,
-    offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
+    cursor: Annotated[
+        str | None, Query(description="Pagination cursor from previous response")
+    ] = None,
 ) -> SessionsListResponse:
     """List realtime sessions for the authenticated tenant."""
     # Parse datetime filters
@@ -154,13 +155,18 @@ async def list_realtime_sessions(
     settings = get_settings()
     service = RealtimeSessionService(db, settings)
 
-    sessions, total = await service.list_sessions(
+    sessions, has_more = await service.list_sessions(
         tenant_id=api_key.tenant_id,
         status=status,
         since=since_dt,
         until=until_dt,
         limit=limit,
-        offset=offset,
+        cursor=cursor,
+    )
+
+    # Compute next cursor from last session
+    next_cursor = (
+        service.encode_session_cursor(sessions[-1]) if sessions and has_more else None
     )
 
     return SessionsListResponse(
@@ -181,9 +187,8 @@ async def list_realtime_sessions(
             )
             for s in sessions
         ],
-        total=total,
-        limit=limit,
-        offset=offset,
+        cursor=next_cursor,
+        has_more=has_more,
     )
 
 

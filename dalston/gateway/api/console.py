@@ -528,9 +528,26 @@ class ConsoleJobListResponse(BaseModel):
     """Response for console job listing."""
 
     jobs: list[ConsoleJobSummary]
-    total: int
-    limit: int
-    offset: int
+    cursor: str | None
+    has_more: bool
+
+
+def _encode_job_cursor(job: JobModel) -> str:
+    """Encode a cursor from a job's created_at and id."""
+    return f"{job.created_at.isoformat()}:{job.id}"
+
+
+def _decode_job_cursor(cursor: str) -> tuple[datetime, UUID] | None:
+    """Decode a cursor into created_at and id."""
+    try:
+        parts = cursor.rsplit(":", 1)
+        if len(parts) != 2:
+            return None
+        created_at = datetime.fromisoformat(parts[0])
+        job_id = UUID(parts[1])
+        return created_at, job_id
+    except (ValueError, TypeError):
+        return None
 
 
 @router.get(
@@ -543,28 +560,44 @@ async def list_console_jobs(
     api_key: RequireAdmin,
     db: AsyncSession = Depends(get_db),
     limit: int = 20,
-    offset: int = 0,
+    cursor: str | None = None,
     status: str | None = None,
 ) -> ConsoleJobListResponse:
-    """List all jobs for console (admin view)."""
-    # Build query - no tenant filter for admin
-    query = select(JobModel).order_by(JobModel.created_at.desc())
+    """List all jobs for console (admin view) with cursor-based pagination."""
+    # Build base query - no tenant filter for admin
+    query = select(JobModel)
 
     # Optional status filter
     if status:
         query = query.where(JobModel.status == status)
 
-    # Get total count
-    count_query = select(func.count(JobModel.id))
-    if status:
-        count_query = count_query.where(JobModel.status == status)
-    total_result = await db.execute(count_query)
-    total = total_result.scalar() or 0
+    # Apply cursor filter (jobs older than cursor)
+    if cursor:
+        decoded = _decode_job_cursor(cursor)
+        if decoded:
+            cursor_created_at, cursor_id = decoded
+            # Get jobs created before the cursor OR same time but with smaller ID
+            query = query.where(
+                (JobModel.created_at < cursor_created_at)
+                | (
+                    (JobModel.created_at == cursor_created_at)
+                    & (JobModel.id < cursor_id)
+                )
+            )
 
-    # Apply pagination
-    query = query.limit(limit).offset(offset)
+    # Fetch limit + 1 to determine has_more
+    query = query.order_by(JobModel.created_at.desc(), JobModel.id.desc()).limit(
+        limit + 1
+    )
     result = await db.execute(query)
-    jobs = result.scalars().all()
+    jobs = list(result.scalars().all())
+
+    has_more = len(jobs) > limit
+    if has_more:
+        jobs = jobs[:limit]
+
+    # Next cursor is encoded from the last job
+    next_cursor = _encode_job_cursor(jobs[-1]) if jobs and has_more else None
 
     return ConsoleJobListResponse(
         jobs=[
@@ -583,9 +616,8 @@ async def list_console_jobs(
             )
             for job in jobs
         ],
-        total=total,
-        limit=limit,
-        offset=offset,
+        cursor=next_cursor,
+        has_more=has_more,
     )
 
 

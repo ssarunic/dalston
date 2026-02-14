@@ -56,7 +56,7 @@ export function useRotateWebhookSecret() {
 
 export function useWebhookDeliveries(
   endpointId: string,
-  params: { status?: string; limit?: number; offset?: number } = {}
+  params: { status?: string; limit?: number; cursor?: string } = {}
 ) {
   return useQuery({
     queryKey: ['webhookDeliveries', endpointId, params],

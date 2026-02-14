@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Trash2, X } from 'lucide-react'
+import { Trash2, X, RefreshCw } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useJobs } from '@/hooks/useJobs'
 import { apiClient } from '@/api/client'
-import type { JobStatus } from '@/api/types'
+import type { JobStatus, ConsoleJobSummary } from '@/api/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -53,7 +53,8 @@ function formatDuration(seconds: number | undefined): string {
 
 export function BatchJobs() {
   const [statusFilter, setStatusFilter] = useState<string>('')
-  const [page, setPage] = useState(0)
+  const [cursor, setCursor] = useState<string | undefined>(undefined)
+  const [allJobs, setAllJobs] = useState<ConsoleJobSummary[]>([])
   const [deleteTarget, setDeleteTarget] = useState<{ id: string } | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -64,13 +65,43 @@ export function BatchJobs() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
 
-  const { data, isLoading, error } = useJobs({
+  const { data, isLoading, isFetching, error, refetch } = useJobs({
     limit: PAGE_SIZE,
-    offset: page * PAGE_SIZE,
+    cursor,
     status: statusFilter || undefined,
   })
 
-  const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0
+  // Accumulate jobs when data changes (intentional pattern for cursor pagination)
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (data?.jobs) {
+      if (cursor === undefined) {
+        setAllJobs(() => data.jobs)
+      } else {
+        setAllJobs((prev) => [...prev, ...data.jobs])
+      }
+    }
+  }, [data, cursor])
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Reset pagination when filter changes
+  const handleFilterChange = useCallback((value: string) => {
+    setStatusFilter(value)
+    setCursor(undefined)
+    setAllJobs([])
+  }, [])
+
+  const loadMore = () => {
+    if (data?.has_more && data?.cursor) {
+      setCursor(data.cursor)
+    }
+  }
+
+  const handleRefresh = () => {
+    setCursor(undefined)
+    setAllJobs([])
+    refetch()
+  }
 
   async function handleDelete() {
     if (!deleteTarget) return
@@ -79,6 +110,9 @@ export function BatchJobs() {
     try {
       await apiClient.deleteJob(deleteTarget.id)
       setDeleteTarget(null)
+      // Reset and refetch to get fresh data
+      setCursor(undefined)
+      setAllJobs([])
       queryClient.invalidateQueries({ queryKey: ['jobs'] })
     } catch (err) {
       const message =
@@ -97,6 +131,9 @@ export function BatchJobs() {
       const result = await apiClient.cancelJob(cancelTarget.id)
       setCancelTarget(null)
       setCancelSuccess(result.message)
+      // Reset and refetch to get fresh data
+      setCursor(undefined)
+      setAllJobs([])
       queryClient.invalidateQueries({ queryKey: ['jobs'] })
       // Clear success message after 3 seconds
       setTimeout(() => setCancelSuccess(null), 3000)
@@ -119,31 +156,38 @@ export function BatchJobs() {
       </div>
 
       {/* Filters */}
-      <div className="flex gap-2">
-        {STATUS_FILTERS.map((filter) => (
-          <Button
-            key={filter.value}
-            variant={statusFilter === filter.value ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => {
-              setStatusFilter(filter.value)
-              setPage(0)
-            }}
-          >
-            {filter.label}
-          </Button>
-        ))}
+      <div className="flex items-center gap-2">
+        <div className="flex gap-2">
+          {STATUS_FILTERS.map((filter) => (
+            <Button
+              key={filter.value}
+              variant={statusFilter === filter.value ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => handleFilterChange(filter.value)}
+            >
+              {filter.label}
+            </Button>
+          ))}
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleRefresh}
+          disabled={isFetching}
+        >
+          <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
+        </Button>
       </div>
 
       {/* Jobs Table */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base font-medium">
-            {data?.total ?? 0} jobs
+            Jobs
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
+          {isLoading && cursor === undefined ? (
             <div className="space-y-3">
               {[...Array(5)].map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
@@ -151,7 +195,7 @@ export function BatchJobs() {
             </div>
           ) : error ? (
             <p className="text-red-400 py-4">Error loading jobs</p>
-          ) : data?.jobs.length === 0 ? (
+          ) : allJobs.length === 0 ? (
             <p className="text-muted-foreground py-8 text-center">
               No jobs found
             </p>
@@ -169,7 +213,7 @@ export function BatchJobs() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data?.jobs.map((job) => (
+                {allJobs.map((job) => (
                   <TableRow
                     key={job.id}
                     className="cursor-pointer hover:bg-accent/50"
@@ -236,31 +280,20 @@ export function BatchJobs() {
           )}
 
           {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between pt-4">
+          {allJobs.length > 0 && (
+            <div className="flex flex-col items-center gap-3 pt-4">
               <p className="text-sm text-muted-foreground">
-                Page {page + 1} of {totalPages}
+                Showing {allJobs.length} jobs
               </p>
-              <div className="flex gap-2">
+              {data?.has_more && (
                 <Button
                   variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  disabled={page === 0}
+                  onClick={loadMore}
+                  disabled={isFetching}
                 >
-                  <ChevronLeft className="h-4 w-4" />
-                  Previous
+                  {isFetching ? 'Loading...' : 'Load More'}
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                  disabled={page >= totalPages - 1}
-                >
-                  Next
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
+              )}
             </div>
           )}
         </CardContent>

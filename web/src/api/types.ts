@@ -67,9 +67,8 @@ export interface JobDetail extends JobSummary {
 
 export interface JobListResponse {
   jobs: JobSummary[]
-  total: number
-  limit: number
-  offset: number
+  cursor: string | null
+  has_more: boolean
 }
 
 // Console-specific types (admin endpoints)
@@ -90,9 +89,8 @@ export interface ConsoleJobSummary {
 
 export interface ConsoleJobListResponse {
   jobs: ConsoleJobSummary[]
-  total: number
-  limit: number
-  offset: number
+  cursor: string | null
+  has_more: boolean
 }
 
 export interface ConsoleJobDetail {
@@ -294,9 +292,8 @@ export interface WebhookDelivery {
 
 export interface DeliveryListResponse {
   deliveries: WebhookDelivery[]
-  total: number
-  limit: number
-  offset: number
+  cursor: string | null
+  has_more: boolean
 }
 
 export interface CreateWebhookRequest {
@@ -345,9 +342,8 @@ export interface RealtimeSessionDetail extends RealtimeSessionSummary {
 
 export interface RealtimeSessionListResponse {
   sessions: RealtimeSessionSummary[]
-  total: number
-  limit: number
-  offset: number
+  cursor: string | null
+  has_more: boolean
 }
 
 export interface RealtimeSessionListParams {
@@ -355,7 +351,7 @@ export interface RealtimeSessionListParams {
   since?: string
   until?: string
   limit?: number
-  offset?: number
+  cursor?: string
 }
 
 export interface SessionUtterance {

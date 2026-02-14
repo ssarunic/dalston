@@ -133,9 +133,8 @@ class DeliveryListResponse(BaseModel):
     """Paginated list of webhook deliveries."""
 
     deliveries: list[WebhookDeliveryResponse]
-    total: int
-    limit: int
-    offset: int
+    cursor: str | None
+    has_more: bool
 
 
 # Endpoints
@@ -369,19 +368,29 @@ async def list_webhook_deliveries(
     api_key: RequireWebhooks,
     status: Annotated[str | None, Query(description="Filter by status")] = None,
     limit: Annotated[int, Query(ge=1, le=100, description="Max results")] = 20,
-    offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
+    cursor: Annotated[
+        str | None, Query(description="Pagination cursor from previous response")
+    ] = None,
     db: AsyncSession = Depends(get_db),
     service: WebhookEndpointService = Depends(get_webhook_endpoint_service),
 ) -> DeliveryListResponse:
     """List delivery attempts for a webhook endpoint."""
-    deliveries, total = await service.list_deliveries(
+    deliveries, has_more = await service.list_deliveries(
         db=db,
         endpoint_id=endpoint_id,
         tenant_id=api_key.tenant_id,
         status=status,
         limit=limit,
-        offset=offset,
+        cursor=cursor,
     )
+
+    # Compute next cursor from last delivery
+    next_cursor = (
+        service.encode_delivery_cursor(deliveries[-1])
+        if deliveries and has_more
+        else None
+    )
+
     return DeliveryListResponse(
         deliveries=[
             WebhookDeliveryResponse(
@@ -398,9 +407,8 @@ async def list_webhook_deliveries(
             )
             for d in deliveries
         ],
-        total=total,
-        limit=limit,
-        offset=offset,
+        cursor=next_cursor,
+        has_more=has_more,
     )
 
 

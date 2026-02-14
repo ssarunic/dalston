@@ -60,7 +60,7 @@ export function getApiKey(): string | null {
 
 export interface JobListParams {
   limit?: number
-  offset?: number
+  cursor?: string
   status?: string
 }
 
@@ -78,7 +78,7 @@ export const apiClient = {
   getJobs: (params: JobListParams = {}) => {
     const searchParams = new URLSearchParams()
     if (params.limit) searchParams.set('limit', String(params.limit))
-    if (params.offset) searchParams.set('offset', String(params.offset))
+    if (params.cursor) searchParams.set('cursor', params.cursor)
     if (params.status) searchParams.set('status', params.status)
     return currentClient.get('api/console/jobs', { searchParams }).json<ConsoleJobListResponse>()
   },
@@ -168,12 +168,12 @@ export const apiClient = {
 
   getWebhookDeliveries: (
     endpointId: string,
-    params: { status?: string; limit?: number; offset?: number } = {}
+    params: { status?: string; limit?: number; cursor?: string } = {}
   ) => {
     const searchParams = new URLSearchParams()
     if (params.status) searchParams.set('status', params.status)
     if (params.limit) searchParams.set('limit', String(params.limit))
-    if (params.offset) searchParams.set('offset', String(params.offset))
+    if (params.cursor) searchParams.set('cursor', params.cursor)
     return currentClient
       .get(`v1/webhooks/${endpointId}/deliveries`, { searchParams })
       .json<DeliveryListResponse>()
@@ -189,7 +189,7 @@ export const apiClient = {
     if (params.since) searchParams.set('since', params.since)
     if (params.until) searchParams.set('until', params.until)
     if (params.limit) searchParams.set('limit', String(params.limit))
-    if (params.offset) searchParams.set('offset', String(params.offset))
+    if (params.cursor) searchParams.set('cursor', params.cursor)
     return currentClient.get('v1/realtime/sessions', { searchParams }).json<RealtimeSessionListResponse>()
   },
 

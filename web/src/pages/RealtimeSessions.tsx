@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Radio, MessageSquare, Mic, Trash2 } from 'lucide-react'
+import { Radio, MessageSquare, Mic, Trash2, RefreshCw } from 'lucide-react'
 import { apiClient } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -23,7 +23,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { useRealtimeStatus } from '@/hooks/useRealtimeStatus'
 import { useRealtimeSessions } from '@/hooks/useRealtimeSessions'
-import type { RealtimeSessionStatus } from '@/api/types'
+import type { RealtimeSessionStatus, RealtimeSessionSummary } from '@/api/types'
 
 function StatusDot({ status }: { status: string }) {
   const color =
@@ -59,15 +59,52 @@ function formatDate(dateStr: string): string {
   return date.toLocaleString()
 }
 
+const PAGE_SIZE = 50
+
 export function RealtimeSessions() {
   const navigate = useNavigate()
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [cursor, setCursor] = useState<string | undefined>(undefined)
+  const [allSessions, setAllSessions] = useState<RealtimeSessionSummary[]>([])
   const { data: statusData, isLoading: statusLoading, error: statusError } = useRealtimeStatus()
-  const { data: sessionsData, isLoading: sessionsLoading, refetch } = useRealtimeSessions({
+  const { data: sessionsData, isLoading: sessionsLoading, isFetching, refetch } = useRealtimeSessions({
     status: statusFilter === 'all' ? undefined : statusFilter,
-    limit: 50,
+    limit: PAGE_SIZE,
+    cursor,
   })
+
+  // Accumulate sessions when data changes (intentional pattern for cursor pagination)
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (sessionsData?.sessions) {
+      if (cursor === undefined) {
+        setAllSessions(() => sessionsData.sessions)
+      } else {
+        setAllSessions((prev) => [...prev, ...sessionsData.sessions])
+      }
+    }
+  }, [sessionsData, cursor])
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Reset pagination when filter changes
+  const handleFilterChange = useCallback((value: string) => {
+    setStatusFilter(value)
+    setCursor(undefined)
+    setAllSessions([])
+  }, [])
+
+  const loadMore = () => {
+    if (sessionsData?.has_more && sessionsData?.cursor) {
+      setCursor(sessionsData.cursor)
+    }
+  }
+
+  const handleRefresh = () => {
+    setCursor(undefined)
+    setAllSessions([])
+    refetch()
+  }
 
   const handleDelete = async (sessionId: string) => {
     if (!confirm('Are you sure you want to delete this session?')) {
@@ -76,6 +113,9 @@ export function RealtimeSessions() {
     setDeletingId(sessionId)
     try {
       await apiClient.deleteRealtimeSession(sessionId)
+      // Reset and refetch to get fresh data
+      setCursor(undefined)
+      setAllSessions([])
       refetch()
     } catch (error) {
       console.error('Failed to delete session:', error)
@@ -190,27 +230,37 @@ export function RealtimeSessions() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Session History</CardTitle>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[150px]">
-              <SelectValue placeholder="Filter status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="completed">Completed</SelectItem>
-              <SelectItem value="error">Error</SelectItem>
-              <SelectItem value="interrupted">Interrupted</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="flex items-center gap-2">
+            <Select value={statusFilter} onValueChange={handleFilterChange}>
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="Filter status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="error">Error</SelectItem>
+                <SelectItem value="interrupted">Interrupted</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isFetching}
+            >
+              <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
-          {sessionsLoading ? (
+          {sessionsLoading && cursor === undefined ? (
             <div className="space-y-2">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
             </div>
-          ) : sessionsData?.sessions.length === 0 ? (
+          ) : allSessions.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               No sessions found
             </div>
@@ -229,7 +279,7 @@ export function RealtimeSessions() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sessionsData?.sessions.map((session) => (
+                {allSessions.map((session) => (
                   <TableRow
                     key={session.id}
                     className="cursor-pointer hover:bg-accent/50"
@@ -297,9 +347,20 @@ export function RealtimeSessions() {
               </TableBody>
             </Table>
           )}
-          {sessionsData && sessionsData.total > sessionsData.sessions.length && (
-            <div className="mt-4 text-center text-sm text-muted-foreground">
-              Showing {sessionsData.sessions.length} of {sessionsData.total} sessions
+          {allSessions.length > 0 && (
+            <div className="flex flex-col items-center gap-3 pt-4">
+              <p className="text-sm text-muted-foreground">
+                Showing {allSessions.length} sessions
+              </p>
+              {sessionsData?.has_more && (
+                <Button
+                  variant="outline"
+                  onClick={loadMore}
+                  disabled={isFetching}
+                >
+                  {isFetching ? 'Loading...' : 'Load More'}
+                </Button>
+              )}
             </div>
           )}
         </CardContent>
