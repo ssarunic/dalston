@@ -60,16 +60,22 @@ export function RetentionPolicies() {
     try {
       await deletePolicy.mutateAsync(policy.id)
       setDeleteConfirm(null)
-    } catch (err) {
-      if (err instanceof Error) {
-        // Try to extract error detail from response
-        const message = err.message.includes('in use')
-          ? 'Cannot delete policy that is currently in use by jobs'
-          : err.message
-        setDeleteError(message)
-      } else {
-        setDeleteError('Failed to delete policy')
+    } catch (err: unknown) {
+      // Map HTTP status codes to user-friendly messages
+      let message = 'Failed to delete policy'
+      if (err && typeof err === 'object' && 'response' in err) {
+        const response = (err as { response: Response }).response
+        if (response.status === 409) {
+          message = 'Cannot delete policy that is currently in use by jobs'
+        } else if (response.status === 400) {
+          message = 'Cannot delete system policies'
+        } else if (response.status === 404) {
+          message = 'Policy not found'
+        }
+      } else if (err instanceof Error) {
+        message = err.message
       }
+      setDeleteError(message)
     }
   }
 
