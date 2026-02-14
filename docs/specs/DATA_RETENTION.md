@@ -505,6 +505,31 @@ Every RETENTION_CLEANUP_INTERVAL_SECONDS:
   4. Log summary: "Purged {n} expired jobs, {m} expired sessions"
 ```
 
+#### Two-Phase Commit with Redis Locks
+
+The cleanup worker uses a two-phase commit pattern with Redis locks for atomicity:
+
+**Phase 1 (Lock + S3 Deletion):**
+
+1. Acquire Redis lock for the job (`SET NX EX` with 5-minute TTL)
+2. If lock acquired, delete S3 artifacts (irreversible operation)
+
+**Phase 2 (DB Update):**
+
+3. Mark job as purged in database (`purged_at = NOW()`)
+4. Release Redis lock
+
+**Failure Handling:**
+
+- If Phase 2 fails, the Redis lock expires after TTL and the job is retried on next sweep
+- S3 deletion is idempotent, so retrying is safe
+- Each job uses a fresh database session to ensure clean transaction state
+
+```python
+PURGE_LOCK_JOB_KEY = "dalston:purge_lock:job:{job_id}"
+PURGE_LOCK_TTL_SECONDS = 300  # 5 minutes
+```
+
 #### Idempotency
 
 The cleanup worker is idempotent:
@@ -512,6 +537,7 @@ The cleanup worker is idempotent:
 - If it crashes mid-sweep, jobs where S3 deletion succeeded but `purged_at` wasn't set will be re-processed
 - S3 delete on non-existent keys is a no-op
 - The batch size limit prevents unbounded work per cycle
+- Redis locks prevent multiple workers from processing the same job concurrently
 
 #### Zero-Retention Mode (`none`)
 

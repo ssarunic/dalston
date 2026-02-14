@@ -6,7 +6,7 @@
 | **Duration**  | 5-6 days                                                                                  |
 | **Dependencies** | M11 (API Authentication), M21 (Admin Webhooks)                                         |
 | **Deliverable** | Retention policies, cleanup worker, audit logging, API extensions                       |
-| **Status**    | Not Started                                                                               |
+| **Status**    | Completed                                                                                 |
 
 ## User Story
 
@@ -346,16 +346,26 @@ class AuditService:
 - Create `dalston/orchestrator/cleanup.py` with cleanup worker
 - Start cleanup worker in orchestrator main loop
 - Add config for cleanup interval and batch size
+- Implement Redis-based two-phase commit for atomicity
 
 **Worker implementation:**
 
-```python
-async def cleanup_expired_jobs():
-    """Periodic sweep of expired jobs."""
-    while True:
-        await asyncio.sleep(settings.retention_cleanup_interval_seconds)
+The cleanup worker uses a two-phase commit pattern with Redis locks to ensure atomicity:
 
-        expired_jobs = await db.execute(
+1. **Phase 1 (Lock + S3 deletion)**: Acquire Redis lock, then delete S3 artifacts (irreversible)
+2. **Phase 2 (DB update)**: Mark job as purged in database
+
+If Phase 2 fails, the Redis lock expires (5 minute TTL) and the job is retried on next sweep. S3 deletion is idempotent so retry is safe.
+
+```python
+PURGE_LOCK_JOB_KEY = "dalston:purge_lock:job:{job_id}"
+PURGE_LOCK_TTL_SECONDS = 300  # 5 minutes
+
+async def _purge_expired_jobs(self) -> int:
+    """Find and purge expired jobs using two-phase commit."""
+    # Query jobs to purge
+    async with self.db_session_factory() as db:
+        jobs = await db.execute(
             select(JobModel)
             .where(JobModel.purge_after <= func.now())
             .where(JobModel.purged_at.is_(None))
@@ -363,17 +373,24 @@ async def cleanup_expired_jobs():
             .limit(settings.retention_cleanup_batch_size)
         )
 
-        for job in expired_jobs.scalars():
-            try:
-                await purge_job_artifacts(job)
-                job.purged_at = datetime.now(UTC)
-                await audit_service.log("job.purged", "job", str(job.id), ...)
-                await db.commit()
-            except Exception:
-                logger.error("cleanup_job_failed", job_id=job.id, exc_info=True)
-                await db.rollback()
+    for job in jobs:
+        # Phase 1: Acquire lock before S3 deletion
+        if not await self._acquire_job_lock(job.id):
+            continue  # Another worker is handling this job
 
-        logger.info("cleanup_sweep_complete", jobs_purged=len(list(expired_jobs)))
+        try:
+            # Delete S3 artifacts (irreversible)
+            await self._delete_job_artifacts(job.id, job.retention_scope, storage)
+
+            # Phase 2: Mark as purged in fresh DB session
+            async with self.db_session_factory() as db:
+                job_record = await db.get(JobModel, job.id)
+                job_record.purged_at = datetime.now(UTC)
+                await db.commit()
+
+            await audit_service.log_job_purged(...)
+        finally:
+            await self._release_job_lock(job.id)
 ```
 
 ---
@@ -543,29 +560,29 @@ curl http://localhost:8000/v1/audio/transcriptions/$JOB_ID/transcript
 
 ## Checkpoint
 
-- [ ] `retention_policies` table created with system policies seeded
-- [ ] Jobs table has retention columns with proper indexes
-- [ ] `audit_log` table created with immutability rules
-- [ ] `RetentionService` resolves policies correctly (tenant -> system fallback)
-- [ ] Policy CRUD API working
-- [ ] Job submission accepts `retention_policy` parameter
-- [ ] Job response includes `retention` block
-- [ ] `purge_after` computed correctly on job completion
-- [ ] Zero-retention jobs purged immediately on completion
-- [ ] Cleanup worker runs on schedule and purges expired jobs
-- [ ] S3 artifacts deleted, job row retained with `purged_at`
-- [ ] `410 Gone` returned for purged job transcripts
-- [ ] `DELETE .../audio` deletes audio, preserves transcript
-- [ ] `AuditService` logs events with fail-open behavior
-- [ ] Audit query API returns filtered events
-- [ ] Audit immutability enforced (UPDATE/DELETE blocked)
-- [ ] ElevenLabs endpoint accepts `retention_policy`
-- [ ] Realtime sessions support retention policies
-- [ ] SDK has `retention_policy` parameter
-- [ ] CLI has `--retention-policy` flag
-- [ ] Console shows retention info on job detail
-- [ ] Console has audit log viewer
-- [ ] All tests passing
+- [x] `retention_policies` table created with system policies seeded
+- [x] Jobs table has retention columns with proper indexes
+- [x] `audit_log` table created with immutability rules
+- [x] `RetentionService` resolves policies correctly (tenant -> system fallback)
+- [x] Policy CRUD API working
+- [x] Job submission accepts `retention_policy` parameter
+- [x] Job response includes `retention` block
+- [x] `purge_after` computed correctly on job completion
+- [x] Zero-retention jobs purged immediately on completion
+- [x] Cleanup worker runs on schedule and purges expired jobs
+- [x] S3 artifacts deleted, job row retained with `purged_at`
+- [x] `410 Gone` returned for purged job transcripts
+- [x] `DELETE .../audio` deletes audio, preserves transcript
+- [x] `AuditService` logs events with fail-open behavior
+- [x] Audit query API returns filtered events (cursor-based pagination)
+- [x] Audit immutability enforced (UPDATE/DELETE blocked)
+- [x] ElevenLabs endpoint accepts `retention_policy`
+- [x] Realtime sessions support retention policies
+- [x] SDK has `retention_policy` parameter
+- [x] CLI has `--retention-policy` flag
+- [x] Console shows retention info on job detail
+- [x] Console has audit log viewer
+- [x] All tests passing
 
 ---
 
@@ -602,6 +619,45 @@ curl http://localhost:8000/v1/audio/transcriptions/$JOB_ID/transcript
 | `web/src/api/types.ts` | Retention types |
 | `web/src/pages/JobDetail.tsx` | Retention info, audit trail |
 | `web/src/pages/AuditLog.tsx` | Audit log viewer |
+
+---
+
+## Implementation Notes
+
+The following additional improvements were made during implementation:
+
+### Redis-Based Two-Phase Commit (Cleanup Worker)
+
+The cleanup worker uses Redis locks for coordination instead of database transactions spanning S3 operations. This ensures atomicity without blocking database connections during potentially slow S3 deletions.
+
+### Thread Safety (Engine SDK)
+
+Added `threading.Lock` to protect `_current_task_id` in the engine SDK runner's heartbeat loop. This prevents race conditions when the heartbeat thread reads the task ID while the main thread is updating it.
+
+### System Policy Constants
+
+Created `dalston/common/constants.py` with well-known UUIDs for system policies:
+
+- `SYSTEM_POLICY_DEFAULT` - 24-hour auto-delete
+- `SYSTEM_POLICY_ZERO_RETENTION` - immediate purge
+- `SYSTEM_POLICY_KEEP` - never auto-delete
+
+### Cursor-Based Pagination (Audit API)
+
+The audit log API uses cursor-based pagination (not offset-based) since audit entries are append-only and new entries may arrive between page requests.
+
+### FK ON DELETE SET NULL
+
+Added migration `0011_add_fk_on_delete_set_null` to set `ON DELETE SET NULL` on `retention_policy_id` foreign keys in `jobs` and `realtime_sessions` tables. This provides defense-in-depth: if a policy is deleted while jobs reference it, the FK won't block deletion.
+
+### Retention Strategy Test Matrix
+
+Comprehensive parametrized tests cover all combinations of:
+
+- Modes: `auto_delete`, `keep`, `none`
+- Scopes: `all`, `audio_only`
+
+Tests verify correct purge scheduling and S3 artifact deletion behavior for each strategy.
 
 ---
 
