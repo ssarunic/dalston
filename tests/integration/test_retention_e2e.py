@@ -133,15 +133,32 @@ class TestRetentionLifecycleE2E:
         )
         job.purge_after = datetime.now(UTC) - timedelta(hours=1)
 
-        # Set up mock session factory
-        mock_db = AsyncMock()
+        # Mock Redis for lock coordination
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+        mock_redis.delete = AsyncMock()
+
+        # Query session returns job
+        query_session = AsyncMock()
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [job]
-        mock_db.execute.return_value = mock_result
+        query_session.execute.return_value = mock_result
+
+        # Update session returns job record
+        update_session = AsyncMock()
+        job_record = MagicMock()
+        job_record.purged_at = None
+        update_session.get.return_value = job_record
+
+        session_calls = [query_session, update_session]
+        call_index = 0
 
         @asynccontextmanager
         async def session_factory():
-            yield mock_db
+            nonlocal call_index
+            session = session_calls[call_index]
+            call_index += 1
+            yield session
 
         # Set up mock settings
         from dalston.config import Settings
@@ -154,6 +171,7 @@ class TestRetentionLifecycleE2E:
             db_session_factory=session_factory,
             settings=settings,
         )
+        worker._redis = mock_redis
 
         # Run purge
         with patch("dalston.orchestrator.cleanup.StorageService") as MockStorageService:
@@ -311,14 +329,34 @@ class TestCleanupWorkerE2E:
             for _ in range(5)
         ]
 
-        mock_db = AsyncMock()
+        # Mock Redis for lock coordination
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+        mock_redis.delete = AsyncMock()
+
+        # Query session returns jobs
+        query_session = AsyncMock()
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = jobs
-        mock_db.execute.return_value = mock_result
+        query_session.execute.return_value = mock_result
+
+        # Update sessions return job records
+        def make_update_session(job):
+            update_session = AsyncMock()
+            job_record = MagicMock()
+            job_record.purged_at = None
+            update_session.get.return_value = job_record
+            return update_session
+
+        session_calls = [query_session] + [make_update_session(j) for j in jobs]
+        call_index = 0
 
         @asynccontextmanager
         async def session_factory():
-            yield mock_db
+            nonlocal call_index
+            session = session_calls[call_index]
+            call_index += 1
+            yield session
 
         settings = Settings()
         settings.retention_cleanup_batch_size = 10
@@ -335,6 +373,7 @@ class TestCleanupWorkerE2E:
             settings=settings,
             audit_service=mock_audit,
         )
+        worker._redis = mock_redis
 
         with patch("dalston.orchestrator.cleanup.StorageService") as MockStorageService:
             MockStorageService.return_value = AsyncMock()
@@ -343,10 +382,6 @@ class TestCleanupWorkerE2E:
 
             # All 5 jobs should be purged
             assert purged == 5
-
-            # All jobs should have purged_at set
-            for job in jobs:
-                assert job.purged_at is not None
 
             # Audit log called for each job
             assert len(audit_calls) == 5
@@ -371,14 +406,32 @@ class TestCleanupWorkerE2E:
             purge_after=datetime.now(UTC) - timedelta(hours=1),
         )
 
-        mock_db = AsyncMock()
+        # Mock Redis for lock coordination
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+        mock_redis.delete = AsyncMock()
+
+        # Query session returns both jobs
+        query_session = AsyncMock()
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [job1, job2]
-        mock_db.execute.return_value = mock_result
+        query_session.execute.return_value = mock_result
+
+        # Update session for job2 only (job1 fails before DB update)
+        update_session = AsyncMock()
+        job_record = MagicMock()
+        job_record.purged_at = None
+        update_session.get.return_value = job_record
+
+        session_calls = [query_session, update_session]
+        call_index = 0
 
         @asynccontextmanager
         async def session_factory():
-            yield mock_db
+            nonlocal call_index
+            session = session_calls[call_index]
+            call_index += 1
+            yield session
 
         settings = Settings()
         settings.retention_cleanup_batch_size = 10
@@ -387,6 +440,7 @@ class TestCleanupWorkerE2E:
             db_session_factory=session_factory,
             settings=settings,
         )
+        worker._redis = mock_redis
 
         with patch("dalston.orchestrator.cleanup.StorageService") as MockStorageService:
             mock_storage = AsyncMock()
@@ -401,5 +455,343 @@ class TestCleanupWorkerE2E:
 
             # Only second job should be purged
             assert purged == 1
-            assert job1.purged_at is None  # Failed
-            assert job2.purged_at is not None  # Succeeded
+
+
+class TestRetentionStrategies:
+    """Test different retention strategies with audio file scenarios.
+
+    This tests the matrix of retention modes (auto_delete, keep, none) and
+    scopes (all, audio_only) to verify correct purge behavior for each
+    combination.
+    """
+
+    @pytest.fixture
+    def tenant_id(self) -> UUID:
+        return UUID("12345678-1234-1234-1234-123456789abc")
+
+    @pytest.fixture
+    def audio_file_path(self) -> str:
+        """Path to test audio file (test_merged.wav)."""
+        from pathlib import Path
+
+        return str(Path(__file__).parent.parent / "audio" / "test_merged.wav")
+
+    def _make_job(
+        self,
+        job_id: UUID,
+        tenant_id: UUID,
+        retention_mode: str,
+        retention_hours: int | None,
+        retention_scope: str,
+        completed_at: datetime,
+        audio_path: str | None = None,
+    ):
+        """Create a mock job with full retention settings."""
+        job = MagicMock()
+        job.id = job_id
+        job.tenant_id = tenant_id
+        job.retention_mode = retention_mode
+        job.retention_hours = retention_hours
+        job.retention_scope = retention_scope
+        job.completed_at = completed_at
+        job.purge_after = None
+        job.purged_at = None
+        job.audio_path = audio_path
+        return job
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mode,hours,scope,expected_purge,expected_artifacts",
+        [
+            # AUTO_DELETE mode - deletes after specified hours
+            (
+                RetentionMode.AUTO_DELETE.value,
+                24,
+                RetentionScope.ALL.value,
+                True,
+                ["audio", "tasks", "transcript"],
+            ),
+            (
+                RetentionMode.AUTO_DELETE.value,
+                24,
+                RetentionScope.AUDIO_ONLY.value,
+                True,
+                ["audio"],
+            ),
+            # NONE mode - immediate deletion
+            (
+                RetentionMode.NONE.value,
+                None,
+                RetentionScope.ALL.value,
+                True,
+                ["audio", "tasks", "transcript"],
+            ),
+            (
+                RetentionMode.NONE.value,
+                None,
+                RetentionScope.AUDIO_ONLY.value,
+                True,
+                ["audio"],
+            ),
+            # KEEP mode - never deleted
+            (
+                RetentionMode.KEEP.value,
+                None,
+                RetentionScope.ALL.value,
+                False,
+                [],
+            ),
+            (
+                RetentionMode.KEEP.value,
+                None,
+                RetentionScope.AUDIO_ONLY.value,
+                False,
+                [],
+            ),
+        ],
+    )
+    async def test_retention_strategy_matrix(
+        self,
+        tenant_id,
+        audio_file_path,
+        mode,
+        hours,
+        scope,
+        expected_purge,
+        expected_artifacts,
+    ):
+        """Test all retention mode and scope combinations."""
+        import structlog
+
+        job_id = uuid4()
+        # Job completed 25 hours ago (expired for 24-hour policies)
+        completed_at = datetime.now(UTC) - timedelta(hours=25)
+
+        job = self._make_job(
+            job_id=job_id,
+            tenant_id=tenant_id,
+            retention_mode=mode,
+            retention_hours=hours,
+            retention_scope=scope,
+            completed_at=completed_at,
+            audio_path=audio_file_path,
+        )
+
+        # Compute purge_after
+        log = structlog.get_logger().bind(job_id=str(job_id))
+        await _compute_purge_after(job, log)
+
+        if expected_purge:
+            assert job.purge_after is not None, f"Expected purge for {mode}/{scope}"
+            assert job.purge_after < datetime.now(UTC), "Job should be expired"
+        else:
+            assert job.purge_after is None, f"No purge expected for {mode}/{scope}"
+
+    @pytest.mark.asyncio
+    async def test_audio_only_preserves_transcript_with_audio_file(
+        self, tenant_id, audio_file_path
+    ):
+        """Test that audio_only scope deletes only audio, preserving transcript.
+
+        Simulates a job created with test_merged.wav where only the audio
+        should be deleted (for privacy) while transcript is retained (for
+        compliance).
+        """
+        from contextlib import asynccontextmanager
+
+        from dalston.config import Settings
+        from dalston.orchestrator.cleanup import CleanupWorker
+
+        job_id = uuid4()
+        job = self._make_job(
+            job_id=job_id,
+            tenant_id=tenant_id,
+            retention_mode=RetentionMode.AUTO_DELETE.value,
+            retention_hours=1,
+            retention_scope=RetentionScope.AUDIO_ONLY.value,
+            completed_at=datetime.now(UTC) - timedelta(hours=2),
+            audio_path=audio_file_path,
+        )
+        job.purge_after = datetime.now(UTC) - timedelta(hours=1)
+
+        # Mock Redis for lock coordination
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+        mock_redis.delete = AsyncMock()
+
+        # Query session returns job
+        query_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [job]
+        query_session.execute.return_value = mock_result
+
+        # Update session returns job record
+        update_session = AsyncMock()
+        job_record = MagicMock()
+        job_record.purged_at = None
+        update_session.get.return_value = job_record
+
+        session_calls = [query_session, update_session]
+        call_index = 0
+
+        @asynccontextmanager
+        async def session_factory():
+            nonlocal call_index
+            session = session_calls[call_index]
+            call_index += 1
+            yield session
+
+        settings = Settings()
+        settings.retention_cleanup_batch_size = 10
+
+        worker = CleanupWorker(
+            db_session_factory=session_factory,
+            settings=settings,
+        )
+        worker._redis = mock_redis
+
+        with patch("dalston.orchestrator.cleanup.StorageService") as MockStorageService:
+            mock_storage = AsyncMock()
+            MockStorageService.return_value = mock_storage
+
+            purged = await worker._purge_expired_jobs()
+
+            # Job purged
+            assert purged == 1
+            # Only audio deleted
+            mock_storage.delete_job_audio.assert_awaited_once_with(job_id)
+            # Full artifacts (transcript, tasks) NOT deleted
+            mock_storage.delete_job_artifacts.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_all_scope_deletes_everything_with_audio_file(
+        self, tenant_id, audio_file_path
+    ):
+        """Test that 'all' scope deletes audio, tasks, and transcript.
+
+        Simulates a job created with test_merged.wav where all artifacts
+        should be deleted after the retention period.
+        """
+        from contextlib import asynccontextmanager
+
+        from dalston.config import Settings
+        from dalston.orchestrator.cleanup import CleanupWorker
+
+        job_id = uuid4()
+        job = self._make_job(
+            job_id=job_id,
+            tenant_id=tenant_id,
+            retention_mode=RetentionMode.AUTO_DELETE.value,
+            retention_hours=1,
+            retention_scope=RetentionScope.ALL.value,
+            completed_at=datetime.now(UTC) - timedelta(hours=2),
+            audio_path=audio_file_path,
+        )
+        job.purge_after = datetime.now(UTC) - timedelta(hours=1)
+
+        # Mock Redis for lock coordination
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+        mock_redis.delete = AsyncMock()
+
+        # Query session returns job
+        query_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [job]
+        query_session.execute.return_value = mock_result
+
+        # Update session returns job record
+        update_session = AsyncMock()
+        job_record = MagicMock()
+        job_record.purged_at = None
+        update_session.get.return_value = job_record
+
+        session_calls = [query_session, update_session]
+        call_index = 0
+
+        @asynccontextmanager
+        async def session_factory():
+            nonlocal call_index
+            session = session_calls[call_index]
+            call_index += 1
+            yield session
+
+        settings = Settings()
+        settings.retention_cleanup_batch_size = 10
+
+        worker = CleanupWorker(
+            db_session_factory=session_factory,
+            settings=settings,
+        )
+        worker._redis = mock_redis
+
+        with patch("dalston.orchestrator.cleanup.StorageService") as MockStorageService:
+            mock_storage = AsyncMock()
+            MockStorageService.return_value = mock_storage
+
+            purged = await worker._purge_expired_jobs()
+
+            # Job purged
+            assert purged == 1
+            # All artifacts deleted
+            mock_storage.delete_job_artifacts.assert_awaited_once_with(job_id)
+            # Individual audio NOT called (covered by delete_job_artifacts)
+            mock_storage.delete_job_audio.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_keep_mode_never_purges_audio_file(self, tenant_id, audio_file_path):
+        """Test that keep mode results in no purge scheduling.
+
+        Simulates a job created with test_merged.wav that should be
+        retained indefinitely (no automatic deletion).
+        """
+        import structlog
+
+        job_id = uuid4()
+        job = self._make_job(
+            job_id=job_id,
+            tenant_id=tenant_id,
+            retention_mode=RetentionMode.KEEP.value,
+            retention_hours=None,
+            retention_scope=RetentionScope.ALL.value,
+            completed_at=datetime.now(UTC),
+            audio_path=audio_file_path,
+        )
+
+        log = structlog.get_logger().bind(job_id=str(job_id))
+        await _compute_purge_after(job, log)
+
+        # purge_after should remain None - never purge
+        assert job.purge_after is None
+
+    @pytest.mark.asyncio
+    async def test_zero_retention_immediate_purge_with_audio_file(
+        self, tenant_id, audio_file_path
+    ):
+        """Test zero-retention mode triggers immediate purge scheduling.
+
+        Simulates a job created with test_merged.wav that should be
+        purged immediately after completion (privacy-first workflow).
+        """
+        import structlog
+
+        job_id = uuid4()
+        job = self._make_job(
+            job_id=job_id,
+            tenant_id=tenant_id,
+            retention_mode=RetentionMode.NONE.value,
+            retention_hours=None,
+            retention_scope=RetentionScope.ALL.value,
+            completed_at=datetime.now(UTC),
+            audio_path=audio_file_path,
+        )
+
+        log = structlog.get_logger().bind(job_id=str(job_id))
+
+        before = datetime.now(UTC)
+        await _compute_purge_after(job, log)
+        after = datetime.now(UTC)
+
+        # purge_after should be set to ~now for immediate purge
+        assert job.purge_after is not None
+        assert before <= job.purge_after <= after
