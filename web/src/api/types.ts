@@ -34,6 +34,12 @@ export interface JobSummary {
   started_at?: string
   completed_at?: string
   progress?: number
+  // Result stats (populated on completion)
+  audio_duration_seconds?: number
+  result_language_code?: string
+  result_word_count?: number
+  result_segment_count?: number
+  result_speaker_count?: number
 }
 
 export interface RetentionInfo {
@@ -55,6 +61,8 @@ export interface JobDetail extends JobSummary {
   segments?: Segment[]
   speakers?: Speaker[]
   retention?: RetentionInfo
+  // Additional result stats
+  result_character_count?: number
 }
 
 export interface JobListResponse {
@@ -72,6 +80,12 @@ export interface ConsoleJobSummary {
   created_at: string
   started_at?: string
   completed_at?: string
+  // Result stats (populated on completion)
+  audio_duration_seconds?: number
+  result_language_code?: string
+  result_word_count?: number
+  result_segment_count?: number
+  result_speaker_count?: number
 }
 
 export interface ConsoleJobListResponse {
@@ -308,7 +322,7 @@ export interface RealtimeSessionSummary {
   model: string | null
   engine: string | null
   audio_duration_seconds: number
-  utterance_count: number
+  segment_count: number
   word_count: number
   store_audio: boolean
   store_transcript: boolean

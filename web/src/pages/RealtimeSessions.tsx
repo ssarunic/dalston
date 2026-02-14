@@ -221,7 +221,7 @@ export function RealtimeSessions() {
                   <TableHead>Status</TableHead>
                   <TableHead>Model</TableHead>
                   <TableHead>Duration</TableHead>
-                  <TableHead>Utterances</TableHead>
+                  <TableHead>Segments</TableHead>
                   <TableHead>Storage</TableHead>
                   <TableHead>Started</TableHead>
                   <TableHead></TableHead>
@@ -253,7 +253,7 @@ export function RealtimeSessions() {
                     <TableCell>
                       <div className="flex items-center gap-1">
                         <MessageSquare className="h-3 w-3" />
-                        {session.utterance_count}
+                        {session.segment_count}
                       </div>
                     </TableCell>
                     <TableCell>

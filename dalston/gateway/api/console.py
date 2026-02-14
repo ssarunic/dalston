@@ -445,6 +445,12 @@ class ConsoleJobSummary(BaseModel):
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    # Result stats (populated on completion)
+    audio_duration_seconds: float | None = None
+    result_language_code: str | None = None
+    result_word_count: int | None = None
+    result_segment_count: int | None = None
+    result_speaker_count: int | None = None
 
     model_config = {"from_attributes": True}
 
@@ -500,6 +506,11 @@ async def list_console_jobs(
                 created_at=job.created_at,
                 started_at=job.started_at,
                 completed_at=job.completed_at,
+                audio_duration_seconds=job.audio_duration,
+                result_language_code=job.result_language_code,
+                result_word_count=job.result_word_count,
+                result_segment_count=job.result_segment_count,
+                result_speaker_count=job.result_speaker_count,
             )
             for job in jobs
         ],

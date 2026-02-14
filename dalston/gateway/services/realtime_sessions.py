@@ -108,7 +108,7 @@ class RealtimeSessionService:
         self,
         session_id: str,
         audio_duration_seconds: float | None = None,
-        utterance_count: int | None = None,
+        segment_count: int | None = None,
         word_count: int | None = None,
     ) -> None:
         """Update session statistics.
@@ -118,7 +118,7 @@ class RealtimeSessionService:
         Args:
             session_id: Session ID
             audio_duration_seconds: Total audio duration
-            utterance_count: Number of utterances
+            segment_count: Number of segments
             word_count: Number of words
         """
         session_uuid = self._parse_session_id(session_id)
@@ -126,8 +126,8 @@ class RealtimeSessionService:
         values = {}
         if audio_duration_seconds is not None:
             values["audio_duration_seconds"] = audio_duration_seconds
-        if utterance_count is not None:
-            values["utterance_count"] = utterance_count
+        if segment_count is not None:
+            values["segment_count"] = segment_count
         if word_count is not None:
             values["word_count"] = word_count
 
@@ -145,7 +145,7 @@ class RealtimeSessionService:
         session_id: str,
         status: str,
         audio_duration_seconds: float | None = None,
-        utterance_count: int | None = None,
+        segment_count: int | None = None,
         word_count: int | None = None,
         audio_uri: str | None = None,
         transcript_uri: str | None = None,
@@ -158,7 +158,7 @@ class RealtimeSessionService:
             session_id: Session ID
             status: Final status (completed, error, interrupted)
             audio_duration_seconds: Final audio duration
-            utterance_count: Final utterance count
+            segment_count: Final segment count
             word_count: Final word count
             audio_uri: S3 URI for recorded audio
             transcript_uri: S3 URI for transcript
@@ -177,8 +177,8 @@ class RealtimeSessionService:
 
         if audio_duration_seconds is not None:
             values["audio_duration_seconds"] = audio_duration_seconds
-        if utterance_count is not None:
-            values["utterance_count"] = utterance_count
+        if segment_count is not None:
+            values["segment_count"] = segment_count
         if word_count is not None:
             values["word_count"] = word_count
         if audio_uri is not None:

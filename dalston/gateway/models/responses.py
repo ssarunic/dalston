@@ -86,6 +86,24 @@ class JobResponse(BaseModel):
         default=None, description="Retention policy and status"
     )
 
+    # Result summary stats (populated on successful completion)
+    audio_duration_seconds: float | None = Field(
+        default=None, description="Audio duration in seconds"
+    )
+    result_language_code: str | None = Field(
+        default=None, description="Detected language code"
+    )
+    result_word_count: int | None = Field(default=None, description="Total word count")
+    result_segment_count: int | None = Field(
+        default=None, description="Number of transcript segments"
+    )
+    result_speaker_count: int | None = Field(
+        default=None, description="Number of speakers (null if no diarization)"
+    )
+    result_character_count: int | None = Field(
+        default=None, description="Total character count"
+    )
+
 
 class JobSummary(BaseModel):
     """Summary of a job for list responses."""
@@ -98,6 +116,15 @@ class JobSummary(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     progress: int | None = None
+
+    # Result summary stats (for quick display without fetching transcript)
+    audio_duration_seconds: float | None = Field(
+        default=None, alias="audio_duration", description="Audio duration in seconds"
+    )
+    result_language_code: str | None = None
+    result_word_count: int | None = None
+    result_segment_count: int | None = None
+    result_speaker_count: int | None = None
 
 
 class JobListResponse(BaseModel):

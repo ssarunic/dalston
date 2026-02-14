@@ -346,7 +346,7 @@ class RealtimeSessionInfo:
     model: str | None
     engine: str | None
     audio_duration_seconds: float
-    utterance_count: int
+    segment_count: int
     word_count: int
     store_audio: bool
     store_transcript: bool

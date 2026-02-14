@@ -53,7 +53,7 @@ class SessionSummary(BaseModel):
     model: str | None
     engine: str | None
     audio_duration_seconds: float
-    utterance_count: int
+    segment_count: int
     word_count: int
     store_audio: bool
     store_transcript: bool
@@ -72,7 +72,7 @@ class SessionDetail(BaseModel):
     encoding: str | None
     sample_rate: int | None
     audio_duration_seconds: float
-    utterance_count: int
+    segment_count: int
     word_count: int
     store_audio: bool
     store_transcript: bool
@@ -172,7 +172,7 @@ async def list_realtime_sessions(
                 model=s.model,
                 engine=s.engine,
                 audio_duration_seconds=s.audio_duration_seconds,
-                utterance_count=s.utterance_count,
+                segment_count=s.segment_count,
                 word_count=s.word_count,
                 store_audio=s.store_audio,
                 store_transcript=s.store_transcript,
@@ -221,7 +221,7 @@ async def get_realtime_session(
         encoding=session.encoding,
         sample_rate=session.sample_rate,
         audio_duration_seconds=session.audio_duration_seconds,
-        utterance_count=session.utterance_count,
+        segment_count=session.segment_count,
         word_count=session.word_count,
         store_audio=session.store_audio,
         store_transcript=session.store_transcript,

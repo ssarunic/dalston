@@ -6,6 +6,7 @@ Handles Redis pub/sub events:
 - task.failed: Retry or fail job
 """
 
+import json
 import re
 import time
 from datetime import UTC, datetime, timedelta
@@ -24,7 +25,8 @@ from dalston.common.events import (
     publish_job_failed,
 )
 from dalston.common.models import JobStatus, RetentionMode, TaskStatus
-from dalston.config import Settings
+from dalston.common.s3 import get_s3_client
+from dalston.config import Settings, get_settings
 from dalston.db.models import JobModel, TaskModel
 from dalston.gateway.services.rate_limiter import (
     KEY_PREFIX_JOBS,
@@ -35,6 +37,7 @@ from dalston.orchestrator.scheduler import (
     queue_task,
     remove_task_from_queue,
 )
+from dalston.orchestrator.stats import extract_stats_from_transcript
 
 logger = structlog.get_logger()
 
@@ -484,6 +487,58 @@ async def _compute_purge_after(job: JobModel, log) -> None:
     # mode == "keep": purge_after stays NULL (never purge)
 
 
+async def _populate_job_result_stats(job: JobModel, log) -> None:
+    """Fetch transcript and populate result stats on job.
+
+    Called when a job successfully completes. Reads the final transcript
+    from S3 and extracts summary statistics.
+
+    Args:
+        job: Job model to update with stats
+        log: Logger instance
+    """
+    settings = get_settings()
+    transcript_uri = f"s3://{settings.s3_bucket}/jobs/{job.id}/transcript.json"
+
+    try:
+        # Parse S3 URI
+        uri_parts = transcript_uri.replace("s3://", "").split("/", 1)
+        bucket = uri_parts[0]
+        key = uri_parts[1] if len(uri_parts) > 1 else ""
+
+        async with get_s3_client(settings) as s3:
+            response = await s3.get_object(Bucket=bucket, Key=key)
+            body = await response["Body"].read()
+            transcript = json.loads(body.decode("utf-8"))
+
+        # Extract stats from transcript
+        stats = extract_stats_from_transcript(transcript)
+
+        # Update job model
+        job.result_language_code = stats.language_code
+        job.result_word_count = stats.word_count
+        job.result_segment_count = stats.segment_count
+        job.result_speaker_count = stats.speaker_count
+        job.result_character_count = stats.character_count
+
+        log.info(
+            "job_result_stats_populated",
+            language_code=stats.language_code,
+            word_count=stats.word_count,
+            segment_count=stats.segment_count,
+            speaker_count=stats.speaker_count,
+            character_count=stats.character_count,
+        )
+
+    except Exception as e:
+        # Don't fail the job if stats extraction fails - just log and continue
+        log.warning(
+            "job_result_stats_extraction_failed",
+            transcript_uri=transcript_uri,
+            error=str(e),
+        )
+
+
 async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) -> None:
     """Check if all tasks are done and mark job as completed.
 
@@ -535,6 +590,9 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
             duration = (datetime.now(UTC) - job.started_at).total_seconds()
             dalston.metrics.observe_orchestrator_job_duration(len(all_tasks), duration)
         log.info("job_completed")
+
+        # Extract and store result stats from transcript
+        await _populate_job_result_stats(job, log)
 
     job.completed_at = datetime.now(UTC)
 

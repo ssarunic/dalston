@@ -79,7 +79,7 @@ def list_sessions(
                     "model": s.model,
                     "engine": s.engine,
                     "audio_duration_seconds": s.audio_duration_seconds,
-                    "utterance_count": s.utterance_count,
+                    "segment_count": s.segment_count,
                     "word_count": s.word_count,
                     "started_at": s.started_at.isoformat() if s.started_at else None,
                     "ended_at": s.ended_at.isoformat() if s.ended_at else None,
@@ -96,7 +96,7 @@ def list_sessions(
             table.add_column("Model")
             table.add_column("Engine")
             table.add_column("Duration", justify="right")
-            table.add_column("Utterances", justify="right")
+            table.add_column("Segments", justify="right")
             table.add_column("Started")
 
             status_colors = {
@@ -117,7 +117,7 @@ def list_sessions(
                     s.model or "-",
                     s.engine or "-",
                     format_duration(s.audio_duration_seconds),
-                    str(s.utterance_count),
+                    str(s.segment_count),
                     started,
                 )
 
@@ -166,7 +166,7 @@ def get_session(
                 "model": session.model,
                 "engine": session.engine,
                 "audio_duration_seconds": session.audio_duration_seconds,
-                "utterance_count": session.utterance_count,
+                "segment_count": session.segment_count,
                 "word_count": session.word_count,
                 "store_audio": session.store_audio,
                 "store_transcript": session.store_transcript,
@@ -201,7 +201,7 @@ def get_session(
             table.add_row("Model", session.model or "-")
             table.add_row("Engine", session.engine or "-")
             table.add_row("Duration", format_duration(session.audio_duration_seconds))
-            table.add_row("Utterances", str(session.utterance_count))
+            table.add_row("Segments", str(session.segment_count))
             table.add_row("Words", str(session.word_count))
             table.add_row("Store Audio", "Yes" if session.store_audio else "No")
             table.add_row(

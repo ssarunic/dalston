@@ -216,6 +216,13 @@ class JobModel(Base):
         TIMESTAMP(timezone=True), nullable=True
     )
 
+    # Result summary stats (populated on successful completion)
+    result_language_code: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    result_word_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    result_segment_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    result_speaker_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    result_character_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # Relationships
     tenant: Mapped["TenantModel"] = relationship(back_populates="jobs")
     tasks: Mapped[list["TaskModel"]] = relationship(back_populates="job")
@@ -474,7 +481,7 @@ class RealtimeSessionModel(Base):
     audio_duration_seconds: Mapped[float] = mapped_column(
         Float, nullable=False, default=0.0
     )
-    utterance_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    segment_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # Tracking

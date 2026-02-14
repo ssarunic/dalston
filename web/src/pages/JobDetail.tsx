@@ -224,16 +224,6 @@ export function JobDetail() {
     )
   }
 
-  // Calculate duration
-  const duration =
-    job.completed_at && job.started_at
-      ? Math.round(
-          (new Date(job.completed_at).getTime() -
-            new Date(job.started_at).getTime()) /
-            1000
-        )
-      : undefined
-
   const formatDuration = (secs: number) => {
     if (secs < 60) return `${secs}s`
     const mins = Math.floor(secs / 60)
@@ -280,26 +270,31 @@ export function JobDetail() {
       )}
 
       {/* Metadata */}
-      <div className="grid gap-4 md:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-6">
         <MetadataCard
           icon={Clock}
-          label="Duration"
-          value={duration ? formatDuration(duration) : job.status === 'running' ? 'In progress...' : '-'}
+          label="Audio"
+          value={job.audio_duration_seconds ? formatDuration(job.audio_duration_seconds) : '-'}
         />
         <MetadataCard
           icon={Globe}
           label="Language"
-          value={job.language_code?.toUpperCase() || 'Auto'}
+          value={job.result_language_code?.toUpperCase() || job.language_code?.toUpperCase() || 'Auto'}
         />
         <MetadataCard
-          icon={Users}
-          label="Speakers"
-          value={job.speakers?.length ?? 0}
+          icon={FileText}
+          label="Words"
+          value={job.result_word_count?.toLocaleString() ?? '-'}
         />
         <MetadataCard
           icon={FileText}
           label="Segments"
-          value={job.segments?.length ?? 0}
+          value={job.result_segment_count ?? job.segments?.length ?? 0}
+        />
+        <MetadataCard
+          icon={Users}
+          label="Speakers"
+          value={job.result_speaker_count ?? job.speakers?.length ?? 0}
         />
         <RetentionCard retention={job.retention} />
       </div>

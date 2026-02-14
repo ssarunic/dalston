@@ -43,6 +43,14 @@ function formatDate(dateStr: string): string {
   })
 }
 
+function formatDuration(seconds: number | undefined): string {
+  if (seconds === undefined || seconds === null) return '-'
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  const mins = Math.floor(seconds / 60)
+  const secs = Math.round(seconds % 60)
+  return `${mins}m ${secs}s`
+}
+
 export function BatchJobs() {
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [page, setPage] = useState(0)
@@ -152,7 +160,9 @@ export function BatchJobs() {
                 <TableRow>
                   <TableHead>Job ID</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>State</TableHead>
+                  <TableHead>Duration</TableHead>
+                  <TableHead>Language</TableHead>
+                  <TableHead className="text-right">Words</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -171,14 +181,14 @@ export function BatchJobs() {
                     <TableCell>
                       <StatusBadge status={job.status} />
                     </TableCell>
-                    <TableCell>
-                      {job.status === 'running' ? (
-                        <span className="text-xs text-muted-foreground">In progress</span>
-                      ) : job.status === 'completed' ? (
-                        <span className="text-xs text-muted-foreground">Done</span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">-</span>
-                      )}
+                    <TableCell className="text-muted-foreground text-sm">
+                      {formatDuration(job.audio_duration_seconds)}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
+                      {job.result_language_code?.toUpperCase() || '-'}
+                    </TableCell>
+                    <TableCell className="text-right text-muted-foreground text-sm">
+                      {job.result_word_count?.toLocaleString() || '-'}
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
                       {formatDate(job.created_at)}

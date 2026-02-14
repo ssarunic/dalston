@@ -24,7 +24,7 @@ DEFAULT_ENGINES = {
     "prepare": "audio-prepare",
     "transcribe": "faster-whisper",
     "align": "whisperx-align",
-    "diarize": "pyannote-4.0",
+    "diarize": "pyannote-3.1",
     "merge": "final-merger",
 }
 

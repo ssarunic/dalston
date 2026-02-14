@@ -288,7 +288,7 @@ async def realtime_transcription(
                 log.info(
                     "session_stats_captured",
                     audio_duration=audio_duration,
-                    utterance_count=len(segments),
+                    segment_count=len(segments),
                     word_count=word_count,
                     audio_uri=audio_uri,
                     transcript_uri=transcript_uri,
@@ -297,7 +297,7 @@ async def realtime_transcription(
                 await session_service.update_stats(
                     session_id=allocation.session_id,
                     audio_duration_seconds=audio_duration,
-                    utterance_count=len(segments),
+                    segment_count=len(segments),
                     word_count=word_count,
                 )
             except Exception as e:

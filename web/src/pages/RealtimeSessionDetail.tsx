@@ -132,11 +132,11 @@ export function RealtimeSessionDetail() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <MessageSquare className="h-4 w-4" />
-              Utterances
+              Segments
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{session.utterance_count}</div>
+            <div className="text-2xl font-bold">{session.segment_count}</div>
           </CardContent>
         </Card>
 
@@ -283,7 +283,7 @@ export function RealtimeSessionDetail() {
             </div>
             {transcript.utterances && transcript.utterances.length > 0 && (
               <div className="mt-4 space-y-2">
-                <h4 className="font-medium">Utterances</h4>
+                <h4 className="font-medium">Segments</h4>
                 <div className="space-y-2 max-h-96 overflow-y-auto">
                   {transcript.utterances.map((utt: SessionUtterance, idx: number) => (
                     <div key={idx} className="p-2 bg-muted rounded text-sm">

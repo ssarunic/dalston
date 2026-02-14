@@ -279,20 +279,28 @@ function DiarizeOutputView({ output }: { output: Record<string, unknown> }) {
 function PrepareOutputView({ output }: { output: Record<string, unknown> }) {
   // Data may be at top level or nested in a 'data' field
   const data = (output.data as Record<string, unknown>) ?? output
-  const duration = data.duration as number | undefined
-  const channels = data.channels as number | undefined
-  const sampleRate = data.sample_rate as number | undefined
+  // Audio info is in channel_files array
+  const channelFiles = data.channel_files as { duration?: number; channels?: number; sample_rate?: number }[] | undefined
+  const firstChannel = channelFiles?.[0]
+  const duration = firstChannel?.duration
+  const channels = firstChannel?.channels
+  const sampleRate = firstChannel?.sample_rate
+  const splitChannels = data.split_channels as boolean | undefined
 
   return (
-    <div className="grid grid-cols-3 gap-4">
+    <div className="grid grid-cols-4 gap-4">
       <MetricCard
         label="Duration"
-        value={duration ? `${duration.toFixed(1)}s` : undefined}
+        value={duration ? `${duration.toFixed(2)}s` : undefined}
       />
       <MetricCard label="Channels" value={channels} />
       <MetricCard
         label="Sample Rate"
         value={sampleRate ? `${sampleRate / 1000}kHz` : undefined}
+      />
+      <MetricCard
+        label="Split Channels"
+        value={splitChannels ? 'Yes' : 'No'}
       />
     </div>
   )

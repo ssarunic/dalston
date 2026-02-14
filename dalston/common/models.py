@@ -280,6 +280,13 @@ class Job(BaseModel):
     # Computed fields for API responses
     text: str | None = None
 
+    # Result summary stats (populated on successful completion)
+    result_language_code: str | None = None
+    result_word_count: int | None = None
+    result_segment_count: int | None = None
+    result_speaker_count: int | None = None
+    result_character_count: int | None = None
+
 
 class Task(BaseModel):
     """Atomic processing unit within a job's DAG."""
