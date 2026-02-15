@@ -132,8 +132,8 @@ s3://{bucket}/
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `store_audio` | bool | false | Record audio to S3 during session |
-| `store_transcript` | bool | false | Save final transcript to S3 on end |
+| `store_audio` | bool | true | Record audio to S3 during session |
+| `store_transcript` | bool | true | Save final transcript to S3 on end |
 | `enhance_on_end` | bool | false | Create batch job on session end (requires store_audio) |
 | `resume_session_id` | string | null | Link this session to a previous one |
 

@@ -602,6 +602,6 @@ class RealtimeEngine(ABC):
                 "min_silence_duration_ms", 500, min_val=50, max_val=2000
             ),
             # Storage options (S3 config read from Settings)
-            store_audio=get_bool_param("store_audio", False),
-            store_transcript=get_bool_param("store_transcript", False),
+            store_audio=get_bool_param("store_audio", True),
+            store_transcript=get_bool_param("store_transcript", True),
         )

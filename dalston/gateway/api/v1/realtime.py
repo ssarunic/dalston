@@ -115,10 +115,10 @@ async def realtime_transcription(
     enhance_on_end: Annotated[
         bool, Query(description="Trigger batch enhancement")
     ] = False,
-    store_audio: Annotated[bool, Query(description="Record audio to S3")] = False,
+    store_audio: Annotated[bool, Query(description="Record audio to S3")] = True,
     store_transcript: Annotated[
         bool, Query(description="Save final transcript to S3")
-    ] = False,
+    ] = True,
     resume_session_id: Annotated[
         str | None, Query(description="Link to previous session for resume")
     ] = None,

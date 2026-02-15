@@ -83,8 +83,8 @@ class SessionConfig:
     min_speech_duration_ms: int = 250  # Min speech duration (ms)
     min_silence_duration_ms: int = 500  # Silence to trigger endpoint (ms)
     # Storage options (S3 bucket/endpoint read from Settings env vars)
-    store_audio: bool = False
-    store_transcript: bool = False
+    store_audio: bool = True
+    store_transcript: bool = True
 
 
 class AudioBuffer:

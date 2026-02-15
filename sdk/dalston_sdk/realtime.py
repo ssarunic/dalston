@@ -174,8 +174,8 @@ class AsyncRealtimeSession:
         interim_results: bool = True,
         word_timestamps: bool = False,
         # Storage and enhancement options
-        store_audio: bool = False,
-        store_transcript: bool = False,
+        store_audio: bool = True,
+        store_transcript: bool = True,
         enhance_on_end: bool = False,
         # PII detection options (M26)
         pii_detection: bool = False,
@@ -493,8 +493,8 @@ class RealtimeSession:
         interim_results: bool = True,
         word_timestamps: bool = False,
         # Storage and enhancement options
-        store_audio: bool = False,
-        store_transcript: bool = False,
+        store_audio: bool = True,
+        store_transcript: bool = True,
         enhance_on_end: bool = False,
         # PII detection options (M26)
         pii_detection: bool = False,

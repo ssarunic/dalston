@@ -45,8 +45,8 @@ class RealtimeSessionService:
         engine: str | None = None,
         encoding: str | None = None,
         sample_rate: int | None = None,
-        store_audio: bool = False,
-        store_transcript: bool = False,
+        store_audio: bool = True,
+        store_transcript: bool = True,
         enhance_on_end: bool = False,
         previous_session_id: UUID | None = None,
         # Retention fields (M25)

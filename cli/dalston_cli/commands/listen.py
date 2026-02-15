@@ -90,7 +90,14 @@ def listen(
             "--store-audio",
             help="Record audio to S3 during session.",
         ),
-    ] = False,
+    ] = True,
+    store_transcript: Annotated[
+        bool,
+        typer.Option(
+            "--store-transcript",
+            help="Save final transcript to S3 on session end.",
+        ),
+    ] = True,
     enhance: Annotated[
         bool,
         typer.Option(
@@ -212,7 +219,7 @@ def listen(
         enable_vad=not no_vad,
         interim_results=not no_interim,
         store_audio=store_audio,
-        store_transcript=store_audio,  # Store transcript if storing audio
+        store_transcript=store_transcript,
         enhance_on_end=enhance,
         pii_detection=pii,
         pii_detection_tier=pii_tier,
