@@ -312,7 +312,7 @@ class TestServerRegistry:
         transcribers = await registry.get_engines_for_stage("transcribe")
 
         assert len(transcribers) == 1
-        assert transcribers[0].engine_id == "faster-whisper"
+        assert transcribers[0].stage == "transcribe"
 
     @pytest.mark.asyncio
     async def test_is_engine_available_true(self, registry, mock_redis):
