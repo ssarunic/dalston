@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
+import { BackButton } from '@/components/BackButton'
 import type { TaskStatus } from '@/api/types'
 
 const statusConfig: Record<TaskStatus, { icon: React.ElementType; color: string; bg: string }> = {
@@ -512,9 +513,7 @@ export function TaskDetail() {
       <div className="flex flex-col items-center justify-center py-12">
         <AlertCircle className="h-12 w-12 text-red-400 mb-4" />
         <p className="text-red-400">Error loading task</p>
-        <Link to={`/jobs/${jobId}`} className="mt-4">
-          <Button variant="outline">Back to Job</Button>
-        </Link>
+        <BackButton fallbackPath={`/jobs/${jobId}`} variant="outline" label="Back to Job" className="mt-4" />
       </div>
     )
   }
@@ -539,11 +538,7 @@ export function TaskDetail() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Link to={`/jobs/${jobId}`}>
-          <Button variant="ghost" size="icon">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
+        <BackButton fallbackPath={`/jobs/${jobId}`} />
         <div className="flex-1">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold uppercase">{artifact.stage}</h1>

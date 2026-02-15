@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider, Outlet } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
@@ -29,38 +29,46 @@ const queryClient = new QueryClient({
 // Get basename from Vite's base URL (removes trailing slash)
 const basename = import.meta.env.BASE_URL.replace(/\/$/, '') || '/'
 
+// Protected layout wrapper
+function ProtectedLayout() {
+  return (
+    <ProtectedRoute>
+      <Layout>
+        <Outlet />
+      </Layout>
+    </ProtectedRoute>
+  )
+}
+
+const router = createBrowserRouter(
+  [
+    { path: '/login', element: <Login /> },
+    {
+      element: <ProtectedLayout />,
+      children: [
+        { path: '/', element: <Dashboard /> },
+        { path: '/jobs', element: <BatchJobs /> },
+        { path: '/jobs/:jobId', element: <JobDetail /> },
+        { path: '/jobs/:jobId/tasks/:taskId', element: <TaskDetail /> },
+        { path: '/realtime', element: <RealtimeSessions /> },
+        { path: '/realtime/sessions/:sessionId', element: <RealtimeSessionDetail /> },
+        { path: '/engines', element: <Engines /> },
+        { path: '/keys', element: <ApiKeys /> },
+        { path: '/webhooks', element: <Webhooks /> },
+        { path: '/webhooks/:endpointId', element: <WebhookDetail /> },
+        { path: '/retention', element: <RetentionPolicies /> },
+        { path: '/audit', element: <AuditLog /> },
+      ],
+    },
+  ],
+  { basename }
+)
+
 export default function App() {
   return (
     <AuthProvider>
       <QueryClientProvider client={queryClient}>
-        <BrowserRouter basename={basename}>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route
-              path="/*"
-              element={
-                <ProtectedRoute>
-                  <Layout>
-                    <Routes>
-                      <Route path="/" element={<Dashboard />} />
-                      <Route path="/jobs" element={<BatchJobs />} />
-                      <Route path="/jobs/:jobId" element={<JobDetail />} />
-                      <Route path="/jobs/:jobId/tasks/:taskId" element={<TaskDetail />} />
-                      <Route path="/realtime" element={<RealtimeSessions />} />
-                      <Route path="/realtime/sessions/:sessionId" element={<RealtimeSessionDetail />} />
-                      <Route path="/engines" element={<Engines />} />
-                      <Route path="/keys" element={<ApiKeys />} />
-                      <Route path="/webhooks" element={<Webhooks />} />
-                      <Route path="/webhooks/:endpointId" element={<WebhookDetail />} />
-                      <Route path="/retention" element={<RetentionPolicies />} />
-                      <Route path="/audit" element={<AuditLog />} />
-                    </Routes>
-                  </Layout>
-                </ProtectedRoute>
-              }
-            />
-          </Routes>
-        </BrowserRouter>
+        <RouterProvider router={router} />
       </QueryClientProvider>
     </AuthProvider>
   )

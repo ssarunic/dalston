@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useEffect, useRef } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   ScrollText,
   AlertCircle,
@@ -29,7 +29,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useAuditEvents } from '@/hooks/useAuditLog'
-import type { AuditEvent, AuditListParams } from '@/api/types'
+import type { AuditEvent, AuditListParams, AuditListResponse } from '@/api/types'
 
 const RESOURCE_TYPES = [
   { value: '', label: 'All Resources' },
@@ -142,36 +142,76 @@ function EventDetailRow({ event }: { event: AuditEvent }) {
 }
 
 export function AuditLog() {
-  const [filters, setFilters] = useState<AuditListParams>({
-    limit: 50,
-  })
+  const [searchParams, setSearchParams] = useSearchParams()
   const [showFilters, setShowFilters] = useState(false)
+  const [allEvents, setAllEvents] = useState<AuditEvent[]>([])
+  const [hasMore, setHasMore] = useState(false)
   const sinceRef = useRef<HTMLInputElement>(null)
   const untilRef = useRef<HTMLInputElement>(null)
+  const lastCursorRef = useRef<string | undefined>(undefined)
+  const lastDataRef = useRef<AuditListResponse | null>(null)
 
-  const { data, isLoading, error, isFetching } = useAuditEvents(filters)
-
-  const applyDateFilters = () => {
-    const sinceValue = sinceRef.current?.value || ''
-    const untilValue = untilRef.current?.value || ''
-    setFilters((prev) => ({
-      ...prev,
-      since: sinceValue ? new Date(sinceValue).toISOString() : undefined,
-      until: untilValue ? new Date(untilValue).toISOString() : undefined,
-      cursor: undefined,
-    }))
+  // Read filters from URL params
+  const cursor = searchParams.get('cursor') || undefined
+  const filters: AuditListParams = {
+    limit: 50,
+    cursor,
+    resource_type: searchParams.get('resource_type') || undefined,
+    action: searchParams.get('action') || undefined,
+    actor_id: searchParams.get('actor_id') || undefined,
+    since: searchParams.get('since') || undefined,
+    until: searchParams.get('until') || undefined,
   }
 
+  const { data, isLoading, error, isFetching, refetch } = useAuditEvents(filters)
+
+  // Process data and accumulate events
+  useEffect(() => {
+    if (!data) return
+    lastDataRef.current = data
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing API data
+    setHasMore(data.has_more)
+
+    // If cursor changed (pagination), append events
+    // If no cursor (first page or filter changed), replace events
+    if (cursor && cursor === lastCursorRef.current) {
+      // Same cursor, data might be refetched - don't duplicate
+      return
+    }
+
+    if (cursor) {
+      // Loading more - append new events
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing API data
+      setAllEvents((prev) => [...prev, ...data.events])
+    } else {
+      // First page - replace events
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing API data
+      setAllEvents(data.events)
+    }
+    lastCursorRef.current = cursor
+  }, [data, cursor])
+
   const handleFilterChange = (key: keyof AuditListParams, value: string) => {
-    setFilters((prev) => ({
-      ...prev,
-      [key]: value || undefined,
-      cursor: undefined,
-    }))
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.delete('cursor')
+      if (value) {
+        next.set(key, value)
+      } else {
+        next.delete(key)
+      }
+      return next
+    }, { replace: true })
+    setAllEvents([])
+    lastCursorRef.current = undefined
   }
 
   const clearFilters = () => {
-    setFilters({ limit: 50 })
+    setSearchParams({}, { replace: true })
+    setAllEvents([])
+    lastCursorRef.current = undefined
+    if (sinceRef.current) sinceRef.current.value = ''
+    if (untilRef.current) untilRef.current.value = ''
   }
 
   const hasActiveFilters = !!(
@@ -183,9 +223,36 @@ export function AuditLog() {
   )
 
   const loadMore = () => {
-    if (data?.cursor) {
-      setFilters((prev) => ({ ...prev, cursor: data.cursor! }))
-    }
+    if (!hasMore || !lastDataRef.current?.cursor) return
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('cursor', lastDataRef.current!.cursor!)
+      return next
+    }, { replace: true })
+  }
+
+  const handleRefresh = () => {
+    const sinceValue = sinceRef.current?.value || ''
+    const untilValue = untilRef.current?.value || ''
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.delete('cursor')
+      // Apply date filters from input fields
+      if (sinceValue) {
+        next.set('since', new Date(sinceValue).toISOString())
+      } else {
+        next.delete('since')
+      }
+      if (untilValue) {
+        next.set('until', new Date(untilValue).toISOString())
+      } else {
+        next.delete('until')
+      }
+      return next
+    }, { replace: true })
+    setAllEvents([])
+    lastCursorRef.current = undefined
+    refetch()
   }
 
   return (
@@ -212,7 +279,7 @@ export function AuditLog() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => applyDateFilters()}
+            onClick={handleRefresh}
             disabled={isFetching}
           >
             <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
@@ -319,7 +386,7 @@ export function AuditLog() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {isLoading || isFetching ? (
+          {(isLoading || (isFetching && allEvents.length === 0)) && !cursor ? (
             <div className="space-y-3">
               {[...Array(10)].map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
@@ -333,7 +400,7 @@ export function AuditLog() {
                 {error instanceof Error ? error.message : 'Unknown error'}
               </span>
             </div>
-          ) : !data?.events.length ? (
+          ) : allEvents.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <ScrollText className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No audit events found</p>
@@ -355,18 +422,21 @@ export function AuditLog() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {data.events.map((event) => (
+                  {allEvents.map((event) => (
                     <EventDetailRow key={event.id} event={event} />
                   ))}
                 </TableBody>
               </Table>
-              {data.has_more && (
-                <div className="flex justify-center pt-4">
-                  <Button variant="outline" onClick={loadMore}>
-                    Load More
+              <div className="flex flex-col items-center gap-3 pt-4">
+                <p className="text-sm text-muted-foreground">
+                  Showing {allEvents.length} events
+                </p>
+                {hasMore && (
+                  <Button variant="outline" onClick={loadMore} disabled={isFetching}>
+                    {isFetching ? 'Loading...' : 'Load More'}
                   </Button>
-                </div>
-              )}
+                )}
+              </div>
             </>
           )}
         </CardContent>

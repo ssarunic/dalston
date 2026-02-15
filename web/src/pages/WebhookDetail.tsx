@@ -1,7 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
-  ArrowLeft,
   Webhook,
   AlertCircle,
   RefreshCw,
@@ -23,7 +22,9 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useWebhooks, useWebhookDeliveries, useRetryDelivery } from '@/hooks/useWebhooks'
-import type { WebhookDelivery } from '@/api/types'
+import { useTableState } from '@/hooks/useTableState'
+import { BackButton } from '@/components/BackButton'
+import type { WebhookDelivery, DeliveryListResponse } from '@/api/types'
 
 const PAGE_SIZE = 20
 
@@ -70,9 +71,24 @@ function formatDateTime(dateStr: string): string {
 
 export function WebhookDetail() {
   const { endpointId } = useParams<{ endpointId: string }>()
-  const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
-  const [cursor, setCursor] = useState<string | undefined>(undefined)
-  const [allDeliveries, setAllDeliveries] = useState<WebhookDelivery[]>([])
+  const {
+    cursor,
+    items: allDeliveries,
+    filters,
+    hasMore,
+    setFilter,
+    loadMore,
+    processData,
+    clearItems,
+  } = useTableState<WebhookDelivery, DeliveryListResponse>({
+    defaultFilters: { status: '' },
+    dataKey: 'deliveries',
+    getItems: (data) => data.deliveries,
+    getCursor: (data) => data.cursor,
+    getHasMore: (data) => data.has_more,
+  })
+
+  const statusFilter = filters.status || undefined
 
   const { data: webhooksData, isLoading: webhooksLoading } = useWebhooks()
   const {
@@ -88,35 +104,19 @@ export function WebhookDetail() {
   })
   const retryDelivery = useRetryDelivery()
 
-  // Accumulate deliveries when data changes (intentional pattern for cursor pagination)
-  /* eslint-disable react-hooks/set-state-in-effect */
+  // Process data when it changes
   useEffect(() => {
-    if (deliveriesData?.deliveries) {
-      if (cursor === undefined) {
-        setAllDeliveries(() => deliveriesData.deliveries)
-      } else {
-        setAllDeliveries((prev) => [...prev, ...deliveriesData.deliveries])
-      }
+    if (deliveriesData) {
+      processData(deliveriesData)
     }
-  }, [deliveriesData, cursor])
-  /* eslint-enable react-hooks/set-state-in-effect */
+  }, [deliveriesData, processData])
 
-  // Reset pagination when filter changes
-  const handleFilterChange = useCallback((value: string | undefined) => {
-    setStatusFilter(value)
-    setCursor(undefined)
-    setAllDeliveries([])
-  }, [])
-
-  const loadMore = () => {
-    if (deliveriesData?.has_more && deliveriesData?.cursor) {
-      setCursor(deliveriesData.cursor)
-    }
+  const handleFilterChange = (value: string | undefined) => {
+    setFilter('status', value || '')
   }
 
   const handleRefresh = () => {
-    setCursor(undefined)
-    setAllDeliveries([])
+    clearItems()
     refetch()
   }
 
@@ -131,8 +131,7 @@ export function WebhookDetail() {
         deliveryId: delivery.id,
       })
       // Reset and refetch after retry
-      setCursor(undefined)
-      setAllDeliveries([])
+      clearItems()
       refetch()
     } catch (err) {
       console.error('Failed to retry delivery:', err)
@@ -152,13 +151,7 @@ export function WebhookDetail() {
   if (!webhook) {
     return (
       <div className="space-y-6">
-        <Link
-          to="/webhooks"
-          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to Webhooks
-        </Link>
+        <BackButton fallbackPath="/webhooks" variant="link" label="Back to Webhooks" />
         <Card>
           <CardContent className="py-8">
             <div className="flex items-center justify-center gap-2 text-muted-foreground">
@@ -174,13 +167,7 @@ export function WebhookDetail() {
   return (
     <div className="space-y-6">
       {/* Back Link */}
-      <Link
-        to="/webhooks"
-        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back to Webhooks
-      </Link>
+      <BackButton fallbackPath="/webhooks" variant="link" label="Back to Webhooks" />
 
       {/* Endpoint Info Card */}
       <Card>
@@ -380,7 +367,7 @@ export function WebhookDetail() {
                   <p className="text-sm text-muted-foreground">
                     Showing {allDeliveries.length} deliveries
                   </p>
-                  {deliveriesData?.has_more && (
+                  {hasMore && (
                     <Button
                       variant="outline"
                       onClick={loadMore}

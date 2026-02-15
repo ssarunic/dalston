@@ -1,6 +1,5 @@
-import { useParams, Link } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import {
-  ArrowLeft,
   Clock,
   MessageSquare,
   Mic,
@@ -15,6 +14,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useRealtimeSession, useSessionTranscript } from '@/hooks/useRealtimeSessions'
+import { BackButton } from '@/components/BackButton'
 import { apiClient } from '@/api/client'
 import type { RealtimeSessionStatus, SessionUtterance } from '@/api/types'
 
@@ -78,10 +78,7 @@ export function RealtimeSessionDetail() {
   if (error || !session) {
     return (
       <div className="space-y-6">
-        <Link to="/realtime" className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" />
-          Back to Realtime
-        </Link>
+        <BackButton fallbackPath="/realtime" variant="link" label="Back to Realtime" />
         <div className="p-4 bg-destructive/10 text-destructive rounded-md flex items-center gap-2">
           <AlertCircle className="h-5 w-5" />
           Session not found
@@ -94,9 +91,7 @@ export function RealtimeSessionDetail() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link to="/realtime" className="text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-5 w-5" />
-          </Link>
+          <BackButton fallbackPath="/realtime" />
           <div>
             <h1 className="text-2xl font-bold font-mono">{session.id}</h1>
             <p className="text-muted-foreground">Realtime Session</p>

@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Menu } from 'lucide-react'
 import { Sidebar } from './Sidebar'
 import { Sheet, SheetContent, SheetTrigger } from './ui/sheet'
 import { Button } from './ui/button'
+import { useScrollRestoration } from '@/hooks/useScrollRestoration'
 
 interface LayoutProps {
   children: React.ReactNode
@@ -10,6 +11,9 @@ interface LayoutProps {
 
 export function Layout({ children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const mainRef = useRef<HTMLElement>(null)
+
+  useScrollRestoration(mainRef)
 
   return (
     <div className="flex h-screen bg-background">
@@ -37,7 +41,7 @@ export function Layout({ children }: LayoutProps) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-auto p-4 md:p-6">
+        <main ref={mainRef} className="flex-1 overflow-auto p-4 md:p-6">
           {children}
         </main>
       </div>

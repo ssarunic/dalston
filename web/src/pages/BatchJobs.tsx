@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Trash2, X, RefreshCw, Filter } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useJobs } from '@/hooks/useJobs'
+import { useTableState } from '@/hooks/useTableState'
 import { apiClient } from '@/api/client'
-import type { JobStatus, ConsoleJobSummary } from '@/api/types'
+import type { JobStatus, ConsoleJobSummary, ConsoleJobListResponse } from '@/api/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -60,9 +61,24 @@ function formatDuration(seconds: number | undefined): string {
 }
 
 export function BatchJobs() {
-  const [statusFilter, setStatusFilter] = useState<string>('')
-  const [cursor, setCursor] = useState<string | undefined>(undefined)
-  const [allJobs, setAllJobs] = useState<ConsoleJobSummary[]>([])
+  const {
+    cursor,
+    items: allJobs,
+    filters,
+    hasMore,
+    setFilter,
+    loadMore,
+    processData,
+    clearItems,
+  } = useTableState<ConsoleJobSummary, ConsoleJobListResponse>({
+    defaultFilters: { status: '' },
+    dataKey: 'jobs',
+    getItems: (data) => data.jobs,
+    getCursor: (data) => data.cursor,
+    getHasMore: (data) => data.has_more,
+  })
+
+  const statusFilter = filters.status
   const [deleteTarget, setDeleteTarget] = useState<{ id: string } | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -82,37 +98,20 @@ export function BatchJobs() {
     status: statusFilter || undefined,
   })
 
-  // Accumulate jobs when data changes (intentional pattern for cursor pagination)
+  // Process data when it changes
   useEffect(() => {
-    if (data?.jobs) {
-      if (cursor === undefined) {
-        setAllJobs(() => data.jobs)
-      } else {
-        setAllJobs((prev) => [...prev, ...data.jobs])
-      }
+    if (data) {
+      processData(data)
     }
-  }, [data, cursor])
+  }, [data, processData])
 
-  // Reset pagination when filter changes
-  const handleFilterChange = useCallback((value: string) => {
-    setStatusFilter(value)
-    setCursor(undefined)
-    setAllJobs([])
-  }, [])
-
-  const loadMore = () => {
-    if (data?.has_more && data?.cursor) {
-      setCursor(data.cursor)
-    }
+  const handleFilterChange = (value: string) => {
+    setFilter('status', value)
   }
 
   const handleRefresh = async () => {
-    setCursor(undefined)
-    setAllJobs([])
-    const { data: newData } = await refetch()
-    if (newData?.jobs) {
-      setAllJobs(newData.jobs)
-    }
+    clearItems()
+    await refetch()
   }
 
   async function handleDelete() {
@@ -123,8 +122,7 @@ export function BatchJobs() {
       await apiClient.deleteJob(deleteTarget.id)
       setDeleteTarget(null)
       // Reset and refetch to get fresh data
-      setCursor(undefined)
-      setAllJobs([])
+      clearItems()
       queryClient.invalidateQueries({ queryKey: ['jobs'] })
     } catch (err) {
       const message =
@@ -144,8 +142,7 @@ export function BatchJobs() {
       setCancelTarget(null)
       setCancelSuccess(result.message)
       // Reset and refetch to get fresh data
-      setCursor(undefined)
-      setAllJobs([])
+      clearItems()
       queryClient.invalidateQueries({ queryKey: ['jobs'] })
       // Clear success message after 3 seconds
       setTimeout(() => setCancelSuccess(null), 3000)
@@ -340,7 +337,7 @@ export function BatchJobs() {
               <p className="text-sm text-muted-foreground">
                 Showing {allJobs.length} jobs
               </p>
-              {data?.has_more && (
+              {hasMore && (
                 <Button
                   variant="outline"
                   onClick={loadMore}

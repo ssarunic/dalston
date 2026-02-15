@@ -1,7 +1,6 @@
 import { useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import {
-  ArrowLeft,
   Globe,
   Users,
   FileText,
@@ -21,6 +20,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/StatusBadge'
 import { DAGViewer } from '@/components/DAGViewer'
+import { BackButton } from '@/components/BackButton'
 import { apiClient } from '@/api/client'
 import type { Segment, RetentionInfo, AuditEvent } from '@/api/types'
 
@@ -302,9 +302,7 @@ export function JobDetail() {
       <div className="flex flex-col items-center justify-center py-12">
         <AlertCircle className="h-12 w-12 text-red-400 mb-4" />
         <p className="text-red-400">Error loading job</p>
-        <Link to="/jobs" className="mt-4">
-          <Button variant="outline">Back to Jobs</Button>
-        </Link>
+        <BackButton fallbackPath="/jobs" variant="outline" label="Back to Jobs" className="mt-4" />
       </div>
     )
   }
@@ -313,9 +311,7 @@ export function JobDetail() {
     return (
       <div className="flex flex-col items-center justify-center py-12">
         <p className="text-muted-foreground">Job not found</p>
-        <Link to="/jobs" className="mt-4">
-          <Button variant="outline">Back to Jobs</Button>
-        </Link>
+        <BackButton fallbackPath="/jobs" variant="outline" label="Back to Jobs" className="mt-4" />
       </div>
     )
   }
@@ -332,11 +328,7 @@ export function JobDetail() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link to="/jobs">
-            <Button variant="ghost" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
+          <BackButton fallbackPath="/jobs" />
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold font-mono">{job.id}</h1>

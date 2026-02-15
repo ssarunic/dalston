@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Radio, MessageSquare, Mic, Trash2, RefreshCw, Filter, X } from 'lucide-react'
 import { apiClient } from '@/api/client'
+import { useTableState } from '@/hooks/useTableState'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
@@ -24,7 +25,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { useRealtimeStatus } from '@/hooks/useRealtimeStatus'
 import { useRealtimeSessions } from '@/hooks/useRealtimeSessions'
-import type { RealtimeSessionStatus, RealtimeSessionSummary } from '@/api/types'
+import type { RealtimeSessionStatus, RealtimeSessionSummary, RealtimeSessionListResponse } from '@/api/types'
 
 function StatusDot({ status }: { status: string }) {
   const color =
@@ -64,12 +65,27 @@ const PAGE_SIZE = 50
 
 export function RealtimeSessions() {
   const navigate = useNavigate()
-  const [statusFilter, setStatusFilter] = useState<string>('all')
+  const {
+    cursor,
+    items: allSessions,
+    filters,
+    hasMore,
+    setFilter,
+    loadMore,
+    processData,
+    clearItems,
+  } = useTableState<RealtimeSessionSummary, RealtimeSessionListResponse>({
+    defaultFilters: { status: 'all' },
+    dataKey: 'sessions',
+    getItems: (data) => data.sessions,
+    getCursor: (data) => data.cursor,
+    getHasMore: (data) => data.has_more,
+  })
+
+  const statusFilter = filters.status || 'all'
   const [deleteTarget, setDeleteTarget] = useState<{ id: string } | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [cursor, setCursor] = useState<string | undefined>(undefined)
-  const [allSessions, setAllSessions] = useState<RealtimeSessionSummary[]>([])
   const [showFilters, setShowFilters] = useState(false)
 
   const hasActiveFilters = statusFilter !== 'all'
@@ -80,37 +96,20 @@ export function RealtimeSessions() {
     cursor,
   })
 
-  // Accumulate sessions when data changes (intentional pattern for cursor pagination)
+  // Process data when it changes
   useEffect(() => {
-    if (sessionsData?.sessions) {
-      if (cursor === undefined) {
-        setAllSessions(() => sessionsData.sessions)
-      } else {
-        setAllSessions((prev) => [...prev, ...sessionsData.sessions])
-      }
+    if (sessionsData) {
+      processData(sessionsData)
     }
-  }, [sessionsData, cursor])
+  }, [sessionsData, processData])
 
-  // Reset pagination when filter changes
-  const handleFilterChange = useCallback((value: string) => {
-    setStatusFilter(value)
-    setCursor(undefined)
-    setAllSessions([])
-  }, [])
-
-  const loadMore = () => {
-    if (sessionsData?.has_more && sessionsData?.cursor) {
-      setCursor(sessionsData.cursor)
-    }
+  const handleFilterChange = (value: string) => {
+    setFilter('status', value)
   }
 
   const handleRefresh = async () => {
-    setCursor(undefined)
-    setAllSessions([])
-    const { data: newData } = await refetch()
-    if (newData?.sessions) {
-      setAllSessions(newData.sessions)
-    }
+    clearItems()
+    await refetch()
   }
 
   const handleDelete = async () => {
@@ -121,8 +120,7 @@ export function RealtimeSessions() {
       await apiClient.deleteRealtimeSession(deleteTarget.id)
       setDeleteTarget(null)
       // Reset and refetch to get fresh data
-      setCursor(undefined)
-      setAllSessions([])
+      clearItems()
       refetch()
     } catch (error) {
       const message =
@@ -401,7 +399,7 @@ export function RealtimeSessions() {
               <p className="text-sm text-muted-foreground">
                 Showing {allSessions.length} sessions
               </p>
-              {sessionsData?.has_more && (
+              {hasMore && (
                 <Button
                   variant="outline"
                   onClick={loadMore}
