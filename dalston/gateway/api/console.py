@@ -397,19 +397,16 @@ async def get_engines(
     session_router: SessionRouter = Depends(get_session_router),
 ) -> EnginesResponse:
     """Get status of all engines."""
-    # Discover engines from heartbeat keys
+    # Discover engines from registry (M28 batch engine registry)
+    # First get all registered engine IDs from the SET
+    registered_engine_ids = await redis.smembers("dalston:batch:engines")
+
+    # Then fetch state for each registered engine
     discovered_heartbeats: dict[str, dict[str, str]] = {}
-    cursor: int | bytes = 0
-    while True:
-        cursor, keys = await redis.scan(
-            cursor, match="dalston:batch_engine:*:heartbeat", count=100
-        )
-        for key in keys:
-            data = await redis.hgetall(key)
-            if data and "engine_id" in data:
-                discovered_heartbeats[data["engine_id"]] = data
-        if cursor == 0:
-            break
+    for engine_id in registered_engine_ids:
+        data = await redis.hgetall(f"dalston:batch:engine:{engine_id}")
+        if data and "engine_id" in data:
+            discovered_heartbeats[data["engine_id"]] = data
 
     now = datetime.now(UTC)
     batch_engines = []
@@ -427,7 +424,7 @@ async def get_engines(
         else:
             # Check heartbeat age
             try:
-                last_seen = datetime.fromisoformat(heartbeat["last_seen"])
+                last_seen = datetime.fromisoformat(heartbeat["last_heartbeat"])
                 age = (now - last_seen).total_seconds()
             except (KeyError, ValueError):
                 age = float("inf")
@@ -456,7 +453,7 @@ async def get_engines(
             queue_depth = await redis.llen(queue_key) or 0
 
             try:
-                last_seen = datetime.fromisoformat(heartbeat["last_seen"])
+                last_seen = datetime.fromisoformat(heartbeat["last_heartbeat"])
                 age = (now - last_seen).total_seconds()
             except (KeyError, ValueError):
                 age = float("inf")
