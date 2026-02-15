@@ -354,8 +354,12 @@ class TestPerChannelTaskCompletion:
         mock_redis = AsyncMock()
         mock_redis.decr = AsyncMock(return_value=0)  # Rate limiter decrement
         mock_settings = MagicMock()
+        mock_registry = AsyncMock()
+        mock_registry.is_engine_available = AsyncMock(return_value=True)
 
-        await handle_task_completed(task_id, mock_db, mock_redis, mock_settings)
+        await handle_task_completed(
+            task_id, mock_db, mock_redis, mock_settings, mock_registry
+        )
 
         # Error should be cleared
         assert mock_task.error is None

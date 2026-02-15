@@ -250,9 +250,15 @@ class TestRequestIdInTaskMetadata:
         settings.s3_endpoint_url = "http://localhost:9000"
         return settings
 
+    @pytest.fixture
+    def mock_registry(self):
+        registry = AsyncMock()
+        registry.is_engine_available = AsyncMock(return_value=True)
+        return registry
+
     @pytest.mark.asyncio
     async def test_queue_task_includes_request_id_from_contextvars(
-        self, mock_redis, mock_settings
+        self, mock_redis, mock_settings, mock_registry
     ):
         """queue_task stores request_id from contextvars in Redis task metadata."""
         from dalston.common.models import Task
@@ -275,7 +281,7 @@ class TestRequestIdInTaskMetadata:
         with patch(
             "dalston.orchestrator.scheduler.write_task_input", new_callable=AsyncMock
         ):
-            await queue_task(mock_redis, task, mock_settings)
+            await queue_task(mock_redis, task, mock_settings, mock_registry)
 
         # Verify hset was called with request_id in the mapping
         mock_redis.hset.assert_called_once()
@@ -301,7 +307,7 @@ class TestRequestIdInTaskMetadata:
 
     @pytest.mark.asyncio
     async def test_queue_task_omits_request_id_when_not_in_context(
-        self, mock_redis, mock_settings
+        self, mock_redis, mock_settings, mock_registry
     ):
         """queue_task does not include request_id when not in contextvars."""
         from dalston.common.models import Task
@@ -323,7 +329,7 @@ class TestRequestIdInTaskMetadata:
         with patch(
             "dalston.orchestrator.scheduler.write_task_input", new_callable=AsyncMock
         ):
-            await queue_task(mock_redis, task, mock_settings)
+            await queue_task(mock_redis, task, mock_settings, mock_registry)
 
         mock_redis.hset.assert_called_once()
         call_kwargs = mock_redis.hset.call_args
@@ -341,6 +347,7 @@ class TestOrchestratorEventDispatch:
 
         mock_redis = AsyncMock()
         mock_settings = MagicMock()
+        mock_batch_registry = AsyncMock()
 
         # Create a job.created event with request_id
         event_data = json.dumps(
@@ -372,7 +379,9 @@ class TestOrchestratorEventDispatch:
             )
             mock_session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            await _dispatch_event(event_data, mock_redis, mock_settings)
+            await _dispatch_event(
+                event_data, mock_redis, mock_settings, mock_batch_registry
+            )
 
         assert captured_ctx.get("request_id") == "req_from_gateway"
 
@@ -383,6 +392,7 @@ class TestOrchestratorEventDispatch:
 
         mock_redis = AsyncMock()
         mock_settings = MagicMock()
+        mock_batch_registry = AsyncMock()
 
         event_data = json.dumps(
             {
@@ -410,6 +420,8 @@ class TestOrchestratorEventDispatch:
             )
             mock_session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            await _dispatch_event(event_data, mock_redis, mock_settings)
+            await _dispatch_event(
+                event_data, mock_redis, mock_settings, mock_batch_registry
+            )
 
         assert "request_id" not in captured_ctx
