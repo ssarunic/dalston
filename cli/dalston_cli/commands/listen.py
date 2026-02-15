@@ -104,7 +104,7 @@ def listen(
             "--enhance",
             help="Run batch enhancement after session ends (requires --store-audio).",
         ),
-    ] = False,
+    ] = True,
     # PII detection options
     pii: Annotated[
         bool,

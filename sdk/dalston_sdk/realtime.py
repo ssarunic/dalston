@@ -176,7 +176,7 @@ class AsyncRealtimeSession:
         # Storage and enhancement options
         store_audio: bool = True,
         store_transcript: bool = True,
-        enhance_on_end: bool = False,
+        enhance_on_end: bool = True,
         # PII detection options (M26)
         pii_detection: bool = False,
         pii_detection_tier: str = "standard",
@@ -495,7 +495,7 @@ class RealtimeSession:
         # Storage and enhancement options
         store_audio: bool = True,
         store_transcript: bool = True,
-        enhance_on_end: bool = False,
+        enhance_on_end: bool = True,
         # PII detection options (M26)
         pii_detection: bool = False,
         pii_detection_tier: str = "standard",

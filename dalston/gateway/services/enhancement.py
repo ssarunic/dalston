@@ -179,11 +179,9 @@ class EnhancementService:
                 "Cannot create enhancement job: no audio URI provided."
             )
 
-        # Validate: session must not be active
-        if session.status == "active":
-            raise EnhancementError(
-                "Cannot create enhancement job: session is still active."
-            )
+        # Note: We don't check session.status == "active" here because this method
+        # is called during the finalization flow BEFORE the session status is updated.
+        # The caller is responsible for ensuring the session is actually ending.
 
         # Validate: session should not already have an enhancement job
         if session.enhancement_job_id is not None:
@@ -259,23 +257,23 @@ class EnhancementService:
             Model ID to use for batch processing
         """
         # Map fast/distil models to full-size equivalents
-        # Default to whisper-large-v3 for best quality
+        # Default to large-v3 for best quality
         model_mapping = {
-            "fast": "whisper-large-v3",
-            "distil-whisper-large-v3-en": "whisper-large-v3",
-            "distil-whisper-large-v2": "whisper-large-v3",
-            "parakeet": "whisper-large-v3",
-            "parakeet-0.6b": "whisper-large-v3",
-            "parakeet-1.1b": "whisper-large-v3",
-            "scribe_v1": "whisper-large-v3",
-            "scribe_v2": "whisper-large-v3",
+            "fast": "large-v3",
+            "distil-large-v3-en": "large-v3",
+            "distil-whisper-large-v2": "large-v3",
+            "parakeet": "large-v3",
+            "parakeet-0.6b": "large-v3",
+            "parakeet-1.1b": "large-v3",
+            "scribe_v1": "large-v3",
+            "scribe_v2": "large-v3",
         }
 
         if realtime_model and realtime_model.lower() in model_mapping:
             return model_mapping[realtime_model.lower()]
 
-        # If already a full model or unknown, default to whisper-large-v3
-        return "whisper-large-v3"
+        # If already a full model or unknown, default to large-v3
+        return "large-v3"
 
 
 async def create_enhancement_for_session(

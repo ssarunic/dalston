@@ -47,7 +47,7 @@ class RealtimeSessionService:
         sample_rate: int | None = None,
         store_audio: bool = True,
         store_transcript: bool = True,
-        enhance_on_end: bool = False,
+        enhance_on_end: bool = True,
         previous_session_id: UUID | None = None,
         # Retention fields (M25)
         retention_policy_id: UUID | None = None,

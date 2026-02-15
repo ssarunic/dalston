@@ -190,47 +190,38 @@ class TestBatchModelMapping:
         return EnhancementService(AsyncMock(), MagicMock())
 
     def test_fast_model_maps_to_large_v3(self, enhancement_service):
-        """Test that 'fast' model maps to whisper-large-v3."""
+        """Test that 'fast' model maps to large-v3."""
         result = enhancement_service._get_batch_model("fast")
-        assert result == "whisper-large-v3"
+        assert result == "large-v3"
 
     def test_parakeet_model_maps_to_large_v3(self, enhancement_service):
-        """Test that parakeet models map to whisper-large-v3."""
-        assert enhancement_service._get_batch_model("parakeet") == "whisper-large-v3"
-        assert (
-            enhancement_service._get_batch_model("parakeet-0.6b") == "whisper-large-v3"
-        )
-        assert (
-            enhancement_service._get_batch_model("parakeet-1.1b") == "whisper-large-v3"
-        )
+        """Test that parakeet models map to large-v3."""
+        assert enhancement_service._get_batch_model("parakeet") == "large-v3"
+        assert enhancement_service._get_batch_model("parakeet-0.6b") == "large-v3"
+        assert enhancement_service._get_batch_model("parakeet-1.1b") == "large-v3"
 
     def test_distil_whisper_maps_to_large_v3(self, enhancement_service):
-        """Test that distil-whisper models map to whisper-large-v3."""
-        assert (
-            enhancement_service._get_batch_model("distil-whisper-large-v3-en")
-            == "whisper-large-v3"
-        )
+        """Test that distil-whisper models map to large-v3."""
+        assert enhancement_service._get_batch_model("distil-large-v3-en") == "large-v3"
         assert (
             enhancement_service._get_batch_model("distil-whisper-large-v2")
-            == "whisper-large-v3"
+            == "large-v3"
         )
 
     def test_elevenlabs_scribe_maps_to_large_v3(self, enhancement_service):
-        """Test that ElevenLabs scribe models map to whisper-large-v3."""
-        assert enhancement_service._get_batch_model("scribe_v1") == "whisper-large-v3"
-        assert enhancement_service._get_batch_model("scribe_v2") == "whisper-large-v3"
+        """Test that ElevenLabs scribe models map to large-v3."""
+        assert enhancement_service._get_batch_model("scribe_v1") == "large-v3"
+        assert enhancement_service._get_batch_model("scribe_v2") == "large-v3"
 
     def test_unknown_model_defaults_to_large_v3(self, enhancement_service):
-        """Test that unknown models default to whisper-large-v3."""
-        assert (
-            enhancement_service._get_batch_model("unknown-model") == "whisper-large-v3"
-        )
-        assert enhancement_service._get_batch_model(None) == "whisper-large-v3"
+        """Test that unknown models default to large-v3."""
+        assert enhancement_service._get_batch_model("unknown-model") == "large-v3"
+        assert enhancement_service._get_batch_model(None) == "large-v3"
 
     def test_model_mapping_case_insensitive(self, enhancement_service):
         """Test that model mapping is case-insensitive."""
-        assert enhancement_service._get_batch_model("FAST") == "whisper-large-v3"
-        assert enhancement_service._get_batch_model("Parakeet") == "whisper-large-v3"
+        assert enhancement_service._get_batch_model("FAST") == "large-v3"
+        assert enhancement_service._get_batch_model("Parakeet") == "large-v3"
 
 
 class TestCreateEnhancementForSession:

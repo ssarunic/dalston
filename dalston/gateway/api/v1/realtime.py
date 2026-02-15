@@ -114,7 +114,7 @@ async def realtime_transcription(
     word_timestamps: Annotated[bool, Query(description="Include word timing")] = False,
     enhance_on_end: Annotated[
         bool, Query(description="Trigger batch enhancement")
-    ] = False,
+    ] = True,
     store_audio: Annotated[bool, Query(description="Record audio to S3")] = True,
     store_transcript: Annotated[
         bool, Query(description="Save final transcript to S3")
@@ -607,7 +607,7 @@ async def elevenlabs_realtime_transcription(
         language=language_code,
         model=routing_model,
         client_ip=client_ip,
-        enhance_on_end=False,
+        enhance_on_end=True,
     )
 
     if allocation is None:

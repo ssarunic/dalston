@@ -160,7 +160,7 @@ class SessionRouter:
         language: str,
         model: str,
         client_ip: str,
-        enhance_on_end: bool = False,
+        enhance_on_end: bool = True,
     ) -> WorkerAllocation | None:
         """Acquire a worker for a new session.
 

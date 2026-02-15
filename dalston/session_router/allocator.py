@@ -67,7 +67,7 @@ class SessionState:
     model: str
     client_ip: str
     started_at: datetime
-    enhance_on_end: bool = False
+    enhance_on_end: bool = True
 
 
 class SessionAllocator:
@@ -119,7 +119,7 @@ class SessionAllocator:
         language: str,
         model: str,
         client_ip: str,
-        enhance_on_end: bool = False,
+        enhance_on_end: bool = True,
     ) -> WorkerAllocation | None:
         """Find worker with capacity and reserve a slot.
 
