@@ -72,7 +72,7 @@ class TestExtractStatsFromTranscript:
         assert stats.language_code is None
         assert stats.word_count == 0
         assert stats.segment_count == 0
-        assert stats.speaker_count == 0
+        assert stats.speaker_count is None  # None when no diarization
         assert stats.character_count == 0
 
     def test_handles_missing_metadata(self):
@@ -88,7 +88,7 @@ class TestExtractStatsFromTranscript:
         assert stats.language_code is None
         assert stats.word_count == 2
         assert stats.segment_count == 1
-        assert stats.speaker_count == 0
+        assert stats.speaker_count is None  # None when no speakers
 
     def test_handles_missing_text(self):
         """Test extraction when text is missing.
@@ -179,8 +179,20 @@ class TestJobResultStats:
             language_code=None,
             word_count=0,
             segment_count=0,
-            speaker_count=0,
+            speaker_count=None,
             character_count=0,
         )
 
         assert stats.language_code is None
+
+    def test_allows_none_speaker_count(self):
+        """Test that speaker_count can be None (no diarization)."""
+        stats = JobResultStats(
+            language_code="en",
+            word_count=100,
+            segment_count=10,
+            speaker_count=None,
+            character_count=500,
+        )
+
+        assert stats.speaker_count is None

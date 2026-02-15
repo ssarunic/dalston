@@ -387,7 +387,7 @@ export function JobDetail() {
         <MetadataCard
           icon={Users}
           label="Speakers"
-          value={job.result_speaker_count ?? job.speakers?.length ?? 0}
+          value={job.result_speaker_count ?? (job.speakers?.length ? job.speakers.length : '-')}
         />
         <RetentionCard retention={job.retention} />
       </div>

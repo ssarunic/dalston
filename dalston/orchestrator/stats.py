@@ -21,7 +21,7 @@ class JobResultStats:
     language_code: str | None
     word_count: int
     segment_count: int
-    speaker_count: int
+    speaker_count: int | None  # None when diarization wasn't run
     character_count: int
 
 
@@ -43,7 +43,9 @@ def extract_stats_from_transcript(transcript: dict[str, Any]) -> JobResultStats:
     segment_count = len(segments)
 
     # Count speakers - use metadata.speaker_count if available, else count speakers array
-    speaker_count = metadata.get("speaker_count", len(speakers))
+    # Return None if no speakers (diarization wasn't run or detected no speakers)
+    raw_speaker_count = metadata.get("speaker_count", len(speakers))
+    speaker_count = raw_speaker_count if raw_speaker_count > 0 else None
 
     # Count words - split text on whitespace
     word_count = len(text.split()) if text else 0
