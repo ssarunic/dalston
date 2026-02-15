@@ -21,6 +21,7 @@ import dalston.logging
 import dalston.metrics
 import dalston.telemetry
 from dalston.engine_sdk import io
+from dalston.engine_sdk.registry import BatchEngineInfo, BatchEngineRegistry
 from dalston.engine_sdk.types import TaskInput, TaskOutput
 
 if TYPE_CHECKING:
@@ -78,7 +79,6 @@ class EngineRunner:
 
     # Redis key patterns
     QUEUE_KEY = "dalston:queue:{engine_id}"
-    HEARTBEAT_KEY = "dalston:batch_engine:{engine_id}:heartbeat"
     EVENTS_CHANNEL = "dalston:events"
 
     # Configuration
@@ -95,6 +95,7 @@ class EngineRunner:
         """
         self.engine = engine
         self._redis: redis.Redis | None = None
+        self._registry: BatchEngineRegistry | None = None
         self._running = False
         self._metrics_server: HTTPServer | None = None
         self._metrics_thread: threading.Thread | None = None
@@ -134,11 +135,6 @@ class EngineRunner:
         """Get the Redis queue key for this engine."""
         return self.QUEUE_KEY.format(engine_id=self.engine_id)
 
-    @property
-    def heartbeat_key(self) -> str:
-        """Get the Redis heartbeat key for this engine."""
-        return self.HEARTBEAT_KEY.format(engine_id=self.engine_id)
-
     def run(self) -> None:
         """Start the processing loop.
 
@@ -149,6 +145,16 @@ class EngineRunner:
 
         # Start metrics HTTP server in background thread (M20)
         self._start_metrics_server()
+
+        # Initialize registry and register engine
+        self._registry = BatchEngineRegistry(self.redis_url)
+        self._registry.register(
+            BatchEngineInfo(
+                engine_id=self.engine_id,
+                stage=getattr(self.engine, "stage", "unknown"),
+                queue_name=self.queue_key,
+            )
+        )
 
         # Start heartbeat thread to advertise engine status
         self._start_heartbeat_thread()
@@ -178,6 +184,12 @@ class EngineRunner:
     def stop(self) -> None:
         """Stop the processing loop."""
         self._running = False
+        # Unregister from registry for immediate offline status
+        if self._registry:
+            try:
+                self._registry.unregister(self.engine_id)
+            except Exception:
+                pass  # Best effort cleanup
 
     def _start_metrics_server(self) -> None:
         """Start metrics HTTP server in a background thread."""
@@ -215,36 +227,25 @@ class EngineRunner:
         logger.info("heartbeat_thread_started")
 
     def _stop_heartbeat_thread(self) -> None:
-        """Stop heartbeat thread and clear heartbeat from Redis."""
+        """Stop heartbeat thread."""
         if self._heartbeat_thread:
             # Thread will exit when _running becomes False
             self._heartbeat_thread = None
-        # Delete heartbeat key so engine shows as offline immediately
-        try:
-            self.redis_client.delete(self.heartbeat_key)
-            logger.debug("heartbeat_key_deleted")
-        except Exception:
-            pass  # Best effort cleanup
 
     def _heartbeat_loop(self) -> None:
-        """Send heartbeats to Redis periodically."""
+        """Send heartbeats to Redis periodically via registry."""
         while self._running:
             try:
                 # Read current task with lock for thread safety
                 with self._task_lock:
                     current_task = self._current_task_id
 
-                self.redis_client.hset(
-                    self.heartbeat_key,
-                    mapping={
-                        "engine_id": self.engine_id,
-                        "stage": getattr(self.engine, "stage", "unknown"),
-                        "last_seen": datetime.now(UTC).isoformat(),
-                        "status": "processing" if current_task else "idle",
-                        "current_task": current_task or "",
-                    },
-                )
-                self.redis_client.expire(self.heartbeat_key, self.HEARTBEAT_TTL)
+                if self._registry:
+                    self._registry.heartbeat(
+                        engine_id=self.engine_id,
+                        status="processing" if current_task else "idle",
+                        current_task=current_task,
+                    )
             except Exception as e:
                 logger.warning("heartbeat_failed", error=str(e))
             time.sleep(self.HEARTBEAT_INTERVAL)

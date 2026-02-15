@@ -32,6 +32,8 @@ from dalston.gateway.services.rate_limiter import (
     KEY_PREFIX_JOBS,
 )
 from dalston.orchestrator.dag import build_task_dag
+from dalston.orchestrator.exceptions import EngineUnavailableError
+from dalston.orchestrator.registry import BatchEngineRegistry
 from dalston.orchestrator.scheduler import (
     get_task_output,
     queue_task,
@@ -59,6 +61,7 @@ async def handle_job_created(
     db: AsyncSession,
     redis: Redis,
     settings: Settings,
+    registry: BatchEngineRegistry,
 ) -> None:
     """Handle job.created event.
 
@@ -74,6 +77,7 @@ async def handle_job_created(
         db: Database session
         redis: Redis client
         settings: Application settings
+        registry: Batch engine registry for availability checks
     """
     log = logger.bind(job_id=str(job_id))
     log.info("handling_job_created")
@@ -166,13 +170,29 @@ async def handle_job_created(
                 await db.commit()
 
             # Queue for execution (include audio metadata for prepare stage)
-            await queue_task(
-                redis=redis,
-                task=task,
-                settings=settings,
-                previous_outputs={},
-                audio_metadata=audio_metadata if task.stage == "prepare" else None,
-            )
+            try:
+                await queue_task(
+                    redis=redis,
+                    task=task,
+                    settings=settings,
+                    registry=registry,
+                    previous_outputs={},
+                    audio_metadata=audio_metadata if task.stage == "prepare" else None,
+                )
+            except EngineUnavailableError as e:
+                # Fail the job immediately if engine is unavailable
+                job.status = JobStatus.FAILED.value
+                job.error = str(e)
+                job.completed_at = datetime.now(UTC)
+                await db.commit()
+                await _decrement_concurrent_jobs(redis, job.tenant_id)
+                await publish_job_failed(redis, job_id, str(e))
+                log.error(
+                    "job_failed_engine_unavailable",
+                    engine_id=e.engine_id,
+                    stage=e.stage,
+                )
+                return
 
             # Record task scheduled metric (M20)
             dalston.metrics.inc_orchestrator_tasks_scheduled(task.engine_id, task.stage)
@@ -212,6 +232,7 @@ async def handle_task_completed(
     db: AsyncSession,
     redis: Redis,
     settings: Settings,
+    registry: BatchEngineRegistry,
 ) -> None:
     """Handle task.completed event.
 
@@ -227,6 +248,7 @@ async def handle_task_completed(
         db: Database session
         redis: Redis client
         settings: Application settings
+        registry: Batch engine registry for availability checks
     """
     log = logger.bind(task_id=str(task_id))
     log.info("handling_task_completed")
@@ -331,12 +353,30 @@ async def handle_task_completed(
 
             task_model = Task.model_validate(dependent)
 
-            await queue_task(
-                redis=redis,
-                task=task_model,
-                settings=settings,
-                previous_outputs=previous_outputs,
-            )
+            try:
+                await queue_task(
+                    redis=redis,
+                    task=task_model,
+                    settings=settings,
+                    registry=registry,
+                    previous_outputs=previous_outputs,
+                )
+            except EngineUnavailableError as e:
+                # Fail the job immediately if engine is unavailable
+                job = await db.get(JobModel, job_id)
+                if job:
+                    job.status = JobStatus.FAILED.value
+                    job.error = str(e)
+                    job.completed_at = datetime.now(UTC)
+                    await db.commit()
+                    await _decrement_concurrent_jobs(redis, job.tenant_id)
+                    await publish_job_failed(redis, job_id, str(e))
+                log.error(
+                    "job_failed_engine_unavailable",
+                    engine_id=e.engine_id,
+                    stage=e.stage,
+                )
+                return
 
             # Record task scheduled metric (M20)
             dalston.metrics.inc_orchestrator_tasks_scheduled(
@@ -359,6 +399,7 @@ async def handle_task_failed(
     db: AsyncSession,
     redis: Redis,
     settings: Settings,
+    registry: BatchEngineRegistry,
 ) -> None:
     """Handle task.failed event.
 
@@ -374,6 +415,7 @@ async def handle_task_failed(
         db: Database session
         redis: Redis client
         settings: Application settings
+        registry: Batch engine registry for availability checks
     """
     log = logger.bind(task_id=str(task_id))
     log.info("handling_task_failed", error=error)
@@ -414,12 +456,33 @@ async def handle_task_failed(
             settings=settings,
         )
 
-        await queue_task(
-            redis=redis,
-            task=task_model,
-            settings=settings,
-            previous_outputs=previous_outputs,
-        )
+        try:
+            await queue_task(
+                redis=redis,
+                task=task_model,
+                settings=settings,
+                registry=registry,
+                previous_outputs=previous_outputs,
+            )
+        except EngineUnavailableError as e:
+            # Engine became unavailable during retry - fail the job
+            task.status = TaskStatus.FAILED.value
+            task.error = str(e)
+            await db.commit()
+            job = await db.get(JobModel, job_id)
+            if job:
+                job.status = JobStatus.FAILED.value
+                job.error = str(e)
+                job.completed_at = datetime.now(UTC)
+                await db.commit()
+                await _decrement_concurrent_jobs(redis, job.tenant_id)
+                await publish_job_failed(redis, job_id, str(e))
+            log.error(
+                "job_failed_engine_unavailable_on_retry",
+                engine_id=e.engine_id,
+                stage=e.stage,
+            )
+            return
 
         return
 
@@ -432,7 +495,7 @@ async def handle_task_failed(
         log.info("skipped_optional_task")
 
         # Treat as completed for dependency purposes
-        await handle_task_completed(task_id, db, redis, settings)
+        await handle_task_completed(task_id, db, redis, settings, registry)
         return
 
     # 4. Required task failed - fail the job

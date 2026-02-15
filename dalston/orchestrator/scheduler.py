@@ -20,6 +20,8 @@ from dalston.common.models import Task
 from dalston.common.pipeline_types import AudioMedia, TaskInputData
 from dalston.common.s3 import get_s3_client
 from dalston.config import Settings
+from dalston.orchestrator.exceptions import EngineUnavailableError
+from dalston.orchestrator.registry import BatchEngineRegistry
 
 logger = structlog.get_logger()
 
@@ -32,23 +34,41 @@ async def queue_task(
     redis: Redis,
     task: Task,
     settings: Settings,
+    registry: BatchEngineRegistry,
     previous_outputs: dict[str, Any] | None = None,
     audio_metadata: dict[str, Any] | None = None,
 ) -> None:
     """Queue a task for execution by its engine.
 
     Steps:
-    1. Store task metadata in Redis hash (for engine lookup)
-    2. Write task input.json to S3
-    3. Push task_id to engine queue
+    1. Check engine availability (fail fast if unavailable)
+    2. Store task metadata in Redis hash (for engine lookup)
+    3. Write task input.json to S3
+    4. Push task_id to engine queue
 
     Args:
         redis: Async Redis client
         task: Task to queue
         settings: Application settings (for S3 bucket)
+        registry: Batch engine registry for availability checks
         previous_outputs: Outputs from dependency tasks (keyed by stage)
         audio_metadata: Audio file metadata (format, duration, sample_rate, channels)
+
+    Raises:
+        EngineUnavailableError: If the required engine is not available
     """
+    task_id_str = str(task.id)
+    job_id_str = str(task.job_id)
+
+    # Check engine availability before queuing (fail fast)
+    if not await registry.is_engine_available(task.engine_id):
+        raise EngineUnavailableError(
+            f"Engine '{task.engine_id}' is not available. "
+            f"No healthy engine registered for stage '{task.stage}'.",
+            engine_id=task.engine_id,
+            stage=task.stage,
+        )
+
     task_id_str = str(task.id)
     job_id_str = str(task.job_id)
 

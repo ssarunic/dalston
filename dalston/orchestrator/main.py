@@ -37,6 +37,7 @@ from dalston.orchestrator.handlers import (
     handle_task_failed,
     handle_task_started,
 )
+from dalston.orchestrator.registry import BatchEngineRegistry
 
 # Configure structured logging via shared module
 dalston.logging.configure("orchestrator")
@@ -144,6 +145,9 @@ async def orchestrator_loop() -> None:
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     pubsub = redis.pubsub()
 
+    # Initialize batch engine registry
+    batch_registry = BatchEngineRegistry(redis)
+
     try:
         # Subscribe to events channel
         await pubsub.subscribe(EVENTS_CHANNEL)
@@ -166,7 +170,7 @@ async def orchestrator_loop() -> None:
                 if message["type"] != "message":
                     continue
 
-                await _dispatch_event(message["data"], redis, settings)
+                await _dispatch_event(message["data"], redis, settings, batch_registry)
 
             except Exception as e:
                 logger.exception("event_processing_error", error=str(e))
@@ -196,6 +200,7 @@ async def _dispatch_event(
     data: str,
     redis: aioredis.Redis,
     settings,
+    batch_registry: BatchEngineRegistry,
 ) -> None:
     """Parse and dispatch an event to the appropriate handler.
 
@@ -203,6 +208,7 @@ async def _dispatch_event(
         data: Raw JSON event data
         redis: Redis client
         settings: Application settings
+        batch_registry: Batch engine registry for availability checks
     """
     try:
         event = json.loads(data)
@@ -241,7 +247,9 @@ async def _dispatch_event(
                 if event_type == "job.created":
                     job_id = UUID(event["job_id"])
                     dalston.telemetry.set_span_attribute("dalston.job_id", str(job_id))
-                    await handle_job_created(job_id, db, redis, settings)
+                    await handle_job_created(
+                        job_id, db, redis, settings, batch_registry
+                    )
 
                 elif event_type == "task.started":
                     task_id = UUID(event["task_id"])
@@ -255,7 +263,9 @@ async def _dispatch_event(
                     dalston.telemetry.set_span_attribute(
                         "dalston.task_id", str(task_id)
                     )
-                    await handle_task_completed(task_id, db, redis, settings)
+                    await handle_task_completed(
+                        task_id, db, redis, settings, batch_registry
+                    )
 
                 elif event_type == "task.failed":
                     task_id = UUID(event["task_id"])
@@ -264,7 +274,9 @@ async def _dispatch_event(
                         "dalston.task_id", str(task_id)
                     )
                     dalston.telemetry.set_span_attribute("dalston.error", error)
-                    await handle_task_failed(task_id, error, db, redis, settings)
+                    await handle_task_failed(
+                        task_id, error, db, redis, settings, batch_registry
+                    )
 
                 elif event_type == "job.completed":
                     job_id = UUID(event["job_id"])
