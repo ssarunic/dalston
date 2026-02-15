@@ -127,6 +127,8 @@ class EnhancementService:
             # No webhook for enhancement jobs by default - client polls for status
             webhook_url=None,
             webhook_metadata=None,
+            # Pass audio duration from realtime session
+            audio_duration=session.audio_duration_seconds,
         )
 
         log.info(
@@ -229,6 +231,8 @@ class EnhancementService:
             parameters=parameters,
             webhook_url=None,
             webhook_metadata=None,
+            # Pass audio duration from realtime session
+            audio_duration=session.audio_duration_seconds,
             # PII columns (M26)
             pii_detection_enabled=pii_detection,
             pii_detection_tier=pii_detection_tier if pii_detection else None,

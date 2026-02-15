@@ -249,6 +249,28 @@ async def handle_task_completed(
     # Record task completion metric (M20)
     dalston.metrics.inc_orchestrator_tasks_completed(task.engine_id, "success")
 
+    # Update job audio_duration from prepare stage output if not already set
+    # This handles enhancement jobs that don't have duration set at creation time
+    if task.stage == "prepare":
+        job = await db.get(JobModel, job_id)
+        if job and job.audio_duration is None:
+            output = await get_task_output(
+                job_id=job_id,
+                task_id=task_id,
+                settings=settings,
+            )
+            if output and "data" in output:
+                prepare_data = output["data"]
+                # The prepare stage outputs channel_files with duration
+                channel_files = prepare_data.get("channel_files", [])
+                if channel_files and "duration" in channel_files[0]:
+                    job.audio_duration = channel_files[0]["duration"]
+                    await db.commit()
+                    log.info(
+                        "updated_job_audio_duration",
+                        audio_duration=job.audio_duration,
+                    )
+
     # 2. Find all tasks for this job
     result = await db.execute(select(TaskModel).where(TaskModel.job_id == job_id))
     all_tasks = list(result.scalars().all())

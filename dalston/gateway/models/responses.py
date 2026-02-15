@@ -162,7 +162,7 @@ class JobSummary(BaseModel):
 
     # Result summary stats (for quick display without fetching transcript)
     audio_duration_seconds: float | None = Field(
-        default=None, alias="audio_duration", description="Audio duration in seconds"
+        default=None, description="Audio duration in seconds"
     )
     result_language_code: str | None = None
     result_word_count: int | None = None
