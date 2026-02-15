@@ -339,7 +339,6 @@ export function JobDetail() {
             </p>
           </div>
         </div>
-        {job.status === 'completed' && <ExportButtons jobId={job.id} />}
       </div>
 
       {/* Error message */}
@@ -414,38 +413,41 @@ export function JobDetail() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="text-base font-medium">Transcript</CardTitle>
-              {job.pii?.enabled && job.redacted_text && (
-                <div className="flex items-center gap-2">
-                  <Shield className="h-4 w-4 text-muted-foreground" />
-                  <div className="flex rounded-md border border-border overflow-hidden">
-                    <button
-                      onClick={() => setShowRedacted(false)}
-                      className={`px-3 py-1 text-xs font-medium transition-colors ${
-                        !showRedacted
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-background text-muted-foreground hover:bg-muted'
-                      }`}
-                    >
-                      Original
-                    </button>
-                    <button
-                      onClick={() => setShowRedacted(true)}
-                      className={`px-3 py-1 text-xs font-medium transition-colors ${
-                        showRedacted
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-background text-muted-foreground hover:bg-muted'
-                      }`}
-                    >
-                      Redacted
-                    </button>
+              <div className="flex items-center gap-4">
+                {job.pii?.enabled && job.redacted_text && (
+                  <div className="flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-muted-foreground" />
+                    <div className="flex rounded-md border border-border overflow-hidden">
+                      <button
+                        onClick={() => setShowRedacted(false)}
+                        className={`px-3 py-1 text-xs font-medium transition-colors ${
+                          !showRedacted
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-background text-muted-foreground hover:bg-muted'
+                        }`}
+                      >
+                        Original
+                      </button>
+                      <button
+                        onClick={() => setShowRedacted(true)}
+                        className={`px-3 py-1 text-xs font-medium transition-colors ${
+                          showRedacted
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-background text-muted-foreground hover:bg-muted'
+                        }`}
+                      >
+                        Redacted
+                      </button>
+                    </div>
+                    {job.pii.entities_detected && job.pii.entities_detected > 0 && (
+                      <Badge variant="secondary">
+                        {job.pii.entities_detected} PII
+                      </Badge>
+                    )}
                   </div>
-                  {job.pii.entities_detected && job.pii.entities_detected > 0 && (
-                    <Badge variant="secondary">
-                      {job.pii.entities_detected} PII
-                    </Badge>
-                  )}
-                </div>
-              )}
+                )}
+                <ExportButtons jobId={job.id} />
+              </div>
             </div>
           </CardHeader>
           <CardContent>
