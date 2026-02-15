@@ -256,7 +256,7 @@ class TestRealtimeProtocolMessages:
         ]
         msg = SessionEndMessage(
             session_id="sess_abc",
-            total_duration=10.0,
+            total_audio_seconds=10.0,
             total_speech_duration=4.0,
             transcript="Hello World",
             segments=segments,
@@ -266,7 +266,7 @@ class TestRealtimeProtocolMessages:
         parsed = json.loads(json_str)
 
         assert parsed["type"] == "session.end"
-        assert parsed["total_duration"] == 10.0
+        assert parsed["total_audio_seconds"] == 10.0
         assert parsed["total_speech_duration"] == 4.0
         assert len(parsed["segments"]) == 2
 

@@ -19,7 +19,7 @@ class TestSessionEndMessageWithURIs:
         """SessionEndMessage includes URIs when set."""
         msg = SessionEndMessage(
             session_id="sess_abc123",
-            total_duration=10.0,
+            total_audio_seconds=10.0,
             total_speech_duration=5.0,
             transcript="Hello world",
             segments=[],
@@ -40,7 +40,7 @@ class TestSessionEndMessageWithURIs:
         """SessionEndMessage omits URIs when None."""
         msg = SessionEndMessage(
             session_id="sess_abc123",
-            total_duration=10.0,
+            total_audio_seconds=10.0,
             total_speech_duration=5.0,
             transcript="Hello world",
             segments=[],
@@ -56,7 +56,7 @@ class TestSessionEndMessageWithURIs:
         """SessionEndMessage JSON includes URIs."""
         msg = SessionEndMessage(
             session_id="sess_abc123",
-            total_duration=10.0,
+            total_audio_seconds=10.0,
             total_speech_duration=5.0,
             transcript="Test",
             segments=[],

@@ -59,7 +59,10 @@ def _parse_message(data: dict[str, Any]) -> RealtimeMessage:
             type=RealtimeMessageType.SESSION_END,
             data=SessionEnd(
                 session_id=data["session_id"],
-                total_audio_seconds=data.get("total_audio_seconds", 0.0),
+                # Server sends total_duration, SDK uses total_audio_seconds
+                total_audio_seconds=data.get(
+                    "total_duration", data.get("total_audio_seconds", 0.0)
+                ),
                 total_billed_seconds=data.get("total_billed_seconds"),
             ),
         )
@@ -69,6 +72,8 @@ def _parse_message(data: dict[str, Any]) -> RealtimeMessage:
             type=RealtimeMessageType.TRANSCRIPT_PARTIAL,
             data=TranscriptPartial(
                 text=data.get("text", ""),
+                start=data.get("start", 0.0),
+                end=data.get("end", 0.0),
                 is_final=False,
             ),
         )
@@ -548,6 +553,8 @@ class RealtimeSession:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        self._close_requested = threading.Event()  # Signal to initiate graceful close
+        self._close_completed = threading.Event()  # Signal that close is done
         self._loop_ready = threading.Event()
         self._receive_task: asyncio.Task[None] | None = None
         self._session_begin: SessionBegin | None = None
@@ -652,10 +659,42 @@ class RealtimeSession:
     async def _receive_loop(self) -> None:
         """Background loop to receive and dispatch messages."""
         try:
-            async for message in self._async_session:
-                if self._stop_event.is_set():
+            ws = self._async_session._ws
+            if not ws:
+                return
+
+            end_sent = False
+            while True:
+                # Check if close was requested - send end message
+                if self._close_requested.is_set() and not end_sent:
+                    try:
+                        await ws.send(json.dumps({"type": "end"}))
+                        end_sent = True
+                    except Exception:
+                        break
+
+                try:
+                    # Use wait_for to allow checking close_requested periodically
+                    raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                except TimeoutError:
+                    continue
+                except websockets.exceptions.ConnectionClosed:
                     break
+
+                if isinstance(raw, bytes):
+                    continue
+
+                data = json.loads(raw)
+                message = _parse_message(data)
+
+                # Dispatch all messages to callbacks
                 self._dispatch(message)
+
+                # Store session end and exit
+                if message.type == RealtimeMessageType.SESSION_END:
+                    self._session_end = message.data  # type: ignore
+                    break
+
         except Exception as e:
             # Dispatch connection errors to error callbacks
             if not self._stop_event.is_set():
@@ -669,6 +708,8 @@ class RealtimeSession:
                         cb(error_data)
                     except Exception:
                         pass  # Don't let callback errors crash the loop
+        finally:
+            self._close_completed.set()
 
     def _run_loop(self) -> None:
         """Run the event loop in background thread."""
@@ -697,7 +738,10 @@ class RealtimeSession:
         """
         # Start background thread with event loop
         self._stop_event.clear()
+        self._close_requested.clear()
+        self._close_completed.clear()
         self._loop_ready.clear()
+        self._session_end = None
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
 
@@ -760,26 +804,43 @@ class RealtimeSession:
         Returns:
             SessionEnd message with session statistics.
         """
-        self._stop_event.set()
-
         if self._loop is not None and self._loop.is_running():
+            # Signal the receive loop to initiate graceful close
+            self._close_requested.set()
+
+            # Wait for the receive loop to complete (it will dispatch all messages)
+            if not self._close_completed.wait(timeout=timeout):
+                # Timeout - force stop
+                self._stop_event.set()
+
+            # Clean up the WebSocket
             try:
                 future = asyncio.run_coroutine_threadsafe(
-                    asyncio.wait_for(self._async_session.close(), timeout),
+                    self._cleanup_websocket(),
                     self._loop,
                 )
-                self._session_end = future.result(timeout=timeout + 1.0)
-            except (asyncio.TimeoutError, TimeoutError):
+                future.result(timeout=1.0)
+            except Exception:
                 pass
-            finally:
-                # Stop the event loop
-                self._loop.call_soon_threadsafe(self._loop.stop)
+
+            # Stop the event loop
+            self._loop.call_soon_threadsafe(self._loop.stop)
 
         if self._thread:
             self._thread.join(timeout=1.0)
             self._thread = None
 
         return self._session_end
+
+    async def _cleanup_websocket(self) -> None:
+        """Clean up the WebSocket connection."""
+        import contextlib
+
+        self._async_session._connected = False
+        if self._async_session._ws:
+            with contextlib.suppress(Exception):
+                await self._async_session._ws.close()
+            self._async_session._ws = None
 
     def __enter__(self) -> RealtimeSession:
         return self

@@ -219,7 +219,7 @@ class TestSessionEndMessage:
         ]
         msg = SessionEndMessage(
             session_id="sess_abc",
-            total_duration=10.0,
+            total_audio_seconds=10.0,
             total_speech_duration=4.0,
             transcript="Hello World",
             segments=segments,
@@ -229,7 +229,7 @@ class TestSessionEndMessage:
 
         assert result["type"] == "session.end"
         assert result["session_id"] == "sess_abc"
-        assert result["total_duration"] == 10.0
+        assert result["total_audio_seconds"] == 10.0
         assert result["total_speech_duration"] == 4.0
         assert result["transcript"] == "Hello World"
         assert len(result["segments"]) == 2
@@ -238,7 +238,7 @@ class TestSessionEndMessage:
     def test_to_dict_with_enhancement_job(self):
         msg = SessionEndMessage(
             session_id="sess_abc",
-            total_duration=10.0,
+            total_audio_seconds=10.0,
             total_speech_duration=4.0,
             transcript="Hello",
             segments=[],

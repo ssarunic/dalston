@@ -296,8 +296,9 @@ def listen(
         raise typer.Exit(code=1) from e
     finally:
         # Close session and get stats
+        # Use longer timeout for batch processing (S3 upload, final transcription)
         try:
-            end_data = session.close()
+            end_data = session.close(timeout=15.0)
             if end_data:
                 total_duration = end_data.total_audio_seconds
                 if enhance:

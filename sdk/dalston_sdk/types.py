@@ -230,6 +230,8 @@ class TranscriptPartial:
     """Partial (interim) transcript result."""
 
     text: str
+    start: float = 0.0
+    end: float = 0.0
     is_final: bool = False
 
 

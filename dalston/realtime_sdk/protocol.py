@@ -169,7 +169,7 @@ class SessionEndMessage:
     """Sent when session ends (gracefully or due to timeout)."""
 
     session_id: str
-    total_duration: float
+    total_audio_seconds: float
     total_speech_duration: float
     transcript: str
     segments: list[SegmentInfo]
@@ -182,7 +182,7 @@ class SessionEndMessage:
         result = {
             "type": self.type,
             "session_id": self.session_id,
-            "total_duration": self.total_duration,
+            "total_audio_seconds": self.total_audio_seconds,
             "total_speech_duration": self.total_speech_duration,
             "transcript": self.transcript,
             "segments": [s.to_dict() for s in self.segments],
