@@ -4,7 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useDashboard } from '@/hooks/useDashboard'
-import type { JobSummary } from '@/api/types'
+import { useRealtimeSessions } from '@/hooks/useRealtimeSessions'
+import type { JobSummary, RealtimeSessionSummary, RealtimeSessionStatus, JobStatus } from '@/api/types'
 
 function StatCard({
   title,
@@ -60,6 +61,35 @@ function RecentJobRow({ job }: { job: JobSummary }) {
   )
 }
 
+function mapSessionStatus(status: RealtimeSessionStatus): JobStatus {
+  const map: Record<RealtimeSessionStatus, JobStatus> = {
+    active: 'running',
+    completed: 'completed',
+    error: 'failed',
+    interrupted: 'cancelled',
+  }
+  return map[status]
+}
+
+function RecentSessionRow({ session }: { session: RealtimeSessionSummary }) {
+  const timeAgo = formatTimeAgo(session.started_at)
+
+  return (
+    <Link
+      to={`/realtime/sessions/${session.id}`}
+      className="flex items-center justify-between py-3 px-2 rounded-md hover:bg-accent transition-colors"
+    >
+      <div className="flex items-center gap-4">
+        <StatusBadge status={mapSessionStatus(session.status)} />
+        <span className="text-sm font-mono text-muted-foreground">
+          {session.id.slice(0, 8)}...
+        </span>
+      </div>
+      <span className="text-sm text-muted-foreground">{timeAgo}</span>
+    </Link>
+  )
+}
+
 function formatTimeAgo(dateStr: string): string {
   const date = new Date(dateStr)
   const now = new Date()
@@ -76,9 +106,11 @@ function formatTimeAgo(dateStr: string): string {
 
 export function Dashboard() {
   const { health, jobStats, realtime, recentJobs, isLoading, error } = useDashboard()
+  const { data: sessionsData, isLoading: sessionsLoading } = useRealtimeSessions({ limit: 5 })
 
   // Handle error state - show basic dashboard with error indicator
   const isHealthy = !error && health?.status === 'healthy'
+  const recentSessions = sessionsData?.sessions ?? []
 
   return (
     <div className="space-y-6">
@@ -119,37 +151,71 @@ export function Dashboard() {
         />
       </div>
 
-      {/* Recent Jobs */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Recent Jobs</CardTitle>
-          <Link
-            to="/jobs"
-            className="text-sm text-primary hover:underline"
-          >
-            View all
-          </Link>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="space-y-3">
-              {[...Array(5)].map((_, i) => (
-                <Skeleton key={i} className="h-10 w-full" />
-              ))}
-            </div>
-          ) : recentJobs.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">
-              No jobs yet
-            </p>
-          ) : (
-            <div className="divide-y divide-border">
-              {recentJobs.map((job) => (
-                <RecentJobRow key={job.id} job={job} />
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {/* Recent Activity - Two Column Layout */}
+      <div className="grid gap-6 grid-cols-1 lg:grid-cols-2">
+        {/* Realtime first in DOM for mobile stacking */}
+        <Card className="lg:order-2">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>Recent Live Sessions</CardTitle>
+            <Link
+              to="/realtime"
+              className="text-sm text-primary hover:underline"
+            >
+              View all
+            </Link>
+          </CardHeader>
+          <CardContent>
+            {sessionsLoading ? (
+              <div className="space-y-3">
+                {[...Array(5)].map((_, i) => (
+                  <Skeleton key={i} className="h-10 w-full" />
+                ))}
+              </div>
+            ) : recentSessions.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">
+                No sessions yet
+              </p>
+            ) : (
+              <div className="divide-y divide-border">
+                {recentSessions.map((session) => (
+                  <RecentSessionRow key={session.id} session={session} />
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="lg:order-1">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>Recent Batch Jobs</CardTitle>
+            <Link
+              to="/jobs"
+              className="text-sm text-primary hover:underline"
+            >
+              View all
+            </Link>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="space-y-3">
+                {[...Array(5)].map((_, i) => (
+                  <Skeleton key={i} className="h-10 w-full" />
+                ))}
+              </div>
+            ) : recentJobs.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">
+                No jobs yet
+              </p>
+            ) : (
+              <div className="divide-y divide-border">
+                {recentJobs.map((job) => (
+                  <RecentJobRow key={job.id} job={job} />
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }
