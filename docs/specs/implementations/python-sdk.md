@@ -112,6 +112,28 @@ class SpeakerDetection(str, Enum):
     PER_CHANNEL = "per_channel"
 
 
+class PIIDetectionTier(str, Enum):
+    """PII detection thoroughness level.
+
+    - FAST: Regex-only detection (fastest, lower recall)
+    - STANDARD: Regex + GLiNER ML model (balanced)
+    - THOROUGH: Regex + GLiNER + LLM verification (highest accuracy, slowest)
+    """
+    FAST = "fast"
+    STANDARD = "standard"
+    THOROUGH = "thorough"
+
+
+class PIIRedactionMode(str, Enum):
+    """Audio redaction mode for detected PII.
+
+    - SILENCE: Replace PII audio segments with silence
+    - BEEP: Replace PII audio segments with a beep tone
+    """
+    SILENCE = "silence"
+    BEEP = "beep"
+
+
 @dataclass
 class Word:
     """A single word with timing and optional speaker."""
@@ -166,8 +188,22 @@ class Dalston:
         timestamps_granularity: TimestampGranularity | str = TimestampGranularity.WORD,
         webhook_url: str | None = None,
         webhook_metadata: dict | None = None,
+        # PII detection parameters
+        pii_detection: bool = False,
+        pii_detection_tier: PIIDetectionTier | str | None = None,
+        pii_entity_types: list[str] | None = None,
+        redact_pii_audio: bool = False,
+        pii_redaction_mode: PIIRedactionMode | str | None = None,
     ) -> Job:
-        """Submit audio for transcription."""
+        """Submit audio for transcription.
+
+        PII Detection:
+            pii_detection: Enable PII detection in transcript
+            pii_detection_tier: Detection thoroughness (fast, standard, thorough)
+            pii_entity_types: Entity types to detect (e.g., ["ssn", "credit_card_number"])
+            redact_pii_audio: Generate redacted audio file
+            pii_redaction_mode: Audio redaction mode (silence or beep)
+        """
         # Build multipart form, handle file upload
         # POST to /v1/audio/transcriptions
         ...
@@ -408,6 +444,21 @@ All spec features implemented:
 ### Package Rename
 
 The Python package was renamed from `dalston` to `dalston_sdk` to avoid import conflicts with the `dalston/` server package in the repo root. Users import as `from dalston_sdk import Dalston`. The PyPI distribution name remains `dalston-sdk`.
+
+### PII Detection (M26)
+
+Added PII detection and audio redaction parameters to `transcribe()`:
+
+- `pii_detection` — Enable PII detection in transcript
+- `pii_detection_tier` — Detection thoroughness (fast, standard, thorough)
+- `pii_entity_types` — Specific entity types to detect
+- `redact_pii_audio` — Generate redacted audio file
+- `pii_redaction_mode` — Audio redaction mode (silence or beep)
+
+New types:
+
+- `PIIDetectionTier` — Enum for detection tier
+- `PIIRedactionMode` — Enum for audio redaction mode
 
 ### Session Management (M24)
 
