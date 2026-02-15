@@ -452,12 +452,12 @@ export function JobDetail() {
             {job.segments && job.segments.length > 0 && !showRedacted ? (
               <TranscriptViewer segments={job.segments} speakers={job.speakers} />
             ) : showRedacted && job.redacted_text ? (
-              <div className="prose prose-invert prose-sm max-w-none">
-                <p className="whitespace-pre-wrap">{job.redacted_text}</p>
+              <div className="max-h-[500px] overflow-y-auto">
+                <p className="text-sm whitespace-pre-wrap">{job.redacted_text}</p>
               </div>
             ) : job.text ? (
-              <div className="prose prose-invert prose-sm max-w-none">
-                <p className="whitespace-pre-wrap">{job.text}</p>
+              <div className="max-h-[500px] overflow-y-auto">
+                <p className="text-sm whitespace-pre-wrap">{job.text}</p>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground py-4 text-center">
