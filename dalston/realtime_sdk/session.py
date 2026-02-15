@@ -776,7 +776,7 @@ class SessionHandler:
         await self._send(
             SessionEndMessage(
                 session_id=self.config.session_id,
-                total_audio_seconds=self.get_duration(),
+                total_audio_seconds=self._buffer.get_total_duration(),
                 total_speech_duration=self._assembler.current_time,
                 transcript=self._assembler.get_full_transcript(),
                 segments=segments,
