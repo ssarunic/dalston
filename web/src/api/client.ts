@@ -117,6 +117,12 @@ export const apiClient = {
     return currentApiKey ? `${base}?api_key=${currentApiKey}` : base
   },
 
+  // Session export URL (needs API key as query param for download links)
+  getSessionExportUrl: (sessionId: string, format: 'srt' | 'vtt' | 'txt' | 'json') => {
+    const base = `/v1/realtime/sessions/${sessionId}/export/${format}`
+    return currentApiKey ? `${base}?api_key=${currentApiKey}` : base
+  },
+
   // Auth validation
   validateKey: async (apiKey: string): Promise<{ valid: boolean; isAdmin: boolean }> => {
     try {

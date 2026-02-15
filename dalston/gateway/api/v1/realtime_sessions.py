@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +28,7 @@ from dalston.config import get_settings
 from dalston.db.session import get_db
 from dalston.gateway.dependencies import RequireJobsRead
 from dalston.gateway.services.enhancement import EnhancementError, EnhancementService
+from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.realtime_sessions import RealtimeSessionService
 
@@ -327,6 +328,116 @@ async def get_session_transcript(
             raise HTTPException(
                 status_code=404, detail="Transcript not found"
             ) from None
+
+
+def _normalize_realtime_transcript(transcript: dict) -> dict:
+    """Normalize realtime transcript to batch format for export.
+
+    Realtime transcripts have 'utterances' while batch transcripts have 'segments'.
+    This function converts the realtime format to match what ExportService expects.
+    """
+    utterances = transcript.get("utterances", [])
+    return {
+        "text": transcript.get("text", ""),
+        "segments": [
+            {
+                "id": str(utt.get("id", idx)),
+                "start": utt.get("start", 0.0),
+                "end": utt.get("end", 0.0),
+                "text": utt.get("text", ""),
+                "speaker_id": None,  # Realtime doesn't have speaker diarization
+            }
+            for idx, utt in enumerate(utterances)
+        ],
+        "words": [],  # Realtime doesn't have word-level data
+    }
+
+
+@router.get(
+    "/sessions/{session_id}/export/{format}",
+    summary="Export session transcript",
+    description="Export realtime session transcript in specified format: srt, vtt, txt, json",
+    responses={
+        200: {
+            "description": "Exported transcript",
+            "content": {
+                "text/plain": {"schema": {"type": "string"}},
+                "text/vtt": {"schema": {"type": "string"}},
+                "application/json": {"schema": {"type": "object"}},
+            },
+        },
+        400: {"description": "Unsupported format"},
+        404: {"description": "Session or transcript not found"},
+    },
+)
+async def export_session_transcript(
+    session_id: str,
+    format: str,
+    api_key: RequireJobsRead,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    include_speakers: Annotated[
+        bool, Query(description="Include speaker labels in output")
+    ] = True,
+    max_line_length: Annotated[
+        int, Query(ge=10, le=200, description="Max characters per subtitle line")
+    ] = 42,
+    max_lines: Annotated[
+        int, Query(ge=1, le=10, description="Max lines per subtitle block")
+    ] = 2,
+) -> Response:
+    """Export realtime session transcript in specified format.
+
+    Supported formats: srt, vtt, txt, json
+    """
+    export_service = ExportService()
+
+    # Validate format
+    export_format = export_service.validate_format(format)
+
+    settings = get_settings()
+    service = RealtimeSessionService(db, settings)
+
+    # Get session and verify tenant access
+    session = await service.get_session(session_id)
+
+    if session is None or session.tenant_id != api_key.tenant_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if not session.transcript_uri:
+        raise HTTPException(status_code=404, detail="Transcript not available")
+
+    # Parse S3 URI and fetch transcript
+    uri_parts = session.transcript_uri.replace("s3://", "").split("/", 1)
+    bucket = uri_parts[0]
+    key = uri_parts[1] if len(uri_parts) > 1 else ""
+
+    async with get_s3_client(settings) as s3:
+        try:
+            response = await s3.get_object(Bucket=bucket, Key=key)
+            body = await response["Body"].read()
+            transcript = json.loads(body.decode("utf-8"))
+        except Exception as e:
+            logger.warning(
+                "transcript_fetch_failed",
+                session_id=session_id,
+                bucket=bucket,
+                key=key,
+                error=str(e),
+            )
+            raise HTTPException(
+                status_code=404, detail="Transcript not found"
+            ) from None
+
+    # Normalize realtime transcript to batch format for export
+    normalized_transcript = _normalize_realtime_transcript(transcript)
+
+    return export_service.create_export_response(
+        transcript=normalized_transcript,
+        export_format=export_format,
+        include_speakers=include_speakers,
+        max_line_length=max_line_length,
+        max_lines=max_lines,
+    )
 
 
 @router.get(

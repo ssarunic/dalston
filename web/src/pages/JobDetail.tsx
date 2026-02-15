@@ -4,25 +4,22 @@ import {
   Globe,
   Users,
   FileText,
-  Download,
   AlertCircle,
   Trash2,
   Mic,
   ScrollText,
-  Shield,
 } from 'lucide-react'
 import { useJob } from '@/hooks/useJob'
 import { useJobTasks } from '@/hooks/useJobTasks'
 import { useResourceAuditTrail } from '@/hooks/useAuditLog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/StatusBadge'
 import { DAGViewer } from '@/components/DAGViewer'
 import { BackButton } from '@/components/BackButton'
-import { apiClient } from '@/api/client'
-import type { Segment, RetentionInfo, AuditEvent } from '@/api/types'
+import { TranscriptViewer } from '@/components/TranscriptViewer'
+import type { RetentionInfo, AuditEvent } from '@/api/types'
 
 function MetadataCard({
   icon: Icon,
@@ -103,86 +100,6 @@ function RetentionCard({ retention }: { retention?: RetentionInfo }) {
           </p>
         )}
       </div>
-    </div>
-  )
-}
-
-function TranscriptSegment({ segment, speakerColors }: { segment: Segment; speakerColors: Record<string, string> }) {
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = Math.floor(seconds % 60)
-    return `${mins}:${secs.toString().padStart(2, '0')}`
-  }
-
-  const speakerColor = segment.speaker ? speakerColors[segment.speaker] : undefined
-
-  return (
-    <div className="flex gap-4 py-3 border-b border-border last:border-0">
-      <div className="w-16 flex-shrink-0 text-xs text-muted-foreground font-mono">
-        {formatTime(segment.start)}
-      </div>
-      {segment.speaker && (
-        <div
-          className="w-24 flex-shrink-0 text-xs font-medium"
-          style={{ color: speakerColor }}
-        >
-          {segment.speaker}
-        </div>
-      )}
-      <div className="flex-1 text-sm">{segment.text}</div>
-    </div>
-  )
-}
-
-function TranscriptViewer({ segments, speakers }: { segments: Segment[]; speakers?: { id: string; label: string }[] }) {
-  // Generate colors for speakers
-  const speakerColors: Record<string, string> = {}
-  const colors = ['#60a5fa', '#34d399', '#f472b6', '#fbbf24', '#a78bfa', '#fb923c']
-  speakers?.forEach((s, i) => {
-    speakerColors[s.id] = colors[i % colors.length]
-    speakerColors[s.label] = colors[i % colors.length]
-  })
-
-  if (segments.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground py-4 text-center">
-        No transcript available
-      </p>
-    )
-  }
-
-  return (
-    <div className="max-h-[500px] overflow-y-auto">
-      {segments.map((segment) => (
-        <TranscriptSegment
-          key={segment.id}
-          segment={segment}
-          speakerColors={speakerColors}
-        />
-      ))}
-    </div>
-  )
-}
-
-function ExportButtons({ jobId }: { jobId: string }) {
-  const formats = ['srt', 'vtt', 'txt', 'json'] as const
-
-  return (
-    <div className="flex gap-2">
-      {formats.map((format) => (
-        <a
-          key={format}
-          href={apiClient.getExportUrl(jobId, format)}
-          download
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Button variant="outline" size="sm">
-            <Download className="h-3 w-3 mr-1" />
-            {format.toUpperCase()}
-          </Button>
-        </a>
-      ))}
     </div>
   )
 }
@@ -411,61 +328,23 @@ export function JobDetail() {
       {job.status === 'completed' && (
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base font-medium">Transcript</CardTitle>
-              <div className="flex items-center gap-4">
-                {job.pii?.enabled && job.redacted_text && (
-                  <div className="flex items-center gap-2">
-                    <Shield className="h-4 w-4 text-muted-foreground" />
-                    <div className="flex rounded-md border border-border overflow-hidden">
-                      <button
-                        onClick={() => setShowRedacted(false)}
-                        className={`px-3 py-1 text-xs font-medium transition-colors ${
-                          !showRedacted
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-background text-muted-foreground hover:bg-muted'
-                        }`}
-                      >
-                        Original
-                      </button>
-                      <button
-                        onClick={() => setShowRedacted(true)}
-                        className={`px-3 py-1 text-xs font-medium transition-colors ${
-                          showRedacted
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-background text-muted-foreground hover:bg-muted'
-                        }`}
-                      >
-                        Redacted
-                      </button>
-                    </div>
-                    {job.pii.entities_detected && job.pii.entities_detected > 0 && (
-                      <Badge variant="secondary">
-                        {job.pii.entities_detected} PII
-                      </Badge>
-                    )}
-                  </div>
-                )}
-                <ExportButtons jobId={job.id} />
-              </div>
-            </div>
+            <CardTitle className="text-base font-medium">Transcript</CardTitle>
           </CardHeader>
           <CardContent>
-            {job.segments && job.segments.length > 0 && !showRedacted ? (
-              <TranscriptViewer segments={job.segments} speakers={job.speakers} />
-            ) : showRedacted && job.redacted_text ? (
-              <div className="max-h-[500px] overflow-y-auto">
-                <p className="text-sm whitespace-pre-wrap">{job.redacted_text}</p>
-              </div>
-            ) : job.text ? (
-              <div className="max-h-[500px] overflow-y-auto">
-                <p className="text-sm whitespace-pre-wrap">{job.text}</p>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground py-4 text-center">
-                No transcript available
-              </p>
-            )}
+            <TranscriptViewer
+              segments={job.segments ?? []}
+              speakers={job.speakers}
+              fullText={job.text}
+              enableExport={true}
+              exportConfig={{ type: 'job', id: job.id }}
+              piiConfig={job.pii?.enabled && job.redacted_text ? {
+                enabled: true,
+                entitiesDetected: job.pii.entities_detected,
+                redactedText: job.redacted_text,
+                onToggle: setShowRedacted,
+                showRedacted,
+              } : undefined}
+            />
           </CardContent>
         </Card>
       )}

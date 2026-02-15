@@ -15,8 +15,9 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useRealtimeSession, useSessionTranscript } from '@/hooks/useRealtimeSessions'
 import { BackButton } from '@/components/BackButton'
+import { TranscriptViewer } from '@/components/TranscriptViewer'
 import { apiClient } from '@/api/client'
-import type { RealtimeSessionStatus, SessionUtterance } from '@/api/types'
+import type { RealtimeSessionStatus } from '@/api/types'
 
 function SessionStatusBadge({ status }: { status: RealtimeSessionStatus }) {
   const variants: Record<RealtimeSessionStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
@@ -273,24 +274,17 @@ export function RealtimeSessionDetail() {
             <CardTitle>Transcript</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="prose prose-sm dark:prose-invert max-w-none">
-              <p className="whitespace-pre-wrap">{transcript.text}</p>
-            </div>
-            {transcript.utterances && transcript.utterances.length > 0 && (
-              <div className="mt-4 space-y-2">
-                <h4 className="font-medium">Segments</h4>
-                <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {transcript.utterances.map((utt: SessionUtterance, idx: number) => (
-                    <div key={idx} className="p-2 bg-muted rounded text-sm">
-                      <span className="text-muted-foreground text-xs">
-                        {utt.start.toFixed(1)}s - {utt.end.toFixed(1)}s
-                      </span>
-                      <p>{utt.text}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            <TranscriptViewer
+              segments={transcript.utterances?.map(utt => ({
+                id: utt.id,
+                start: utt.start,
+                end: utt.end,
+                text: utt.text,
+              })) ?? []}
+              fullText={transcript.text}
+              enableExport={!!session.transcript_uri}
+              exportConfig={{ type: 'session', id: session.id }}
+            />
           </CardContent>
         </Card>
       )}

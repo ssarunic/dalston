@@ -391,6 +391,17 @@ export interface SessionTranscript {
   utterances?: SessionUtterance[]
 }
 
+// Unified segment type for TranscriptViewer component
+// Works with both batch Segment and realtime SessionUtterance
+export interface UnifiedSegment {
+  id: string | number
+  start: number
+  end: number
+  text: string
+  speaker?: string
+  confidence?: number
+}
+
 // Retention Policy types
 export type RetentionMode = 'auto_delete' | 'keep' | 'none'
 export type RetentionScope = 'all' | 'audio_only'
