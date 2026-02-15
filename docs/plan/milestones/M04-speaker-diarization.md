@@ -154,7 +154,7 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 | `dalston/orchestrator/dag.py` | Added `speaker_detection` parameter (`none`/`diarize`/`per_channel`), parallel diarize task, per-channel DAG builder |
 | `engines/merge/final-merger/engine.py` | Added speaker assignment via overlap algorithm, `_merge_per_channel()` for stereo audio |
 | `engines/prepare/audio-prepare/engine.py` | Added `split_channels` config, `_extract_channel()` for per-channel mode, mono validation |
-| `docker-compose.yml` | Added `engine-pyannote-3.1` and `engine-pyannote-3.1-gpu` services |
+| `docker-compose.yml` | Added `stt-batch-diarize-pyannote-v31-cpu` and `stt-batch-diarize-pyannote-v31` services |
 
 ### Key Implementation Details
 

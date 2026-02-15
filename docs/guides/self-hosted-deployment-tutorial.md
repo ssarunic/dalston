@@ -107,7 +107,7 @@ Best for: Testing, development, or when you only need basic transcription withou
 docker compose up -d \
   postgres redis minio minio-init \
   gateway orchestrator \
-  engine-audio-prepare engine-faster-whisper engine-final-merger
+  stt-batch-prepare stt-batch-transcribe-whisper-cpu stt-batch-merge
 ```
 
 Submit jobs with `timestamps_granularity=segment` to skip alignment.
@@ -120,7 +120,7 @@ Best for: Production use requiring word-level timestamps.
 docker compose up -d \
   postgres redis minio minio-init \
   gateway orchestrator \
-  engine-audio-prepare engine-faster-whisper engine-whisperx-align engine-final-merger
+  stt-batch-prepare stt-batch-transcribe-whisper-cpu stt-batch-align-whisperx-cpu stt-batch-merge
 ```
 
 ### Option C: Full Pipeline (With Speaker Diarization)
@@ -131,7 +131,7 @@ Best for: Meeting transcription, interviews, multi-speaker content.
 docker compose up -d
 ```
 
-This starts all engines including `engine-pyannote-3.1` for speaker identification.
+This starts all engines including `stt-batch-diarize-pyannote-v31-cpu` for speaker identification.
 
 ### Option D: GPU-Accelerated
 
@@ -151,7 +151,7 @@ Best for: Live transcription without batch processing.
 docker compose up -d \
   postgres redis \
   gateway \
-  realtime-whisper-1 realtime-whisper-2
+  stt-rt-transcribe-whisper-1 stt-rt-transcribe-whisper-2
 ```
 
 ## 5. Verify Deployment
@@ -211,10 +211,10 @@ asyncio.run(create_key())
 
 | Service | URL | Description |
 | ------- | --- | ----------- |
-| API | http://localhost:8000 | REST API |
-| API Docs | http://localhost:8000/docs | OpenAPI documentation |
-| Web Console | http://localhost:8000 | Management UI (login with API key) |
-| MinIO Console | http://localhost:9001 | Object storage admin |
+| API | <http://localhost:8000> | REST API |
+| API Docs | <http://localhost:8000/docs> | OpenAPI documentation |
+| Web Console | <http://localhost:8000> | Management UI (login with API key) |
+| MinIO Console | <http://localhost:9001> | Object storage admin |
 
 ## 8. Test Transcription
 
@@ -240,13 +240,13 @@ curl http://localhost:8000/v1/audio/transcriptions/JOB_ID \
 
 ```bash
 # Scale transcription engines
-docker compose up -d --scale engine-faster-whisper=2
+docker compose up -d --scale stt-batch-transcribe-whisper-cpu=2
 
 # Scale multiple engines
 docker compose up -d \
-  --scale engine-faster-whisper=2 \
-  --scale engine-whisperx-align=2 \
-  --scale engine-pyannote-3.1=2
+  --scale stt-batch-transcribe-whisper-cpu=2 \
+  --scale stt-batch-align-whisperx-cpu=2 \
+  --scale stt-batch-diarize-pyannote-v31-cpu=2
 ```
 
 ### Resource limits
@@ -255,7 +255,7 @@ Add to `docker-compose.override.yml`:
 
 ```yaml
 services:
-  engine-faster-whisper:
+  stt-batch-transcribe-whisper-cpu:
     deploy:
       resources:
         limits:
@@ -268,7 +268,7 @@ services:
 
 ```yaml
 services:
-  engine-faster-whisper:
+  stt-batch-transcribe-whisper-cpu:
     deploy:
       resources:
         reservations:
@@ -277,7 +277,7 @@ services:
               device_ids: ['0']
               capabilities: [gpu]
 
-  engine-pyannote-3.1:
+  stt-batch-diarize-pyannote-v31-cpu:
     deploy:
       resources:
         reservations:
@@ -376,7 +376,7 @@ docker compose logs -f
 
 # Specific service
 docker compose logs -f gateway
-docker compose logs -f engine-faster-whisper
+docker compose logs -f stt-batch-transcribe-whisper-cpu
 ```
 
 ### Update deployment
@@ -457,7 +457,7 @@ docker info | grep -i runtime
 docker stats
 
 # Reduce concurrent processing by scaling down
-docker compose up -d --scale engine-faster-whisper=1
+docker compose up -d --scale stt-batch-transcribe-whisper-cpu=1
 ```
 
 ### Jobs stuck in pending
@@ -492,10 +492,10 @@ Models are downloaded on first use. If downloads fail:
 
 ```bash
 # Check internet connectivity from container
-docker compose exec engine-faster-whisper curl -I https://huggingface.co
+docker compose exec stt-batch-transcribe-whisper-cpu curl -I https://huggingface.co
 
 # Manually download models
-docker compose exec engine-faster-whisper python -c "from faster_whisper import WhisperModel; WhisperModel('large-v3')"
+docker compose exec stt-batch-transcribe-whisper-cpu python -c "from faster_whisper import WhisperModel; WhisperModel('large-v3')"
 ```
 
 ### HuggingFace token issues
@@ -504,10 +504,10 @@ For diarization engines:
 
 ```bash
 # Verify token is set
-docker compose exec engine-pyannote-3.1 printenv HF_TOKEN
+docker compose exec stt-batch-diarize-pyannote-v31-cpu printenv HF_TOKEN
 
 # Test token validity
-docker compose exec engine-pyannote-3.1 python -c "
+docker compose exec stt-batch-diarize-pyannote-v31-cpu python -c "
 from huggingface_hub import HfApi
 api = HfApi()
 print(api.whoami())

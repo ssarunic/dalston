@@ -184,7 +184,7 @@ Note: `interim_results` parameter is ignored for non-streaming models.
 
 ```bash
 # Start realtime worker
-docker compose up -d realtime-whisper-1
+docker compose up -d stt-rt-transcribe-whisper-1
 
 # Connect via WebSocket
 wscat -c "ws://localhost:8000/v1/audio/transcriptions/stream?model=fast"

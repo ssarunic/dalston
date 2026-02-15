@@ -143,7 +143,7 @@ Key: dalston:realtime:worker:{worker_id}
 Type: Hash
 
 {
-  "endpoint": "ws://realtime-whisper-1:9000",
+  "endpoint": "ws://stt-rt-transcribe-whisper-1:9000",
   "status": "ready",                          // ready | busy | draining | offline
   "capacity": 4,                              // Max concurrent sessions
   "active_sessions": 2,                       // Current active count
@@ -172,7 +172,7 @@ Key: dalston:realtime:session:{session_id}
 Type: Hash
 
 {
-  "worker_id": "realtime-whisper-1",
+  "worker_id": "stt-rt-transcribe-whisper-1",
   "status": "active",                         // active | ended | error
   "language": "en",
   "model": "fast",
@@ -263,7 +263,7 @@ Type: Hash
 TTL: 300 seconds (extended on activity)
 
 {
-  "worker_id": "realtime-whisper-1",
+  "worker_id": "stt-rt-transcribe-whisper-1",
   "tenant_id": "uuid",
   "status": "active",
   "language": "en",
@@ -288,7 +288,7 @@ Session state in Redis is ephemeral. Audio and transcripts are persisted to S3.
 {
   "session_id": "sess_abc123",
   "tenant_id": "uuid",
-  "worker_id": "realtime-whisper-1",
+  "worker_id": "stt-rt-transcribe-whisper-1",
   "started_at": "2025-01-28T12:00:00Z",
   "ended_at": "2025-01-28T12:05:30Z",
   "config": {
@@ -413,7 +413,7 @@ async def acquire_worker(
 @dataclass
 class WorkerAllocation:
     worker_id: str
-    endpoint: str           # e.g., "ws://realtime-whisper-1:9000"
+    endpoint: str           # e.g., "ws://stt-rt-transcribe-whisper-1:9000"
     session_id: str         # Newly created session ID
 ```
 

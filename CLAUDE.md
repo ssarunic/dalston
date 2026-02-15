@@ -49,31 +49,31 @@ docker compose up -d
 
 # Start core services only (minimal setup with word timestamps)
 docker compose up -d gateway orchestrator redis postgres minio minio-init \
-  engine-audio-prepare engine-faster-whisper engine-whisperx-align engine-final-merger
+  stt-batch-prepare stt-batch-transcribe-whisper-cpu stt-batch-align-whisperx-cpu stt-batch-merge
 
 # Start without word-level alignment (faster, smaller setup)
 # Note: Submit jobs with timestamps_granularity=segment to skip alignment
 docker compose up -d gateway orchestrator redis postgres minio minio-init \
-  engine-audio-prepare engine-faster-whisper engine-final-merger
+  stt-batch-prepare stt-batch-transcribe-whisper-cpu stt-batch-merge
 
 # Start with real-time workers
 docker compose up -d gateway orchestrator redis \
-  engine-faster-whisper engine-merger \
-  realtime-whisper-1 realtime-whisper-2
+  stt-batch-transcribe-whisper-cpu stt-batch-merge \
+  stt-rt-transcribe-whisper-1 stt-rt-transcribe-whisper-2
 
 # Scale engines for high load
-docker compose up -d --scale engine-faster-whisper=2 --scale engine-pyannote=2
+docker compose up -d --scale stt-batch-transcribe-whisper-cpu=2 --scale stt-batch-diarize-pyannote-v31-cpu=2
 
 # View logs
 docker compose logs -f gateway
-docker compose logs -f engine-faster-whisper
+docker compose logs -f stt-batch-transcribe-whisper-cpu
 
 # Stop services
 docker compose down
 
 # Rebuild specific service
-docker compose build engine-faster-whisper
-docker compose up -d --build engine-faster-whisper
+docker compose build stt-batch-transcribe-whisper-cpu
+docker compose up -d --build stt-batch-transcribe-whisper-cpu
 ```
 
 ### Testing

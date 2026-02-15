@@ -129,7 +129,7 @@ services:
   # PREPARE ENGINES
   # ============================================================
 
-  engine-audio-prepare:
+  stt-batch-prepare:
     build:
       context: ./engines/prepare/audio-prepare
     environment:
@@ -149,7 +149,7 @@ services:
   # TRANSCRIPTION ENGINES
   # ============================================================
 
-  engine-faster-whisper:
+  stt-batch-transcribe-whisper-cpu:
     build:
       context: ./engines/transcribe/faster-whisper
     environment:
@@ -174,7 +174,7 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
 
-  engine-parakeet:
+  stt-batch-transcribe-parakeet:
     build:
       context: ./engines/transcribe/parakeet
     environment:
@@ -203,7 +203,7 @@ services:
   # ALIGNMENT ENGINES
   # ============================================================
 
-  engine-whisperx-align:
+  stt-batch-align-whisperx-cpu:
     build:
       context: ./engines/align/whisperx-align
     environment:
@@ -232,7 +232,7 @@ services:
   # DIARIZATION ENGINES
   # ============================================================
 
-  engine-pyannote:
+  stt-batch-diarize-pyannote-v31-cpu:
     build:
       context: ./engines/diarize/pyannote-3.1
     environment:
@@ -361,7 +361,7 @@ services:
   # MERGE ENGINES
   # ============================================================
 
-  engine-merger:
+  stt-batch-merge:
     build:
       context: ./engines/merge/final-merger
     environment:
@@ -529,27 +529,27 @@ CMD ["python", "/app/engine.py"]
 docker compose up -d
 
 # Start core only (minimal)
-docker compose up -d postgres redis gateway orchestrator engine-audio-prepare engine-faster-whisper engine-merger
+docker compose up -d postgres redis gateway orchestrator stt-batch-prepare stt-batch-transcribe-whisper-cpu stt-batch-merge
 
 # Start with specific engines
 docker compose up -d postgres redis gateway orchestrator \
-  engine-audio-prepare \
-  engine-faster-whisper \
-  engine-whisperx-align \
-  engine-pyannote \
-  engine-merger
+  stt-batch-prepare \
+  stt-batch-transcribe-whisper-cpu \
+  stt-batch-align-whisperx-cpu \
+  stt-batch-diarize-pyannote-v31-cpu \
+  stt-batch-merge
 ```
 
 ### Scaling Engines
 
 ```bash
 # Scale transcription engine (if backlogged)
-docker compose up -d --scale engine-faster-whisper=2
+docker compose up -d --scale stt-batch-transcribe-whisper-cpu=2
 
 # Scale multiple engines
 docker compose up -d \
-  --scale engine-faster-whisper=2 \
-  --scale engine-pyannote=2
+  --scale stt-batch-transcribe-whisper-cpu=2 \
+  --scale stt-batch-diarize-pyannote-v31-cpu=2
 ```
 
 ### Viewing Logs
@@ -560,7 +560,7 @@ docker compose logs -f
 
 # Specific service
 docker compose logs -f gateway
-docker compose logs -f engine-faster-whisper
+docker compose logs -f stt-batch-transcribe-whisper-cpu
 
 # Last 100 lines
 docker compose logs --tail=100 orchestrator
@@ -586,10 +586,10 @@ docker compose down -v
 docker compose build
 
 # Rebuild specific service
-docker compose build engine-faster-whisper
+docker compose build stt-batch-transcribe-whisper-cpu
 
 # Rebuild and restart
-docker compose up -d --build engine-faster-whisper
+docker compose up -d --build stt-batch-transcribe-whisper-cpu
 ```
 
 ---
@@ -601,7 +601,7 @@ docker compose up -d --build engine-faster-whisper
 By default, all GPU engines share the same GPU. To assign specific GPUs:
 
 ```yaml
-engine-faster-whisper:
+stt-batch-transcribe-whisper-cpu:
   deploy:
     resources:
       reservations:
@@ -610,7 +610,7 @@ engine-faster-whisper:
             device_ids: ['0']      # First GPU
             capabilities: [gpu]
 
-engine-pyannote:
+stt-batch-diarize-pyannote-v31-cpu:
   deploy:
     resources:
       reservations:
@@ -623,7 +623,7 @@ engine-pyannote:
 ### Memory Limits
 
 ```yaml
-engine-faster-whisper:
+stt-batch-transcribe-whisper-cpu:
   deploy:
     resources:
       limits:
@@ -715,7 +715,7 @@ aws s3 ls s3://${S3_BUCKET}/ --region ${S3_REGION}
 docker stats
 
 # Specific containers
-docker stats gateway orchestrator engine-faster-whisper
+docker stats gateway orchestrator stt-batch-transcribe-whisper-cpu
 ```
 
 ---
@@ -740,10 +740,10 @@ sudo systemctl restart docker
 docker compose exec redis redis-cli LLEN dalston:queue:faster-whisper
 
 # Check engine logs
-docker compose logs -f engine-faster-whisper
+docker compose logs -f stt-batch-transcribe-whisper-cpu
 
 # Check engine is running
-docker compose ps engine-faster-whisper
+docker compose ps stt-batch-transcribe-whisper-cpu
 ```
 
 ### Out of Memory
@@ -754,7 +754,7 @@ docker stats --no-stream
 
 # Reduce batch size in engine config
 # Or reduce number of concurrent engines
-docker compose up -d --scale engine-faster-whisper=1
+docker compose up -d --scale stt-batch-transcribe-whisper-cpu=1
 ```
 
 ### Redis Connection Errors

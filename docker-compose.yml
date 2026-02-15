@@ -1,5 +1,14 @@
 # Dalston - Modular Audio Transcription Server
 #
+# Container Naming Convention:
+#   {type}-{domain}-{stage}-{impl}[-v{version}][-cpu]
+#   - type: batch (file processing) or rt (realtime streaming)
+#   - domain: stt (speech-to-text), tts (text-to-speech, future)
+#   - stage: prepare, transcribe, align, diarize, detect, redact, merge
+#   - impl: whisper, parakeet, pyannote, presidio, etc.
+#   - version: v31, v40, etc. (only when multiple versions coexist)
+#   - cpu: only when forcing CPU mode (GPU is default for compute-heavy engines)
+#
 # Image Sharing Strategy:
 #   Services that use the same Dockerfile share a single image via the `image:` directive.
 #   Only the first service has a `build:` section; others just reference the image.
@@ -7,7 +16,7 @@
 #
 # Usage:
 #   docker compose up -d
-#   docker compose up -d --scale engine-faster-whisper=2  # scale specific engine
+#   docker compose up -d --scale stt-batch-transcribe-whisper=2  # scale specific engine
 
 services:
   # ============================================================
@@ -224,11 +233,12 @@ services:
     restart: unless-stopped
 
   # ============================================================
-  # ENGINES (M02+)
+  # BATCH STT ENGINES
   # ============================================================
 
-  engine-audio-prepare:
-    image: dalston/engine-audio-prepare:latest
+  # --- PREPARE STAGE ---
+  stt-batch-prepare:
+    image: dalston/stt-batch-prepare:latest
     build:
       context: .
       dockerfile: engines/prepare/audio-prepare/Dockerfile
@@ -254,8 +264,77 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
-  engine-faster-whisper:
-    image: dalston/engine-faster-whisper:latest
+  # --- TRANSCRIBE STAGE ---
+  # NVIDIA Parakeet transcription (CPU - default for local dev)
+  stt-batch-transcribe-parakeet-cpu:
+    image: dalston/stt-batch-transcribe-parakeet:cpu
+    build:
+      context: .
+      dockerfile: engines/transcribe/parakeet/Dockerfile
+      args:
+        DEVICE: cpu
+    environment:
+      - ENGINE_ID=parakeet
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
+    volumes:
+      - parakeet-models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # NVIDIA Parakeet transcription (GPU - use with: docker compose --profile gpu up -d)
+  stt-batch-transcribe-parakeet:
+    image: dalston/stt-batch-transcribe-parakeet:latest
+    build:
+      context: .
+      dockerfile: engines/transcribe/parakeet/Dockerfile
+    environment:
+      - ENGINE_ID=parakeet
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
+    volumes:
+      - parakeet-models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - gpu
+    restart: unless-stopped
+
+  # Faster-Whisper transcription (CPU - use with: docker compose --profile whisper up -d)
+  stt-batch-transcribe-whisper-cpu:
+    image: dalston/stt-batch-transcribe-whisper:latest
     build:
       context: .
       dockerfile: engines/transcribe/faster-whisper/Dockerfile
@@ -281,12 +360,13 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+    profiles:
+      - whisper
     restart: unless-stopped
 
-  # GPU-accelerated faster-whisper (use with: docker compose --profile gpu up -d)
-  # Shares image with engine-faster-whisper
-  engine-faster-whisper-gpu:
-    image: dalston/engine-faster-whisper:latest
+  # Faster-Whisper transcription (GPU - use with: docker compose --profile gpu up -d)
+  stt-batch-transcribe-whisper:
+    image: dalston/stt-batch-transcribe-whisper:latest
     environment:
       - ENGINE_ID=faster-whisper
       - REDIS_URL=redis://redis:6379
@@ -315,8 +395,10 @@ services:
       - gpu
     restart: unless-stopped
 
-  engine-whisperx-align:
-    image: dalston/engine-whisperx-align:latest
+  # --- ALIGN STAGE ---
+  # WhisperX alignment (CPU - default for local dev)
+  stt-batch-align-whisperx-cpu:
+    image: dalston/stt-batch-align-whisperx:latest
     build:
       context: .
       dockerfile: engines/align/whisperx-align/Dockerfile
@@ -344,10 +426,9 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
-  # GPU-accelerated whisperx-align (use with: docker compose --profile gpu up -d)
-  # Shares image with engine-whisperx-align
-  engine-whisperx-align-gpu:
-    image: dalston/engine-whisperx-align:latest
+  # WhisperX alignment (GPU - use with: docker compose --profile gpu up -d)
+  stt-batch-align-whisperx:
+    image: dalston/stt-batch-align-whisperx:latest
     environment:
       - ENGINE_ID=whisperx-align
       - REDIS_URL=redis://redis:6379
@@ -378,169 +459,10 @@ services:
       - gpu
     restart: unless-stopped
 
-  engine-final-merger:
-    image: dalston/engine-final-merger:latest
-    build:
-      context: .
-      dockerfile: engines/merge/final-merger/Dockerfile
-    environment:
-      - ENGINE_ID=final-merger
-      - REDIS_URL=redis://redis:6379
-      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
-      - S3_REGION=${S3_REGION:-us-east-1}
-      - S3_ENDPOINT_URL=http://minio:9000
-      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
-      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_FORMAT=${LOG_FORMAT:-json}
-      - OTEL_ENABLED=${OTEL_ENABLED:-false}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
-      # Prometheus metrics (M20)
-      - METRICS_ENABLED=${METRICS_ENABLED:-true}
-      - METRICS_PORT=9100
-    depends_on:
-      redis:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
-    restart: unless-stopped
-
-  # ============================================================
-  # PARAKEET ENGINES (M22)
-  # ============================================================
-
-  # NVIDIA Parakeet batch transcription engine (GPU)
-  engine-parakeet:
-    image: dalston/engine-parakeet:latest
-    build:
-      context: .
-      dockerfile: engines/transcribe/parakeet/Dockerfile
-    environment:
-      - ENGINE_ID=parakeet
-      - REDIS_URL=redis://redis:6379
-      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
-      - S3_REGION=${S3_REGION:-us-east-1}
-      - S3_ENDPOINT_URL=http://minio:9000
-      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
-      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_FORMAT=${LOG_FORMAT:-json}
-      # Prometheus metrics (M20)
-      - METRICS_ENABLED=${METRICS_ENABLED:-true}
-      - METRICS_PORT=9100
-    volumes:
-      - parakeet-models:/models
-    depends_on:
-      redis:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    profiles:
-      - gpu
-      - parakeet
-    restart: unless-stopped
-
-  # NVIDIA Parakeet batch transcription engine (CPU - for local dev)
-  engine-parakeet-cpu:
-    image: dalston/engine-parakeet:cpu
-    build:
-      context: .
-      dockerfile: engines/transcribe/parakeet/Dockerfile
-      args:
-        DEVICE: cpu
-    environment:
-      - ENGINE_ID=parakeet
-      - REDIS_URL=redis://redis:6379
-      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
-      - S3_REGION=${S3_REGION:-us-east-1}
-      - S3_ENDPOINT_URL=http://minio:9000
-      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
-      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_FORMAT=${LOG_FORMAT:-json}
-      # Prometheus metrics (M20)
-      - METRICS_ENABLED=${METRICS_ENABLED:-true}
-      - METRICS_PORT=9100
-    volumes:
-      - parakeet-models:/models
-    depends_on:
-      redis:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
-    profiles:
-      - parakeet-cpu
-    restart: unless-stopped
-
-  # ============================================================
-  # PII DETECTION & AUDIO REDACTION ENGINES (M26)
-  # ============================================================
-
-  engine-pii-presidio:
-    image: dalston/engine-pii-presidio:latest
-    build:
-      context: .
-      dockerfile: engines/detect/pii-presidio/Dockerfile
-    environment:
-      - ENGINE_ID=pii-presidio
-      - REDIS_URL=redis://redis:6379
-      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
-      - S3_REGION=${S3_REGION:-us-east-1}
-      - S3_ENDPOINT_URL=http://minio:9000
-      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
-      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_FORMAT=${LOG_FORMAT:-json}
-      # Prometheus metrics (M20)
-      - METRICS_ENABLED=${METRICS_ENABLED:-true}
-      - METRICS_PORT=9100
-    volumes:
-      - gliner-models:/models
-    depends_on:
-      redis:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
-    restart: unless-stopped
-
-  engine-audio-redactor:
-    image: dalston/engine-audio-redactor:latest
-    build:
-      context: .
-      dockerfile: engines/redact/audio-redactor/Dockerfile
-    environment:
-      - ENGINE_ID=audio-redactor
-      - REDIS_URL=redis://redis:6379
-      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
-      - S3_REGION=${S3_REGION:-us-east-1}
-      - S3_ENDPOINT_URL=http://minio:9000
-      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
-      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_FORMAT=${LOG_FORMAT:-json}
-      # Prometheus metrics (M20)
-      - METRICS_ENABLED=${METRICS_ENABLED:-true}
-      - METRICS_PORT=9100
-    depends_on:
-      redis:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
-    restart: unless-stopped
-
-  # ============================================================
-  # DIARIZATION ENGINES (M04)
-  # ============================================================
-
-  engine-pyannote-3.1:
-    image: dalston/engine-pyannote-3.1:latest
+  # --- DIARIZE STAGE ---
+  # Pyannote 3.1 diarization (CPU - default for local dev)
+  stt-batch-diarize-pyannote-v31-cpu:
+    image: dalston/stt-batch-diarize-pyannote-v31:latest
     build:
       context: .
       dockerfile: engines/diarize/pyannote-3.1/Dockerfile
@@ -568,10 +490,9 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
-  # GPU-accelerated pyannote (use with: docker compose --profile gpu up -d)
-  # Shares image with engine-pyannote-3.1
-  engine-pyannote-3.1-gpu:
-    image: dalston/engine-pyannote-3.1:latest
+  # Pyannote 3.1 diarization (GPU - use with: docker compose --profile gpu up -d)
+  stt-batch-diarize-pyannote-v31:
+    image: dalston/stt-batch-diarize-pyannote-v31:latest
     environment:
       - ENGINE_ID=pyannote-3.1
       - REDIS_URL=redis://redis:6379
@@ -601,9 +522,9 @@ services:
       - gpu
     restart: unless-stopped
 
-  # Pyannote 4.0 with Community-1 pipeline and VBx clustering
-  engine-pyannote-4.0:
-    image: dalston/engine-pyannote-4.0:latest
+  # Pyannote 4.0 diarization (CPU - default for local dev)
+  stt-batch-diarize-pyannote-v40-cpu:
+    image: dalston/stt-batch-diarize-pyannote-v40:latest
     build:
       context: .
       dockerfile: engines/diarize/pyannote-4.0/Dockerfile
@@ -631,10 +552,9 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
-  # GPU-accelerated pyannote 4.0 (use with: docker compose --profile gpu up -d)
-  # Shares image with engine-pyannote-4.0
-  engine-pyannote-4.0-gpu:
-    image: dalston/engine-pyannote-4.0:latest
+  # Pyannote 4.0 diarization (GPU - use with: docker compose --profile gpu up -d)
+  stt-batch-diarize-pyannote-v40:
+    image: dalston/stt-batch-diarize-pyannote-v40:latest
     environment:
       - ENGINE_ID=pyannote-4.0
       - REDIS_URL=redis://redis:6379
@@ -664,20 +584,220 @@ services:
       - gpu
     restart: unless-stopped
 
-  # ============================================================
-  # REALTIME ENGINES (M06)
-  # All realtime workers share the same image (dalston/realtime-whisper)
-  # ============================================================
+  # --- DETECT STAGE (PII) ---
+  stt-batch-detect-presidio:
+    image: dalston/stt-batch-detect-presidio:latest
+    build:
+      context: .
+      dockerfile: engines/detect/pii-presidio/Dockerfile
+    environment:
+      - ENGINE_ID=pii-presidio
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
+    volumes:
+      - gliner-models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
-  realtime-whisper-1:
-    image: dalston/realtime-whisper:latest
+  # --- REDACT STAGE ---
+  stt-batch-redact-audio:
+    image: dalston/stt-batch-redact-audio:latest
+    build:
+      context: .
+      dockerfile: engines/redact/audio-redactor/Dockerfile
+    environment:
+      - ENGINE_ID=audio-redactor
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # --- MERGE STAGE ---
+  stt-batch-merge:
+    image: dalston/stt-batch-merge:latest
+    build:
+      context: .
+      dockerfile: engines/merge/final-merger/Dockerfile
+    environment:
+      - ENGINE_ID=final-merger
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      - OTEL_ENABLED=${OTEL_ENABLED:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # ============================================================
+  # REALTIME STT WORKERS
+  # ============================================================
+  # Default: Parakeet CPU (local dev) - scale with: docker compose up -d --scale stt-rt-transcribe-parakeet-cpu=2
+  # Whisper CPU: docker compose --profile whisper up -d
+  # GPU workers: docker compose --profile gpu up -d
+
+  # --- PARAKEET REALTIME (CPU - DEFAULT) ---
+  # Default realtime worker for local development
+  stt-rt-transcribe-parakeet-cpu:
+    image: dalston/stt-rt-transcribe-parakeet:cpu
+    build:
+      context: .
+      dockerfile: engines/realtime/parakeet-streaming/Dockerfile
+      args:
+        DEVICE: cpu
+    environment:
+      - WORKER_PORT=9000
+      - MAX_SESSIONS=2
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      # S3 storage for audio/transcript persistence (M24)
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      - OTEL_ENABLED=${OTEL_ENABLED:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
+    volumes:
+      - parakeet-models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 9000)); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Parakeet realtime (GPU - use with: docker compose --profile gpu up -d)
+  stt-rt-transcribe-parakeet:
+    image: dalston/stt-rt-transcribe-parakeet:latest
+    build:
+      context: .
+      dockerfile: engines/realtime/parakeet-streaming/Dockerfile
+    environment:
+      - WORKER_PORT=9000
+      - MAX_SESSIONS=4
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      # S3 storage for audio/transcript persistence (M24)
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      - OTEL_ENABLED=${OTEL_ENABLED:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
+    volumes:
+      - parakeet-models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 9000)); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - gpu
+    restart: unless-stopped
+
+  # --- WHISPER REALTIME (CPU) ---
+  # Use with: docker compose --profile whisper up -d
+  stt-rt-transcribe-whisper-cpu:
+    image: dalston/stt-rt-transcribe-whisper:latest
     build:
       context: .
       dockerfile: engines/realtime/whisper-streaming/Dockerfile
     environment:
-      - WORKER_ID=realtime-whisper-1
       - WORKER_PORT=9000
-      - WORKER_ENDPOINT=ws://realtime-whisper-1:9000
+      - MAX_SESSIONS=4
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      # S3 storage for audio/transcript persistence (M24)
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      - OTEL_ENABLED=${OTEL_ENABLED:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
+    volumes:
+      - realtime-models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 9000)); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    profiles:
+      - whisper
+    restart: unless-stopped
+
+  # Whisper realtime (GPU - use with: docker compose --profile gpu up -d)
+  stt-rt-transcribe-whisper:
+    image: dalston/stt-rt-transcribe-whisper:latest
+    environment:
+      - WORKER_PORT=9000
       - MAX_SESSIONS=4
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -703,68 +823,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-    restart: unless-stopped
-
-  # Additional realtime worker - shares image with realtime-whisper-1
-  realtime-whisper-2:
-    image: dalston/realtime-whisper:latest
-    environment:
-      - WORKER_ID=realtime-whisper-2
-      - WORKER_PORT=9000
-      - WORKER_ENDPOINT=ws://realtime-whisper-2:9000
-      - MAX_SESSIONS=4
-      - REDIS_URL=redis://redis:6379
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_FORMAT=${LOG_FORMAT:-json}
-      # S3 storage for audio/transcript persistence (M24)
-      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
-      - S3_REGION=${S3_REGION:-us-east-1}
-      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
-      # Prometheus metrics (M20)
-      - METRICS_ENABLED=${METRICS_ENABLED:-true}
-      - METRICS_PORT=9100
-    volumes:
-      - realtime-models:/models
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 9000)); s.close()"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
-
-  # GPU-accelerated realtime worker (use with: docker compose --profile gpu up -d)
-  # Shares image with realtime-whisper-1
-  realtime-whisper-gpu:
-    image: dalston/realtime-whisper:latest
-    environment:
-      - WORKER_ID=realtime-whisper-gpu
-      - WORKER_PORT=9000
-      - WORKER_ENDPOINT=ws://realtime-whisper-gpu:9000
-      - MAX_SESSIONS=4
-      - REDIS_URL=redis://redis:6379
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_FORMAT=${LOG_FORMAT:-json}
-      # S3 storage for audio/transcript persistence (M24)
-      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
-      - S3_REGION=${S3_REGION:-us-east-1}
-      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
-    volumes:
-      - realtime-models:/models
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 9000)); s.close()"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
     deploy:
       resources:
         reservations:
@@ -774,137 +832,6 @@ services:
               capabilities: [gpu]
     profiles:
       - gpu
-    restart: unless-stopped
-
-  # ============================================================
-  # PARAKEET REALTIME ENGINES (M22)
-  # ============================================================
-
-  # NVIDIA Parakeet streaming realtime worker (GPU)
-  realtime-parakeet-1:
-    image: dalston/realtime-parakeet:latest
-    build:
-      context: .
-      dockerfile: engines/realtime/parakeet-streaming/Dockerfile
-    environment:
-      - WORKER_ID=realtime-parakeet-1
-      - WORKER_PORT=9000
-      - WORKER_ENDPOINT=ws://realtime-parakeet-1:9000
-      - MAX_SESSIONS=4
-      - REDIS_URL=redis://redis:6379
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_FORMAT=${LOG_FORMAT:-json}
-      # S3 storage for audio/transcript persistence (M24)
-      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
-      - S3_REGION=${S3_REGION:-us-east-1}
-      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
-      # Prometheus metrics (M20)
-      - METRICS_ENABLED=${METRICS_ENABLED:-true}
-      - METRICS_PORT=9100
-    volumes:
-      - parakeet-models:/models
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 9000)); s.close()"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    profiles:
-      - gpu
-      - parakeet
-    restart: unless-stopped
-
-  # Additional Parakeet realtime worker (GPU)
-  realtime-parakeet-2:
-    image: dalston/realtime-parakeet:latest
-    environment:
-      - WORKER_ID=realtime-parakeet-2
-      - WORKER_PORT=9000
-      - WORKER_ENDPOINT=ws://realtime-parakeet-2:9000
-      - MAX_SESSIONS=4
-      - REDIS_URL=redis://redis:6379
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_FORMAT=${LOG_FORMAT:-json}
-      # S3 storage for audio/transcript persistence (M24)
-      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
-      - S3_REGION=${S3_REGION:-us-east-1}
-      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
-      # Prometheus metrics (M20)
-      - METRICS_ENABLED=${METRICS_ENABLED:-true}
-      - METRICS_PORT=9100
-    volumes:
-      - parakeet-models:/models
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 9000)); s.close()"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    profiles:
-      - gpu
-      - parakeet
-    restart: unless-stopped
-
-  # NVIDIA Parakeet streaming realtime worker (CPU - for local dev)
-  realtime-parakeet-cpu:
-    image: dalston/realtime-parakeet:cpu
-    build:
-      context: .
-      dockerfile: engines/realtime/parakeet-streaming/Dockerfile
-      args:
-        DEVICE: cpu
-    environment:
-      - WORKER_ID=realtime-parakeet-cpu
-      - WORKER_PORT=9000
-      - WORKER_ENDPOINT=ws://realtime-parakeet-cpu:9000
-      - MAX_SESSIONS=2
-      - REDIS_URL=redis://redis:6379
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_FORMAT=${LOG_FORMAT:-json}
-      # S3 storage for audio/transcript persistence (M24)
-      # Note: Containers access MinIO via internal network, not localhost
-      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
-      - S3_REGION=${S3_REGION:-us-east-1}
-      - S3_ENDPOINT_URL=http://minio:9000
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
-      # Prometheus metrics (M20)
-      - METRICS_ENABLED=${METRICS_ENABLED:-true}
-      - METRICS_PORT=9100
-    volumes:
-      - parakeet-models:/models
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 9000)); s.close()"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    profiles:
-      - parakeet-cpu
     restart: unless-stopped
 
 volumes:

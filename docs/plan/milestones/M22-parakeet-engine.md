@@ -160,7 +160,7 @@ See [implementation plan](../impl/M22-22.2-parakeet-realtime-engine.md) for deta
 
 ```yaml
 # Batch engine
-engine-parakeet:
+stt-batch-transcribe-parakeet:
   build: ./engines/transcribe/parakeet
   deploy:
     resources:
@@ -171,10 +171,10 @@ engine-parakeet:
             capabilities: [gpu]
 
 # Real-time engine
-realtime-parakeet-1:
+stt-rt-transcribe-parakeet-1:
   build: ./engines/realtime/parakeet-streaming
   environment:
-    - WORKER_ID=realtime-parakeet-1
+    - WORKER_ID=stt-rt-transcribe-parakeet-1
     - WORKER_PORT=9000
     - MAX_SESSIONS=4
     - REDIS_URL=redis://redis:6379
@@ -254,7 +254,7 @@ curl http://localhost:8000/v1/models/parakeet-0.6b
 
 ```bash
 # Start Parakeet real-time worker
-docker compose up -d realtime-parakeet-1
+docker compose up -d stt-rt-transcribe-parakeet-1
 
 # Stream with Parakeet
 wscat -c "ws://localhost:8000/v1/audio/transcriptions/stream?model=parakeet-0.6b"
@@ -265,10 +265,10 @@ wscat -c "ws://localhost:8000/v1/audio/transcriptions/stream?model=parakeet-0.6b
 
 ```bash
 # Batch engine health
-docker compose logs engine-parakeet | grep "healthy"
+docker compose logs stt-batch-transcribe-parakeet | grep "healthy"
 
 # Real-time worker health
-docker compose exec redis redis-cli HGETALL dalston:realtime:worker:realtime-parakeet-1
+docker compose exec redis redis-cli HGETALL dalston:realtime:worker:stt-rt-transcribe-parakeet-1
 # → Shows status, capacity, active_sessions, models
 ```
 

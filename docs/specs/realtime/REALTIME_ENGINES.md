@@ -760,14 +760,14 @@ soundfile>=0.12.0
 ```yaml
 # In docker-compose.yml
 
-realtime-whisper-1:
+stt-rt-transcribe-whisper-1:
   build:
     context: ./engines/realtime/whisper-streaming
   ports:
     - "9001:9000"
   environment:
     - REDIS_URL=redis://redis:6379
-    - WORKER_ID=realtime-whisper-1
+    - WORKER_ID=stt-rt-transcribe-whisper-1
     - WORKER_PORT=9000
     - MAX_SESSIONS=4
   volumes:
@@ -797,16 +797,16 @@ realtime-whisper-1:
 Add more workers:
 
 ```yaml
-realtime-whisper-2:
-  # Same as realtime-whisper-1
+stt-rt-transcribe-whisper-2:
+  # Same as stt-rt-transcribe-whisper-1
   environment:
-    - WORKER_ID=realtime-whisper-2
+    - WORKER_ID=stt-rt-transcribe-whisper-2
   ports:
     - "9002:9000"
 
-realtime-whisper-3:
+stt-rt-transcribe-whisper-3:
   environment:
-    - WORKER_ID=realtime-whisper-3
+    - WORKER_ID=stt-rt-transcribe-whisper-3
   ports:
     - "9003:9000"
 ```
@@ -816,7 +816,7 @@ realtime-whisper-3:
 Assign specific GPUs to workers:
 
 ```yaml
-realtime-whisper-1:
+stt-rt-transcribe-whisper-1:
   deploy:
     resources:
       reservations:
@@ -825,7 +825,7 @@ realtime-whisper-1:
             device_ids: ['0']
             capabilities: [gpu]
 
-realtime-whisper-2:
+stt-rt-transcribe-whisper-2:
   deploy:
     resources:
       reservations:

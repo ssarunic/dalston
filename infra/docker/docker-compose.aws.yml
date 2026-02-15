@@ -21,20 +21,12 @@ services:
     volumes:
       - /data/postgres:/var/lib/postgresql/data
 
-  engine-audio-prepare:
+  stt-batch-prepare:
     environment:
       - S3_BUCKET=${S3_BUCKET}
       - AWS_REGION=${AWS_REGION}
 
-  engine-faster-whisper:
-    environment:
-      - S3_BUCKET=${S3_BUCKET}
-      - AWS_REGION=${AWS_REGION}
-      - HF_HOME=/data/models
-    volumes:
-      - /data/models:/data/models
-
-  engine-whisperx-align:
+  stt-batch-transcribe-whisper:
     environment:
       - S3_BUCKET=${S3_BUCKET}
       - AWS_REGION=${AWS_REGION}
@@ -42,7 +34,7 @@ services:
     volumes:
       - /data/models:/data/models
 
-  engine-pyannote:
+  stt-batch-align-whisperx:
     environment:
       - S3_BUCKET=${S3_BUCKET}
       - AWS_REGION=${AWS_REGION}
@@ -50,7 +42,15 @@ services:
     volumes:
       - /data/models:/data/models
 
-  engine-final-merger:
+  stt-batch-diarize-pyannote-v31:
+    environment:
+      - S3_BUCKET=${S3_BUCKET}
+      - AWS_REGION=${AWS_REGION}
+      - HF_HOME=/data/models
+    volumes:
+      - /data/models:/data/models
+
+  stt-batch-merge:
     environment:
       - S3_BUCKET=${S3_BUCKET}
       - AWS_REGION=${AWS_REGION}

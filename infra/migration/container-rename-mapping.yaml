@@ -1,0 +1,111 @@
+# Container Rename Mapping (Completed)
+#
+# Naming Convention: {domain}-{type}-{stage}-{impl}[-v{version}][-cpu]
+#   - domain: stt (speech-to-text), tts (text-to-speech, future)
+#   - type: batch or rt (realtime)
+#   - stage: prepare, transcribe, align, diarize, detect, redact, merge
+#   - impl: whisper, parakeet, pyannote, presidio, etc.
+#   - version: v31, v40, etc. (only when multiple versions coexist)
+#   - cpu: only when forcing CPU mode (GPU is default for compute-heavy engines)
+#
+# Engine IDs remain unchanged (faster-whisper, parakeet, etc.) - used in Redis queues
+
+stt_batch_engines:
+  # Prepare stage (CPU-only)
+  stt-batch-prepare:
+    old_name: engine-audio-prepare
+    engine_id: audio-prepare
+    image: dalston/stt-batch-prepare:latest
+
+  # Transcribe stage
+  stt-batch-transcribe-whisper:
+    old_name: engine-faster-whisper-gpu
+    engine_id: faster-whisper
+    image: dalston/stt-batch-transcribe-whisper:latest
+    profiles: [gpu]
+  stt-batch-transcribe-whisper-cpu:
+    old_name: engine-faster-whisper
+    engine_id: faster-whisper
+    image: dalston/stt-batch-transcribe-whisper:latest
+  stt-batch-transcribe-parakeet:
+    old_name: engine-parakeet
+    engine_id: parakeet
+    image: dalston/stt-batch-transcribe-parakeet:latest
+    profiles: [gpu, parakeet]
+  stt-batch-transcribe-parakeet-cpu:
+    old_name: engine-parakeet-cpu
+    engine_id: parakeet
+    image: dalston/stt-batch-transcribe-parakeet:cpu
+    profiles: [parakeet-cpu]
+
+  # Align stage
+  stt-batch-align-whisperx:
+    old_name: engine-whisperx-align-gpu
+    engine_id: whisperx-align
+    image: dalston/stt-batch-align-whisperx:latest
+    profiles: [gpu]
+  stt-batch-align-whisperx-cpu:
+    old_name: engine-whisperx-align
+    engine_id: whisperx-align
+    image: dalston/stt-batch-align-whisperx:latest
+
+  # Diarize stage
+  stt-batch-diarize-pyannote-v31:
+    old_name: engine-pyannote-3.1-gpu
+    engine_id: pyannote-3.1
+    image: dalston/stt-batch-diarize-pyannote-v31:latest
+    profiles: [gpu]
+  stt-batch-diarize-pyannote-v31-cpu:
+    old_name: engine-pyannote-3.1
+    engine_id: pyannote-3.1
+    image: dalston/stt-batch-diarize-pyannote-v31:latest
+  stt-batch-diarize-pyannote-v40:
+    old_name: engine-pyannote-4.0-gpu
+    engine_id: pyannote-4.0
+    image: dalston/stt-batch-diarize-pyannote-v40:latest
+    profiles: [gpu]
+  stt-batch-diarize-pyannote-v40-cpu:
+    old_name: engine-pyannote-4.0
+    engine_id: pyannote-4.0
+    image: dalston/stt-batch-diarize-pyannote-v40:latest
+
+  # Detect stage (PII, CPU-only)
+  stt-batch-detect-presidio:
+    old_name: engine-pii-presidio
+    engine_id: pii-presidio
+    image: dalston/stt-batch-detect-presidio:latest
+
+  # Redact stage (CPU-only)
+  stt-batch-redact-audio:
+    old_name: engine-audio-redactor
+    engine_id: audio-redactor
+    image: dalston/stt-batch-redact-audio:latest
+
+  # Merge stage (CPU-only)
+  stt-batch-merge:
+    old_name: engine-final-merger
+    engine_id: final-merger
+    image: dalston/stt-batch-merge:latest
+
+stt_rt_workers:
+  # Parakeet realtime (default for local dev)
+  stt-rt-transcribe-parakeet-cpu:
+    old_name: realtime-parakeet-cpu
+    image: dalston/stt-rt-transcribe-parakeet:cpu
+    profiles: []  # Default, no profile needed
+    notes: Scale with --scale stt-rt-transcribe-parakeet-cpu=N
+  stt-rt-transcribe-parakeet:
+    old_name: realtime-parakeet-gpu
+    image: dalston/stt-rt-transcribe-parakeet:latest
+    profiles: [gpu]
+
+  # Whisper realtime
+  stt-rt-transcribe-whisper-cpu:
+    old_name: realtime-whisper-1
+    image: dalston/stt-rt-transcribe-whisper:latest
+    profiles: [whisper]
+    notes: Scale with --scale stt-rt-transcribe-whisper-cpu=N
+  stt-rt-transcribe-whisper:
+    old_name: realtime-whisper-gpu
+    image: dalston/stt-rt-transcribe-whisper:latest
+    profiles: [gpu]

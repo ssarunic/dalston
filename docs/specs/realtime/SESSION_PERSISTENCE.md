@@ -104,7 +104,7 @@ Redis continues to track active session state for real-time operations:
 ```
 dalston:realtime:session:{session_id}        (Hash)
 {
-  "worker_id": "realtime-whisper-1",
+  "worker_id": "stt-rt-transcribe-whisper-1",
   "status": "active",
   "language": "en",
   "model": "fast",
@@ -250,7 +250,7 @@ On unexpected disconnect:
   ],
   "metadata": {
     "created_at": "2025-01-28T12:01:00Z",
-    "worker_id": "realtime-whisper-1",
+    "worker_id": "stt-rt-transcribe-whisper-1",
     "encoding": "pcm_s16le",
     "sample_rate": 16000
   }
@@ -365,7 +365,7 @@ GET /v1/realtime/sessions/{session_id}
   "enhance_on_end": false,
   "audio_uri": "s3://bucket/sessions/sess_abc123/audio.wav",
   "transcript_uri": "s3://bucket/sessions/sess_abc123/transcript.json",
-  "worker_id": "realtime-whisper-1",
+  "worker_id": "stt-rt-transcribe-whisper-1",
   "client_ip": "192.168.1.100",
   "started_at": "2025-01-28T12:00:00Z",
   "ended_at": "2025-01-28T12:01:00Z"

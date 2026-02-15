@@ -275,7 +275,7 @@ Members: [worker_id, worker_id, ...]
 
 dalston:realtime:worker:{worker_id}          (Hash)
 {
-  "endpoint": "ws://realtime-whisper-1:9000",
+  "endpoint": "ws://stt-rt-transcribe-whisper-1:9000",
   "status": "ready",                          // ready | busy | draining
   "capacity": 4,
   "active_sessions": 2,
@@ -294,7 +294,7 @@ Members: [session_id, session_id, ...]
 ```
 dalston:realtime:session:{session_id}        (Hash)
 {
-  "worker_id": "realtime-whisper-1",
+  "worker_id": "stt-rt-transcribe-whisper-1",
   "status": "active",                         // active | ended | error
   "language": "en",
   "model": "fast",

@@ -327,23 +327,23 @@ engines/realtime/{engine-id}/
 
 | Service | Stage |
 |---------|-------|
-| `engine-audio-prepare` | prepare |
-| `engine-faster-whisper` | transcribe |
-| `engine-parakeet` | transcribe |
-| `engine-whisperx-align` | align |
-| `engine-pyannote` | diarize |
+| `stt-batch-prepare` | prepare |
+| `stt-batch-transcribe-whisper-cpu` | transcribe |
+| `stt-batch-transcribe-parakeet` | transcribe |
+| `stt-batch-align-whisperx-cpu` | align |
+| `stt-batch-diarize-pyannote-v31-cpu` | diarize |
 | `engine-emotion` | detect |
 | `engine-llm-cleanup` | refine |
-| `engine-merger` | merge |
+| `stt-batch-merge` | merge |
 | `engine-whisperx-full` | transcribe+align+diarize |
 
 ### Realtime Engines
 
 | Service | Purpose |
 |---------|---------|
-| `realtime-whisper-1` | Streaming transcription worker |
-| `realtime-whisper-2` | Streaming transcription worker |
-| `realtime-whisper-N` | Additional workers as needed |
+| `stt-rt-transcribe-whisper-1` | Streaming transcription worker |
+| `stt-rt-transcribe-whisper-2` | Streaming transcription worker |
+| `stt-rt-transcribe-whisper-N` | Additional workers as needed |
 
 ---
 
@@ -452,10 +452,10 @@ pytest --cov=dalston --cov-report=html
 docker compose build
 
 # Build specific
-docker compose build gateway engine-faster-whisper realtime-whisper-1
+docker compose build gateway stt-batch-transcribe-whisper-cpu stt-rt-transcribe-whisper-1
 
 # Start batch + realtime
 docker compose up -d gateway orchestrator redis \
-  engine-faster-whisper engine-merger \
-  realtime-whisper-1 realtime-whisper-2
+  stt-batch-transcribe-whisper-cpu stt-batch-merge \
+  stt-rt-transcribe-whisper-1 stt-rt-transcribe-whisper-2
 ```

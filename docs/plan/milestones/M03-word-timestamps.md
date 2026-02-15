@@ -115,7 +115,7 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 | ---- | ------- |
 | `dalston/orchestrator/dag.py` | Added align stage, conditional based on `timestamps_granularity` or `word_timestamps` |
 | `engines/merge/final-merger/engine.py` | Handle aligned segments, track `word_timestamps` and `word_timestamps_requested` in metadata |
-| `docker-compose.yml` | Added `engine-whisperx-align` and `engine-whisperx-align-gpu` services |
+| `docker-compose.yml` | Added `stt-batch-align-whisperx-cpu` and `stt-batch-align-whisperx-cpu-gpu` services |
 | `CLAUDE.md` | Updated core services list to include alignment engine |
 
 ### Key Implementation Details
@@ -137,10 +137,10 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 
 ```yaml
 # CPU version (default)
-engine-whisperx-align
+stt-batch-align-whisperx-cpu
 
 # GPU version (--profile gpu)
-engine-whisperx-align-gpu
+stt-batch-align-whisperx-cpu-gpu
 ```
 
 ### Verification Results

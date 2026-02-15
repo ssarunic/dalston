@@ -251,7 +251,7 @@ services:
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.aws.yml up -d \
   gateway orchestrator redis postgres \
-  engine-audio-prepare engine-faster-whisper engine-final-merger
+  stt-batch-prepare stt-batch-transcribe-whisper-cpu stt-batch-merge
 ```
 
 ---

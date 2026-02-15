@@ -448,7 +448,7 @@ System capacity for realtime transcription.
   "available_capacity": 9,
   "workers": [
     {
-      "id": "realtime-whisper-1",
+      "id": "stt-rt-transcribe-whisper-1",
       "status": "ready",
       "capacity": 4,
       "active_sessions": 2
@@ -466,7 +466,7 @@ List active sessions (admin).
   "sessions": [
     {
       "session_id": "sess_abc123",
-      "worker_id": "realtime-whisper-1",
+      "worker_id": "stt-rt-transcribe-whisper-1",
       "started_at": "2025-01-28T12:00:00Z",
       "duration": 45.6,
       "language": "en",

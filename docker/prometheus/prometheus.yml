@@ -24,29 +24,35 @@ scrape_configs:
       - targets: ['metrics-exporter:9100']
     metrics_path: /metrics
 
-  # Batch engine metrics (M20)
+  # Batch STT engine metrics (M20)
   # Engines expose /metrics on port 9100 via lightweight HTTP server
-  - job_name: 'dalston-engines'
+  - job_name: 'dalston-batch-stt'
     static_configs:
       - targets:
-          - 'engine-audio-prepare:9100'
-          - 'engine-faster-whisper:9100'
-          - 'engine-whisperx-align:9100'
-          - 'engine-final-merger:9100'
-          - 'engine-parakeet:9100'
-          - 'engine-parakeet-cpu:9100'
-          - 'engine-pyannote-3.1:9100'
-          - 'engine-pyannote-4.0:9100'
+          - 'stt-batch-prepare:9100'
+          - 'stt-batch-transcribe-whisper:9100'
+          - 'stt-batch-transcribe-whisper-cpu:9100'
+          - 'stt-batch-transcribe-parakeet:9100'
+          - 'stt-batch-transcribe-parakeet-cpu:9100'
+          - 'stt-batch-align-whisperx:9100'
+          - 'stt-batch-align-whisperx-cpu:9100'
+          - 'stt-batch-diarize-pyannote-v31:9100'
+          - 'stt-batch-diarize-pyannote-v31-cpu:9100'
+          - 'stt-batch-diarize-pyannote-v40:9100'
+          - 'stt-batch-diarize-pyannote-v40-cpu:9100'
+          - 'stt-batch-detect-presidio:9100'
+          - 'stt-batch-redact-audio:9100'
+          - 'stt-batch-merge:9100'
     metrics_path: /metrics
 
-  # Realtime worker metrics (M20)
+  # Realtime STT worker metrics (M20)
   # Workers expose /metrics on port 9100 via aiohttp HTTP server
-  - job_name: 'dalston-realtime'
+  # Note: Scaled workers are discovered via docker-compose service names
+  - job_name: 'dalston-rt-stt'
     static_configs:
       - targets:
-          - 'realtime-whisper-1:9100'
-          - 'realtime-whisper-2:9100'
-          - 'realtime-parakeet-1:9100'
-          - 'realtime-parakeet-2:9100'
-          - 'realtime-parakeet-cpu:9100'
+          - 'stt-rt-transcribe-parakeet-cpu:9100'  # Default (local dev)
+          - 'stt-rt-transcribe-parakeet:9100'      # GPU
+          - 'stt-rt-transcribe-whisper-cpu:9100'   # Whisper CPU
+          - 'stt-rt-transcribe-whisper:9100'       # Whisper GPU
     metrics_path: /metrics
