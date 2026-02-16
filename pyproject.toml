@@ -46,6 +46,7 @@ orchestrator = [
     "websockets>=12.0",  # Required by gateway module
     "tinytag>=2.0.0",  # Required by gateway.services.audio_probe
     "aiohttp>=3.9.0",  # For lightweight HTTP server (metrics endpoint)
+    "pyyaml>=6.0",  # For engine catalog YAML parsing (M29)
 ]
 engine-sdk = [
     "redis>=5.0.0",

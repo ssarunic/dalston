@@ -19,6 +19,37 @@ from dalston.common.pipeline_types import (
 T = TypeVar("T", bound=BaseModel)
 
 
+class EngineCapabilities(BaseModel):
+    """What an engine can do. Published in heartbeats, declared in catalog.
+
+    This schema defines engine capabilities for:
+    - Validation: Check if a job's requirements match running engine capabilities
+    - Catalog: Declare what engines could be started and their resource needs
+    - Routing: (future) Select best engine for a given job
+
+    Attributes:
+        engine_id: Unique engine identifier (e.g., "parakeet", "faster-whisper")
+        version: Engine version string
+        stages: Pipeline stages this engine handles (e.g., ["transcribe"])
+        languages: ISO 639-1 codes supported, None means all languages
+        supports_word_timestamps: Whether engine produces word-level timestamps
+        supports_streaming: Whether engine supports streaming transcription
+        model_variants: Available model variants (e.g., ["large-v3", "medium"])
+        gpu_required: Whether GPU is required for this engine
+        gpu_vram_mb: Estimated VRAM usage in MB
+    """
+
+    engine_id: str
+    version: str
+    stages: list[str]
+    languages: list[str] | None = None
+    supports_word_timestamps: bool = False
+    supports_streaming: bool = False
+    model_variants: list[str] | None = None
+    gpu_required: bool = False
+    gpu_vram_mb: int | None = None
+
+
 @dataclass
 class TaskInput:
     """Input data provided to an engine's process method.

@@ -230,6 +230,15 @@ class PIIDetectionEngine(Engine):
         align_output = input.get_align_output()
         transcribe_output = input.get_transcribe_output()
 
+        # Extract language from transcription
+        language = "en"  # Default fallback
+        if transcribe_output and transcribe_output.language:
+            language = transcribe_output.language
+        elif (
+            align_output and hasattr(align_output, "language") and align_output.language
+        ):
+            language = align_output.language
+
         if align_output and not align_output.skipped:
             segments = align_output.segments
             text = align_output.text
@@ -240,7 +249,10 @@ class PIIDetectionEngine(Engine):
             # Fallback to raw output
             raw_transcribe = input.get_raw_output("transcribe") or {}
             text = raw_transcribe.get("text", "")
+            language = raw_transcribe.get("language", "en")
             segments = []
+
+        self.logger.info("detected_language_for_pii", language=language)
 
         # Get diarization for speaker assignment
         diarize_output = input.get_diarize_output()
@@ -253,6 +265,7 @@ class PIIDetectionEngine(Engine):
             entity_types=entity_types,
             confidence_threshold=confidence_threshold,
             speaker_turns=speaker_turns,
+            language=language,
         )
 
         # Generate redacted text
@@ -289,6 +302,9 @@ class PIIDetectionEngine(Engine):
 
         return TaskOutput(data=output)
 
+    # Languages supported by Presidio's default NLP models
+    PRESIDIO_SUPPORTED_LANGUAGES = {"en", "de", "es", "fr", "it", "pt", "nl", "he"}
+
     def _detect_entities(
         self,
         text: str,
@@ -296,8 +312,12 @@ class PIIDetectionEngine(Engine):
         entity_types: list[str],
         confidence_threshold: float,
         speaker_turns: list,
+        language: str = "en",
     ) -> list[PIIEntity]:
         """Detect PII entities in text using Presidio and optionally GLiNER.
+
+        For languages not supported by Presidio (en, de, es, fr, it, pt, nl, he),
+        we skip Presidio and rely solely on GLiNER which is multilingual.
 
         Args:
             text: Full transcript text
@@ -305,6 +325,7 @@ class PIIDetectionEngine(Engine):
             entity_types: Entity types to detect
             confidence_threshold: Minimum confidence threshold
             speaker_turns: Speaker diarization turns for assignment
+            language: ISO 639-1 language code from transcription
 
         Returns:
             List of detected PIIEntity objects
@@ -313,6 +334,15 @@ class PIIDetectionEngine(Engine):
 
         # Build word-to-time mapping from segments
         word_times = self._build_word_time_map(segments)
+
+        # Check if Presidio supports this language
+        use_presidio = language in self.PRESIDIO_SUPPORTED_LANGUAGES
+        if not use_presidio:
+            self.logger.info(
+                "presidio_skipped_unsupported_language",
+                language=language,
+                supported=list(self.PRESIDIO_SUPPORTED_LANGUAGES),
+            )
 
         # Map entity types to Presidio entities
         presidio_entities = []
@@ -327,12 +357,12 @@ class PIIDetectionEngine(Engine):
             if dalston_type in entity_types:
                 presidio_entities.append(ce)
 
-        # Run Presidio analysis
-        if presidio_entities and self._analyzer:
+        # Run Presidio analysis only for supported languages
+        if presidio_entities and self._analyzer and use_presidio:
             results = self._analyzer.analyze(
                 text=text,
                 entities=presidio_entities,
-                language="en",
+                language=language,
             )
 
             for result in results:

@@ -5,7 +5,7 @@ from typing import Any
 
 import structlog
 
-from dalston.engine_sdk.types import TaskInput, TaskOutput
+from dalston.engine_sdk.types import EngineCapabilities, TaskInput, TaskOutput
 
 
 class Engine(ABC):
@@ -78,6 +78,22 @@ class Engine(ABC):
         return {
             "status": "healthy",
         }
+
+    def get_capabilities(self) -> EngineCapabilities:
+        """Return engine capabilities for registration and validation.
+
+        Override this method in engine subclasses to declare specific capabilities.
+        Capabilities are published in heartbeats and used by the orchestrator to
+        validate job requirements against running engines.
+
+        Returns:
+            EngineCapabilities describing what this engine can do
+        """
+        return EngineCapabilities(
+            engine_id=getattr(self, "engine_id", "unknown"),
+            version="unknown",
+            stages=[],
+        )
 
     def run(self) -> None:
         """Start the engine's processing loop.

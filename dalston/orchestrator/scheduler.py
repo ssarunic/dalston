@@ -4,6 +4,7 @@ Handles:
 - Writing task metadata to Redis for engine lookup
 - Writing task input.json to S3
 - Pushing task IDs to engine-specific Redis queues
+- Validating engine capabilities against job requirements (M29)
 """
 
 import json
@@ -20,7 +21,12 @@ from dalston.common.models import Task
 from dalston.common.pipeline_types import AudioMedia, TaskInputData
 from dalston.common.s3 import get_s3_client
 from dalston.config import Settings
-from dalston.orchestrator.exceptions import EngineUnavailableError
+from dalston.orchestrator.catalog import EngineCatalog, get_catalog
+from dalston.orchestrator.exceptions import (
+    CatalogValidationError,
+    EngineCapabilityError,
+    EngineUnavailableError,
+)
 from dalston.orchestrator.registry import BatchEngineRegistry
 
 logger = structlog.get_logger()
@@ -37,14 +43,17 @@ async def queue_task(
     registry: BatchEngineRegistry,
     previous_outputs: dict[str, Any] | None = None,
     audio_metadata: dict[str, Any] | None = None,
+    catalog: EngineCatalog | None = None,
 ) -> None:
     """Queue a task for execution by its engine.
 
     Steps:
-    1. Check engine availability (fail fast if unavailable)
-    2. Store task metadata in Redis hash (for engine lookup)
-    3. Write task input.json to S3
-    4. Push task_id to engine queue
+    1. Validate catalog (does any engine support this stage + requirements?)
+    2. Check engine availability (fail fast if engine not running)
+    3. Validate capabilities (does running engine support job requirements?)
+    4. Store task metadata in Redis hash (for engine lookup)
+    5. Write task input.json to S3
+    6. Push task_id to engine queue
 
     Args:
         redis: Async Redis client
@@ -53,14 +62,33 @@ async def queue_task(
         registry: Batch engine registry for availability checks
         previous_outputs: Outputs from dependency tasks (keyed by stage)
         audio_metadata: Audio file metadata (format, duration, sample_rate, channels)
+        catalog: Engine catalog for validation (uses singleton if not provided)
 
     Raises:
-        EngineUnavailableError: If the required engine is not available
+        CatalogValidationError: If no engine in catalog supports the requirements
+        EngineUnavailableError: If the required engine is not running
+        EngineCapabilityError: If running engine doesn't support job requirements
     """
     task_id_str = str(task.id)
     job_id_str = str(task.job_id)
 
-    # Check engine availability before queuing (fail fast)
+    # Get language from task config (if present)
+    language = task.config.get("language") if task.config else None
+
+    # 1. Catalog check - does any engine in catalog support this?
+    if catalog is None:
+        catalog = get_catalog()
+
+    if language and task.stage == "transcribe":
+        catalog_error = catalog.validate_language_support(task.stage, language)
+        if catalog_error:
+            raise CatalogValidationError(
+                catalog_error,
+                stage=task.stage,
+                language=language,
+            )
+
+    # 2. Registry check - is the engine currently running? (M28)
     if not await registry.is_engine_available(task.engine_id):
         raise EngineUnavailableError(
             f"Engine '{task.engine_id}' is not available. "
@@ -68,6 +96,19 @@ async def queue_task(
             engine_id=task.engine_id,
             stage=task.stage,
         )
+
+    # 3. Capabilities check - does running engine support job requirements? (M29)
+    if language and task.stage == "transcribe":
+        engine_state = await registry.get_engine(task.engine_id)
+        if engine_state and not engine_state.supports_language(language):
+            raise EngineCapabilityError(
+                f"Engine '{task.engine_id}' is running but does not support "
+                f"language '{language}'. Supported languages: "
+                f"{engine_state.capabilities.languages if engine_state.capabilities else 'unknown'}",
+                engine_id=task.engine_id,
+                stage=task.stage,
+                language=language,
+            )
 
     task_id_str = str(task.id)
     job_id_str = str(task.job_id)

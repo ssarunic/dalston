@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 import redis
 import structlog
 
+from dalston.engine_sdk.types import EngineCapabilities
+
 logger = structlog.get_logger()
 
 
@@ -28,11 +30,13 @@ class BatchEngineInfo:
         engine_id: Unique identifier for this engine (e.g., "faster-whisper")
         stage: Pipeline stage this engine handles (e.g., "transcribe")
         queue_name: Redis queue name this engine polls (e.g., "dalston:queue:faster-whisper")
+        capabilities: Engine capabilities for validation and routing
     """
 
     engine_id: str
     stage: str
     queue_name: str
+    capabilities: EngineCapabilities | None = None
 
 
 class BatchEngineRegistry:
@@ -89,7 +93,7 @@ class BatchEngineRegistry:
     def register(self, info: BatchEngineInfo) -> None:
         """Register engine with the registry.
 
-        Creates engine entry in Redis with initial state.
+        Creates engine entry in Redis with initial state including capabilities.
 
         Args:
             info: Engine registration information
@@ -98,19 +102,23 @@ class BatchEngineRegistry:
         engine_key = f"{ENGINE_KEY_PREFIX}{info.engine_id}"
         now = datetime.now(UTC).isoformat()
 
+        # Build mapping with required fields
+        mapping: dict[str, str] = {
+            "engine_id": info.engine_id,
+            "stage": info.stage,
+            "queue_name": info.queue_name,
+            "status": "idle",
+            "current_task": "",
+            "last_heartbeat": now,
+            "registered_at": now,
+        }
+
+        # Include capabilities if provided
+        if info.capabilities is not None:
+            mapping["capabilities"] = info.capabilities.model_dump_json()
+
         # Set engine state
-        r.hset(
-            engine_key,
-            mapping={
-                "engine_id": info.engine_id,
-                "stage": info.stage,
-                "queue_name": info.queue_name,
-                "status": "idle",
-                "current_task": "",
-                "last_heartbeat": now,
-                "registered_at": now,
-            },
-        )
+        r.hset(engine_key, mapping=mapping)
 
         # Set TTL on engine key
         r.expire(engine_key, self.HEARTBEAT_TTL)
@@ -123,6 +131,7 @@ class BatchEngineRegistry:
             engine_id=info.engine_id,
             stage=info.stage,
             queue_name=info.queue_name,
+            has_capabilities=info.capabilities is not None,
         )
 
     def heartbeat(
@@ -130,27 +139,32 @@ class BatchEngineRegistry:
         engine_id: str,
         status: str,
         current_task: str | None = None,
+        capabilities: EngineCapabilities | None = None,
     ) -> None:
         """Send heartbeat update.
 
-        Updates engine state and refreshes TTL.
+        Updates engine state and refreshes TTL. Optionally updates capabilities.
 
         Args:
             engine_id: Engine identifier
             status: Engine status ("idle" or "processing")
             current_task: Current task ID if processing, None if idle
+            capabilities: Engine capabilities (optional, included on first heartbeat)
         """
         r = self._get_redis()
         engine_key = f"{ENGINE_KEY_PREFIX}{engine_id}"
 
-        r.hset(
-            engine_key,
-            mapping={
-                "status": status,
-                "current_task": current_task or "",
-                "last_heartbeat": datetime.now(UTC).isoformat(),
-            },
-        )
+        mapping: dict[str, str] = {
+            "status": status,
+            "current_task": current_task or "",
+            "last_heartbeat": datetime.now(UTC).isoformat(),
+        }
+
+        # Include capabilities if provided
+        if capabilities is not None:
+            mapping["capabilities"] = capabilities.model_dump_json()
+
+        r.hset(engine_key, mapping=mapping)
 
         # Refresh TTL
         r.expire(engine_key, self.HEARTBEAT_TTL)

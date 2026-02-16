@@ -146,13 +146,15 @@ class EngineRunner:
         # Start metrics HTTP server in background thread (M20)
         self._start_metrics_server()
 
-        # Initialize registry and register engine
+        # Initialize registry and register engine with capabilities
         self._registry = BatchEngineRegistry(self.redis_url)
+        capabilities = self.engine.get_capabilities()
         self._registry.register(
             BatchEngineInfo(
                 engine_id=self.engine_id,
                 stage=getattr(self.engine, "stage", "unknown"),
                 queue_name=self.queue_key,
+                capabilities=capabilities,
             )
         )
 

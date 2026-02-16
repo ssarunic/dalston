@@ -32,7 +32,11 @@ from dalston.gateway.services.rate_limiter import (
     KEY_PREFIX_JOBS,
 )
 from dalston.orchestrator.dag import build_task_dag
-from dalston.orchestrator.exceptions import EngineUnavailableError
+from dalston.orchestrator.exceptions import (
+    CatalogValidationError,
+    EngineCapabilityError,
+    EngineUnavailableError,
+)
 from dalston.orchestrator.registry import BatchEngineRegistry
 from dalston.orchestrator.scheduler import (
     get_task_output,
@@ -179,8 +183,12 @@ async def handle_job_created(
                     previous_outputs={},
                     audio_metadata=audio_metadata if task.stage == "prepare" else None,
                 )
-            except EngineUnavailableError as e:
-                # Fail the job immediately if engine is unavailable
+            except (
+                EngineUnavailableError,
+                EngineCapabilityError,
+                CatalogValidationError,
+            ) as e:
+                # Fail the job immediately if engine is unavailable or incapable
                 job.status = JobStatus.FAILED.value
                 job.error = str(e)
                 job.completed_at = datetime.now(UTC)
@@ -188,9 +196,10 @@ async def handle_job_created(
                 await _decrement_concurrent_jobs(redis, job.tenant_id)
                 await publish_job_failed(redis, job_id, str(e))
                 log.error(
-                    "job_failed_engine_unavailable",
-                    engine_id=e.engine_id,
-                    stage=e.stage,
+                    "job_failed_engine_error",
+                    error_type=type(e).__name__,
+                    engine_id=getattr(e, "engine_id", None),
+                    stage=getattr(e, "stage", None),
                 )
                 return
 
@@ -361,8 +370,12 @@ async def handle_task_completed(
                     registry=registry,
                     previous_outputs=previous_outputs,
                 )
-            except EngineUnavailableError as e:
-                # Fail the job immediately if engine is unavailable
+            except (
+                EngineUnavailableError,
+                EngineCapabilityError,
+                CatalogValidationError,
+            ) as e:
+                # Fail the job immediately if engine is unavailable or incapable
                 job = await db.get(JobModel, job_id)
                 if job:
                     job.status = JobStatus.FAILED.value
@@ -372,9 +385,10 @@ async def handle_task_completed(
                     await _decrement_concurrent_jobs(redis, job.tenant_id)
                     await publish_job_failed(redis, job_id, str(e))
                 log.error(
-                    "job_failed_engine_unavailable",
-                    engine_id=e.engine_id,
-                    stage=e.stage,
+                    "job_failed_engine_error",
+                    error_type=type(e).__name__,
+                    engine_id=getattr(e, "engine_id", None),
+                    stage=getattr(e, "stage", None),
                 )
                 return
 
@@ -464,8 +478,12 @@ async def handle_task_failed(
                 registry=registry,
                 previous_outputs=previous_outputs,
             )
-        except EngineUnavailableError as e:
-            # Engine became unavailable during retry - fail the job
+        except (
+            EngineUnavailableError,
+            EngineCapabilityError,
+            CatalogValidationError,
+        ) as e:
+            # Engine became unavailable or incapable during retry - fail the job
             task.status = TaskStatus.FAILED.value
             task.error = str(e)
             await db.commit()
@@ -478,9 +496,10 @@ async def handle_task_failed(
                 await _decrement_concurrent_jobs(redis, job.tenant_id)
                 await publish_job_failed(redis, job_id, str(e))
             log.error(
-                "job_failed_engine_unavailable_on_retry",
-                engine_id=e.engine_id,
-                stage=e.stage,
+                "job_failed_engine_error_on_retry",
+                error_type=type(e).__name__,
+                engine_id=getattr(e, "engine_id", None),
+                stage=getattr(e, "stage", None),
             )
             return
 

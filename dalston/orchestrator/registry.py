@@ -11,6 +11,8 @@ from datetime import UTC, datetime
 import redis.asyncio as redis
 import structlog
 
+from dalston.engine_sdk.types import EngineCapabilities
+
 logger = structlog.get_logger()
 
 
@@ -34,6 +36,7 @@ class BatchEngineState:
         current_task: Task ID currently being processed, or None
         last_heartbeat: Last heartbeat timestamp
         registered_at: Engine registration timestamp
+        capabilities: Engine capabilities for validation (M29)
     """
 
     engine_id: str
@@ -43,6 +46,7 @@ class BatchEngineState:
     current_task: str | None
     last_heartbeat: datetime
     registered_at: datetime
+    capabilities: EngineCapabilities | None = None
 
     @property
     def is_available(self) -> bool:
@@ -56,6 +60,23 @@ class BatchEngineState:
             return False
         age = (datetime.now(UTC) - self.last_heartbeat).total_seconds()
         return age < HEARTBEAT_TIMEOUT_SECONDS
+
+    def supports_language(self, language: str) -> bool:
+        """Check if engine supports a specific language.
+
+        Args:
+            language: ISO 639-1 language code (e.g., "en", "hr")
+
+        Returns:
+            True if supported (or capabilities not declared, for backward compat)
+        """
+        if self.capabilities is None:
+            return True  # Backward compatibility with M28 engines
+        if self.capabilities.languages is None:
+            return True  # None means all languages
+        return language.lower() in [
+            lang.lower() for lang in self.capabilities.languages
+        ]
 
 
 class BatchEngineRegistry:
@@ -160,6 +181,22 @@ class BatchEngineRegistry:
     def _parse_engine_state(self, engine_id: str, data: dict) -> BatchEngineState:
         """Parse engine state from Redis hash data."""
         current_task = data.get("current_task", "")
+
+        # Parse capabilities JSON if present
+        capabilities = None
+        capabilities_json = data.get("capabilities")
+        if capabilities_json:
+            try:
+                capabilities = EngineCapabilities.model_validate_json(capabilities_json)
+            except Exception:
+                logger.warning(
+                    "failed_to_parse_capabilities",
+                    engine_id=engine_id,
+                    capabilities_json=capabilities_json[:100]
+                    if capabilities_json
+                    else None,
+                )
+
         return BatchEngineState(
             engine_id=engine_id,
             stage=data.get("stage", "unknown"),
@@ -168,6 +205,7 @@ class BatchEngineRegistry:
             current_task=current_task if current_task else None,
             last_heartbeat=self._parse_datetime(data.get("last_heartbeat")),
             registered_at=self._parse_datetime(data.get("registered_at")),
+            capabilities=capabilities,
         )
 
     def _parse_datetime(self, value: str | None) -> datetime:

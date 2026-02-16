@@ -68,11 +68,12 @@ from dalston.common.pipeline_types import (
 )
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.runner import EngineRunner
-from dalston.engine_sdk.types import TaskInput, TaskOutput
+from dalston.engine_sdk.types import EngineCapabilities, TaskInput, TaskOutput
 
 __all__ = [
     # Core SDK
     "Engine",
+    "EngineCapabilities",
     "EngineRunner",
     "TaskInput",
     "TaskOutput",

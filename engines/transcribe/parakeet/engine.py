@@ -18,6 +18,7 @@ import torch
 from dalston.engine_sdk import (
     AlignmentMethod,
     Engine,
+    EngineCapabilities,
     Segment,
     TaskInput,
     TaskOutput,
@@ -334,6 +335,28 @@ class ParakeetEngine(Engine):
             "cuda_memory_allocated_gb": round(cuda_memory_allocated, 2),
             "cuda_memory_total_gb": round(cuda_memory_total, 2),
         }
+
+    def get_capabilities(self) -> EngineCapabilities:
+        """Return Parakeet engine capabilities.
+
+        Parakeet is an English-only transcription engine with native
+        word-level timestamps via RNNT/TDT alignment.
+        """
+        return EngineCapabilities(
+            engine_id="parakeet",
+            version="1.0.0",
+            stages=["transcribe"],
+            languages=["en"],  # English only
+            supports_word_timestamps=True,
+            supports_streaming=False,
+            model_variants=[
+                "nvidia/parakeet-tdt_ctc-110m",
+                "nvidia/parakeet-rnnt-0.6b",
+                "nvidia/parakeet-rnnt-1.1b",
+            ],
+            gpu_required=True,
+            gpu_vram_mb=4000,
+        )
 
 
 if __name__ == "__main__":

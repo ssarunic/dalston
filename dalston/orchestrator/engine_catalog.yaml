@@ -1,0 +1,125 @@
+# Engine Catalog - M29: Engine Catalog & Capabilities
+#
+# This file declares all engines that could be started in the system.
+# The orchestrator loads this at startup to:
+# - Validate job requirements before any engine runs
+# - Enable future auto-scaling by knowing which images to boot
+#
+# Note: This is the static "menu" of deployable engines. The registry
+# (Redis heartbeats) tracks what's actually running.
+
+engines:
+  # === PREPARE STAGE ===
+  audio-prepare:
+    image: dalston/audio-prepare:latest
+    stages:
+      - prepare
+    languages: null  # all languages
+    supports_word_timestamps: false
+    supports_streaming: false
+    gpu_required: false
+
+  # === TRANSCRIBE STAGE ===
+  parakeet:
+    image: dalston/parakeet:latest
+    stages:
+      - transcribe
+    languages:
+      - en  # English only
+    supports_word_timestamps: true
+    supports_streaming: false
+    model_variants:
+      - nvidia/parakeet-tdt_ctc-110m
+      - nvidia/parakeet-rnnt-0.6b
+      - nvidia/parakeet-rnnt-1.1b
+    gpu_required: true
+    gpu_vram_mb: 4000
+
+  faster-whisper:
+    image: dalston/faster-whisper:latest
+    stages:
+      - transcribe
+    languages: null  # all languages (99+)
+    supports_word_timestamps: false
+    supports_streaming: false
+    model_variants:
+      - large-v3
+      - large-v3-turbo
+      - medium
+      - small
+      - base
+      - tiny
+    gpu_required: true
+    gpu_vram_mb: 5000
+
+  whisper-cpu:
+    image: dalston/whisper-cpu:latest
+    stages:
+      - transcribe
+    languages: null  # all languages
+    supports_word_timestamps: false
+    supports_streaming: false
+    model_variants:
+      - tiny
+      - base
+      - small
+    gpu_required: false
+
+  # === ALIGN STAGE ===
+  whisperx-align:
+    image: dalston/whisperx-align:latest
+    stages:
+      - align
+    languages: null  # all languages supported by whisperX
+    supports_word_timestamps: true
+    supports_streaming: false
+    gpu_required: true
+    gpu_vram_mb: 2000
+
+  # === DIARIZE STAGE ===
+  pyannote-3.1:
+    image: dalston/pyannote:latest
+    stages:
+      - diarize
+    languages: null  # language-agnostic
+    supports_word_timestamps: false
+    supports_streaming: false
+    gpu_required: true
+    gpu_vram_mb: 1500
+
+  # === PII DETECTION STAGE ===
+  pii-detect:
+    image: dalston/pii-detect:latest
+    stages:
+      - pii_detect
+    languages:
+      - en
+      - es
+      - de
+      - fr
+      - it
+      - pt
+      - nl
+    supports_word_timestamps: false
+    supports_streaming: false
+    gpu_required: false
+
+  # === AUDIO REDACTION STAGE ===
+  audio-redact:
+    image: dalston/audio-redact:latest
+    stages:
+      - audio_redact
+    languages: null  # language-agnostic
+    supports_word_timestamps: false
+    supports_streaming: false
+    gpu_required: false
+
+  # === MERGE STAGE ===
+  final-merger:
+    image: dalston/final-merger:latest
+    stages:
+      - merge
+    languages: null  # all languages
+    supports_word_timestamps: false
+    supports_streaming: false
+    gpu_required: false
