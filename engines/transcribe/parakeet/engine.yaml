@@ -1,3 +1,4 @@
+schema_version: "1.1"
 id: parakeet
 stage: transcribe
 name: NVIDIA Parakeet
@@ -86,3 +87,22 @@ output_schema:
     language_confidence:
       type: number
       description: Confidence in language (always 1.0 for Parakeet)
+
+hf_compat:
+  pipeline_tag: automatic-speech-recognition
+  library_name: nemo
+  license: apache-2.0
+
+hardware:
+  min_vram_gb: 4
+  recommended_gpu:
+    - t4
+    - a10g
+  supports_cpu: false
+  min_ram_gb: 8
+
+performance:
+  rtf_gpu: 0.0005
+  rtf_cpu: null
+  max_concurrent_jobs: 4
+  warm_start_latency_ms: 100

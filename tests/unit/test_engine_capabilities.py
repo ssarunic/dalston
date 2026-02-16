@@ -299,52 +299,83 @@ class TestEngineCatalog:
     """Tests for engine catalog loading and validation."""
 
     @pytest.fixture
-    def catalog_yaml(self):
-        """Create a test catalog YAML file."""
-        content = """
-engines:
-  parakeet:
-    image: dalston/parakeet:latest
-    stages:
-      - transcribe
-    languages:
-      - en
-    supports_word_timestamps: true
-    gpu_required: true
-    gpu_vram_mb: 4000
-
-  faster-whisper:
-    image: dalston/faster-whisper:latest
-    stages:
-      - transcribe
-    languages: null
-    supports_word_timestamps: false
-    gpu_required: true
-    gpu_vram_mb: 5000
-
-  audio-prepare:
-    image: dalston/audio-prepare:latest
-    stages:
-      - prepare
-    languages: null
-    gpu_required: false
-"""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            f.write(content)
+    def catalog_json(self):
+        """Create a test catalog JSON file (M30 format)."""
+        content = {
+            "generated_at": "2026-02-16T10:00:00Z",
+            "schema_version": "1.1",
+            "engines": {
+                "parakeet": {
+                    "id": "parakeet",
+                    "stage": "transcribe",
+                    "version": "1.0.0",
+                    "image": "dalston/parakeet:latest",
+                    "capabilities": {
+                        "stages": ["transcribe"],
+                        "languages": ["en"],
+                        "supports_word_timestamps": True,
+                        "supports_streaming": False,
+                    },
+                    "hardware": {
+                        "gpu_required": True,
+                        "min_vram_gb": 4,
+                        "supports_cpu": False,
+                    },
+                    "performance": {},
+                },
+                "faster-whisper": {
+                    "id": "faster-whisper",
+                    "stage": "transcribe",
+                    "version": "1.0.0",
+                    "image": "dalston/faster-whisper:latest",
+                    "capabilities": {
+                        "stages": ["transcribe"],
+                        "languages": None,
+                        "supports_word_timestamps": False,
+                        "supports_streaming": False,
+                    },
+                    "hardware": {
+                        "gpu_required": True,
+                        "min_vram_gb": 5,
+                        "supports_cpu": True,
+                    },
+                    "performance": {},
+                },
+                "audio-prepare": {
+                    "id": "audio-prepare",
+                    "stage": "prepare",
+                    "version": "1.0.0",
+                    "image": "dalston/audio-prepare:latest",
+                    "capabilities": {
+                        "stages": ["prepare"],
+                        "languages": None,
+                        "supports_word_timestamps": False,
+                        "supports_streaming": False,
+                    },
+                    "hardware": {
+                        "gpu_required": False,
+                        "supports_cpu": True,
+                    },
+                    "performance": {},
+                },
+            },
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(content, f)
             return Path(f.name)
 
-    def test_load_catalog(self, catalog_yaml):
-        """Test loading catalog from YAML."""
-        catalog = EngineCatalog.load(catalog_yaml)
+    def test_load_catalog(self, catalog_json):
+        """Test loading catalog from JSON."""
+        catalog = EngineCatalog.load(catalog_json)
 
         assert len(catalog) == 3
         assert "parakeet" in catalog
         assert "faster-whisper" in catalog
         assert "audio-prepare" in catalog
 
-    def test_get_engine(self, catalog_yaml):
+    def test_get_engine(self, catalog_json):
         """Test getting a specific engine."""
-        catalog = EngineCatalog.load(catalog_yaml)
+        catalog = EngineCatalog.load(catalog_json)
 
         entry = catalog.get_engine("parakeet")
 
@@ -354,17 +385,17 @@ engines:
         assert entry.capabilities.languages == ["en"]
         assert entry.capabilities.supports_word_timestamps is True
 
-    def test_get_engine_not_found(self, catalog_yaml):
+    def test_get_engine_not_found(self, catalog_json):
         """Test getting non-existent engine."""
-        catalog = EngineCatalog.load(catalog_yaml)
+        catalog = EngineCatalog.load(catalog_json)
 
         entry = catalog.get_engine("nonexistent")
 
         assert entry is None
 
-    def test_get_engines_for_stage(self, catalog_yaml):
+    def test_get_engines_for_stage(self, catalog_json):
         """Test getting engines by stage."""
-        catalog = EngineCatalog.load(catalog_yaml)
+        catalog = EngineCatalog.load(catalog_json)
 
         transcribers = catalog.get_engines_for_stage("transcribe")
 
@@ -372,9 +403,9 @@ engines:
         engine_ids = {e.engine_id for e in transcribers}
         assert engine_ids == {"parakeet", "faster-whisper"}
 
-    def test_find_engines_supporting_language(self, catalog_yaml):
+    def test_find_engines_supporting_language(self, catalog_json):
         """Test finding engines that support a language."""
-        catalog = EngineCatalog.load(catalog_yaml)
+        catalog = EngineCatalog.load(catalog_json)
 
         # English - both parakeet (explicitly) and faster-whisper (null=all)
         en_engines = catalog.find_engines_supporting_language("transcribe", "en")
@@ -385,25 +416,25 @@ engines:
         assert len(hr_engines) == 1
         assert hr_engines[0].engine_id == "faster-whisper"
 
-    def test_validate_language_support_ok(self, catalog_yaml):
+    def test_validate_language_support_ok(self, catalog_json):
         """Test validation passes for supported language."""
-        catalog = EngineCatalog.load(catalog_yaml)
+        catalog = EngineCatalog.load(catalog_json)
 
         error = catalog.validate_language_support("transcribe", "en")
 
         assert error is None
 
-    def test_validate_language_support_fail(self, catalog_yaml):
+    def test_validate_language_support_fail(self, catalog_json):
         """Test validation fails for language only supported by whisper."""
-        catalog = EngineCatalog.load(catalog_yaml)
+        catalog = EngineCatalog.load(catalog_json)
 
         # Croatian is supported by faster-whisper (null=all), so no error
         error = catalog.validate_language_support("transcribe", "hr")
         assert error is None
 
-    def test_validate_language_support_no_stage(self, catalog_yaml):
+    def test_validate_language_support_no_stage(self, catalog_json):
         """Test validation fails for unsupported stage."""
-        catalog = EngineCatalog.load(catalog_yaml)
+        catalog = EngineCatalog.load(catalog_json)
 
         error = catalog.validate_language_support("diarize", "en")
 

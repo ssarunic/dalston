@@ -1,3 +1,4 @@
+schema_version: "1.1"
 id: pii-presidio
 stage: detect
 name: PII Detection (Presidio + GLiNER)
@@ -84,3 +85,19 @@ output_schema:
     processing_time_ms:
       type: integer
       description: Processing time in milliseconds
+
+hf_compat:
+  pipeline_tag: dalston:pii-redaction
+  library_name: presidio
+  license: mit
+
+hardware:
+  min_vram_gb: 0
+  supports_cpu: true
+  min_ram_gb: 4
+
+performance:
+  rtf_gpu: 0.01
+  rtf_cpu: 0.05
+  max_concurrent_jobs: 8
+  warm_start_latency_ms: 100

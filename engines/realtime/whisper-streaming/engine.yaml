@@ -1,3 +1,4 @@
+schema_version: "1.1"
 id: whisper-streaming
 type: realtime
 name: Whisper Streaming
@@ -76,3 +77,22 @@ environment:
   ACCURATE_MODEL:
     description: Model for "accurate" variant
     default: large-v3
+
+hf_compat:
+  pipeline_tag: automatic-speech-recognition
+  library_name: ctranslate2
+  license: mit
+
+hardware:
+  min_vram_gb: 6
+  recommended_gpu:
+    - t4
+    - a10g
+  supports_cpu: true
+  min_ram_gb: 12
+
+performance:
+  rtf_gpu: 0.1
+  rtf_cpu: 0.5
+  max_concurrent_jobs: 4
+  warm_start_latency_ms: 200

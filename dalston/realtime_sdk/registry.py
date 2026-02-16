@@ -90,6 +90,8 @@ class WorkerRegistry:
         """
         self._redis_url = redis_url
         self._redis: redis.Redis | None = None
+        # Store registration info for re-registration if key is deleted
+        self._registered_workers: dict[str, WorkerInfo] = {}
 
     async def _get_redis(self) -> redis.Redis:
         """Get or create Redis connection."""
@@ -133,6 +135,9 @@ class WorkerRegistry:
         # Add to worker set
         await r.sadd(WORKER_SET_KEY, info.worker_id)
 
+        # Store registration info for re-registration if key is deleted
+        self._registered_workers[info.worker_id] = info
+
         # Publish registration event
         await r.publish(
             EVENTS_CHANNEL,
@@ -160,7 +165,9 @@ class WorkerRegistry:
     ) -> None:
         """Send heartbeat update.
 
-        Updates worker state and last_heartbeat timestamp.
+        Updates worker state and last_heartbeat timestamp. If the Redis key
+        was deleted (e.g., Redis restart, manual deletion), re-populates all
+        registration fields from stored info.
 
         Args:
             worker_id: Worker identifier
@@ -170,16 +177,52 @@ class WorkerRegistry:
         """
         r = await self._get_redis()
         worker_key = f"{WORKER_KEY_PREFIX}{worker_id}"
+        now = datetime.now(UTC).isoformat()
 
-        await r.hset(
-            worker_key,
-            mapping={
-                "status": status,
-                "active_sessions": str(active_sessions),
-                "gpu_memory_used": gpu_memory_used,
-                "last_heartbeat": datetime.now(UTC).isoformat(),
-            },
-        )
+        # Check if key is missing or incomplete
+        existing_data = await r.hget(worker_key, "endpoint")
+        needs_reregistration = existing_data is None
+
+        if needs_reregistration and worker_id in self._registered_workers:
+            # Re-populate all registration fields
+            info = self._registered_workers[worker_id]
+            await r.hset(
+                worker_key,
+                mapping={
+                    "endpoint": info.endpoint,
+                    "status": status,
+                    "capacity": str(info.capacity),
+                    "active_sessions": str(active_sessions),
+                    "gpu_memory_used": gpu_memory_used,
+                    "gpu_memory_total": "0GB",
+                    "models_loaded": json.dumps(info.models),
+                    "languages_supported": json.dumps(info.languages),
+                    "engine": info.engine,
+                    "last_heartbeat": now,
+                    "started_at": now,
+                },
+            )
+
+            # Re-add to worker set (idempotent)
+            await r.sadd(WORKER_SET_KEY, worker_id)
+
+            logger.info(
+                "worker_reregistered",
+                worker_id=worker_id,
+                endpoint=info.endpoint,
+                reason="key_missing",
+            )
+        else:
+            # Normal heartbeat - just update dynamic fields
+            await r.hset(
+                worker_key,
+                mapping={
+                    "status": status,
+                    "active_sessions": str(active_sessions),
+                    "gpu_memory_used": gpu_memory_used,
+                    "last_heartbeat": now,
+                },
+            )
 
         logger.debug("heartbeat", worker_id=worker_id, active_sessions=active_sessions)
 
@@ -265,6 +308,9 @@ class WorkerRegistry:
 
         # Delete sessions set
         await r.delete(sessions_key)
+
+        # Remove from local cache
+        self._registered_workers.pop(worker_id, None)
 
         # Publish unregistration event
         await r.publish(

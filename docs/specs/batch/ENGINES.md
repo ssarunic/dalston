@@ -90,11 +90,13 @@ Integrated engines covering multiple stages.
 
 ## Engine Metadata Format
 
-Each engine has an `engine.yaml` file describing its capabilities:
+Each engine has an `engine.yaml` file (schema version 1.1) describing its capabilities. This file is the single source of truth for engine metadata.
 
 ```yaml
-id: faster-whisper
-stage: transcribe                    # Or stages: [transcribe, align, diarize] for multi-stage
+# === REQUIRED FIELDS ===
+schema_version: "1.1"                # Schema version for validation
+id: faster-whisper                   # Unique engine identifier
+stage: transcribe                    # Pipeline stage (or type: realtime)
 name: Faster Whisper
 version: 1.2.0
 description: |
@@ -113,6 +115,7 @@ capabilities:
   streaming: false                   # Supports streaming?
   word_timestamps: true              # Can output word-level timing?
 
+# === OPTIONAL FIELDS ===
 input:
   audio_formats: [wav]               # Expected input format
   sample_rate: 16000                 # Expected sample rate
@@ -128,14 +131,6 @@ config_schema:
     language:
       type: string
       default: auto
-    beam_size:
-      type: integer
-      default: 5
-      minimum: 1
-      maximum: 10
-    vad_filter:
-      type: boolean
-      default: true
 
 output_schema:
   type: object
@@ -145,15 +140,91 @@ output_schema:
       type: string
     segments:
       type: array
-      items:
-        type: object
-        properties:
-          start: { type: number }
-          end: { type: number }
-          text: { type: string }
-          words: { type: array }
     language:
       type: string
+
+# === NEW IN SCHEMA 1.1 ===
+
+# HuggingFace ecosystem compatibility
+hf_compat:
+  pipeline_tag: automatic-speech-recognition  # HF task taxonomy
+  library_name: ctranslate2                   # Underlying ML framework
+  license: mit                                # SPDX license identifier
+
+# Hardware requirements
+hardware:
+  min_vram_gb: 4                     # Minimum GPU VRAM in GB
+  recommended_gpu:                   # Recommended GPU types
+    - t4
+    - a10g
+  supports_cpu: true                 # Whether CPU inference works
+  min_ram_gb: 8                      # Minimum system RAM in GB
+
+# Performance characteristics
+performance:
+  rtf_gpu: 0.05                      # Real-time factor on GPU (0.05 = 20x faster)
+  rtf_cpu: 0.8                       # Real-time factor on CPU
+  max_concurrent_jobs: 4             # Concurrent job limit
+  warm_start_latency_ms: 50          # Latency after model loaded
+```
+
+### Schema 1.1 New Sections
+
+#### hf_compat (optional)
+
+HuggingFace ecosystem compatibility metadata.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `pipeline_tag` | string | HF task taxonomy or Dalston extension |
+| `library_name` | string | Underlying ML framework |
+| `license` | string | SPDX license identifier |
+
+**Valid pipeline_tag values:**
+
+- HF standard: `automatic-speech-recognition`, `speaker-diarization`, `voice-activity-detection`, `audio-classification`
+- Dalston extensions: `dalston:audio-preparation`, `dalston:merge`, `dalston:pii-redaction`, `dalston:audio-redaction`
+
+#### hardware (optional)
+
+Hardware requirements for deployment planning and auto-scaling.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `min_vram_gb` | int | Minimum GPU VRAM in GB |
+| `recommended_gpu` | list | GPU types: `a10g`, `t4`, `l4`, `a100`, `h100` |
+| `supports_cpu` | bool | Whether CPU inference works |
+| `min_ram_gb` | int | Minimum system RAM in GB |
+
+#### performance (optional)
+
+Performance characteristics for timeout calculation and capacity planning.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `rtf_gpu` | float | Real-time factor on GPU (0.05 = 20x faster than real-time) |
+| `rtf_cpu` | float | Real-time factor on CPU, null if unsupported |
+| `max_concurrent_jobs` | int | Concurrent job limit |
+| `warm_start_latency_ms` | int | Latency after model loaded |
+
+### Validation
+
+All engine.yaml files are validated against the JSON Schema at `dalston/schemas/engine.schema.json`:
+
+```bash
+# Validate single file
+python -m dalston.tools.validate_engine engines/transcribe/faster-whisper/engine.yaml
+
+# Validate all engines
+python -m dalston.tools.validate_engine --all
+```
+
+### Catalog Generation
+
+The engine catalog is generated from engine.yaml files at build time:
+
+```bash
+python scripts/generate_catalog.py --engines-dir engines/ --output dalston/orchestrator/generated_catalog.json
 ```
 
 ---
@@ -277,6 +348,39 @@ class Engine:
 
 ## Creating a New Engine
 
+### Quick Start with Scaffold Command
+
+The easiest way to create a new engine is using the scaffold command:
+
+```bash
+# Scaffold a new transcription engine
+python -m dalston.tools.scaffold_engine my-transcriber --stage transcribe --no-dry-run
+
+# Scaffold a diarization engine with GPU required
+python -m dalston.tools.scaffold_engine my-diarizer --stage diarize --gpu required --no-dry-run
+
+# Scaffold a CPU-only merge engine
+python -m dalston.tools.scaffold_engine my-merger --stage merge --gpu none --no-dry-run
+
+# List all valid stages
+python -m dalston.tools.scaffold_engine --list-stages
+```
+
+This creates a complete engine skeleton:
+
+```
+engines/{stage}/{engine-id}/
+├── engine.yaml          # Full schema 1.1 metadata
+├── engine.py            # Engine implementation template
+├── Dockerfile           # Container build file
+├── requirements.txt     # Python dependencies
+└── README.md            # Engine documentation
+```
+
+### Manual Setup
+
+Alternatively, create the structure manually:
+
 ### 1. Create Directory Structure
 
 ```
@@ -291,7 +395,7 @@ engines/
 
 ### 2. Write engine.yaml
 
-Define metadata, capabilities, and configuration schema.
+Define metadata, capabilities, and configuration schema (see Engine Metadata Format above).
 
 ### 3. Implement engine.py
 

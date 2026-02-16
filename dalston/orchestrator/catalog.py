@@ -1,28 +1,32 @@
 """Engine catalog loader and validator.
 
-The catalog is a static configuration file declaring all engines that could
-be started in the system. It enables:
+The catalog is a JSON file declaring all engines that could be started in the
+system. It enables:
 - Validation: Check job requirements before engines are running
 - Auto-scaling (future): Know which images to boot for pending jobs
 
 The catalog answers "what could I start?" while the registry (Redis heartbeats)
 answers "what's running?"
+
+M30: Catalog is generated from engine.yaml files at build time using
+'python scripts/generate_catalog.py'. Each engine's metadata lives in its
+engine.yaml file (single source of truth).
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
 import structlog
-import yaml
 
 from dalston.engine_sdk.types import EngineCapabilities
 
 logger = structlog.get_logger()
 
 # Default catalog path (relative to this module)
-DEFAULT_CATALOG_PATH = Path(__file__).parent / "engine_catalog.yaml"
+DEFAULT_CATALOG_PATH = Path(__file__).parent / "generated_catalog.json"
 
 
 @dataclass
@@ -40,7 +44,7 @@ class CatalogEntry:
 class EngineCatalog:
     """Static catalog of deployable engines.
 
-    Loaded from YAML at orchestrator startup. Used for early validation
+    Loaded from JSON at orchestrator startup. Used for early validation
     of job requirements before checking if engines are actually running.
 
     Example:
@@ -64,17 +68,18 @@ class EngineCatalog:
 
     @classmethod
     def load(cls, path: Path | str | None = None) -> EngineCatalog:
-        """Load catalog from YAML file.
+        """Load catalog from JSON file.
 
         Args:
-            path: Path to catalog YAML. Defaults to engine_catalog.yaml in this directory.
+            path: Path to catalog file. Defaults to generated_catalog.json.
 
         Returns:
             EngineCatalog instance
 
         Raises:
-            FileNotFoundError: If catalog file doesn't exist
-            yaml.YAMLError: If catalog file is invalid YAML
+            FileNotFoundError: If catalog file doesn't exist. Run
+                'python scripts/generate_catalog.py' to generate it.
+            json.JSONDecodeError: If JSON catalog file is invalid
         """
         if path is None:
             path = DEFAULT_CATALOG_PATH
@@ -82,25 +87,44 @@ class EngineCatalog:
 
         logger.info("loading_engine_catalog", path=str(path))
 
-        with open(path) as f:
-            data = yaml.safe_load(f)
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                f"Engine catalog not found at {path}. "
+                "Run 'python scripts/generate_catalog.py' to generate it from engine.yaml files."
+            ) from None
 
         entries: dict[str, CatalogEntry] = {}
         engines_data = data.get("engines", {})
 
         for engine_id, engine_data in engines_data.items():
+            caps_data = engine_data.get("capabilities", {})
+            hw_data = engine_data.get("hardware", {})
+            perf_data = engine_data.get("performance", {})
+
             capabilities = EngineCapabilities(
                 engine_id=engine_id,
-                version="catalog",  # Catalog doesn't track versions
-                stages=engine_data.get("stages", []),
-                languages=engine_data.get("languages"),
-                supports_word_timestamps=engine_data.get(
+                version=engine_data.get("version", "unknown"),
+                stages=caps_data.get("stages", []),
+                languages=caps_data.get("languages"),
+                supports_word_timestamps=caps_data.get(
                     "supports_word_timestamps", False
                 ),
-                supports_streaming=engine_data.get("supports_streaming", False),
-                model_variants=engine_data.get("model_variants"),
-                gpu_required=engine_data.get("gpu_required", False),
-                gpu_vram_mb=engine_data.get("gpu_vram_mb"),
+                supports_streaming=caps_data.get("supports_streaming", False),
+                model_variants=None,
+                gpu_required=hw_data.get("gpu_required", False),
+                gpu_vram_mb=(
+                    hw_data.get("min_vram_gb", 0) * 1024
+                    if hw_data.get("min_vram_gb")
+                    else None
+                ),
+                supports_cpu=hw_data.get("supports_cpu", True),
+                min_ram_gb=hw_data.get("min_ram_gb"),
+                rtf_gpu=perf_data.get("rtf_gpu"),
+                rtf_cpu=perf_data.get("rtf_cpu"),
+                max_concurrent_jobs=perf_data.get("max_concurrent_jobs"),
             )
 
             entries[engine_id] = CatalogEntry(

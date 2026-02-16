@@ -37,6 +37,11 @@ class EngineCapabilities(BaseModel):
         model_variants: Available model variants (e.g., ["large-v3", "medium"])
         gpu_required: Whether GPU is required for this engine
         gpu_vram_mb: Estimated VRAM usage in MB
+        supports_cpu: Whether CPU inference is supported (M30)
+        min_ram_gb: Minimum system RAM in GB (M30)
+        rtf_gpu: Real-time factor on GPU (M30)
+        rtf_cpu: Real-time factor on CPU (M30)
+        max_concurrent_jobs: Maximum concurrent job limit (M30)
     """
 
     engine_id: str
@@ -48,6 +53,12 @@ class EngineCapabilities(BaseModel):
     model_variants: list[str] | None = None
     gpu_required: bool = False
     gpu_vram_mb: int | None = None
+    # M30: New fields for hardware and performance metadata
+    supports_cpu: bool = True
+    min_ram_gb: int | None = None
+    rtf_gpu: float | None = None
+    rtf_cpu: float | None = None
+    max_concurrent_jobs: int | None = None
 
 
 @dataclass

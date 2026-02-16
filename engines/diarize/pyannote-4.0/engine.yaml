@@ -1,3 +1,4 @@
+schema_version: "1.1"
 id: pyannote-4.0
 stage: diarize
 name: Pyannote Speaker Diarization 4.0
@@ -108,3 +109,21 @@ output_schema:
       items:
         type: string
       description: Any processing warnings
+
+hf_compat:
+  pipeline_tag: speaker-diarization
+  library_name: pyannote
+  license: mit
+
+hardware:
+  min_vram_gb: 2
+  recommended_gpu:
+    - t4
+  supports_cpu: true
+  min_ram_gb: 6
+
+performance:
+  rtf_gpu: 0.08
+  rtf_cpu: 1.2
+  max_concurrent_jobs: 4
+  warm_start_latency_ms: 500

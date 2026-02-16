@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from dalston.gateway.api.v1 import (
     audit,
+    engines,
     jobs,
     models,
     pii,
@@ -21,6 +22,9 @@ router = APIRouter(prefix="/v1")
 
 # Mount model discovery routes
 router.include_router(models.router)
+
+# Mount engine discovery routes (M30)
+router.include_router(engines.router)
 
 # Mount transcription routes (Dalston native API)
 router.include_router(transcription.router)

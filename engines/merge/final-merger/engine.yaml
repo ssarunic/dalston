@@ -1,3 +1,4 @@
+schema_version: "1.1"
 id: final-merger
 stage: merge
 name: Final Merger
@@ -123,3 +124,19 @@ output_schema:
     summary:
       type: string
       description: Content summary (null in M02)
+
+hf_compat:
+  pipeline_tag: dalston:merge
+  library_name: python
+  license: apache-2.0
+
+hardware:
+  min_vram_gb: 0
+  supports_cpu: true
+  min_ram_gb: 1
+
+performance:
+  rtf_gpu: null
+  rtf_cpu: 0.001
+  max_concurrent_jobs: 16
+  warm_start_latency_ms: 5

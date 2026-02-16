@@ -48,6 +48,25 @@ from dalston.orchestrator.stats import extract_stats_from_transcript
 logger = structlog.get_logger()
 
 
+def _serialize_engine_error(
+    e: EngineUnavailableError | EngineCapabilityError | CatalogValidationError,
+) -> str:
+    """Serialize engine error with details to JSON string (M30).
+
+    If the exception has a to_dict method (enhanced exceptions), serialize
+    the full error dict. Otherwise, fall back to str(e).
+
+    Args:
+        e: The exception to serialize
+
+    Returns:
+        JSON string if exception has details, otherwise str(e)
+    """
+    if hasattr(e, "to_dict"):
+        return json.dumps(e.to_dict())
+    return str(e)
+
+
 async def _decrement_concurrent_jobs(redis: Redis, tenant_id: UUID) -> None:
     """Decrement concurrent job count for rate limiting.
 
@@ -189,12 +208,14 @@ async def handle_job_created(
                 CatalogValidationError,
             ) as e:
                 # Fail the job immediately if engine is unavailable or incapable
+                # Serialize with full details (M30)
+                error_str = _serialize_engine_error(e)
                 job.status = JobStatus.FAILED.value
-                job.error = str(e)
+                job.error = error_str
                 job.completed_at = datetime.now(UTC)
                 await db.commit()
                 await _decrement_concurrent_jobs(redis, job.tenant_id)
-                await publish_job_failed(redis, job_id, str(e))
+                await publish_job_failed(redis, job_id, error_str)
                 log.error(
                     "job_failed_engine_error",
                     error_type=type(e).__name__,
@@ -376,14 +397,16 @@ async def handle_task_completed(
                 CatalogValidationError,
             ) as e:
                 # Fail the job immediately if engine is unavailable or incapable
+                # Serialize with full details (M30)
+                error_str = _serialize_engine_error(e)
                 job = await db.get(JobModel, job_id)
                 if job:
                     job.status = JobStatus.FAILED.value
-                    job.error = str(e)
+                    job.error = error_str
                     job.completed_at = datetime.now(UTC)
                     await db.commit()
                     await _decrement_concurrent_jobs(redis, job.tenant_id)
-                    await publish_job_failed(redis, job_id, str(e))
+                    await publish_job_failed(redis, job_id, error_str)
                 log.error(
                     "job_failed_engine_error",
                     error_type=type(e).__name__,
@@ -484,17 +507,19 @@ async def handle_task_failed(
             CatalogValidationError,
         ) as e:
             # Engine became unavailable or incapable during retry - fail the job
+            # Serialize with full details (M30)
+            error_str = _serialize_engine_error(e)
             task.status = TaskStatus.FAILED.value
-            task.error = str(e)
+            task.error = error_str
             await db.commit()
             job = await db.get(JobModel, job_id)
             if job:
                 job.status = JobStatus.FAILED.value
-                job.error = str(e)
+                job.error = error_str
                 job.completed_at = datetime.now(UTC)
                 await db.commit()
                 await _decrement_concurrent_jobs(redis, job.tenant_id)
-                await publish_job_failed(redis, job_id, str(e))
+                await publish_job_failed(redis, job_id, error_str)
             log.error(
                 "job_failed_engine_error_on_retry",
                 error_type=type(e).__name__,

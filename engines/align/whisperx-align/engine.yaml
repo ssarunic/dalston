@@ -1,3 +1,4 @@
+schema_version: "1.1"
 id: whisperx-align
 stage: align
 name: WhisperX Alignment
@@ -95,3 +96,21 @@ output_schema:
     word_timestamps:
       type: boolean
       description: Always true for this engine
+
+hf_compat:
+  pipeline_tag: automatic-speech-recognition
+  library_name: whisperx
+  license: bsd-4-clause
+
+hardware:
+  min_vram_gb: 2
+  recommended_gpu:
+    - t4
+  supports_cpu: true
+  min_ram_gb: 4
+
+performance:
+  rtf_gpu: 0.02
+  rtf_cpu: 0.3
+  max_concurrent_jobs: 8
+  warm_start_latency_ms: 200
