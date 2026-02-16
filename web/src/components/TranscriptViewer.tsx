@@ -16,12 +16,15 @@ function TranscriptSegmentRow({
   segment,
   speakerColors,
   showSpeakerColumn,
+  showRedacted,
 }: {
   segment: UnifiedSegment
   speakerColors: Record<string, string>
   showSpeakerColumn: boolean
+  showRedacted?: boolean
 }) {
   const speakerColor = segment.speaker ? speakerColors[segment.speaker] : undefined
+  const displayText = showRedacted && segment.redacted_text ? segment.redacted_text : segment.text
 
   return (
     <div className="flex gap-4 py-3 border-b border-border last:border-0">
@@ -36,7 +39,7 @@ function TranscriptSegmentRow({
           {segment.speaker}
         </div>
       )}
-      <div className="flex-1 text-sm">{segment.text}</div>
+      <div className="flex-1 text-sm">{displayText}</div>
     </div>
   )
 }
@@ -119,16 +122,18 @@ export function TranscriptViewer({
   const hasSpeakers = speakers && speakers.length > 0
   const hasSegments = segments.length > 0
 
-  // Check if we should show redacted view (PII mode active and showing redacted)
-  const showRedactedText = piiConfig?.showRedacted && piiConfig?.redactedText
+  // Check if segments have per-segment redacted_text
+  const hasPerSegmentRedaction = segments.some(s => s.redacted_text)
+  // Check if PII toggle should be shown
+  const showPiiToggle = piiConfig?.enabled && (hasPerSegmentRedaction || piiConfig?.redactedText)
 
   return (
     <div className="space-y-4">
       {/* Header with PII toggle and export buttons */}
-      {(piiConfig?.enabled || enableExport) && (
+      {(showPiiToggle || enableExport) && (
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            {piiConfig?.enabled && piiConfig.redactedText && (
+            {showPiiToggle && (
               <div className="flex items-center gap-2">
                 <Shield className="h-4 w-4 text-muted-foreground" />
                 <div className="flex rounded-md border border-border overflow-hidden">
@@ -169,11 +174,8 @@ export function TranscriptViewer({
 
       {/* Transcript content */}
       <div className="overflow-y-auto" style={{ maxHeight }}>
-        {showRedactedText ? (
-          // Redacted text view
-          <p className="text-sm whitespace-pre-wrap">{piiConfig.redactedText}</p>
-        ) : hasSegments ? (
-          // Segment list view
+        {hasSegments ? (
+          // Segment list view (works for both original and redacted)
           <div>
             {segments.map((segment) => (
               <TranscriptSegmentRow
@@ -181,9 +183,13 @@ export function TranscriptViewer({
                 segment={segment}
                 speakerColors={speakerColors}
                 showSpeakerColumn={!!hasSpeakers}
+                showRedacted={piiConfig?.showRedacted}
               />
             ))}
           </div>
+        ) : piiConfig?.showRedacted && piiConfig?.redactedText ? (
+          // Fallback: plain redacted text if no segments
+          <p className="text-sm whitespace-pre-wrap">{piiConfig.redactedText}</p>
         ) : fullText ? (
           // Plain text fallback
           <p className="text-sm whitespace-pre-wrap">{fullText}</p>
