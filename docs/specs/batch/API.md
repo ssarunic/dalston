@@ -190,7 +190,7 @@ Submit audio for transcription using ElevenLabs-compatible parameters.
 | Field | Type | Description |
 |-------|------|-------------|
 | `file` | binary | Audio file upload (max 3GB) |
-| `cloud_storage_url` | string | HTTPS URL to audio file (S3/GCS presigned URL) |
+| `cloud_storage_url` | string | HTTPS URL to audio file (S3/GCS presigned, Google Drive, Dropbox) |
 
 #### Core Parameters
 
@@ -467,7 +467,7 @@ Submit audio for transcription.
 | Field | Type | Description |
 |-------|------|-------------|
 | `file` | binary | Audio file upload |
-| `audio_url` | string | URL to audio file (S3/GCS presigned URL, HTTPS) |
+| `audio_url` | string | URL to audio file (HTTPS, S3/GCS presigned, Google Drive, Dropbox) |
 
 #### Core Parameters
 

@@ -474,8 +474,17 @@ New types added:
 - `RealtimeSessionInfo` — Dataclass with full session metadata
 - `RealtimeSessionList` — Paginated list response
 
+### Audio URL Support
+
+The `audio_url` parameter now supports:
+
+- Direct HTTPS URLs (public or presigned)
+- S3 presigned URLs
+- GCS presigned URLs
+- Google Drive share links (auto-converted to direct download)
+- Dropbox share links (auto-converted to direct download)
+
 ### Deferred
 
-- `audio_url` parameter — In SDK but gateway doesn't support yet
 - Retry logic — Users handle `RateLimitError.retry_after` manually
 - Connection pooling config — Using httpx defaults
