@@ -79,6 +79,8 @@ class BatchEngineRegistry:
         """
         self._redis_url = redis_url
         self._redis: redis.Redis | None = None
+        # Store registration info for re-registration after TTL expiration
+        self._registered_engines: dict[str, BatchEngineInfo] = {}
 
     def _get_redis(self) -> redis.Redis:
         """Get or create Redis connection (sync)."""
@@ -126,6 +128,9 @@ class BatchEngineRegistry:
         # Add to engine set
         r.sadd(ENGINE_SET_KEY, info.engine_id)
 
+        # Store registration info for re-registration after TTL expiration
+        self._registered_engines[info.engine_id] = info
+
         logger.info(
             "batch_engine_registered",
             engine_id=info.engine_id,
@@ -143,7 +148,9 @@ class BatchEngineRegistry:
     ) -> None:
         """Send heartbeat update.
 
-        Updates engine state and refreshes TTL. Optionally updates capabilities.
+        Updates engine state and refreshes TTL. If the Redis key was deleted
+        (e.g., TTL expired during system sleep), re-populates all registration
+        fields from stored info.
 
         Args:
             engine_id: Engine identifier
@@ -153,16 +160,50 @@ class BatchEngineRegistry:
         """
         r = self._get_redis()
         engine_key = f"{ENGINE_KEY_PREFIX}{engine_id}"
+        now = datetime.now(UTC).isoformat()
 
-        mapping: dict[str, str] = {
-            "status": status,
-            "current_task": current_task or "",
-            "last_heartbeat": datetime.now(UTC).isoformat(),
-        }
+        # Check if key is missing or incomplete (TTL expired during sleep)
+        existing_data = r.hget(engine_key, "engine_id")
+        needs_reregistration = existing_data is None
 
-        # Include capabilities if provided
-        if capabilities is not None:
-            mapping["capabilities"] = capabilities.model_dump_json()
+        if needs_reregistration and engine_id in self._registered_engines:
+            # Re-populate all registration fields
+            info = self._registered_engines[engine_id]
+            mapping: dict[str, str] = {
+                "engine_id": info.engine_id,
+                "stage": info.stage,
+                "queue_name": info.queue_name,
+                "status": status,
+                "current_task": current_task or "",
+                "last_heartbeat": now,
+                "registered_at": now,
+            }
+
+            # Use stored capabilities if not provided in this call
+            caps = capabilities or info.capabilities
+            if caps is not None:
+                mapping["capabilities"] = caps.model_dump_json()
+
+            # Re-add to engine set (idempotent)
+            r.sadd(ENGINE_SET_KEY, engine_id)
+
+            logger.info(
+                "batch_engine_reregistered",
+                engine_id=engine_id,
+                stage=info.stage,
+                reason="ttl_expired",
+            )
+        else:
+            # Normal heartbeat - just update dynamic fields
+            mapping = {
+                "status": status,
+                "current_task": current_task or "",
+                "last_heartbeat": now,
+            }
+
+            # Include capabilities if provided
+            if capabilities is not None:
+                mapping["capabilities"] = capabilities.model_dump_json()
 
         r.hset(engine_key, mapping=mapping)
 
@@ -192,6 +233,9 @@ class BatchEngineRegistry:
 
         # Delete engine state
         r.delete(engine_key)
+
+        # Remove from local cache
+        self._registered_engines.pop(engine_id, None)
 
         logger.info("batch_engine_unregistered", engine_id=engine_id)
 
