@@ -1,4 +1,4 @@
-schema_version: "1.0"
+schema_version: "1.1"
 id: audio-redactor
 stage: redact
 name: Audio Redaction (FFmpeg)
@@ -65,3 +65,19 @@ output_schema:
             type: array
             items:
               type: string
+
+hf_compat:
+  pipeline_tag: dalston:audio-redaction
+  library_name: ffmpeg
+  license: apache-2.0
+
+hardware:
+  min_vram_gb: 0
+  supports_cpu: true
+  min_ram_gb: 2
+
+performance:
+  rtf_gpu: null
+  rtf_cpu: 0.05
+  max_concurrent_jobs: 8
+  warm_start_latency_ms: 10

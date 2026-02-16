@@ -1,4 +1,4 @@
-schema_version: "1.0"
+schema_version: "1.1"
 id: faster-whisper
 stage: transcribe
 name: Faster Whisper
@@ -125,3 +125,22 @@ output_schema:
     language_confidence:
       type: number
       description: Confidence in language detection (0-1)
+
+hf_compat:
+  pipeline_tag: automatic-speech-recognition
+  library_name: ctranslate2
+  license: mit
+
+hardware:
+  min_vram_gb: 4
+  recommended_gpu:
+    - t4
+    - a10g
+  supports_cpu: true
+  min_ram_gb: 8
+
+performance:
+  rtf_gpu: 0.05
+  rtf_cpu: 0.8
+  max_concurrent_jobs: 4
+  warm_start_latency_ms: 50

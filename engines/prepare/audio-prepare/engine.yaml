@@ -1,4 +1,4 @@
-schema_version: "1.0"
+schema_version: "1.1"
 id: audio-prepare
 stage: prepare
 name: Audio Prepare
@@ -80,3 +80,19 @@ output_schema:
     original_channels:
       type: integer
       description: Original number of channels
+
+hf_compat:
+  pipeline_tag: dalston:audio-preparation
+  library_name: ffmpeg
+  license: apache-2.0
+
+hardware:
+  min_vram_gb: 0
+  supports_cpu: true
+  min_ram_gb: 1
+
+performance:
+  rtf_gpu: null
+  rtf_cpu: 0.1
+  max_concurrent_jobs: 8
+  warm_start_latency_ms: 10

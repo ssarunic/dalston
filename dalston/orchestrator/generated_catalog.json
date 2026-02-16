@@ -1,0 +1,506 @@
+{
+  "generated_at": "2026-02-16T13:57:09.724181+00:00",
+  "schema_version": "1.1",
+  "engine_count": 11,
+  "engines": {
+    "whisperx-align": {
+      "id": "whisperx-align",
+      "name": "WhisperX Alignment",
+      "version": "1.0.0",
+      "stage": "align",
+      "type": null,
+      "description": "Word-level timestamp alignment using WhisperX with wav2vec2-based\nforced alignment. Produces more accurate word boundaries than\ntranscription-time estimates.\n\nLoads language-specific alignment models lazily on first use.\nSupports 100+ languages via wav2vec2 models from HuggingFace.",
+      "image": "dalston/stt-batch-align-whisperx-align:1.0.0",
+      "capabilities": {
+        "stages": [
+          "align"
+        ],
+        "languages": null,
+        "supports_word_timestamps": true,
+        "supports_streaming": false,
+        "max_audio_duration": 7200,
+        "max_sessions": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": true,
+        "min_vram_gb": 2,
+        "recommended_gpu": [
+          "t4"
+        ],
+        "supports_cpu": true,
+        "min_ram_gb": 4,
+        "memory": "4G"
+      },
+      "performance": {
+        "rtf_gpu": 0.02,
+        "rtf_cpu": 0.3,
+        "max_concurrent_jobs": 8,
+        "warm_start_latency_ms": 200
+      },
+      "hf_compat": {
+        "pipeline_tag": "automatic-speech-recognition",
+        "library_name": "whisperx",
+        "license": "bsd-4-clause"
+      },
+      "input": {
+        "audio_formats": [
+          "wav"
+        ],
+        "sample_rate": 16000,
+        "channels": 1
+      }
+    },
+    "pii-presidio": {
+      "id": "pii-presidio",
+      "name": "PII Detection (Presidio + GLiNER)",
+      "version": "1.0.0",
+      "stage": "detect",
+      "type": null,
+      "description": "Detects personally identifiable information using Microsoft Presidio\nwith GLiNER for ML-based entity recognition. Supports three detection\ntiers: fast (regex only), standard (+ GLiNER), thorough (+ LLM).",
+      "image": "dalston/stt-batch-detect-pii-presidio:1.0.0",
+      "capabilities": {
+        "stages": [
+          "detect"
+        ],
+        "languages": null,
+        "supports_word_timestamps": false,
+        "supports_streaming": false,
+        "max_audio_duration": null,
+        "max_sessions": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": true,
+        "min_vram_gb": 0,
+        "recommended_gpu": null,
+        "supports_cpu": true,
+        "min_ram_gb": 4,
+        "memory": "4G"
+      },
+      "performance": {
+        "rtf_gpu": 0.01,
+        "rtf_cpu": 0.05,
+        "max_concurrent_jobs": 8,
+        "warm_start_latency_ms": 100
+      },
+      "hf_compat": {
+        "pipeline_tag": "dalston:pii-redaction",
+        "library_name": "presidio",
+        "license": "mit"
+      }
+    },
+    "pyannote-3.1": {
+      "id": "pyannote-3.1",
+      "name": "Pyannote Speaker Diarization 3.1",
+      "version": "1.0.0",
+      "stage": "diarize",
+      "type": null,
+      "description": "Speaker diarization using pyannote-audio 3.1.\nIdentifies who speaks when in an audio file.\n\nRequires HuggingFace token (HF_TOKEN) for accessing gated models.\nSupports optional min/max speaker count hints for improved accuracy.",
+      "image": "dalston/stt-batch-diarize-pyannote-3.1:1.0.0",
+      "capabilities": {
+        "stages": [
+          "diarize"
+        ],
+        "languages": null,
+        "supports_word_timestamps": false,
+        "supports_streaming": false,
+        "max_audio_duration": 7200,
+        "max_sessions": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": true,
+        "min_vram_gb": 2,
+        "recommended_gpu": [
+          "t4"
+        ],
+        "supports_cpu": true,
+        "min_ram_gb": 6,
+        "memory": "6G"
+      },
+      "performance": {
+        "rtf_gpu": 0.1,
+        "rtf_cpu": 1.5,
+        "max_concurrent_jobs": 4,
+        "warm_start_latency_ms": 500
+      },
+      "hf_compat": {
+        "pipeline_tag": "speaker-diarization",
+        "library_name": "pyannote",
+        "license": "mit"
+      },
+      "input": {
+        "audio_formats": [
+          "wav"
+        ],
+        "sample_rate": 16000,
+        "channels": 1
+      }
+    },
+    "pyannote-4.0": {
+      "id": "pyannote-4.0",
+      "name": "Pyannote Speaker Diarization 4.0",
+      "version": "1.0.0",
+      "stage": "diarize",
+      "type": null,
+      "description": "Speaker diarization using pyannote-audio 4.0 with the new Community-1 pipeline.\nIdentifies who speaks when in an audio file.\n\nNew in 4.0:\n  - VBx clustering for improved speaker counting and assignment\n  - Exclusive mode for single-speaker segments (better Whisper alignment)\n  - NumPy 2.0 and modern dependency compatibility\n\nRequires HuggingFace token (HF_TOKEN) for accessing gated models.\nSupports optional min/max speaker count hints for improved accuracy.",
+      "image": "dalston/stt-batch-diarize-pyannote-4.0:1.0.0",
+      "capabilities": {
+        "stages": [
+          "diarize"
+        ],
+        "languages": null,
+        "supports_word_timestamps": false,
+        "supports_streaming": false,
+        "max_audio_duration": 7200,
+        "max_sessions": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": true,
+        "min_vram_gb": 2,
+        "recommended_gpu": [
+          "t4"
+        ],
+        "supports_cpu": true,
+        "min_ram_gb": 6,
+        "memory": "6G"
+      },
+      "performance": {
+        "rtf_gpu": 0.08,
+        "rtf_cpu": 1.2,
+        "max_concurrent_jobs": 4,
+        "warm_start_latency_ms": 500
+      },
+      "hf_compat": {
+        "pipeline_tag": "speaker-diarization",
+        "library_name": "pyannote",
+        "license": "mit"
+      },
+      "input": {
+        "audio_formats": [
+          "wav"
+        ],
+        "sample_rate": 16000,
+        "channels": 1
+      }
+    },
+    "final-merger": {
+      "id": "final-merger",
+      "name": "Final Merger",
+      "version": "1.0.0",
+      "stage": "merge",
+      "type": null,
+      "description": "Combines outputs from upstream pipeline stages into the\nstandard Dalston transcript format.\n\nAdds segment IDs, metadata, and writes the canonical\ntranscript.json file for the Gateway to read.",
+      "image": "dalston/stt-batch-merge-final-merger:1.0.0",
+      "capabilities": {
+        "stages": [
+          "merge"
+        ],
+        "languages": null,
+        "supports_word_timestamps": false,
+        "supports_streaming": false,
+        "max_audio_duration": 86400,
+        "max_sessions": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": false,
+        "min_vram_gb": 0,
+        "recommended_gpu": null,
+        "supports_cpu": true,
+        "min_ram_gb": 1,
+        "memory": "256M"
+      },
+      "performance": {
+        "rtf_gpu": null,
+        "rtf_cpu": 0.001,
+        "max_concurrent_jobs": 16,
+        "warm_start_latency_ms": 5
+      },
+      "hf_compat": {
+        "pipeline_tag": "dalston:merge",
+        "library_name": "python",
+        "license": "apache-2.0"
+      }
+    },
+    "audio-prepare": {
+      "id": "audio-prepare",
+      "name": "Audio Prepare",
+      "version": "1.0.0",
+      "stage": "prepare",
+      "type": null,
+      "description": "Converts any audio format to 16kHz, 16-bit, mono WAV.\nExtracts duration and audio metadata using ffprobe.\nRequired as the first stage of all batch pipelines.",
+      "image": "dalston/stt-batch-prepare-audio-prepare:1.0.0",
+      "capabilities": {
+        "stages": [
+          "prepare"
+        ],
+        "languages": null,
+        "supports_word_timestamps": false,
+        "supports_streaming": false,
+        "max_audio_duration": 14400,
+        "max_sessions": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": false,
+        "min_vram_gb": 0,
+        "recommended_gpu": null,
+        "supports_cpu": true,
+        "min_ram_gb": 1,
+        "memory": "512M"
+      },
+      "performance": {
+        "rtf_gpu": null,
+        "rtf_cpu": 0.1,
+        "max_concurrent_jobs": 8,
+        "warm_start_latency_ms": 10
+      },
+      "hf_compat": {
+        "pipeline_tag": "dalston:audio-preparation",
+        "library_name": "ffmpeg",
+        "license": "apache-2.0"
+      },
+      "input": {
+        "audio_formats": [
+          "mp3",
+          "wav",
+          "m4a",
+          "flac",
+          "ogg",
+          "webm",
+          "mp4",
+          "mkv",
+          "avi",
+          "aac",
+          "wma"
+        ],
+        "sample_rate": "any",
+        "channels": "any"
+      }
+    },
+    "parakeet-streaming": {
+      "id": "parakeet-streaming",
+      "name": "Parakeet Streaming",
+      "version": "1.0.0",
+      "stage": null,
+      "type": "realtime",
+      "description": "Real-time streaming transcription using NVIDIA Parakeet.\nUses cache-aware FastConformer encoder for true streaming with ~100ms latency.\nEnglish-only, requires NVIDIA GPU.",
+      "image": "dalston/stt-rt-parakeet-streaming:1.0.0",
+      "capabilities": {
+        "stages": [],
+        "languages": [
+          "en"
+        ],
+        "supports_word_timestamps": true,
+        "supports_streaming": true,
+        "max_audio_duration": null,
+        "max_sessions": 4
+      },
+      "hardware": {
+        "gpu_required": true,
+        "gpu_optional": false,
+        "min_vram_gb": 4,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": false,
+        "min_ram_gb": 8,
+        "memory": "8G"
+      },
+      "performance": {
+        "rtf_gpu": 0.05,
+        "rtf_cpu": null,
+        "max_concurrent_jobs": 4,
+        "warm_start_latency_ms": 100
+      },
+      "hf_compat": {
+        "pipeline_tag": "automatic-speech-recognition",
+        "library_name": "nemo",
+        "license": "apache-2.0"
+      }
+    },
+    "whisper-streaming": {
+      "id": "whisper-streaming",
+      "name": "Whisper Streaming",
+      "version": "1.0.0",
+      "stage": null,
+      "type": "realtime",
+      "description": "Real-time streaming transcription using Whisper.\nSupports \"fast\" (distil-whisper) and \"accurate\" (large-v3) variants.\nUses Silero VAD for speech boundary detection.",
+      "image": "dalston/stt-rt-whisper-streaming:1.0.0",
+      "capabilities": {
+        "stages": [],
+        "languages": null,
+        "supports_word_timestamps": true,
+        "supports_streaming": true,
+        "max_audio_duration": null,
+        "max_sessions": 4
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": true,
+        "min_vram_gb": 6,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": true,
+        "min_ram_gb": 12,
+        "memory": "12G"
+      },
+      "performance": {
+        "rtf_gpu": 0.1,
+        "rtf_cpu": 0.5,
+        "max_concurrent_jobs": 4,
+        "warm_start_latency_ms": 200
+      },
+      "hf_compat": {
+        "pipeline_tag": "automatic-speech-recognition",
+        "library_name": "ctranslate2",
+        "license": "mit"
+      }
+    },
+    "audio-redactor": {
+      "id": "audio-redactor",
+      "name": "Audio Redaction (FFmpeg)",
+      "version": "1.0.0",
+      "stage": "redact",
+      "type": null,
+      "description": "Redacts audio by replacing PII segments with silence or beep tones.\nUses FFmpeg for efficient single-pass processing. Requires PII detection\noutput with entity timing information.",
+      "image": "dalston/stt-batch-redact-audio-redactor:1.0.0",
+      "capabilities": {
+        "stages": [
+          "redact"
+        ],
+        "languages": null,
+        "supports_word_timestamps": false,
+        "supports_streaming": false,
+        "max_audio_duration": null,
+        "max_sessions": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": false,
+        "min_vram_gb": 0,
+        "recommended_gpu": null,
+        "supports_cpu": true,
+        "min_ram_gb": 2,
+        "memory": "2G"
+      },
+      "performance": {
+        "rtf_gpu": null,
+        "rtf_cpu": 0.05,
+        "max_concurrent_jobs": 8,
+        "warm_start_latency_ms": 10
+      },
+      "hf_compat": {
+        "pipeline_tag": "dalston:audio-redaction",
+        "library_name": "ffmpeg",
+        "license": "apache-2.0"
+      }
+    },
+    "faster-whisper": {
+      "id": "faster-whisper",
+      "name": "Faster Whisper",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "type": null,
+      "description": "CTranslate2-optimized Whisper implementation for fast transcription.\nSupports all Whisper model sizes and 99 languages.\nIncludes VAD filtering for improved accuracy on audio with silence.",
+      "image": "dalston/stt-batch-transcribe-faster-whisper:1.0.0",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": null,
+        "supports_word_timestamps": true,
+        "supports_streaming": false,
+        "max_audio_duration": 7200,
+        "max_sessions": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": true,
+        "min_vram_gb": 4,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": true,
+        "min_ram_gb": 8,
+        "memory": "8G"
+      },
+      "performance": {
+        "rtf_gpu": 0.05,
+        "rtf_cpu": 0.8,
+        "max_concurrent_jobs": 4,
+        "warm_start_latency_ms": 50
+      },
+      "hf_compat": {
+        "pipeline_tag": "automatic-speech-recognition",
+        "library_name": "ctranslate2",
+        "license": "mit"
+      },
+      "input": {
+        "audio_formats": [
+          "wav"
+        ],
+        "sample_rate": 16000,
+        "channels": 1
+      }
+    },
+    "parakeet": {
+      "id": "parakeet",
+      "name": "NVIDIA Parakeet",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "type": null,
+      "description": "NVIDIA Parakeet FastConformer RNNT for fast English-only transcription.\nProduces native word-level timestamps without separate alignment.\nAchieves RTFx >2000 with competitive WER (~7.2% average).",
+      "image": "dalston/stt-batch-transcribe-parakeet:1.0.0",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": [
+          "en"
+        ],
+        "supports_word_timestamps": true,
+        "supports_streaming": true,
+        "max_audio_duration": 7200,
+        "max_sessions": null
+      },
+      "hardware": {
+        "gpu_required": true,
+        "gpu_optional": false,
+        "min_vram_gb": 4,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": false,
+        "min_ram_gb": 8,
+        "memory": "8G"
+      },
+      "performance": {
+        "rtf_gpu": 0.0005,
+        "rtf_cpu": null,
+        "max_concurrent_jobs": 4,
+        "warm_start_latency_ms": 100
+      },
+      "hf_compat": {
+        "pipeline_tag": "automatic-speech-recognition",
+        "library_name": "nemo",
+        "license": "apache-2.0"
+      },
+      "input": {
+        "audio_formats": [
+          "wav"
+        ],
+        "sample_rate": 16000,
+        "channels": 1
+      }
+    }
+  }
+}
