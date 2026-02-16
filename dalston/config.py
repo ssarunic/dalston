@@ -86,6 +86,18 @@ class Settings(BaseSettings):
         description="Minimum retention hours allowed (1 = 1 hour minimum)",
     )
 
+    # Audio URL Download
+    audio_url_max_size_gb: float = Field(
+        default=3.0,
+        alias="AUDIO_URL_MAX_SIZE_GB",
+        description="Maximum audio file size for URL downloads in GB",
+    )
+    audio_url_timeout_seconds: int = Field(
+        default=300,
+        alias="AUDIO_URL_TIMEOUT_SECONDS",
+        description="Timeout for downloading audio from URLs in seconds",
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:

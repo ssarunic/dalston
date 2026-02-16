@@ -58,6 +58,10 @@ from dalston.gateway.services.audio_probe import (
     InvalidAudioError,
     probe_audio,
 )
+from dalston.gateway.services.audio_url import (
+    AudioUrlError,
+    download_audio_from_url,
+)
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.rate_limiter import RedisRateLimiter
@@ -80,8 +84,16 @@ router = APIRouter(prefix="/audio/transcriptions", tags=["transcriptions"])
 async def create_transcription(
     request: Request,
     response: Response,
-    file: Annotated[UploadFile, File(description="Audio file to transcribe")],
     api_key: RequireJobsWriteRateLimited,
+    file: UploadFile | None = File(
+        default=None, description="Audio file to transcribe"
+    ),
+    audio_url: Annotated[
+        str | None,
+        Form(
+            description="URL to audio file (HTTPS, S3/GCS presigned URL, Google Drive, Dropbox)"
+        ),
+    ] = None,
     model: Annotated[
         str,
         Form(
@@ -168,14 +180,51 @@ async def create_transcription(
 ) -> JobCreatedResponse:
     """Create a new transcription job.
 
-    1. Upload audio file to S3
-    2. Create job record in PostgreSQL
-    3. Publish job.created event to Redis
-    4. Return job ID for polling
+    Accepts either:
+    - file: Direct file upload
+    - audio_url: URL to audio file (HTTPS, Google Drive, Dropbox, S3/GCS presigned)
+
+    Steps:
+    1. Download audio from URL (if audio_url provided)
+    2. Upload audio file to S3
+    3. Create job record in PostgreSQL
+    4. Publish job.created event to Redis
+    5. Return job ID for polling
     """
-    # Validate file
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="File must have a filename")
+    # Validate input: exactly one of file or audio_url required
+    if file is None and audio_url is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Either 'file' or 'audio_url' must be provided",
+        )
+    if file is not None and audio_url is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either 'file' or 'audio_url', not both",
+        )
+
+    # Handle audio_url: download the file
+    file_content: bytes
+    filename: str
+
+    if audio_url is not None:
+        try:
+            max_size = int(settings.audio_url_max_size_gb * 1024 * 1024 * 1024)
+            downloaded = await download_audio_from_url(
+                url=audio_url,
+                max_size=max_size,
+                timeout=settings.audio_url_timeout_seconds,
+            )
+            file_content = downloaded.content
+            filename = downloaded.filename
+        except AudioUrlError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+    else:
+        # Validate file upload
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="File must have a filename")
+        filename = file.filename
+        file_content = await file.read()
 
     # Check per-job webhook_url deprecation
     if webhook_url:
@@ -225,15 +274,10 @@ async def create_transcription(
                 detail=f"Invalid JSON in webhook_metadata: {e}",
             ) from e
 
-    # Read file content for probing
-    file_content = await file.read()
-
     # Probe audio to extract metadata and validate
-    # Uses to_thread() because probe_audio calls ffprobe synchronously
+    # Uses to_thread() because probe_audio uses tinytag synchronously
     try:
-        audio_metadata = await asyncio.to_thread(
-            probe_audio, file_content, file.filename
-        )
+        audio_metadata = await asyncio.to_thread(probe_audio, file_content, filename)
     except InvalidAudioError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -303,6 +347,7 @@ async def create_transcription(
         job_id=UUID("00000000-0000-0000-0000-000000000000"),  # Temporary, will update
         file=file,
         file_content=file_content,
+        filename=filename,
     )
 
     # Parse PII entity types for dedicated column
@@ -337,7 +382,10 @@ async def create_transcription(
 
     # Re-upload with correct job ID path
     audio_uri = await storage.upload_audio(
-        job_id=job.id, file=file, file_content=file_content
+        job_id=job.id,
+        file=file,
+        file_content=file_content,
+        filename=filename,
     )
 
     # Update job with correct audio URI

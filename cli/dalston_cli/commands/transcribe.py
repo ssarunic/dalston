@@ -30,12 +30,20 @@ PIIRedactMode = Literal["silence", "beep"]
 
 def transcribe(
     files: Annotated[
-        list[Path],
+        list[Path] | None,
         typer.Argument(
             exists=True,
-            help="Audio files to transcribe.",
+            help="Audio files to transcribe (optional if --url is provided).",
         ),
-    ],
+    ] = None,
+    url: Annotated[
+        str | None,
+        typer.Option(
+            "--url",
+            "-u",
+            help="URL to audio file (HTTPS, Google Drive, Dropbox, S3/GCS presigned URL).",
+        ),
+    ] = None,
     model: Annotated[
         str,
         typer.Option(
@@ -215,9 +223,25 @@ def transcribe(
         dalston transcribe call.mp3 --pii --pii-tier standard  # Detect PII entities
 
         dalston transcribe call.mp3 --pii --redact-audio --redaction-mode beep  # Detect and redact PII
+
+        dalston transcribe --url "https://example.com/audio.mp3"  # Transcribe from URL
+
+        dalston transcribe --url "https://drive.google.com/file/d/.../view"  # Google Drive URL
     """
     client = state.client
     quiet = state.quiet
+
+    # Validate: must provide either files or url, not both or neither
+    if not files and not url:
+        error_console.print(
+            "[red]Error:[/red] Either provide audio files or --url, not neither."
+        )
+        raise typer.Exit(code=1)
+    if files and url:
+        error_console.print(
+            "[red]Error:[/red] Provide either audio files or --url, not both."
+        )
+        raise typer.Exit(code=1)
 
     # Map speaker detection string to enum
     speaker_detection_map = {
@@ -262,19 +286,31 @@ def transcribe(
     # Determine output handling for multiple files
     output_path = str(output) if output else None
     output_is_dir = output and output.is_dir()
-    if len(files) > 1 and output and not output_is_dir:
+    if files and len(files) > 1 and output and not output_is_dir:
         # Create directory if it doesn't exist
         output.mkdir(parents=True, exist_ok=True)
         output_is_dir = True
 
-    for file_path in files:
+    # Build list of inputs: either file paths or a single URL
+    inputs: list[tuple[str | None, str | None]] = []
+    if url:
+        inputs.append((None, url))  # (file_path, audio_url)
+    else:
+        for fp in files or []:
+            inputs.append((str(fp), None))  # (file_path, audio_url)
+
+    for file_path, audio_url in inputs:
         if not quiet and not json_output:
-            error_console.print(f"Submitting: {file_path}")
+            if file_path:
+                error_console.print(f"Submitting: {file_path}")
+            else:
+                error_console.print(f"Submitting URL: {audio_url[:60]}...")
 
         try:
             # Submit job
             job = client.transcribe(
-                file=str(file_path),
+                file=file_path,
+                audio_url=audio_url,
                 model=model,
                 language=language,
                 initial_prompt=initial_prompt,
@@ -306,8 +342,8 @@ def transcribe(
 
             # Determine output path for this file
             file_output = output_path
-            if output_is_dir:
-                stem = file_path.stem
+            if output_is_dir and file_path:
+                stem = Path(file_path).stem
                 file_output = str(output / f"{stem}.{fmt}")
 
             # Output result
@@ -321,5 +357,6 @@ def transcribe(
         except typer.Exit:
             raise
         except Exception as e:
-            error_console.print(f"[red]Error:[/red] Error processing {file_path}: {e}")
+            source = file_path or audio_url
+            error_console.print(f"[red]Error:[/red] Error processing {source}: {e}")
             raise typer.Exit(code=1) from e
