@@ -18,7 +18,7 @@ capabilities:
     - all  # 99 languages supported
   max_audio_duration: 7200  # 2 hours
   streaming: false
-  word_timestamps: true
+  word_timestamps: false  # Has timestamps but they're inaccurate; use alignment stage
 
 input:
   audio_formats:
