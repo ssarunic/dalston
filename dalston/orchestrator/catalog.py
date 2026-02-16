@@ -125,6 +125,8 @@ class EngineCatalog:
                 rtf_gpu=perf_data.get("rtf_gpu"),
                 rtf_cpu=perf_data.get("rtf_cpu"),
                 max_concurrent_jobs=perf_data.get("max_concurrent_jobs"),
+                # M31: includes_diarization for capability-driven routing
+                includes_diarization=caps_data.get("includes_diarization", False),
             )
 
             entries[engine_id] = CatalogEntry(
@@ -209,6 +211,51 @@ class EngineCatalog:
                 f"{[e.engine_id for e in available_engines]}"
             )
         return None
+
+    def find_engines(self, stage: str, requirements: dict) -> list[CatalogEntry]:
+        """Find catalog engines that could satisfy requirements (M31).
+
+        Used by the engine selector to identify alternatives when no running
+        engine matches, enabling actionable error messages.
+
+        Args:
+            stage: Pipeline stage (e.g., "transcribe", "diarize")
+            requirements: Dict of requirements to match:
+                - language: ISO 639-1 code (optional)
+                - streaming: bool (optional)
+
+        Returns:
+            List of CatalogEntry objects that match all requirements
+        """
+        result = []
+        for entry in self.get_engines_for_stage(stage):
+            if self._matches_requirements(entry.capabilities, requirements):
+                result.append(entry)
+        return result
+
+    def _matches_requirements(
+        self, caps: EngineCapabilities, requirements: dict
+    ) -> bool:
+        """Check if capabilities satisfy requirements.
+
+        Args:
+            caps: Engine capabilities to check
+            requirements: Requirements dict
+
+        Returns:
+            True if all requirements are satisfied
+        """
+        # Language check
+        lang = requirements.get("language")
+        if lang and caps.languages is not None:
+            if lang.lower() not in [lng.lower() for lng in caps.languages]:
+                return False
+
+        # Streaming check
+        if requirements.get("streaming") and not caps.supports_streaming:
+            return False
+
+        return True
 
     def __len__(self) -> int:
         """Return number of engines in catalog."""

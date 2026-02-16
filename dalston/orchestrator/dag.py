@@ -2,13 +2,23 @@
 
 Converts job parameters into a directed acyclic graph of tasks.
 Each task represents a processing step executed by a specific engine.
+
+M31: Added capability-driven engine selection via build_task_dag_async().
+The original build_task_dag() is preserved as a fallback.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import structlog
 
 from dalston.common.models import Task, TaskStatus
+
+if TYPE_CHECKING:
+    from dalston.orchestrator.catalog import EngineCatalog
+    from dalston.orchestrator.registry import BatchEngineRegistry
 
 logger = structlog.get_logger()
 
@@ -474,6 +484,456 @@ def _build_per_channel_dag(
         job_id=job_id,
         stage="merge",
         engine_id=engines["merge"],
+        status=TaskStatus.PENDING,
+        dependencies=merge_dependencies,
+        config={
+            "word_timestamps": word_timestamps,
+            "speaker_detection": "per_channel",
+            "channel_count": num_channels,
+        },
+        input_uri=None,
+        output_uri=None,
+        retries=0,
+        max_retries=2,
+        required=True,
+    )
+    tasks.append(merge_task)
+
+    return tasks
+
+
+# =============================================================================
+# M31: Capability-Driven DAG Building
+# =============================================================================
+
+
+async def build_task_dag_async(
+    job_id: UUID,
+    audio_uri: str,
+    parameters: dict,
+    registry: BatchEngineRegistry,
+    catalog: EngineCatalog,
+) -> list[Task]:
+    """Build a task DAG using capability-driven engine selection (M31).
+
+    This is the preferred method for building DAGs. It uses the engine selector
+    to choose engines based on capabilities rather than hardcoded defaults.
+
+    The DAG shape is determined by selected engine capabilities:
+    - If transcriber has supports_word_timestamps=True, skip align stage
+    - If transcriber has includes_diarization=True, skip diarize stage
+
+    Args:
+        job_id: The job's UUID
+        audio_uri: S3 URI to the audio file
+        parameters: Job parameters (see build_task_dag for details)
+        registry: Batch engine registry (running engines)
+        catalog: Engine catalog (all available engines)
+
+    Returns:
+        List of Task objects with dependencies wired
+
+    Raises:
+        NoCapableEngineError: If no running engine can handle requirements
+    """
+    from dalston.orchestrator.engine_selector import select_pipeline_engines
+
+    # Select engines for all required stages
+    selections = await select_pipeline_engines(parameters, registry, catalog)
+
+    # Build engines dict from selections (for compatibility with existing code)
+    engines = {stage: sel.engine_id for stage, sel in selections.items()}
+
+    # Determine DAG shape from capabilities
+    skip_alignment = "align" not in selections
+    skip_diarization = "diarize" not in selections
+
+    # Log DAG shape decision
+    logger.info(
+        "dag_shape_decided",
+        job_id=str(job_id),
+        transcriber=selections["transcribe"].engine_id,
+        alignment_included=not skip_alignment,
+        diarization_included=not skip_diarization,
+        stages=list(selections.keys()),
+    )
+
+    # Build the DAG using the same logic but with selected engines
+    return _build_dag_with_engines(
+        job_id=job_id,
+        audio_uri=audio_uri,
+        parameters=parameters,
+        engines=engines,
+        skip_alignment=skip_alignment,
+        skip_diarization=skip_diarization,
+    )
+
+
+def _build_dag_with_engines(
+    job_id: UUID,
+    audio_uri: str,
+    parameters: dict,
+    engines: dict[str, str],
+    skip_alignment: bool,
+    skip_diarization: bool,
+) -> list[Task]:
+    """Build DAG with pre-selected engines.
+
+    Internal function used by build_task_dag_async to create the actual
+    task graph with capability-driven engine selection.
+
+    Args:
+        job_id: The job's UUID
+        audio_uri: S3 URI to the audio file
+        parameters: Job parameters
+        engines: Pre-selected engine IDs by stage
+        skip_alignment: Whether to skip the alignment stage
+        skip_diarization: Whether to skip diarization even if requested
+
+    Returns:
+        List of Task objects with dependencies wired
+    """
+    # Check if word timestamps is enabled
+    if "word_timestamps" in parameters:
+        word_timestamps = parameters["word_timestamps"]
+    elif "timestamps_granularity" in parameters:
+        granularity = parameters["timestamps_granularity"]
+        if granularity not in VALID_TIMESTAMPS_GRANULARITIES:
+            logger.warning(
+                f"Unknown timestamps_granularity '{granularity}', "
+                f"expected one of {VALID_TIMESTAMPS_GRANULARITIES}. Defaulting to 'word'."
+            )
+            granularity = "word"
+        word_timestamps = granularity == "word"
+    else:
+        word_timestamps = True
+
+    # Check speaker detection mode
+    speaker_detection = parameters.get("speaker_detection", "none")
+    if speaker_detection not in VALID_SPEAKER_DETECTION_MODES:
+        logger.warning(
+            f"Unknown speaker_detection '{speaker_detection}', "
+            f"expected one of {VALID_SPEAKER_DETECTION_MODES}. Defaulting to 'none'."
+        )
+        speaker_detection = "none"
+
+    # Build diarization config
+    diarize_config: dict = {}
+    if parameters.get("num_speakers") is not None and parameters["num_speakers"] > 0:
+        diarize_config["min_speakers"] = parameters["num_speakers"]
+        diarize_config["max_speakers"] = parameters["num_speakers"]
+    else:
+        if (
+            parameters.get("min_speakers") is not None
+            and parameters["min_speakers"] > 0
+        ):
+            diarize_config["min_speakers"] = parameters["min_speakers"]
+        if (
+            parameters.get("max_speakers") is not None
+            and parameters["max_speakers"] > 0
+        ):
+            diarize_config["max_speakers"] = parameters["max_speakers"]
+
+    if parameters.get("exclusive"):
+        diarize_config["exclusive"] = True
+
+    # Build transcription config
+    if "transcribe_config" in parameters:
+        transcribe_config = {
+            **DEFAULT_TRANSCRIBE_CONFIG,
+            **parameters["transcribe_config"],
+        }
+        if parameters.get("language"):
+            transcribe_config["language"] = parameters["language"]
+    else:
+        transcribe_config = {
+            "model": parameters.get("model", DEFAULT_TRANSCRIBE_CONFIG["model"]),
+            "language": parameters.get(
+                "language", DEFAULT_TRANSCRIBE_CONFIG["language"]
+            ),
+            "beam_size": parameters.get(
+                "beam_size", DEFAULT_TRANSCRIBE_CONFIG["beam_size"]
+            ),
+            "vad_filter": parameters.get(
+                "vad_filter", DEFAULT_TRANSCRIBE_CONFIG["vad_filter"]
+            ),
+        }
+
+    tasks: list[Task] = []
+    diarize_task = None
+
+    # Prepare config
+    prepare_config: dict = {}
+    if speaker_detection == "per_channel":
+        prepare_config["split_channels"] = True
+
+    # Task 1: Audio preparation
+    prepare_task = Task(
+        id=uuid4(),
+        job_id=job_id,
+        stage="prepare",
+        engine_id=engines.get("prepare", DEFAULT_ENGINES["prepare"]),
+        status=TaskStatus.PENDING,
+        dependencies=[],
+        config=prepare_config,
+        input_uri=audio_uri,
+        output_uri=None,
+        retries=0,
+        max_retries=2,
+        required=True,
+    )
+    tasks.append(prepare_task)
+
+    # Handle per_channel mode
+    if speaker_detection == "per_channel":
+        num_channels = parameters.get("num_channels", 2)
+        return _build_per_channel_dag_with_engines(
+            tasks=tasks,
+            prepare_task=prepare_task,
+            job_id=job_id,
+            engines=engines,
+            transcribe_config=transcribe_config,
+            word_timestamps=word_timestamps,
+            skip_alignment=skip_alignment,
+            num_channels=num_channels,
+        )
+
+    # Diarization (if requested and not skipped due to native support)
+    if speaker_detection == "diarize" and not skip_diarization:
+        diarize_task = Task(
+            id=uuid4(),
+            job_id=job_id,
+            stage="diarize",
+            engine_id=engines.get("diarize", DEFAULT_ENGINES["diarize"]),
+            status=TaskStatus.PENDING,
+            dependencies=[prepare_task.id],
+            config=diarize_config,
+            input_uri=None,
+            output_uri=None,
+            retries=0,
+            max_retries=2,
+            required=True,
+        )
+        tasks.append(diarize_task)
+
+    # Transcription
+    transcribe_task = Task(
+        id=uuid4(),
+        job_id=job_id,
+        stage="transcribe",
+        engine_id=engines.get("transcribe", DEFAULT_ENGINES["transcribe"]),
+        status=TaskStatus.PENDING,
+        dependencies=[prepare_task.id],
+        config=transcribe_config,
+        input_uri=None,
+        output_uri=None,
+        retries=0,
+        max_retries=2,
+        required=True,
+    )
+    tasks.append(transcribe_task)
+
+    # Alignment (if word timestamps wanted and engine doesn't have native support)
+    align_task = None
+    if word_timestamps and not skip_alignment:
+        align_task = Task(
+            id=uuid4(),
+            job_id=job_id,
+            stage="align",
+            engine_id=engines.get("align", DEFAULT_ENGINES["align"]),
+            status=TaskStatus.PENDING,
+            dependencies=[transcribe_task.id],
+            config={"word_timestamps": True},
+            input_uri=None,
+            output_uri=None,
+            retries=0,
+            max_retries=2,
+            required=True,
+        )
+        tasks.append(align_task)
+
+    # PII Detection
+    pii_detect_task = None
+    audio_redact_task = None
+    pii_detection_enabled = parameters.get("pii_detection", False)
+
+    if pii_detection_enabled:
+        pii_dependencies = [transcribe_task.id]
+        if align_task is not None:
+            pii_dependencies.append(align_task.id)
+        if diarize_task is not None:
+            pii_dependencies.append(diarize_task.id)
+
+        pii_tier = parameters.get("pii_detection_tier", "standard")
+        if pii_tier not in VALID_PII_DETECTION_TIERS:
+            pii_tier = "standard"
+
+        pii_detect_config = {
+            "detection_tier": pii_tier,
+            "entity_types": parameters.get("pii_entity_types"),
+            "confidence_threshold": parameters.get("pii_confidence_threshold", 0.5),
+        }
+
+        pii_detect_task = Task(
+            id=uuid4(),
+            job_id=job_id,
+            stage="pii_detect",
+            engine_id=engines.get("pii_detect", DEFAULT_ENGINES["pii_detect"]),
+            status=TaskStatus.PENDING,
+            dependencies=pii_dependencies,
+            config=pii_detect_config,
+            input_uri=None,
+            output_uri=None,
+            retries=0,
+            max_retries=2,
+            required=True,
+        )
+        tasks.append(pii_detect_task)
+
+        if parameters.get("redact_pii_audio", False):
+            redaction_mode = parameters.get("pii_redaction_mode", "silence")
+            if redaction_mode not in VALID_PII_REDACTION_MODES:
+                redaction_mode = "silence"
+
+            audio_redact_config = {
+                "redaction_mode": redaction_mode,
+                "buffer_ms": parameters.get("pii_buffer_ms", 50),
+            }
+
+            audio_redact_task = Task(
+                id=uuid4(),
+                job_id=job_id,
+                stage="audio_redact",
+                engine_id=engines.get("audio_redact", DEFAULT_ENGINES["audio_redact"]),
+                status=TaskStatus.PENDING,
+                dependencies=[pii_detect_task.id],
+                config=audio_redact_config,
+                input_uri=None,
+                output_uri=None,
+                retries=0,
+                max_retries=2,
+                required=True,
+            )
+            tasks.append(audio_redact_task)
+
+    # Merge
+    merge_dependencies = [prepare_task.id, transcribe_task.id]
+    if align_task is not None:
+        merge_dependencies.append(align_task.id)
+    if diarize_task is not None:
+        merge_dependencies.append(diarize_task.id)
+    if pii_detect_task is not None:
+        merge_dependencies.append(pii_detect_task.id)
+    if audio_redact_task is not None:
+        merge_dependencies.append(audio_redact_task.id)
+
+    merge_config: dict = {
+        "word_timestamps": word_timestamps,
+        "speaker_detection": speaker_detection,
+    }
+    if pii_detection_enabled:
+        merge_config["pii_detection"] = True
+
+    merge_task = Task(
+        id=uuid4(),
+        job_id=job_id,
+        stage="merge",
+        engine_id=engines.get("merge", DEFAULT_ENGINES["merge"]),
+        status=TaskStatus.PENDING,
+        dependencies=merge_dependencies,
+        config=merge_config,
+        input_uri=None,
+        output_uri=None,
+        retries=0,
+        max_retries=2,
+        required=True,
+    )
+    tasks.append(merge_task)
+
+    return tasks
+
+
+def _build_per_channel_dag_with_engines(
+    tasks: list[Task],
+    prepare_task: Task,
+    job_id: UUID,
+    engines: dict[str, str],
+    transcribe_config: dict,
+    word_timestamps: bool,
+    skip_alignment: bool,
+    num_channels: int = 2,
+) -> list[Task]:
+    """Build per-channel DAG with pre-selected engines (M31).
+
+    Args:
+        tasks: List with prepare_task already added
+        prepare_task: The prepare task
+        job_id: Job UUID
+        engines: Pre-selected engine IDs by stage
+        transcribe_config: Transcription configuration
+        word_timestamps: Whether word timestamps are requested
+        skip_alignment: Whether to skip alignment (transcriber has native support)
+        num_channels: Number of audio channels
+
+    Returns:
+        Complete task list including merge
+    """
+    all_channel_tasks = []
+    last_channel_tasks = []
+
+    for channel in range(num_channels):
+        channel_transcribe_config = {
+            **transcribe_config,
+            "channel": channel,
+        }
+
+        transcribe_task = Task(
+            id=uuid4(),
+            job_id=job_id,
+            stage=f"transcribe_ch{channel}",
+            engine_id=engines.get("transcribe", DEFAULT_ENGINES["transcribe"]),
+            status=TaskStatus.PENDING,
+            dependencies=[prepare_task.id],
+            config=channel_transcribe_config,
+            input_uri=None,
+            output_uri=None,
+            retries=0,
+            max_retries=2,
+            required=True,
+        )
+        tasks.append(transcribe_task)
+        all_channel_tasks.append(transcribe_task)
+
+        last_task = transcribe_task
+
+        if word_timestamps and not skip_alignment:
+            align_task = Task(
+                id=uuid4(),
+                job_id=job_id,
+                stage=f"align_ch{channel}",
+                engine_id=engines.get("align", DEFAULT_ENGINES["align"]),
+                status=TaskStatus.PENDING,
+                dependencies=[transcribe_task.id],
+                config={"word_timestamps": True, "channel": channel},
+                input_uri=None,
+                output_uri=None,
+                retries=0,
+                max_retries=2,
+                required=True,
+            )
+            tasks.append(align_task)
+            all_channel_tasks.append(align_task)
+            last_task = align_task
+
+        last_channel_tasks.append(last_task)
+
+    merge_dependencies = [prepare_task.id] + [t.id for t in all_channel_tasks]
+
+    merge_task = Task(
+        id=uuid4(),
+        job_id=job_id,
+        stage="merge",
+        engine_id=engines.get("merge", DEFAULT_ENGINES["merge"]),
         status=TaskStatus.PENDING,
         dependencies=merge_dependencies,
         config={

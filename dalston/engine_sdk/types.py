@@ -42,6 +42,7 @@ class EngineCapabilities(BaseModel):
         rtf_gpu: Real-time factor on GPU (M30)
         rtf_cpu: Real-time factor on CPU (M30)
         max_concurrent_jobs: Maximum concurrent job limit (M30)
+        includes_diarization: Whether output includes speaker labels (M31)
     """
 
     engine_id: str
@@ -59,6 +60,8 @@ class EngineCapabilities(BaseModel):
     rtf_gpu: float | None = None
     rtf_cpu: float | None = None
     max_concurrent_jobs: int | None = None
+    # M31: Capability-driven routing - output includes speaker labels (skip diarize stage)
+    includes_diarization: bool = False
 
 
 @dataclass

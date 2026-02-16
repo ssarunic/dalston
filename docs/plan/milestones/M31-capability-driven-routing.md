@@ -146,17 +146,17 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 
 ```bash
 curl -X POST http://localhost:8000/v1/audio/transcriptions \
-  -F "file=@long.wav" -F "language=en"
+  -F "file=@croatian.wav" -F "language=hr"
 # 422 response:
 {
   "error": "no_capable_engine",
   "stage": "transcribe",
-  "requirements": {"language": "en", "audio_duration_s": 14400},
+  "requirements": {"language": "hr"},
   "running_engines": [
-    {"id": "parakeet", "reason": "max duration 7200s < required 14400s"}
+    {"id": "parakeet", "reason": "language 'hr' not supported (has: ['en'])"}
   ],
   "catalog_alternatives": [
-    {"id": "faster-whisper", "max_audio_duration": null}
+    {"id": "faster-whisper", "languages": null}
   ]
 }
 ```
@@ -201,7 +201,7 @@ docker compose logs gateway | grep engine_selected
 
 Extend the data model and add prerequisite methods before building the selector.
 
-1. Add missing fields to `EngineCapabilities` (`includes_diarization`, `max_audio_duration`)
+1. Add missing field to `EngineCapabilities` (`includes_diarization`)
 2. Update catalog loader to extract new fields
 3. Add `find_engines()` method to catalog for requirement-based queries
 4. Resolve faster-whisper word timestamps discrepancy
@@ -248,7 +248,6 @@ class EngineCapabilities(BaseModel):
 
     # NEW: For DAG shape decisions
     includes_diarization: bool = False    # Output includes speaker labels
-    max_audio_duration: int | None = None  # Max audio length in seconds
 ```
 
 **Files:**
@@ -263,13 +262,12 @@ class EngineCapabilities(BaseModel):
 
 ### 31.2: Update Catalog Loader
 
-Extract `max_audio_duration` from engine.yaml into capabilities.
+Extract `includes_diarization` from engine.yaml into capabilities.
 
 ```python
 # dalston/orchestrator/catalog.py
 capabilities = EngineCapabilities(
     # ... existing ...
-    max_audio_duration=caps_data.get("max_audio_duration"),
     includes_diarization=caps_data.get("includes_diarization", False),
 )
 ```
@@ -307,12 +305,6 @@ def _matches_requirements(
     lang = requirements.get("language")
     if lang and caps.languages is not None:
         if lang.lower() not in [l.lower() for l in caps.languages]:
-            return False
-
-    # Duration check
-    dur = requirements.get("audio_duration_s")
-    if dur and caps.max_audio_duration:
-        if dur > caps.max_audio_duration:
             return False
 
     return True
@@ -443,12 +435,6 @@ def _meets_requirements(caps: EngineCapabilities, requirements: dict) -> bool:
     if requirements.get("streaming") and not caps.supports_streaming:
         return False
 
-    # Duration (hard)
-    dur = requirements.get("audio_duration_s")
-    if dur and caps.max_audio_duration:
-        if dur > caps.max_audio_duration:
-            return False
-
     return True
 
 
@@ -549,10 +535,6 @@ def _explain_mismatch(self, engine: BatchEngineState) -> str:
     if self.requirements.get("streaming") and not caps.supports_streaming:
         reasons.append("streaming not supported")
 
-    dur = self.requirements.get("audio_duration_s")
-    if dur and caps.max_audio_duration and dur > caps.max_audio_duration:
-        reasons.append(f"max duration {caps.max_audio_duration}s < required {dur}s")
-
     return "; ".join(reasons) if reasons else "unknown"
 
 def to_dict(self) -> dict:
@@ -583,7 +565,7 @@ Convert user-facing config to internal requirements.
 
 ```python
 # dalston/orchestrator/engine_selector.py
-def extract_requirements(parameters: dict, audio_duration_s: float | None = None) -> dict:
+def extract_requirements(parameters: dict) -> dict:
     """Convert job parameters to selector requirements."""
     requirements = {}
 
@@ -591,10 +573,6 @@ def extract_requirements(parameters: dict, audio_duration_s: float | None = None
     language = parameters.get("language") or parameters.get("language_code")
     if language and language.lower() != "auto":
         requirements["language"] = language
-
-    # Audio duration
-    if audio_duration_s:
-        requirements["audio_duration_s"] = audio_duration_s
 
     # Streaming (realtime path only)
     if parameters.get("streaming"):
@@ -707,7 +685,6 @@ async def build_task_dag(
     parameters: dict,
     registry: BatchEngineRegistry,
     catalog: EngineCatalog,
-    audio_duration_s: float | None = None,
 ) -> list[Task]:
 ```
 
@@ -759,10 +736,9 @@ async def build_task_dag(
     parameters: dict,
     registry: BatchEngineRegistry,
     catalog: EngineCatalog,
-    audio_duration_s: float | None = None,
 ) -> list[Task]:
 
-    requirements = extract_requirements(parameters, audio_duration_s)
+    requirements = extract_requirements(parameters)
 
     # Select all engines (replaces DEFAULT_ENGINES)
     selections = await select_all_engines(
@@ -826,7 +802,7 @@ from dalston.orchestrator.engine_selector import (
 )
 
 async def submit_job(job_id: UUID, audio_uri: str, parameters: dict):
-    requirements = extract_requirements(parameters, audio_duration_s)
+    requirements = extract_requirements(parameters)
 
     try:
         selections = await select_all_engines(
@@ -841,7 +817,7 @@ async def submit_job(job_id: UUID, audio_uri: str, parameters: dict):
 
     # Build DAG with validated selections
     dag = await build_task_dag(
-        job_id, audio_uri, parameters, registry, catalog, audio_duration_s
+        job_id, audio_uri, parameters, registry, catalog
     )
 
     # Queue tasks...
@@ -882,7 +858,7 @@ async def _handle_engine_disappeared(task: Task, job: Job):
         )
         return
 
-    requirements = extract_requirements(job.parameters, job.audio_duration_s)
+    requirements = extract_requirements(job.parameters)
 
     try:
         new_selection = await select_engine(
@@ -1035,12 +1011,6 @@ class TestMeetsRequirements:
     def test_null_languages_means_all(self):
         caps = mock_capabilities(languages=None)
         assert _meets_requirements(caps, {"language": "hr"}) is True
-
-    def test_duration_filters_correctly(self):
-        caps = mock_capabilities(max_audio_duration=7200)
-        assert _meets_requirements(caps, {"audio_duration_s": 3600}) is True
-        assert _meets_requirements(caps, {"audio_duration_s": 14400}) is False
-
 
 class TestRanking:
     def test_prefers_native_word_timestamps(self):
@@ -1214,7 +1184,7 @@ docker compose logs orchestrator | grep dag_shape_decided
 
 ## Checkpoint
 
-- [ ] `includes_diarization` and `max_audio_duration` added to EngineCapabilities
+- [ ] `includes_diarization` added to EngineCapabilities
 - [ ] Catalog loader extracts new fields
 - [ ] `find_engines()` method added to catalog
 - [ ] faster-whisper word timestamps discrepancy resolved
