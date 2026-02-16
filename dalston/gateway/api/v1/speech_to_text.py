@@ -38,6 +38,10 @@ from dalston.gateway.dependencies import (
     get_redis,
     get_settings,
 )
+from dalston.gateway.services.audio_url import (
+    AudioUrlError,
+    download_audio_from_url,
+)
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
@@ -133,8 +137,16 @@ def map_timestamps_granularity(granularity: str) -> str:
     },
 )
 async def create_transcription(
-    file: Annotated[UploadFile, File(description="Audio file to transcribe")],
     api_key: RequireJobsWrite,
+    file: UploadFile | None = File(
+        default=None, description="Audio file to transcribe"
+    ),
+    cloud_storage_url: Annotated[
+        str | None,
+        Form(
+            description="HTTPS URL to audio file (S3/GCS presigned URL, Google Drive, Dropbox)"
+        ),
+    ] = None,
     model_id: Annotated[
         str,
         Form(description="Model ID: scribe_v1, scribe_v1_experimental, or scribe_v2"),
@@ -174,10 +186,45 @@ async def create_transcription(
 
     This endpoint accepts ElevenLabs parameters and translates them
     to Dalston's internal format.
+
+    Accepts either:
+    - file: Direct file upload
+    - cloud_storage_url: HTTPS URL to audio file (S3/GCS presigned URL, etc.)
     """
-    # Validate file
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="File must have a filename")
+    # Validate input: exactly one of file or cloud_storage_url required
+    if file is None and cloud_storage_url is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Either 'file' or 'cloud_storage_url' must be provided",
+        )
+    if file is not None and cloud_storage_url is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either 'file' or 'cloud_storage_url', not both",
+        )
+
+    # Handle cloud_storage_url: download the file
+    file_content: bytes
+    filename: str
+
+    if cloud_storage_url is not None:
+        try:
+            max_size = int(settings.audio_url_max_size_gb * 1024 * 1024 * 1024)
+            downloaded = await download_audio_from_url(
+                url=cloud_storage_url,
+                max_size=max_size,
+                timeout=settings.audio_url_timeout_seconds,
+            )
+            file_content = downloaded.content
+            filename = downloaded.filename
+        except AudioUrlError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+    else:
+        # Validate file upload
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="File must have a filename")
+        filename = file.filename
+        file_content = await file.read()
 
     # Map ElevenLabs parameters to Dalston parameters
     dalston_model = map_elevenlabs_model(model_id)
@@ -197,9 +244,6 @@ async def create_transcription(
                 "param": "model_id",
             },
         ) from e
-
-    # Read file content for upload
-    file_content = await file.read()
 
     # Build parameters dict (matching native API format with transcribe_config)
     parameters = {
@@ -223,13 +267,13 @@ async def create_transcription(
         parameters=parameters,
     )
 
-    # Upload once with correct job ID
+    # Upload audio with correct job ID
     storage = StorageService(settings)
-    await file.seek(0)
     audio_uri = await storage.upload_audio(
         job_id=job.id,
         file=file,
         file_content=file_content,
+        filename=filename,
     )
 
     # Update job with correct audio URI

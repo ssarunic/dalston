@@ -294,6 +294,8 @@ class Dalston:
         """
         if file is None and audio_url is None:
             raise ValidationError("Either file or audio_url must be provided")
+        if file is not None and audio_url is not None:
+            raise ValidationError("Provide either file or audio_url, not both")
 
         # Build form data
         data: dict[str, Any] = {
@@ -310,6 +312,10 @@ class Dalston:
                 else timestamps_granularity
             ),
         }
+
+        # Add audio_url if provided
+        if audio_url is not None:
+            data["audio_url"] = audio_url
 
         if initial_prompt is not None:
             data["initial_prompt"] = initial_prompt
@@ -1038,6 +1044,8 @@ class AsyncDalston:
         """
         if file is None and audio_url is None:
             raise ValidationError("Either file or audio_url must be provided")
+        if file is not None and audio_url is not None:
+            raise ValidationError("Provide either file or audio_url, not both")
 
         # Build form data
         data: dict[str, Any] = {
@@ -1054,6 +1062,10 @@ class AsyncDalston:
                 else timestamps_granularity
             ),
         }
+
+        # Add audio_url if provided
+        if audio_url is not None:
+            data["audio_url"] = audio_url
 
         if initial_prompt is not None:
             data["initial_prompt"] = initial_prompt

@@ -23,35 +23,51 @@ class StorageService:
     async def upload_audio(
         self,
         job_id: UUID,
-        file: UploadFile,
+        file: UploadFile | None = None,
         file_content: bytes | None = None,
+        filename: str | None = None,
+        content_type: str | None = None,
     ) -> str:
         """Upload audio file to S3.
 
         Args:
             job_id: Job UUID for path construction
-            file: Uploaded file from FastAPI
-            file_content: Pre-read file content (avoids re-reading if already probed)
+            file: Uploaded file from FastAPI (optional if file_content provided)
+            file_content: Pre-read file content (required if file is None)
+            filename: Explicit filename (used when file is None)
+            content_type: Explicit content type (used when file is None)
 
         Returns:
             S3 URI: s3://{bucket}/jobs/{job_id}/audio/original.{ext}
         """
+        # Resolve filename
+        resolved_filename = filename
+        if resolved_filename is None and file is not None:
+            resolved_filename = file.filename
+
         # Determine file extension
         ext = "bin"
-        if file.filename:
-            ext = Path(file.filename).suffix.lstrip(".") or "bin"
+        if resolved_filename:
+            ext = Path(resolved_filename).suffix.lstrip(".") or "bin"
 
         # Determine content type
-        content_type = file.content_type
-        if not content_type and file.filename:
-            content_type, _ = mimetypes.guess_type(file.filename)
-        content_type = content_type or "application/octet-stream"
+        resolved_content_type = content_type
+        if resolved_content_type is None and file is not None:
+            resolved_content_type = file.content_type
+        if not resolved_content_type and resolved_filename:
+            resolved_content_type, _ = mimetypes.guess_type(resolved_filename)
+        resolved_content_type = resolved_content_type or "application/octet-stream"
 
         # Build S3 key
         key = f"jobs/{job_id}/audio/original.{ext}"
 
         # Use provided content or read from file
-        content = file_content if file_content is not None else await file.read()
+        if file_content is not None:
+            content = file_content
+        elif file is not None:
+            content = await file.read()
+        else:
+            raise ValueError("Either file or file_content must be provided")
 
         # Upload to S3
         async with get_s3_client(self.settings) as s3:
@@ -59,7 +75,7 @@ class StorageService:
                 Bucket=self.bucket,
                 Key=key,
                 Body=content,
-                ContentType=content_type,
+                ContentType=resolved_content_type,
             )
 
         return f"s3://{self.bucket}/{key}"
