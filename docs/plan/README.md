@@ -130,6 +130,14 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 |---|-----------|------|------|--------|
 | [M26](milestones/M26-pii-detection-redaction.md) | PII Detection & Audio Redaction | Detect PII, redact text and audio | 8-10 | Not Started |
 
+## Engine Infrastructure Milestones
+
+| # | Milestone | Goal | Days | Status |
+|---|-----------|------|------|--------|
+| [M28](milestones/M28-batch-engine-registry.md) | Batch Engine Registry | Fail-fast when engines unavailable | 2-3 | Complete |
+| [M29](milestones/M29-engine-catalog-capabilities.md) | Engine Catalog & Capabilities | Validate job requirements against engine capabilities | 2-3 | Complete |
+| [M30](milestones/M30-engine-metadata-evolution.md) | Engine Metadata Evolution | Single source of truth for engine metadata; discovery API | 8-10 | Planning |
+
 ---
 
 ## Timeline
@@ -218,6 +226,8 @@ M11 + M21 ──► M25
 M6 ──► M24 (realtime session persistence, prerequisite for M7)
 
 M3 + M4 + M25 ──► M26
+
+M28 ──► M29 ──► M30
 ```
 
 - **M1-M5**: Core batch pipeline (sequential)
@@ -232,6 +242,7 @@ M3 + M4 + M25 ──► M26
 - **M24**: Realtime Session Persistence (needs M6 real-time, prerequisite for M7 hybrid)
 - **M25**: Data Retention & Audit (needs M11 auth, M21 webhooks for purge events)
 - **M26**: PII Detection & Audio Redaction (needs M3 word timestamps, M4 diarization, M25 retention)
+- **M28-M30**: Engine infrastructure (M28 registry → M29 capabilities → M30 metadata evolution)
 
 ---
 
@@ -262,3 +273,6 @@ Each milestone has a verification section. Key checkpoints:
 | M24 | Realtime sessions stored in DB; audio/transcript saved to S3; sessions visible in console |
 | M25 | Jobs auto-purged after retention period; audit log shows full lifecycle |
 | M26 | PII detected in transcript; redacted audio produced with silence over PII spans |
+| M28 | Job fails immediately with clear error when engine not running |
+| M29 | Job fails with capability mismatch error (e.g., unsupported language) |
+| M30 | `GET /v1/engines` returns engine list; `GET /v1/capabilities` returns aggregate capabilities |
