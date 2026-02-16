@@ -2,10 +2,17 @@
 
 Combines outputs from prepare, transcribe, align, and diarize stages
 into the standard Dalston transcript format with segment IDs and metadata.
+
+For per_channel mode with PII and audio redaction, also combines:
+- PII entities from each channel
+- Redacted mono WAVs into stereo output (using FFmpeg)
 """
 
 import os
+import subprocess
+import tempfile
 from datetime import UTC, datetime
+from pathlib import Path
 
 from dalston.engine_sdk import (
     Engine,
@@ -312,6 +319,10 @@ class FinalMergerEngine(Engine):
         Interleaves segments from multiple channel transcripts by timestamp,
         assigning speakers based on channel (SPEAKER_00 for ch0, etc.).
 
+        For per-channel PII and audio redaction:
+        - Collects PII entities from each channel
+        - Assembles redacted mono WAVs into stereo output using FFmpeg
+
         Args:
             input: Task input with previous_outputs containing channel data
             config: Merge task config
@@ -321,6 +332,8 @@ class FinalMergerEngine(Engine):
         """
         job_id = input.job_id
         word_timestamps = config.get("word_timestamps", False)
+        pii_detection_enabled = config.get("pii_detection", False)
+        redact_pii_audio = config.get("redact_pii_audio", False)
 
         # Get prepare output
         prepare_output = input.get_prepare_output()
@@ -360,15 +373,25 @@ class FinalMergerEngine(Engine):
 
         self.logger.info("merging_per_channel_outputs", channel_count=channel_count)
 
-        # Collect segments from all channels
+        # Collect segments and PII data from all channels
         all_segments: list[dict] = []
+        all_pii_entities: list[PIIEntity] = []
+        redacted_audio_uris: list[str] = []
         pipeline_warnings: list = []
         language = "en"
         language_confidence = 1.0
 
+        # Track entity counts across channels
+        total_entity_count_by_type: dict[str, int] = {}
+        total_entity_count_by_category: dict[str, int] = {}
+        pii_detection_tier: str | None = None
+        total_pii_processing_time_ms = 0
+
         for channel in range(channel_count):
             transcribe_key = f"transcribe_ch{channel}"
             align_key = f"align_ch{channel}"
+            pii_detect_key = f"pii_detect_ch{channel}"
+            audio_redact_key = f"audio_redact_ch{channel}"
 
             transcribe_output = input.get_transcribe_output(transcribe_key)
             align_output = input.get_align_output(align_key)
@@ -432,18 +455,99 @@ class FinalMergerEngine(Engine):
                         }
                     )
 
+            # Collect PII detection output for this channel
+            if pii_detection_enabled:
+                pii_detect_output = input.get_pii_detect_output(pii_detect_key)
+                if pii_detect_output:
+                    # Add channel info via speaker field
+                    for entity in pii_detect_output.entities:
+                        # Create a copy with channel info in speaker field
+                        speaker_with_channel = (
+                            f"{entity.speaker or ''}_ch{channel}"
+                            if entity.speaker
+                            else f"ch{channel}"
+                        )
+                        entity_with_channel = PIIEntity(
+                            entity_type=entity.entity_type,
+                            category=entity.category,
+                            start_offset=entity.start_offset,
+                            end_offset=entity.end_offset,
+                            start_time=entity.start_time,
+                            end_time=entity.end_time,
+                            confidence=entity.confidence,
+                            speaker=speaker_with_channel,
+                            redacted_value=entity.redacted_value,
+                            original_text=entity.original_text,
+                        )
+                        all_pii_entities.append(entity_with_channel)
+
+                    # Aggregate entity counts
+                    pii_detection_tier = pii_detect_output.detection_tier
+                    total_pii_processing_time_ms += (
+                        pii_detect_output.processing_time_ms or 0
+                    )
+
+                    for etype, count in (
+                        pii_detect_output.entity_count_by_type or {}
+                    ).items():
+                        total_entity_count_by_type[etype] = (
+                            total_entity_count_by_type.get(etype, 0) + count
+                        )
+
+                    for cat, count in (
+                        pii_detect_output.entity_count_by_category or {}
+                    ).items():
+                        total_entity_count_by_category[cat] = (
+                            total_entity_count_by_category.get(cat, 0) + count
+                        )
+
+                    self.logger.info(
+                        "collected_pii_from_channel",
+                        channel=channel,
+                        entity_count=len(pii_detect_output.entities),
+                    )
+
+            # Collect audio redaction output for this channel
+            if redact_pii_audio:
+                audio_redact_output = input.get_audio_redact_output(audio_redact_key)
+                if audio_redact_output and audio_redact_output.redacted_audio_uri:
+                    redacted_audio_uris.append(audio_redact_output.redacted_audio_uri)
+                    self.logger.info(
+                        "collected_redacted_audio_from_channel",
+                        channel=channel,
+                        uri=audio_redact_output.redacted_audio_uri,
+                    )
+
         # Sort all segments by start time (interleave)
         all_segments.sort(key=lambda s: s["start"])
 
-        # Build final segments with IDs
+        # Build final segments with IDs and per-segment redacted text
         segments: list[MergedSegment] = []
+        redacted_segment_texts: list[str] = []
+
         for idx, seg in enumerate(all_segments):
             words = self._normalize_words(seg["words"]) if seg.get("words") else None
+
+            # Compute per-segment redacted text if PII was detected
+            redacted_seg_text: str | None = None
+            if pii_detection_enabled and all_pii_entities:
+                seg_channel = seg.get("channel", 0)
+                redacted_seg_text = self._redact_segment_text(
+                    segment_text=seg["text"],
+                    segment_start=seg["start"],
+                    segment_end=seg["end"],
+                    segment_channel=seg_channel,
+                    pii_entities=all_pii_entities,
+                    words=seg.get("words"),
+                )
+                redacted_segment_texts.append(redacted_seg_text)
+
             segment = MergedSegment(
                 id=f"seg_{idx:03d}",
                 start=seg["start"],
                 end=seg["end"],
                 text=seg["text"],
+                redacted_text=redacted_seg_text,
                 speaker=seg["speaker"],
                 words=words,
                 emotion=None,
@@ -461,13 +565,47 @@ class FinalMergerEngine(Engine):
         # Combine text from all segments
         text = " ".join(seg.text for seg in segments if seg.text)
 
+        # Build full redacted text from per-segment redacted texts
+        redacted_text: str | None = None
+        if redacted_segment_texts:
+            redacted_text = " ".join(redacted_segment_texts)
+
         # Determine pipeline stages
         pipeline_stages = ["prepare"]
         for ch in range(channel_count):
             pipeline_stages.append(f"transcribe_ch{ch}")
             if word_timestamps:
                 pipeline_stages.append(f"align_ch{ch}")
+            if pii_detection_enabled:
+                pipeline_stages.append(f"pii_detect_ch{ch}")
+            if redact_pii_audio:
+                pipeline_stages.append(f"audio_redact_ch{ch}")
         pipeline_stages.append("merge")
+
+        # Assemble redacted stereo audio if we have redacted mono files
+        redacted_stereo_uri: str | None = None
+        if redact_pii_audio and len(redacted_audio_uris) == channel_count:
+            redacted_stereo_uri = self._assemble_stereo_audio(
+                job_id=str(job_id),
+                channel_uris=redacted_audio_uris,
+                sample_rate=sample_rate,
+            )
+            if redacted_stereo_uri:
+                self.logger.info(
+                    "assembled_stereo_audio", stereo_uri=redacted_stereo_uri
+                )
+
+        # Build PII metadata if detection was enabled
+        pii_metadata: PIIMetadata | None = None
+        if pii_detection_enabled and (all_pii_entities or pii_detection_tier):
+            pii_metadata = PIIMetadata(
+                detection_tier=pii_detection_tier or "standard",
+                entities_detected=len(all_pii_entities),
+                entity_count_by_type=total_entity_count_by_type or None,
+                entity_count_by_category=total_entity_count_by_category or None,
+                redacted_audio_uri=redacted_stereo_uri,
+                processing_time_ms=total_pii_processing_time_ms or None,
+            )
 
         # Build metadata
         metadata = TranscriptMetadata(
@@ -496,12 +634,17 @@ class FinalMergerEngine(Engine):
             segments=segments,
             paragraphs=[],
             summary=None,
+            redacted_text=redacted_text,
+            pii_entities=all_pii_entities if all_pii_entities else None,
+            pii_metadata=pii_metadata,
         )
 
         self.logger.info(
             "merged_per_channel_transcript",
             segment_count=len(segments),
             speaker_count=len(speakers),
+            pii_entities_count=len(all_pii_entities) if all_pii_entities else 0,
+            redacted_stereo_audio=redacted_stereo_uri is not None,
         )
 
         # Upload to S3
@@ -511,6 +654,202 @@ class FinalMergerEngine(Engine):
         self.logger.info("uploaded_transcript", transcript_uri=transcript_uri)
 
         return TaskOutput(data=transcript)
+
+    def _assemble_stereo_audio(
+        self,
+        job_id: str,
+        channel_uris: list[str],
+        sample_rate: int = 16000,
+    ) -> str | None:
+        """Assemble multiple mono WAV files into a stereo WAV file using FFmpeg.
+
+        Downloads channel audio files from S3, uses FFmpeg to merge them into
+        stereo, and uploads the result back to S3.
+
+        Args:
+            job_id: Job ID for output path
+            channel_uris: List of S3 URIs for mono channel files (ch0, ch1, ...)
+            sample_rate: Target sample rate
+
+        Returns:
+            S3 URI of the assembled stereo file, or None on failure
+        """
+        if len(channel_uris) < 2:
+            self.logger.warning(
+                "insufficient_channels_for_stereo",
+                channel_count=len(channel_uris),
+            )
+            return None
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmppath = Path(tmpdir)
+
+            # Download channel files
+            local_channels: list[Path] = []
+            for idx, uri in enumerate(channel_uris):
+                local_path = tmppath / f"channel_{idx}.wav"
+                try:
+                    io.download_file(uri, local_path)
+                    local_channels.append(local_path)
+                    self.logger.info(
+                        "downloaded_channel_audio",
+                        channel=idx,
+                        local_path=str(local_path),
+                    )
+                except Exception as e:
+                    self.logger.error(
+                        "failed_to_download_channel", channel=idx, uri=uri, error=str(e)
+                    )
+                    return None
+
+            # Build FFmpeg command to merge mono files into stereo
+            # Using amerge filter to combine channels
+            output_path = tmppath / "redacted_stereo.wav"
+
+            # For 2 channels: merge left and right
+            # FFmpeg command: ffmpeg -i ch0.wav -i ch1.wav -filter_complex amerge=inputs=2 -ac 2 output.wav
+            cmd = ["ffmpeg", "-y"]
+            for ch_path in local_channels:
+                cmd.extend(["-i", str(ch_path)])
+
+            cmd.extend(
+                [
+                    "-filter_complex",
+                    f"amerge=inputs={len(local_channels)}",
+                    "-ac",
+                    str(len(local_channels)),
+                    "-ar",
+                    str(sample_rate),
+                    str(output_path),
+                ]
+            )
+
+            self.logger.info("running_ffmpeg_stereo_assembly", command=" ".join(cmd))
+
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+                if result.returncode != 0:
+                    self.logger.error(
+                        "ffmpeg_stereo_assembly_failed",
+                        returncode=result.returncode,
+                        stderr=result.stderr[:500] if result.stderr else None,
+                    )
+                    return None
+            except subprocess.TimeoutExpired:
+                self.logger.error("ffmpeg_stereo_assembly_timeout")
+                return None
+            except Exception as e:
+                self.logger.error("ffmpeg_stereo_assembly_error", error=str(e))
+                return None
+
+            # Upload stereo file to S3
+            s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
+            stereo_uri = f"s3://{s3_bucket}/jobs/{job_id}/redacted_stereo.wav"
+
+            try:
+                io.upload_file(str(output_path), stereo_uri)
+                self.logger.info("uploaded_stereo_audio", uri=stereo_uri)
+                return stereo_uri
+            except Exception as e:
+                self.logger.error("failed_to_upload_stereo", error=str(e))
+                return None
+
+    def _redact_segment_text(
+        self,
+        segment_text: str,
+        segment_start: float,
+        segment_end: float,
+        segment_channel: int,
+        pii_entities: list[PIIEntity],
+        words: list | None = None,
+    ) -> str:
+        """Redact PII from segment text based on timing overlap.
+
+        For per-channel mode, we can't use character offsets because they're
+        relative to each channel's original text. Instead, we match entities
+        by time overlap and use word-level replacement if words are available.
+
+        Args:
+            segment_text: Original segment text
+            segment_start: Segment start time
+            segment_end: Segment end time
+            segment_channel: Channel index (0, 1, etc.)
+            pii_entities: All PII entities with timing info
+            words: Word-level timing info if available
+
+        Returns:
+            Redacted segment text
+        """
+        # Find entities that overlap with this segment's time range and channel
+        channel_suffix = f"ch{segment_channel}"
+        overlapping_entities = []
+        for entity in pii_entities:
+            # Check if entity is from this channel (speaker ends with ch0, ch1, etc.)
+            if entity.speaker and entity.speaker.endswith(channel_suffix):
+                # Check time overlap
+                if entity.start_time < segment_end and entity.end_time > segment_start:
+                    overlapping_entities.append(entity)
+
+        if not overlapping_entities:
+            return segment_text
+
+        # If we have words, do word-level replacement
+        if words:
+            redacted_words = []
+            for w in words:
+                word_text = w.get("text", "") if isinstance(w, dict) else w.text
+                word_start = w.get("start", 0) if isinstance(w, dict) else w.start
+                word_end = w.get("end", 0) if isinstance(w, dict) else w.end
+
+                # Check if any entity overlaps with this word
+                redacted = False
+                for entity in overlapping_entities:
+                    if entity.start_time <= word_start and entity.end_time >= word_end:
+                        # Word is fully within entity - redact it
+                        redacted_words.append(f"[{entity.entity_type.upper()}]")
+                        redacted = True
+                        break
+                    elif word_start < entity.end_time and word_end > entity.start_time:
+                        # Partial overlap - also redact
+                        redacted_words.append(f"[{entity.entity_type.upper()}]")
+                        redacted = True
+                        break
+
+                if not redacted:
+                    redacted_words.append(word_text)
+
+            # Deduplicate consecutive redaction markers
+            result_words = []
+            prev_marker = None
+            for word in redacted_words:
+                if word.startswith("[") and word.endswith("]"):
+                    if word != prev_marker:
+                        result_words.append(word)
+                        prev_marker = word
+                else:
+                    result_words.append(word)
+                    prev_marker = None
+
+            return " ".join(result_words)
+
+        # No words - do simple text replacement using original_text
+        redacted = segment_text
+        # Sort by length (longest first) to avoid partial replacements
+        sorted_entities = sorted(
+            overlapping_entities, key=lambda e: len(e.original_text), reverse=True
+        )
+        for entity in sorted_entities:
+            if entity.original_text in redacted:
+                redacted = redacted.replace(
+                    entity.original_text, f"[{entity.entity_type.upper()}]", 1
+                )
+
+        return redacted
 
     def _normalize_words(self, words: list) -> list[Word]:
         """Normalize word structures per pipeline interface spec.

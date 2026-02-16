@@ -75,6 +75,7 @@ class TaskInput:
         previous_outputs: Results from dependency tasks, keyed by stage name
         config: Engine-specific configuration from job parameters
         media: Audio file metadata (for prepare stage - format, duration, etc.)
+        stage: Stage name for this task (e.g., "transcribe", "audio_redact_ch0")
     """
 
     task_id: str
@@ -83,6 +84,7 @@ class TaskInput:
     previous_outputs: dict[str, Any] = field(default_factory=dict)
     config: dict[str, Any] = field(default_factory=dict)
     media: dict[str, Any] | None = None
+    stage: str = "unknown"
 
     def get_prepare_output(self) -> PrepareOutput | None:
         """Get typed prepare stage output.
@@ -124,21 +126,31 @@ class TaskInput:
         """
         return self._get_typed_output("diarize", DiarizeOutput)
 
-    def get_pii_detect_output(self) -> PIIDetectOutput | None:
+    def get_pii_detect_output(self, key: str = "pii_detect") -> PIIDetectOutput | None:
         """Get typed PII detection stage output.
+
+        Args:
+            key: Output key, defaults to "pii_detect". Use "pii_detect_ch0" etc
+                 for per-channel mode.
 
         Returns:
             PIIDetectOutput if present and valid, None otherwise
         """
-        return self._get_typed_output("pii_detect", PIIDetectOutput)
+        return self._get_typed_output(key, PIIDetectOutput)
 
-    def get_audio_redact_output(self) -> AudioRedactOutput | None:
+    def get_audio_redact_output(
+        self, key: str = "audio_redact"
+    ) -> AudioRedactOutput | None:
         """Get typed audio redaction stage output.
+
+        Args:
+            key: Output key, defaults to "audio_redact". Use "audio_redact_ch0" etc
+                 for per-channel mode.
 
         Returns:
             AudioRedactOutput if present and valid, None otherwise
         """
-        return self._get_typed_output("audio_redact", AudioRedactOutput)
+        return self._get_typed_output(key, AudioRedactOutput)
 
     def _get_typed_output(self, key: str, model: type[T]) -> T | None:
         """Get a typed output from previous_outputs.

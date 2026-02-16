@@ -25,6 +25,21 @@ class AudioRedactionEngine(Engine):
 
     BEEP_FREQUENCY = 1000  # 1kHz beep tone
 
+    def _get_channel_suffix(self, stage: str) -> str:
+        """Extract channel suffix from stage name.
+
+        Args:
+            stage: Stage name (e.g., "audio_redact", "audio_redact_ch0")
+
+        Returns:
+            Channel suffix for output file (e.g., "", "_ch0")
+        """
+        if "_ch" in stage:
+            # Extract channel part: "audio_redact_ch0" -> "_ch0"
+            idx = stage.rfind("_ch")
+            return stage[idx:]
+        return ""
+
     def process(self, input: TaskInput) -> TaskOutput:
         """Redact PII from audio file.
 
@@ -37,6 +52,11 @@ class AudioRedactionEngine(Engine):
         config = input.config
         job_id = input.job_id
         audio_path = input.audio_path
+        stage = input.stage
+
+        # Determine output filename with channel suffix
+        channel_suffix = self._get_channel_suffix(stage)
+        output_filename = f"redacted{channel_suffix}.wav"
 
         # Get config
         mode_str = config.get("redaction_mode", "silence")
@@ -50,11 +70,17 @@ class AudioRedactionEngine(Engine):
             buffer_ms=buffer_ms,
         )
 
-        # Get PII detection output
-        pii_output = input.get_pii_detect_output()
+        # Get PII detection output - use channel-specific key if available
+        # For audio_redact_ch0, look for pii_detect_ch0
+        pii_key = "pii_detect"
+        if "_ch" in stage:
+            idx = stage.rfind("_ch")
+            pii_key = f"pii_detect{stage[idx:]}"
+
+        pii_output = input.get_pii_detect_output(pii_key)
         if not pii_output:
-            # Try raw output
-            raw_pii = input.get_raw_output("pii_detect") or {}
+            # Try raw output with channel-specific key
+            raw_pii = input.get_raw_output(pii_key) or {}
             entities = raw_pii.get("entities", [])
         else:
             entities = [e.model_dump() for e in pii_output.entities]
@@ -63,7 +89,7 @@ class AudioRedactionEngine(Engine):
             self.logger.info("no_entities_to_redact", job_id=job_id)
             # No entities - just copy the audio
             s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
-            redacted_uri = f"s3://{s3_bucket}/jobs/{job_id}/audio/redacted.wav"
+            redacted_uri = f"s3://{s3_bucket}/jobs/{job_id}/audio/{output_filename}"
             io.upload_file(audio_path, redacted_uri)
 
             output = AudioRedactOutput(
@@ -101,7 +127,7 @@ class AudioRedactionEngine(Engine):
 
             # Upload to S3
             s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
-            redacted_uri = f"s3://{s3_bucket}/jobs/{job_id}/audio/redacted.wav"
+            redacted_uri = f"s3://{s3_bucket}/jobs/{job_id}/audio/{output_filename}"
             io.upload_file(output_path, redacted_uri)
 
             self.logger.info(

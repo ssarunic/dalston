@@ -219,6 +219,7 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
             transcribe_config=transcribe_config,
             word_timestamps=word_timestamps,
             num_channels=num_channels,
+            parameters=parameters,
         )
 
     # Task (optional): Diarization (depends only on prepare, runs parallel with transcribe/align)
@@ -402,12 +403,16 @@ def _build_per_channel_dag(
     transcribe_config: dict,
     word_timestamps: bool,
     num_channels: int = 2,
+    parameters: dict | None = None,
 ) -> list[Task]:
     """Build DAG for per_channel speaker detection mode.
 
-    Creates parallel transcription (and optionally alignment) tasks
-    for each audio channel. Stage names always use the ``_chN`` suffix
-    (e.g. ``transcribe_ch0``, ``align_ch0``) even for a single channel.
+    Creates parallel processing pipelines for each audio channel:
+        prepare (split_channels=true)
+            ↓
+        transcribe_ch0 → align_ch0 → pii_detect_ch0 → audio_redact_ch0 ─┐
+                                                                         ├─ merge
+        transcribe_ch1 → align_ch1 → pii_detect_ch1 → audio_redact_ch1 ─┘
 
     Args:
         tasks: List with prepare_task already added
@@ -417,15 +422,21 @@ def _build_per_channel_dag(
         transcribe_config: Base transcription config
         word_timestamps: Whether to include alignment tasks
         num_channels: Number of audio channels (default: 2)
+        parameters: Original job parameters (for PII config)
 
     Returns:
         Complete task list including merge
     """
-    all_channel_tasks = []  # All per-channel tasks (transcribe + align)
-    last_channel_tasks = []  # Last task per channel (for execution ordering)
+    parameters = parameters or {}
+    all_channel_tasks: list[Task] = []
+    last_channel_tasks: list[Task] = []
 
     # Skip alignment for engines with native word timestamps (e.g., Parakeet)
     skip_alignment = engines["transcribe"] in NATIVE_WORD_TIMESTAMP_ENGINES
+
+    # Check if PII detection is enabled
+    pii_detection_enabled = parameters.get("pii_detection", False)
+    redact_pii_audio = parameters.get("redact_pii_audio", False)
 
     for channel in range(num_channels):
         # Transcription task for this channel
@@ -453,7 +464,7 @@ def _build_per_channel_dag(
 
         last_task = transcribe_task
 
-        # Alignment task for this channel (optional, skipped for native word timestamp engines)
+        # Alignment task for this channel (optional)
         if word_timestamps and not skip_alignment:
             align_task = Task(
                 id=uuid4(),
@@ -473,11 +484,81 @@ def _build_per_channel_dag(
             all_channel_tasks.append(align_task)
             last_task = align_task
 
+        # PII detection task for this channel
+        if pii_detection_enabled:
+            pii_tier = parameters.get("pii_detection_tier", "standard")
+            if pii_tier not in VALID_PII_DETECTION_TIERS:
+                pii_tier = "standard"
+
+            pii_detect_config = {
+                "detection_tier": pii_tier,
+                "entity_types": parameters.get("pii_entity_types"),
+                "confidence_threshold": parameters.get("pii_confidence_threshold", 0.5),
+                "channel": channel,
+            }
+
+            pii_detect_task = Task(
+                id=uuid4(),
+                job_id=job_id,
+                stage=f"pii_detect_ch{channel}",
+                engine_id=engines["pii_detect"],
+                status=TaskStatus.PENDING,
+                dependencies=[last_task.id],
+                config=pii_detect_config,
+                input_uri=None,
+                output_uri=None,
+                retries=0,
+                max_retries=2,
+                required=True,
+            )
+            tasks.append(pii_detect_task)
+            all_channel_tasks.append(pii_detect_task)
+            last_task = pii_detect_task
+
+            # Audio redaction task for this channel
+            if redact_pii_audio:
+                redaction_mode = parameters.get("pii_redaction_mode", "silence")
+                if redaction_mode not in VALID_PII_REDACTION_MODES:
+                    redaction_mode = "silence"
+
+                audio_redact_config = {
+                    "redaction_mode": redaction_mode,
+                    "buffer_ms": parameters.get("pii_buffer_ms", 50),
+                    "channel": channel,
+                }
+
+                audio_redact_task = Task(
+                    id=uuid4(),
+                    job_id=job_id,
+                    stage=f"audio_redact_ch{channel}",
+                    engine_id=engines["audio_redact"],
+                    status=TaskStatus.PENDING,
+                    dependencies=[pii_detect_task.id],
+                    config=audio_redact_config,
+                    input_uri=None,
+                    output_uri=None,
+                    retries=0,
+                    max_retries=2,
+                    required=True,
+                )
+                tasks.append(audio_redact_task)
+                all_channel_tasks.append(audio_redact_task)
+                last_task = audio_redact_task
+
         last_channel_tasks.append(last_task)
 
-    # Merge task depends on prepare and ALL per-channel tasks
-    # (needs both transcribe and align outputs for each channel)
+    # Merge depends on prepare and all per-channel tasks
     merge_dependencies = [prepare_task.id] + [t.id for t in all_channel_tasks]
+
+    merge_config: dict = {
+        "word_timestamps": word_timestamps,
+        "speaker_detection": "per_channel",
+        "channel_count": num_channels,
+    }
+    if pii_detection_enabled:
+        merge_config["pii_detection"] = True
+    if redact_pii_audio:
+        merge_config["redact_pii_audio"] = True
 
     merge_task = Task(
         id=uuid4(),
@@ -486,11 +567,7 @@ def _build_per_channel_dag(
         engine_id=engines["merge"],
         status=TaskStatus.PENDING,
         dependencies=merge_dependencies,
-        config={
-            "word_timestamps": word_timestamps,
-            "speaker_detection": "per_channel",
-            "channel_count": num_channels,
-        },
+        config=merge_config,
         input_uri=None,
         output_uri=None,
         retries=0,
@@ -696,6 +773,7 @@ def _build_dag_with_engines(
             word_timestamps=word_timestamps,
             skip_alignment=skip_alignment,
             num_channels=num_channels,
+            parameters=parameters,
         )
 
     # Diarization (if requested and not skipped due to native support)
@@ -862,8 +940,16 @@ def _build_per_channel_dag_with_engines(
     word_timestamps: bool,
     skip_alignment: bool,
     num_channels: int = 2,
+    parameters: dict | None = None,
 ) -> list[Task]:
     """Build per-channel DAG with pre-selected engines (M31).
+
+    Creates parallel processing pipelines for each audio channel:
+        prepare (split_channels=true)
+            ↓
+        transcribe_ch0 → align_ch0 → pii_detect_ch0 → audio_redact_ch0 ─┐
+                                                                         ├─ merge
+        transcribe_ch1 → align_ch1 → pii_detect_ch1 → audio_redact_ch1 ─┘
 
     Args:
         tasks: List with prepare_task already added
@@ -874,12 +960,18 @@ def _build_per_channel_dag_with_engines(
         word_timestamps: Whether word timestamps are requested
         skip_alignment: Whether to skip alignment (transcriber has native support)
         num_channels: Number of audio channels
+        parameters: Original job parameters (for PII config)
 
     Returns:
         Complete task list including merge
     """
-    all_channel_tasks = []
-    last_channel_tasks = []
+    parameters = parameters or {}
+    all_channel_tasks: list[Task] = []
+    last_channel_tasks: list[Task] = []
+
+    # Check if PII detection is enabled
+    pii_detection_enabled = parameters.get("pii_detection", False)
+    redact_pii_audio = parameters.get("redact_pii_audio", False)
 
     for channel in range(num_channels):
         channel_transcribe_config = {
@@ -906,6 +998,7 @@ def _build_per_channel_dag_with_engines(
 
         last_task = transcribe_task
 
+        # Alignment task for this channel
         if word_timestamps and not skip_alignment:
             align_task = Task(
                 id=uuid4(),
@@ -925,9 +1018,83 @@ def _build_per_channel_dag_with_engines(
             all_channel_tasks.append(align_task)
             last_task = align_task
 
+        # PII detection task for this channel
+        if pii_detection_enabled:
+            pii_tier = parameters.get("pii_detection_tier", "standard")
+            if pii_tier not in VALID_PII_DETECTION_TIERS:
+                pii_tier = "standard"
+
+            pii_detect_config = {
+                "detection_tier": pii_tier,
+                "entity_types": parameters.get("pii_entity_types"),
+                "confidence_threshold": parameters.get("pii_confidence_threshold", 0.5),
+                "channel": channel,
+            }
+
+            pii_detect_task = Task(
+                id=uuid4(),
+                job_id=job_id,
+                stage=f"pii_detect_ch{channel}",
+                engine_id=engines.get("pii_detect", DEFAULT_ENGINES["pii_detect"]),
+                status=TaskStatus.PENDING,
+                dependencies=[last_task.id],
+                config=pii_detect_config,
+                input_uri=None,
+                output_uri=None,
+                retries=0,
+                max_retries=2,
+                required=True,
+            )
+            tasks.append(pii_detect_task)
+            all_channel_tasks.append(pii_detect_task)
+            last_task = pii_detect_task
+
+            # Audio redaction task for this channel
+            if redact_pii_audio:
+                redaction_mode = parameters.get("pii_redaction_mode", "silence")
+                if redaction_mode not in VALID_PII_REDACTION_MODES:
+                    redaction_mode = "silence"
+
+                audio_redact_config = {
+                    "redaction_mode": redaction_mode,
+                    "buffer_ms": parameters.get("pii_buffer_ms", 50),
+                    "channel": channel,
+                }
+
+                audio_redact_task = Task(
+                    id=uuid4(),
+                    job_id=job_id,
+                    stage=f"audio_redact_ch{channel}",
+                    engine_id=engines.get(
+                        "audio_redact", DEFAULT_ENGINES["audio_redact"]
+                    ),
+                    status=TaskStatus.PENDING,
+                    dependencies=[pii_detect_task.id],
+                    config=audio_redact_config,
+                    input_uri=None,
+                    output_uri=None,
+                    retries=0,
+                    max_retries=2,
+                    required=True,
+                )
+                tasks.append(audio_redact_task)
+                all_channel_tasks.append(audio_redact_task)
+                last_task = audio_redact_task
+
         last_channel_tasks.append(last_task)
 
+    # Merge depends on prepare and all per-channel tasks
     merge_dependencies = [prepare_task.id] + [t.id for t in all_channel_tasks]
+
+    merge_config: dict = {
+        "word_timestamps": word_timestamps,
+        "speaker_detection": "per_channel",
+        "channel_count": num_channels,
+    }
+    if pii_detection_enabled:
+        merge_config["pii_detection"] = True
+    if redact_pii_audio:
+        merge_config["redact_pii_audio"] = True
 
     merge_task = Task(
         id=uuid4(),
@@ -936,11 +1103,7 @@ def _build_per_channel_dag_with_engines(
         engine_id=engines.get("merge", DEFAULT_ENGINES["merge"]),
         status=TaskStatus.PENDING,
         dependencies=merge_dependencies,
-        config={
-            "word_timestamps": word_timestamps,
-            "speaker_detection": "per_channel",
-            "channel_count": num_channels,
-        },
+        config=merge_config,
         input_uri=None,
         output_uri=None,
         retries=0,

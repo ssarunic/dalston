@@ -1,6 +1,6 @@
 schema_version: "1.1"
 id: audio-redactor
-stage: redact
+stage: audio_redact
 name: Audio Redaction (FFmpeg)
 version: 1.0.0
 description: |

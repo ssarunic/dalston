@@ -490,6 +490,27 @@ async def select_pipeline_engines(
             user_preference=parameters.get("engine_diarize"),
         )
 
+    # PII detection (conditional on parameters)
+    pii_detection_enabled = parameters.get("pii_detection", False)
+    if pii_detection_enabled:
+        selections["pii_detect"] = await select_engine(
+            "pii_detect",
+            {},  # No special requirements for PII detection
+            registry,
+            catalog,
+            user_preference=parameters.get("engine_pii_detect"),
+        )
+
+        # Audio redaction (conditional on parameters, requires PII detection)
+        if parameters.get("redact_pii_audio", False):
+            selections["audio_redact"] = await select_engine(
+                "audio_redact",
+                {},  # No special requirements for audio redaction
+                registry,
+                catalog,
+                user_preference=parameters.get("engine_audio_redact"),
+            )
+
     # Merge (always required)
     selections["merge"] = await select_engine(
         "merge",
@@ -505,6 +526,8 @@ async def select_pipeline_engines(
         engines={stage: sel.engine_id for stage, sel in selections.items()},
         alignment_included="align" in selections,
         diarization_included="diarize" in selections,
+        pii_detection_included="pii_detect" in selections,
+        audio_redaction_included="audio_redact" in selections,
     )
 
     return selections

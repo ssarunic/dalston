@@ -302,3 +302,194 @@ class TestBuildTaskDagParakeet:
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
         assert transcribe_task.engine_id == "parakeet"
         assert transcribe_task.config["model"] == "nvidia/parakeet-rnnt-0.6b"
+
+
+class TestBuildTaskDagPerChannelPII:
+    """Tests for per-channel PII detection and audio redaction."""
+
+    @pytest.fixture
+    def job_id(self) -> UUID:
+        return uuid4()
+
+    @pytest.fixture
+    def audio_uri(self) -> str:
+        return "s3://test-bucket/audio/test.wav"
+
+    def test_per_channel_pii_stages_created(self, job_id: UUID, audio_uri: str):
+        """Test that per-channel PII detection stages are created."""
+        parameters = {
+            "speaker_detection": "per_channel",
+            "num_channels": 2,
+            "pii_detection": True,
+        }
+
+        tasks = build_task_dag(job_id, audio_uri, parameters)
+
+        stages = [t.stage for t in tasks]
+        # Should have per-channel PII detect stages
+        assert "pii_detect_ch0" in stages
+        assert "pii_detect_ch1" in stages
+        # Should NOT have single pii_detect stage
+        assert "pii_detect" not in stages
+
+    def test_per_channel_audio_redact_stages_created(
+        self, job_id: UUID, audio_uri: str
+    ):
+        """Test that per-channel audio redaction stages are created."""
+        parameters = {
+            "speaker_detection": "per_channel",
+            "num_channels": 2,
+            "pii_detection": True,
+            "redact_pii_audio": True,
+        }
+
+        tasks = build_task_dag(job_id, audio_uri, parameters)
+
+        stages = [t.stage for t in tasks]
+        # Should have per-channel audio redact stages
+        assert "audio_redact_ch0" in stages
+        assert "audio_redact_ch1" in stages
+        # Should NOT have single audio_redact stage
+        assert "audio_redact" not in stages
+
+    def test_per_channel_pii_dependencies_correct(self, job_id: UUID, audio_uri: str):
+        """Test that PII detect depends on align (or transcribe if no align)."""
+        parameters = {
+            "speaker_detection": "per_channel",
+            "num_channels": 2,
+            "timestamps_granularity": "word",
+            "pii_detection": True,
+        }
+
+        tasks = build_task_dag(job_id, audio_uri, parameters)
+
+        task_by_stage = {t.stage: t for t in tasks}
+
+        # pii_detect_ch0 should depend on align_ch0
+        assert (
+            task_by_stage["align_ch0"].id
+            in task_by_stage["pii_detect_ch0"].dependencies
+        )
+        # pii_detect_ch1 should depend on align_ch1
+        assert (
+            task_by_stage["align_ch1"].id
+            in task_by_stage["pii_detect_ch1"].dependencies
+        )
+
+    def test_per_channel_audio_redact_dependencies_correct(
+        self, job_id: UUID, audio_uri: str
+    ):
+        """Test that audio redact depends on pii detect."""
+        parameters = {
+            "speaker_detection": "per_channel",
+            "num_channels": 2,
+            "pii_detection": True,
+            "redact_pii_audio": True,
+        }
+
+        tasks = build_task_dag(job_id, audio_uri, parameters)
+
+        task_by_stage = {t.stage: t for t in tasks}
+
+        # audio_redact_ch0 should depend on pii_detect_ch0
+        assert (
+            task_by_stage["pii_detect_ch0"].id
+            in task_by_stage["audio_redact_ch0"].dependencies
+        )
+        # audio_redact_ch1 should depend on pii_detect_ch1
+        assert (
+            task_by_stage["pii_detect_ch1"].id
+            in task_by_stage["audio_redact_ch1"].dependencies
+        )
+
+    def test_per_channel_merge_depends_on_all_stages(
+        self, job_id: UUID, audio_uri: str
+    ):
+        """Test that merge depends on all per-channel stages."""
+        parameters = {
+            "speaker_detection": "per_channel",
+            "num_channels": 2,
+            "timestamps_granularity": "word",
+            "pii_detection": True,
+            "redact_pii_audio": True,
+        }
+
+        tasks = build_task_dag(job_id, audio_uri, parameters)
+
+        task_by_stage = {t.stage: t for t in tasks}
+        merge_deps = task_by_stage["merge"].dependencies
+
+        # Merge should depend on prepare and all per-channel tasks
+        assert task_by_stage["prepare"].id in merge_deps
+        assert task_by_stage["transcribe_ch0"].id in merge_deps
+        assert task_by_stage["transcribe_ch1"].id in merge_deps
+        assert task_by_stage["align_ch0"].id in merge_deps
+        assert task_by_stage["align_ch1"].id in merge_deps
+        assert task_by_stage["pii_detect_ch0"].id in merge_deps
+        assert task_by_stage["pii_detect_ch1"].id in merge_deps
+        assert task_by_stage["audio_redact_ch0"].id in merge_deps
+        assert task_by_stage["audio_redact_ch1"].id in merge_deps
+
+    def test_per_channel_merge_config_has_pii_flags(self, job_id: UUID, audio_uri: str):
+        """Test that merge config includes PII flags."""
+        parameters = {
+            "speaker_detection": "per_channel",
+            "num_channels": 2,
+            "pii_detection": True,
+            "redact_pii_audio": True,
+        }
+
+        tasks = build_task_dag(job_id, audio_uri, parameters)
+
+        merge_task = next(t for t in tasks if t.stage == "merge")
+
+        assert merge_task.config.get("pii_detection") is True
+        assert merge_task.config.get("redact_pii_audio") is True
+
+    def test_per_channel_full_pipeline_task_count(self, job_id: UUID, audio_uri: str):
+        """Test full per-channel pipeline has expected task count."""
+        parameters = {
+            "speaker_detection": "per_channel",
+            "num_channels": 2,
+            "timestamps_granularity": "word",
+            "pii_detection": True,
+            "redact_pii_audio": True,
+        }
+
+        tasks = build_task_dag(job_id, audio_uri, parameters)
+
+        # Expected stages:
+        # - prepare (1)
+        # - transcribe_ch0, transcribe_ch1 (2)
+        # - align_ch0, align_ch1 (2)
+        # - pii_detect_ch0, pii_detect_ch1 (2)
+        # - audio_redact_ch0, audio_redact_ch1 (2)
+        # - merge (1)
+        # Total: 10 tasks
+        assert len(tasks) == 10
+
+    def test_per_channel_pii_no_redaction_task_count(
+        self, job_id: UUID, audio_uri: str
+    ):
+        """Test per-channel with PII detection but no redaction."""
+        parameters = {
+            "speaker_detection": "per_channel",
+            "num_channels": 2,
+            "timestamps_granularity": "word",
+            "pii_detection": True,
+            "redact_pii_audio": False,  # No audio redaction
+        }
+
+        tasks = build_task_dag(job_id, audio_uri, parameters)
+
+        stages = [t.stage for t in tasks]
+
+        # Should have pii_detect but NOT audio_redact
+        assert "pii_detect_ch0" in stages
+        assert "pii_detect_ch1" in stages
+        assert "audio_redact_ch0" not in stages
+        assert "audio_redact_ch1" not in stages
+
+        # Expected: prepare, transcribe_ch0/1, align_ch0/1, pii_detect_ch0/1, merge
+        # Total: 8 tasks
+        assert len(tasks) == 8
