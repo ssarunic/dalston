@@ -76,6 +76,7 @@ dev = [
     "ruff>=0.9.0",
     "pre-commit>=4.0.0",
     "numpy>=1.24.0",  # For VAD tests
+    "jsonschema>=4.0.0",  # For engine YAML validation (M30)
     # OpenTelemetry test utilities (M19)
     "opentelemetry-test-utils>=0.41b0,<1.0.0",
 ]
