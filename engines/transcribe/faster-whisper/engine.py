@@ -11,7 +11,6 @@ from faster_whisper import WhisperModel
 from dalston.engine_sdk import (
     AlignmentMethod,
     Engine,
-    EngineCapabilities,
     Segment,
     TaskInput,
     TaskOutput,
@@ -228,23 +227,9 @@ class FasterWhisperEngine(Engine):
             "cuda_device_count": cuda_device_count,
         }
 
-    def get_capabilities(self) -> EngineCapabilities:
-        """Return engine capabilities for M29 catalog validation.
-
-        Faster-Whisper supports 100+ languages (all Whisper languages),
-        word-level timestamps via attention, and runs on CPU or GPU.
-        """
-        return EngineCapabilities(
-            engine_id="faster-whisper",
-            version="1.0.0",
-            stages=["transcribe"],
-            languages=None,  # All languages supported (Whisper multilingual)
-            supports_word_timestamps=True,
-            supports_streaming=False,
-            model_variants=["tiny", "base", "small", "medium", "large-v2", "large-v3"],
-            gpu_required=False,  # Can run on CPU (falls back automatically)
-            gpu_vram_mb=6000,  # Recommended for large-v3 on GPU
-        )
+    # Capabilities are loaded from engine.yaml by the base class.
+    # word_timestamps is set to false because attention-based timestamps
+    # are not as accurate as forced alignment (whisperx-align).
 
 
 if __name__ == "__main__":
