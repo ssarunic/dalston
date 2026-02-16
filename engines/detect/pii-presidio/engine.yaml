@@ -1,3 +1,4 @@
+schema_version: "1.0"
 id: pii-presidio
 stage: detect
 name: PII Detection (Presidio + GLiNER)

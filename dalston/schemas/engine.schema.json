@@ -1,0 +1,457 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "https://dalston.dev/schemas/engine.schema.json",
+  "title": "Dalston Engine Metadata Schema",
+  "description": "Schema for validating engine.yaml files in the Dalston transcription system",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "version",
+    "description",
+    "container",
+    "capabilities"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": ["1.0", "1.1"],
+      "description": "Schema version for migration tracking"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9.-]*[a-z0-9]$",
+      "minLength": 2,
+      "maxLength": 64,
+      "description": "Unique engine identifier (lowercase, hyphens and dots allowed)"
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "prepare",
+        "transcribe",
+        "align",
+        "diarize",
+        "detect",
+        "redact",
+        "refine",
+        "merge"
+      ],
+      "description": "Pipeline stage for batch engines"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["realtime"],
+      "description": "Engine type for non-batch engines"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Human-readable engine name"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[a-zA-Z0-9]+)?$",
+      "description": "Semantic version (e.g., 1.0.0, 1.2.3-beta)"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 10,
+      "description": "Multi-line description of engine functionality"
+    },
+    "container": {
+      "$ref": "#/$defs/container"
+    },
+    "capabilities": {
+      "$ref": "#/$defs/capabilities"
+    },
+    "input": {
+      "$ref": "#/$defs/input"
+    },
+    "config_schema": {
+      "type": "object",
+      "description": "JSON Schema for engine configuration options"
+    },
+    "output_schema": {
+      "type": "object",
+      "description": "JSON Schema for engine output format"
+    },
+    "server": {
+      "$ref": "#/$defs/server"
+    },
+    "models": {
+      "type": "object",
+      "description": "Model variants for realtime engines",
+      "additionalProperties": {
+        "$ref": "#/$defs/modelVariant"
+      }
+    },
+    "audio": {
+      "$ref": "#/$defs/audio"
+    },
+    "vad": {
+      "$ref": "#/$defs/vad"
+    },
+    "heartbeat": {
+      "$ref": "#/$defs/heartbeat"
+    },
+    "environment": {
+      "type": "object",
+      "description": "Environment variable definitions for realtime engines",
+      "additionalProperties": {
+        "$ref": "#/$defs/envVar"
+      }
+    },
+    "hf_compat": {
+      "$ref": "#/$defs/hfCompat"
+    },
+    "hardware": {
+      "$ref": "#/$defs/hardware"
+    },
+    "performance": {
+      "$ref": "#/$defs/performance"
+    }
+  },
+  "oneOf": [
+    {
+      "required": ["stage"],
+      "properties": {
+        "type": false
+      },
+      "description": "Batch engine with stage field"
+    },
+    {
+      "required": ["type"],
+      "properties": {
+        "stage": false
+      },
+      "description": "Realtime engine with type field"
+    }
+  ],
+  "$defs": {
+    "container": {
+      "type": "object",
+      "required": ["gpu", "memory"],
+      "properties": {
+        "gpu": {
+          "type": "string",
+          "enum": ["required", "optional", "none"],
+          "description": "GPU requirement level"
+        },
+        "memory": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?[KMGT]i?$",
+          "description": "Memory requirement (e.g., 512M, 8G, 4Gi)"
+        },
+        "model_cache": {
+          "type": "string",
+          "description": "Path to model cache directory"
+        }
+      },
+      "additionalProperties": false
+    },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "languages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Supported language codes, or ['all'] for universal support"
+        },
+        "max_audio_duration": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum audio duration in seconds"
+        },
+        "streaming": {
+          "type": "boolean",
+          "description": "Whether engine supports streaming mode"
+        },
+        "word_timestamps": {
+          "type": "boolean",
+          "description": "Whether engine produces word-level timestamps"
+        },
+        "max_sessions": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum concurrent sessions (realtime engines)"
+        },
+        "detection_tiers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["fast", "standard", "thorough"]
+          },
+          "description": "Detection tiers for PII engines"
+        },
+        "redaction_modes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["silence", "beep"]
+          },
+          "description": "Redaction modes for audio redaction engines"
+        }
+      },
+      "additionalProperties": true
+    },
+    "input": {
+      "type": "object",
+      "properties": {
+        "audio_formats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Supported input audio formats"
+        },
+        "sample_rate": {
+          "oneOf": [
+            {"type": "integer", "minimum": 8000, "maximum": 192000},
+            {"type": "string", "enum": ["any"]}
+          ],
+          "description": "Required sample rate or 'any'"
+        },
+        "channels": {
+          "oneOf": [
+            {"type": "integer", "minimum": 1, "maximum": 8},
+            {"type": "string", "enum": ["any"]}
+          ],
+          "description": "Required channels or 'any'"
+        }
+      },
+      "additionalProperties": false
+    },
+    "server": {
+      "type": "object",
+      "required": ["port", "protocol", "path"],
+      "properties": {
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "WebSocket server port"
+        },
+        "protocol": {
+          "type": "string",
+          "enum": ["websocket"],
+          "description": "Server protocol"
+        },
+        "path": {
+          "type": "string",
+          "description": "WebSocket endpoint path"
+        }
+      },
+      "additionalProperties": false
+    },
+    "modelVariant": {
+      "type": "object",
+      "required": ["name", "description"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Model identifier"
+        },
+        "description": {
+          "type": "string",
+          "description": "Model description"
+        },
+        "latency": {
+          "type": "string",
+          "enum": ["very_low", "low", "medium", "high"],
+          "description": "Latency classification"
+        },
+        "accuracy": {
+          "type": "string",
+          "enum": ["good", "excellent"],
+          "description": "Accuracy classification"
+        }
+      },
+      "additionalProperties": false
+    },
+    "audio": {
+      "type": "object",
+      "required": ["encodings", "sample_rates", "channels"],
+      "properties": {
+        "encodings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["pcm_s16le", "pcm_f32le", "mulaw", "alaw"]
+          },
+          "description": "Supported audio encodings"
+        },
+        "sample_rates": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "Supported sample rates"
+        },
+        "channels": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Required number of channels"
+        }
+      },
+      "additionalProperties": false
+    },
+    "vad": {
+      "type": "object",
+      "required": ["engine"],
+      "properties": {
+        "engine": {
+          "type": "string",
+          "description": "VAD engine name"
+        },
+        "threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "VAD activation threshold"
+        },
+        "min_speech_duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum speech duration in milliseconds"
+        },
+        "min_silence_duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum silence duration in milliseconds"
+        },
+        "lookback_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Lookback window in milliseconds"
+        }
+      },
+      "additionalProperties": false
+    },
+    "heartbeat": {
+      "type": "object",
+      "required": ["interval_seconds", "timeout_seconds"],
+      "properties": {
+        "interval_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Heartbeat interval in seconds"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Heartbeat timeout in seconds"
+        }
+      },
+      "additionalProperties": false
+    },
+    "envVar": {
+      "type": "object",
+      "required": ["description"],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Environment variable description"
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether the variable is required"
+        },
+        "default": {
+          "type": "string",
+          "description": "Default value if not provided"
+        }
+      },
+      "additionalProperties": false
+    },
+    "hfCompat": {
+      "type": "object",
+      "description": "HuggingFace ecosystem compatibility metadata (schema 1.1+)",
+      "properties": {
+        "pipeline_tag": {
+          "type": "string",
+          "enum": [
+            "automatic-speech-recognition",
+            "speaker-diarization",
+            "voice-activity-detection",
+            "audio-classification",
+            "dalston:audio-preparation",
+            "dalston:merge",
+            "dalston:pii-redaction",
+            "dalston:audio-redaction"
+          ],
+          "description": "HuggingFace task taxonomy or Dalston extension"
+        },
+        "library_name": {
+          "type": "string",
+          "description": "Underlying ML framework"
+        },
+        "license": {
+          "type": "string",
+          "description": "SPDX license identifier"
+        }
+      },
+      "additionalProperties": false
+    },
+    "hardware": {
+      "type": "object",
+      "description": "Hardware requirements metadata (schema 1.1+)",
+      "properties": {
+        "min_vram_gb": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum GPU VRAM in GB"
+        },
+        "recommended_gpu": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["a10g", "t4", "l4", "a100", "h100"]
+          },
+          "description": "Recommended GPU types"
+        },
+        "supports_cpu": {
+          "type": "boolean",
+          "description": "Whether CPU inference is supported"
+        },
+        "min_ram_gb": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum system RAM in GB"
+        }
+      },
+      "additionalProperties": false
+    },
+    "performance": {
+      "type": "object",
+      "description": "Performance characteristics metadata (schema 1.1+)",
+      "properties": {
+        "rtf_gpu": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Real-time factor on GPU (0.05 = 20x faster than realtime)"
+        },
+        "rtf_cpu": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Real-time factor on CPU, null if unsupported"
+        },
+        "max_concurrent_jobs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum concurrent job limit"
+        },
+        "warm_start_latency_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Latency after model is loaded"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,3 +1,4 @@
+schema_version: "1.0"
 id: audio-redactor
 stage: redact
 name: Audio Redaction (FFmpeg)

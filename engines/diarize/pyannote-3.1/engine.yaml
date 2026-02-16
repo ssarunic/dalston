@@ -1,3 +1,4 @@
+schema_version: "1.0"
 id: pyannote-3.1
 stage: diarize
 name: Pyannote Speaker Diarization 3.1

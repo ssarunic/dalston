@@ -1,3 +1,4 @@
+schema_version: "1.0"
 id: whisper-streaming
 type: realtime
 name: Whisper Streaming
