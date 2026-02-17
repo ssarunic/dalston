@@ -35,6 +35,7 @@ class WorkerStatus:
     active_sessions: int
     models: list[str]
     languages: list[str]
+    engine: str = "unknown"
 
     @classmethod
     def from_worker_state(cls, state: WorkerState) -> WorkerStatus:
@@ -47,6 +48,7 @@ class WorkerStatus:
             active_sessions=state.active_sessions,
             models=state.models_loaded,
             languages=state.languages_supported,
+            engine=state.engine,
         )
 
 

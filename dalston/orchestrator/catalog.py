@@ -124,7 +124,7 @@ class EngineCatalog:
                 min_ram_gb=hw_data.get("min_ram_gb"),
                 rtf_gpu=perf_data.get("rtf_gpu"),
                 rtf_cpu=perf_data.get("rtf_cpu"),
-                max_concurrent_jobs=perf_data.get("max_concurrent_jobs"),
+                max_concurrency=caps_data.get("max_concurrency"),
                 # M31: includes_diarization for capability-driven routing
                 includes_diarization=caps_data.get("includes_diarization", False),
             )

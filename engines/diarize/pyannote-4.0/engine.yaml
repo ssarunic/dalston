@@ -25,6 +25,7 @@ capabilities:
     - all  # Language-agnostic speaker diarization
   max_audio_duration: 7200  # 2 hours
   streaming: false
+  max_concurrency: 4
 
 input:
   audio_formats:
@@ -125,5 +126,4 @@ hardware:
 performance:
   rtf_gpu: 0.08
   rtf_cpu: 1.2
-  max_concurrent_jobs: 4
   warm_start_latency_ms: 500

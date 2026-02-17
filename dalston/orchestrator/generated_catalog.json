@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-16T13:57:09.724181+00:00",
+  "generated_at": "2026-02-17T09:05:38.075307+00:00",
   "schema_version": "1.1",
   "engine_count": 11,
   "engines": {
@@ -19,7 +19,7 @@
         "supports_word_timestamps": true,
         "supports_streaming": false,
         "max_audio_duration": 7200,
-        "max_sessions": null
+        "max_concurrency": 8
       },
       "hardware": {
         "gpu_required": false,
@@ -35,7 +35,6 @@
       "performance": {
         "rtf_gpu": 0.02,
         "rtf_cpu": 0.3,
-        "max_concurrent_jobs": 8,
         "warm_start_latency_ms": 200
       },
       "hf_compat": {
@@ -55,19 +54,19 @@
       "id": "pii-presidio",
       "name": "PII Detection (Presidio + GLiNER)",
       "version": "1.0.0",
-      "stage": "detect",
+      "stage": "pii_detect",
       "type": null,
       "description": "Detects personally identifiable information using Microsoft Presidio\nwith GLiNER for ML-based entity recognition. Supports three detection\ntiers: fast (regex only), standard (+ GLiNER), thorough (+ LLM).",
-      "image": "dalston/stt-batch-detect-pii-presidio:1.0.0",
+      "image": "dalston/stt-batch-pii_detect-pii-presidio:1.0.0",
       "capabilities": {
         "stages": [
-          "detect"
+          "pii_detect"
         ],
         "languages": null,
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": null,
-        "max_sessions": null
+        "max_concurrency": 8
       },
       "hardware": {
         "gpu_required": false,
@@ -81,7 +80,6 @@
       "performance": {
         "rtf_gpu": 0.01,
         "rtf_cpu": 0.05,
-        "max_concurrent_jobs": 8,
         "warm_start_latency_ms": 100
       },
       "hf_compat": {
@@ -106,7 +104,7 @@
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 7200,
-        "max_sessions": null
+        "max_concurrency": 4
       },
       "hardware": {
         "gpu_required": false,
@@ -122,7 +120,6 @@
       "performance": {
         "rtf_gpu": 0.1,
         "rtf_cpu": 1.5,
-        "max_concurrent_jobs": 4,
         "warm_start_latency_ms": 500
       },
       "hf_compat": {
@@ -154,7 +151,7 @@
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 7200,
-        "max_sessions": null
+        "max_concurrency": 4
       },
       "hardware": {
         "gpu_required": false,
@@ -170,7 +167,6 @@
       "performance": {
         "rtf_gpu": 0.08,
         "rtf_cpu": 1.2,
-        "max_concurrent_jobs": 4,
         "warm_start_latency_ms": 500
       },
       "hf_compat": {
@@ -189,11 +185,11 @@
     "final-merger": {
       "id": "final-merger",
       "name": "Final Merger",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "stage": "merge",
       "type": null,
-      "description": "Combines outputs from upstream pipeline stages into the\nstandard Dalston transcript format.\n\nAdds segment IDs, metadata, and writes the canonical\ntranscript.json file for the Gateway to read.",
-      "image": "dalston/stt-batch-merge-final-merger:1.0.0",
+      "description": "Combines outputs from upstream pipeline stages into the\nstandard Dalston transcript format.\n\nAdds segment IDs, metadata, and writes the canonical\ntranscript.json file for the Gateway to read.\n\nFor per_channel mode with PII detection and audio redaction:\n- Collects and merges PII entities from each channel\n- Assembles redacted mono WAVs into stereo output (FFmpeg)",
+      "image": "dalston/stt-batch-merge-final-merger:1.1.0",
       "capabilities": {
         "stages": [
           "merge"
@@ -202,7 +198,7 @@
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 86400,
-        "max_sessions": null
+        "max_concurrency": 16
       },
       "hardware": {
         "gpu_required": false,
@@ -216,7 +212,6 @@
       "performance": {
         "rtf_gpu": null,
         "rtf_cpu": 0.001,
-        "max_concurrent_jobs": 16,
         "warm_start_latency_ms": 5
       },
       "hf_compat": {
@@ -241,7 +236,7 @@
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 14400,
-        "max_sessions": null
+        "max_concurrency": 8
       },
       "hardware": {
         "gpu_required": false,
@@ -255,7 +250,6 @@
       "performance": {
         "rtf_gpu": null,
         "rtf_cpu": 0.1,
-        "max_concurrent_jobs": 8,
         "warm_start_latency_ms": 10
       },
       "hf_compat": {
@@ -297,7 +291,7 @@
         "supports_word_timestamps": true,
         "supports_streaming": true,
         "max_audio_duration": null,
-        "max_sessions": 4
+        "max_concurrency": 4
       },
       "hardware": {
         "gpu_required": true,
@@ -314,7 +308,6 @@
       "performance": {
         "rtf_gpu": 0.05,
         "rtf_cpu": null,
-        "max_concurrent_jobs": 4,
         "warm_start_latency_ms": 100
       },
       "hf_compat": {
@@ -337,7 +330,7 @@
         "supports_word_timestamps": true,
         "supports_streaming": true,
         "max_audio_duration": null,
-        "max_sessions": 4
+        "max_concurrency": 4
       },
       "hardware": {
         "gpu_required": false,
@@ -354,7 +347,6 @@
       "performance": {
         "rtf_gpu": 0.1,
         "rtf_cpu": 0.5,
-        "max_concurrent_jobs": 4,
         "warm_start_latency_ms": 200
       },
       "hf_compat": {
@@ -367,19 +359,19 @@
       "id": "audio-redactor",
       "name": "Audio Redaction (FFmpeg)",
       "version": "1.0.0",
-      "stage": "redact",
+      "stage": "audio_redact",
       "type": null,
       "description": "Redacts audio by replacing PII segments with silence or beep tones.\nUses FFmpeg for efficient single-pass processing. Requires PII detection\noutput with entity timing information.",
-      "image": "dalston/stt-batch-redact-audio-redactor:1.0.0",
+      "image": "dalston/stt-batch-audio_redact-audio-redactor:1.0.0",
       "capabilities": {
         "stages": [
-          "redact"
+          "audio_redact"
         ],
         "languages": null,
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": null,
-        "max_sessions": null
+        "max_concurrency": 8
       },
       "hardware": {
         "gpu_required": false,
@@ -393,7 +385,6 @@
       "performance": {
         "rtf_gpu": null,
         "rtf_cpu": 0.05,
-        "max_concurrent_jobs": 8,
         "warm_start_latency_ms": 10
       },
       "hf_compat": {
@@ -415,10 +406,10 @@
           "transcribe"
         ],
         "languages": null,
-        "supports_word_timestamps": true,
+        "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 7200,
-        "max_sessions": null
+        "max_concurrency": 4
       },
       "hardware": {
         "gpu_required": false,
@@ -435,7 +426,6 @@
       "performance": {
         "rtf_gpu": 0.05,
         "rtf_cpu": 0.8,
-        "max_concurrent_jobs": 4,
         "warm_start_latency_ms": 50
       },
       "hf_compat": {
@@ -469,7 +459,7 @@
         "supports_word_timestamps": true,
         "supports_streaming": true,
         "max_audio_duration": 7200,
-        "max_sessions": null
+        "max_concurrency": 4
       },
       "hardware": {
         "gpu_required": true,
@@ -486,7 +476,6 @@
       "performance": {
         "rtf_gpu": 0.0005,
         "rtf_cpu": null,
-        "max_concurrent_jobs": 4,
         "warm_start_latency_ms": 100
       },
       "hf_compat": {

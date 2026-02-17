@@ -19,6 +19,7 @@ capabilities:
   max_audio_duration: 7200  # 2 hours
   streaming: true  # Native streaming support (used by realtime variant)
   word_timestamps: true  # Native word-level timestamps via RNNT alignment
+  max_concurrency: 4
 
 input:
   audio_formats:
@@ -104,5 +105,4 @@ hardware:
 performance:
   rtf_gpu: 0.0005
   rtf_cpu: null
-  max_concurrent_jobs: 4
   warm_start_latency_ms: 100

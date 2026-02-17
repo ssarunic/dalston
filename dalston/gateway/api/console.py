@@ -369,18 +369,6 @@ class EnginesResponse(BaseModel):
     realtime_engines: list[RealtimeWorker]
 
 
-# Known batch engines and their stages
-BATCH_ENGINES = {
-    "audio-prepare": "prepare",
-    "faster-whisper": "transcribe",
-    "parakeet": "transcribe",
-    "whisperx-align": "align",
-    "pyannote-3.1": "diarize",
-    "pyannote-4.0": "diarize",
-    "final-merger": "merge",
-}
-
-
 # Heartbeat timeout thresholds (seconds)
 HEARTBEAT_STALE_THRESHOLD = 30  # Mark as stale after 30s without heartbeat
 
@@ -396,12 +384,17 @@ async def get_engines(
     redis: Redis = Depends(get_redis),
     session_router: SessionRouter = Depends(get_session_router),
 ) -> EnginesResponse:
-    """Get status of all engines."""
-    # Discover engines from registry (M28 batch engine registry)
-    # First get all registered engine IDs from the SET
-    registered_engine_ids = await redis.smembers("dalston:batch:engines")
+    """Get status of all engines.
 
-    # Then fetch state for each registered engine
+    Uses the engine catalog as the source of truth for which engines exist,
+    combined with Redis heartbeats for live status.
+    """
+    from dalston.orchestrator.catalog import get_catalog
+
+    catalog = get_catalog()
+
+    # Fetch heartbeats for all registered engines from Redis
+    registered_engine_ids = await redis.smembers("dalston:batch:engines")
     discovered_heartbeats: dict[str, dict[str, str]] = {}
     for engine_id in registered_engine_ids:
         data = await redis.hgetall(f"dalston:batch:engine:{engine_id}")
@@ -411,8 +404,15 @@ async def get_engines(
     now = datetime.now(UTC)
     batch_engines = []
 
-    # Process known engines (may be offline if not in discovered_heartbeats)
-    for engine_id, stage in BATCH_ENGINES.items():
+    # Process all batch engines from catalog (skip realtime engines)
+    for entry in catalog.get_all_engines():
+        # Skip realtime engines (they have empty stages list)
+        if not entry.capabilities.stages:
+            continue
+
+        engine_id = entry.engine_id
+        stage = entry.capabilities.stages[0]
+
         queue_key = f"dalston:queue:{engine_id}"
         queue_depth = await redis.llen(queue_key) or 0
 
@@ -446,40 +446,14 @@ async def get_engines(
             )
         )
 
-    # Add any discovered engines not in BATCH_ENGINES (dynamically registered)
-    for engine_id, heartbeat in discovered_heartbeats.items():
-        if engine_id not in BATCH_ENGINES:
-            queue_key = f"dalston:queue:{engine_id}"
-            queue_depth = await redis.llen(queue_key) or 0
-
-            try:
-                last_seen = datetime.fromisoformat(heartbeat["last_heartbeat"])
-                age = (now - last_seen).total_seconds()
-            except (KeyError, ValueError):
-                age = float("inf")
-
-            if age > HEARTBEAT_STALE_THRESHOLD:
-                status = "stale"
-            else:
-                status = heartbeat.get("status", "idle")
-
-            processing = 1 if heartbeat.get("current_task") else 0
-
-            batch_engines.append(
-                BatchEngine(
-                    engine_id=engine_id,
-                    stage=heartbeat.get("stage", "unknown"),
-                    status=status,
-                    queue_depth=queue_depth,
-                    processing=processing,
-                )
-            )
-
-    # Get realtime workers
+    # Get realtime workers and track which engine types have running workers
     realtime_engines = []
+    running_engine_types: set[str] = set()
+
     try:
         workers = await session_router.list_workers()
         for worker in workers:
+            running_engine_types.add(worker.engine)
             realtime_engines.append(
                 RealtimeWorker(
                     worker_id=worker.worker_id,
@@ -494,6 +468,30 @@ async def get_engines(
     except Exception:
         # Session router may not be available
         pass
+
+    # Add offline entries for realtime engines in catalog with no running workers
+    for entry in catalog.get_all_engines():
+        # Realtime engines have empty stages list
+        if entry.capabilities.stages:
+            continue
+
+        engine_id = entry.engine_id
+        # Check if any workers are running for this engine type
+        # Worker engine field uses short name (e.g., "whisper" not "whisper-streaming")
+        engine_short_name = engine_id.replace("-streaming", "")
+        if engine_short_name not in running_engine_types:
+            # No workers running - add offline placeholder
+            realtime_engines.append(
+                RealtimeWorker(
+                    worker_id=f"{engine_id} (offline)",
+                    endpoint="",
+                    status="offline",
+                    capacity=entry.capabilities.max_concurrency or 4,
+                    active_sessions=0,
+                    models=[],
+                    languages=entry.capabilities.languages or [],
+                )
+            )
 
     return EnginesResponse(
         batch_engines=batch_engines,

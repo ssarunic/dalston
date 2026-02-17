@@ -143,7 +143,7 @@ class Engine(ABC):
             min_ram_gb=hardware.get("min_ram_gb"),
             rtf_gpu=performance.get("rtf_gpu"),
             rtf_cpu=performance.get("rtf_cpu"),
-            max_concurrent_jobs=performance.get("max_concurrent_jobs"),
+            max_concurrency=caps.get("max_concurrency"),
         )
 
     def _load_engine_yaml(self) -> dict[str, Any] | None:

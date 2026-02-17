@@ -254,7 +254,6 @@ class TestValidateEngine:
         }
         valid_batch_engine["performance"] = {
             "rtf_gpu": 0.05,
-            "max_concurrent_jobs": 4,
         }
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:

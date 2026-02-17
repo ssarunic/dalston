@@ -20,6 +20,7 @@ capabilities:
     - fast
     - standard
     - thorough
+  max_concurrency: 8
 
 config_schema:
   type: object
@@ -99,5 +100,4 @@ hardware:
 performance:
   rtf_gpu: 0.01
   rtf_cpu: 0.05
-  max_concurrent_jobs: 8
   warm_start_latency_ms: 100

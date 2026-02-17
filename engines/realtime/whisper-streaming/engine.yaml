@@ -16,7 +16,7 @@ container:
 capabilities:
   languages:
     - all  # 99 languages supported with auto-detection
-  max_sessions: 4
+  max_concurrency: 4
   streaming: true
   word_timestamps: true
 
@@ -94,5 +94,4 @@ hardware:
 performance:
   rtf_gpu: 0.1
   rtf_cpu: 0.5
-  max_concurrent_jobs: 4
   warm_start_latency_ms: 200

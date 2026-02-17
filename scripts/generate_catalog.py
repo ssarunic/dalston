@@ -80,7 +80,7 @@ def transform_engine_to_catalog_entry(data: dict, yaml_path: Path) -> dict:
             "supports_word_timestamps": caps.get("word_timestamps", False),
             "supports_streaming": caps.get("streaming", False),
             "max_audio_duration": caps.get("max_audio_duration"),
-            "max_sessions": caps.get("max_sessions"),
+            "max_concurrency": caps.get("max_concurrency"),
         },
         "hardware": {
             "gpu_required": gpu_required,
@@ -94,7 +94,6 @@ def transform_engine_to_catalog_entry(data: dict, yaml_path: Path) -> dict:
         "performance": {
             "rtf_gpu": performance.get("rtf_gpu"),
             "rtf_cpu": performance.get("rtf_cpu"),
-            "max_concurrent_jobs": performance.get("max_concurrent_jobs"),
             "warm_start_latency_ms": performance.get("warm_start_latency_ms"),
         },
     }

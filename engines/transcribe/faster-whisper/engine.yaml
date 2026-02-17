@@ -19,6 +19,7 @@ capabilities:
   max_audio_duration: 7200  # 2 hours
   streaming: false
   word_timestamps: false  # Has timestamps but they're inaccurate; use alignment stage
+  max_concurrency: 4
 
 input:
   audio_formats:
@@ -142,5 +143,4 @@ hardware:
 performance:
   rtf_gpu: 0.05
   rtf_cpu: 0.8
-  max_concurrent_jobs: 4
   warm_start_latency_ms: 50

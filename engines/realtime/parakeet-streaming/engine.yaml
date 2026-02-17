@@ -16,7 +16,7 @@ container:
 capabilities:
   languages:
     - en  # English only
-  max_sessions: 4
+  max_concurrency: 4
   streaming: true
   word_timestamps: true  # Native word-level timestamps via RNNT
 
@@ -87,5 +87,4 @@ hardware:
 performance:
   rtf_gpu: 0.05
   rtf_cpu: null
-  max_concurrent_jobs: 4
   warm_start_latency_ms: 100

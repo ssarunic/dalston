@@ -175,10 +175,10 @@
           "type": "boolean",
           "description": "Whether engine produces word-level timestamps"
         },
-        "max_sessions": {
+        "max_concurrency": {
           "type": "integer",
           "minimum": 1,
-          "description": "Maximum concurrent sessions (realtime engines)"
+          "description": "Maximum concurrent work units (jobs for batch, sessions for realtime)"
         },
         "detection_tiers": {
           "type": "array",
@@ -439,11 +439,6 @@
           "type": ["number", "null"],
           "minimum": 0,
           "description": "Real-time factor on CPU, null if CPU unsupported"
-        },
-        "max_concurrent_jobs": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Maximum concurrent job limit"
         },
         "warm_start_latency_ms": {
           "type": "integer",

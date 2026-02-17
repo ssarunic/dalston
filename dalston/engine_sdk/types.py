@@ -41,7 +41,7 @@ class EngineCapabilities(BaseModel):
         min_ram_gb: Minimum system RAM in GB (M30)
         rtf_gpu: Real-time factor on GPU (M30)
         rtf_cpu: Real-time factor on CPU (M30)
-        max_concurrent_jobs: Maximum concurrent job limit (M30)
+        max_concurrency: Max concurrent work units - jobs (batch) or sessions (realtime)
         includes_diarization: Whether output includes speaker labels (M31)
     """
 
@@ -59,7 +59,7 @@ class EngineCapabilities(BaseModel):
     min_ram_gb: int | None = None
     rtf_gpu: float | None = None
     rtf_cpu: float | None = None
-    max_concurrent_jobs: int | None = None
+    max_concurrency: int | None = None
     # M31: Capability-driven routing - output includes speaker labels (skip diarize stage)
     includes_diarization: bool = False
 

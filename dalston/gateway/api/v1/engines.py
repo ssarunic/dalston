@@ -29,6 +29,7 @@ class EngineCapabilitiesResponse(BaseModel):
     supports_word_timestamps: bool = False
     supports_streaming: bool = False
     max_audio_duration_s: int | None = None
+    max_concurrency: int | None = None
 
 
 class EngineHardwareResponse(BaseModel):
@@ -45,7 +46,6 @@ class EnginePerformanceResponse(BaseModel):
 
     rtf_gpu: float | None = None
     rtf_cpu: float | None = None
-    max_concurrent_jobs: int | None = None
 
 
 class EngineResponse(BaseModel):
@@ -142,6 +142,7 @@ async def list_engines(
                     supports_word_timestamps=caps.supports_word_timestamps,
                     supports_streaming=caps.supports_streaming,
                     max_audio_duration_s=None,  # Not in current schema
+                    max_concurrency=caps.max_concurrency,
                 ),
                 hardware=EngineHardwareResponse(
                     gpu_required=caps.gpu_required,
@@ -154,7 +155,6 @@ async def list_engines(
                 performance=EnginePerformanceResponse(
                     rtf_gpu=caps.rtf_gpu,
                     rtf_cpu=caps.rtf_cpu,
-                    max_concurrent_jobs=caps.max_concurrent_jobs,
                 ),
             )
         )

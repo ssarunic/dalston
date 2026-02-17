@@ -22,6 +22,7 @@ capabilities:
   max_audio_duration: 7200  # 2 hours
   streaming: false
   word_timestamps: true
+  max_concurrency: 8
 
 input:
   audio_formats:
@@ -112,5 +113,4 @@ hardware:
 performance:
   rtf_gpu: 0.02
   rtf_cpu: 0.3
-  max_concurrent_jobs: 8
   warm_start_latency_ms: 200

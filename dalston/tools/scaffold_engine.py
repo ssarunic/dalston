@@ -154,6 +154,7 @@ capabilities:
   languages:
 {languages_yaml}
   max_audio_duration: 7200
+  max_concurrency: 4
   streaming: false
   word_timestamps: {str(config.word_timestamps).lower()}
 
@@ -193,7 +194,6 @@ hardware:
 performance:
   rtf_gpu: {rtf_gpu}
   rtf_cpu: {rtf_cpu}
-  max_concurrent_jobs: 4
   warm_start_latency_ms: 100
 """
 

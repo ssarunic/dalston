@@ -55,7 +55,6 @@ def valid_batch_engine_yaml() -> dict:
         "performance": {
             "rtf_gpu": 0.05,
             "rtf_cpu": 0.8,
-            "max_concurrent_jobs": 4,
             "warm_start_latency_ms": 50,
         },
         "hf_compat": {
@@ -83,7 +82,7 @@ def valid_realtime_engine_yaml() -> dict:
         "capabilities": {
             "languages": ["all"],
             "streaming": True,
-            "max_sessions": 4,
+            "max_concurrency": 4,
         },
         "hardware": {
             "min_vram_gb": 6,
@@ -92,7 +91,6 @@ def valid_realtime_engine_yaml() -> dict:
         "performance": {
             "rtf_gpu": 0.1,
             "rtf_cpu": None,
-            "max_concurrent_jobs": 4,
         },
     }
 
