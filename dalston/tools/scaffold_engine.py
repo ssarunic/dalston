@@ -405,14 +405,14 @@ RUN pip install --no-cache-dir -e ".[engine-sdk]"
 WORKDIR /engine
 
 # Copy engine requirements first for better caching
-COPY engines/{config.stage}/{config.engine_id}/requirements.txt .
+COPY engines/stt-{config.stage}/{config.engine_id}/requirements.txt .
 
 # Install engine dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy engine files
-COPY engines/{config.stage}/{config.engine_id}/engine.yaml .
-COPY engines/{config.stage}/{config.engine_id}/engine.py .
+COPY engines/stt-{config.stage}/{config.engine_id}/engine.yaml .
+COPY engines/stt-{config.stage}/{config.engine_id}/engine.py .
 
 # Create model cache directory
 ENV HF_HOME=/models
@@ -593,16 +593,16 @@ RUN pip install --no-cache-dir -e ".[engine-sdk]"
 WORKDIR /engine
 
 # Copy engine requirements first for better caching
-COPY engines/{stage}/{engine_family}/requirements.txt .
+COPY engines/stt-{stage}/{engine_family}/requirements.txt .
 
 # Install engine dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy engine implementation
-COPY engines/{stage}/{engine_family}/engine.py .
+COPY engines/stt-{stage}/{engine_family}/engine.py .
 
 # Copy variant-specific config to standard location
-COPY engines/{stage}/{engine_family}/variants/${{MODEL_SIZE}}.yaml /etc/dalston/engine.yaml
+COPY engines/stt-{stage}/{engine_family}/variants/${{MODEL_SIZE}}.yaml /etc/dalston/engine.yaml
 
 # Set model variant via environment
 ENV MODEL_SIZE=${{MODEL_SIZE}}
@@ -717,7 +717,7 @@ def scaffold_variant_engine(
 
     Returns True on success, False on failure.
     """
-    engine_dir = engines_dir / stage / engine_family
+    engine_dir = engines_dir / f"stt-{stage}" / engine_family
 
     if engine_dir.exists():
         print(f"Error: Directory already exists: {engine_dir}", file=sys.stderr)
@@ -813,7 +813,7 @@ def scaffold_engine(config: ScaffoldConfig, engines_dir: Path, dry_run: bool) ->
 
     Returns True on success, False on failure.
     """
-    engine_dir = engines_dir / config.stage / config.engine_id
+    engine_dir = engines_dir / f"stt-{config.stage}" / config.engine_id
 
     if engine_dir.exists():
         print(f"Error: Directory already exists: {engine_dir}", file=sys.stderr)

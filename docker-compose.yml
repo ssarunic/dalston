@@ -255,7 +255,7 @@ services:
     image: dalston/stt-batch-prepare:latest
     build:
       context: .
-      dockerfile: engines/prepare/audio-prepare/Dockerfile
+      dockerfile: engines/stt-prepare/audio-prepare/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
       ENGINE_ID: audio-prepare
@@ -269,7 +269,7 @@ services:
     image: dalston/stt-batch-transcribe-parakeet-ctc-0.6b:1.0.0
     build:
       context: .
-      dockerfile: engines/transcribe/parakeet/Dockerfile
+      dockerfile: engines/stt-transcribe/parakeet/Dockerfile
       args:
         MODEL_VARIANT: ctc-0.6b
     environment:
@@ -286,7 +286,7 @@ services:
     image: dalston/stt-batch-transcribe-parakeet-ctc-1.1b:1.0.0
     build:
       context: .
-      dockerfile: engines/transcribe/parakeet/Dockerfile
+      dockerfile: engines/stt-transcribe/parakeet/Dockerfile
       args:
         MODEL_VARIANT: ctc-1.1b
     environment:
@@ -304,7 +304,7 @@ services:
     image: dalston/stt-batch-transcribe-parakeet-tdt-0.6b:1.0.0
     build:
       context: .
-      dockerfile: engines/transcribe/parakeet/Dockerfile
+      dockerfile: engines/stt-transcribe/parakeet/Dockerfile
       args:
         MODEL_VARIANT: tdt-0.6b
         SKIP_MODEL_DOWNLOAD: "false"
@@ -323,7 +323,7 @@ services:
     image: dalston/stt-batch-transcribe-parakeet-tdt-0.6b:1.0.0
     build:
       context: .
-      dockerfile: engines/transcribe/parakeet/Dockerfile
+      dockerfile: engines/stt-transcribe/parakeet/Dockerfile
       args:
         MODEL_VARIANT: tdt-0.6b
         SKIP_MODEL_DOWNLOAD: "true"
@@ -341,7 +341,7 @@ services:
     image: dalston/stt-batch-transcribe-parakeet-tdt-1.1b:1.0.0
     build:
       context: .
-      dockerfile: engines/transcribe/parakeet/Dockerfile
+      dockerfile: engines/stt-transcribe/parakeet/Dockerfile
       args:
         MODEL_VARIANT: tdt-1.1b
     environment:
@@ -359,7 +359,7 @@ services:
     image: dalston/stt-batch-transcribe-faster-whisper-base:1.0.0
     build:
       context: .
-      dockerfile: engines/transcribe/faster-whisper/Dockerfile
+      dockerfile: engines/stt-transcribe/faster-whisper/Dockerfile
       args:
         MODEL_SIZE: base
     environment:
@@ -377,7 +377,7 @@ services:
     image: dalston/stt-batch-transcribe-faster-whisper-large-v3:1.0.0
     build:
       context: .
-      dockerfile: engines/transcribe/faster-whisper/Dockerfile
+      dockerfile: engines/stt-transcribe/faster-whisper/Dockerfile
       args:
         MODEL_SIZE: large-v3
     environment:
@@ -395,7 +395,7 @@ services:
     image: dalston/stt-batch-transcribe-faster-whisper-large-v3-turbo:1.0.0
     build:
       context: .
-      dockerfile: engines/transcribe/faster-whisper/Dockerfile
+      dockerfile: engines/stt-transcribe/faster-whisper/Dockerfile
       args:
         MODEL_SIZE: large-v3-turbo
     environment:
@@ -413,7 +413,7 @@ services:
     image: dalston/stt-batch-transcribe-voxtral-mini-3b:1.0.0
     build:
       context: .
-      dockerfile: engines/transcribe/voxtral/Dockerfile
+      dockerfile: engines/stt-transcribe/voxtral/Dockerfile
       args:
         MODEL_SIZE: mini-3b
     environment:
@@ -433,7 +433,7 @@ services:
     image: dalston/stt-batch-align-whisperx:latest
     build:
       context: .
-      dockerfile: engines/align/whisperx-align/Dockerfile
+      dockerfile: engines/stt-align/whisperx-align/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
       ENGINE_ID: whisperx-align
@@ -462,7 +462,7 @@ services:
     image: dalston/stt-batch-diarize-pyannote-v31:latest
     build:
       context: .
-      dockerfile: engines/diarize/pyannote-3.1/Dockerfile
+      dockerfile: engines/stt-diarize/pyannote-3.1/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
       ENGINE_ID: pyannote-3.1
@@ -492,7 +492,7 @@ services:
     image: dalston/stt-batch-diarize-pyannote-v40:latest
     build:
       context: .
-      dockerfile: engines/diarize/pyannote-4.0/Dockerfile
+      dockerfile: engines/stt-diarize/pyannote-4.0/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
       ENGINE_ID: pyannote-4.0
@@ -522,7 +522,7 @@ services:
     image: dalston/stt-batch-pii-detect-presidio:latest
     build:
       context: .
-      dockerfile: engines/detect/pii-presidio/Dockerfile
+      dockerfile: engines/stt-detect/pii-presidio/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
       ENGINE_ID: pii-presidio
@@ -536,7 +536,7 @@ services:
     image: dalston/stt-batch-audio-redact-audio:latest
     build:
       context: .
-      dockerfile: engines/redact/audio-redactor/Dockerfile
+      dockerfile: engines/stt-redact/audio-redactor/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
       ENGINE_ID: audio-redactor
@@ -548,7 +548,7 @@ services:
     image: dalston/stt-batch-merge:latest
     build:
       context: .
-      dockerfile: engines/merge/final-merger/Dockerfile
+      dockerfile: engines/stt-merge/final-merger/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
       ENGINE_ID: final-merger
@@ -561,10 +561,10 @@ services:
 
   # Parakeet RNNT 0.6B (GPU - default realtime worker, streaming capable)
   stt-rt-transcribe-parakeet-rnnt-0.6b:
-    image: dalston/stt-rt-transcribe-parakeet-streaming-rnnt-0.6b:1.0.0
+    image: dalston/stt-rt-transcribe-parakeet-rnnt-0.6b:1.0.0
     build:
       context: .
-      dockerfile: engines/realtime/parakeet-streaming/Dockerfile
+      dockerfile: engines/stt-rt/parakeet/Dockerfile
       args:
         MODEL_SIZE: 0.6b
     environment:
@@ -581,10 +581,10 @@ services:
 
   # Parakeet RNNT 1.1B (GPU - accurate English streaming)
   stt-rt-transcribe-parakeet-rnnt-1.1b:
-    image: dalston/stt-rt-transcribe-parakeet-streaming-rnnt-1.1b:1.0.0
+    image: dalston/stt-rt-transcribe-parakeet-rnnt-1.1b:1.0.0
     build:
       context: .
-      dockerfile: engines/realtime/parakeet-streaming/Dockerfile
+      dockerfile: engines/stt-rt/parakeet/Dockerfile
       args:
         MODEL_SIZE: 1.1b
     environment:
@@ -600,12 +600,12 @@ services:
     profiles: [parakeet-rnnt-1.1b]
     restart: unless-stopped
 
-  # Faster Whisper streaming base (GPU)
-  stt-rt-transcribe-faster-whisper-streaming-base:
-    image: dalston/stt-rt-transcribe-faster-whisper-streaming-base:1.0.0
+  # Faster Whisper base (GPU)
+  stt-rt-transcribe-faster-whisper-base:
+    image: dalston/stt-rt-transcribe-faster-whisper-base:1.0.0
     build:
       context: .
-      dockerfile: engines/realtime/faster-whisper-streaming/Dockerfile
+      dockerfile: engines/stt-rt/faster-whisper/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
       WORKER_PORT: 9000
@@ -623,7 +623,7 @@ services:
     image: dalston/stt-rt-transcribe-voxtral-mini-4b:1.0.0
     build:
       context: .
-      dockerfile: engines/realtime/voxtral-streaming/Dockerfile
+      dockerfile: engines/stt-rt/voxtral/Dockerfile
       args:
         MODEL_SIZE: mini-4b
     environment:

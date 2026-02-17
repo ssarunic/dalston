@@ -32,7 +32,7 @@ class TestFinalMergerEngineOutput:
         """Test that final-merger produces valid MergeOutput."""
         import sys
 
-        sys.path.insert(0, "engines/merge/final-merger")
+        sys.path.insert(0, "engines/stt-merge/final-merger")
 
         with patch("dalston.engine_sdk.io.upload_json"):
             from engine import FinalMergerEngine
@@ -131,7 +131,7 @@ class TestFinalMergerEngineOutput:
         """Test merge output with speaker diarization."""
         import sys
 
-        sys.path.insert(0, "engines/merge/final-merger")
+        sys.path.insert(0, "engines/stt-merge/final-merger")
 
         with patch("dalston.engine_sdk.io.upload_json"):
             from engine import FinalMergerEngine
@@ -190,7 +190,7 @@ class TestFinalMergerEngineOutput:
         """Test merge output with per-channel speaker detection."""
         import sys
 
-        sys.path.insert(0, "engines/merge/final-merger")
+        sys.path.insert(0, "engines/stt-merge/final-merger")
 
         with patch("dalston.engine_sdk.io.upload_json"):
             from engine import FinalMergerEngine
@@ -272,7 +272,7 @@ class TestFinalMergerEngineOutput:
         """Test merge gracefully handles skipped alignment stage."""
         import sys
 
-        sys.path.insert(0, "engines/merge/final-merger")
+        sys.path.insert(0, "engines/stt-merge/final-merger")
 
         with patch("dalston.engine_sdk.io.upload_json"):
             from engine import FinalMergerEngine

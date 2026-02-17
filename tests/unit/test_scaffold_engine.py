@@ -275,7 +275,7 @@ class TestGenerateDockerfile:
         """Should copy engine files from correct path."""
         content = generate_dockerfile(basic_config)
 
-        assert "engines/transcribe/test-engine/" in content
+        assert "engines/stt-transcribe/test-engine/" in content
         assert "engine.yaml" in content
         assert "engine.py" in content
 
@@ -390,7 +390,7 @@ class TestScaffoldEngine:
             result = scaffold_engine(config, engines_dir, dry_run=True)
 
             assert result is True
-            assert not (engines_dir / "transcribe" / "test-engine").exists()
+            assert not (engines_dir / "stt-transcribe" / "test-engine").exists()
 
     def test_creates_all_files(self) -> None:
         """Should create all required files."""
@@ -415,7 +415,7 @@ class TestScaffoldEngine:
 
             assert result is True
 
-            engine_dir = engines_dir / "transcribe" / "test-engine"
+            engine_dir = engines_dir / "stt-transcribe" / "test-engine"
             assert engine_dir.exists()
             assert (engine_dir / "engine.yaml").exists()
             assert (engine_dir / "engine.py").exists()
@@ -445,7 +445,7 @@ class TestScaffoldEngine:
             scaffold_engine(config, engines_dir, dry_run=False)
 
             engine_yaml_path = (
-                engines_dir / "transcribe" / "test-engine" / "engine.yaml"
+                engines_dir / "stt-transcribe" / "test-engine" / "engine.yaml"
             )
             with open(engine_yaml_path) as f:
                 data = yaml.safe_load(f)
@@ -458,7 +458,7 @@ class TestScaffoldEngine:
         """Should fail if engine directory already exists."""
         with tempfile.TemporaryDirectory() as tmpdir:
             engines_dir = Path(tmpdir)
-            existing_dir = engines_dir / "transcribe" / "test-engine"
+            existing_dir = engines_dir / "stt-transcribe" / "test-engine"
             existing_dir.mkdir(parents=True)
 
             config = ScaffoldConfig(

@@ -17,7 +17,7 @@ torch = pytest.importorskip("torch")
 
 def load_parakeet_engine():
     """Load ParakeetEngine from engines directory using importlib."""
-    engine_path = Path("engines/transcribe/parakeet/engine.py")
+    engine_path = Path("engines/stt-transcribe/parakeet/engine.py")
     if not engine_path.exists():
         pytest.skip("Parakeet engine not found")
 
@@ -71,20 +71,27 @@ def mock_nemo_asr():
 class TestParakeetEngineModelVariants:
     """Tests for Parakeet model variants."""
 
-    def test_default_model_size_is_0_6b(self, mock_cuda_available):
-        """Test that default model size is 0.6b."""
+    def test_default_model_variant_is_ctc_0_6b(self, mock_cuda_available):
+        """Test that default model variant is ctc-0.6b."""
         ParakeetEngine = load_parakeet_engine()
-        assert ParakeetEngine.DEFAULT_MODEL_SIZE == "0.6b"
+        assert ParakeetEngine.DEFAULT_MODEL_VARIANT == "ctc-0.6b"
 
-    def test_supported_model_sizes(self, mock_cuda_available):
-        """Test that expected model sizes are supported."""
+    def test_supported_model_variants(self, mock_cuda_available):
+        """Test that expected model variants are supported."""
         ParakeetEngine = load_parakeet_engine()
-        # RNNT model sizes
-        assert "0.6b" in ParakeetEngine.MODEL_SIZE_MAP
-        assert "1.1b" in ParakeetEngine.MODEL_SIZE_MAP
+        # CTC and TDT model variants
+        assert "ctc-0.6b" in ParakeetEngine.MODEL_VARIANT_MAP
+        assert "ctc-1.1b" in ParakeetEngine.MODEL_VARIANT_MAP
+        assert "tdt-0.6b" in ParakeetEngine.MODEL_VARIANT_MAP
+        assert "tdt-1.1b" in ParakeetEngine.MODEL_VARIANT_MAP
         # Verify NeMo model identifiers
-        assert ParakeetEngine.MODEL_SIZE_MAP["0.6b"] == "nvidia/parakeet-rnnt-0.6b"
-        assert ParakeetEngine.MODEL_SIZE_MAP["1.1b"] == "nvidia/parakeet-rnnt-1.1b"
+        assert (
+            ParakeetEngine.MODEL_VARIANT_MAP["ctc-0.6b"] == "nvidia/parakeet-ctc-0.6b"
+        )
+        assert (
+            ParakeetEngine.MODEL_VARIANT_MAP["tdt-0.6b"]
+            == "nvidia/parakeet-tdt-0.6b-v3"
+        )
 
 
 class TestParakeetEngineHealthCheck:

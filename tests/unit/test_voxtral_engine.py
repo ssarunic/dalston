@@ -6,11 +6,29 @@ Tests engine logic without loading the actual model weights.
 # Check if transformers is available for integration-style tests
 import importlib.util
 import os
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 HAS_TRANSFORMERS = importlib.util.find_spec("transformers") is not None
+
+
+def load_voxtral_engine():
+    """Load VoxtralEngine from engines directory using importlib."""
+    engine_path = Path("engines/stt-transcribe/voxtral/engine.py")
+    if not engine_path.exists():
+        pytest.skip("Voxtral engine not found")
+
+    spec = importlib.util.spec_from_file_location("voxtral_engine", engine_path)
+    if spec is None or spec.loader is None:
+        pytest.skip("Could not load voxtral engine spec")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["voxtral_engine"] = module
+    spec.loader.exec_module(module)
+    return module.VoxtralEngine
 
 
 class TestVoxtralEngine:
@@ -27,8 +45,7 @@ class TestVoxtralEngine:
     @pytest.fixture
     def engine(self, mock_torch):
         """Create engine instance with mocked dependencies."""
-        from engines.transcribe.voxtral.engine import VoxtralEngine
-
+        VoxtralEngine = load_voxtral_engine()
         engine = VoxtralEngine()
         return engine
 
@@ -148,7 +165,7 @@ class TestVoxtralEngineEnvironment:
         """Unknown MODEL_SIZE should fall back to default."""
         with patch.dict(os.environ, {"MODEL_SIZE": "unknown", "DEVICE": "cpu"}):
             with patch("torch.cuda.is_available", return_value=False):
-                from engines.transcribe.voxtral.engine import VoxtralEngine
+                VoxtralEngine = load_voxtral_engine()
 
                 engine = VoxtralEngine()
                 assert engine._model_size == "mini-3b"
@@ -157,7 +174,7 @@ class TestVoxtralEngineEnvironment:
         """Explicit DEVICE=cpu should use CPU."""
         with patch.dict(os.environ, {"DEVICE": "cpu", "MODEL_SIZE": "mini-3b"}):
             with patch("torch.cuda.is_available", return_value=True):
-                from engines.transcribe.voxtral.engine import VoxtralEngine
+                VoxtralEngine = load_voxtral_engine()
 
                 engine = VoxtralEngine()
                 assert engine._device == "cpu"

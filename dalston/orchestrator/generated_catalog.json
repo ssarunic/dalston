@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-02-17T17:37:09.233321+00:00",
+  "generated_at": "2026-02-17T18:03:51.359157+00:00",
   "schema_version": "1.1",
-  "engine_count": 19,
+  "engine_count": 18,
   "engines": {
     "whisperx-align": {
       "id": "whisperx-align",
@@ -275,182 +275,6 @@
         "channels": "any"
       }
     },
-    "faster-whisper-streaming-base": {
-      "id": "faster-whisper-streaming-base",
-      "name": "Faster Whisper Streaming Base",
-      "version": "1.0.0",
-      "stage": null,
-      "type": "realtime",
-      "description": "Real-time streaming transcription using faster-whisper (CTranslate2).\nSupports both \"fast\" (distil-whisper) and \"accurate\" (large-v3) model modes.\nUses Silero VAD for speech boundary detection.",
-      "image": "dalston/stt-rt-faster-whisper-streaming-base:1.0.0",
-      "capabilities": {
-        "stages": [],
-        "languages": null,
-        "supports_word_timestamps": true,
-        "supports_streaming": true,
-        "max_audio_duration": null,
-        "max_concurrency": 4
-      },
-      "hardware": {
-        "gpu_required": false,
-        "gpu_optional": true,
-        "min_vram_gb": 6,
-        "recommended_gpu": [
-          "t4",
-          "a10g"
-        ],
-        "supports_cpu": true,
-        "min_ram_gb": 12,
-        "memory": "12G"
-      },
-      "performance": {
-        "rtf_gpu": 0.1,
-        "rtf_cpu": 0.5,
-        "warm_start_latency_ms": 200
-      },
-      "hf_compat": {
-        "pipeline_tag": "automatic-speech-recognition",
-        "library_name": "ctranslate2",
-        "license": "mit"
-      }
-    },
-    "parakeet-streaming-rnnt-0.6b": {
-      "id": "parakeet-streaming-rnnt-0.6b",
-      "name": "Parakeet Streaming RNNT 0.6B",
-      "version": "1.0.0",
-      "stage": null,
-      "type": "realtime",
-      "description": "Real-time streaming transcription using NVIDIA Parakeet RNNT 0.6B.\nUses cache-aware FastConformer encoder with RNNT decoder for true streaming.\nRNNT is the only decoder architecture that supports streaming inference.\nEnglish-only, requires NVIDIA GPU.",
-      "image": "dalston/stt-rt-parakeet-streaming-rnnt-0.6b:1.0.0",
-      "capabilities": {
-        "stages": [],
-        "languages": [
-          "en"
-        ],
-        "supports_word_timestamps": true,
-        "supports_streaming": true,
-        "max_audio_duration": null,
-        "max_concurrency": 4
-      },
-      "hardware": {
-        "gpu_required": true,
-        "gpu_optional": false,
-        "min_vram_gb": 4,
-        "recommended_gpu": [
-          "t4",
-          "a10g"
-        ],
-        "supports_cpu": false,
-        "min_ram_gb": 8,
-        "memory": "6G"
-      },
-      "performance": {
-        "rtf_gpu": 0.05,
-        "rtf_cpu": null,
-        "warm_start_latency_ms": 100
-      },
-      "hf_compat": {
-        "pipeline_tag": "automatic-speech-recognition",
-        "library_name": "nemo",
-        "license": "cc-by-4.0"
-      }
-    },
-    "parakeet-streaming-rnnt-1.1b": {
-      "id": "parakeet-streaming-rnnt-1.1b",
-      "name": "Parakeet Streaming RNNT 1.1B",
-      "version": "1.0.0",
-      "stage": null,
-      "type": "realtime",
-      "description": "Real-time streaming transcription using NVIDIA Parakeet RNNT 1.1B.\nUses cache-aware FastConformer encoder with RNNT decoder for true streaming.\nHigher accuracy variant with larger model capacity.\nEnglish-only, requires NVIDIA GPU.",
-      "image": "dalston/stt-rt-parakeet-streaming-rnnt-1.1b:1.0.0",
-      "capabilities": {
-        "stages": [],
-        "languages": [
-          "en"
-        ],
-        "supports_word_timestamps": true,
-        "supports_streaming": true,
-        "max_audio_duration": null,
-        "max_concurrency": 4
-      },
-      "hardware": {
-        "gpu_required": true,
-        "gpu_optional": false,
-        "min_vram_gb": 6,
-        "recommended_gpu": [
-          "a10g",
-          "a100"
-        ],
-        "supports_cpu": false,
-        "min_ram_gb": 12,
-        "memory": "10G"
-      },
-      "performance": {
-        "rtf_gpu": 0.07,
-        "rtf_cpu": null,
-        "warm_start_latency_ms": 120
-      },
-      "hf_compat": {
-        "pipeline_tag": "automatic-speech-recognition",
-        "library_name": "nemo",
-        "license": "cc-by-4.0"
-      }
-    },
-    "voxtral-streaming-mini-4b": {
-      "id": "voxtral-streaming-mini-4b",
-      "name": "Voxtral Streaming Mini 4B",
-      "version": "1.0.0",
-      "stage": null,
-      "type": "realtime",
-      "description": "Real-time streaming transcription using Mistral Voxtral-Mini-4B-Realtime.\nAchieves <500ms latency with configurable delay (80ms-2400ms).\nSupports 13 languages with native streaming architecture.",
-      "image": "dalston/stt-rt-voxtral-streaming-mini-4b:1.0.0",
-      "capabilities": {
-        "stages": [],
-        "languages": [
-          "en",
-          "zh",
-          "hi",
-          "es",
-          "ar",
-          "fr",
-          "pt",
-          "ru",
-          "de",
-          "ja",
-          "ko",
-          "it",
-          "nl"
-        ],
-        "supports_word_timestamps": true,
-        "supports_streaming": true,
-        "max_audio_duration": null,
-        "max_concurrency": 4
-      },
-      "hardware": {
-        "gpu_required": true,
-        "gpu_optional": false,
-        "min_vram_gb": 16,
-        "recommended_gpu": [
-          "a10g",
-          "l4",
-          "rtx4090",
-          "a100"
-        ],
-        "supports_cpu": false,
-        "min_ram_gb": 24,
-        "memory": "18G"
-      },
-      "performance": {
-        "rtf_gpu": 0.08,
-        "rtf_cpu": null,
-        "warm_start_latency_ms": 200
-      },
-      "hf_compat": {
-        "pipeline_tag": "automatic-speech-recognition",
-        "library_name": "transformers",
-        "license": "apache-2.0"
-      }
-    },
     "audio-redactor": {
       "id": "audio-redactor",
       "name": "Audio Redaction (FFmpeg)",
@@ -535,6 +359,143 @@
         ],
         "sample_rate": 16000,
         "channels": 1
+      }
+    },
+    "parakeet-rnnt-0.6b": {
+      "id": "parakeet-rnnt-0.6b",
+      "name": "Parakeet RNNT 0.6B",
+      "version": "1.0.0",
+      "stage": null,
+      "type": "realtime",
+      "description": "Real-time streaming transcription using NVIDIA Parakeet RNNT 0.6B.\nUses cache-aware FastConformer encoder with RNNT decoder for true streaming.\nRNNT is the only decoder architecture that supports streaming inference.\nEnglish-only, requires NVIDIA GPU.",
+      "image": "dalston/stt-rt-parakeet-rnnt-0.6b:1.0.0",
+      "capabilities": {
+        "stages": [],
+        "languages": [
+          "en"
+        ],
+        "supports_word_timestamps": true,
+        "supports_streaming": true,
+        "max_audio_duration": null,
+        "max_concurrency": 4
+      },
+      "hardware": {
+        "gpu_required": true,
+        "gpu_optional": false,
+        "min_vram_gb": 4,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": false,
+        "min_ram_gb": 8,
+        "memory": "6G"
+      },
+      "performance": {
+        "rtf_gpu": 0.05,
+        "rtf_cpu": null,
+        "warm_start_latency_ms": 100
+      },
+      "hf_compat": {
+        "pipeline_tag": "automatic-speech-recognition",
+        "library_name": "nemo",
+        "license": "cc-by-4.0"
+      }
+    },
+    "parakeet-rnnt-1.1b": {
+      "id": "parakeet-rnnt-1.1b",
+      "name": "Parakeet RNNT 1.1B",
+      "version": "1.0.0",
+      "stage": null,
+      "type": "realtime",
+      "description": "Real-time streaming transcription using NVIDIA Parakeet RNNT 1.1B.\nUses cache-aware FastConformer encoder with RNNT decoder for true streaming.\nHigher accuracy variant with larger model capacity.\nEnglish-only, requires NVIDIA GPU.",
+      "image": "dalston/stt-rt-parakeet-rnnt-1.1b:1.0.0",
+      "capabilities": {
+        "stages": [],
+        "languages": [
+          "en"
+        ],
+        "supports_word_timestamps": true,
+        "supports_streaming": true,
+        "max_audio_duration": null,
+        "max_concurrency": 4
+      },
+      "hardware": {
+        "gpu_required": true,
+        "gpu_optional": false,
+        "min_vram_gb": 6,
+        "recommended_gpu": [
+          "a10g",
+          "a100"
+        ],
+        "supports_cpu": false,
+        "min_ram_gb": 12,
+        "memory": "10G"
+      },
+      "performance": {
+        "rtf_gpu": 0.07,
+        "rtf_cpu": null,
+        "warm_start_latency_ms": 120
+      },
+      "hf_compat": {
+        "pipeline_tag": "automatic-speech-recognition",
+        "library_name": "nemo",
+        "license": "cc-by-4.0"
+      }
+    },
+    "voxtral-mini-4b": {
+      "id": "voxtral-mini-4b",
+      "name": "Voxtral Mini 4B",
+      "version": "1.0.0",
+      "stage": null,
+      "type": "realtime",
+      "description": "Real-time streaming transcription using Mistral Voxtral-Mini-4B-Realtime.\nAchieves <500ms latency with configurable delay (80ms-2400ms).\nSupports 13 languages with native streaming architecture.",
+      "image": "dalston/stt-rt-voxtral-mini-4b:1.0.0",
+      "capabilities": {
+        "stages": [],
+        "languages": [
+          "en",
+          "zh",
+          "hi",
+          "es",
+          "ar",
+          "fr",
+          "pt",
+          "ru",
+          "de",
+          "ja",
+          "ko",
+          "it",
+          "nl"
+        ],
+        "supports_word_timestamps": true,
+        "supports_streaming": true,
+        "max_audio_duration": null,
+        "max_concurrency": 4
+      },
+      "hardware": {
+        "gpu_required": true,
+        "gpu_optional": false,
+        "min_vram_gb": 16,
+        "recommended_gpu": [
+          "a10g",
+          "l4",
+          "rtx4090",
+          "a100"
+        ],
+        "supports_cpu": false,
+        "min_ram_gb": 24,
+        "memory": "18G"
+      },
+      "performance": {
+        "rtf_gpu": 0.08,
+        "rtf_cpu": null,
+        "warm_start_latency_ms": 200
+      },
+      "hf_compat": {
+        "pipeline_tag": "automatic-speech-recognition",
+        "library_name": "transformers",
+        "license": "apache-2.0"
       }
     },
     "faster-whisper-large-v3-turbo": {

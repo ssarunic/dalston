@@ -17,7 +17,7 @@ torch = pytest.importorskip("torch")
 
 def load_parakeet_streaming_engine():
     """Load ParakeetStreamingEngine from engines directory using importlib."""
-    engine_path = Path("engines/realtime/parakeet-streaming/engine.py")
+    engine_path = Path("engines/stt-rt/parakeet/engine.py")
     if not engine_path.exists():
         pytest.skip("Parakeet streaming engine not found")
 

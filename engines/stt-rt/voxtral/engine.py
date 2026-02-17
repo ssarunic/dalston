@@ -269,7 +269,7 @@ class VoxtralStreamingEngine(RealtimeEngine):
 
     def get_engine(self) -> str:
         """Return engine type identifier."""
-        return f"voxtral-streaming-{self._model_size}"
+        return f"voxtral-{self._model_size}"
 
     def get_gpu_memory_usage(self) -> str:
         """Return GPU memory usage string."""

@@ -1,21 +1,22 @@
 schema_version: "1.1"
-id: faster-whisper-streaming-base
+id: parakeet-rnnt-1.1b
 type: realtime
-name: Faster Whisper Streaming Base
+name: Parakeet RNNT 1.1B
 version: 1.0.0
 description: |
-  Real-time streaming transcription using faster-whisper (CTranslate2).
-  Supports both "fast" (distil-whisper) and "accurate" (large-v3) model modes.
-  Uses Silero VAD for speech boundary detection.
+  Real-time streaming transcription using NVIDIA Parakeet RNNT 1.1B.
+  Uses cache-aware FastConformer encoder with RNNT decoder for true streaming.
+  Higher accuracy variant with larger model capacity.
+  English-only, requires NVIDIA GPU.
 
 container:
-  gpu: optional
-  memory: 12G
+  gpu: required
+  memory: 10G
   model_cache: /models
 
 capabilities:
   languages:
-    - all
+    - en
   max_concurrency: 4
   streaming: true
   word_timestamps: true
@@ -25,24 +26,10 @@ server:
   protocol: websocket
   path: /session
 
-models:
-  fast:
-    name: distil-whisper/distil-large-v3
-    description: Distil-Whisper for low-latency transcription
-    latency: low
-    accuracy: good
-  accurate:
-    name: large-v3
-    description: Whisper large-v3 for high accuracy
-    latency: medium
-    accuracy: excellent
-
 audio:
   encodings:
     - pcm_s16le
     - pcm_f32le
-    - mulaw
-    - alaw
   sample_rates:
     - 16000
   channels: 1
@@ -71,27 +58,27 @@ environment:
   REDIS_URL:
     description: Redis connection URL
     default: redis://localhost:6379
-  FAST_MODEL:
-    description: Model for "fast" variant
-    default: distil-whisper/distil-large-v3
-  ACCURATE_MODEL:
-    description: Model for "accurate" variant
-    default: large-v3
+  MODEL_SIZE:
+    description: Parakeet model size variant
+    default: "1.1b"
+  CHUNK_SIZE_MS:
+    description: Audio chunk size in milliseconds
+    default: "100"
 
 hf_compat:
   pipeline_tag: automatic-speech-recognition
-  library_name: ctranslate2
-  license: mit
+  library_name: nemo
+  license: cc-by-4.0
 
 hardware:
   min_vram_gb: 6
   recommended_gpu:
-    - t4
     - a10g
-  supports_cpu: true
+    - a100
+  supports_cpu: false
   min_ram_gb: 12
 
 performance:
-  rtf_gpu: 0.1
-  rtf_cpu: 0.5
-  warm_start_latency_ms: 200
+  rtf_gpu: 0.07
+  rtf_cpu: null
+  warm_start_latency_ms: 120
