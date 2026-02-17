@@ -1,0 +1,48 @@
+schema_version: "1.1"
+id: whisper-large-v3-turbo
+stage: transcribe
+name: Whisper Large V3 Turbo
+version: 1.0.0
+description: |
+  OpenAI Whisper large-v3-turbo model via faster-whisper (CTranslate2).
+  Optimized for speed while maintaining high accuracy.
+  Distilled from large-v3 with pruned decoder for faster inference.
+  Supports 99 languages with automatic language detection.
+
+container:
+  gpu: required
+  memory: 6G
+  model_cache: /models
+
+capabilities:
+  languages:
+    - all  # 99 languages supported
+  max_audio_duration: 7200  # 2 hours
+  streaming: false
+  word_timestamps: false  # Has timestamps but they're inaccurate; use alignment stage
+  max_concurrency: 4
+
+input:
+  audio_formats:
+    - wav
+  sample_rate: 16000
+  channels: 1
+
+hf_compat:
+  pipeline_tag: automatic-speech-recognition
+  library_name: ctranslate2
+  license: mit
+  source_model: "Systran/faster-whisper-large-v3-turbo"
+
+hardware:
+  min_vram_gb: 4
+  recommended_gpu:
+    - t4
+    - a10g
+  supports_cpu: false
+  min_ram_gb: 8
+
+performance:
+  rtf_gpu: 0.03
+  rtf_cpu: null
+  warm_start_latency_ms: 40

@@ -1,21 +1,21 @@
 schema_version: "1.1"
-id: whisper-streaming
+id: whisper-streaming-base
 type: realtime
-name: Whisper Streaming
+name: Whisper Streaming Base
 version: 1.0.0
 description: |
-  Real-time streaming transcription using Whisper.
-  Supports "fast" (distil-whisper) and "accurate" (large-v3) variants.
+  Real-time streaming transcription using Whisper base variant.
+  Supports both "fast" (distil-whisper) and "accurate" (large-v3) model modes.
   Uses Silero VAD for speech boundary detection.
 
 container:
-  gpu: optional  # Recommended for performance; auto-detects and falls back to CPU
-  memory: 12G   # Needs to hold two models in memory
+  gpu: optional
+  memory: 12G
   model_cache: /models
 
 capabilities:
   languages:
-    - all  # 99 languages supported with auto-detection
+    - all
   max_concurrency: 4
   streaming: true
   word_timestamps: true

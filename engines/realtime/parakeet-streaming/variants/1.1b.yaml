@@ -1,0 +1,83 @@
+schema_version: "1.1"
+id: parakeet-streaming-1.1b
+type: realtime
+name: Parakeet Streaming 1.1B
+version: 1.0.0
+description: |
+  Real-time streaming transcription using NVIDIA Parakeet 1.1B.
+  Uses cache-aware FastConformer encoder for true streaming with ~120ms latency.
+  Higher accuracy variant, English-only, requires NVIDIA GPU.
+
+container:
+  gpu: required
+  memory: 10G
+  model_cache: /models
+
+capabilities:
+  languages:
+    - en
+  max_concurrency: 4
+  streaming: true
+  word_timestamps: true
+
+server:
+  port: 9000
+  protocol: websocket
+  path: /session
+
+audio:
+  encodings:
+    - pcm_s16le
+    - pcm_f32le
+  sample_rates:
+    - 16000
+  channels: 1
+
+vad:
+  engine: silero
+  threshold: 0.5
+  min_speech_duration_ms: 250
+  min_silence_duration_ms: 500
+  lookback_ms: 300
+
+heartbeat:
+  interval_seconds: 10
+  timeout_seconds: 30
+
+environment:
+  WORKER_ID:
+    description: Unique identifier for this worker
+    required: true
+  WORKER_PORT:
+    description: WebSocket server port
+    default: "9000"
+  MAX_SESSIONS:
+    description: Maximum concurrent sessions
+    default: "4"
+  REDIS_URL:
+    description: Redis connection URL
+    default: redis://localhost:6379
+  MODEL_SIZE:
+    description: Parakeet model size variant
+    default: "1.1b"
+  CHUNK_SIZE_MS:
+    description: Audio chunk size in milliseconds
+    default: "100"
+
+hf_compat:
+  pipeline_tag: automatic-speech-recognition
+  library_name: nemo
+  license: apache-2.0
+
+hardware:
+  min_vram_gb: 6
+  recommended_gpu:
+    - a10g
+    - a100
+  supports_cpu: false
+  min_ram_gb: 12
+
+performance:
+  rtf_gpu: 0.07
+  rtf_cpu: null
+  warm_start_latency_ms: 120

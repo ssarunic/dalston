@@ -7,6 +7,7 @@ Parakeet produces native word-level timestamps via RNNT alignment,
 eliminating the need for a separate alignment stage.
 
 Environment variables:
+    MODEL_SIZE: Model variant to use (0.6b, 1.1b). Defaults to 0.6b.
     DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
 """
 
@@ -39,24 +40,29 @@ class ParakeetEngine(Engine):
     recommended for production use.
     """
 
-    # Model variants (NeMo model identifiers)
-    # TDT_CTC models are faster and lighter than RNNT
-    MODEL_VARIANTS = {
-        # TDT_CTC (lightweight, faster)
-        "nvidia/parakeet-tdt_ctc-110m": "nvidia/parakeet-tdt_ctc-110m",
-        "parakeet-110m": "nvidia/parakeet-tdt_ctc-110m",  # Alias
-        # RNNT (more accurate, heavier)
-        "nvidia/parakeet-rnnt-0.6b": "nvidia/parakeet-rnnt-0.6b",
-        "parakeet-0.6b": "nvidia/parakeet-rnnt-0.6b",  # Alias
-        "nvidia/parakeet-rnnt-1.1b": "nvidia/parakeet-rnnt-1.1b",
-        "parakeet-1.1b": "nvidia/parakeet-rnnt-1.1b",  # Alias
+    # Model size to NeMo model identifier mapping
+    MODEL_SIZE_MAP = {
+        "0.6b": "nvidia/parakeet-rnnt-0.6b",
+        "1.1b": "nvidia/parakeet-rnnt-1.1b",
     }
-    DEFAULT_MODEL = "nvidia/parakeet-tdt_ctc-110m"
+    DEFAULT_MODEL_SIZE = "0.6b"
 
     def __init__(self) -> None:
         super().__init__()
         self._model = None
         self._model_name: str | None = None
+
+        # Determine model from environment variable (set at container build time)
+        model_size = os.environ.get("MODEL_SIZE", self.DEFAULT_MODEL_SIZE)
+        if model_size not in self.MODEL_SIZE_MAP:
+            self.logger.warning(
+                "unknown_model_size",
+                requested=model_size,
+                using=self.DEFAULT_MODEL_SIZE,
+            )
+            model_size = self.DEFAULT_MODEL_SIZE
+        self._model_size = model_size
+        self._nemo_model_id = self.MODEL_SIZE_MAP[model_size]
 
         # Determine device from environment or availability
         requested_device = os.environ.get("DEVICE", "").lower()
@@ -126,17 +132,10 @@ class ParakeetEngine(Engine):
         config = input.config
         channel = config.get("channel")  # For per_channel mode
 
-        # Get model configuration
-        model_name = config.get("model", self.DEFAULT_MODEL)
-        if model_name not in self.MODEL_VARIANTS:
-            self.logger.warning(
-                "unknown_model_variant",
-                requested=model_name,
-                using=self.DEFAULT_MODEL,
-            )
-            model_name = self.DEFAULT_MODEL
+        # Use the model configured at container build time
+        model_name = self._nemo_model_id
 
-        # Load model
+        # Load model (lazy loading)
         self._load_model(model_name)
 
         self.logger.info("transcribing", audio_path=str(audio_path))
@@ -167,7 +166,7 @@ class ParakeetEngine(Engine):
                     language="en",
                     language_confidence=1.0,
                     channel=channel,
-                    engine_id="parakeet",
+                    engine_id=f"parakeet-{self._model_size}",
                     skipped=False,
                     warnings=[],
                 )
@@ -182,9 +181,8 @@ class ParakeetEngine(Engine):
             full_text = str(hypothesis)
 
         # Determine alignment method based on model type
-        alignment_method = (
-            AlignmentMethod.TDT if "tdt" in model_name.lower() else AlignmentMethod.RNNT
-        )
+        # All parakeet-*b variants use RNNT
+        alignment_method = AlignmentMethod.RNNT
 
         # Build segments with word-level timestamps
         segments: list[Segment] = []
@@ -306,7 +304,7 @@ class ParakeetEngine(Engine):
             timestamp_granularity_actual=timestamp_granularity_actual,
             alignment_method=alignment_method,
             channel=channel,
-            engine_id="parakeet",
+            engine_id=f"parakeet-{self._model_size}",
             skipped=False,
             skip_reason=None,
             warnings=[],
@@ -340,22 +338,21 @@ class ParakeetEngine(Engine):
         """Return Parakeet engine capabilities.
 
         Parakeet is an English-only transcription engine with native
-        word-level timestamps via RNNT/TDT alignment.
+        word-level timestamps via RNNT alignment.
         """
+        # VRAM requirements per model size
+        vram_mb = 4000 if self._model_size == "0.6b" else 6000
+
         return EngineCapabilities(
-            engine_id="parakeet",
+            engine_id=f"parakeet-{self._model_size}",
             version="1.0.0",
             stages=["transcribe"],
             languages=["en"],  # English only
             supports_word_timestamps=True,
             supports_streaming=False,
-            model_variants=[
-                "nvidia/parakeet-tdt_ctc-110m",
-                "nvidia/parakeet-rnnt-0.6b",
-                "nvidia/parakeet-rnnt-1.1b",
-            ],
+            model_variants=[self._nemo_model_id],
             gpu_required=True,
-            gpu_vram_mb=4000,
+            gpu_vram_mb=vram_mb,
         )
 
 

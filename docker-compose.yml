@@ -265,16 +265,16 @@ services:
     restart: unless-stopped
 
   # --- TRANSCRIBE STAGE ---
-  # NVIDIA Parakeet transcription (CPU - default for local dev)
-  stt-batch-transcribe-parakeet-cpu:
-    image: dalston/stt-batch-transcribe-parakeet:cpu
+  # Parakeet 0.6B variant (GPU - fast English transcription)
+  stt-batch-transcribe-parakeet-0.6b:
+    image: dalston/stt-batch-transcribe-parakeet-0.6b:1.0.0
     build:
       context: .
       dockerfile: engines/transcribe/parakeet/Dockerfile
       args:
-        DEVICE: cpu
+        MODEL_SIZE: 0.6b
     environment:
-      - ENGINE_ID=parakeet
+      - ENGINE_ID=parakeet-0.6b
       - REDIS_URL=redis://redis:6379
       - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
       - S3_REGION=${S3_REGION:-us-east-1}
@@ -293,16 +293,25 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     restart: unless-stopped
 
-  # NVIDIA Parakeet transcription (GPU - use with: docker compose --profile gpu up -d)
-  stt-batch-transcribe-parakeet:
-    image: dalston/stt-batch-transcribe-parakeet:latest
+  # Parakeet 1.1B variant (GPU - accurate English transcription)
+  stt-batch-transcribe-parakeet-1.1b:
+    image: dalston/stt-batch-transcribe-parakeet-1.1b:1.0.0
     build:
       context: .
       dockerfile: engines/transcribe/parakeet/Dockerfile
+      args:
+        MODEL_SIZE: 1.1b
     environment:
-      - ENGINE_ID=parakeet
+      - ENGINE_ID=parakeet-1.1b
       - REDIS_URL=redis://redis:6379
       - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
       - S3_REGION=${S3_REGION:-us-east-1}
@@ -329,17 +338,19 @@ services:
               count: 1
               capabilities: [gpu]
     profiles:
-      - gpu
+      - parakeet-1.1b
     restart: unless-stopped
 
-  # Faster-Whisper transcription (CPU - use with: docker compose --profile whisper up -d)
-  stt-batch-transcribe-whisper-cpu:
-    image: dalston/stt-batch-transcribe-whisper:latest
+  # Whisper base variant (GPU - default transcription engine)
+  stt-batch-transcribe-whisper-base:
+    image: dalston/stt-batch-transcribe-whisper-base:1.0.0
     build:
       context: .
-      dockerfile: engines/transcribe/faster-whisper/Dockerfile
+      dockerfile: engines/transcribe/whisper/Dockerfile
+      args:
+        MODEL_SIZE: base
     environment:
-      - ENGINE_ID=faster-whisper
+      - ENGINE_ID=whisper-base
       - REDIS_URL=redis://redis:6379
       - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
       - S3_REGION=${S3_REGION:-us-east-1}
@@ -360,15 +371,27 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     profiles:
-      - whisper
+      - whisper-base
     restart: unless-stopped
 
-  # Faster-Whisper transcription (GPU - use with: docker compose --profile gpu up -d)
-  stt-batch-transcribe-whisper:
-    image: dalston/stt-batch-transcribe-whisper:latest
+  # Whisper large-v3 variant (GPU - highest accuracy)
+  stt-batch-transcribe-whisper-large-v3:
+    image: dalston/stt-batch-transcribe-whisper-large-v3:1.0.0
+    build:
+      context: .
+      dockerfile: engines/transcribe/whisper/Dockerfile
+      args:
+        MODEL_SIZE: large-v3
     environment:
-      - ENGINE_ID=faster-whisper
+      - ENGINE_ID=whisper-large-v3
       - REDIS_URL=redis://redis:6379
       - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
       - S3_REGION=${S3_REGION:-us-east-1}
@@ -377,6 +400,11 @@ services:
       - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
+      - OTEL_ENABLED=${OTEL_ENABLED:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
     volumes:
       - whisper-models:/models
     depends_on:
@@ -393,6 +421,47 @@ services:
               capabilities: [gpu]
     profiles:
       - gpu
+    restart: unless-stopped
+
+  # Whisper large-v3-turbo variant (GPU - fast + accurate)
+  stt-batch-transcribe-whisper-large-v3-turbo:
+    image: dalston/stt-batch-transcribe-whisper-large-v3-turbo:1.0.0
+    build:
+      context: .
+      dockerfile: engines/transcribe/whisper/Dockerfile
+      args:
+        MODEL_SIZE: large-v3-turbo
+    environment:
+      - ENGINE_ID=whisper-large-v3-turbo
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      - OTEL_ENABLED=${OTEL_ENABLED:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      # Prometheus metrics (M20)
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=9100
+    volumes:
+      - whisper-models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - whisper-turbo
     restart: unless-stopped
 
   # --- ALIGN STAGE ---
@@ -673,18 +742,19 @@ services:
   # Whisper CPU: docker compose --profile whisper up -d
   # GPU workers: docker compose --profile gpu up -d
 
-  # --- PARAKEET REALTIME (CPU - DEFAULT) ---
-  # Default realtime worker for local development
-  stt-rt-transcribe-parakeet-cpu:
-    image: dalston/stt-rt-transcribe-parakeet:cpu
+  # --- PARAKEET REALTIME 0.6B (GPU - DEFAULT) ---
+  # Default realtime worker - fast English streaming
+  stt-rt-transcribe-parakeet-0.6b:
+    image: dalston/stt-rt-transcribe-parakeet-streaming-0.6b:1.0.0
     build:
       context: .
       dockerfile: engines/realtime/parakeet-streaming/Dockerfile
       args:
-        DEVICE: cpu
+        MODEL_SIZE: 0.6b
     environment:
+      - MODEL_SIZE=0.6b
       - WORKER_PORT=9000
-      - MAX_SESSIONS=2
+      - MAX_SESSIONS=4
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
@@ -709,15 +779,25 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     restart: unless-stopped
 
-  # Parakeet realtime (GPU - use with: docker compose --profile gpu up -d)
-  stt-rt-transcribe-parakeet:
-    image: dalston/stt-rt-transcribe-parakeet:latest
+  # Parakeet realtime 1.1B (GPU - accurate English streaming)
+  stt-rt-transcribe-parakeet-1.1b:
+    image: dalston/stt-rt-transcribe-parakeet-streaming-1.1b:1.0.0
     build:
       context: .
       dockerfile: engines/realtime/parakeet-streaming/Dockerfile
+      args:
+        MODEL_SIZE: 1.1b
     environment:
+      - MODEL_SIZE=1.1b
       - WORKER_PORT=9000
       - MAX_SESSIONS=4
       - REDIS_URL=redis://redis:6379
@@ -752,13 +832,13 @@ services:
               count: 1
               capabilities: [gpu]
     profiles:
-      - gpu
+      - parakeet-1.1b
     restart: unless-stopped
 
-  # --- WHISPER REALTIME (CPU) ---
+  # --- WHISPER STREAMING BASE (GPU) ---
   # Use with: docker compose --profile whisper up -d
-  stt-rt-transcribe-whisper-cpu:
-    image: dalston/stt-rt-transcribe-whisper:latest
+  stt-rt-transcribe-whisper-streaming-base:
+    image: dalston/stt-rt-transcribe-whisper-streaming-base:1.0.0
     build:
       context: .
       dockerfile: engines/realtime/whisper-streaming/Dockerfile
@@ -789,40 +869,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-    profiles:
-      - whisper
-    restart: unless-stopped
-
-  # Whisper realtime (GPU - use with: docker compose --profile gpu up -d)
-  stt-rt-transcribe-whisper:
-    image: dalston/stt-rt-transcribe-whisper:latest
-    environment:
-      - WORKER_PORT=9000
-      - MAX_SESSIONS=4
-      - REDIS_URL=redis://redis:6379
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_FORMAT=${LOG_FORMAT:-json}
-      # S3 storage for audio/transcript persistence (M24)
-      - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
-      - S3_REGION=${S3_REGION:-us-east-1}
-      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-minioadmin}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-minioadmin}
-      - OTEL_ENABLED=${OTEL_ENABLED:-false}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
-      # Prometheus metrics (M20)
-      - METRICS_ENABLED=${METRICS_ENABLED:-true}
-      - METRICS_PORT=9100
-    volumes:
-      - realtime-models:/models
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 9000)); s.close()"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
     deploy:
       resources:
         reservations:
@@ -831,7 +877,7 @@ services:
               count: 1
               capabilities: [gpu]
     profiles:
-      - gpu
+      - whisper
     restart: unless-stopped
 
 volumes:

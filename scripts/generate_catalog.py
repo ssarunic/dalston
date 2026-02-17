@@ -1,8 +1,18 @@
 #!/usr/bin/env python3
-"""Generate engine catalog from engine.yaml files.
+"""Generate engine catalog from engine.yaml and variant files.
 
-This script scans all engine.yaml files in the engines directory and
-generates a single catalog.json file for the orchestrator to load.
+This script scans all engine.yaml files and variants/*.yaml files in the
+engines directory and generates a single catalog.json file for the
+orchestrator to load.
+
+Engine variants allow a single engine implementation to have multiple
+deployable configurations with different hardware requirements. For example:
+    engines/transcribe/whisper/
+    ├── engine.py           # Shared implementation
+    ├── Dockerfile          # Parameterized
+    └── variants/
+        ├── base.yaml       # id: whisper-base
+        └── large-v3.yaml   # id: whisper-large-v3
 
 Usage:
     python scripts/generate_catalog.py
@@ -21,8 +31,29 @@ import yaml
 
 
 def find_engine_yamls(engines_dir: Path) -> list[Path]:
-    """Find all engine.yaml files in the engines directory."""
-    return sorted(engines_dir.glob("**/engine.yaml"))
+    """Find all engine.yaml and variant files in the engines directory.
+
+    Scans for:
+    - engines/**/engine.yaml - traditional single-file engines
+    - engines/**/variants/*.yaml - variant-based engines (M32)
+
+    Engines with a variants/ directory should NOT have an engine.yaml file
+    at the same level - each variant is a separate deployable engine.
+    """
+    yamls: list[Path] = []
+
+    # Find traditional engine.yaml files
+    for yaml_path in engines_dir.glob("**/engine.yaml"):
+        # Skip if this engine has a variants/ directory (migrated engine)
+        variants_dir = yaml_path.parent / "variants"
+        if variants_dir.exists() and any(variants_dir.glob("*.yaml")):
+            continue
+        yamls.append(yaml_path)
+
+    # Find variant YAML files
+    yamls.extend(engines_dir.glob("**/variants/*.yaml"))
+
+    return sorted(yamls)
 
 
 def load_engine_yaml(path: Path) -> dict:

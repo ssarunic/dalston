@@ -1,4 +1,4 @@
-# Faster-Whisper Engine Dependencies
+# Whisper Engine Dependencies
 
 # Core transcription library (CTranslate2-based Whisper)
 faster-whisper>=1.0.0

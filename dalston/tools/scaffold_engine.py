@@ -4,6 +4,7 @@ Scaffold a new Dalston engine with all required files.
 Usage:
     python -m dalston.tools.scaffold_engine my-engine --stage transcribe
     python -m dalston.tools.scaffold_engine my-engine --stage diarize --gpu required
+    python -m dalston.tools.scaffold_engine whisper --stage transcribe --variants base,large-v3,large-v3-turbo
     python -m dalston.tools.scaffold_engine --list-stages
 """
 
@@ -57,6 +58,79 @@ class ScaffoldConfig(NamedTuple):
     supports_cpu: bool
     min_vram_gb: int | None
     min_ram_gb: int
+
+
+class VariantConfig(NamedTuple):
+    """Configuration for a single engine variant."""
+
+    variant_id: str  # e.g., "base", "large-v3"
+    engine_family: str  # e.g., "whisper"
+    full_engine_id: str  # e.g., "whisper-base"
+    stage: str
+    name: str
+    description: str
+    gpu: str
+    memory: str
+    languages: list[str] | None
+    word_timestamps: bool
+    supports_cpu: bool
+    min_vram_gb: int | None
+    min_ram_gb: int
+
+
+# Default variant hardware specs (can be overridden)
+VARIANT_DEFAULTS = {
+    "tiny": {"min_vram_gb": 1, "gpu": "optional", "supports_cpu": True, "memory": "2G"},
+    "base": {"min_vram_gb": 2, "gpu": "optional", "supports_cpu": True, "memory": "4G"},
+    "small": {
+        "min_vram_gb": 3,
+        "gpu": "optional",
+        "supports_cpu": True,
+        "memory": "4G",
+    },
+    "medium": {
+        "min_vram_gb": 4,
+        "gpu": "optional",
+        "supports_cpu": False,
+        "memory": "6G",
+    },
+    "large-v1": {
+        "min_vram_gb": 6,
+        "gpu": "required",
+        "supports_cpu": False,
+        "memory": "8G",
+    },
+    "large-v2": {
+        "min_vram_gb": 6,
+        "gpu": "required",
+        "supports_cpu": False,
+        "memory": "8G",
+    },
+    "large-v3": {
+        "min_vram_gb": 6,
+        "gpu": "required",
+        "supports_cpu": False,
+        "memory": "8G",
+    },
+    "large-v3-turbo": {
+        "min_vram_gb": 4,
+        "gpu": "required",
+        "supports_cpu": False,
+        "memory": "6G",
+    },
+    "0.6b": {
+        "min_vram_gb": 4,
+        "gpu": "required",
+        "supports_cpu": False,
+        "memory": "6G",
+    },
+    "1.1b": {
+        "min_vram_gb": 6,
+        "gpu": "required",
+        "supports_cpu": False,
+        "memory": "8G",
+    },
+}
 
 
 def validate_engine_id(engine_id: str) -> str | None:
@@ -416,6 +490,324 @@ REDIS_URL=redis://localhost:6379 ENGINE_ID={config.engine_id} python engine.py
 """
 
 
+def generate_variant_yaml(config: VariantConfig) -> str:
+    """Generate variant-specific engine.yaml content."""
+    pipeline_tag = PIPELINE_TAG_MAP.get(config.stage, "audio-classification")
+
+    # Format languages
+    if config.languages is None:
+        languages_yaml = "    - all  # Supports all languages"
+    elif config.languages == ["en"]:
+        languages_yaml = "    - en"
+    else:
+        languages_yaml = "\n".join(f"    - {lang}" for lang in config.languages)
+
+    # Hardware section
+    hardware_lines = []
+    if config.min_vram_gb:
+        hardware_lines.append(f"  min_vram_gb: {config.min_vram_gb}")
+    if config.gpu != "none":
+        hardware_lines.append("  recommended_gpu:\n    - t4\n    - a10g")
+    hardware_lines.append(f"  supports_cpu: {str(config.supports_cpu).lower()}")
+    hardware_lines.append(f"  min_ram_gb: {config.min_ram_gb}")
+    hardware_yaml = "\n".join(line for line in hardware_lines if line)
+
+    # Performance section
+    if config.stage == "transcribe":
+        rtf_gpu = "0.05"
+        rtf_cpu = "0.8" if config.supports_cpu else "null"
+    else:
+        rtf_gpu = "0.1" if config.gpu != "none" else "null"
+        rtf_cpu = "0.5" if config.supports_cpu else "null"
+
+    return f"""schema_version: "1.1"
+id: {config.full_engine_id}
+stage: {config.stage}
+name: {config.name}
+version: 1.0.0
+description: |
+  {config.description}
+
+container:
+  gpu: {config.gpu}
+  memory: {config.memory}
+  model_cache: /models
+
+capabilities:
+  languages:
+{languages_yaml}
+  max_audio_duration: 7200
+  max_concurrency: 4
+  streaming: false
+  word_timestamps: {str(config.word_timestamps).lower()}
+
+input:
+  audio_formats:
+    - wav
+  sample_rate: 16000
+  channels: 1
+
+hf_compat:
+  pipeline_tag: {pipeline_tag}
+  library_name: custom
+  license: apache-2.0
+
+hardware:
+{hardware_yaml}
+
+performance:
+  rtf_gpu: {rtf_gpu}
+  rtf_cpu: {rtf_cpu}
+  warm_start_latency_ms: 100
+"""
+
+
+def generate_variant_dockerfile(engine_family: str, stage: str) -> str:
+    """Generate parameterized Dockerfile for variant-based engines."""
+    return f"""# {engine_family.title()} Engine (Parameterized)
+#
+# Build with specific variant:
+#   docker compose build --build-arg MODEL_SIZE=base stt-batch-{stage}-{engine_family}-base
+#   docker compose build --build-arg MODEL_SIZE=large-v3 stt-batch-{stage}-{engine_family}-large-v3
+#
+ARG MODEL_SIZE=large-v3
+
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+    ffmpeg \\
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory for dalston package
+WORKDIR /opt/dalston
+
+# Copy the dalston package source
+COPY pyproject.toml .
+COPY dalston/ dalston/
+
+# Install the dalston engine SDK
+RUN pip install --no-cache-dir -e ".[engine-sdk]"
+
+# Set working directory for engine
+WORKDIR /engine
+
+# Copy engine requirements first for better caching
+COPY engines/{stage}/{engine_family}/requirements.txt .
+
+# Install engine dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy engine implementation
+COPY engines/{stage}/{engine_family}/engine.py .
+
+# Copy variant-specific config to standard location
+COPY engines/{stage}/{engine_family}/variants/${{MODEL_SIZE}}.yaml /etc/dalston/engine.yaml
+
+# Set model variant via environment
+ENV MODEL_SIZE=${{MODEL_SIZE}}
+ENV HF_HOME=/models
+RUN mkdir -p /models
+
+CMD ["python", "engine.py"]
+"""
+
+
+def generate_variant_engine_py(engine_family: str, stage: str, description: str) -> str:
+    """Generate shared engine.py for variant-based engines."""
+    class_name = to_class_name(engine_family)
+
+    return f'''"""{engine_family.title()} engine.
+
+{description}
+
+This engine supports multiple model variants configured via the MODEL_SIZE
+environment variable. Each variant has its own engine.yaml in the variants/
+directory with appropriate hardware requirements.
+"""
+
+import os
+from typing import Any
+
+from dalston.engine_sdk import (
+    Engine,
+    TaskInput,
+    TaskOutput,
+)
+
+
+class {class_name}(Engine):
+    """{engine_family.title()} engine implementation.
+
+    The model variant is determined by the MODEL_SIZE environment variable,
+    which is set at container build time. Each variant is a separate
+    deployable engine with its own hardware requirements.
+
+    TODO: Add your model loading and processing logic here.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._model = None
+        # Model variant determined by container, not request
+        self._model_size = os.environ.get("MODEL_SIZE", "large-v3")
+        self.logger.info("engine_init", model_size=self._model_size)
+
+    def _load_model(self) -> None:
+        """Load the model if not already loaded."""
+        if self._model is not None:
+            return
+
+        self.logger.info("loading_model", model_size=self._model_size)
+        # TODO: Load your model here based on self._model_size
+        # self._model = load_model(self._model_size)
+        self._model = "placeholder"
+        self.logger.info("model_loaded", model_size=self._model_size)
+
+    def process(self, input: TaskInput) -> TaskOutput:
+        """Process audio input.
+
+        Args:
+            input: Task input with audio file path and config
+
+        Returns:
+            TaskOutput with processing results
+        """
+        audio_path = input.audio_path
+
+        # Load model (lazy loading, cached)
+        self._load_model()
+
+        self.logger.info("processing", audio_path=str(audio_path))
+
+        # TODO: Implement your processing logic here
+        # result = self._model.process(audio_path)
+        result = {{"status": "processed", "audio_path": str(audio_path)}}
+
+        self.logger.info("processing_complete")
+
+        return TaskOutput(data=result)
+
+    def health_check(self) -> dict[str, Any]:
+        """Return health status."""
+        return {{
+            "status": "healthy",
+            "model_loaded": self._model is not None,
+            "model_size": self._model_size,
+        }}
+
+
+if __name__ == "__main__":
+    engine = {class_name}()
+    engine.run()
+'''
+
+
+def scaffold_variant_engine(
+    engine_family: str,
+    stage: str,
+    variants: list[str],
+    description: str,
+    languages: list[str] | None,
+    word_timestamps: bool,
+    engines_dir: Path,
+    dry_run: bool,
+) -> bool:
+    """Create engine directory with variant structure.
+
+    Returns True on success, False on failure.
+    """
+    engine_dir = engines_dir / stage / engine_family
+
+    if engine_dir.exists():
+        print(f"Error: Directory already exists: {engine_dir}", file=sys.stderr)
+        return False
+
+    # Generate files
+    files = {
+        "engine.py": generate_variant_engine_py(engine_family, stage, description),
+        "Dockerfile": generate_variant_dockerfile(engine_family, stage),
+        "requirements.txt": "# Engine-specific dependencies\n# Add your dependencies here\n",
+        "README.md": f"""# {engine_family.title()}
+
+{description}
+
+## Variants
+
+This engine supports multiple variants with different hardware requirements:
+
+| Variant | Command |
+|---------|---------|
+{chr(10).join(f"| {v} | `docker compose up stt-batch-{stage}-{engine_family}-{v}` |" for v in variants)}
+
+## Adding a New Variant
+
+1. Create `variants/{{new-variant}}.yaml` with appropriate hardware specs
+2. Add service to `docker-compose.yml`
+3. Build: `docker compose build --build-arg MODEL_SIZE={{new-variant}} stt-batch-{stage}-{engine_family}-{{new-variant}}`
+""",
+    }
+
+    # Generate variant YAML files
+    variant_files = {}
+    for variant in variants:
+        defaults = VARIANT_DEFAULTS.get(variant, {})
+        config = VariantConfig(
+            variant_id=variant,
+            engine_family=engine_family,
+            full_engine_id=f"{engine_family}-{variant}",
+            stage=stage,
+            name=f"{engine_family.title()} {variant.title().replace('-', ' ')}",
+            description=f"{engine_family.title()} {variant} variant.",
+            gpu=defaults.get("gpu", "optional"),
+            memory=defaults.get("memory", "4G"),
+            languages=languages,
+            word_timestamps=word_timestamps,
+            supports_cpu=defaults.get("supports_cpu", True),
+            min_vram_gb=defaults.get("min_vram_gb", 4),
+            min_ram_gb=4,
+        )
+        variant_files[f"variants/{variant}.yaml"] = generate_variant_yaml(config)
+
+    if dry_run:
+        print(f"Would create: {engine_dir}/")
+        for filename in files:
+            print(f"  - {filename}")
+        print("  - variants/")
+        for filename in variant_files:
+            print(f"    - {filename.split('/')[1]}")
+        print("\nUse --no-dry-run to create files.")
+        return True
+
+    # Create directories
+    engine_dir.mkdir(parents=True, exist_ok=True)
+    (engine_dir / "variants").mkdir(exist_ok=True)
+
+    # Write main files
+    for filename, content in files.items():
+        file_path = engine_dir / filename
+        file_path.write_text(content)
+        print(f"Created: {file_path}")
+
+    # Write variant files
+    for filename, content in variant_files.items():
+        file_path = engine_dir / filename
+        file_path.write_text(content)
+        print(f"Created: {file_path}")
+
+    print(f"\n✓ Engine with {len(variants)} variants scaffolded at {engine_dir}")
+    print("\nNext steps:")
+    print("  1. Implement process() in engine.py")
+    print("  2. Add dependencies to requirements.txt")
+    print("  3. Adjust hardware specs in variants/*.yaml")
+    print(
+        f"  4. Validate: python -m dalston.tools.validate_engine {engine_dir}/variants/*.yaml"
+    )
+    print("  5. Add services to docker-compose.yml")
+
+    return True
+
+
 def scaffold_engine(config: ScaffoldConfig, engines_dir: Path, dry_run: bool) -> bool:
     """Create the engine directory and all template files.
 
@@ -474,6 +866,7 @@ Examples:
   python -m dalston.tools.scaffold_engine my-transcriber --stage transcribe
   python -m dalston.tools.scaffold_engine my-diarizer --stage diarize --gpu required
   python -m dalston.tools.scaffold_engine my-merger --stage merge --gpu none
+  python -m dalston.tools.scaffold_engine whisper --stage transcribe --variants base,large-v3,large-v3-turbo
   python -m dalston.tools.scaffold_engine --list-stages
         """,
     )
@@ -531,6 +924,12 @@ Examples:
         help="Engine produces word-level timestamps",
     )
     parser.add_argument(
+        "--variants",
+        type=str,
+        help="Comma-separated list of variants (e.g., base,large-v3,large-v3-turbo). "
+        "Creates variant structure with separate YAML per variant.",
+    )
+    parser.add_argument(
         "--engines-dir",
         type=Path,
         default=DEFAULT_ENGINES_DIR,
@@ -574,6 +973,24 @@ Examples:
     if languages == ["all"]:
         languages = None
 
+    dry_run = not args.no_dry_run
+
+    # Handle variant-based scaffolding
+    if args.variants:
+        variants = [v.strip() for v in args.variants.split(",")]
+        success = scaffold_variant_engine(
+            engine_family=args.engine_id,
+            stage=args.stage,
+            variants=variants,
+            description=args.description,
+            languages=languages,
+            word_timestamps=args.word_timestamps,
+            engines_dir=args.engines_dir,
+            dry_run=dry_run,
+        )
+        return 0 if success else 1
+
+    # Traditional single-engine scaffolding
     # Determine hardware defaults based on GPU setting
     if args.gpu == "none":
         supports_cpu = True
@@ -599,7 +1016,6 @@ Examples:
         min_ram_gb=4,
     )
 
-    dry_run = not args.no_dry_run
     success = scaffold_engine(config, args.engines_dir, dry_run)
 
     return 0 if success else 1

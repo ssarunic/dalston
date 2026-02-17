@@ -136,7 +136,9 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 |---|-----------|------|------|--------|
 | [M28](milestones/M28-batch-engine-registry.md) | Batch Engine Registry | Fail-fast when engines unavailable | 2-3 | Complete |
 | [M29](milestones/M29-engine-catalog-capabilities.md) | Engine Catalog & Capabilities | Validate job requirements against engine capabilities | 2-3 | Complete |
-| [M30](milestones/M30-engine-metadata-evolution.md) | Engine Metadata Evolution | Single source of truth for engine metadata; discovery API | 8-10 | Planning |
+| [M30](milestones/M30-engine-metadata-evolution.md) | Engine Metadata Evolution | Single source of truth for engine metadata; discovery API | 8-10 | Complete |
+| [M31](milestones/M31-capability-driven-routing.md) | Capability-Driven Routing | Route jobs based on engine capabilities | 2-3 | Complete |
+| [M32](milestones/M32-engine-variant-structure.md) | Engine Variant Structure | Model sizes as separate deployable engines | 1.5-2 | Planned |
 
 ---
 
@@ -227,7 +229,9 @@ M6 ──► M24 (realtime session persistence, prerequisite for M7)
 
 M3 + M4 + M25 ──► M26
 
-M28 ──► M29 ──► M30
+M28 ──► M29 ──► M30 ──► M31
+                  │
+                  └──► M32 (variant structure)
 ```
 
 - **M1-M5**: Core batch pipeline (sequential)
@@ -242,7 +246,7 @@ M28 ──► M29 ──► M30
 - **M24**: Realtime Session Persistence (needs M6 real-time, prerequisite for M7 hybrid)
 - **M25**: Data Retention & Audit (needs M11 auth, M21 webhooks for purge events)
 - **M26**: PII Detection & Audio Redaction (needs M3 word timestamps, M4 diarization, M25 retention)
-- **M28-M30**: Engine infrastructure (M28 registry → M29 capabilities → M30 metadata evolution)
+- **M28-M32**: Engine infrastructure (M28 registry → M29 capabilities → M30 metadata → M31 routing → M32 variants)
 
 ---
 
@@ -276,3 +280,4 @@ Each milestone has a verification section. Key checkpoints:
 | M28 | Job fails immediately with clear error when engine not running |
 | M29 | Job fails with capability mismatch error (e.g., unsupported language) |
 | M30 | `GET /v1/engines` returns engine list; `GET /v1/capabilities` returns aggregate capabilities |
+| M32 | Catalog shows `whisper-base`, `whisper-large-v3`, `whisper-large-v3-turbo` as separate engines |

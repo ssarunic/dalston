@@ -1,9 +1,14 @@
-"""Faster-Whisper transcription engine.
+"""Whisper transcription engine.
 
 Uses the faster-whisper library (CTranslate2-based) for efficient
 speech-to-text transcription with GPU acceleration.
+
+This engine supports multiple model variants configured via the MODEL_SIZE
+environment variable. Each variant has its own engine.yaml in the variants/
+directory with appropriate hardware requirements.
 """
 
+import os
 from typing import Any
 
 from faster_whisper import WhisperModel
@@ -20,30 +25,34 @@ from dalston.engine_sdk import (
 )
 
 
-class FasterWhisperEngine(Engine):
-    """Faster-Whisper transcription engine.
+class WhisperEngine(Engine):
+    """Whisper transcription engine.
 
     Loads the Whisper model lazily on first request and caches it
-    for subsequent transcriptions. Supports multiple model sizes
-    and VAD filtering for improved accuracy.
+    for subsequent transcriptions. The model variant is determined by
+    the MODEL_SIZE environment variable, set at container build time.
 
     Automatically detects GPU availability and falls back to CPU mode.
     """
 
     # Default configuration
-    DEFAULT_MODEL = "large-v3"
     DEFAULT_BEAM_SIZE = 5
     DEFAULT_VAD_FILTER = True
 
     def __init__(self) -> None:
         super().__init__()
         self._model: WhisperModel | None = None
-        self._model_size: str | None = None
+
+        # Model variant determined by container, not request config
+        self._model_size = os.environ.get("MODEL_SIZE", "large-v3")
 
         # Auto-detect device and compute type
         self._device, self._compute_type = self._detect_device()
         self.logger.info(
-            "detected_device", device=self._device, compute_type=self._compute_type
+            "engine_init",
+            model_size=self._model_size,
+            device=self._device,
+            compute_type=self._compute_type,
         )
 
     def _detect_device(self) -> tuple[str, str]:
@@ -63,33 +72,25 @@ class FasterWhisperEngine(Engine):
         # Fallback to CPU
         return "cpu", "int8"
 
-    def _load_model(self, model_size: str, device: str, compute_type: str) -> None:
-        """Load the Whisper model if not already loaded.
-
-        Args:
-            model_size: Model size (tiny, base, small, medium, large-v2, large-v3)
-            device: Device to use (cuda, cpu)
-            compute_type: Compute type (float16, int8, int8_float16)
-        """
-        # Only reload if model size changed
-        if self._model is not None and self._model_size == model_size:
+    def _load_model(self) -> None:
+        """Load the Whisper model if not already loaded."""
+        if self._model is not None:
             return
 
         self.logger.info(
             "loading_whisper_model",
-            model_size=model_size,
-            device=device,
-            compute_type=compute_type,
+            model_size=self._model_size,
+            device=self._device,
+            compute_type=self._compute_type,
         )
 
         self._model = WhisperModel(
-            model_size,
-            device=device,
-            compute_type=compute_type,
+            self._model_size,
+            device=self._device,
+            compute_type=self._compute_type,
         )
-        self._model_size = model_size
 
-        self.logger.info("model_loaded_successfully", model_size=model_size)
+        self.logger.info("model_loaded_successfully", model_size=self._model_size)
 
     def process(self, input: TaskInput) -> TaskOutput:
         """Transcribe audio using Faster-Whisper.
@@ -103,10 +104,6 @@ class FasterWhisperEngine(Engine):
         audio_path = input.audio_path
         config = input.config
 
-        # Get configuration with defaults (use auto-detected device settings)
-        model_size = config.get("model", self.DEFAULT_MODEL)
-        device = config.get("device", self._device)
-        compute_type = config.get("compute_type", self._compute_type)
         # Handle language: None or "auto" means auto-detect
         language = config.get("language")
         if language == "auto" or language == "":
@@ -116,12 +113,12 @@ class FasterWhisperEngine(Engine):
         channel = config.get("channel")  # For per_channel mode
 
         # Load model (lazy loading, cached)
-        self._load_model(model_size, device, compute_type)
+        self._load_model()
 
         self.logger.info("transcribing", audio_path=str(audio_path))
         self.logger.info(
             "transcribe_config",
-            model=model_size,
+            model=self._model_size,
             language=language,
             beam_size=beam_size,
             vad_filter=vad_filter,
@@ -187,6 +184,9 @@ class FasterWhisperEngine(Engine):
             else TimestampGranularity.SEGMENT
         )
 
+        # Get engine_id from environment or capabilities
+        engine_id = os.environ.get("ENGINE_ID", f"whisper-{self._model_size}")
+
         output = TranscribeOutput(
             text=full_text,
             segments=segments,
@@ -196,7 +196,7 @@ class FasterWhisperEngine(Engine):
             timestamp_granularity_requested=TimestampGranularity.WORD,
             timestamp_granularity_actual=timestamp_granularity_actual,
             channel=channel,
-            engine_id="faster-whisper",
+            engine_id=engine_id,
             skipped=False,
             skip_reason=None,
             warnings=[],
@@ -233,5 +233,5 @@ class FasterWhisperEngine(Engine):
 
 
 if __name__ == "__main__":
-    engine = FasterWhisperEngine()
+    engine = WhisperEngine()
     engine.run()

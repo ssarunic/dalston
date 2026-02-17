@@ -166,12 +166,17 @@ class TestFindEngineYamls:
     """Tests for find_engine_yamls function."""
 
     def test_finds_engine_yamls(self) -> None:
-        """Should find engine.yaml files in the engines directory."""
+        """Should find engine.yaml and variant YAML files in the engines directory."""
         engines_dir = Path(__file__).parent.parent.parent / "engines"
         if engines_dir.exists():
             files = find_engine_yamls(engines_dir)
+            # Should find both engine.yaml files and variant files
             assert len(files) >= 11
-            assert all(f.name == "engine.yaml" for f in files)
+            # All files should be YAML files (engine.yaml or variants/*.yaml)
+            assert all(f.suffix == ".yaml" for f in files)
+            # All should be either engine.yaml or in a variants/ directory
+            for f in files:
+                assert f.name == "engine.yaml" or f.parent.name == "variants"
 
     def test_empty_for_nonexistent_dir(self) -> None:
         """Should return empty list for non-existent directory."""

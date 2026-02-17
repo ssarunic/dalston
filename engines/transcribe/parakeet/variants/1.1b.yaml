@@ -1,0 +1,46 @@
+schema_version: "1.1"
+id: parakeet-1.1b
+stage: transcribe
+name: NVIDIA Parakeet 1.1B
+version: 1.0.0
+description: |
+  NVIDIA Parakeet FastConformer RNNT 1.1B for accurate English-only transcription.
+  Produces native word-level timestamps without separate alignment.
+  Higher accuracy variant, recommended for A10G or better GPUs.
+
+container:
+  gpu: required
+  memory: 10G
+  model_cache: /models
+
+capabilities:
+  languages:
+    - en
+  max_audio_duration: 7200
+  streaming: false
+  word_timestamps: true
+  max_concurrency: 4
+
+input:
+  audio_formats:
+    - wav
+  sample_rate: 16000
+  channels: 1
+
+hf_compat:
+  pipeline_tag: automatic-speech-recognition
+  library_name: nemo
+  license: apache-2.0
+
+hardware:
+  min_vram_gb: 6
+  recommended_gpu:
+    - a10g
+    - a100
+  supports_cpu: false
+  min_ram_gb: 12
+
+performance:
+  rtf_gpu: 0.0008
+  rtf_cpu: null
+  warm_start_latency_ms: 150
