@@ -1,0 +1,55 @@
+schema_version: "1.1"
+id: voxtral-mini-3b
+stage: transcribe
+name: Mistral Voxtral Mini 3B
+version: 1.0.0
+description: |
+  Mistral Voxtral Mini 3B for multilingual transcription.
+  Supports 8 languages with segment-level output.
+  Optimized for edge and local deployments with ~9.5GB VRAM requirement.
+  Use WhisperX align stage for word-level timestamps if needed.
+
+container:
+  gpu: required
+  memory: 12G
+  model_cache: /models
+
+capabilities:
+  languages:
+    - en
+    - es
+    - fr
+    - pt
+    - hi
+    - de
+    - nl
+    - it
+  max_audio_duration: 1800
+  streaming: false
+  word_timestamps: false
+  max_concurrency: 2
+
+input:
+  audio_formats:
+    - wav
+  sample_rate: 16000
+  channels: 1
+
+hf_compat:
+  pipeline_tag: automatic-speech-recognition
+  library_name: transformers
+  license: apache-2.0
+
+hardware:
+  min_vram_gb: 9.5
+  recommended_gpu:
+    - a10g
+    - l4
+    - rtx4090
+  supports_cpu: false
+  min_ram_gb: 16
+
+performance:
+  rtf_gpu: 0.05
+  rtf_cpu: null
+  warm_start_latency_ms: 500

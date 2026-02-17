@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-02-17T09:05:38.075307+00:00",
+  "generated_at": "2026-02-17T14:16:05.932986+00:00",
   "schema_version": "1.1",
-  "engine_count": 11,
+  "engine_count": 17,
   "engines": {
     "whisperx-align": {
       "id": "whisperx-align",
@@ -275,55 +275,14 @@
         "channels": "any"
       }
     },
-    "parakeet-streaming": {
-      "id": "parakeet-streaming",
-      "name": "Parakeet Streaming",
+    "faster-whisper-streaming-base": {
+      "id": "faster-whisper-streaming-base",
+      "name": "Faster Whisper Streaming Base",
       "version": "1.0.0",
       "stage": null,
       "type": "realtime",
-      "description": "Real-time streaming transcription using NVIDIA Parakeet.\nUses cache-aware FastConformer encoder for true streaming with ~100ms latency.\nEnglish-only, requires NVIDIA GPU.",
-      "image": "dalston/stt-rt-parakeet-streaming:1.0.0",
-      "capabilities": {
-        "stages": [],
-        "languages": [
-          "en"
-        ],
-        "supports_word_timestamps": true,
-        "supports_streaming": true,
-        "max_audio_duration": null,
-        "max_concurrency": 4
-      },
-      "hardware": {
-        "gpu_required": true,
-        "gpu_optional": false,
-        "min_vram_gb": 4,
-        "recommended_gpu": [
-          "t4",
-          "a10g"
-        ],
-        "supports_cpu": false,
-        "min_ram_gb": 8,
-        "memory": "8G"
-      },
-      "performance": {
-        "rtf_gpu": 0.05,
-        "rtf_cpu": null,
-        "warm_start_latency_ms": 100
-      },
-      "hf_compat": {
-        "pipeline_tag": "automatic-speech-recognition",
-        "library_name": "nemo",
-        "license": "apache-2.0"
-      }
-    },
-    "whisper-streaming": {
-      "id": "whisper-streaming",
-      "name": "Whisper Streaming",
-      "version": "1.0.0",
-      "stage": null,
-      "type": "realtime",
-      "description": "Real-time streaming transcription using Whisper.\nSupports \"fast\" (distil-whisper) and \"accurate\" (large-v3) variants.\nUses Silero VAD for speech boundary detection.",
-      "image": "dalston/stt-rt-whisper-streaming:1.0.0",
+      "description": "Real-time streaming transcription using faster-whisper (CTranslate2).\nSupports both \"fast\" (distil-whisper) and \"accurate\" (large-v3) model modes.\nUses Silero VAD for speech boundary detection.",
+      "image": "dalston/stt-rt-faster-whisper-streaming-base:1.0.0",
       "capabilities": {
         "stages": [],
         "languages": null,
@@ -353,6 +312,143 @@
         "pipeline_tag": "automatic-speech-recognition",
         "library_name": "ctranslate2",
         "license": "mit"
+      }
+    },
+    "parakeet-streaming-0.6b": {
+      "id": "parakeet-streaming-0.6b",
+      "name": "Parakeet Streaming 0.6B",
+      "version": "1.0.0",
+      "stage": null,
+      "type": "realtime",
+      "description": "Real-time streaming transcription using NVIDIA Parakeet 0.6B.\nUses cache-aware FastConformer encoder for true streaming with ~100ms latency.\nEnglish-only, requires NVIDIA GPU.",
+      "image": "dalston/stt-rt-parakeet-streaming-0.6b:1.0.0",
+      "capabilities": {
+        "stages": [],
+        "languages": [
+          "en"
+        ],
+        "supports_word_timestamps": true,
+        "supports_streaming": true,
+        "max_audio_duration": null,
+        "max_concurrency": 4
+      },
+      "hardware": {
+        "gpu_required": true,
+        "gpu_optional": false,
+        "min_vram_gb": 4,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": false,
+        "min_ram_gb": 8,
+        "memory": "6G"
+      },
+      "performance": {
+        "rtf_gpu": 0.05,
+        "rtf_cpu": null,
+        "warm_start_latency_ms": 100
+      },
+      "hf_compat": {
+        "pipeline_tag": "automatic-speech-recognition",
+        "library_name": "nemo",
+        "license": "apache-2.0"
+      }
+    },
+    "parakeet-streaming-1.1b": {
+      "id": "parakeet-streaming-1.1b",
+      "name": "Parakeet Streaming 1.1B",
+      "version": "1.0.0",
+      "stage": null,
+      "type": "realtime",
+      "description": "Real-time streaming transcription using NVIDIA Parakeet 1.1B.\nUses cache-aware FastConformer encoder for true streaming with ~120ms latency.\nHigher accuracy variant, English-only, requires NVIDIA GPU.",
+      "image": "dalston/stt-rt-parakeet-streaming-1.1b:1.0.0",
+      "capabilities": {
+        "stages": [],
+        "languages": [
+          "en"
+        ],
+        "supports_word_timestamps": true,
+        "supports_streaming": true,
+        "max_audio_duration": null,
+        "max_concurrency": 4
+      },
+      "hardware": {
+        "gpu_required": true,
+        "gpu_optional": false,
+        "min_vram_gb": 6,
+        "recommended_gpu": [
+          "a10g",
+          "a100"
+        ],
+        "supports_cpu": false,
+        "min_ram_gb": 12,
+        "memory": "10G"
+      },
+      "performance": {
+        "rtf_gpu": 0.07,
+        "rtf_cpu": null,
+        "warm_start_latency_ms": 120
+      },
+      "hf_compat": {
+        "pipeline_tag": "automatic-speech-recognition",
+        "library_name": "nemo",
+        "license": "apache-2.0"
+      }
+    },
+    "voxtral-streaming-mini-4b": {
+      "id": "voxtral-streaming-mini-4b",
+      "name": "Voxtral Streaming Mini 4B",
+      "version": "1.0.0",
+      "stage": null,
+      "type": "realtime",
+      "description": "Real-time streaming transcription using Mistral Voxtral-Mini-4B-Realtime.\nAchieves <500ms latency with configurable delay (80ms-2400ms).\nSupports 13 languages with native streaming architecture.",
+      "image": "dalston/stt-rt-voxtral-streaming-mini-4b:1.0.0",
+      "capabilities": {
+        "stages": [],
+        "languages": [
+          "en",
+          "zh",
+          "hi",
+          "es",
+          "ar",
+          "fr",
+          "pt",
+          "ru",
+          "de",
+          "ja",
+          "ko",
+          "it",
+          "nl"
+        ],
+        "supports_word_timestamps": true,
+        "supports_streaming": true,
+        "max_audio_duration": null,
+        "max_concurrency": 4
+      },
+      "hardware": {
+        "gpu_required": true,
+        "gpu_optional": false,
+        "min_vram_gb": 16,
+        "recommended_gpu": [
+          "a10g",
+          "l4",
+          "rtx4090",
+          "a100"
+        ],
+        "supports_cpu": false,
+        "min_ram_gb": 24,
+        "memory": "18G"
+      },
+      "performance": {
+        "rtf_gpu": 0.08,
+        "rtf_cpu": null,
+        "warm_start_latency_ms": 200
+      },
+      "hf_compat": {
+        "pipeline_tag": "automatic-speech-recognition",
+        "library_name": "transformers",
+        "license": "apache-2.0"
       }
     },
     "audio-redactor": {
@@ -393,14 +489,14 @@
         "license": "apache-2.0"
       }
     },
-    "faster-whisper": {
-      "id": "faster-whisper",
-      "name": "Faster Whisper",
+    "faster-whisper-base": {
+      "id": "faster-whisper-base",
+      "name": "Faster Whisper Base",
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "CTranslate2-optimized Whisper implementation for fast transcription.\nSupports all Whisper model sizes and 99 languages.\nIncludes VAD filtering for improved accuracy on audio with silence.",
-      "image": "dalston/stt-batch-transcribe-faster-whisper:1.0.0",
+      "description": "OpenAI Whisper base model via faster-whisper (CTranslate2).\nGood balance of speed and accuracy for general transcription.\nSupports 99 languages with automatic language detection.",
+      "image": "dalston/stt-batch-transcribe-faster-whisper-base:1.0.0",
       "capabilities": {
         "stages": [
           "transcribe"
@@ -414,24 +510,24 @@
       "hardware": {
         "gpu_required": false,
         "gpu_optional": true,
-        "min_vram_gb": 4,
+        "min_vram_gb": 2,
         "recommended_gpu": [
-          "t4",
-          "a10g"
+          "t4"
         ],
         "supports_cpu": true,
-        "min_ram_gb": 8,
-        "memory": "8G"
+        "min_ram_gb": 4,
+        "memory": "4G"
       },
       "performance": {
-        "rtf_gpu": 0.05,
-        "rtf_cpu": 0.8,
-        "warm_start_latency_ms": 50
+        "rtf_gpu": 0.03,
+        "rtf_cpu": 0.4,
+        "warm_start_latency_ms": 30
       },
       "hf_compat": {
         "pipeline_tag": "automatic-speech-recognition",
         "library_name": "ctranslate2",
-        "license": "mit"
+        "license": "mit",
+        "source_model": "Systran/faster-whisper-base"
       },
       "input": {
         "audio_formats": [
@@ -441,23 +537,21 @@
         "channels": 1
       }
     },
-    "parakeet": {
-      "id": "parakeet",
-      "name": "NVIDIA Parakeet",
+    "faster-whisper-large-v3-turbo": {
+      "id": "faster-whisper-large-v3-turbo",
+      "name": "Faster Whisper Large V3 Turbo",
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "NVIDIA Parakeet FastConformer RNNT for fast English-only transcription.\nProduces native word-level timestamps without separate alignment.\nAchieves RTFx >2000 with competitive WER (~7.2% average).",
-      "image": "dalston/stt-batch-transcribe-parakeet:1.0.0",
+      "description": "OpenAI Whisper large-v3-turbo model via faster-whisper (CTranslate2).\nOptimized for speed while maintaining high accuracy.\nDistilled from large-v3 with pruned decoder for faster inference.\nSupports 99 languages with automatic language detection.",
+      "image": "dalston/stt-batch-transcribe-faster-whisper-large-v3-turbo:1.0.0",
       "capabilities": {
         "stages": [
           "transcribe"
         ],
-        "languages": [
-          "en"
-        ],
-        "supports_word_timestamps": true,
-        "supports_streaming": true,
+        "languages": null,
+        "supports_word_timestamps": false,
+        "supports_streaming": false,
         "max_audio_duration": 7200,
         "max_concurrency": 4
       },
@@ -471,7 +565,107 @@
         ],
         "supports_cpu": false,
         "min_ram_gb": 8,
+        "memory": "6G"
+      },
+      "performance": {
+        "rtf_gpu": 0.03,
+        "rtf_cpu": null,
+        "warm_start_latency_ms": 40
+      },
+      "hf_compat": {
+        "pipeline_tag": "automatic-speech-recognition",
+        "library_name": "ctranslate2",
+        "license": "mit",
+        "source_model": "Systran/faster-whisper-large-v3-turbo"
+      },
+      "input": {
+        "audio_formats": [
+          "wav"
+        ],
+        "sample_rate": 16000,
+        "channels": 1
+      }
+    },
+    "faster-whisper-large-v3": {
+      "id": "faster-whisper-large-v3",
+      "name": "Faster Whisper Large V3",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "type": null,
+      "description": "OpenAI Whisper large-v3 model via faster-whisper (CTranslate2).\nBest accuracy for multilingual transcription.\nSupports 99 languages with automatic language detection.",
+      "image": "dalston/stt-batch-transcribe-faster-whisper-large-v3:1.0.0",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": null,
+        "supports_word_timestamps": false,
+        "supports_streaming": false,
+        "max_audio_duration": 7200,
+        "max_concurrency": 4
+      },
+      "hardware": {
+        "gpu_required": true,
+        "gpu_optional": false,
+        "min_vram_gb": 6,
+        "recommended_gpu": [
+          "a10g",
+          "a100"
+        ],
+        "supports_cpu": false,
+        "min_ram_gb": 16,
         "memory": "8G"
+      },
+      "performance": {
+        "rtf_gpu": 0.05,
+        "rtf_cpu": null,
+        "warm_start_latency_ms": 50
+      },
+      "hf_compat": {
+        "pipeline_tag": "automatic-speech-recognition",
+        "library_name": "ctranslate2",
+        "license": "mit",
+        "source_model": "Systran/faster-whisper-large-v3"
+      },
+      "input": {
+        "audio_formats": [
+          "wav"
+        ],
+        "sample_rate": 16000,
+        "channels": 1
+      }
+    },
+    "parakeet-0.6b": {
+      "id": "parakeet-0.6b",
+      "name": "NVIDIA Parakeet 0.6B",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "type": null,
+      "description": "NVIDIA Parakeet FastConformer RNNT 0.6B for fast English-only transcription.\nProduces native word-level timestamps without separate alignment.\nFaster variant with good accuracy, suitable for T4 GPUs.",
+      "image": "dalston/stt-batch-transcribe-parakeet-0.6b:1.0.0",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": [
+          "en"
+        ],
+        "supports_word_timestamps": true,
+        "supports_streaming": false,
+        "max_audio_duration": 7200,
+        "max_concurrency": 4
+      },
+      "hardware": {
+        "gpu_required": true,
+        "gpu_optional": false,
+        "min_vram_gb": 4,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": false,
+        "min_ram_gb": 8,
+        "memory": "6G"
       },
       "performance": {
         "rtf_gpu": 0.0005,
@@ -481,6 +675,114 @@
       "hf_compat": {
         "pipeline_tag": "automatic-speech-recognition",
         "library_name": "nemo",
+        "license": "apache-2.0"
+      },
+      "input": {
+        "audio_formats": [
+          "wav"
+        ],
+        "sample_rate": 16000,
+        "channels": 1
+      }
+    },
+    "parakeet-1.1b": {
+      "id": "parakeet-1.1b",
+      "name": "NVIDIA Parakeet 1.1B",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "type": null,
+      "description": "NVIDIA Parakeet FastConformer RNNT 1.1B for accurate English-only transcription.\nProduces native word-level timestamps without separate alignment.\nHigher accuracy variant, recommended for A10G or better GPUs.",
+      "image": "dalston/stt-batch-transcribe-parakeet-1.1b:1.0.0",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": [
+          "en"
+        ],
+        "supports_word_timestamps": true,
+        "supports_streaming": false,
+        "max_audio_duration": 7200,
+        "max_concurrency": 4
+      },
+      "hardware": {
+        "gpu_required": true,
+        "gpu_optional": false,
+        "min_vram_gb": 6,
+        "recommended_gpu": [
+          "a10g",
+          "a100"
+        ],
+        "supports_cpu": false,
+        "min_ram_gb": 12,
+        "memory": "10G"
+      },
+      "performance": {
+        "rtf_gpu": 0.0008,
+        "rtf_cpu": null,
+        "warm_start_latency_ms": 150
+      },
+      "hf_compat": {
+        "pipeline_tag": "automatic-speech-recognition",
+        "library_name": "nemo",
+        "license": "apache-2.0"
+      },
+      "input": {
+        "audio_formats": [
+          "wav"
+        ],
+        "sample_rate": 16000,
+        "channels": 1
+      }
+    },
+    "voxtral-mini-3b": {
+      "id": "voxtral-mini-3b",
+      "name": "Mistral Voxtral Mini 3B",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "type": null,
+      "description": "Mistral Voxtral Mini 3B for multilingual transcription.\nSupports 8 languages with segment-level output.\nOptimized for edge and local deployments with ~9.5GB VRAM requirement.\nUse WhisperX align stage for word-level timestamps if needed.",
+      "image": "dalston/stt-batch-transcribe-voxtral-mini-3b:1.0.0",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": [
+          "en",
+          "es",
+          "fr",
+          "pt",
+          "hi",
+          "de",
+          "nl",
+          "it"
+        ],
+        "supports_word_timestamps": false,
+        "supports_streaming": false,
+        "max_audio_duration": 1800,
+        "max_concurrency": 2
+      },
+      "hardware": {
+        "gpu_required": true,
+        "gpu_optional": false,
+        "min_vram_gb": 9.5,
+        "recommended_gpu": [
+          "a10g",
+          "l4",
+          "rtx4090"
+        ],
+        "supports_cpu": false,
+        "min_ram_gb": 16,
+        "memory": "12G"
+      },
+      "performance": {
+        "rtf_gpu": 0.05,
+        "rtf_cpu": null,
+        "warm_start_latency_ms": 500
+      },
+      "hf_compat": {
+        "pipeline_tag": "automatic-speech-recognition",
+        "library_name": "transformers",
         "license": "apache-2.0"
       },
       "input": {

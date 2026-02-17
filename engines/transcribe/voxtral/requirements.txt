@@ -1,0 +1,22 @@
+# Mistral Voxtral Engine Dependencies
+
+# Transformers with Voxtral support
+transformers>=4.54.0
+
+# Mistral common library with audio support
+mistral-common[audio]>=1.5.0
+
+# PyTorch with CUDA support
+torch>=2.0.0
+
+# Audio processing
+librosa>=0.10.0
+soundfile>=0.12.0
+numpy>=1.24.0
+
+# Accelerate for efficient model loading
+accelerate>=0.26.0
+
+# Tokenizers
+sentencepiece>=0.1.99
+protobuf>=3.20.0
