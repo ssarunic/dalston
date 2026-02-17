@@ -1,13 +1,17 @@
 """NVIDIA Parakeet transcription engine.
 
-Uses NVIDIA NeMo Parakeet FastConformer RNNT models for fast
-English-only speech-to-text transcription with GPU acceleration.
+Uses NVIDIA NeMo Parakeet FastConformer models with CTC or TDT decoders
+for fast English-only speech-to-text transcription with GPU acceleration.
 
-Parakeet produces native word-level timestamps via RNNT alignment,
-eliminating the need for a separate alignment stage.
+- CTC (Connectionist Temporal Classification): Fastest inference, good accuracy
+- TDT (Token-and-Duration Transducer): Best accuracy, 64% faster than RNNT
+
+Parakeet produces native word-level timestamps, eliminating the need for
+a separate alignment stage.
 
 Environment variables:
-    MODEL_SIZE: Model variant to use (0.6b, 1.1b). Defaults to 0.6b.
+    MODEL_VARIANT: Model variant (ctc-0.6b, ctc-1.1b, tdt-0.6b, tdt-1.1b).
+                   Defaults to ctc-0.6b.
     DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
 """
 
@@ -32,37 +36,48 @@ from dalston.engine_sdk import (
 class ParakeetEngine(Engine):
     """NVIDIA Parakeet transcription engine.
 
-    Uses FastConformer encoder with RNNT decoder for efficient
+    Uses FastConformer encoder with CTC or TDT decoder for efficient
     English-only transcription. Automatically produces word-level
     timestamps without requiring separate alignment.
+
+    Decoder types:
+    - CTC: Fastest inference, greedy decoding, good for batch processing
+    - TDT: Best accuracy, predicts token durations, recommended for quality
 
     Supports both GPU (CUDA) and CPU inference. GPU is strongly
     recommended for production use.
     """
 
-    # Model size to NeMo model identifier mapping
-    MODEL_SIZE_MAP = {
-        "0.6b": "nvidia/parakeet-rnnt-0.6b",
-        "1.1b": "nvidia/parakeet-rnnt-1.1b",
+    # Model variant to NeMo model identifier mapping
+    MODEL_VARIANT_MAP = {
+        "ctc-0.6b": "nvidia/parakeet-ctc-0.6b",
+        "ctc-1.1b": "nvidia/parakeet-ctc-1.1b",
+        "tdt-0.6b": "nvidia/parakeet-tdt-0.6b-v3",
+        "tdt-1.1b": "nvidia/parakeet-tdt-1.1b",
     }
-    DEFAULT_MODEL_SIZE = "0.6b"
+    DEFAULT_MODEL_VARIANT = "ctc-0.6b"
 
     def __init__(self) -> None:
         super().__init__()
         self._model = None
         self._model_name: str | None = None
 
-        # Determine model from environment variable (set at container build time)
-        model_size = os.environ.get("MODEL_SIZE", self.DEFAULT_MODEL_SIZE)
-        if model_size not in self.MODEL_SIZE_MAP:
+        # Determine model variant from environment variable (set at container build time)
+        model_variant = os.environ.get("MODEL_VARIANT", self.DEFAULT_MODEL_VARIANT)
+        if model_variant not in self.MODEL_VARIANT_MAP:
             self.logger.warning(
-                "unknown_model_size",
-                requested=model_size,
-                using=self.DEFAULT_MODEL_SIZE,
+                "unknown_model_variant",
+                requested=model_variant,
+                using=self.DEFAULT_MODEL_VARIANT,
             )
-            model_size = self.DEFAULT_MODEL_SIZE
-        self._model_size = model_size
-        self._nemo_model_id = self.MODEL_SIZE_MAP[model_size]
+            model_variant = self.DEFAULT_MODEL_VARIANT
+        self._model_variant = model_variant
+        self._nemo_model_id = self.MODEL_VARIANT_MAP[model_variant]
+
+        # Extract decoder type and size from variant
+        parts = model_variant.split("-")
+        self._decoder_type = parts[0]  # ctc or tdt
+        self._model_size = parts[1] if len(parts) > 1 else "0.6b"
 
         # Determine device from environment or availability
         requested_device = os.environ.get("DEVICE", "").lower()
@@ -101,7 +116,11 @@ class ParakeetEngine(Engine):
         if self._model is not None and self._model_name == model_name:
             return
 
-        self.logger.info("loading_parakeet_model", model_name=model_name)
+        self.logger.info(
+            "loading_parakeet_model",
+            model_name=model_name,
+            decoder_type=self._decoder_type,
+        )
 
         # Import NeMo ASR module
         try:
@@ -120,7 +139,7 @@ class ParakeetEngine(Engine):
         self.logger.info("model_loaded_successfully", model_name=model_name)
 
     def process(self, input: TaskInput) -> TaskOutput:
-        """Transcribe audio using Parakeet RNNT.
+        """Transcribe audio using Parakeet CTC or TDT.
 
         Args:
             input: Task input with audio file path and config
@@ -166,7 +185,7 @@ class ParakeetEngine(Engine):
                     language="en",
                     language_confidence=1.0,
                     channel=channel,
-                    engine_id=f"parakeet-{self._model_size}",
+                    engine_id=f"parakeet-{self._model_variant}",
                     skipped=False,
                     warnings=[],
                 )
@@ -180,9 +199,11 @@ class ParakeetEngine(Engine):
         else:
             full_text = str(hypothesis)
 
-        # Determine alignment method based on model type
-        # All parakeet-*b variants use RNNT
-        alignment_method = AlignmentMethod.RNNT
+        # Determine alignment method based on decoder type
+        if self._decoder_type == "ctc":
+            alignment_method = AlignmentMethod.CTC
+        else:  # tdt
+            alignment_method = AlignmentMethod.TDT
 
         # Build segments with word-level timestamps
         segments: list[Segment] = []
@@ -256,7 +277,7 @@ class ParakeetEngine(Engine):
                     start=round(word_start, 3),
                     end=round(word_end, 3),
                     confidence=None,
-                    alignment_method=AlignmentMethod.RNNT,
+                    alignment_method=alignment_method,
                 )
                 current_words.append(word)
                 all_words.append(word)
@@ -304,7 +325,7 @@ class ParakeetEngine(Engine):
             timestamp_granularity_actual=timestamp_granularity_actual,
             alignment_method=alignment_method,
             channel=channel,
-            engine_id=f"parakeet-{self._model_size}",
+            engine_id=f"parakeet-{self._model_variant}",
             skipped=False,
             skip_reason=None,
             warnings=[],
@@ -338,13 +359,13 @@ class ParakeetEngine(Engine):
         """Return Parakeet engine capabilities.
 
         Parakeet is an English-only transcription engine with native
-        word-level timestamps via RNNT alignment.
+        word-level timestamps via CTC or TDT alignment.
         """
         # VRAM requirements per model size
         vram_mb = 4000 if self._model_size == "0.6b" else 6000
 
         return EngineCapabilities(
-            engine_id=f"parakeet-{self._model_size}",
+            engine_id=f"parakeet-{self._model_variant}",
             version="1.0.0",
             stages=["transcribe"],
             languages=["en"],  # English only

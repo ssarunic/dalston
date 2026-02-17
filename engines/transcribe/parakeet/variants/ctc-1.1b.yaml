@@ -1,16 +1,17 @@
 schema_version: "1.1"
-id: parakeet-0.6b
+id: parakeet-ctc-1.1b
 stage: transcribe
-name: NVIDIA Parakeet 0.6B
+name: NVIDIA Parakeet CTC 1.1B
 version: 1.0.0
 description: |
-  NVIDIA Parakeet FastConformer RNNT 0.6B for fast English-only transcription.
-  Produces native word-level timestamps without separate alignment.
-  Faster variant with good accuracy, suitable for T4 GPUs.
+  NVIDIA Parakeet FastConformer CTC 1.1B for fast English-only transcription.
+  CTC decoder provides fastest inference with greedy decoding.
+  Larger model with better accuracy than 0.6B variant.
+  Best choice for high-throughput batch processing with quality.
 
 container:
   gpu: required
-  memory: 6G
+  memory: 10G
   model_cache: /models
 
 capabilities:
@@ -30,17 +31,17 @@ input:
 hf_compat:
   pipeline_tag: automatic-speech-recognition
   library_name: nemo
-  license: apache-2.0
+  license: cc-by-4.0
 
 hardware:
-  min_vram_gb: 4
+  min_vram_gb: 6
   recommended_gpu:
-    - t4
     - a10g
+    - a100
   supports_cpu: false
-  min_ram_gb: 8
+  min_ram_gb: 12
 
 performance:
   rtf_gpu: 0.0005
   rtf_cpu: null
-  warm_start_latency_ms: 100
+  warm_start_latency_ms: 150

@@ -264,39 +264,94 @@ services:
 
   # --- TRANSCRIBE STAGE ---
 
-  # Parakeet 0.6B (GPU - fast English transcription)
-  stt-batch-transcribe-parakeet-0.6b:
-    image: dalston/stt-batch-transcribe-parakeet-0.6b:1.0.0
+  # Parakeet CTC 0.6B (GPU - fastest English transcription)
+  stt-batch-transcribe-parakeet-ctc-0.6b:
+    image: dalston/stt-batch-transcribe-parakeet-ctc-0.6b:1.0.0
     build:
       context: .
       dockerfile: engines/transcribe/parakeet/Dockerfile
       args:
-        MODEL_SIZE: 0.6b
+        MODEL_VARIANT: ctc-0.6b
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: parakeet-0.6b
+      ENGINE_ID: parakeet-ctc-0.6b
     volumes:
       - parakeet-models:/models
     depends_on: *batch-depends
     deploy: *gpu-deploy
     restart: unless-stopped
 
-  # Parakeet 1.1B (GPU - accurate English transcription)
-  stt-batch-transcribe-parakeet-1.1b:
-    image: dalston/stt-batch-transcribe-parakeet-1.1b:1.0.0
+  # Parakeet CTC 1.1B (GPU - fast English transcription, larger model)
+  stt-batch-transcribe-parakeet-ctc-1.1b:
+    image: dalston/stt-batch-transcribe-parakeet-ctc-1.1b:1.0.0
     build:
       context: .
       dockerfile: engines/transcribe/parakeet/Dockerfile
       args:
-        MODEL_SIZE: 1.1b
+        MODEL_VARIANT: ctc-1.1b
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: parakeet-1.1b
+      ENGINE_ID: parakeet-ctc-1.1b
     volumes:
       - parakeet-models:/models
     depends_on: *batch-depends
     deploy: *gpu-deploy
-    profiles: [parakeet-1.1b]
+    profiles: [parakeet-ctc-1.1b]
+    restart: unless-stopped
+
+  # Parakeet TDT 0.6B (GPU - accurate English transcription)
+  stt-batch-transcribe-parakeet-tdt-0.6b:
+    image: dalston/stt-batch-transcribe-parakeet-tdt-0.6b:1.0.0
+    build:
+      context: .
+      dockerfile: engines/transcribe/parakeet/Dockerfile
+      args:
+        MODEL_VARIANT: tdt-0.6b
+        SKIP_MODEL_DOWNLOAD: "false"
+    environment:
+      <<: [*common-env, *observability-env]
+      ENGINE_ID: parakeet-tdt-0.6b
+    volumes:
+      - parakeet-models:/models
+    depends_on: *batch-depends
+    deploy: *gpu-deploy
+    profiles: [parakeet-tdt-0.6b]
+    restart: unless-stopped
+
+  # Parakeet TDT 0.6B (CPU - for testing without GPU)
+  stt-batch-transcribe-parakeet-tdt-0.6b-cpu:
+    image: dalston/stt-batch-transcribe-parakeet-tdt-0.6b:1.0.0
+    build:
+      context: .
+      dockerfile: engines/transcribe/parakeet/Dockerfile
+      args:
+        MODEL_VARIANT: tdt-0.6b
+        SKIP_MODEL_DOWNLOAD: "true"
+    environment:
+      <<: [*common-env, *observability-env]
+      ENGINE_ID: parakeet-tdt-0.6b
+      DEVICE: cpu
+    volumes:
+      - parakeet-models:/models
+    depends_on: *batch-depends
+    restart: unless-stopped
+
+  # Parakeet TDT 1.1B (GPU - highest accuracy English transcription)
+  stt-batch-transcribe-parakeet-tdt-1.1b:
+    image: dalston/stt-batch-transcribe-parakeet-tdt-1.1b:1.0.0
+    build:
+      context: .
+      dockerfile: engines/transcribe/parakeet/Dockerfile
+      args:
+        MODEL_VARIANT: tdt-1.1b
+    environment:
+      <<: [*common-env, *observability-env]
+      ENGINE_ID: parakeet-tdt-1.1b
+    volumes:
+      - parakeet-models:/models
+    depends_on: *batch-depends
+    deploy: *gpu-deploy
+    profiles: [parakeet-tdt-1.1b]
     restart: unless-stopped
 
   # Faster Whisper base (GPU - balanced speed/accuracy)
@@ -504,9 +559,9 @@ services:
   # REALTIME STT WORKERS
   # ============================================================
 
-  # Parakeet 0.6B (GPU - default realtime worker)
-  stt-rt-transcribe-parakeet-0.6b:
-    image: dalston/stt-rt-transcribe-parakeet-streaming-0.6b:1.0.0
+  # Parakeet RNNT 0.6B (GPU - default realtime worker, streaming capable)
+  stt-rt-transcribe-parakeet-rnnt-0.6b:
+    image: dalston/stt-rt-transcribe-parakeet-streaming-rnnt-0.6b:1.0.0
     build:
       context: .
       dockerfile: engines/realtime/parakeet-streaming/Dockerfile
@@ -524,9 +579,9 @@ services:
     deploy: *gpu-deploy
     restart: unless-stopped
 
-  # Parakeet 1.1B (GPU - accurate English streaming)
-  stt-rt-transcribe-parakeet-1.1b:
-    image: dalston/stt-rt-transcribe-parakeet-streaming-1.1b:1.0.0
+  # Parakeet RNNT 1.1B (GPU - accurate English streaming)
+  stt-rt-transcribe-parakeet-rnnt-1.1b:
+    image: dalston/stt-rt-transcribe-parakeet-streaming-rnnt-1.1b:1.0.0
     build:
       context: .
       dockerfile: engines/realtime/parakeet-streaming/Dockerfile
@@ -542,7 +597,7 @@ services:
     depends_on: *realtime-depends
     healthcheck: *ws-healthcheck
     deploy: *gpu-deploy
-    profiles: [parakeet-1.1b]
+    profiles: [parakeet-rnnt-1.1b]
     restart: unless-stopped
 
   # Faster Whisper streaming base (GPU)

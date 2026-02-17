@@ -1,12 +1,13 @@
 schema_version: "1.1"
-id: parakeet-1.1b
+id: parakeet-tdt-1.1b
 stage: transcribe
-name: NVIDIA Parakeet 1.1B
+name: NVIDIA Parakeet TDT 1.1B
 version: 1.0.0
 description: |
-  NVIDIA Parakeet FastConformer RNNT 1.1B for accurate English-only transcription.
-  Produces native word-level timestamps without separate alignment.
-  Higher accuracy variant, recommended for A10G or better GPUs.
+  NVIDIA Parakeet FastConformer TDT 1.1B for highest accuracy English transcription.
+  TDT (Token-and-Duration Transducer) achieves state-of-the-art WER scores.
+  First model to achieve <7.0% average WER on HuggingFace Open ASR leaderboard.
+  Best choice when transcription accuracy is the priority.
 
 container:
   gpu: required
@@ -30,7 +31,7 @@ input:
 hf_compat:
   pipeline_tag: automatic-speech-recognition
   library_name: nemo
-  license: apache-2.0
+  license: cc-by-4.0
 
 hardware:
   min_vram_gb: 6
@@ -41,6 +42,6 @@ hardware:
   min_ram_gb: 12
 
 performance:
-  rtf_gpu: 0.0008
+  rtf_gpu: 0.0006
   rtf_cpu: null
   warm_start_latency_ms: 150

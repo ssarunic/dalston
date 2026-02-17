@@ -1,24 +1,24 @@
 # NVIDIA Parakeet Transcription Engine
 #
-# FastConformer RNNT transcription using NeMo toolkit.
-# Parameterized by MODEL_SIZE to build variant-specific containers.
+# FastConformer transcription with CTC or TDT decoders using NeMo toolkit.
+# Parameterized by MODEL_VARIANT to build variant-specific containers.
 #
 # Build from repo root:
-#   docker compose build stt-batch-transcribe-parakeet-0.6b
-#   docker compose build stt-batch-transcribe-parakeet-1.1b
+#   docker compose build stt-batch-transcribe-parakeet-ctc-0.6b
+#   docker compose build stt-batch-transcribe-parakeet-tdt-1.1b
 #
 # Or directly:
-#   docker build --build-arg MODEL_SIZE=0.6b -t dalston/stt-batch-transcribe-parakeet-0.6b:1.0.0 .
-#   docker build --build-arg MODEL_SIZE=1.1b -t dalston/stt-batch-transcribe-parakeet-1.1b:1.0.0 .
+#   docker build --build-arg MODEL_VARIANT=ctc-0.6b -t dalston/stt-batch-transcribe-parakeet-ctc-0.6b:1.0.0 .
+#   docker build --build-arg MODEL_VARIANT=tdt-1.1b -t dalston/stt-batch-transcribe-parakeet-tdt-1.1b:1.0.0 .
 
-# Build argument to select model size
-ARG MODEL_SIZE=0.6b
+# Build argument to select model variant (decoder-size)
+ARG MODEL_VARIANT=ctc-0.6b
 
 # Use CUDA base image for GPU support
 FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04 AS base
 
 # Re-declare ARG after FROM (it gets reset)
-ARG MODEL_SIZE=0.6b
+ARG MODEL_VARIANT=ctc-0.6b
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -57,16 +57,25 @@ COPY engines/transcribe/parakeet/requirements.txt .
 RUN python -m pip install --no-cache-dir -r requirements.txt
 
 # Pre-download the model at build time for faster container startup
-ARG MODEL_SIZE=0.6b
-RUN python -c "\
+# Skip on ARM64/Apple Silicon due to NeMo segfault issues - model will download at runtime
+ARG MODEL_VARIANT=ctc-0.6b
+ARG SKIP_MODEL_DOWNLOAD=false
+RUN if [ "$SKIP_MODEL_DOWNLOAD" = "false" ]; then \
+    python -c "\
 import nemo.collections.asr as nemo_asr; \
-model_map = {'0.6b': 'nvidia/parakeet-rnnt-0.6b', '1.1b': 'nvidia/parakeet-rnnt-1.1b'}; \
-model_id = model_map['${MODEL_SIZE}']; \
+model_map = { \
+    'ctc-0.6b': 'nvidia/parakeet-ctc-0.6b', \
+    'ctc-1.1b': 'nvidia/parakeet-ctc-1.1b', \
+    'tdt-0.6b': 'nvidia/parakeet-tdt-0.6b-v3', \
+    'tdt-1.1b': 'nvidia/parakeet-tdt-1.1b', \
+}; \
+model_id = model_map['${MODEL_VARIANT}']; \
 model = nemo_asr.models.ASRModel.from_pretrained(model_id); \
-print(f'Model {model_id} downloaded successfully')"
+print(f'Model {model_id} downloaded successfully')"; \
+    else echo "Skipping model download (will download at runtime)"; fi
 
 # Copy engine files
-COPY engines/transcribe/parakeet/variants/${MODEL_SIZE}.yaml /etc/dalston/engine.yaml
+COPY engines/transcribe/parakeet/variants/${MODEL_VARIANT}.yaml /etc/dalston/engine.yaml
 COPY engines/transcribe/parakeet/engine.py .
 
 # Create model cache directory
@@ -74,8 +83,8 @@ ENV NEMO_CACHE=/models
 ENV HF_HOME=/models
 RUN mkdir -p /models
 
-# Set MODEL_SIZE environment variable for the engine
-ENV MODEL_SIZE=${MODEL_SIZE}
+# Set MODEL_VARIANT environment variable for the engine
+ENV MODEL_VARIANT=${MODEL_VARIANT}
 
 # Set CUDA visible devices
 ENV NVIDIA_VISIBLE_DEVICES=all
