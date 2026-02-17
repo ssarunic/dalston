@@ -25,21 +25,6 @@ class AudioRedactionEngine(Engine):
 
     BEEP_FREQUENCY = 1000  # 1kHz beep tone
 
-    def _get_channel_suffix(self, stage: str) -> str:
-        """Extract channel suffix from stage name.
-
-        Args:
-            stage: Stage name (e.g., "audio_redact", "audio_redact_ch0")
-
-        Returns:
-            Channel suffix for output file (e.g., "", "_ch0")
-        """
-        if "_ch" in stage:
-            # Extract channel part: "audio_redact_ch0" -> "_ch0"
-            idx = stage.rfind("_ch")
-            return stage[idx:]
-        return ""
-
     def process(self, input: TaskInput) -> TaskOutput:
         """Redact PII from audio file.
 
@@ -52,10 +37,18 @@ class AudioRedactionEngine(Engine):
         config = input.config
         job_id = input.job_id
         audio_path = input.audio_path
-        stage = input.stage
 
-        # Determine output filename with channel suffix
-        channel_suffix = self._get_channel_suffix(stage)
+        # Get channel from config (set by DAG builder for per-channel mode)
+        channel: int | None = config.get("channel")
+
+        # Determine output filename and PII key based on channel
+        if channel is not None:
+            channel_suffix = f"_ch{channel}"
+            pii_key = f"pii_detect_ch{channel}"
+        else:
+            channel_suffix = ""
+            pii_key = "pii_detect"
+
         output_filename = f"redacted{channel_suffix}.wav"
 
         # Get config
@@ -68,14 +61,8 @@ class AudioRedactionEngine(Engine):
             job_id=job_id,
             mode=mode.value,
             buffer_ms=buffer_ms,
+            channel=channel,
         )
-
-        # Get PII detection output - use channel-specific key if available
-        # For audio_redact_ch0, look for pii_detect_ch0
-        pii_key = "pii_detect"
-        if "_ch" in stage:
-            idx = stage.rfind("_ch")
-            pii_key = f"pii_detect{stage[idx:]}"
 
         pii_output = input.get_pii_detect_output(pii_key)
         if not pii_output:

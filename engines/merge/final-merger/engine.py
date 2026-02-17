@@ -740,6 +740,12 @@ class FinalMergerEngine(Engine):
                         stderr=result.stderr[:500] if result.stderr else None,
                     )
                     return None
+            except FileNotFoundError:
+                self.logger.error(
+                    "ffmpeg_not_found",
+                    hint="FFmpeg is required for stereo assembly",
+                )
+                return None
             except subprocess.TimeoutExpired:
                 self.logger.error("ffmpeg_stereo_assembly_timeout")
                 return None
