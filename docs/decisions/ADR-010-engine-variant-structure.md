@@ -10,10 +10,10 @@ Model families like Whisper, Parakeet, Voxtral, and Qwen have multiple size vari
 
 | Model | VRAM | RTF (GPU) | Use Case |
 |-------|------|-----------|----------|
-| whisper-tiny | 1GB | 0.02 | Fast drafts, low-resource |
-| whisper-base | 2GB | 0.03 | Balanced speed/quality |
-| whisper-large-v3 | 6GB | 0.05 | Best accuracy |
-| whisper-large-v3-turbo | 4GB | 0.03 | Fast + accurate |
+| faster-whisper-tiny | 1GB | 0.02 | Fast drafts, low-resource |
+| faster-whisper-base | 2GB | 0.03 | Balanced speed/quality |
+| faster-whisper-large-v3 | 6GB | 0.05 | Best accuracy |
+| faster-whisper-large-v3-turbo | 4GB | 0.03 | Fast + accurate |
 
 Currently, `faster-whisper` handles all sizes via `config.model` parameter. This creates problems:
 
@@ -34,14 +34,14 @@ Treat each model size as a separate deployable engine with shared implementation
 ### Directory Structure
 
 ```
-engines/transcribe/whisper/
+engines/transcribe/faster-whisper/
 ├── engine.py                    # Shared implementation
 ├── Dockerfile                   # Parameterized via ARG
 ├── requirements.txt
 └── variants/
-    ├── base.yaml                # id: whisper-base
-    ├── large-v3.yaml            # id: whisper-large-v3
-    └── large-v3-turbo.yaml      # id: whisper-large-v3-turbo
+    ├── base.yaml                # id: faster-whisper-base
+    ├── large-v3.yaml            # id: faster-whisper-large-v3
+    └── large-v3-turbo.yaml      # id: faster-whisper-large-v3-turbo
 ```
 
 ### Variant engine.yaml
@@ -51,9 +51,9 @@ Each variant specifies accurate hardware requirements:
 ```yaml
 # variants/base.yaml
 schema_version: "1.1"
-id: whisper-base
+id: faster-whisper-base
 stage: transcribe
-name: Whisper Base
+name: Faster Whisper Base
 
 hardware:
   min_vram_gb: 2
@@ -68,9 +68,9 @@ performance:
 ```yaml
 # variants/large-v3.yaml
 schema_version: "1.1"
-id: whisper-large-v3
+id: faster-whisper-large-v3
 stage: transcribe
-name: Whisper Large V3
+name: Faster Whisper Large V3
 
 hardware:
   min_vram_gb: 6
@@ -96,11 +96,11 @@ ENV WHISPER_MODEL=${MODEL_SIZE}
 ```python
 import os
 
-class WhisperEngine(Engine):
+class FasterWhisperEngine(Engine):
     def __init__(self):
         super().__init__()
         # Model determined by container, not request config
-        self._model_size = os.environ["WHISPER_MODEL"]
+        self._model_size = os.environ["MODEL_SIZE"]
 ```
 
 ### Catalog Generation
@@ -120,11 +120,11 @@ def find_engine_yamls(engines_dir: Path) -> list[Path]:
 
 1. **Accurate resource allocation.** Each variant declares true requirements. Orchestrator and auto-scaler make correct decisions.
 
-2. **Independent scaling.** Scale whisper-base to 10 instances while keeping whisper-large-v3 at 2.
+2. **Independent scaling.** Scale faster-whisper-base to 10 instances while keeping faster-whisper-large-v3 at 2.
 
 3. **Right-sized containers.** Base variant container is smaller (fewer dependencies, smaller model cache).
 
-4. **Simplified model selection.** User requests `model=whisper-large-v3`, which maps directly to engine ID. No engine_model indirection needed.
+4. **Simplified model selection.** User requests `model=faster-whisper-large-v3`, which maps directly to engine ID. No engine_model indirection needed.
 
 5. **Extensibility.** Adding a new variant is one YAML file + docker-compose entry. No code changes.
 

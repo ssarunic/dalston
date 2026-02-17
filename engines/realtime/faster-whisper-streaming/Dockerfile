@@ -1,10 +1,10 @@
-# Whisper Streaming Real-time Engine
+# Faster Whisper Streaming Real-time Engine
 #
 # Real-time transcription using faster-whisper with Silero VAD.
 # Runs a WebSocket server for streaming audio transcription.
 #
 # Build from repo root:
-#   docker compose build stt-rt-transcribe-whisper-cpu
+#   docker compose build stt-rt-transcribe-faster-whisper-streaming-base
 #
 # For GPU support, use docker compose --profile gpu
 
@@ -29,7 +29,7 @@ RUN pip install --no-cache-dir -e ".[realtime-sdk]"
 WORKDIR /engine
 
 # Copy engine requirements first for better caching
-COPY engines/realtime/whisper-streaming/requirements.txt .
+COPY engines/realtime/faster-whisper-streaming/requirements.txt .
 
 # Install engine dependencies
 RUN pip install --no-cache-dir -r requirements.txt
@@ -48,8 +48,8 @@ RUN python -c "import torch; torch.hub.load('snakers4/silero-vad', 'silero_vad',
     && echo "Silero VAD model downloaded successfully"
 
 # Copy engine files
-COPY engines/realtime/whisper-streaming/engine.yaml .
-COPY engines/realtime/whisper-streaming/engine.py .
+COPY engines/realtime/faster-whisper-streaming/variants/base.yaml /etc/dalston/engine.yaml
+COPY engines/realtime/faster-whisper-streaming/engine.py .
 
 # Create model cache directory
 ENV HF_HOME=/models
@@ -57,7 +57,7 @@ ENV TORCH_HOME=/models
 RUN mkdir -p /models
 
 # Default environment variables
-ENV WORKER_ID=stt-rt-transcribe-whisper
+ENV WORKER_ID=stt-rt-transcribe-faster-whisper
 ENV WORKER_PORT=9000
 ENV MAX_SESSIONS=4
 ENV REDIS_URL=redis://redis:6379

@@ -341,16 +341,16 @@ services:
       - parakeet-1.1b
     restart: unless-stopped
 
-  # Whisper base variant (GPU - default transcription engine)
-  stt-batch-transcribe-whisper-base:
-    image: dalston/stt-batch-transcribe-whisper-base:1.0.0
+  # Faster Whisper base variant (GPU - balanced speed/accuracy)
+  stt-batch-transcribe-faster-whisper-base:
+    image: dalston/stt-batch-transcribe-faster-whisper-base:1.0.0
     build:
       context: .
-      dockerfile: engines/transcribe/whisper/Dockerfile
+      dockerfile: engines/transcribe/faster-whisper/Dockerfile
       args:
         MODEL_SIZE: base
     environment:
-      - ENGINE_ID=whisper-base
+      - ENGINE_ID=faster-whisper-base
       - REDIS_URL=redis://redis:6379
       - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
       - S3_REGION=${S3_REGION:-us-east-1}
@@ -379,19 +379,19 @@ services:
               count: 1
               capabilities: [gpu]
     profiles:
-      - whisper-base
+      - faster-whisper-base
     restart: unless-stopped
 
-  # Whisper large-v3 variant (GPU - highest accuracy)
-  stt-batch-transcribe-whisper-large-v3:
-    image: dalston/stt-batch-transcribe-whisper-large-v3:1.0.0
+  # Faster Whisper large-v3 variant (GPU - highest accuracy)
+  stt-batch-transcribe-faster-whisper-large-v3:
+    image: dalston/stt-batch-transcribe-faster-whisper-large-v3:1.0.0
     build:
       context: .
-      dockerfile: engines/transcribe/whisper/Dockerfile
+      dockerfile: engines/transcribe/faster-whisper/Dockerfile
       args:
         MODEL_SIZE: large-v3
     environment:
-      - ENGINE_ID=whisper-large-v3
+      - ENGINE_ID=faster-whisper-large-v3
       - REDIS_URL=redis://redis:6379
       - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
       - S3_REGION=${S3_REGION:-us-east-1}
@@ -423,16 +423,16 @@ services:
       - gpu
     restart: unless-stopped
 
-  # Whisper large-v3-turbo variant (GPU - fast + accurate)
-  stt-batch-transcribe-whisper-large-v3-turbo:
-    image: dalston/stt-batch-transcribe-whisper-large-v3-turbo:1.0.0
+  # Faster Whisper large-v3-turbo variant (GPU - fast + accurate)
+  stt-batch-transcribe-faster-whisper-large-v3-turbo:
+    image: dalston/stt-batch-transcribe-faster-whisper-large-v3-turbo:1.0.0
     build:
       context: .
-      dockerfile: engines/transcribe/whisper/Dockerfile
+      dockerfile: engines/transcribe/faster-whisper/Dockerfile
       args:
         MODEL_SIZE: large-v3-turbo
     environment:
-      - ENGINE_ID=whisper-large-v3-turbo
+      - ENGINE_ID=faster-whisper-large-v3-turbo
       - REDIS_URL=redis://redis:6379
       - S3_BUCKET=${S3_BUCKET:-dalston-artifacts}
       - S3_REGION=${S3_REGION:-us-east-1}
@@ -461,7 +461,7 @@ services:
               count: 1
               capabilities: [gpu]
     profiles:
-      - whisper-turbo
+      - faster-whisper-turbo
     restart: unless-stopped
 
   # --- ALIGN STAGE ---
@@ -738,8 +738,8 @@ services:
   # ============================================================
   # REALTIME STT WORKERS
   # ============================================================
-  # Default: Parakeet CPU (local dev) - scale with: docker compose up -d --scale stt-rt-transcribe-parakeet-cpu=2
-  # Whisper CPU: docker compose --profile whisper up -d
+  # Default: Parakeet 0.6B GPU - scale with: docker compose up -d --scale stt-rt-transcribe-parakeet-0.6b=2
+  # Faster Whisper: docker compose --profile faster-whisper up -d
   # GPU workers: docker compose --profile gpu up -d
 
   # --- PARAKEET REALTIME 0.6B (GPU - DEFAULT) ---
@@ -835,13 +835,13 @@ services:
       - parakeet-1.1b
     restart: unless-stopped
 
-  # --- WHISPER STREAMING BASE (GPU) ---
-  # Use with: docker compose --profile whisper up -d
-  stt-rt-transcribe-whisper-streaming-base:
-    image: dalston/stt-rt-transcribe-whisper-streaming-base:1.0.0
+  # --- FASTER WHISPER STREAMING BASE (GPU) ---
+  # Use with: docker compose --profile faster-whisper up -d
+  stt-rt-transcribe-faster-whisper-streaming-base:
+    image: dalston/stt-rt-transcribe-faster-whisper-streaming-base:1.0.0
     build:
       context: .
-      dockerfile: engines/realtime/whisper-streaming/Dockerfile
+      dockerfile: engines/realtime/faster-whisper-streaming/Dockerfile
     environment:
       - WORKER_PORT=9000
       - MAX_SESSIONS=4
@@ -877,7 +877,7 @@ services:
               count: 1
               capabilities: [gpu]
     profiles:
-      - whisper
+      - faster-whisper
     restart: unless-stopped
 
 volumes:

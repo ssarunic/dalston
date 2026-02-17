@@ -1,7 +1,7 @@
 schema_version: "1.1"
-id: whisper-large-v3-turbo
+id: faster-whisper-large-v3-turbo
 stage: transcribe
-name: Whisper Large V3 Turbo
+name: Faster Whisper Large V3 Turbo
 version: 1.0.0
 description: |
   OpenAI Whisper large-v3-turbo model via faster-whisper (CTranslate2).

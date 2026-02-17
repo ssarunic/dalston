@@ -1,10 +1,10 @@
 schema_version: "1.1"
-id: whisper-streaming-base
+id: faster-whisper-streaming-base
 type: realtime
-name: Whisper Streaming Base
+name: Faster Whisper Streaming Base
 version: 1.0.0
 description: |
-  Real-time streaming transcription using Whisper base variant.
+  Real-time streaming transcription using faster-whisper (CTranslate2).
   Supports both "fast" (distil-whisper) and "accurate" (large-v3) model modes.
   Uses Silero VAD for speech boundary detection.
 
