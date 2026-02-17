@@ -1,7 +1,7 @@
 """Unit tests for session_router module."""
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -10,8 +10,12 @@ from dalston.session_router.allocator import (
     SessionState,
     WorkerAllocation,
 )
+from dalston.session_router.health import HealthMonitor
 from dalston.session_router.registry import (
+    ACTIVE_SESSIONS_KEY,
+    SESSION_KEY_PREFIX,
     WORKER_KEY_PREFIX,
+    WORKER_SESSIONS_SUFFIX,
     WorkerRegistry,
     WorkerState,
 )
@@ -561,3 +565,200 @@ class TestWorkerAllocation:
         assert allocation.engine == "whisper"
         assert allocation.endpoint == "ws://localhost:9000"
         assert allocation.session_id == "sess_abc123"
+
+
+class TestHealthMonitor:
+    """Tests for HealthMonitor class."""
+
+    @pytest.fixture
+    def mock_redis(self):
+        return AsyncMock()
+
+    @pytest.fixture
+    def mock_registry(self):
+        return AsyncMock(spec=WorkerRegistry)
+
+    @pytest.fixture
+    def health_monitor(self, mock_redis, mock_registry) -> HealthMonitor:
+        return HealthMonitor(mock_redis, mock_registry)
+
+    @pytest.mark.asyncio
+    async def test_reconcile_no_active_sessions(
+        self, health_monitor: HealthMonitor, mock_redis
+    ):
+        """No cleanup needed when there are no active sessions."""
+        mock_redis.smembers.return_value = set()
+
+        cleaned = await health_monitor.reconcile_orphaned_sessions()
+
+        assert cleaned == 0
+        mock_redis.smembers.assert_called_once_with(ACTIVE_SESSIONS_KEY)
+
+    @pytest.mark.asyncio
+    async def test_reconcile_all_sessions_alive(
+        self, health_monitor: HealthMonitor, mock_redis
+    ):
+        """No cleanup when all sessions have valid keys."""
+        mock_redis.smembers.return_value = {"sess_abc123", "sess_def456"}
+        mock_redis.exists.return_value = True  # All session keys exist
+
+        cleaned = await health_monitor.reconcile_orphaned_sessions()
+
+        assert cleaned == 0
+        assert mock_redis.exists.call_count == 2
+
+    @pytest.mark.asyncio
+    @patch("dalston.session_router.health.dalston.metrics")
+    async def test_reconcile_orphaned_session_cleanup(
+        self, mock_metrics, health_monitor: HealthMonitor, mock_redis
+    ):
+        """Orphaned session is properly cleaned up."""
+        orphaned_session = "sess_orphaned"
+        worker_id = "worker-1"
+
+        # Setup: session is in active set but key expired
+        mock_redis.smembers.side_effect = [
+            {orphaned_session},  # First call: ACTIVE_SESSIONS_KEY
+            {worker_id},  # Second call: WORKER_SET_KEY
+        ]
+        mock_redis.exists.return_value = False  # Session key expired
+        mock_redis.sismember.return_value = True  # Session in worker's set
+        mock_redis.hincrby.return_value = 1  # New count after decrement
+
+        cleaned = await health_monitor.reconcile_orphaned_sessions()
+
+        assert cleaned == 1
+
+        # Verify session key was checked
+        mock_redis.exists.assert_called_once_with(
+            f"{SESSION_KEY_PREFIX}{orphaned_session}"
+        )
+
+        # Verify worker was found and counter decremented
+        mock_redis.hincrby.assert_called_once_with(
+            f"{WORKER_KEY_PREFIX}{worker_id}", "active_sessions", -1
+        )
+
+        # Verify session removed from worker's set
+        mock_redis.srem.assert_any_call(
+            f"{WORKER_KEY_PREFIX}{worker_id}{WORKER_SESSIONS_SUFFIX}",
+            orphaned_session,
+        )
+
+        # Verify session removed from active sessions
+        mock_redis.srem.assert_any_call(ACTIVE_SESSIONS_KEY, orphaned_session)
+
+        # Verify metrics updated
+        mock_metrics.set_session_router_sessions_active.assert_called_once_with(
+            worker_id, 1
+        )
+
+    @pytest.mark.asyncio
+    @patch("dalston.session_router.health.dalston.metrics")
+    async def test_reconcile_negative_counter_clamped(
+        self, mock_metrics, health_monitor: HealthMonitor, mock_redis
+    ):
+        """Counter is clamped to zero if it goes negative."""
+        orphaned_session = "sess_orphaned"
+        worker_id = "worker-1"
+
+        mock_redis.smembers.side_effect = [
+            {orphaned_session},
+            {worker_id},
+        ]
+        mock_redis.exists.return_value = False
+        mock_redis.sismember.return_value = True
+        mock_redis.hincrby.return_value = -1  # Went negative
+
+        cleaned = await health_monitor.reconcile_orphaned_sessions()
+
+        assert cleaned == 1
+
+        # Verify counter was reset to 0
+        mock_redis.hset.assert_called_once_with(
+            f"{WORKER_KEY_PREFIX}{worker_id}", "active_sessions", 0
+        )
+
+        # Metrics should show 0
+        mock_metrics.set_session_router_sessions_active.assert_called_once_with(
+            worker_id, 0
+        )
+
+    @pytest.mark.asyncio
+    @patch("dalston.session_router.health.dalston.metrics")
+    async def test_reconcile_multiple_orphaned_sessions(
+        self, mock_metrics, health_monitor: HealthMonitor, mock_redis
+    ):
+        """Multiple orphaned sessions are all cleaned up."""
+        orphaned_sessions = {"sess_1", "sess_2", "sess_3"}
+        worker_id = "worker-1"
+
+        # Track calls to smembers
+        smembers_calls = [
+            orphaned_sessions,  # ACTIVE_SESSIONS_KEY
+            {worker_id},  # WORKER_SET_KEY for sess_1
+            {worker_id},  # WORKER_SET_KEY for sess_2
+            {worker_id},  # WORKER_SET_KEY for sess_3
+        ]
+        mock_redis.smembers.side_effect = smembers_calls
+        mock_redis.exists.return_value = False  # All expired
+        mock_redis.sismember.return_value = True
+        mock_redis.hincrby.return_value = 0
+
+        cleaned = await health_monitor.reconcile_orphaned_sessions()
+
+        assert cleaned == 3
+        assert mock_redis.srem.call_count == 6  # 3 from worker set + 3 from active set
+
+    @pytest.mark.asyncio
+    @patch("dalston.session_router.health.dalston.metrics")
+    async def test_reconcile_session_not_in_any_worker(
+        self, mock_metrics, health_monitor: HealthMonitor, mock_redis
+    ):
+        """Orphaned session not found in any worker set is still cleaned."""
+        orphaned_session = "sess_orphaned"
+
+        mock_redis.smembers.side_effect = [
+            {orphaned_session},  # ACTIVE_SESSIONS_KEY
+            {"worker-1", "worker-2"},  # WORKER_SET_KEY
+        ]
+        mock_redis.exists.return_value = False
+        mock_redis.sismember.return_value = False  # Not in any worker's set
+
+        cleaned = await health_monitor.reconcile_orphaned_sessions()
+
+        assert cleaned == 1
+
+        # Session should still be removed from active sessions
+        mock_redis.srem.assert_called_once_with(ACTIVE_SESSIONS_KEY, orphaned_session)
+
+        # No counter decrement since session wasn't found in any worker
+        mock_redis.hincrby.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_reconcile_mixed_live_and_orphaned(
+        self, health_monitor: HealthMonitor, mock_redis
+    ):
+        """Only orphaned sessions are cleaned, live ones remain."""
+        live_session = "sess_live"
+        orphaned_session = "sess_orphaned"
+
+        mock_redis.smembers.side_effect = [
+            {live_session, orphaned_session},
+            {"worker-1"},  # For orphaned session lookup
+        ]
+
+        # Live session exists, orphaned does not
+        async def mock_exists(key):
+            return live_session in key
+
+        mock_redis.exists.side_effect = mock_exists
+        mock_redis.sismember.return_value = False
+
+        with patch("dalston.session_router.health.dalston.metrics"):
+            cleaned = await health_monitor.reconcile_orphaned_sessions()
+
+        assert cleaned == 1
+
+        # Only orphaned session should be removed
+        mock_redis.srem.assert_called_once_with(ACTIVE_SESSIONS_KEY, orphaned_session)

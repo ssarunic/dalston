@@ -229,16 +229,17 @@ class WorkerRegistry:
     async def session_started(self, worker_id: str, session_id: str) -> None:
         """Notify that a session has started on this worker.
 
-        Adds session to worker's session set.
+        Note: The session set is managed exclusively by the Gateway's
+        SessionAllocator (acquire_worker/release_worker). This method
+        only logs for observability.
 
         Args:
             worker_id: Worker identifier
             session_id: Session identifier
         """
-        r = await self._get_redis()
-        sessions_key = f"{WORKER_KEY_PREFIX}{worker_id}{WORKER_SESSIONS_SUFFIX}"
-
-        await r.sadd(sessions_key, session_id)
+        # Note: Session set management is handled by Gateway's SessionAllocator
+        # to avoid race conditions during Gateway crash recovery.
+        # See: dalston/session_router/allocator.py
 
         logger.debug("session_started", worker_id=worker_id, session_id=session_id)
 
@@ -251,7 +252,9 @@ class WorkerRegistry:
     ) -> None:
         """Notify that a session has ended.
 
-        Removes session from worker's session set and publishes event.
+        Publishes event for monitoring. Session set cleanup is handled by
+        the Gateway's SessionAllocator (release_worker) or HealthMonitor
+        reconciliation.
 
         Args:
             worker_id: Worker identifier
@@ -260,12 +263,12 @@ class WorkerRegistry:
             status: End status ("completed" or "error")
         """
         r = await self._get_redis()
-        sessions_key = f"{WORKER_KEY_PREFIX}{worker_id}{WORKER_SESSIONS_SUFFIX}"
 
-        # Remove from session set
-        await r.srem(sessions_key, session_id)
+        # Note: Session set management is handled by Gateway's SessionAllocator
+        # to avoid race conditions during Gateway crash recovery.
+        # See: dalston/session_router/allocator.py and health.py
 
-        # Publish session end event
+        # Publish session end event for monitoring
         await r.publish(
             EVENTS_CHANNEL,
             json.dumps(

@@ -14,7 +14,12 @@ import structlog
 
 import dalston.metrics
 from dalston.session_router.registry import (
+    ACTIVE_SESSIONS_KEY,
     EVENTS_CHANNEL,
+    SESSION_KEY_PREFIX,
+    WORKER_KEY_PREFIX,
+    WORKER_SESSIONS_SUFFIX,
+    WORKER_SET_KEY,
     WorkerRegistry,
 )
 
@@ -86,6 +91,7 @@ class HealthMonitor:
         while self._running:
             try:
                 await self.check_workers()
+                await self.reconcile_orphaned_sessions()
             except Exception as e:
                 logger.error("health_check_error", error=str(e))
 
@@ -139,6 +145,94 @@ class HealthMonitor:
         # Update metrics (M20)
         dalston.metrics.set_session_router_workers_registered(total_workers)
         dalston.metrics.set_session_router_workers_healthy(healthy_workers)
+
+    async def reconcile_orphaned_sessions(self) -> int:
+        """Clean up orphaned sessions from crashed Gateway instances.
+
+        When a Gateway crashes, the finally block that calls release_worker()
+        never executes. The session key expires via TTL (5 min), but related
+        state remains:
+        - ACTIVE_SESSIONS_KEY set still contains the session_id
+        - Worker's session set still contains the session_id
+        - Worker's active_sessions counter is still elevated
+
+        This method periodically scans for sessions in ACTIVE_SESSIONS_KEY
+        that no longer have a corresponding session key (expired), and cleans
+        up the orphaned state.
+
+        Returns:
+            Number of orphaned sessions cleaned up
+        """
+        cleaned_count = 0
+
+        # Get all sessions marked as active
+        active_sessions = await self._redis.smembers(ACTIVE_SESSIONS_KEY)
+        if not active_sessions:
+            return 0
+
+        # Check each session
+        for session_id in active_sessions:
+            session_key = f"{SESSION_KEY_PREFIX}{session_id}"
+
+            # If session key still exists, it's a live session
+            if await self._redis.exists(session_key):
+                continue
+
+            # Session key expired - this is an orphaned session
+            logger.info(
+                "orphaned_session_detected",
+                session_id=session_id,
+                reason="session_key_expired",
+            )
+
+            # Find which worker had this session
+            worker_ids = await self._redis.smembers(WORKER_SET_KEY)
+            for worker_id in worker_ids:
+                sessions_key = f"{WORKER_KEY_PREFIX}{worker_id}{WORKER_SESSIONS_SUFFIX}"
+                if await self._redis.sismember(sessions_key, session_id):
+                    # Found the worker - decrement counter and remove from set
+                    worker_key = f"{WORKER_KEY_PREFIX}{worker_id}"
+                    new_count = await self._redis.hincrby(
+                        worker_key, "active_sessions", -1
+                    )
+
+                    # Ensure counter doesn't go negative
+                    if new_count < 0:
+                        await self._redis.hset(worker_key, "active_sessions", 0)
+                        new_count = 0
+
+                    # Remove from worker's session set
+                    await self._redis.srem(sessions_key, session_id)
+
+                    # Update metrics
+                    dalston.metrics.set_session_router_sessions_active(
+                        worker_id, max(0, new_count)
+                    )
+
+                    logger.info(
+                        "orphaned_session_cleaned_from_worker",
+                        session_id=session_id,
+                        worker_id=worker_id,
+                        new_active_sessions=new_count,
+                    )
+                    break
+
+            # Remove from active sessions index
+            await self._redis.srem(ACTIVE_SESSIONS_KEY, session_id)
+            cleaned_count += 1
+
+            logger.info(
+                "orphaned_session_cleaned",
+                session_id=session_id,
+            )
+
+        if cleaned_count > 0:
+            logger.info(
+                "orphaned_sessions_reconciliation_complete",
+                cleaned_count=cleaned_count,
+            )
+
+        return cleaned_count
 
     async def _publish_worker_offline_event(
         self,
