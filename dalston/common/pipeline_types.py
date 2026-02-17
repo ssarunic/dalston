@@ -237,6 +237,9 @@ class MergedSegment(BaseModel):
     start: float = Field(..., ge=0, description="Start time in seconds")
     end: float = Field(..., ge=0, description="End time in seconds")
     text: str = Field(..., description="Transcript text")
+    redacted_text: str | None = Field(
+        default=None, description="Text with PII redacted (if PII detection enabled)"
+    )
     speaker: str | None = Field(default=None, description="Assigned speaker ID")
     words: list[Word] | None = Field(default=None, description="Word-level detail")
     speaker_confidence: float | None = Field(

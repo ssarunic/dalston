@@ -31,7 +31,9 @@ from dalston.db.models import JobModel, TaskModel
 from dalston.gateway.services.rate_limiter import (
     KEY_PREFIX_JOBS,
 )
-from dalston.orchestrator.dag import build_task_dag
+from dalston.orchestrator.catalog import get_catalog
+from dalston.orchestrator.dag import build_task_dag, build_task_dag_async
+from dalston.orchestrator.engine_selector import NoCapableEngineError
 from dalston.orchestrator.exceptions import (
     CatalogValidationError,
     EngineCapabilityError,
@@ -129,13 +131,30 @@ async def handle_job_created(
         log.info("tasks_already_exist_skipping_dag_build")
         return
 
-    # 2. Build task DAG
+    # 2. Build task DAG using capability-driven engine selection (M31)
     dag_start = time.perf_counter()
-    tasks = build_task_dag(
-        job_id=job.id,
-        audio_uri=job.audio_uri,
-        parameters=job.parameters,
-    )
+    try:
+        catalog = get_catalog()
+        tasks = await build_task_dag_async(
+            job_id=job.id,
+            audio_uri=job.audio_uri,
+            parameters=job.parameters,
+            registry=registry,
+            catalog=catalog,
+        )
+    except NoCapableEngineError as e:
+        # No running engine can handle the job requirements
+        # Fall back to legacy DAG builder (uses hardcoded defaults)
+        log.warning(
+            "capability_driven_dag_failed_using_fallback",
+            stage=e.stage,
+            requirements=e.requirements,
+        )
+        tasks = build_task_dag(
+            job_id=job.id,
+            audio_uri=job.audio_uri,
+            parameters=job.parameters,
+        )
     dalston.metrics.observe_orchestrator_dag_build(time.perf_counter() - dag_start)
 
     log.info("built_task_dag", task_count=len(tasks))

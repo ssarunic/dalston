@@ -2,13 +2,17 @@ schema_version: "1.1"
 id: final-merger
 stage: merge
 name: Final Merger
-version: 1.0.0
+version: 1.1.0
 description: |
   Combines outputs from upstream pipeline stages into the
   standard Dalston transcript format.
 
   Adds segment IDs, metadata, and writes the canonical
   transcript.json file for the Gateway to read.
+
+  For per_channel mode with PII detection and audio redaction:
+  - Collects and merges PII entities from each channel
+  - Assembles redacted mono WAVs into stereo output (FFmpeg)
 
 container:
   gpu: none
@@ -124,6 +128,44 @@ output_schema:
     summary:
       type: string
       description: Content summary (null in M02)
+    redacted_text:
+      type: string
+      description: Text with PII replaced by entity type labels (if PII detection enabled)
+    pii_entities:
+      type: array
+      description: Detected PII entities (if PII detection enabled)
+      items:
+        type: object
+        properties:
+          text:
+            type: string
+          entity_type:
+            type: string
+          category:
+            type: string
+          start_time:
+            type: number
+          end_time:
+            type: number
+          confidence:
+            type: number
+    pii_metadata:
+      type: object
+      description: PII detection statistics (if PII detection enabled)
+      properties:
+        detection_tier:
+          type: string
+        entities_detected:
+          type: integer
+        entity_count_by_type:
+          type: object
+        entity_count_by_category:
+          type: object
+        redacted_audio_uri:
+          type: string
+          description: S3 URI for redacted stereo audio (per_channel + audio redaction)
+        processing_time_ms:
+          type: integer
 
 hf_compat:
   pipeline_tag: dalston:merge

@@ -38,6 +38,19 @@ class AudioRedactionEngine(Engine):
         job_id = input.job_id
         audio_path = input.audio_path
 
+        # Get channel from config (set by DAG builder for per-channel mode)
+        channel: int | None = config.get("channel")
+
+        # Determine output filename and PII key based on channel
+        if channel is not None:
+            channel_suffix = f"_ch{channel}"
+            pii_key = f"pii_detect_ch{channel}"
+        else:
+            channel_suffix = ""
+            pii_key = "pii_detect"
+
+        output_filename = f"redacted{channel_suffix}.wav"
+
         # Get config
         mode_str = config.get("redaction_mode", "silence")
         mode = PIIRedactionMode(mode_str)
@@ -48,13 +61,13 @@ class AudioRedactionEngine(Engine):
             job_id=job_id,
             mode=mode.value,
             buffer_ms=buffer_ms,
+            channel=channel,
         )
 
-        # Get PII detection output
-        pii_output = input.get_pii_detect_output()
+        pii_output = input.get_pii_detect_output(pii_key)
         if not pii_output:
-            # Try raw output
-            raw_pii = input.get_raw_output("pii_detect") or {}
+            # Try raw output with channel-specific key
+            raw_pii = input.get_raw_output(pii_key) or {}
             entities = raw_pii.get("entities", [])
         else:
             entities = [e.model_dump() for e in pii_output.entities]
@@ -63,7 +76,7 @@ class AudioRedactionEngine(Engine):
             self.logger.info("no_entities_to_redact", job_id=job_id)
             # No entities - just copy the audio
             s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
-            redacted_uri = f"s3://{s3_bucket}/jobs/{job_id}/audio/redacted.wav"
+            redacted_uri = f"s3://{s3_bucket}/jobs/{job_id}/audio/{output_filename}"
             io.upload_file(audio_path, redacted_uri)
 
             output = AudioRedactOutput(
@@ -101,7 +114,7 @@ class AudioRedactionEngine(Engine):
 
             # Upload to S3
             s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
-            redacted_uri = f"s3://{s3_bucket}/jobs/{job_id}/audio/redacted.wav"
+            redacted_uri = f"s3://{s3_bucket}/jobs/{job_id}/audio/{output_filename}"
             io.upload_file(output_path, redacted_uri)
 
             self.logger.info(

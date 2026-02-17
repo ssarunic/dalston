@@ -398,6 +398,7 @@ export interface UnifiedSegment {
   start: number
   end: number
   text: string
+  redacted_text?: string
   speaker?: string
   confidence?: number
 }

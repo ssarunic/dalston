@@ -149,10 +149,14 @@ class EngineRunner:
         # Initialize registry and register engine with capabilities
         self._registry = BatchEngineRegistry(self.redis_url)
         capabilities = self.engine.get_capabilities()
+
+        # Get stage from capabilities (derived from engine.yaml) or fallback to "unknown"
+        stage = capabilities.stages[0] if capabilities.stages else "unknown"
+
         self._registry.register(
             BatchEngineInfo(
                 engine_id=self.engine_id,
-                stage=getattr(self.engine, "stage", "unknown"),
+                stage=stage,
                 queue_name=self.queue_key,
                 capabilities=capabilities,
             )
@@ -448,6 +452,7 @@ class EngineRunner:
         return TaskInput(
             task_id=task_id,
             job_id=job_id,
+            stage=task_metadata.get("stage", "unknown"),
             audio_path=audio_path,
             previous_outputs=input_data.get("previous_outputs", {}),
             config=input_data.get("config", {}),

@@ -1,6 +1,6 @@
 schema_version: "1.1"
 id: pii-presidio
-stage: detect
+stage: pii_detect
 name: PII Detection (Presidio + GLiNER)
 version: 1.0.0
 description: |

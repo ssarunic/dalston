@@ -6,7 +6,7 @@
 | **Duration**     | 8-10 days                                                                          |
 | **Dependencies** | M28 (Batch Engine Registry), M29 (Engine Catalog & Capabilities)                   |
 | **Deliverable**  | Extended engine.yaml schema, JSON Schema validation, discovery API, scaffold tools |
-| **Status**       | Planning                                                                           |
+| **Status**       | Complete                                                                           |
 
 ## User Story
 
@@ -551,22 +551,22 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 
 ## Checkpoint
 
-- [ ] `schema_version: "1.0"` added to all existing engine.yaml files
-- [ ] JSON Schema created at `dalston/schemas/engine.schema.json`
-- [ ] Validator CLI works: `python -m dalston.tools.validate_engine --all`
-- [ ] CI validates engine.yaml on PR
-- [ ] All engine.yaml files updated with new sections (schema 1.1)
-- [ ] Catalog generation script works
-- [ ] catalog.py loads from generated_catalog.json
-- [ ] Engine.get_capabilities() loads from engine.yaml
-- [ ] EngineCapabilities model extended with new fields
-- [ ] GET /v1/engines endpoint returns engine list with status
-- [ ] GET /v1/capabilities endpoint returns aggregate capabilities
-- [ ] Performance-based timeout calculation works
-- [ ] Error messages include catalog context and suggestions
-- [ ] Scaffold command generates new engine skeleton
-- [ ] engine_catalog.yaml deprecated/deleted
-- [ ] ENGINES.md updated with new schema
+- [x] `schema_version: "1.0"` added to all existing engine.yaml files
+- [x] JSON Schema created at `dalston/schemas/engine.schema.json`
+- [x] Validator CLI works: `python -m dalston.tools.validate_engine --all`
+- [x] CI validates engine.yaml on PR (pre-commit hook)
+- [x] All engine.yaml files updated with new sections (schema 1.1)
+- [x] Catalog generation script works (`scripts/generate_catalog.py`)
+- [x] catalog.py loads from generated_catalog.json
+- [x] Engine.get_capabilities() loads from engine.yaml
+- [x] EngineCapabilities model extended with new fields
+- [x] GET /v1/engines endpoint returns engine list with status
+- [x] GET /v1/capabilities endpoint returns aggregate capabilities
+- [x] Performance-based timeout calculation works
+- [x] Error messages include catalog context and suggestions
+- [x] Scaffold command generates new engine skeleton (`dalston/tools/scaffold_engine.py`)
+- [x] engine_catalog.yaml deleted
+- [x] ENGINES.md updated with new schema
 
 ---
 
@@ -627,3 +627,52 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 - **HF ecosystem integration**: Pipeline tags enable model discovery
 - **Client SDKs**: Discovery API enables capability negotiation
 - **Contributor experience**: Scaffold + validation reduces onboarding friction
+
+---
+
+## Implementation Summary
+
+**Completed: February 2026**
+
+M30 was implemented in 4 phases:
+
+### Phase 1: Schema Validation
+
+- Created `dalston/schemas/engine.schema.json` with full validation
+- Built `dalston/tools/validate_engine.py` CLI tool
+- Added `schema_version: "1.0"` to all engine.yaml files
+
+### Phase 2: Extended Metadata & Catalog Generation
+
+- Extended all engine.yaml files with `hf_compat`, `hardware`, and `performance` sections
+- Created `scripts/generate_catalog.py` to build catalog from engine.yaml files
+- Generated `dalston/orchestrator/generated_catalog.json`
+
+### Phase 3: Discovery API & Error Handling
+
+- Added `GET /v1/engines` endpoint with engine status (running/available/unhealthy)
+- Added `GET /v1/capabilities` endpoint for aggregate capability discovery
+- Enhanced error messages with catalog context and suggestions
+
+### Phase 4: Runtime & Tooling
+
+- Modified `Engine.get_capabilities()` to load from engine.yaml at runtime
+- Created `dalston/tools/scaffold_engine.py` for new engine scaffolding
+- Deleted legacy `dalston/orchestrator/engine_catalog.yaml`
+- Extended `EngineCapabilities` model with hardware/performance fields
+
+### Key Files Created
+
+- `dalston/schemas/engine.schema.json`
+- `dalston/tools/validate_engine.py`
+- `dalston/tools/scaffold_engine.py`
+- `dalston/gateway/api/v1/engines.py`
+- `scripts/generate_catalog.py`
+- `dalston/orchestrator/generated_catalog.json`
+
+### Stage Names Updated
+
+During implementation, stage names were consolidated:
+
+- `detect` → `pii_detect` (PII detection stage)
+- `redact` → `audio_redact` (audio redaction stage)

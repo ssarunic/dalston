@@ -337,7 +337,7 @@ export function JobDetail() {
               fullText={job.text}
               enableExport={true}
               exportConfig={{ type: 'job', id: job.id }}
-              piiConfig={job.pii?.enabled && job.redacted_text ? {
+              piiConfig={job.pii?.enabled ? {
                 enabled: true,
                 entitiesDetected: job.pii.entities_detected,
                 redactedText: job.redacted_text,
