@@ -40,8 +40,8 @@ scrape_configs:
           - 'stt-batch-diarize-pyannote-v31-cpu:9100'
           - 'stt-batch-diarize-pyannote-v40:9100'
           - 'stt-batch-diarize-pyannote-v40-cpu:9100'
-          - 'stt-batch-detect-presidio:9100'
-          - 'stt-batch-redact-audio:9100'
+          - 'stt-batch-pii-detect-presidio:9100'
+          - 'stt-batch-audio-redact-audio:9100'
           - 'stt-batch-merge:9100'
     metrics_path: /metrics
 

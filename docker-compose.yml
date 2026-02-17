@@ -584,9 +584,9 @@ services:
       - gpu
     restart: unless-stopped
 
-  # --- DETECT STAGE (PII) ---
-  stt-batch-detect-presidio:
-    image: dalston/stt-batch-detect-presidio:latest
+  # --- PII DETECT STAGE ---
+  stt-batch-pii-detect-presidio:
+    image: dalston/stt-batch-pii-detect-presidio:latest
     build:
       context: .
       dockerfile: engines/detect/pii-presidio/Dockerfile
@@ -612,9 +612,9 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
-  # --- REDACT STAGE ---
-  stt-batch-redact-audio:
-    image: dalston/stt-batch-redact-audio:latest
+  # --- AUDIO REDACT STAGE ---
+  stt-batch-audio-redact-audio:
+    image: dalston/stt-batch-audio-redact-audio:latest
     build:
       context: .
       dockerfile: engines/redact/audio-redactor/Dockerfile

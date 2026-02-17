@@ -332,10 +332,9 @@ engines/realtime/{engine-id}/
 | `stt-batch-transcribe-parakeet` | transcribe |
 | `stt-batch-align-whisperx-cpu` | align |
 | `stt-batch-diarize-pyannote-v31-cpu` | diarize |
-| `stt-batch-detect-emotion` | detect |
-| `stt-batch-refine-llm` | refine |
+| `stt-batch-pii-detect-presidio` | pii_detect |
+| `stt-batch-audio-redact-audio` | audio_redact |
 | `stt-batch-merge` | merge |
-| `stt-batch-transcribe-whisperx-full` | transcribe+align+diarize |
 
 ### Realtime Engines
 

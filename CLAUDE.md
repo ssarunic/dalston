@@ -17,7 +17,7 @@ The system is composed of several key components:
 - **Batch Engines**: Containerized processors (transcribe, align, diarize, refine, merge)
 - **Real-time Workers**: WebSocket servers for streaming transcription
 
-Pipeline stages: `PREPARE → TRANSCRIBE → ALIGN → DIARIZE → DETECT → REFINE → MERGE`
+Pipeline stages: `PREPARE → TRANSCRIBE → ALIGN → DIARIZE → PII_DETECT → AUDIO_REDACT → MERGE`
 
 ## Commands
 

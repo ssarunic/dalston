@@ -4,7 +4,7 @@
 # and optionally GLiNER for ML-based entity recognition.
 #
 # Build from repo root:
-#   docker compose build stt-batch-detect-presidio
+#   docker compose build stt-batch-pii-detect-presidio
 
 FROM dalston/engine-base:latest
 
