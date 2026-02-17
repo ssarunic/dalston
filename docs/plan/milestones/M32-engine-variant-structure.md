@@ -6,7 +6,7 @@
 | **Duration**     | 1.5-2 days                                                         |
 | **Dependencies** | M30 (Engine Metadata Evolution)                                    |
 | **Deliverable**  | Restructured engines, updated tooling, accurate per-variant specs  |
-| **Status**       | Planned                                                            |
+| **Status**       | Complete                                                           |
 
 ## User Story
 

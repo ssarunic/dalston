@@ -2,235 +2,213 @@
 
 ## Overview
 
-This specification defines how users select transcription models in Dalston's API. The design must accommodate multiple transcription engines (faster-whisper, Parakeet, Canary-Qwen, etc.) with varying model architectures and naming conventions.
+This specification defines how users select transcription engines in Dalston's API. The system uses a direct engine ID approach - users either specify an exact engine ID or use `auto` for capability-driven selection.
 
 ---
 
-## Current State
+## Design Principles
 
-### Batch API (REST)
-
-- **Model selection**: Not exposed in API parameters
-- **Default**: `large-v3` (hardcoded in orchestrator)
-- **Engine override**: `engine_transcribe` parameter exists but not documented
-
-### Real-time API (WebSocket)
-
-- **Model selection**: `model=fast|accurate` query parameter
-- **Default engine**: Parakeet (native streaming, not VAD-chunked Whisper)
-- **Mapping**: `fast` → parakeet-0.6b, `accurate` → parakeet-1.1b
-
-### Engine Level
-
-- Each engine defines its own model options in `engine.yaml`
-- faster-whisper supports: tiny, base, small, medium, large-v1/v2/v3
-- Engines read model from `input.config.model`
+1. **Direct mapping**: Model parameter maps directly to engine IDs
+2. **Auto-selection**: Use `auto` to let the orchestrator select the best available engine
+3. **Runtime discovery**: `/v1/models` shows only currently running engines
+4. **No aliases**: Clean break - use exact engine IDs for explicit selection
 
 ---
 
-## Requirements
+## Engine Selection
 
-### Functional Requirements
+### Specifying an Engine
 
-1. **FR-1**: Users MUST be able to select a transcription model via API parameter
-2. **FR-2**: The system MUST support multiple transcription engines with different model sets
-3. **FR-3**: The system MUST provide sensible defaults for users who don't specify a model
-4. **FR-4**: The system MUST validate model names and return clear errors for invalid models
-5. **FR-5**: The system SHOULD support convenience aliases (e.g., `fast`, `accurate`)
-6. **FR-6**: The system MUST expose available models via API endpoint (`GET /v1/models`)
+Users can specify an exact engine ID:
 
-### Non-Functional Requirements
-
-1. **NFR-1**: Adding new model variants within an existing engine should require only registry updates
-2. **NFR-2**: Model naming should be self-documenting and consistent
-3. **NFR-3**: API should follow industry conventions (similar to OpenAI, Anthropic)
-
----
-
-## Design Decision: Provider-Style Model Names
-
-### Alternatives Considered
-
-| Approach              | Example                                     | Pros              | Cons                              |
-| --------------------- | ------------------------------------------- | ----------------- | --------------------------------- |
-| **Abstract tiers**    | `model="large"`                             | Simple            | Doesn't map across architectures  |
-| **Engine + size**     | `engine="whisper"`, `size="large"`          | Explicit          | Two params, validation complexity |
-| **HuggingFace paths** | `model="Systran/faster-whisper-large-v3"`   | Precise           | Verbose, couples to HF            |
-| **Provider-style**    | `model="whisper-large-v3"`                  | Clear, extensible | Requires registry                 |
-
-### Selected Approach: Provider-Style Names
-
-Model identifiers follow the pattern: `{family}-{variant}`
-
-```
-whisper-large-v3      # Whisper large v3 (default)
-whisper-large-v2      # Whisper large v2
-whisper-base          # Whisper base
-whisper-turbo         # Whisper turbo (pruned decoder)
-distil-whisper        # Distilled Whisper (English-only)
-parakeet-1.1b         # NVIDIA Parakeet 1.1B
-parakeet-0.6b         # NVIDIA Parakeet 0.6B
-canary-qwen           # NVIDIA Canary-Qwen
-voxtral-4b            # Mistral Voxtral (multilingual streaming)
+```bash
+curl -X POST http://localhost:8000/v1/audio/transcriptions \
+  -H "Authorization: Bearer $API_KEY" \
+  -F "file=@audio.wav" \
+  -F "model=faster-whisper-base"
 ```
 
-### Rationale
+### Auto-Selection
 
-1. **Self-documenting**: `whisper-large-v3` is immediately understandable
-2. **Extensible**: Adding `parakeet-1.1b` requires registry entry + engine implementation
-3. **Implicit routing**: Model name implies which engine to use
-4. **Industry standard**: Mirrors OpenAI (`gpt-4o`), Anthropic (`claude-sonnet-4-20250514`)
-5. **Alias support**: Can map `fast` → `distil-whisper`, `accurate` → `whisper-large-v3`
+Use `auto` (or omit the parameter) for capability-driven selection:
 
----
-
-## Model Registry
-
-Central configuration mapping model IDs to engine configuration.
-
-### Schema
-
-```python
-@dataclass
-class ModelDefinition:
-    id: str                    # API-facing model identifier
-    engine: str                # Engine ID (matches engine.yaml)
-    engine_model: str          # Model name passed to engine
-
-    # Metadata
-    name: str                  # Human-readable name
-    description: str           # Brief description
-    tier: str                  # "fast", "balanced", "accurate"
-
-    # Capabilities
-    languages: int | list[str] # Number of languages or explicit list
-    streaming: bool            # Supports real-time streaming
-    word_timestamps: bool      # Supports word-level timing
-
-    # Resource hints
-    vram_gb: float             # Approximate VRAM requirement
-    speed_factor: float        # Relative speed (1.0 = baseline)
+```bash
+curl -X POST http://localhost:8000/v1/audio/transcriptions \
+  -H "Authorization: Bearer $API_KEY" \
+  -F "file=@audio.wav" \
+  -F "model=auto"
 ```
 
-### Initial Registry
+The orchestrator selects the best engine based on:
 
-| Model ID | Engine | Engine Model | Tier | Languages | Streaming |
-|----------|--------|--------------|------|-----------|-----------|
-| `whisper-large-v3` | faster-whisper | large-v3 | accurate | 99 | No |
-| `whisper-large-v2` | faster-whisper | large-v2 | accurate | 99 | No |
-| `whisper-medium` | faster-whisper | medium | balanced | 99 | No |
-| `whisper-small` | faster-whisper | small | fast | 99 | No |
-| `whisper-base` | faster-whisper | base | fast | 99 | No |
-| `whisper-tiny` | faster-whisper | tiny | fast | 99 | No |
-| `distil-whisper` | faster-whisper | distil-large-v3 | fast | 1 (en) | No |
-| `parakeet-110m` | parakeet | nvidia/parakeet-tdt_ctc-110m | fast | 1 (en) | Yes |
-| `parakeet-0.6b` | parakeet | nvidia/parakeet-rnnt-0.6b | fast | 1 (en) | Yes |
-| `parakeet-1.1b` | parakeet | nvidia/parakeet-rnnt-1.1b | balanced | 1 (en) | Yes |
-
-### Aliases
-
-| Alias | Resolves To (Batch) | Resolves To (Realtime) | Use Case |
-|-------|---------------------|------------------------|----------|
-| `fast` | `distil-whisper` | `parakeet-0.6b` | Speed-optimized |
-| `accurate` | `whisper-large-v3` | `parakeet-1.1b` | Quality-optimized |
-| `large` | `whisper-large-v3` | — | Backwards compat |
-| `base` | `whisper-base` | — | Backwards compat |
-| `parakeet` | — | `parakeet-0.6b` | Default Parakeet model |
+- Required capabilities (language, streaming, word timestamps)
+- Engine availability (running and healthy)
+- Priority/performance characteristics from catalog
 
 ---
 
-## API Changes
+## Available Engines
 
-### Batch Transcription Endpoint
+### Batch Transcription Engines
+
+| Engine ID | Languages | Word Timestamps | GPU Required |
+|-----------|-----------|-----------------|--------------|
+| `faster-whisper-base` | 99 | Via alignment | No (CPU supported) |
+| `faster-whisper-large-v3` | 99 | Via alignment | Yes |
+| `faster-whisper-large-v3-turbo` | 99 | Via alignment | Yes |
+| `parakeet-0.6b` | 1 (en) | Native | No (CPU supported) |
+| `parakeet-1.1b` | 1 (en) | Native | Yes |
+
+### Realtime Streaming Engines
+
+| Engine ID | Languages | Use Case |
+|-----------|-----------|----------|
+| `whisper-streaming-base` | 99 | Low-latency multilingual |
+| `parakeet-streaming-0.6b` | 1 (en) | Fast English streaming |
+| `parakeet-streaming-1.1b` | 1 (en) | Accurate English streaming |
+
+---
+
+## API Endpoints
+
+### Batch Transcription
 
 ```
 POST /v1/audio/transcriptions
 ```
 
-**New parameter:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `model` | string | `auto` | Engine ID or `auto` for auto-selection |
+
+### Real-time Transcription
+
+```
+GET /v1/audio/transcriptions/stream?model=parakeet-streaming-0.6b
+```
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `model` | string | `whisper-large-v3` | Model identifier or alias |
+| `model` | string | `auto` | Engine ID or `auto` for auto-selection |
 
-**Example request:**
-
-```bash
-curl -X POST http://localhost:8000/v1/audio/transcriptions \
-  -F "file=@audio.wav" \
-  -F "model=whisper-base"
-```
-
-### Real-time Transcription Endpoint
-
-```
-GET /v1/audio/transcriptions/stream?model=whisper-large-v3
-```
-
-Existing `fast`/`accurate` values continue to work as aliases.
-
-### Models List Endpoint
+### List Running Engines
 
 ```
 GET /v1/models
 ```
 
-**Response:**
+Returns only engines that are currently running and healthy:
 
 ```json
 {
   "object": "list",
   "data": [
     {
-      "id": "whisper-large-v3",
+      "id": "faster-whisper-base",
       "object": "model",
-      "created": 1699000000,
-      "owned_by": "openai",
-      "name": "Whisper Large v3",
-      "description": "Most accurate multilingual transcription model",
+      "stage": "transcribe",
+      "status": "running",
       "capabilities": {
-        "languages": 99,
+        "languages": ["en", "es", "fr", ...],
+        "streaming": false,
+        "word_timestamps": false
+      }
+    },
+    {
+      "id": "parakeet-0.6b",
+      "object": "model",
+      "stage": "transcribe",
+      "status": "running",
+      "capabilities": {
+        "languages": ["en"],
         "streaming": false,
         "word_timestamps": true
-      },
-      "tier": "accurate"
-    },
-    ...
+      }
+    }
   ]
 }
 ```
 
-### Model Details Endpoint
+### List All Engines (with status)
 
 ```
-GET /v1/models/{model_id}
+GET /v1/engines
 ```
 
-Returns detailed information about a specific model.
+Returns all engines from catalog with their current status:
+
+```json
+{
+  "engines": [
+    {
+      "id": "faster-whisper-base",
+      "stage": "transcribe",
+      "version": "1.0.0",
+      "status": "running",
+      "capabilities": { ... },
+      "hardware": { ... },
+      "performance": { ... }
+    },
+    {
+      "id": "faster-whisper-large-v3",
+      "stage": "transcribe",
+      "version": "1.0.0",
+      "status": "available",
+      "capabilities": { ... },
+      "hardware": { ... },
+      "performance": { ... }
+    }
+  ],
+  "total": 2
+}
+```
+
+Status values:
+
+- `running`: Engine has valid heartbeat
+- `available`: In catalog but not running
+- `unhealthy`: Heartbeat expired
 
 ---
 
-## Validation & Error Handling
+## Error Handling
 
-### Invalid Model
+### Engine Not Found
+
+When a specified engine doesn't exist in the catalog:
 
 ```json
 {
   "error": {
     "type": "invalid_request_error",
-    "message": "Model 'whisper-huge' not found. Available models: whisper-large-v3, whisper-base, ...",
+    "message": "Engine 'unknown-engine' not found",
     "param": "model"
   }
 }
 ```
 
-### Engine Not Available
+### Engine Not Running
+
+When a specified engine exists but isn't currently running:
 
 ```json
 {
   "error": {
     "type": "service_unavailable",
-    "message": "Model 'parakeet-1.1b' requires engine 'parakeet' which is not currently running"
+    "message": "Engine 'faster-whisper-large-v3' is not currently running"
+  }
+}
+```
+
+### Capability Mismatch
+
+When auto-selection can't find an engine matching requirements:
+
+```json
+{
+  "error": {
+    "type": "service_unavailable",
+    "message": "No engine available for stage 'transcribe' with language 'hr'"
   }
 }
 ```
@@ -239,44 +217,60 @@ Returns detailed information about a specific model.
 
 ## ElevenLabs Compatibility
 
-ElevenLabs API uses the `model_id` parameter. For compatibility:
+The `/v1/speech-to-text` endpoint accepts ElevenLabs `model_id` parameter values:
 
-| ElevenLabs Endpoint | Dalston Mapping |
-|--------------------|-----------------|
-| `/v1/speech-to-text` | Accept both `model` and `model_id` |
-| Default model | Map to `whisper-large-v3` |
+| ElevenLabs model_id | Behavior |
+|---------------------|----------|
+| `scribe_v1` | Auto-select (treated as `auto`) |
+| `scribe_v2` | Auto-select (treated as `auto`) |
+| Any other value | Auto-select (treated as `auto`) |
+
+ElevenLabs model names are treated as auto-selection since they don't map to Dalston engines.
 
 ---
 
 ## Adding New Engines
 
-When adding a new engine:
+When adding a new transcription engine:
 
-1. Implement engine in `engines/transcribe/{engine-id}/`
-2. Add model entries to `MODEL_REGISTRY` in `dalston/common/models.py`
-3. Models automatically appear in `/v1/models` endpoint
+1. Implement engine in `engines/{stage}/{engine-id}/`
+2. Create variant YAML files in `engines/{stage}/{engine-id}/variants/`
+3. Add docker-compose service definition
+4. Engine auto-registers via heartbeat when started
+5. Appears in `/v1/models` when running
 
-See [M22 Parakeet Engine](../plan/milestones/M22-parakeet-engine.md) for a complete example of adding a new transcription engine.
+See [M32: Engine Variant Structure](../plan/milestones/M32-engine-variant-structure.md) for the variant pattern.
 
-### Language-Specific Models
+---
 
-Support explicit language variants:
+## Future Enhancements
 
+### Capability-Based Auto-Selection
+
+Future: richer auto-selection based on requirements:
+
+```json
+{
+  "model": "auto",
+  "language": "hr",
+  "streaming": true
+}
 ```
-whisper-large-v3         # Auto-detect language
-whisper-large-v3-en      # English-optimized
-whisper-base-en          # English-only base
+
+Would route to the best engine supporting Croatian with streaming.
+
+### Quality Tiers
+
+Future: tier-based selection as convenience:
+
+```json
+{
+  "model": "auto",
+  "tier": "fast"
+}
 ```
 
-### Model Routing by Capability
-
-Future: automatic model selection based on requirements:
-
-```python
-model="auto"
-language="hr"           # Route to best Croatian model
-streaming=True          # Route to streaming-capable model
-```
+Would route to the fastest available engine.
 
 ---
 
@@ -299,17 +293,8 @@ Voxtral Mini 4B Realtime 2602 is a multilingual, natively-streaming speech trans
 | **Latency** | Configurable 80ms-2400ms (sweet spot: 480ms) |
 | **Streaming** | Native (causal encoder, sliding window attention) |
 | **Word timestamps** | Yes |
-| **VRAM** | ≥16GB minimum (~35GB practical) |
+| **VRAM** | >=16GB minimum (~35GB practical) |
 | **Throughput** | >12.5 tokens/second |
-
-**Performance (WER at 480ms latency):**
-
-| Benchmark | Voxtral Realtime | Voxtral Offline |
-|-----------|------------------|-----------------|
-| FLEURS avg (13 langs) | 8.72% | 5.90% |
-| English | 4.90% | 3.32% |
-| Spanish | 3.31% | 2.63% |
-| Meanwhile (long-form EN) | 5.05% | 4.08% |
 
 **Why it matters for Dalston:**
 
@@ -318,48 +303,4 @@ Voxtral Mini 4B Realtime 2602 is a multilingual, natively-streaming speech trans
 - Competitive accuracy with offline models at <500ms latency
 - Open weights under Apache 2.0 license
 
-**Proposed registry entry:**
-
-```python
-"voxtral-4b": ModelDefinition(
-    id="voxtral-4b",
-    engine="voxtral",
-    engine_model="mistralai/Voxtral-Mini-4B-Realtime-2602",
-    name="Voxtral Mini 4B Realtime",
-    description="Multilingual streaming transcription, 13 languages, <500ms latency",
-    tier="balanced",
-    languages=13,
-    streaming=True,
-    word_timestamps=True,
-    vram_gb=16.0,
-    speed_factor=5.0,  # Estimated vs Whisper baseline
-),
-```
-
-**Proposed aliases:**
-
-| Alias | Resolves To | Use Case |
-|-------|-------------|----------|
-| `streaming` | `voxtral-4b` | Default multilingual streaming model |
-| `realtime` | `voxtral-4b` | Alias for streaming |
-
-**Integration considerations:**
-
-1. Requires new `engines/realtime/voxtral-streaming/` engine implementation
-2. WebSocket protocol compatible with existing realtime SDK
-3. May need vLLM or similar for efficient inference
-4. Could become default for `model=auto` when `streaming=true` and language is in supported set
-
----
-
-## Open Questions
-
-1. **Q: Should we deprecate `engine_transcribe` parameter?**
-   - Recommendation: Keep for power users who want explicit engine control, but model parameter handles routing automatically
-
-2. **Q: How to handle model+engine mismatch?**
-   - If user specifies both `model="whisper-base"` and `engine_transcribe="parakeet"`, return error
-
-3. **Q: Version pinning?**
-   - Consider: `whisper-large-v3@20240101` for reproducibility
-   - Defer to future iteration
+**Proposed engine ID:** `voxtral-streaming-4b`
