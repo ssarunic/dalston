@@ -490,8 +490,8 @@ class TestValidStages:
             "transcribe",
             "align",
             "diarize",
-            "detect",
-            "redact",
+            "pii_detect",
+            "audio_redact",
             "refine",
             "merge",
         ]

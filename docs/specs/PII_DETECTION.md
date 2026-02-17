@@ -407,7 +407,7 @@ PII detection integrates with the M25 retention system. The default behavior is 
 
 ```yaml
 id: pii-presidio
-stage: detect
+stage: pii_detect
 name: PII Detection (Presidio + GLiNER)
 version: 1.0.0
 

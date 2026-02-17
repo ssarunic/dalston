@@ -226,9 +226,10 @@ async def get_job_tasks(
         "transcribe": 1,
         "align": 2,
         "diarize": 3,
-        "detect": 4,
-        "refine": 5,
-        "merge": 6,
+        "pii_detect": 4,
+        "audio_redact": 5,
+        "refine": 6,
+        "merge": 7,
     }
     sorted_tasks = sorted(
         job.tasks,

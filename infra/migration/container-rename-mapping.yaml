@@ -3,7 +3,7 @@
 # Naming Convention: {domain}-{type}-{stage}-{impl}[-v{version}][-cpu]
 #   - domain: stt (speech-to-text), tts (text-to-speech, future)
 #   - type: batch or rt (realtime)
-#   - stage: prepare, transcribe, align, diarize, detect, redact, merge
+#   - stage: prepare, transcribe, align, diarize, pii_detect, audio_redact, refine, merge
 #   - impl: whisper, parakeet, pyannote, presidio, etc.
 #   - version: v31, v40, etc. (only when multiple versions coexist)
 #   - cpu: only when forcing CPU mode (GPU is default for compute-heavy engines)

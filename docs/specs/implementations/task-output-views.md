@@ -94,7 +94,7 @@ All stage views include a "Show Raw JSON" toggle below the summary view, preserv
 
 ## Future Stages
 
-When new stages are added (e.g., `detect` for emotion detection, `refine` for LLM cleanup), corresponding output views should be added following this pattern:
+When new stages are added (e.g., `pii_detect` for PII detection, `refine` for LLM cleanup), corresponding output views should be added following this pattern:
 
 1. Check engine output format in `engines/{stage}/*/engine.py`
 2. Identify 3-5 most useful fields for quick inspection

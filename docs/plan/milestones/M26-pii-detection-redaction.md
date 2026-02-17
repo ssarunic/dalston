@@ -263,7 +263,7 @@ class PIIDetectionEngine(Engine):
 
 ```yaml
 id: pii-presidio
-stage: detect
+stage: pii_detect
 name: PII Detection (Presidio + GLiNER)
 version: 1.0.0
 description: |
@@ -447,7 +447,7 @@ def build_dag(job: Job) -> list[Task]:
     # PII Detection (optional, after alignment)
     if job.pii_detection_enabled:
         pii_task = Task(
-            stage="detect",
+            stage="pii_detect",
             engine_id="pii-presidio",
             depends_on=[align_task.id, diarize_task.id] if diarize_task else [align_task.id],
             required=True,  # If requested, it should succeed

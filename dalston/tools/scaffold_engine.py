@@ -21,8 +21,8 @@ VALID_STAGES = [
     "transcribe",
     "align",
     "diarize",
-    "detect",
-    "redact",
+    "pii_detect",
+    "audio_redact",
     "refine",
     "merge",
 ]
@@ -33,8 +33,8 @@ PIPELINE_TAG_MAP = {
     "transcribe": "automatic-speech-recognition",
     "align": "automatic-speech-recognition",
     "diarize": "speaker-diarization",
-    "detect": "audio-classification",
-    "redact": "dalston:audio-redaction",
+    "pii_detect": "audio-classification",
+    "audio_redact": "dalston:audio-redaction",
     "refine": "automatic-speech-recognition",
     "merge": "dalston:merge",
 }
