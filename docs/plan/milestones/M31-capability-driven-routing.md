@@ -6,7 +6,7 @@
 | **Duration**     | 6 days                                                                                  |
 | **Dependencies** | M30 (Engine Metadata Evolution)                                                         |
 | **Deliverable**  | Engine selector module, capability-driven DAG builder, actionable error messages, auto-failover |
-| **Status**       | Planning                                                                                |
+| **Status**       | Done                                                                                    |
 
 ## User Stories
 
@@ -832,6 +832,8 @@ async def submit_job(job_id: UUID, audio_uri: str, parameters: dict):
 
 ### 31.14: Implement Retry-with-Reselection
 
+> **DEFERRED**: This task is deferred to a future milestone. The core capability-driven selection at job submission time covers the primary use case. Retry-with-reselection adds complexity for an edge case (engine dying mid-job) that can be handled by simple job resubmission for now.
+
 Handle engine disappearance during execution.
 
 ```python
@@ -1184,26 +1186,25 @@ docker compose logs orchestrator | grep dag_shape_decided
 
 ## Checkpoint
 
-- [ ] `includes_diarization` added to EngineCapabilities
-- [ ] Catalog loader extracts new fields
-- [ ] `find_engines()` method added to catalog
-- [ ] faster-whisper word timestamps discrepancy resolved
-- [ ] `engine_selector.py` created with `select_engine()`
-- [ ] `NoCapableEngineError` with structured messages
-- [ ] `extract_requirements()` converts job config
-- [ ] `select_all_engines()` handles full pipeline
-- [ ] `build_task_dag()` signature updated
-- [ ] All callers of `build_task_dag()` updated
-- [ ] `DEFAULT_ENGINES` replaced with selector
-- [ ] `NATIVE_WORD_TIMESTAMP_ENGINES` replaced with capability check
-- [ ] `_build_per_channel_dag()` updated
-- [ ] Job submission wired with fail-fast validation
-- [ ] Retry-with-reselection implemented
-- [ ] Structured logging added
-- [ ] Strangle-fig fallback in place
-- [ ] Unit tests for selector
-- [ ] Integration tests for DAG building
-- [ ] Documentation updated
+- [x] `includes_diarization` added to EngineCapabilities
+- [x] Catalog loader extracts new fields
+- [x] `find_engines()` method added to catalog
+- [x] faster-whisper word timestamps discrepancy resolved
+- [x] `engine_selector.py` created with `select_engine()`
+- [x] `NoCapableEngineError` with structured messages
+- [x] `extract_requirements()` converts job config
+- [x] `select_pipeline_engines()` handles full pipeline
+- [x] `build_task_dag_async()` added with capability-driven selection
+- [x] Job handler wired to use `build_task_dag_async()`
+- [x] DAG shape adapts based on engine capabilities
+- [x] `_build_per_channel_dag_from_selections()` uses capabilities
+- [x] Job submission wired with fail-fast validation
+- [ ] ~~Retry-with-reselection implemented~~ (DEFERRED)
+- [x] Structured logging added
+- [x] Strangle-fig fallback in place (sync `build_task_dag()` preserved)
+- [x] Unit tests for selector
+- [x] Integration tests for DAG building
+- [x] Documentation updated
 
 ---
 

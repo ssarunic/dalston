@@ -113,7 +113,8 @@ capabilities:
     - all                            # Or explicit list: [en, es, fr, ...]
   max_audio_duration: 7200           # Seconds
   streaming: false                   # Supports streaming?
-  word_timestamps: true              # Can output word-level timing?
+  word_timestamps: true              # Produces accurate word-level timestamps?
+  includes_diarization: false        # Output includes speaker labels?
 
 # === OPTIONAL FIELDS ===
 input:
@@ -206,6 +207,43 @@ Performance characteristics for timeout calculation and capacity planning.
 | `rtf_cpu` | float | Real-time factor on CPU, null if unsupported |
 | `max_concurrent_jobs` | int | Concurrent job limit |
 | `warm_start_latency_ms` | int | Latency after model loaded |
+
+### Capabilities and Routing
+
+Engine capabilities directly affect how the orchestrator selects engines and builds task DAGs.
+
+#### Routing Capabilities
+
+| Field | Type | Effect on Routing |
+| --- | --- | --- |
+| `languages` | list or null | Filters engines by language support. `null` = universal (all languages). |
+| `streaming` | bool | Required for real-time transcription jobs. |
+| `word_timestamps` | bool | If `true`, alignment stage is skipped (engine produces accurate word timing). |
+| `includes_diarization` | bool | If `true`, diarize stage is skipped (output includes speaker labels). |
+
+#### DAG Shape Examples
+
+The orchestrator adapts DAG shape based on selected engine capabilities:
+
+```
+# faster-whisper (word_timestamps: false, includes_diarization: false)
+prepare → transcribe → align → diarize → merge
+
+# parakeet (word_timestamps: true, includes_diarization: false)
+prepare → transcribe → diarize → merge  (no align - native timestamps)
+
+# whisperx-full (word_timestamps: true, includes_diarization: true)
+prepare → transcribe → merge  (no align, no diarize - all native)
+```
+
+#### Ranking Criteria
+
+When multiple engines match requirements, the selector prefers:
+
+1. Native word timestamps (skips alignment stage)
+2. Native diarization (skips diarize stage)
+3. Language-specific over universal
+4. Faster RTF (real-time factor)
 
 ### Validation
 

@@ -18,7 +18,7 @@ The Orchestrator is a background service responsible for expanding jobs into tas
 ## Responsibilities
 
 1. **Job Expansion**: Convert user job requests into task DAGs based on parameters
-2. **Engine Selection**: Choose optimal engines (single-stage or multi-stage)
+2. **Engine Selection**: Choose optimal engines based on capabilities (language support, word timestamps, diarization)
 3. **Task Scheduling**: Push ready tasks to engine queues
 4. **Dependency Management**: Track task completion and advance dependents
 5. **Failure Handling**: Retry failed tasks, handle optional task failures
@@ -116,61 +116,77 @@ SKIPPED:    Optional task failed, job continues
 }
 ```
 
-### Step 1: Determine Required Stages
+### Step 1: Select Engines (Capability-Driven)
+
+Engine selection uses capabilities declared in `engine.yaml` to match job requirements:
 
 ```python
-required_stages = ["prepare"]  # Always required
+async def select_pipeline_engines(parameters: dict, registry, catalog):
+    """Select engines for all required stages based on capabilities."""
+    requirements = extract_requirements(parameters)  # {language: "hr", ...}
+    selections = {}
 
-if job.word_timestamps or job.speaker_detection == "diarize":
-    required_stages.append("transcribe")
-    required_stages.append("align")
+    # Transcription - filter by language capability
+    selections["transcribe"] = await select_engine(
+        stage="transcribe",
+        requirements=requirements,  # Must support requested language
+        registry=registry,
+        catalog=catalog,
+    )
 
-if job.speaker_detection == "diarize":
-    required_stages.append("diarize")
+    # Alignment - conditional on transcriber capabilities
+    if _should_add_alignment(parameters, selections["transcribe"]):
+        selections["align"] = await select_engine("align", ...)
 
-if job.speaker_detection == "per_channel":
-    required_stages.append("transcribe")  # Per channel
-    required_stages.append("align")       # Per channel
-    # No diarize - speakers known from channels
+    # Diarization - conditional on parameters AND transcriber capabilities
+    if _should_add_diarization(parameters, selections["transcribe"]):
+        selections["diarize"] = await select_engine("diarize", ...)
 
-if job.detect_emotions:
-    required_stages.append("detect_emotions")
-
-if job.detect_events:
-    required_stages.append("detect_events")
-
-if job.llm_cleanup:
-    required_stages.append("refine")
-
-required_stages.append("merge")  # Always required
+    return selections
 ```
 
-### Step 2: Select Engines
+**Selection criteria:**
+
+1. **Hard filters** - Engine must satisfy requirements:
+   - `language`: If specified, engine's `capabilities.languages` must include it (or be `null` for universal)
+   - `streaming`: If true, engine must have `capabilities.supports_streaming: true`
+
+2. **Ranking** - When multiple engines match, prefer:
+   - Native word timestamps (`supports_word_timestamps: true`) - skips alignment stage
+   - Native diarization (`includes_diarization: true`) - skips diarize stage
+   - Language-specific over universal
+   - Faster RTF (real-time factor)
+
+3. **Error handling** - If no engine matches, `NoCapableEngineError` provides:
+   - What was required
+   - Which running engines failed and why
+   - Which catalog engines could work if started
+
+### Step 2: Determine DAG Shape
+
+DAG shape adapts based on selected engine capabilities:
 
 ```python
-def select_engines(required_stages, preference):
-    """Select engines to cover all required stages."""
+def _should_add_alignment(parameters, transcribe_selection):
+    """Alignment needed when job wants word timestamps and transcriber lacks them."""
+    wants_word_timestamps = parameters.get("timestamps_granularity", "word") == "word"
+    has_native = transcribe_selection.capabilities.supports_word_timestamps
+    return wants_word_timestamps and not has_native
 
-    available = get_available_engines()
-    selected = []
-    remaining = set(required_stages)
-
-    # Check for multi-stage engine covering multiple needed stages
-    if preference != "modular":
-        for engine in available:
-            coverage = remaining & set(engine.stages)
-            if len(coverage) > 1:
-                # Multi-stage engine covers multiple needs
-                selected.append(engine)
-                remaining -= coverage
-
-    # Fill remaining with single-stage engines
-    for stage in remaining:
-        engine = find_best_engine_for_stage(stage, available, preference)
-        selected.append(engine)
-
-    return selected
+def _should_add_diarization(parameters, transcribe_selection):
+    """Diarization stage needed when job wants it and transcriber doesn't include it."""
+    wants_diarization = parameters.get("speaker_detection") == "diarize"
+    has_native = transcribe_selection.capabilities.includes_diarization
+    return wants_diarization and not has_native
 ```
+
+**Examples:**
+
+| Transcriber | `supports_word_timestamps` | `includes_diarization` | DAG Shape |
+| --- | --- | --- | --- |
+| faster-whisper | false | false | prepare → transcribe → align → merge |
+| parakeet | true | false | prepare → transcribe → merge (no align) |
+| whisperx-full | true | true | prepare → transcribe → merge (no align, no diarize) |
 
 ### Step 3: Build Task Graph
 
@@ -531,53 +547,74 @@ async def calculate_job_progress(job_id: str) -> dict:
 
 ---
 
-## Engine Selection Algorithm
+## Capability-Driven Engine Selection
 
-```python
-def select_engines_for_stages(required_stages: list[str], preference: str) -> list[Engine]:
-    """
-    Select engines to cover all required stages.
+Engine selection is capability-driven: the orchestrator queries the registry for running engines that satisfy job requirements, then ranks them by capabilities.
 
-    Strategy:
-    1. If preference is "modular", only use single-stage engines
-    2. Otherwise, prefer multi-stage engines when they cover multiple needed stages
-    3. Fall back to single-stage engines for remaining stages
-    """
+### Selection Flow
 
-    available = get_available_engines()
-    selected = []
-    remaining = set(required_stages)
+```
+Job Submission
+      │
+      ▼
+┌─────────────────┐
+│ Extract         │  Job config → internal requirements
+│ Requirements    │  {language: "hr", word_timestamps: true}
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐     ┌──────────────┐
+│ Engine Selector │────▶│ Registry     │  What's running?
+│                 │     │ (Redis)      │
+│ For each stage: │     └──────────────┘
+│ - Filter by caps│     ┌──────────────┐
+│ - Rank matches  │────▶│ Catalog      │  What could run?
+│ - Select best   │     │ (JSON)       │  (for error messages)
+└────────┬────────┘     └──────────────┘
+         │
+         ▼
+┌─────────────────┐
+│ DAG Builder     │  Shape driven by capabilities:
+│                 │  - transcriber.supports_word_timestamps → skip align
+│                 │  - transcriber.includes_diarization → skip diarize
+└────────┬────────┘
+         │
+         ▼
+      Task Queue
+```
 
-    if preference == "modular":
-        # Only single-stage engines
-        for stage in required_stages:
-            engine = find_single_stage_engine(stage, available)
-            selected.append((stage, engine))
-        return selected
+### Actionable Error Messages
 
-    # Sort engines by coverage (most stages first)
-    def coverage_score(engine):
-        return len(remaining & set(engine.stages))
+When no engine matches requirements, the error explains why:
 
-    while remaining:
-        # Find engine with best coverage
-        best = max(available, key=coverage_score, default=None)
+```json
+{
+  "error": "no_capable_engine",
+  "stage": "transcribe",
+  "requirements": {"language": "hr"},
+  "running_engines": [
+    {"id": "parakeet", "reason": "language 'hr' not supported (has: ['en'])"}
+  ],
+  "catalog_alternatives": [
+    {"id": "faster-whisper", "languages": null}
+  ]
+}
+```
 
-        if best is None or coverage_score(best) == 0:
-            raise ValueError(f"No engine available for stages: {remaining}")
+This tells operators exactly what to start: `docker compose up stt-batch-transcribe-faster-whisper`
 
-        covered = remaining & set(best.stages)
+### Zero-Code Engine Additions
 
-        for stage in covered:
-            selected.append((stage, best))
+New engines participate in routing automatically based on their `engine.yaml` capabilities:
 
-        remaining -= covered
+```bash
+# Deploy new engine (no orchestrator code changes needed)
+docker compose up -d stt-batch-transcribe-canary
 
-        # Don't reuse multi-stage engine for different stage groups
-        if len(best.stages) > 1:
-            available = [e for e in available if e.id != best.id]
-
-    return selected
+# Submit job - new engine is selected if it's the best match
+curl -X POST http://localhost:8000/v1/audio/transcriptions \
+  -F "file=@test.wav" -F "language=en"
+# Response shows engine_id: canary-whisper (if it ranked highest)
 ```
 
 ---
