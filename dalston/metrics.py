@@ -52,7 +52,7 @@ def configure_metrics(service_name: str) -> None:
 
     Args:
         service_name: Identifier for this service (e.g. "gateway",
-            "orchestrator", "engine-faster-whisper").
+            "orchestrator", "stt-batch-transcribe-whisper").
 
     Environment Variables:
         METRICS_ENABLED: Set to "false" to disable metrics (default: "true")

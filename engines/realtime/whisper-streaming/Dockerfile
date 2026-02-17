@@ -4,7 +4,7 @@
 # Runs a WebSocket server for streaming audio transcription.
 #
 # Build from repo root:
-#   docker compose build realtime-whisper
+#   docker compose build stt-rt-transcribe-whisper-cpu
 #
 # For GPU support, use docker compose --profile gpu
 
@@ -57,7 +57,7 @@ ENV TORCH_HOME=/models
 RUN mkdir -p /models
 
 # Default environment variables
-ENV WORKER_ID=realtime-whisper
+ENV WORKER_ID=stt-rt-transcribe-whisper
 ENV WORKER_PORT=9000
 ENV MAX_SESSIONS=4
 ENV REDIS_URL=redis://redis:6379

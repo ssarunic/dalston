@@ -2,7 +2,7 @@
 
 These tests require the full Dalston stack to be running:
     docker compose up -d gateway orchestrator redis postgres minio minio-init \
-        engine-audio-prepare engine-faster-whisper engine-final-merger
+        stt-batch-prepare stt-batch-transcribe-whisper-cpu stt-batch-merge
 
 Run with:
     pytest tests/e2e/test_job_cancellation_e2e.py -v -m e2e

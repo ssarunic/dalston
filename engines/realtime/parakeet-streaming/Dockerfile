@@ -5,12 +5,12 @@
 # Supports both GPU (CUDA) and CPU inference via build argument.
 #
 # Build from repo root:
-#   GPU (default): docker compose build realtime-parakeet-1
-#   CPU:           docker compose --profile parakeet-cpu build realtime-parakeet-cpu
+#   GPU (default): docker compose build stt-rt-transcribe-parakeet
+#   CPU:           docker compose --profile parakeet-cpu build stt-rt-transcribe-parakeet-cpu
 #
 # Or directly:
-#   GPU: docker build -t dalston/realtime-parakeet:gpu .
-#   CPU: docker build --build-arg DEVICE=cpu -t dalston/realtime-parakeet:cpu .
+#   GPU: docker build -t dalston/stt-rt-transcribe-parakeet:gpu .
+#   CPU: docker build --build-arg DEVICE=cpu -t dalston/stt-rt-transcribe-parakeet:cpu .
 
 # Build argument to select device (cuda or cpu)
 ARG DEVICE=cuda
@@ -90,7 +90,7 @@ ENV TORCH_HOME=/models
 RUN mkdir -p /models
 
 # Default environment variables
-ENV WORKER_ID=realtime-parakeet
+ENV WORKER_ID=stt-rt-transcribe-parakeet
 ENV WORKER_PORT=9000
 ENV MAX_SESSIONS=4
 ENV REDIS_URL=redis://redis:6379

@@ -4,7 +4,7 @@
 # Supports silence and beep redaction modes.
 #
 # Build from repo root:
-#   docker compose build engine-audio-redactor
+#   docker compose build stt-batch-redact-audio
 
 FROM dalston/engine-base:latest
 

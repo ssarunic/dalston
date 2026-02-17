@@ -4,7 +4,7 @@
 # Supports both GPU (CUDA) and CPU modes with automatic detection.
 #
 # Build from repo root:
-#   docker compose build engine-whisperx-align
+#   docker compose build stt-batch-align-whisperx-cpu
 #
 # For GPU support, use docker compose --profile gpu
 

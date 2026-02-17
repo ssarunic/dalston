@@ -89,7 +89,7 @@ class WorkerRegistry:
         )
 
         # Mark stale worker offline
-        await registry.mark_worker_offline("realtime-whisper-1")
+        await registry.mark_worker_offline("stt-rt-transcribe-whisper-1")
     """
 
     def __init__(self, redis_client: redis.Redis) -> None:

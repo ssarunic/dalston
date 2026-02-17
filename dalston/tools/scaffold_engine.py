@@ -307,7 +307,7 @@ def generate_dockerfile(config: ScaffoldConfig) -> str:
 # {config.description}
 #
 # Build from repo root:
-#   docker compose build engine-{config.engine_id}
+#   docker compose build stt-batch-{config.stage}-{config.engine_id}
 #
 {gpu_comment}
 FROM python:3.11-slim
@@ -374,10 +374,10 @@ def generate_readme(config: ScaffoldConfig) -> str:
 
 ```bash
 # Build the engine
-docker compose build engine-{config.engine_id}
+docker compose build stt-batch-{config.stage}-{config.engine_id}
 
 # Run with docker compose
-docker compose up -d engine-{config.engine_id}
+docker compose up -d stt-batch-{config.stage}-{config.engine_id}
 ```
 
 ## Configuration

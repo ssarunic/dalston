@@ -59,7 +59,7 @@ class WorkerRegistry:
 
         # Register on startup
         await registry.register(WorkerInfo(
-            worker_id="realtime-whisper-1",
+            worker_id="stt-rt-transcribe-whisper-1",
             endpoint="ws://localhost:9000",
             capacity=4,
             models=["fast", "accurate"],
@@ -68,17 +68,17 @@ class WorkerRegistry:
 
         # Send heartbeats periodically
         await registry.heartbeat(
-            worker_id="realtime-whisper-1",
+            worker_id="stt-rt-transcribe-whisper-1",
             active_sessions=2,
             gpu_memory_used="4.2GB"
         )
 
         # Notify session events
-        await registry.session_started("realtime-whisper-1", "sess_abc123")
-        await registry.session_ended("realtime-whisper-1", "sess_abc123", 45.6, "completed")
+        await registry.session_started("stt-rt-transcribe-whisper-1", "sess_abc123")
+        await registry.session_ended("stt-rt-transcribe-whisper-1", "sess_abc123", 45.6, "completed")
 
         # Unregister on shutdown
-        await registry.unregister("realtime-whisper-1")
+        await registry.unregister("stt-rt-transcribe-whisper-1")
         await registry.close()
     """
 

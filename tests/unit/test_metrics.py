@@ -181,7 +181,7 @@ class TestEngineMetrics:
         import dalston.metrics
 
         with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
-            dalston.metrics.configure_metrics("engine-faster-whisper")
+            dalston.metrics.configure_metrics("stt-batch-transcribe-whisper")
 
     def test_inc_engine_tasks(self):
         """Test incrementing engine tasks counter."""
@@ -273,7 +273,7 @@ class TestRealtimeMetrics:
         import dalston.metrics
 
         with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
-            dalston.metrics.configure_metrics("realtime-whisper-1")
+            dalston.metrics.configure_metrics("stt-rt-transcribe-whisper-1")
 
     def test_observe_realtime_session_duration(self):
         """Test observing realtime session duration."""

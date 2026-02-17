@@ -4,12 +4,12 @@
 # Supports both GPU (CUDA) and CPU inference via build argument.
 #
 # Build from repo root:
-#   GPU (default): docker compose build engine-parakeet
-#   CPU:           docker compose --profile parakeet-cpu build engine-parakeet-cpu
+#   GPU (default): docker compose build stt-batch-transcribe-parakeet
+#   CPU:           docker compose --profile parakeet-cpu build stt-batch-transcribe-parakeet-cpu
 #
 # Or directly:
-#   GPU: docker build -t dalston/engine-parakeet:gpu .
-#   CPU: docker build --build-arg DEVICE=cpu -t dalston/engine-parakeet:cpu .
+#   GPU: docker build -t dalston/stt-batch-transcribe-parakeet:gpu .
+#   CPU: docker build --build-arg DEVICE=cpu -t dalston/stt-batch-transcribe-parakeet:cpu .
 
 # Build argument to select device (cuda or cpu)
 ARG DEVICE=cuda

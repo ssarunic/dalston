@@ -5,7 +5,7 @@
 # Requires HuggingFace token (HF_TOKEN) for accessing gated models.
 #
 # Build from repo root:
-#   docker compose build engine-pyannote-4.0
+#   docker compose build stt-batch-diarize-pyannote-v40-cpu
 #
 # For GPU support, use docker compose --profile gpu
 #

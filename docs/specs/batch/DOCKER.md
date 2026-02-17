@@ -262,7 +262,7 @@ services:
   # MULTI-STAGE ENGINES
   # ============================================================
 
-  engine-whisperx-full:
+  stt-batch-transcribe-whisperx-full:
     build:
       context: ./engines/multi/whisperx-full
     environment:
@@ -292,7 +292,7 @@ services:
   # ENRICHMENT ENGINES
   # ============================================================
 
-  engine-emotion:
+  stt-batch-detect-emotion:
     build:
       context: ./engines/detect/emotion2vec
     environment:
@@ -339,7 +339,7 @@ services:
   # REFINEMENT ENGINES
   # ============================================================
 
-  engine-llm-cleanup:
+  stt-batch-refine-llm:
     build:
       context: ./engines/refine/llm-cleanup
     environment:

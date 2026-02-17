@@ -40,7 +40,7 @@ def configure_tracing(service_name: str) -> None:
 
     Args:
         service_name: Identifier for this service (e.g. "dalston-gateway",
-            "dalston-orchestrator", "dalston-engine-faster-whisper").
+            "dalston-orchestrator", "dalston-stt-batch-transcribe-whisper").
 
     Environment Variables:
         OTEL_ENABLED: Set to "true" to enable tracing (default: "false")

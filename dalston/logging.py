@@ -67,7 +67,7 @@ def configure(service_name: str) -> None:
 
     Args:
         service_name: Identifier for this service (e.g. "gateway",
-            "orchestrator", "engine-faster-whisper").
+            "orchestrator", "stt-batch-transcribe-whisper").
 
     Environment Variables:
         LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).

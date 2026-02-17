@@ -370,7 +370,7 @@ class TestWorkerStatus:
 
     def test_worker_status_creation(self):
         status = WorkerStatus(
-            worker_id="realtime-whisper-1",
+            worker_id="stt-rt-transcribe-whisper-1",
             endpoint="ws://localhost:9000",
             status="ready",
             capacity=4,
@@ -379,7 +379,7 @@ class TestWorkerStatus:
             languages=["auto", "en", "es"],
         )
 
-        assert status.worker_id == "realtime-whisper-1"
+        assert status.worker_id == "stt-rt-transcribe-whisper-1"
         assert status.endpoint == "ws://localhost:9000"
         assert status.status == "ready"
         assert status.capacity == 4

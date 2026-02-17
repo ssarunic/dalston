@@ -4,7 +4,7 @@
 # Uses ffmpeg for conversion and ffprobe for metadata extraction.
 #
 # Build from repo root:
-#   docker compose build engine-audio-prepare
+#   docker compose build stt-batch-prepare
 
 FROM dalston/engine-base:latest
 
