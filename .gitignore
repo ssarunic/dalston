@@ -34,3 +34,6 @@ htmlcov/
 
 # OS
 Thumbs.db
+
+# Large test fixtures
+tests/audio/large/
