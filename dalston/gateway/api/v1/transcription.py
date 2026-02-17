@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_cancel_requested, publish_job_created
-from dalston.common.models import DEFAULT_MODEL, JobStatus, resolve_model
+from dalston.common.models import JobStatus
 from dalston.common.utils import compute_duration_ms
 from dalston.config import WEBHOOK_METADATA_MAX_SIZE, Settings
 from dalston.gateway.dependencies import (
@@ -97,9 +97,9 @@ async def create_transcription(
     model: Annotated[
         str,
         Form(
-            description="Transcription model (e.g., whisper-large-v3, whisper-base, fast)"
+            description="Engine ID (e.g., faster-whisper-base, parakeet-0.6b) or 'auto' for automatic selection"
         ),
-    ] = DEFAULT_MODEL,
+    ] = "auto",
     language: Annotated[
         str, Form(description="Language code or 'auto' for detection")
     ] = "auto",
@@ -239,19 +239,6 @@ async def create_transcription(
             "webhook_url parameter is deprecated. Use registered webhooks via POST /v1/webhooks."
         )
 
-    # Validate and resolve model
-    try:
-        model_def = resolve_model(model)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "type": "invalid_request_error",
-                "message": str(e),
-                "param": "model",
-            },
-        ) from e
-
     # Parse webhook_metadata JSON string
     parsed_webhook_metadata: dict | None = None
     if webhook_metadata:
@@ -290,13 +277,10 @@ async def create_transcription(
             f"Use speaker_detection=diarize for mono audio.",
         )
 
-    # Build parameters with resolved model info
-    parameters = {
-        "model": model_def.id,
-        "engine_transcribe": model_def.engine,
-        "transcribe_config": {
-            "model": model_def.engine_model,
-        },
+    # Build parameters
+    # If model is "auto", let orchestrator select engine based on capabilities
+    # Otherwise, pass the engine ID directly
+    parameters: dict = {
         "language": language,
         "speaker_detection": speaker_detection,
         "num_speakers": num_speakers,
@@ -304,6 +288,8 @@ async def create_transcription(
         "max_speakers": max_speakers,
         "timestamps_granularity": timestamps_granularity,
     }
+    if model.lower() != "auto":
+        parameters["engine_transcribe"] = model
     # Only include optional parameters if set
     if initial_prompt is not None:
         parameters["initial_prompt"] = initial_prompt

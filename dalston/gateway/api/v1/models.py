@@ -1,86 +1,102 @@
-"""Model discovery API endpoints.
+"""Engine discovery API endpoints.
 
-GET /v1/models - List available transcription models
-GET /v1/models/{model_id} - Get details for a specific model
+GET /v1/models - List running transcription engines
+GET /v1/models/{engine_id} - Get details for a specific running engine
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from redis.asyncio import Redis
 
-from dalston.common.models import (
-    MODEL_ALIASES,
-    get_available_models,
-    resolve_model,
-)
+from dalston.gateway.dependencies import get_redis
+from dalston.orchestrator.registry import BatchEngineRegistry
 
 router = APIRouter(prefix="/models", tags=["models"])
 
 
 @router.get(
     "",
-    summary="List available models",
-    description="List all transcription models that can be used with the `model` parameter.",
+    summary="List running engines",
+    description="List transcription engines that are currently running and available for use.",
 )
-async def list_models():
-    """List available transcription models.
+async def list_models(
+    stage: str | None = Query(
+        default="transcribe",
+        description="Filter by pipeline stage (transcribe, diarize, align, etc.)",
+    ),
+    redis: Redis = Depends(get_redis),
+):
+    """List running transcription engines.
 
-    Returns all models that can be used with the `model` parameter
-    in transcription requests.
+    Returns engines that are currently running and can be used with the `model` parameter
+    in transcription requests. Use 'auto' to let the system select the best engine.
     """
-    models = get_available_models()
+    registry = BatchEngineRegistry(redis)
+
+    if stage:
+        engines = await registry.get_engines_for_stage(stage)
+    else:
+        engines = await registry.get_engines()
+
+    # Filter to only available (healthy) engines
+    available_engines = [e for e in engines if e.is_available]
+
     return {
         "object": "list",
         "data": [
             {
-                "id": m.id,
+                "id": e.engine_id,
                 "object": "model",
-                "name": m.name,
-                "description": m.description,
+                "stage": e.stage,
+                "status": "running",
                 "capabilities": {
-                    "languages": m.languages,
-                    "streaming": m.streaming,
-                    "word_timestamps": m.word_timestamps,
+                    "languages": e.capabilities.languages if e.capabilities else None,
+                    "streaming": (
+                        e.capabilities.supports_streaming if e.capabilities else False
+                    ),
+                    "word_timestamps": (
+                        e.capabilities.supports_word_timestamps
+                        if e.capabilities
+                        else False
+                    ),
                 },
-                "tier": m.tier,
             }
-            for m in models
+            for e in available_engines
         ],
-        "aliases": MODEL_ALIASES,
     }
 
 
 @router.get(
-    "/{model_id}",
-    summary="Get model details",
-    description="Get detailed information about a specific model.",
-    responses={404: {"description": "Model not found"}},
+    "/{engine_id}",
+    summary="Get engine details",
+    description="Get detailed information about a specific running engine.",
+    responses={404: {"description": "Engine not found or not running"}},
 )
-async def get_model(model_id: str):
-    """Get details for a specific model.
+async def get_model(
+    engine_id: str,
+    redis: Redis = Depends(get_redis),
+):
+    """Get details for a specific running engine.
 
     Args:
-        model_id: Model identifier or alias
+        engine_id: Engine identifier (e.g., faster-whisper-base, parakeet-0.6b)
     """
-    try:
-        model = resolve_model(model_id)
-    except ValueError:
+    registry = BatchEngineRegistry(redis)
+    engine = await registry.get_engine(engine_id)
+
+    if engine is None or not engine.is_available:
         raise HTTPException(
-            status_code=404, detail=f"Model not found: {model_id}"
+            status_code=404, detail=f"Engine not running: {engine_id}"
         ) from None
 
+    caps = engine.capabilities
     return {
-        "id": model.id,
+        "id": engine.engine_id,
         "object": "model",
-        "name": model.name,
-        "description": model.description,
+        "stage": engine.stage,
+        "status": "running",
         "capabilities": {
-            "languages": model.languages,
-            "streaming": model.streaming,
-            "word_timestamps": model.word_timestamps,
-        },
-        "tier": model.tier,
-        "engine": model.engine,
-        "resource_hints": {
-            "vram_gb": model.vram_gb,
-            "speed_factor": model.speed_factor,
+            "languages": caps.languages if caps else None,
+            "streaming": caps.supports_streaming if caps else False,
+            "word_timestamps": caps.supports_word_timestamps if caps else False,
         },
     }

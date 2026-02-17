@@ -323,4 +323,6 @@ class TestAllExistingEngines:
             error_msg = "\n".join(f"{r.path}: {', '.join(r.errors)}" for r in failed)
             pytest.fail(f"Invalid engine.yaml files:\n{error_msg}")
 
-        assert len(results) >= 11, f"Expected at least 11 engines, found {len(results)}"
+        # Transcribe engines use variants/ structure, not engine.yaml
+        # So we only have: prepare, align, diarize (x2), detect, redact, merge = 7
+        assert len(results) >= 7, f"Expected at least 7 engines, found {len(results)}"

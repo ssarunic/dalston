@@ -49,9 +49,9 @@ def transcribe(
         typer.Option(
             "--model",
             "-m",
-            help="Transcription model (e.g., whisper-large-v3, whisper-base, fast, accurate).",
+            help="Engine ID (e.g., faster-whisper-base, parakeet-0.6b) or 'auto' for auto-selection.",
         ),
-    ] = "whisper-large-v3",
+    ] = "auto",
     language: Annotated[
         str,
         typer.Option(

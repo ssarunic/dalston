@@ -30,6 +30,7 @@ from .exceptions import (
 )
 from .types import (
     ExportFormat,
+    HardwareRequirements,
     HealthStatus,
     Job,
     JobList,
@@ -242,7 +243,7 @@ class Dalston:
         self,
         file: str | Path | BinaryIO | None = None,
         audio_url: str | None = None,
-        model: str = "whisper-large-v3",
+        model: str = "auto",
         language: str = "auto",
         initial_prompt: str | None = None,
         speaker_detection: SpeakerDetection | str = SpeakerDetection.NONE,
@@ -264,8 +265,8 @@ class Dalston:
         Args:
             file: Path to audio file, or file-like object.
             audio_url: URL to fetch audio from (alternative to file).
-            model: Transcription model ID or alias (e.g., "whisper-large-v3",
-                   "whisper-base", "fast", "accurate"). Defaults to "whisper-large-v3".
+            model: Engine ID (e.g., "faster-whisper-base", "parakeet-0.6b") or "auto"
+                   for automatic selection based on capabilities. Defaults to "auto".
             language: Language code or "auto" for detection.
             initial_prompt: Domain vocabulary hints to improve accuracy
                 (e.g., technical terms, proper names).
@@ -657,24 +658,28 @@ class Dalston:
             _handle_error(response)
 
         data = response.json()
-        models = [
-            Model(
-                id=m["id"],
-                name=m["name"],
-                description=m["description"],
-                capabilities=ModelCapabilities(
-                    languages=m["capabilities"]["languages"],
-                    streaming=m["capabilities"]["streaming"],
-                    word_timestamps=m["capabilities"]["word_timestamps"],
-                ),
-                tier=m["tier"],
+        models = []
+        for m in data.get("data", []):
+            hardware = None
+            if m.get("hardware"):
+                hardware = HardwareRequirements(
+                    gpu_required=m["hardware"].get("gpu_required", False),
+                    supports_cpu=m["hardware"].get("supports_cpu", True),
+                    min_vram_gb=m["hardware"].get("min_vram_gb"),
+                )
+            models.append(
+                Model(
+                    id=m["id"],
+                    stage=m.get("stage", "transcribe"),
+                    capabilities=ModelCapabilities(
+                        languages=m["capabilities"].get("languages"),
+                        streaming=m["capabilities"].get("streaming", False),
+                        word_timestamps=m["capabilities"].get("word_timestamps", False),
+                    ),
+                    hardware=hardware,
+                )
             )
-            for m in data.get("data", [])
-        ]
-        return ModelList(
-            models=models,
-            aliases=data.get("aliases", {}),
-        )
+        return ModelList(models=models)
 
     def get_model(self, model_id: str) -> Model:
         """Get details for a specific model.
@@ -703,16 +708,22 @@ class Dalston:
             _handle_error(response)
 
         m = response.json()
+        hardware = None
+        if m.get("hardware"):
+            hardware = HardwareRequirements(
+                gpu_required=m["hardware"].get("gpu_required", False),
+                supports_cpu=m["hardware"].get("supports_cpu", True),
+                min_vram_gb=m["hardware"].get("min_vram_gb"),
+            )
         return Model(
             id=m["id"],
-            name=m["name"],
-            description=m["description"],
+            stage=m.get("stage", "transcribe"),
             capabilities=ModelCapabilities(
-                languages=m["capabilities"]["languages"],
-                streaming=m["capabilities"]["streaming"],
-                word_timestamps=m["capabilities"]["word_timestamps"],
+                languages=m["capabilities"].get("languages"),
+                streaming=m["capabilities"].get("streaming", False),
+                word_timestamps=m["capabilities"].get("word_timestamps", False),
             ),
-            tier=m["tier"],
+            hardware=hardware,
         )
 
     def get_realtime_status(self) -> RealtimeStatus:
@@ -996,7 +1007,7 @@ class AsyncDalston:
         self,
         file: str | Path | BinaryIO | None = None,
         audio_url: str | None = None,
-        model: str = "whisper-large-v3",
+        model: str = "auto",
         language: str = "auto",
         initial_prompt: str | None = None,
         speaker_detection: SpeakerDetection | str = SpeakerDetection.NONE,
@@ -1018,8 +1029,8 @@ class AsyncDalston:
         Args:
             file: Path to audio file, or file-like object.
             audio_url: URL to fetch audio from (alternative to file).
-            model: Transcription model ID or alias (e.g., "whisper-large-v3",
-                   "whisper-base", "fast", "accurate"). Defaults to "whisper-large-v3".
+            model: Engine ID (e.g., "faster-whisper-base", "parakeet-0.6b") or "auto"
+                   for automatic selection based on capabilities. Defaults to "auto".
             language: Language code or "auto" for detection.
             initial_prompt: Domain vocabulary hints to improve accuracy
                 (e.g., technical terms, proper names).
@@ -1397,24 +1408,28 @@ class AsyncDalston:
             _handle_error(response)
 
         data = response.json()
-        models = [
-            Model(
-                id=m["id"],
-                name=m["name"],
-                description=m["description"],
-                capabilities=ModelCapabilities(
-                    languages=m["capabilities"]["languages"],
-                    streaming=m["capabilities"]["streaming"],
-                    word_timestamps=m["capabilities"]["word_timestamps"],
-                ),
-                tier=m["tier"],
+        models = []
+        for m in data.get("data", []):
+            hardware = None
+            if m.get("hardware"):
+                hardware = HardwareRequirements(
+                    gpu_required=m["hardware"].get("gpu_required", False),
+                    supports_cpu=m["hardware"].get("supports_cpu", True),
+                    min_vram_gb=m["hardware"].get("min_vram_gb"),
+                )
+            models.append(
+                Model(
+                    id=m["id"],
+                    stage=m.get("stage", "transcribe"),
+                    capabilities=ModelCapabilities(
+                        languages=m["capabilities"].get("languages"),
+                        streaming=m["capabilities"].get("streaming", False),
+                        word_timestamps=m["capabilities"].get("word_timestamps", False),
+                    ),
+                    hardware=hardware,
+                )
             )
-            for m in data.get("data", [])
-        ]
-        return ModelList(
-            models=models,
-            aliases=data.get("aliases", {}),
-        )
+        return ModelList(models=models)
 
     async def get_model(self, model_id: str) -> Model:
         """Get details for a specific model.
@@ -1443,16 +1458,22 @@ class AsyncDalston:
             _handle_error(response)
 
         m = response.json()
+        hardware = None
+        if m.get("hardware"):
+            hardware = HardwareRequirements(
+                gpu_required=m["hardware"].get("gpu_required", False),
+                supports_cpu=m["hardware"].get("supports_cpu", True),
+                min_vram_gb=m["hardware"].get("min_vram_gb"),
+            )
         return Model(
             id=m["id"],
-            name=m["name"],
-            description=m["description"],
+            stage=m.get("stage", "transcribe"),
             capabilities=ModelCapabilities(
-                languages=m["capabilities"]["languages"],
-                streaming=m["capabilities"]["streaming"],
-                word_timestamps=m["capabilities"]["word_timestamps"],
+                languages=m["capabilities"].get("languages"),
+                streaming=m["capabilities"].get("streaming", False),
+                word_timestamps=m["capabilities"].get("word_timestamps", False),
             ),
-            tier=m["tier"],
+            hardware=hardware,
         )
 
     async def get_realtime_status(self) -> RealtimeStatus:

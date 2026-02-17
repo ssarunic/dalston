@@ -57,6 +57,7 @@ from .realtime import AsyncRealtimeSession, RealtimeSession
 # Types
 from .types import (
     ExportFormat,
+    HardwareRequirements,
     HealthStatus,
     Job,
     JobList,
@@ -133,6 +134,7 @@ __all__ = [
     "Model",
     "ModelCapabilities",
     "ModelList",
+    "HardwareRequirements",
     # Real-time types
     "SessionBegin",
     "SessionEnd",

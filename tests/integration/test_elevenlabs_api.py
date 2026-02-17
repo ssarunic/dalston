@@ -151,20 +151,36 @@ class TestCreateTranscriptionEndpoint:
         assert "transcription_id" in data
         assert data["message"] == "Request processed successfully"
 
-    def test_create_transcription_invalid_model(self, client, mock_jobs_service):
-        """Test that invalid model returns 400 error."""
-        audio_content = b"fake audio content"
-        files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+    def test_create_transcription_any_model_accepted(
+        self, client, mock_jobs_service, mock_job
+    ):
+        """Test that any model_id is accepted (validated at orchestrator level)."""
+        mock_jobs_service.create_job.return_value = mock_job
 
-        response = client.post(
-            "/v1/speech-to-text",
-            files=files,
-            data={"model_id": "invalid_model", "webhook": "true"},
-        )
+        with patch(
+            "dalston.gateway.api.v1.speech_to_text.StorageService"
+        ) as MockStorage:
+            MockStorage.return_value.upload_audio = AsyncMock(
+                return_value="s3://bucket/audio.mp3"
+            )
 
-        assert response.status_code == 400
-        data = response.json()
-        assert data["detail"]["param"] == "model_id"
+            with patch(
+                "dalston.gateway.api.v1.speech_to_text.publish_job_created"
+            ) as mock_publish:
+                mock_publish.return_value = None
+
+                audio_content = b"fake audio content"
+                files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+
+                # Any model_id should be accepted - validation happens at orchestrator
+                response = client.post(
+                    "/v1/speech-to-text",
+                    files=files,
+                    data={"model_id": "custom_engine", "webhook": "true"},
+                )
+
+        # Should succeed - model validation is done at orchestrator level
+        assert response.status_code == 200
 
     def test_create_transcription_missing_filename(self, client):
         """Test that file without filename returns error."""

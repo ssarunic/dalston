@@ -418,25 +418,32 @@ class SessionToken:
 class ModelCapabilities:
     """Model capabilities and features."""
 
-    languages: int  # Number of supported languages (1 = English-only)
+    languages: list[str] | None  # Supported language codes, None = all languages
     streaming: bool  # Supports real-time streaming
     word_timestamps: bool  # Supports word-level timestamps
 
 
 @dataclass
-class Model:
-    """Transcription model information."""
+class HardwareRequirements:
+    """Engine hardware requirements."""
 
-    id: str  # Model identifier (e.g., "whisper-large-v3")
-    name: str  # Human-readable name
-    description: str  # Brief description
+    gpu_required: bool
+    supports_cpu: bool
+    min_vram_gb: float | None = None
+
+
+@dataclass
+class Model:
+    """Transcription engine/model information."""
+
+    id: str  # Engine identifier (e.g., "faster-whisper-base", "parakeet-0.6b")
+    stage: str  # Pipeline stage (e.g., "transcribe")
     capabilities: ModelCapabilities
-    tier: str  # "fast", "balanced", or "accurate"
+    hardware: HardwareRequirements | None = None
 
 
 @dataclass
 class ModelList:
-    """List of available models."""
+    """List of available models/engines."""
 
     models: list[Model]
-    aliases: dict[str, str]  # Alias mappings (e.g., "fast" -> "distil-whisper")

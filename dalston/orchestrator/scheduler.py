@@ -204,7 +204,10 @@ async def queue_task(
     job_id_str = str(task.job_id)
 
     # Get language from task config (if present)
+    # Normalize "auto" to None - it means auto-detect, not a language requirement
     language = task.config.get("language") if task.config else None
+    if language and language.lower() == "auto":
+        language = None
 
     # 1. Catalog check - does any engine in catalog support this?
     if catalog is None:

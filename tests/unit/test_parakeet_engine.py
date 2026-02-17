@@ -71,19 +71,20 @@ def mock_nemo_asr():
 class TestParakeetEngineModelVariants:
     """Tests for Parakeet model variants."""
 
-    def test_default_model_is_tdt_ctc_110m(self, mock_cuda_available):
-        """Test that default model is parakeet-tdt_ctc-110m."""
+    def test_default_model_size_is_0_6b(self, mock_cuda_available):
+        """Test that default model size is 0.6b."""
         ParakeetEngine = load_parakeet_engine()
-        assert ParakeetEngine.DEFAULT_MODEL == "nvidia/parakeet-tdt_ctc-110m"
+        assert ParakeetEngine.DEFAULT_MODEL_SIZE == "0.6b"
 
-    def test_supported_model_variants(self, mock_cuda_available):
-        """Test that all expected variants are supported."""
+    def test_supported_model_sizes(self, mock_cuda_available):
+        """Test that expected model sizes are supported."""
         ParakeetEngine = load_parakeet_engine()
-        # TDT_CTC models
-        assert "nvidia/parakeet-tdt_ctc-110m" in ParakeetEngine.MODEL_VARIANTS
-        # RNNT models
-        assert "nvidia/parakeet-rnnt-0.6b" in ParakeetEngine.MODEL_VARIANTS
-        assert "nvidia/parakeet-rnnt-1.1b" in ParakeetEngine.MODEL_VARIANTS
+        # RNNT model sizes
+        assert "0.6b" in ParakeetEngine.MODEL_SIZE_MAP
+        assert "1.1b" in ParakeetEngine.MODEL_SIZE_MAP
+        # Verify NeMo model identifiers
+        assert ParakeetEngine.MODEL_SIZE_MAP["0.6b"] == "nvidia/parakeet-rnnt-0.6b"
+        assert ParakeetEngine.MODEL_SIZE_MAP["1.1b"] == "nvidia/parakeet-rnnt-1.1b"
 
 
 class TestParakeetEngineHealthCheck:

@@ -18,7 +18,6 @@ import structlog
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from dalston.common.events import publish_job_created
-from dalston.common.models import resolve_model
 from dalston.common.redis import get_redis as _get_redis
 from dalston.common.utils import parse_session_id
 from dalston.config import get_settings
@@ -103,8 +102,10 @@ async def realtime_transcription(
     language: Annotated[str, Query(description="Language code or 'auto'")] = "auto",
     model: Annotated[
         str,
-        Query(description="Model ID or alias (e.g., whisper-large-v3, fast, accurate)"),
-    ] = "fast",
+        Query(
+            description="Engine ID (e.g., parakeet-0.6b, faster-whisper-base) or 'auto'"
+        ),
+    ] = "auto",
     encoding: Annotated[str, Query(description="Audio encoding")] = "pcm_s16le",
     sample_rate: Annotated[int, Query(description="Sample rate in Hz")] = 16000,
     enable_vad: Annotated[bool, Query(description="Enable VAD events")] = True,
@@ -234,24 +235,10 @@ async def realtime_transcription(
         await websocket.close(code=4400, reason="Invalid parameters")
         return
 
-    # Validate model parameter using model registry
-    # For realtime, we keep the original alias (fast/accurate) for worker routing
-    # Workers advertise aliases, not fully resolved model IDs
-    try:
-        model_def = resolve_model(model)
-        # Keep original alias for routing, resolved ID for logging
-        routing_model = model  # Use alias (fast, accurate, parakeet)
-        resolved_model = model_def.id  # For logging
-    except ValueError as e:
-        await websocket.send_json(
-            {
-                "type": "error",
-                "code": "invalid_model",
-                "message": str(e),
-            }
-        )
-        await websocket.close(code=4400, reason="Invalid model")
-        return
+    # Model parameter: use engine ID directly or "auto" for auto-selection
+    # For realtime routing, we pass the engine ID to the session router
+    routing_model = model if model.lower() != "auto" else None
+    resolved_model = model  # For logging
 
     # Get client IP for logging
     client_ip = websocket.client.host if websocket.client else "unknown"
@@ -583,21 +570,10 @@ async def elevenlabs_realtime_transcription(
     # Accept connection
     await websocket.accept()
 
-    # Validate and resolve model
-    # For ElevenLabs, scribe_v1/v2 map to parakeet models
-    # Workers advertise "parakeet" as a capability, so use that for routing
-    try:
-        model_def = resolve_model(model_id)
-        resolved_model = model_def.id
-        # For parakeet models, use "parakeet" alias for routing
-        if resolved_model.startswith("parakeet-"):
-            routing_model = "parakeet"
-        else:
-            routing_model = model_id
-    except ValueError as e:
-        await websocket.send_json({"message_type": "error", "error": str(e)})
-        await websocket.close(code=4400, reason="Invalid model")
-        return
+    # ElevenLabs model_id (scribe_v1, scribe_v2, etc.) is treated as "auto"
+    # Let the session router select the best available realtime engine
+    routing_model = None  # Auto-select
+    resolved_model = model_id  # For logging
 
     # Get client IP
     client_ip = websocket.client.host if websocket.client else "unknown"

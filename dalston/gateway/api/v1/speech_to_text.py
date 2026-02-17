@@ -27,7 +27,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.events import publish_job_created
-from dalston.common.models import JobStatus, resolve_model
+from dalston.common.models import JobStatus
 from dalston.config import Settings
 from dalston.gateway.dependencies import (
     RequireJobsRead,
@@ -91,18 +91,8 @@ class ElevenLabsProcessingResponse(BaseModel):
 
 
 # =============================================================================
-# Model ID Mapping
+# Parameter Mapping
 # =============================================================================
-
-
-def map_elevenlabs_model(model_id: str) -> str:
-    """Map ElevenLabs model_id to Dalston model."""
-    model_map = {
-        "scribe_v1": "fast",
-        "scribe_v1_experimental": "fast",
-        "scribe_v2": "accurate",
-    }
-    return model_map.get(model_id, model_id)
 
 
 def map_timestamps_granularity(granularity: str) -> str:
@@ -227,31 +217,14 @@ async def create_transcription(
         file_content = await file.read()
 
     # Map ElevenLabs parameters to Dalston parameters
-    dalston_model = map_elevenlabs_model(model_id)
+    # ElevenLabs model_id (scribe_v1, scribe_v2, etc.) is treated as "auto"
+    # Let the orchestrator auto-select the best engine
     dalston_language = language_code or "auto"
     dalston_speaker_detection = "diarize" if diarize else "none"
     dalston_timestamps = map_timestamps_granularity(timestamps_granularity)
 
-    # Resolve model to get engine configuration
-    try:
-        model_def = resolve_model(dalston_model)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "type": "invalid_request_error",
-                "message": str(e),
-                "param": "model_id",
-            },
-        ) from e
-
-    # Build parameters dict (matching native API format with transcribe_config)
-    parameters = {
-        "model": model_def.id,
-        "engine_transcribe": model_def.engine,
-        "transcribe_config": {
-            "model": model_def.engine_model,
-        },
+    # Build parameters - no engine_transcribe means auto-select
+    parameters: dict = {
         "language": dalston_language,
         "speaker_detection": dalston_speaker_detection,
         "timestamps_granularity": dalston_timestamps,
