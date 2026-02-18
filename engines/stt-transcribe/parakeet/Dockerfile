@@ -51,7 +51,7 @@ RUN python -m pip install --no-cache-dir -e ".[engine-sdk]"
 WORKDIR /engine
 
 # Copy engine requirements first for better caching
-COPY engines/transcribe/parakeet/requirements.txt .
+COPY engines/stt-transcribe/parakeet/requirements.txt .
 
 # Install NeMo and dependencies
 RUN python -m pip install --no-cache-dir -r requirements.txt
@@ -75,8 +75,8 @@ print(f'Model {model_id} downloaded successfully')"; \
     else echo "Skipping model download (will download at runtime)"; fi
 
 # Copy engine files
-COPY engines/transcribe/parakeet/variants/${MODEL_VARIANT}.yaml /etc/dalston/engine.yaml
-COPY engines/transcribe/parakeet/engine.py .
+COPY engines/stt-transcribe/parakeet/variants/${MODEL_VARIANT}.yaml /etc/dalston/engine.yaml
+COPY engines/stt-transcribe/parakeet/engine.py .
 
 # Create model cache directory
 ENV NEMO_CACHE=/models
