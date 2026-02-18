@@ -251,6 +251,17 @@ class FinalMergerEngine(Engine):
                     entities_detected=len(pii_entities),
                     redacted_audio=redacted_audio_uri is not None,
                 )
+
+                # Compute per-segment redacted text for mono audio
+                if pii_entities:
+                    for segment in segments:
+                        segment.redacted_text = self._redact_mono_segment_text(
+                            segment_text=segment.text,
+                            segment_start=segment.start,
+                            segment_end=segment.end,
+                            pii_entities=pii_entities,
+                            words=segment.words,
+                        )
             else:
                 # Try raw output
                 raw_pii = input.get_raw_output("pii_detect")
@@ -851,6 +862,93 @@ class FinalMergerEngine(Engine):
         )
         for entity in sorted_entities:
             if entity.original_text in redacted:
+                redacted = redacted.replace(
+                    entity.original_text, f"[{entity.entity_type.upper()}]", 1
+                )
+
+        return redacted
+
+    def _redact_mono_segment_text(
+        self,
+        segment_text: str,
+        segment_start: float,
+        segment_end: float,
+        pii_entities: list[PIIEntity],
+        words: list[Word] | None = None,
+    ) -> str:
+        """Redact PII from mono audio segment text based on timing overlap.
+
+        For mono audio mode (not per-channel), matches PII entities by time
+        overlap with the segment and redacts corresponding text.
+
+        Args:
+            segment_text: Original segment text
+            segment_start: Segment start time
+            segment_end: Segment end time
+            pii_entities: All PII entities with timing info
+            words: Word-level timing info if available
+
+        Returns:
+            Redacted segment text
+        """
+        # Find entities that overlap with this segment's time range
+        overlapping_entities = []
+        for entity in pii_entities:
+            # Check time overlap
+            if entity.start_time is not None and entity.end_time is not None:
+                if entity.start_time < segment_end and entity.end_time > segment_start:
+                    overlapping_entities.append(entity)
+
+        if not overlapping_entities:
+            return segment_text
+
+        # If we have words, do word-level replacement
+        if words:
+            redacted_words = []
+            for w in words:
+                word_text = w.text if hasattr(w, "text") else w.get("text", "")
+                word_start = w.start if hasattr(w, "start") else w.get("start", 0)
+                word_end = w.end if hasattr(w, "end") else w.get("end", 0)
+
+                # Check if any entity overlaps with this word
+                redacted = False
+                for entity in overlapping_entities:
+                    if entity.start_time <= word_start and entity.end_time >= word_end:
+                        # Word is fully within entity - redact it
+                        redacted_words.append(f"[{entity.entity_type.upper()}]")
+                        redacted = True
+                        break
+                    elif word_start < entity.end_time and word_end > entity.start_time:
+                        # Partial overlap - also redact
+                        redacted_words.append(f"[{entity.entity_type.upper()}]")
+                        redacted = True
+                        break
+
+                if not redacted:
+                    redacted_words.append(word_text)
+
+            # Deduplicate consecutive redaction markers
+            result_words = []
+            prev_marker = None
+            for word in redacted_words:
+                if word.startswith("[") and word.endswith("]"):
+                    if word != prev_marker:
+                        result_words.append(word)
+                        prev_marker = word
+                else:
+                    result_words.append(word)
+                    prev_marker = None
+
+            return " ".join(result_words)
+
+        # No words - do simple text replacement using original_text
+        redacted = segment_text
+        # Sort by length (longest first) to avoid partial replacements
+        sorted_entities = sorted(
+            overlapping_entities, key=lambda e: len(e.original_text or ""), reverse=True
+        )
+        for entity in sorted_entities:
+            if entity.original_text and entity.original_text in redacted:
                 redacted = redacted.replace(
                     entity.original_text, f"[{entity.entity_type.upper()}]", 1
                 )
