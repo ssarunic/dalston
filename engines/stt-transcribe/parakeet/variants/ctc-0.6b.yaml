@@ -9,6 +9,9 @@ description: |
   Produces native word-level timestamps without separate alignment.
   Best choice for high-throughput batch processing.
 
+  NOTE: Outputs lowercase text without punctuation. Use refine stage or
+  parakeet-tdt-0.6b (v3) if punctuation/capitalization is required.
+
 container:
   gpu: required
   memory: 6G
@@ -21,6 +24,8 @@ capabilities:
   streaming: false
   word_timestamps: true
   max_concurrency: 4
+  punctuation: false
+  capitalization: false
 
 input:
   audio_formats:

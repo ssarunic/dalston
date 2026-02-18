@@ -7,7 +7,7 @@ Voxtral supports both GPU (recommended) and CPU inference via
 Transformers backend.
 
 Environment variables:
-    MODEL_SIZE: Model variant to use (mini-3b, small-24b). Defaults to mini-3b.
+    MODEL_VARIANT: Model variant to use (mini-3b, small-24b). Defaults to mini-3b.
     DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
 """
 
@@ -38,11 +38,11 @@ class VoxtralEngine(Engine):
     GPU inference is strongly recommended for production use.
     """
 
-    MODEL_SIZE_MAP = {
+    MODEL_VARIANT_MAP = {
         "mini-3b": "mistralai/Voxtral-Mini-3B-2507",
         "small-24b": "mistralai/Voxtral-Small-24B-2507",
     }
-    DEFAULT_MODEL_SIZE = "mini-3b"
+    DEFAULT_MODEL_VARIANT = "mini-3b"
 
     SUPPORTED_LANGUAGES = ["en", "es", "fr", "pt", "hi", "de", "nl", "it"]
 
@@ -52,16 +52,16 @@ class VoxtralEngine(Engine):
         self._processor = None
         self._model_name: str | None = None
 
-        model_size = os.environ.get("MODEL_SIZE", self.DEFAULT_MODEL_SIZE)
-        if model_size not in self.MODEL_SIZE_MAP:
+        model_variant = os.environ.get("MODEL_VARIANT", self.DEFAULT_MODEL_VARIANT)
+        if model_variant not in self.MODEL_VARIANT_MAP:
             self.logger.warning(
-                "unknown_model_size",
-                requested=model_size,
-                using=self.DEFAULT_MODEL_SIZE,
+                "unknown_model_variant",
+                requested=model_variant,
+                using=self.DEFAULT_MODEL_VARIANT,
             )
-            model_size = self.DEFAULT_MODEL_SIZE
-        self._model_size = model_size
-        self._hf_model_id = self.MODEL_SIZE_MAP[model_size]
+            model_variant = self.DEFAULT_MODEL_VARIANT
+        self._model_variant = model_variant
+        self._hf_model_id = self.MODEL_VARIANT_MAP[model_variant]
 
         requested_device = os.environ.get("DEVICE", "").lower()
         cuda_available = torch.cuda.is_available()
@@ -196,7 +196,7 @@ class VoxtralEngine(Engine):
             timestamp_granularity_actual=TimestampGranularity.SEGMENT,
             alignment_method=AlignmentMethod.UNKNOWN,
             channel=channel,
-            engine_id=f"voxtral-{self._model_size}",
+            engine_id=f"voxtral-{self._model_variant}",
             skipped=False,
             skip_reason=None,
             warnings=[],
@@ -228,10 +228,10 @@ class VoxtralEngine(Engine):
 
     def get_capabilities(self) -> EngineCapabilities:
         """Return Voxtral engine capabilities."""
-        vram_mb = 9500 if self._model_size == "mini-3b" else 55000
+        vram_mb = 9500 if self._model_variant == "mini-3b" else 55000
 
         return EngineCapabilities(
-            engine_id=f"voxtral-{self._model_size}",
+            engine_id=f"voxtral-{self._model_variant}",
             version="1.0.0",
             stages=["transcribe"],
             languages=self.SUPPORTED_LANGUAGES,

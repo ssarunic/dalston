@@ -16,7 +16,10 @@
 ARG DEVICE=cuda
 
 # Base images for each device type
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04 AS base-cuda
+# GPU: Official NVIDIA PyTorch container (requires NGC login: docker login nvcr.io)
+#      PyTorch 2.5.0, CUDA 12.6, cuDNN 9 - all versions aligned by NVIDIA
+# CPU: Python slim image for lightweight CPU-only inference
+FROM nvcr.io/nvidia/pytorch:24.12-py3 AS base-cuda
 FROM python:3.11-slim AS base-cpu
 
 # Select the appropriate base image
@@ -26,18 +29,11 @@ FROM base-${DEVICE} AS base
 ARG DEVICE=cuda
 
 # Install system dependencies
-# For CUDA base: need to install Python
+# For NGC PyTorch base: Python/CUDA already installed, just need audio libs
 # For CPU base: Python already installed, just need audio libs
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
-    && if [ "$DEVICE" = "cuda" ]; then \
-        apt-get install -y --no-install-recommends \
-            python3.11 \
-            python3.11-venv \
-            python3-pip \
-        && ln -s /usr/bin/python3.11 /usr/bin/python; \
-    fi \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory for dalston package
@@ -54,34 +50,37 @@ RUN pip install --no-cache-dir -e ".[realtime-sdk]"
 WORKDIR /engine
 
 # Copy engine requirements first for better caching
-COPY engines/realtime/parakeet-streaming/requirements.txt .
+COPY engines/stt-rt/parakeet/requirements.txt .
 
-# Install PyTorch with appropriate backend
-# CPU: Use CPU-only wheels (smaller, faster install)
-# CUDA: Use default wheels with CUDA support
-# torchaudio is installed from regular PyPI (works for both)
+# Install PyTorch for CPU builds only (GPU base already has PyTorch)
 ARG DEVICE=cuda
 RUN if [ "$DEVICE" = "cpu" ]; then \
-        pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu; \
-    fi && \
-    pip install --no-cache-dir torchaudio
+        pip install --no-cache-dir \
+            torch --index-url https://download.pytorch.org/whl/cpu && \
+        pip install --no-cache-dir torchaudio; \
+    fi
 
 # Install NeMo and dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download the default model (0.6B) at build time
-RUN python -c "\
+# Pre-download models at build time (skip on Mac cross-compile to avoid QEMU crashes)
+ARG MODEL_VARIANT=0.6b
+ARG SKIP_MODEL_DOWNLOAD=false
+RUN if [ "$SKIP_MODEL_DOWNLOAD" = "false" ]; then \
+        python -c "\
 import nemo.collections.asr as nemo_asr; \
-model = nemo_asr.models.ASRModel.from_pretrained('nvidia/parakeet-rnnt-0.6b'); \
-print('Model nvidia/parakeet-rnnt-0.6b downloaded successfully')"
-
-# Download Silero VAD model
-RUN python -c "import torch; torch.hub.load('snakers4/silero-vad', 'silero_vad', trust_repo=True)" \
-    && echo "Silero VAD model downloaded successfully"
+model = nemo_asr.models.ASRModel.from_pretrained('nvidia/parakeet-rnnt-${MODEL_VARIANT}'); \
+print('Model nvidia/parakeet-rnnt-${MODEL_VARIANT} downloaded successfully')" && \
+        python -c "import torch; torch.hub.load('snakers4/silero-vad', 'silero_vad', trust_repo=True)" && \
+        echo "Silero VAD model downloaded successfully"; \
+    else \
+        echo "Skipping model download (SKIP_MODEL_DOWNLOAD=true)"; \
+    fi
 
 # Copy engine files
-COPY engines/realtime/parakeet-streaming/engine.yaml .
-COPY engines/realtime/parakeet-streaming/engine.py .
+ARG MODEL_VARIANT=0.6b
+COPY engines/stt-rt/parakeet/variants/rnnt-${MODEL_VARIANT}.yaml ./engine.yaml
+COPY engines/stt-rt/parakeet/engine.py .
 
 # Create model cache directory
 ENV NEMO_CACHE=/models

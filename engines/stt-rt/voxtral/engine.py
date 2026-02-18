@@ -5,7 +5,7 @@ streaming transcription. Achieves <500ms latency with configurable
 delay settings for accuracy/latency tradeoffs.
 
 Environment variables:
-    MODEL_SIZE: Model variant to use (mini-4b). Defaults to mini-4b.
+    MODEL_VARIANT: Model variant to use (mini-4b). Defaults to mini-4b.
     DEVICE: Device to use for inference (cuda). GPU required for realtime.
     TRANSCRIPTION_DELAY_MS: Transcription delay in ms (80-2400). Default 480.
 """
@@ -34,15 +34,15 @@ class VoxtralStreamingEngine(RealtimeEngine):
         WORKER_PORT: WebSocket server port (default: 9000)
         MAX_SESSIONS: Maximum concurrent sessions (default: 4)
         REDIS_URL: Redis connection URL (default: redis://localhost:6379)
-        MODEL_SIZE: Model size variant (mini-4b). Defaults to mini-4b.
+        MODEL_VARIANT: Model variant (mini-4b). Defaults to mini-4b.
         TRANSCRIPTION_DELAY_MS: Delay in ms (default: 480, range: 80-2400)
         DEVICE: Device to use (cuda). GPU required for realtime performance.
     """
 
-    MODEL_SIZE_MAP = {
+    MODEL_VARIANT_MAP = {
         "mini-4b": "mistralai/Voxtral-Mini-4B-Realtime-2602",
     }
-    DEFAULT_MODEL_SIZE = "mini-4b"
+    DEFAULT_MODEL_VARIANT = "mini-4b"
     DEFAULT_DELAY_MS = 480  # Sweet spot between latency and accuracy
 
     SUPPORTED_LANGUAGES = [
@@ -69,16 +69,16 @@ class VoxtralStreamingEngine(RealtimeEngine):
         self._model_name: str | None = None
         self._delay_ms: int = self.DEFAULT_DELAY_MS
 
-        model_size = os.environ.get("MODEL_SIZE", self.DEFAULT_MODEL_SIZE)
-        if model_size not in self.MODEL_SIZE_MAP:
+        model_variant = os.environ.get("MODEL_VARIANT", self.DEFAULT_MODEL_VARIANT)
+        if model_variant not in self.MODEL_VARIANT_MAP:
             logger.warning(
-                "unknown_model_size",
-                requested=model_size,
-                using=self.DEFAULT_MODEL_SIZE,
+                "unknown_model_variant",
+                requested=model_variant,
+                using=self.DEFAULT_MODEL_VARIANT,
             )
-            model_size = self.DEFAULT_MODEL_SIZE
-        self._model_size = model_size
-        self._hf_model_id = self.MODEL_SIZE_MAP[model_size]
+            model_variant = self.DEFAULT_MODEL_VARIANT
+        self._model_variant = model_variant
+        self._hf_model_id = self.MODEL_VARIANT_MAP[model_variant]
 
         requested_device = os.environ.get("DEVICE", "").lower()
         cuda_available = torch.cuda.is_available()
@@ -116,7 +116,7 @@ class VoxtralStreamingEngine(RealtimeEngine):
 
         logger.info(
             "loading_voxtral_model",
-            model_size=self._model_size,
+            model_variant=self._model_variant,
             model_id=self._hf_model_id,
             delay_ms=self._delay_ms,
         )
@@ -269,7 +269,7 @@ class VoxtralStreamingEngine(RealtimeEngine):
 
     def get_engine(self) -> str:
         """Return engine type identifier."""
-        return f"voxtral-{self._model_size}"
+        return f"voxtral-{self._model_variant}"
 
     def get_gpu_memory_usage(self) -> str:
         """Return GPU memory usage string."""

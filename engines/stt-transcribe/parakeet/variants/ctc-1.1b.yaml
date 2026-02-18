@@ -9,6 +9,9 @@ description: |
   Larger model with better accuracy than 0.6B variant.
   Best choice for high-throughput batch processing with quality.
 
+  NOTE: Outputs lowercase text without punctuation. Use refine stage or
+  parakeet-tdt-0.6b (v3) if punctuation/capitalization is required.
+
 container:
   gpu: required
   memory: 10G
@@ -21,6 +24,8 @@ capabilities:
   streaming: false
   word_timestamps: true
   max_concurrency: 4
+  punctuation: false
+  capitalization: false
 
 input:
   audio_formats:

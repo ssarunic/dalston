@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-17T18:03:51.359157+00:00",
+  "generated_at": "2026-02-18T18:04:26.521393+00:00",
   "schema_version": "1.1",
   "engine_count": 18,
   "engines": {
@@ -367,7 +367,7 @@
       "version": "1.0.0",
       "stage": null,
       "type": "realtime",
-      "description": "Real-time streaming transcription using NVIDIA Parakeet RNNT 0.6B.\nUses cache-aware FastConformer encoder with RNNT decoder for true streaming.\nRNNT is the only decoder architecture that supports streaming inference.\nEnglish-only, requires NVIDIA GPU.",
+      "description": "Real-time streaming transcription using NVIDIA Parakeet RNNT 0.6B.\nUses cache-aware FastConformer encoder with RNNT decoder for true streaming.\nRNNT is the only decoder architecture that supports streaming inference.\nEnglish-only, requires NVIDIA GPU.\n\nNOTE: Outputs lowercase text without punctuation.",
       "image": "dalston/stt-rt-parakeet-rnnt-0.6b:1.0.0",
       "capabilities": {
         "stages": [],
@@ -408,7 +408,7 @@
       "version": "1.0.0",
       "stage": null,
       "type": "realtime",
-      "description": "Real-time streaming transcription using NVIDIA Parakeet RNNT 1.1B.\nUses cache-aware FastConformer encoder with RNNT decoder for true streaming.\nHigher accuracy variant with larger model capacity.\nEnglish-only, requires NVIDIA GPU.",
+      "description": "Real-time streaming transcription using NVIDIA Parakeet RNNT 1.1B.\nUses cache-aware FastConformer encoder with RNNT decoder for true streaming.\nHigher accuracy variant with larger model capacity.\nEnglish-only, requires NVIDIA GPU.\n\nNOTE: Outputs lowercase text without punctuation.",
       "image": "dalston/stt-rt-parakeet-rnnt-1.1b:1.0.0",
       "capabilities": {
         "stages": [],
@@ -602,7 +602,7 @@
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "NVIDIA Parakeet FastConformer CTC 0.6B for fast English-only transcription.\nCTC decoder provides fastest inference with greedy decoding.\nProduces native word-level timestamps without separate alignment.\nBest choice for high-throughput batch processing.",
+      "description": "NVIDIA Parakeet FastConformer CTC 0.6B for fast English-only transcription.\nCTC decoder provides fastest inference with greedy decoding.\nProduces native word-level timestamps without separate alignment.\nBest choice for high-throughput batch processing.\n\nNOTE: Outputs lowercase text without punctuation. Use refine stage or\nparakeet-tdt-0.6b (v3) if punctuation/capitalization is required.",
       "image": "dalston/stt-batch-transcribe-parakeet-ctc-0.6b:1.0.0",
       "capabilities": {
         "stages": [
@@ -652,7 +652,7 @@
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "NVIDIA Parakeet FastConformer CTC 1.1B for fast English-only transcription.\nCTC decoder provides fastest inference with greedy decoding.\nLarger model with better accuracy than 0.6B variant.\nBest choice for high-throughput batch processing with quality.",
+      "description": "NVIDIA Parakeet FastConformer CTC 1.1B for fast English-only transcription.\nCTC decoder provides fastest inference with greedy decoding.\nLarger model with better accuracy than 0.6B variant.\nBest choice for high-throughput batch processing with quality.\n\nNOTE: Outputs lowercase text without punctuation. Use refine stage or\nparakeet-tdt-0.6b (v3) if punctuation/capitalization is required.",
       "image": "dalston/stt-batch-transcribe-parakeet-ctc-1.1b:1.0.0",
       "capabilities": {
         "stages": [
@@ -696,14 +696,14 @@
         "channels": 1
       }
     },
-    "parakeet-tdt-0.6b": {
-      "id": "parakeet-tdt-0.6b",
-      "name": "NVIDIA Parakeet TDT 0.6B",
+    "parakeet-tdt-0.6b-v3": {
+      "id": "parakeet-tdt-0.6b-v3",
+      "name": "NVIDIA Parakeet TDT 0.6B v3",
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "NVIDIA Parakeet FastConformer TDT 0.6B v3 for accurate English-only transcription.\nTDT (Token-and-Duration Transducer) provides best-in-class accuracy.\n64% faster than RNNT while achieving lower WER.\nProduces native word-level timestamps without separate alignment.",
-      "image": "dalston/stt-batch-transcribe-parakeet-tdt-0.6b:1.0.0",
+      "description": "NVIDIA Parakeet FastConformer TDT 0.6B v3 for accurate English-only transcription.\nTDT (Token-and-Duration Transducer) provides best-in-class accuracy.\n64% faster than RNNT while achieving lower WER.\nProduces native word-level timestamps without separate alignment.\n\nNOTE: v3 includes automatic punctuation and capitalization.",
+      "image": "dalston/stt-batch-transcribe-parakeet-tdt-0.6b-v3:1.0.0",
       "capabilities": {
         "stages": [
           "transcribe"
@@ -752,7 +752,7 @@
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "NVIDIA Parakeet FastConformer TDT 1.1B for highest accuracy English transcription.\nTDT (Token-and-Duration Transducer) achieves state-of-the-art WER scores.\nFirst model to achieve <7.0% average WER on HuggingFace Open ASR leaderboard.\nBest choice when transcription accuracy is the priority.",
+      "description": "NVIDIA Parakeet FastConformer TDT 1.1B for highest accuracy English transcription.\nTDT (Token-and-Duration Transducer) achieves state-of-the-art WER scores.\nFirst model to achieve <7.0% average WER on HuggingFace Open ASR leaderboard.\nBest choice when transcription accuracy is the priority.\n\nNOTE: Outputs lowercase text without punctuation. Use refine stage or\nparakeet-tdt-0.6b (v3) if punctuation/capitalization is required.",
       "image": "dalston/stt-batch-transcribe-parakeet-tdt-1.1b:1.0.0",
       "capabilities": {
         "stages": [

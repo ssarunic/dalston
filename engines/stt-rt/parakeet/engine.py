@@ -5,7 +5,7 @@ for low-latency real-time transcription. Achieves ~100ms end-to-end
 latency with native word-level timestamps.
 
 Environment variables:
-    MODEL_SIZE: Model variant to use (0.6b, 1.1b). Defaults to 0.6b.
+    MODEL_VARIANT: Model variant to use (0.6b, 1.1b). Defaults to 0.6b.
     DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
 """
 
@@ -35,17 +35,17 @@ class ParakeetStreamingEngine(RealtimeEngine):
         WORKER_PORT: WebSocket server port (default: 9000)
         MAX_SESSIONS: Maximum concurrent sessions (default: 4)
         REDIS_URL: Redis connection URL (default: redis://localhost:6379)
-        MODEL_SIZE: Model size variant (0.6b, 1.1b). Defaults to 0.6b.
+        MODEL_VARIANT: Model variant (0.6b, 1.1b). Defaults to 0.6b.
         CHUNK_SIZE_MS: Audio chunk size in milliseconds (default: 100)
         DEVICE: Device to use (cuda, cpu). Defaults to cuda if available.
     """
 
-    # Model size to NeMo model identifier mapping
-    MODEL_SIZE_MAP = {
+    # Model variant to NeMo model identifier mapping
+    MODEL_VARIANT_MAP = {
         "0.6b": "nvidia/parakeet-rnnt-0.6b",
         "1.1b": "nvidia/parakeet-rnnt-1.1b",
     }
-    DEFAULT_MODEL_SIZE = "0.6b"
+    DEFAULT_MODEL_VARIANT = "0.6b"
     DEFAULT_CHUNK_SIZE_MS = 100  # 100ms chunks for low latency
 
     def __init__(self) -> None:
@@ -56,16 +56,16 @@ class ParakeetStreamingEngine(RealtimeEngine):
         self._chunk_size_ms: int = 100  # Default chunk size
 
         # Determine model from environment variable (set at container build time)
-        model_size = os.environ.get("MODEL_SIZE", self.DEFAULT_MODEL_SIZE)
-        if model_size not in self.MODEL_SIZE_MAP:
+        model_variant = os.environ.get("MODEL_VARIANT", self.DEFAULT_MODEL_VARIANT)
+        if model_variant not in self.MODEL_VARIANT_MAP:
             logger.warning(
-                "unknown_model_size",
-                requested=model_size,
-                using=self.DEFAULT_MODEL_SIZE,
+                "unknown_model_variant",
+                requested=model_variant,
+                using=self.DEFAULT_MODEL_VARIANT,
             )
-            model_size = self.DEFAULT_MODEL_SIZE
-        self._model_size = model_size
-        self._nemo_model_id = self.MODEL_SIZE_MAP[model_size]
+            model_variant = self.DEFAULT_MODEL_VARIANT
+        self._model_variant = model_variant
+        self._nemo_model_id = self.MODEL_VARIANT_MAP[model_variant]
 
         # Determine device from environment or availability
         requested_device = os.environ.get("DEVICE", "").lower()
@@ -101,7 +101,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
 
         logger.info(
             "loading_parakeet_model",
-            model_size=self._model_size,
+            model_variant=self._model_variant,
             model_id=self._nemo_model_id,
             chunk_size_ms=self._chunk_size_ms,
         )
@@ -244,7 +244,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
 
     def get_engine(self) -> str:
         """Return engine type identifier."""
-        return f"parakeet-rnnt-{self._model_size}"
+        return f"parakeet-rnnt-{self._model_variant}"
 
     def get_gpu_memory_usage(self) -> str:
         """Return GPU memory usage string."""

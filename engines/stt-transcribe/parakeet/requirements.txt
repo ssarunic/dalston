@@ -7,6 +7,10 @@ nemo_toolkit[asr]>=1.23.0
 # Pin Lhotse to version compatible with NeMo (prevents __init__ TypeError)
 lhotse>=1.24.2,<1.30.0
 
+# Pin transformers to version compatible with PyTorch 2.5.0a0 in NGC container
+# Newer versions require torch._dynamo APIs not present in NGC 24.12
+transformers>=4.40.0,<4.46.0
+
 # PyTorch with CUDA support (installed via nemo_toolkit)
 # torch>=2.0.0
 

@@ -299,37 +299,37 @@ services:
     profiles: [parakeet-ctc-1.1b]
     restart: unless-stopped
 
-  # Parakeet TDT 0.6B (GPU - accurate English transcription)
-  stt-batch-transcribe-parakeet-tdt-0.6b:
-    image: dalston/stt-batch-transcribe-parakeet-tdt-0.6b:1.0.0
+  # Parakeet TDT 0.6B v3 (GPU - accurate English transcription)
+  stt-batch-transcribe-parakeet-tdt-0.6b-v3:
+    image: dalston/stt-batch-transcribe-parakeet-tdt-0.6b-v3:1.0.0
     build:
       context: .
       dockerfile: engines/stt-transcribe/parakeet/Dockerfile
       args:
-        MODEL_VARIANT: tdt-0.6b
+        MODEL_VARIANT: tdt-0.6b-v3
         SKIP_MODEL_DOWNLOAD: "false"
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: parakeet-tdt-0.6b
+      ENGINE_ID: parakeet-tdt-0.6b-v3
     volumes:
       - parakeet-models:/models
     depends_on: *batch-depends
     deploy: *gpu-deploy
-    profiles: [parakeet-tdt-0.6b]
+    profiles: [parakeet-tdt-0.6b-v3]
     restart: unless-stopped
 
-  # Parakeet TDT 0.6B (CPU - for testing without GPU)
-  stt-batch-transcribe-parakeet-tdt-0.6b-cpu:
-    image: dalston/stt-batch-transcribe-parakeet-tdt-0.6b:1.0.0
+  # Parakeet TDT 0.6B v3 (CPU - for testing without GPU)
+  stt-batch-transcribe-parakeet-tdt-0.6b-v3-cpu:
+    image: dalston/stt-batch-transcribe-parakeet-tdt-0.6b-v3:1.0.0
     build:
       context: .
       dockerfile: engines/stt-transcribe/parakeet/Dockerfile
       args:
-        MODEL_VARIANT: tdt-0.6b
+        MODEL_VARIANT: tdt-0.6b-v3
         SKIP_MODEL_DOWNLOAD: "true"
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: parakeet-tdt-0.6b
+      ENGINE_ID: parakeet-tdt-0.6b-v3
       DEVICE: cpu
     volumes:
       - parakeet-models:/models
@@ -361,7 +361,7 @@ services:
       context: .
       dockerfile: engines/stt-transcribe/faster-whisper/Dockerfile
       args:
-        MODEL_SIZE: base
+        MODEL_VARIANT: base
     environment:
       <<: [*common-env, *observability-env]
       ENGINE_ID: faster-whisper-base
@@ -379,7 +379,7 @@ services:
       context: .
       dockerfile: engines/stt-transcribe/faster-whisper/Dockerfile
       args:
-        MODEL_SIZE: large-v3
+        MODEL_VARIANT: large-v3
     environment:
       <<: [*common-env, *observability-env]
       ENGINE_ID: faster-whisper-large-v3
@@ -397,7 +397,7 @@ services:
       context: .
       dockerfile: engines/stt-transcribe/faster-whisper/Dockerfile
       args:
-        MODEL_SIZE: large-v3-turbo
+        MODEL_VARIANT: large-v3-turbo
     environment:
       <<: [*common-env, *observability-env]
       ENGINE_ID: faster-whisper-large-v3-turbo
@@ -415,7 +415,7 @@ services:
       context: .
       dockerfile: engines/stt-transcribe/voxtral/Dockerfile
       args:
-        MODEL_SIZE: mini-3b
+        MODEL_VARIANT: mini-3b
     environment:
       <<: [*common-env, *observability-env]
       ENGINE_ID: voxtral-mini-3b
@@ -458,8 +458,8 @@ services:
   # --- DIARIZE STAGE ---
 
   # Pyannote 3.1 (CPU - default for local dev)
-  stt-batch-diarize-pyannote-v31-cpu:
-    image: dalston/stt-batch-diarize-pyannote-v31:latest
+  stt-batch-diarize-pyannote-3.1-cpu:
+    image: dalston/stt-batch-diarize-pyannote-3.1:latest
     build:
       context: .
       dockerfile: engines/stt-diarize/pyannote-3.1/Dockerfile
@@ -474,8 +474,8 @@ services:
     restart: unless-stopped
 
   # Pyannote 3.1 (GPU)
-  stt-batch-diarize-pyannote-v31:
-    image: dalston/stt-batch-diarize-pyannote-v31:latest
+  stt-batch-diarize-pyannote-3.1:
+    image: dalston/stt-batch-diarize-pyannote-3.1:latest
     environment:
       <<: [*common-env, *observability-env]
       ENGINE_ID: pyannote-3.1
@@ -488,8 +488,8 @@ services:
     restart: unless-stopped
 
   # Pyannote 4.0 (CPU - default for local dev)
-  stt-batch-diarize-pyannote-v40-cpu:
-    image: dalston/stt-batch-diarize-pyannote-v40:latest
+  stt-batch-diarize-pyannote-4.0-cpu:
+    image: dalston/stt-batch-diarize-pyannote-4.0:latest
     build:
       context: .
       dockerfile: engines/stt-diarize/pyannote-4.0/Dockerfile
@@ -504,8 +504,8 @@ services:
     restart: unless-stopped
 
   # Pyannote 4.0 (GPU)
-  stt-batch-diarize-pyannote-v40:
-    image: dalston/stt-batch-diarize-pyannote-v40:latest
+  stt-batch-diarize-pyannote-4.0:
+    image: dalston/stt-batch-diarize-pyannote-4.0:latest
     environment:
       <<: [*common-env, *observability-env]
       ENGINE_ID: pyannote-4.0
@@ -566,10 +566,10 @@ services:
       context: .
       dockerfile: engines/stt-rt/parakeet/Dockerfile
       args:
-        MODEL_SIZE: 0.6b
+        MODEL_VARIANT: 0.6b
     environment:
       <<: [*common-env, *observability-env]
-      MODEL_SIZE: 0.6b
+      MODEL_VARIANT: 0.6b
       WORKER_PORT: 9000
       MAX_SESSIONS: 4
     volumes:
@@ -579,6 +579,26 @@ services:
     deploy: *gpu-deploy
     restart: unless-stopped
 
+  # Parakeet RNNT 0.6B CPU (CPU-only realtime worker)
+  stt-rt-transcribe-parakeet-rnnt-0.6b-cpu:
+    image: dalston/stt-rt-transcribe-parakeet-rnnt-0.6b-cpu:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-rt/parakeet/Dockerfile
+      args:
+        MODEL_VARIANT: 0.6b
+        DEVICE: cpu
+    environment:
+      <<: [*common-env, *observability-env]
+      MODEL_VARIANT: 0.6b
+      WORKER_PORT: 9000
+      MAX_SESSIONS: 4
+    volumes:
+      - parakeet-models:/models
+    depends_on: *realtime-depends
+    healthcheck: *ws-healthcheck
+    restart: unless-stopped
+
   # Parakeet RNNT 1.1B (GPU - accurate English streaming)
   stt-rt-transcribe-parakeet-rnnt-1.1b:
     image: dalston/stt-rt-transcribe-parakeet-rnnt-1.1b:1.0.0
@@ -586,10 +606,10 @@ services:
       context: .
       dockerfile: engines/stt-rt/parakeet/Dockerfile
       args:
-        MODEL_SIZE: 1.1b
+        MODEL_VARIANT: 1.1b
     environment:
       <<: [*common-env, *observability-env]
-      MODEL_SIZE: 1.1b
+      MODEL_VARIANT: 1.1b
       WORKER_PORT: 9000
       MAX_SESSIONS: 4
     volumes:
@@ -625,10 +645,10 @@ services:
       context: .
       dockerfile: engines/stt-rt/voxtral/Dockerfile
       args:
-        MODEL_SIZE: mini-4b
+        MODEL_VARIANT: mini-4b
     environment:
       <<: [*common-env, *observability-env]
-      MODEL_SIZE: mini-4b
+      MODEL_VARIANT: mini-4b
       WORKER_PORT: 9000
       MAX_SESSIONS: 4
       TRANSCRIPTION_DELAY_MS: 480

@@ -567,10 +567,10 @@ def generate_variant_dockerfile(engine_family: str, stage: str) -> str:
     return f"""# {engine_family.title()} Engine (Parameterized)
 #
 # Build with specific variant:
-#   docker compose build --build-arg MODEL_SIZE=base stt-batch-{stage}-{engine_family}-base
-#   docker compose build --build-arg MODEL_SIZE=large-v3 stt-batch-{stage}-{engine_family}-large-v3
+#   docker compose build --build-arg MODEL_VARIANT=base stt-batch-{stage}-{engine_family}-base
+#   docker compose build --build-arg MODEL_VARIANT=large-v3 stt-batch-{stage}-{engine_family}-large-v3
 #
-ARG MODEL_SIZE=large-v3
+ARG MODEL_VARIANT=large-v3
 
 FROM python:3.11-slim
 
@@ -602,10 +602,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY engines/stt-{stage}/{engine_family}/engine.py .
 
 # Copy variant-specific config to standard location
-COPY engines/stt-{stage}/{engine_family}/variants/${{MODEL_SIZE}}.yaml /etc/dalston/engine.yaml
+COPY engines/stt-{stage}/{engine_family}/variants/${{MODEL_VARIANT}}.yaml /etc/dalston/engine.yaml
 
 # Set model variant via environment
-ENV MODEL_SIZE=${{MODEL_SIZE}}
+ENV MODEL_VARIANT=${{MODEL_VARIANT}}
 ENV HF_HOME=/models
 RUN mkdir -p /models
 
@@ -621,7 +621,7 @@ def generate_variant_engine_py(engine_family: str, stage: str, description: str)
 
 {description}
 
-This engine supports multiple model variants configured via the MODEL_SIZE
+This engine supports multiple model variants configured via the MODEL_VARIANT
 environment variable. Each variant has its own engine.yaml in the variants/
 directory with appropriate hardware requirements.
 """
@@ -639,7 +639,7 @@ from dalston.engine_sdk import (
 class {class_name}(Engine):
     """{engine_family.title()} engine implementation.
 
-    The model variant is determined by the MODEL_SIZE environment variable,
+    The model variant is determined by the MODEL_VARIANT environment variable,
     which is set at container build time. Each variant is a separate
     deployable engine with its own hardware requirements.
 
@@ -650,19 +650,19 @@ class {class_name}(Engine):
         super().__init__()
         self._model = None
         # Model variant determined by container, not request
-        self._model_size = os.environ.get("MODEL_SIZE", "large-v3")
-        self.logger.info("engine_init", model_size=self._model_size)
+        self._model_variant = os.environ.get("MODEL_VARIANT", "large-v3")
+        self.logger.info("engine_init", model_variant=self._model_variant)
 
     def _load_model(self) -> None:
         """Load the model if not already loaded."""
         if self._model is not None:
             return
 
-        self.logger.info("loading_model", model_size=self._model_size)
-        # TODO: Load your model here based on self._model_size
-        # self._model = load_model(self._model_size)
+        self.logger.info("loading_model", model_variant=self._model_variant)
+        # TODO: Load your model here based on self._model_variant
+        # self._model = load_model(self._model_variant)
         self._model = "placeholder"
-        self.logger.info("model_loaded", model_size=self._model_size)
+        self.logger.info("model_loaded", model_variant=self._model_variant)
 
     def process(self, input: TaskInput) -> TaskOutput:
         """Process audio input.
@@ -693,7 +693,7 @@ class {class_name}(Engine):
         return {{
             "status": "healthy",
             "model_loaded": self._model is not None,
-            "model_size": self._model_size,
+            "model_size": self._model_variant,
         }}
 
 
@@ -744,7 +744,7 @@ This engine supports multiple variants with different hardware requirements:
 
 1. Create `variants/{{new-variant}}.yaml` with appropriate hardware specs
 2. Add service to `docker-compose.yml`
-3. Build: `docker compose build --build-arg MODEL_SIZE={{new-variant}} stt-batch-{stage}-{engine_family}-{{new-variant}}`
+3. Build: `docker compose build --build-arg MODEL_VARIANT={{new-variant}} stt-batch-{stage}-{engine_family}-{{new-variant}}`
 """,
     }
 

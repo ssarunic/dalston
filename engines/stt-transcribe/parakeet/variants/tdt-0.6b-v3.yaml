@@ -1,13 +1,15 @@
 schema_version: "1.1"
-id: parakeet-tdt-0.6b
+id: parakeet-tdt-0.6b-v3
 stage: transcribe
-name: NVIDIA Parakeet TDT 0.6B
+name: NVIDIA Parakeet TDT 0.6B v3
 version: 1.0.0
 description: |
   NVIDIA Parakeet FastConformer TDT 0.6B v3 for accurate English-only transcription.
   TDT (Token-and-Duration Transducer) provides best-in-class accuracy.
   64% faster than RNNT while achieving lower WER.
   Produces native word-level timestamps without separate alignment.
+
+  NOTE: v3 includes automatic punctuation and capitalization.
 
 container:
   gpu: required
@@ -21,6 +23,8 @@ capabilities:
   streaming: false
   word_timestamps: true
   max_concurrency: 4
+  punctuation: true
+  capitalization: true
 
 input:
   audio_formats:

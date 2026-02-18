@@ -69,8 +69,8 @@ environment:
   REDIS_URL:
     description: Redis connection URL
     default: redis://localhost:6379
-  MODEL_SIZE:
-    description: Voxtral model size variant
+  MODEL_VARIANT:
+    description: Voxtral model variant
     default: "mini-4b"
   TRANSCRIPTION_DELAY_MS:
     description: Transcription delay in milliseconds (80-2400)

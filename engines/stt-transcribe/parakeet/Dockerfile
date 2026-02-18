@@ -14,8 +14,9 @@
 # Build argument to select model variant (decoder-size)
 ARG MODEL_VARIANT=ctc-0.6b
 
-# Use CUDA base image for GPU support
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04 AS base
+# Official NVIDIA PyTorch container (requires NGC login: docker login nvcr.io)
+# PyTorch 2.5.0, CUDA 12.6, cuDNN 9 - all versions aligned by NVIDIA
+FROM nvcr.io/nvidia/pytorch:24.12-py3 AS base
 
 # Re-declare ARG after FROM (it gets reset)
 ARG MODEL_VARIANT=ctc-0.6b
@@ -24,18 +25,7 @@ ARG MODEL_VARIANT=ctc-0.6b
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
-    build-essential \
-    gcc \
-    g++ \
-    python3.11 \
-    python3.11-venv \
-    python3.11-dev \
-    python3-pip \
-    && ln -s /usr/bin/python3.11 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
-
-# Upgrade pip
-RUN python -m pip install --no-cache-dir --upgrade pip
 
 # Set working directory for dalston package
 WORKDIR /opt/dalston
@@ -45,7 +35,7 @@ COPY pyproject.toml .
 COPY dalston/ dalston/
 
 # Install the dalston engine SDK
-RUN python -m pip install --no-cache-dir -e ".[engine-sdk]"
+RUN pip install --no-cache-dir -e ".[engine-sdk]"
 
 # Set working directory for engine
 WORKDIR /engine
@@ -54,10 +44,10 @@ WORKDIR /engine
 COPY engines/stt-transcribe/parakeet/requirements.txt .
 
 # Install NeMo and dependencies
-RUN python -m pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download the model at build time for faster container startup
-# Skip on ARM64/Apple Silicon due to NeMo segfault issues - model will download at runtime
+# Skip on ARM64/Apple Silicon due to QEMU emulation issues - model will download at runtime
 ARG MODEL_VARIANT=ctc-0.6b
 ARG SKIP_MODEL_DOWNLOAD=false
 RUN if [ "$SKIP_MODEL_DOWNLOAD" = "false" ]; then \
@@ -66,7 +56,7 @@ import nemo.collections.asr as nemo_asr; \
 model_map = { \
     'ctc-0.6b': 'nvidia/parakeet-ctc-0.6b', \
     'ctc-1.1b': 'nvidia/parakeet-ctc-1.1b', \
-    'tdt-0.6b': 'nvidia/parakeet-tdt-0.6b-v3', \
+    'tdt-0.6b-v3': 'nvidia/parakeet-tdt-0.6b-v3', \
     'tdt-1.1b': 'nvidia/parakeet-tdt-1.1b', \
 }; \
 model_id = model_map['${MODEL_VARIANT}']; \

@@ -82,14 +82,14 @@ class TestParakeetEngineModelVariants:
         # CTC and TDT model variants
         assert "ctc-0.6b" in ParakeetEngine.MODEL_VARIANT_MAP
         assert "ctc-1.1b" in ParakeetEngine.MODEL_VARIANT_MAP
-        assert "tdt-0.6b" in ParakeetEngine.MODEL_VARIANT_MAP
+        assert "tdt-0.6b-v3" in ParakeetEngine.MODEL_VARIANT_MAP
         assert "tdt-1.1b" in ParakeetEngine.MODEL_VARIANT_MAP
         # Verify NeMo model identifiers
         assert (
             ParakeetEngine.MODEL_VARIANT_MAP["ctc-0.6b"] == "nvidia/parakeet-ctc-0.6b"
         )
         assert (
-            ParakeetEngine.MODEL_VARIANT_MAP["tdt-0.6b"]
+            ParakeetEngine.MODEL_VARIANT_MAP["tdt-0.6b-v3"]
             == "nvidia/parakeet-tdt-0.6b-v3"
         )
 
@@ -156,3 +156,115 @@ class TestParakeetEngineDagIntegration:
         assert "align" not in stages
         assert "transcribe" in stages
         assert "merge" in stages
+
+
+class TestParakeetHypothesisParsing:
+    """Tests for parsing NeMo RNNT/TDT Hypothesis objects.
+
+    NeMo's transcribe() with return_hypotheses=True returns nested lists:
+    - transcriptions[batch_idx][decode_strategy_idx]
+    - For RNNT/TDT: transcriptions[0][0] is the greedy hypothesis
+
+    See: https://github.com/NVIDIA-NeMo/NeMo/issues/7677
+    """
+
+    @pytest.fixture
+    def mock_hypothesis_with_timestep(self):
+        """Create a mock Hypothesis object matching NeMo's RNNT/TDT output."""
+        hypothesis = MagicMock()
+        hypothesis.text = "that was hilarious i can't believe you said that"
+        hypothesis.timestep = {
+            "timestep": [2, 3, 5, 6, 8, 10, 13, 15, 16],
+            "word": [
+                {"word": "that", "start": 0.16, "end": 0.24},
+                {"word": "was", "start": 0.24, "end": 0.4},
+                {"word": "hilarious", "start": 0.4, "end": 1.04},
+                {"word": "i", "start": 1.04, "end": 1.2},
+                {"word": "can't", "start": 1.2, "end": 1.52},
+                {"word": "believe", "start": 1.52, "end": 1.84},
+                {"word": "you", "start": 1.84, "end": 2.0},
+                {"word": "said", "start": 2.0, "end": 2.24},
+                {"word": "that", "start": 2.24, "end": 2.56},
+            ],
+            "segment": [
+                {
+                    "segment": "that was hilarious i can't believe you said that",
+                    "start": 0.16,
+                    "end": 2.56,
+                }
+            ],
+        }
+        return hypothesis
+
+    def test_rnnt_transcribe_returns_nested_list(self, mock_hypothesis_with_timestep):
+        """Test that RNNT/TDT models return nested list: transcriptions[0][0]."""
+        # Simulate NeMo's return format: [[hypothesis]]
+        transcriptions = [[mock_hypothesis_with_timestep]]
+
+        # Verify correct access pattern
+        first_result = transcriptions[0]
+        assert isinstance(first_result, list), "transcriptions[0] should be a list"
+
+        hypothesis = first_result[0]
+        assert hasattr(hypothesis, "text"), "hypothesis should have text attribute"
+        assert hasattr(hypothesis, "timestep"), (
+            "hypothesis should have timestep attribute"
+        )
+        assert hypothesis.text == "that was hilarious i can't believe you said that"
+
+    def test_timestep_dict_has_word_and_segment(self, mock_hypothesis_with_timestep):
+        """Test that timestep dict contains word and segment keys."""
+        timestep = mock_hypothesis_with_timestep.timestep
+
+        assert isinstance(timestep, dict), "timestep should be a dict"
+        assert "word" in timestep, "timestep should have 'word' key"
+        assert "segment" in timestep, "timestep should have 'segment' key"
+        assert isinstance(timestep["word"], list), "timestep['word'] should be a list"
+        assert isinstance(timestep["segment"], list), (
+            "timestep['segment'] should be a list"
+        )
+
+    def test_word_timestamps_have_required_fields(self, mock_hypothesis_with_timestep):
+        """Test that word timestamps have word, start, end fields."""
+        word_timestamps = mock_hypothesis_with_timestep.timestep["word"]
+
+        for wt in word_timestamps:
+            assert "word" in wt, "word timestamp should have 'word' key"
+            assert "start" in wt, "word timestamp should have 'start' key"
+            assert "end" in wt, "word timestamp should have 'end' key"
+            assert isinstance(wt["start"], int | float), "start should be numeric"
+            assert isinstance(wt["end"], int | float), "end should be numeric"
+            assert wt["end"] >= wt["start"], "end should be >= start"
+
+    def test_segment_timestamps_have_required_fields(
+        self, mock_hypothesis_with_timestep
+    ):
+        """Test that segment timestamps have segment, start, end fields."""
+        segment_timestamps = mock_hypothesis_with_timestep.timestep["segment"]
+
+        for seg in segment_timestamps:
+            assert "segment" in seg, "segment timestamp should have 'segment' key"
+            assert "start" in seg, "segment timestamp should have 'start' key"
+            assert "end" in seg, "segment timestamp should have 'end' key"
+
+    def test_word_count_matches_text(self, mock_hypothesis_with_timestep):
+        """Test that number of word timestamps matches words in text."""
+        text = mock_hypothesis_with_timestep.text
+        word_timestamps = mock_hypothesis_with_timestep.timestep["word"]
+
+        expected_word_count = len(text.split())
+        assert len(word_timestamps) == expected_word_count, (
+            f"Expected {expected_word_count} word timestamps, got {len(word_timestamps)}"
+        )
+
+    def test_words_are_monotonically_increasing(self, mock_hypothesis_with_timestep):
+        """Test that word timestamps are in chronological order."""
+        word_timestamps = mock_hypothesis_with_timestep.timestep["word"]
+
+        for i in range(1, len(word_timestamps)):
+            prev_end = word_timestamps[i - 1]["end"]
+            curr_start = word_timestamps[i]["start"]
+            # Allow small overlap due to floating point
+            assert curr_start >= prev_end - 0.01, (
+                f"Word {i} starts ({curr_start}) before word {i - 1} ends ({prev_end})"
+            )

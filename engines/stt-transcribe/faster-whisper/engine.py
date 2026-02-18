@@ -3,7 +3,7 @@
 Uses the faster-whisper library (CTranslate2-based) for efficient
 speech-to-text transcription with GPU acceleration.
 
-This engine supports multiple model variants configured via the MODEL_SIZE
+This engine supports multiple model variants configured via the MODEL_VARIANT
 environment variable. Each variant has its own engine.yaml in the variants/
 directory with appropriate hardware requirements.
 """
@@ -30,7 +30,7 @@ class WhisperEngine(Engine):
 
     Loads the Whisper model lazily on first request and caches it
     for subsequent transcriptions. The model variant is determined by
-    the MODEL_SIZE environment variable, set at container build time.
+    the MODEL_VARIANT environment variable, set at container build time.
 
     Automatically detects GPU availability and falls back to CPU mode.
     """
@@ -44,13 +44,13 @@ class WhisperEngine(Engine):
         self._model: WhisperModel | None = None
 
         # Model variant determined by container, not request config
-        self._model_size = os.environ.get("MODEL_SIZE", "large-v3")
+        self._model_variant = os.environ.get("MODEL_VARIANT", "large-v3")
 
         # Auto-detect device and compute type
         self._device, self._compute_type = self._detect_device()
         self.logger.info(
             "engine_init",
-            model_size=self._model_size,
+            model_variant=self._model_variant,
             device=self._device,
             compute_type=self._compute_type,
         )
@@ -79,18 +79,18 @@ class WhisperEngine(Engine):
 
         self.logger.info(
             "loading_whisper_model",
-            model_size=self._model_size,
+            model_variant=self._model_variant,
             device=self._device,
             compute_type=self._compute_type,
         )
 
         self._model = WhisperModel(
-            self._model_size,
+            self._model_variant,
             device=self._device,
             compute_type=self._compute_type,
         )
 
-        self.logger.info("model_loaded_successfully", model_size=self._model_size)
+        self.logger.info("model_loaded_successfully", model_variant=self._model_variant)
 
     def process(self, input: TaskInput) -> TaskOutput:
         """Transcribe audio using Faster-Whisper.
@@ -118,7 +118,7 @@ class WhisperEngine(Engine):
         self.logger.info("transcribing", audio_path=str(audio_path))
         self.logger.info(
             "transcribe_config",
-            model=self._model_size,
+            model=self._model_variant,
             language=language,
             beam_size=beam_size,
             vad_filter=vad_filter,
@@ -185,7 +185,7 @@ class WhisperEngine(Engine):
         )
 
         # Get engine_id from environment or capabilities
-        engine_id = os.environ.get("ENGINE_ID", f"whisper-{self._model_size}")
+        engine_id = os.environ.get("ENGINE_ID", f"whisper-{self._model_variant}")
 
         output = TranscribeOutput(
             text=full_text,
@@ -220,7 +220,7 @@ class WhisperEngine(Engine):
         return {
             "status": "healthy",
             "model_loaded": self._model is not None,
-            "model_size": self._model_size,
+            "model_size": self._model_variant,
             "device": self._device,
             "compute_type": self._compute_type,
             "cuda_available": cuda_available,

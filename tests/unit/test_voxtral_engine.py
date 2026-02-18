@@ -39,7 +39,7 @@ class TestVoxtralEngine:
     @pytest.fixture
     def mock_torch(self):
         """Mock torch to avoid CUDA checks."""
-        with patch.dict(os.environ, {"DEVICE": "cpu", "MODEL_SIZE": "mini-3b"}):
+        with patch.dict(os.environ, {"DEVICE": "cpu", "MODEL_VARIANT": "mini-3b"}):
             with patch("torch.cuda.is_available", return_value=False):
                 with patch("torch.cuda.device_count", return_value=0):
                     yield
@@ -54,7 +54,7 @@ class TestVoxtralEngine:
     def test_engine_init_cpu_fallback(self, engine):
         """Engine should fall back to CPU when CUDA unavailable."""
         assert engine._device == "cpu"
-        assert engine._model_size == "mini-3b"
+        assert engine._model_variant == "mini-3b"
         assert engine._hf_model_id == "mistralai/Voxtral-Mini-3B-2507"
 
     def test_supported_languages(self, engine):
@@ -62,12 +62,14 @@ class TestVoxtralEngine:
         expected = ["en", "es", "fr", "pt", "hi", "de", "nl", "it"]
         assert engine.SUPPORTED_LANGUAGES == expected
 
-    def test_model_size_map(self, engine):
+    def test_model_variant_map(self, engine):
         """Engine should have correct model mappings."""
-        assert "mini-3b" in engine.MODEL_SIZE_MAP
-        assert "small-24b" in engine.MODEL_SIZE_MAP
-        assert engine.MODEL_SIZE_MAP["mini-3b"] == "mistralai/Voxtral-Mini-3B-2507"
-        assert engine.MODEL_SIZE_MAP["small-24b"] == "mistralai/Voxtral-Small-24B-2507"
+        assert "mini-3b" in engine.MODEL_VARIANT_MAP
+        assert "small-24b" in engine.MODEL_VARIANT_MAP
+        assert engine.MODEL_VARIANT_MAP["mini-3b"] == "mistralai/Voxtral-Mini-3B-2507"
+        assert (
+            engine.MODEL_VARIANT_MAP["small-24b"] == "mistralai/Voxtral-Small-24B-2507"
+        )
 
     def test_get_capabilities(self, engine):
         """Engine capabilities should be correct."""
@@ -164,18 +166,18 @@ class TestVoxtralEngine:
 class TestVoxtralEngineEnvironment:
     """Test engine environment variable handling."""
 
-    def test_unknown_model_size_falls_back(self):
-        """Unknown MODEL_SIZE should fall back to default."""
-        with patch.dict(os.environ, {"MODEL_SIZE": "unknown", "DEVICE": "cpu"}):
+    def test_unknown_model_variant_falls_back(self):
+        """Unknown MODEL_VARIANT should fall back to default."""
+        with patch.dict(os.environ, {"MODEL_VARIANT": "unknown", "DEVICE": "cpu"}):
             with patch("torch.cuda.is_available", return_value=False):
                 VoxtralEngine = load_voxtral_engine()
 
                 engine = VoxtralEngine()
-                assert engine._model_size == "mini-3b"
+                assert engine._model_variant == "mini-3b"
 
     def test_explicit_cpu_device(self):
         """Explicit DEVICE=cpu should use CPU."""
-        with patch.dict(os.environ, {"DEVICE": "cpu", "MODEL_SIZE": "mini-3b"}):
+        with patch.dict(os.environ, {"DEVICE": "cpu", "MODEL_VARIANT": "mini-3b"}):
             with patch("torch.cuda.is_available", return_value=True):
                 VoxtralEngine = load_voxtral_engine()
 

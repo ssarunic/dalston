@@ -9,8 +9,12 @@ for fast English-only speech-to-text transcription with GPU acceleration.
 Parakeet produces native word-level timestamps, eliminating the need for
 a separate alignment stage.
 
+Long audio support: Uses local attention (rel_pos_local_attn) instead of full
+attention to reduce memory from O(n²) to O(n). This enables transcription of
+audio up to 3 hours on T4/A10g GPUs.
+
 Environment variables:
-    MODEL_VARIANT: Model variant (ctc-0.6b, ctc-1.1b, tdt-0.6b, tdt-1.1b).
+    MODEL_VARIANT: Model variant (ctc-0.6b, ctc-1.1b, tdt-0.6b-v3, tdt-1.1b).
                    Defaults to ctc-0.6b.
     DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
 """
@@ -52,7 +56,7 @@ class ParakeetEngine(Engine):
     MODEL_VARIANT_MAP = {
         "ctc-0.6b": "nvidia/parakeet-ctc-0.6b",
         "ctc-1.1b": "nvidia/parakeet-ctc-1.1b",
-        "tdt-0.6b": "nvidia/parakeet-tdt-0.6b-v3",
+        "tdt-0.6b-v3": "nvidia/parakeet-tdt-0.6b-v3",
         "tdt-1.1b": "nvidia/parakeet-tdt-1.1b",
     }
     DEFAULT_MODEL_VARIANT = "ctc-0.6b"
@@ -136,6 +140,28 @@ class ParakeetEngine(Engine):
         self._model.eval()
         self._model_name = model_name
 
+        # Enable local attention for long audio support (up to 3 hours)
+        # This reduces memory from O(n²) to O(n), essential for T4/A10g GPUs
+        # See: https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
+        try:
+            self._model.change_attention_model(
+                self_attention_model="rel_pos_local_attn",
+                att_context_size=[256, 256],
+            )
+            # Enable subsampling chunking for additional memory savings
+            self._model.change_subsampling_conv_chunking_factor(1)
+            self.logger.info(
+                "local_attention_enabled",
+                att_context_size=[256, 256],
+                message="Long audio support enabled (up to 3 hours)",
+            )
+        except Exception as e:
+            self.logger.warning(
+                "local_attention_failed",
+                error=str(e),
+                message="Falling back to full attention (limited to ~24min on A100)",
+            )
+
         self.logger.info("model_loaded_successfully", model_name=model_name)
 
     def process(self, input: TaskInput) -> TaskOutput:
@@ -191,13 +217,22 @@ class ParakeetEngine(Engine):
                 )
             )
 
-        hypothesis = transcriptions[0]
-
-        # Extract text - handle both string and Hypothesis object
-        if hasattr(hypothesis, "text"):
-            full_text = hypothesis.text
+        # Handle both current and future NeMo API formats:
+        # - Current: transcriptions[batch_idx][decode_strategy_idx] - nested lists
+        #   where inner index selects greedy (0) vs beam (1) decoding
+        # - Future: transcriptions[batch_idx] - list of Hypothesis objects directly
+        #   (per deprecation warning for _transcribe_output_processing)
+        # See: https://github.com/NVIDIA-NeMo/NeMo/issues/7677
+        first_result = transcriptions[0]
+        if isinstance(first_result, list):
+            # Current format: nested list [batch][strategy]
+            hypothesis = first_result[0]
         else:
-            full_text = str(hypothesis)
+            # Future format: direct Hypothesis object
+            hypothesis = first_result
+
+        # Extract text from Hypothesis object
+        full_text = hypothesis.text
 
         # Determine alignment method based on decoder type
         if self._decoder_type == "ctc":
@@ -209,10 +244,11 @@ class ParakeetEngine(Engine):
         segments: list[Segment] = []
         all_words: list[Word] = []
 
-        # Check for timestamp dict (TDT models with timestamps=True)
-        if hasattr(hypothesis, "timestamp") and isinstance(hypothesis.timestamp, dict):
-            word_timestamps = hypothesis.timestamp.get("word", [])
-            segment_timestamps = hypothesis.timestamp.get("segment", [])
+        # Check for timestep dict (TDT models with timestamps=True)
+        # NeMo returns hypothesis.timestep with 'word', 'segment', 'char' keys
+        if hasattr(hypothesis, "timestep") and isinstance(hypothesis.timestep, dict):
+            word_timestamps = hypothesis.timestep.get("word", [])
+            segment_timestamps = hypothesis.timestep.get("segment", [])
 
             # Extract word-level data
             for wt in word_timestamps:

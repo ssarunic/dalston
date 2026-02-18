@@ -1,7 +1,7 @@
 # Faster Whisper Transcription Engine (Parameterized)
 #
 # Whisper transcription using CTranslate2 (faster-whisper).
-# Supports multiple model variants via MODEL_SIZE build arg.
+# Supports multiple model variants via MODEL_VARIANT build arg.
 #
 # Build specific variant:
 #   docker compose build stt-batch-transcribe-faster-whisper-base
@@ -9,10 +9,10 @@
 #   docker compose build stt-batch-transcribe-faster-whisper-large-v3-turbo
 #
 # Or manually:
-#   docker build --build-arg MODEL_SIZE=base -t dalston/faster-whisper-base .
-#   docker build --build-arg MODEL_SIZE=large-v3 -t dalston/faster-whisper-large-v3 .
+#   docker build --build-arg MODEL_VARIANT=base -t dalston/faster-whisper-base .
+#   docker build --build-arg MODEL_VARIANT=large-v3 -t dalston/faster-whisper-large-v3 .
 
-ARG MODEL_SIZE=large-v3
+ARG MODEL_VARIANT=large-v3
 
 FROM python:3.11-slim
 
@@ -45,16 +45,16 @@ COPY engines/stt-transcribe/faster-whisper/engine.py .
 
 # Copy variant-specific config to standard location
 # Re-declare ARG after FROM to use it
-ARG MODEL_SIZE
-COPY engines/stt-transcribe/faster-whisper/variants/${MODEL_SIZE}.yaml /etc/dalston/engine.yaml
+ARG MODEL_VARIANT
+COPY engines/stt-transcribe/faster-whisper/variants/${MODEL_VARIANT}.yaml /etc/dalston/engine.yaml
 
 # Pre-download the model at build time for faster startup
 # This makes container startup faster at the cost of larger image size
-RUN python -c "from faster_whisper import WhisperModel; WhisperModel('${MODEL_SIZE}', device='cpu', compute_type='int8')" \
-    && echo "Model ${MODEL_SIZE} downloaded successfully"
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('${MODEL_VARIANT}', device='cpu', compute_type='int8')" \
+    && echo "Model ${MODEL_VARIANT} downloaded successfully"
 
 # Set model variant via environment
-ENV MODEL_SIZE=${MODEL_SIZE}
+ENV MODEL_VARIANT=${MODEL_VARIANT}
 ENV HF_HOME=/models
 RUN mkdir -p /models
 

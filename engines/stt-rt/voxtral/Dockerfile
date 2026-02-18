@@ -10,14 +10,14 @@
 # Or directly:
 #   docker build -t dalston/stt-rt-transcribe-voxtral-mini-4b:1.0.0 .
 
-# Build argument to select model size
-ARG MODEL_SIZE=mini-4b
+# Build argument to select model variant
+ARG MODEL_VARIANT=mini-4b
 
 # Use CUDA base image for GPU support (required for realtime)
 FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04 AS base
 
 # Re-declare ARG after FROM
-ARG MODEL_SIZE=mini-4b
+ARG MODEL_VARIANT=mini-4b
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -51,19 +51,19 @@ RUN python -m pip install --no-cache-dir -e ".[realtime-sdk]"
 WORKDIR /engine
 
 # Copy engine requirements first for better caching
-COPY engines/realtime/voxtral-streaming/requirements.txt .
+COPY engines/stt-rt/voxtral/requirements.txt .
 
 # Install dependencies
 RUN python -m pip install --no-cache-dir -r requirements.txt
 
 # Pre-download the model at build time for faster container startup
-ARG MODEL_SIZE=mini-4b
+ARG MODEL_VARIANT=mini-4b
 RUN python -c "\
 import os; \
 os.environ['HF_HOME'] = '/models'; \
 from transformers import AutoProcessor, VoxtralRealtimeForConditionalGeneration; \
 model_map = {'mini-4b': 'mistralai/Voxtral-Mini-4B-Realtime-2602'}; \
-model_id = model_map['${MODEL_SIZE}']; \
+model_id = model_map['${MODEL_VARIANT}']; \
 print(f'Downloading model {model_id}...'); \
 AutoProcessor.from_pretrained(model_id); \
 VoxtralRealtimeForConditionalGeneration.from_pretrained(model_id); \
@@ -74,8 +74,8 @@ RUN python -c "import torch; torch.hub.load('snakers4/silero-vad', 'silero_vad',
     && echo "Silero VAD model downloaded successfully"
 
 # Copy engine files
-COPY engines/realtime/voxtral-streaming/variants/${MODEL_SIZE}.yaml /etc/dalston/engine.yaml
-COPY engines/realtime/voxtral-streaming/engine.py .
+COPY engines/stt-rt/voxtral/variants/${MODEL_VARIANT}.yaml /etc/dalston/engine.yaml
+COPY engines/stt-rt/voxtral/engine.py .
 
 # Create model cache directory
 ENV HF_HOME=/models
@@ -87,7 +87,7 @@ ENV WORKER_ID=stt-rt-transcribe-voxtral
 ENV WORKER_PORT=9000
 ENV MAX_SESSIONS=4
 ENV REDIS_URL=redis://redis:6379
-ENV MODEL_SIZE=${MODEL_SIZE}
+ENV MODEL_VARIANT=${MODEL_VARIANT}
 ENV TRANSCRIPTION_DELAY_MS=480
 
 # Set CUDA visible devices
