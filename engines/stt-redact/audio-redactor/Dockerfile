@@ -14,9 +14,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy engine files
-COPY engines/redact/audio-redactor/requirements.txt .
-COPY engines/redact/audio-redactor/engine.yaml .
-COPY engines/redact/audio-redactor/engine.py .
+COPY engines/stt-redact/audio-redactor/requirements.txt .
+COPY engines/stt-redact/audio-redactor/engine.yaml .
+COPY engines/stt-redact/audio-redactor/engine.py .
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt

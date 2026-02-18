@@ -14,10 +14,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy engine files
-COPY engines/detect/pii-presidio/requirements.txt .
-COPY engines/detect/pii-presidio/engine.yaml .
-COPY engines/detect/pii-presidio/engine.py .
-COPY engines/detect/pii-presidio/recognizers/ ./recognizers/
+COPY engines/stt-detect/pii-presidio/requirements.txt .
+COPY engines/stt-detect/pii-presidio/engine.yaml .
+COPY engines/stt-detect/pii-presidio/engine.py .
+COPY engines/stt-detect/pii-presidio/recognizers/ ./recognizers/
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt

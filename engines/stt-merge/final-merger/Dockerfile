@@ -17,9 +17,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy engine files
-COPY engines/merge/final-merger/requirements.txt .
-COPY engines/merge/final-merger/engine.yaml .
-COPY engines/merge/final-merger/engine.py .
+COPY engines/stt-merge/final-merger/requirements.txt .
+COPY engines/stt-merge/final-merger/engine.yaml .
+COPY engines/stt-merge/final-merger/engine.py .
 
 # Install any additional Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt

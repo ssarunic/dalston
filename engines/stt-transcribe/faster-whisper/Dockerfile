@@ -35,18 +35,18 @@ RUN pip install --no-cache-dir -e ".[engine-sdk]"
 WORKDIR /engine
 
 # Copy engine requirements first for better caching
-COPY engines/transcribe/faster-whisper/requirements.txt .
+COPY engines/stt-transcribe/faster-whisper/requirements.txt .
 
 # Install faster-whisper and dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy engine implementation
-COPY engines/transcribe/faster-whisper/engine.py .
+COPY engines/stt-transcribe/faster-whisper/engine.py .
 
 # Copy variant-specific config to standard location
 # Re-declare ARG after FROM to use it
 ARG MODEL_SIZE
-COPY engines/transcribe/faster-whisper/variants/${MODEL_SIZE}.yaml /etc/dalston/engine.yaml
+COPY engines/stt-transcribe/faster-whisper/variants/${MODEL_SIZE}.yaml /etc/dalston/engine.yaml
 
 # Pre-download the model at build time for faster startup
 # This makes container startup faster at the cost of larger image size

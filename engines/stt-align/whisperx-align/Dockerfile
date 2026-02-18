@@ -30,15 +30,15 @@ RUN pip install --no-cache-dir -e ".[engine-sdk]"
 WORKDIR /engine
 
 # Copy engine requirements first for better caching
-COPY engines/align/whisperx-align/requirements.txt .
+COPY engines/stt-align/whisperx-align/requirements.txt .
 
 # Install whisperx and dependencies
 # Note: whisperx may need git for some dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy engine files
-COPY engines/align/whisperx-align/engine.yaml .
-COPY engines/align/whisperx-align/engine.py .
+COPY engines/stt-align/whisperx-align/engine.yaml .
+COPY engines/stt-align/whisperx-align/engine.py .
 
 # Create model cache directory
 ENV HF_HOME=/models
