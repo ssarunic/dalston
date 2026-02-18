@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 HAS_TRANSFORMERS = importlib.util.find_spec("transformers") is not None
+HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 
 def load_voxtral_engine():
@@ -31,6 +32,7 @@ def load_voxtral_engine():
     return module.VoxtralEngine
 
 
+@pytest.mark.skipif(not HAS_TORCH, reason="torch not installed")
 class TestVoxtralEngine:
     """Test VoxtralEngine without loading actual model."""
 
@@ -158,6 +160,7 @@ class TestVoxtralEngine:
         assert len(result.data.segments) == 1
 
 
+@pytest.mark.skipif(not HAS_TORCH, reason="torch not installed")
 class TestVoxtralEngineEnvironment:
     """Test engine environment variable handling."""
 
