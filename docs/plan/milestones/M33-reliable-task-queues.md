@@ -1,12 +1,12 @@
 # M33: Reliable Task Queues
 
-|                  |                                                                                          |
-| ---------------- | ---------------------------------------------------------------------------------------- |
-| **Goal**         | Crash-resilient task processing with recovery and multi-orchestrator safety             |
-| **Duration**     | 5-6 days                                                                                 |
-| **Dependencies** | M28 (Engine Registry)                                                                    |
-| **Deliverable**  | Redis Streams task queues, stale task recovery, atomic event handling, HA orchestrator   |
-| **Status**       | Not Started                                                                              |
+|                  |                                                                                            |
+| ---------------- | ------------------------------------------------------------------------------------------ |
+| **Goal**         | Crash-resilient task processing with durable event transport and recovery                  |
+| **Duration**     | 7-8 days                                                                                   |
+| **Dependencies** | M28 (Engine Registry)                                                                      |
+| **Deliverable**  | Redis Streams for tasks + events, reconciliation sweeper, atomic claims, HA orchestrator   |
+| **Status**       | Not Started                                                                                |
 
 ## User Story
 
@@ -17,13 +17,17 @@
 ## Outcomes
 
 | Scenario | Current | After M33 |
-|----------|---------|-----------|
+| -------- | ------- | --------- |
 | Engine crashes mid-task | Job stuck forever | Task auto-recovers after 10 min |
 | Task exceeds 20 min timeout | Nothing happens | Task failed, job proceeds/fails |
 | Engine restarts after crash | Lost task | Claims stale tasks on startup |
 | Multiple orchestrators (scanner) | Not supported | Leader election for scanner |
 | Multiple orchestrators (events) | Duplicate DAGs possible | Atomic DB ownership claims |
 | Max retries exceeded | Manual intervention | Job fails with clear error |
+| Orchestrator down during job.created | Job stuck PENDING forever | Event replayed on restart |
+| Orchestrator disconnected during task.completed | Dependents never advance | Event replayed, reconciler catches stragglers |
+| Redis restart/crash | Queued tasks lost | AOF persistence + reconciler recovery |
+| Job stuck due to missed event | Manual DB intervention | Reconciler auto-repairs within 5 min |
 
 ---
 
@@ -34,7 +38,7 @@ Replace Redis Lists (`BRPOP`) with Redis Streams and Consumer Groups.
 ### Why Streams Over BRPOP?
 
 | Feature | Lists (BRPOP) | Streams (XREADGROUP) |
-|---------|---------------|----------------------|
+| ------- | ------------- | -------------------- |
 | Delivery tracking | None | Pending Entries List (PEL) |
 | Who has the task? | Unknown | Tracked per message |
 | Delivery count | Manual | Automatic |
@@ -121,6 +125,7 @@ class StreamMessage:
     job_id: str
     enqueued_at: datetime
     timeout_at: datetime
+    delivery_count: int  # How many times this message was delivered (1 = first attempt)
 
 @dataclass
 class PendingTask:
@@ -188,7 +193,13 @@ def _poll_and_process(self) -> None:
 
     if stale:
         message = stale[0]
-        logger.info("claimed_stale_task", task_id=message.task_id, delivery_count=...)
+        logger.info(
+            "claimed_stale_task",
+            task_id=message.task_id,
+            delivery_count=message.delivery_count,
+        )
+        # Track redelivery for observability
+        dalston.metrics.inc_task_redelivery(self.stage, reason="engine_crash")
     else:
         # 2. No stale tasks - read new ones
         message = read_task(
@@ -458,6 +469,25 @@ dalston_task_recovery_total = Counter(
     "Number of stale tasks recovered",
     ["stage"]
 )
+
+dalston_task_redelivery_total = Counter(
+    "dalston_task_redelivery_total",
+    "Number of task redeliveries (delivery_count > 1)",
+    ["stage", "reason"]  # reason: "engine_crash", "timeout", "manual_retry"
+)
+```
+
+**Logging delivery count:**
+
+When processing a task, always log the `delivery_count` from the stream message. This aids debugging when tasks require multiple attempts:
+
+```python
+logger.info(
+    "task_processing",
+    task_id=message.task_id,
+    delivery_count=message.delivery_count,
+    is_redelivery=message.delivery_count > 1,
+)
 ```
 
 ---
@@ -623,6 +653,371 @@ async def test_concurrent_dependent_queueing():
 
 ---
 
+### 33.9: Reconciliation Sweeper
+
+**Problem:**
+
+Even with durable event transport, defense-in-depth requires a reconciler that detects and repairs stranded states. This catches edge cases where:
+
+- Events are durable but processing fails silently
+- Bugs in event handlers leave inconsistent state
+- Partial failures during multi-step operations
+
+**Deliverables:**
+
+- `dalston/orchestrator/reconciler.py` — Periodic state reconciliation
+- Runs in orchestrator under leader election (shares with scanner)
+- Repairs stranded jobs and tasks from database state
+
+**Implementation:**
+
+```python
+RECONCILE_INTERVAL_S = 300  # 5 minutes
+STRANDED_JOB_THRESHOLD_S = 300  # Job PENDING for >5 min with no tasks
+STRANDED_TASK_THRESHOLD_S = 300  # Task READY for >5 min not in stream
+
+async def reconcile_stranded_states(redis: Redis, db: AsyncSession) -> None:
+    """Find and repair states that missed their events."""
+
+    await reconcile_stranded_jobs(redis, db)
+    await reconcile_stranded_tasks(redis, db)
+
+
+async def reconcile_stranded_jobs(redis: Redis, db: AsyncSession) -> None:
+    """Find PENDING jobs with no tasks and rebuild their DAGs."""
+
+    cutoff = datetime.now(UTC) - timedelta(seconds=STRANDED_JOB_THRESHOLD_S)
+
+    # Find jobs that are PENDING but have no tasks (missed job.created event)
+    stranded = await db.execute(
+        select(JobModel)
+        .outerjoin(TaskModel, JobModel.id == TaskModel.job_id)
+        .where(
+            JobModel.status == JobStatus.PENDING.value,
+            JobModel.created_at < cutoff,
+            TaskModel.id.is_(None),  # No tasks exist
+        )
+        .with_for_update(skip_locked=True)
+    )
+
+    for job in stranded.scalars():
+        logger.warning("reconciling_stranded_job", job_id=str(job.id))
+
+        # Re-publish the event - handler's atomic claim ensures idempotency
+        await add_event(
+            redis,
+            event_type="job.created",
+            payload={"job_id": str(job.id)},
+        )
+
+        dalston.metrics.reconciler_repairs.labels(type="stranded_job").inc()
+
+
+async def reconcile_stranded_tasks(redis: Redis, db: AsyncSession) -> None:
+    """Find READY tasks not in any stream and re-queue them."""
+
+    cutoff = datetime.now(UTC) - timedelta(seconds=STRANDED_TASK_THRESHOLD_S)
+
+    # Find tasks that are READY but not in stream (missed queueing)
+    ready_tasks = await db.execute(
+        select(TaskModel)
+        .where(
+            TaskModel.status == TaskStatus.READY.value,
+            TaskModel.updated_at < cutoff,
+        )
+    )
+
+    for task in ready_tasks.scalars():
+        # Check if task is actually in stream
+        pending = await get_pending(redis, task.stage)
+        task_in_stream = any(p.task_id == str(task.id) for p in pending)
+
+        if not task_in_stream:
+            logger.warning("reconciling_stranded_task", task_id=str(task.id))
+
+            # Re-queue the task
+            await add_task(
+                redis,
+                stage=task.stage,
+                task_id=str(task.id),
+                job_id=str(task.job_id),
+                timeout_s=task.timeout_seconds or 1800,
+            )
+
+            dalston.metrics.reconciler_repairs.labels(type="stranded_task").inc()
+```
+
+**Integration with scanner loop:**
+
+```python
+async def run_scanner_loop():
+    while True:
+        if await try_acquire_leader(redis, instance_id):
+            await scan_stale_tasks(redis, db)
+            await reconcile_stranded_states(redis, db)  # Add reconciliation
+        await asyncio.sleep(SCAN_INTERVAL_S)
+```
+
+---
+
+### 33.10: Durable Event Transport
+
+**Problem:**
+
+Redis Pub/Sub is fire-and-forget. If the orchestrator is disconnected when an event is published, that event is lost forever. This causes jobs to get stuck in PENDING state.
+
+**Evidence from current code:**
+
+- Events published via `redis.publish()` at `dalston/common/events.py:49`
+- Orchestrator subscribes at `dalston/orchestrator/main.py:153`
+- No acknowledgment, no replay, no persistence
+
+**Deliverables:**
+
+- Migrate event publishing from Pub/Sub to Redis Streams
+- Migrate orchestrator subscription to consumer groups
+- Replay missed events on orchestrator startup
+
+**Stream naming:**
+
+- Event stream: `dalston:events` (single stream for all event types)
+- Consumer group: `orchestrators`
+- Each orchestrator instance is a consumer
+
+**Functions (add to `dalston/common/events.py`):**
+
+```python
+EVENTS_STREAM = "dalston:events"
+EVENTS_GROUP = "orchestrators"
+
+async def ensure_events_group(redis: Redis) -> None:
+    """Create consumer group if it doesn't exist. Idempotent."""
+    try:
+        await redis.xgroup_create(
+            EVENTS_STREAM,
+            EVENTS_GROUP,
+            id="0",  # Start from beginning
+            mkstream=True,
+        )
+    except ResponseError as e:
+        if "BUSYGROUP" not in str(e):
+            raise
+
+
+async def add_event(
+    redis: Redis,
+    event_type: str,
+    payload: dict[str, Any],
+) -> str:
+    """Add event to stream. Returns message ID."""
+    event = {
+        "type": event_type,
+        "timestamp": datetime.now(UTC).isoformat(),
+        "payload": json.dumps(payload, default=_json_serializer),
+    }
+
+    # Inject trace context
+    trace_context = dalston.telemetry.inject_trace_context()
+    if trace_context:
+        event["_trace_context"] = json.dumps(trace_context)
+
+    return await redis.xadd(EVENTS_STREAM, event)
+
+
+async def read_events(
+    redis: Redis,
+    consumer: str,
+    count: int = 10,
+    block_ms: int = 1000,
+) -> list[dict]:
+    """Read events from stream. Returns list of events."""
+    results = await redis.xreadgroup(
+        EVENTS_GROUP,
+        consumer,
+        {EVENTS_STREAM: ">"},  # Only new messages
+        count=count,
+        block=block_ms,
+    )
+
+    if not results:
+        return []
+
+    events = []
+    for stream_name, messages in results:
+        for msg_id, fields in messages:
+            events.append({
+                "id": msg_id,
+                "type": fields["type"],
+                "timestamp": fields["timestamp"],
+                "payload": json.loads(fields["payload"]),
+                "_trace_context": json.loads(fields.get("_trace_context", "null")),
+            })
+
+    return events
+
+
+async def ack_event(redis: Redis, message_id: str) -> None:
+    """Acknowledge event processing."""
+    await redis.xack(EVENTS_STREAM, EVENTS_GROUP, message_id)
+
+
+async def claim_pending_events(
+    redis: Redis,
+    consumer: str,
+    min_idle_ms: int = 60000,
+    count: int = 100,
+) -> list[dict]:
+    """Claim events that were delivered but not acknowledged.
+
+    Called on orchestrator startup to recover missed events.
+    """
+    results = await redis.xautoclaim(
+        EVENTS_STREAM,
+        EVENTS_GROUP,
+        consumer,
+        min_idle_time=min_idle_ms,
+        start_id="0-0",
+        count=count,
+    )
+
+    if not results or len(results) < 2:
+        return []
+
+    # xautoclaim returns [next_id, [[id, fields], ...], ...]
+    messages = results[1]
+    events = []
+    for msg_id, fields in messages:
+        if fields:  # Skip deleted messages
+            events.append({
+                "id": msg_id,
+                "type": fields["type"],
+                "timestamp": fields["timestamp"],
+                "payload": json.loads(fields["payload"]),
+            })
+
+    return events
+```
+
+**Migrate publish functions:**
+
+```python
+# Replace all publish_* functions to use add_event instead of publish_event
+
+async def publish_job_created(
+    redis: Redis,
+    job_id: UUID,
+    request_id: str | None = None,
+) -> None:
+    """Publish a job.created event (now durable via Streams)."""
+    payload: dict[str, Any] = {"job_id": str(job_id)}
+    if request_id:
+        payload["request_id"] = request_id
+    await add_event(redis, "job.created", payload)
+
+# ... same pattern for other publish_* functions
+```
+
+**Update orchestrator main loop (`main.py`):**
+
+```python
+async def orchestrator_loop() -> None:
+    # ... initialization ...
+
+    # Generate unique consumer ID for this instance
+    consumer_id = f"orchestrator-{uuid4().hex[:8]}"
+
+    # Ensure consumer group exists
+    await ensure_events_group(redis)
+
+    # On startup, claim any pending events from dead orchestrators
+    pending = await claim_pending_events(redis, consumer_id, min_idle_ms=60000)
+    for event in pending:
+        logger.info("replaying_pending_event", event_type=event["type"], event_id=event["id"])
+        await _dispatch_event(event, redis, settings, batch_registry)
+        await ack_event(redis, event["id"])
+
+    # Main event loop
+    while not _shutdown_event.is_set():
+        try:
+            events = await read_events(redis, consumer_id, count=10, block_ms=1000)
+
+            for event in events:
+                await _dispatch_event(event, redis, settings, batch_registry)
+                await ack_event(redis, event["id"])
+
+        except Exception as e:
+            logger.exception("event_processing_error", error=str(e))
+            await asyncio.sleep(0.1)
+```
+
+**Key behavioral changes:**
+
+| Aspect | Before (Pub/Sub) | After (Streams) |
+| ------ | ---------------- | --------------- |
+| Delivery guarantee | At-most-once | At-least-once |
+| Orchestrator restart | Missed events lost | Replay pending events |
+| Multiple orchestrators | All receive all events | Each event processed once |
+| Acknowledgment | None | Explicit XACK |
+
+**Note on idempotency:** Handlers already use atomic DB claims (33.8), so at-least-once delivery is safe. Duplicate event delivery results in "already claimed" log, not duplicate work.
+
+---
+
+### 33.11: Redis AOF Configuration
+
+**Problem:**
+
+Redis is configured without AOF persistence. On Redis restart, all queued tasks and pending events are lost.
+
+**Evidence:**
+
+Current `docker-compose.yml` Redis configuration lacks persistence settings.
+
+**Deliverables:**
+
+- Update docker-compose.yml Redis configuration
+- Add Redis persistence volume
+
+**Implementation:**
+
+```yaml
+# docker-compose.yml
+services:
+  redis:
+    image: redis:7-alpine
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --auto-aof-rewrite-percentage 100
+      --auto-aof-rewrite-min-size 64mb
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  redis-data:
+```
+
+**Configuration options:**
+
+| Setting | Value | Rationale |
+| ------- | ----- | --------- |
+| `appendonly` | yes | Enable AOF persistence |
+| `appendfsync` | everysec | Fsync every second (good balance of durability/perf) |
+| `auto-aof-rewrite-percentage` | 100 | Rewrite when AOF doubles in size |
+| `auto-aof-rewrite-min-size` | 64mb | Don't rewrite until AOF reaches 64MB |
+
+**Trade-off:** `appendfsync everysec` can lose up to 1 second of writes on crash. For stronger guarantees, use `appendfsync always` (slower).
+
+---
+
 ## Verification
 
 ```bash
@@ -681,6 +1076,58 @@ docker compose exec postgres psql -U dalston -c "
   HAVING COUNT(*) > 1;
 "
 # Should return 0 rows (no duplicates)
+
+# 11. Test orchestrator restart recovery (event durability)
+# Submit a job, then immediately kill orchestrator
+JOB_ID=$(curl -s -X POST http://localhost:8000/v1/audio/transcriptions \
+  -F "file=@test_audio.mp3" | jq -r '.id')
+docker compose stop orchestrator
+sleep 2
+
+# Restart orchestrator - it should replay pending events
+docker compose start orchestrator
+sleep 10
+
+# Job should have progressed (DAG created)
+curl -s http://localhost:8000/v1/audio/transcriptions/$JOB_ID | jq '.status'
+# "running" (not stuck in "pending")
+
+# 12. Test reconciler catches stranded jobs
+# Create job directly in DB (simulating missed event)
+docker compose exec postgres psql -U dalston -c "
+  INSERT INTO jobs (id, status, created_at, updated_at)
+  VALUES ('$(uuidgen)', 'pending', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes');
+"
+
+# Wait for reconciler (runs every 5 min, or trigger manually)
+sleep 330
+
+# Check job was repaired (has tasks now)
+docker compose exec postgres psql -U dalston -c "
+  SELECT j.id, j.status, COUNT(t.id) as task_count
+  FROM jobs j
+  LEFT JOIN tasks t ON j.id = t.job_id
+  WHERE j.created_at < NOW() - INTERVAL '5 minutes'
+  GROUP BY j.id, j.status;
+"
+
+# 13. Test Redis restart recovery
+# Check current stream state
+docker compose exec redis redis-cli XLEN dalston:events
+docker compose exec redis redis-cli XLEN dalston:stream:transcribe
+
+# Restart Redis
+docker compose restart redis
+sleep 5
+
+# Verify data persisted (AOF)
+docker compose exec redis redis-cli XLEN dalston:events
+# Should show same count as before restart
+
+# 14. Verify acceptance criteria
+# - Orchestrator down during event → processes after restart ✓ (test 11)
+# - Redis restart → recovers work ✓ (test 13)
+# - No job stuck due to missed event → reconciler repairs ✓ (test 12)
 ```
 
 ---
@@ -710,6 +1157,8 @@ No data migration needed.
 
 ## Checkpoint
 
+**Task Queue Streams (33.1-33.7):**
+
 - [ ] `dalston/common/streams.py` with helper functions
 - [ ] `discover_streams()` finds all stage streams dynamically
 - [ ] Engine SDK uses `XREADGROUP` + `XAUTOCLAIM` + `XACK`
@@ -718,12 +1167,47 @@ No data migration needed.
 - [ ] Stale scanner discovers streams and fails abandoned tasks
 - [ ] Leader election for scanner
 - [ ] Task cancellation works with streams
+- [ ] `StreamMessage` includes `delivery_count` from PEL
+- [ ] Engine logs `delivery_count` on task processing
+- [ ] Redelivery metric tracks recovery reasons
 - [ ] Metrics updated
-- [ ] Integration test for crash recovery
+
+**Multi-Orchestrator Safety (33.8):**
+
 - [ ] Atomic job ownership claim in `handle_job_created()`
 - [ ] Atomic task status transition in `handle_task_completed()`
 - [ ] DB migration: unique constraint on `tasks(job_id, stage)`
 - [ ] Concurrency tests for multi-orchestrator scenarios
+
+**Reconciliation Sweeper (33.9):**
+
+- [ ] `dalston/orchestrator/reconciler.py` with stranded state detection
+- [ ] Reconciler finds PENDING jobs with no tasks
+- [ ] Reconciler finds READY tasks not in streams
+- [ ] Reconciler runs under leader election
+- [ ] Metrics for reconciliation repairs
+
+**Durable Event Transport (33.10):**
+
+- [ ] `dalston/common/events.py` migrated to Redis Streams
+- [ ] Event consumer group `orchestrators` created on startup
+- [ ] Orchestrator replays pending events on restart
+- [ ] All `publish_*` functions use `XADD`
+- [ ] Events acknowledged after successful handler execution
+- [ ] Integration test: orchestrator down during job.created
+
+**Redis AOF (33.11):**
+
+- [ ] `docker-compose.yml` Redis configured with AOF
+- [ ] Redis data volume for persistence
+- [ ] Integration test: Redis restart preserves streams
+
+**Acceptance Criteria:**
+
+- [ ] Orchestrator down during event → processes after restart
+- [ ] Redis restart → system recovers without manual intervention
+- [ ] No job stuck indefinitely due to missed control-plane messages
+- [ ] Integration tests simulate orchestrator/Redis restarts
 
 ---
 
@@ -741,6 +1225,14 @@ ABSOLUTE_TIMEOUT_MS=1800000     # 30 min - fail even if engine alive
 
 # Leader election (orchestrator)
 LEADER_TTL_S=30
+
+# Reconciliation sweeper (orchestrator)
+RECONCILE_INTERVAL_S=300        # 5 min - how often to check for stranded states
+STRANDED_JOB_THRESHOLD_S=300    # 5 min - job PENDING with no tasks
+STRANDED_TASK_THRESHOLD_S=300   # 5 min - task READY not in stream
+
+# Event stream (orchestrator)
+EVENT_CLAIM_MIN_IDLE_MS=60000   # 1 min - claim events from dead orchestrators
 ```
 
 ---
@@ -748,14 +1240,19 @@ LEADER_TTL_S=30
 ## Files Changed
 
 | File | Change |
-|------|--------|
-| `dalston/common/streams.py` | New - Redis Streams helpers |
+| ---- | ------ |
+| `dalston/common/streams.py` | New - Redis Streams helpers for task queues |
+| `dalston/common/events.py` | Migrate from Pub/Sub to Redis Streams |
 | `dalston/engine_sdk/runner.py` | Replace `brpop` with `xreadgroup` |
 | `dalston/orchestrator/scheduler.py` | Replace `lpush` with `xadd` |
 | `dalston/orchestrator/scanner.py` | New - stale task scanner |
+| `dalston/orchestrator/reconciler.py` | New - stranded state reconciliation |
 | `dalston/orchestrator/leader.py` | New - leader election |
-| `dalston/orchestrator/main.py` | Add scanner loop |
+| `dalston/orchestrator/main.py` | Add scanner loop, event stream consumer |
 | `dalston/orchestrator/handlers.py` | Atomic ownership claims for job/task transitions |
-| `dalston/metrics.py` | Add stream metrics |
+| `dalston/metrics.py` | Add stream + reconciliation metrics |
+| `docker-compose.yml` | Redis AOF configuration + data volume |
 | `alembic/versions/xxx_add_task_uniqueness.py` | New - unique constraint on tasks |
 | `tests/integration/test_multi_orchestrator.py` | New - concurrency tests |
+| `tests/integration/test_event_durability.py` | New - orchestrator restart recovery tests |
+| `tests/integration/test_reconciler.py` | New - stranded state recovery tests |
