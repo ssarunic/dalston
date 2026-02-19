@@ -18,12 +18,14 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import structlog
+from botocore.exceptions import ClientError
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.events import publish_event
 from dalston.common.models import TaskStatus
+from dalston.common.s3 import get_s3_client
 from dalston.common.streams import (
     STREAM_PREFIX,
     ack_task,
@@ -207,6 +209,53 @@ class ReconciliationSweeper:
                 orphaned_pel_entries=orphaned_pel_count,
             )
 
+    async def _check_output_exists_in_s3(
+        self, job_id: str, task_id: str
+    ) -> bool | None:
+        """Check if task output exists in S3.
+
+        Engine uploads output to a predictable path:
+        s3://{bucket}/jobs/{job_id}/tasks/{task_id}/output.json
+
+        Args:
+            job_id: Job UUID as string
+            task_id: Task UUID as string
+
+        Returns:
+            True if output file exists in S3
+            False if output file definitely does not exist (404/NoSuchKey)
+            None if there was a transient error (network, auth, etc.)
+        """
+        key = f"jobs/{job_id}/tasks/{task_id}/output.json"
+
+        try:
+            async with get_s3_client(self._settings) as s3:
+                await s3.head_object(Bucket=self._settings.s3_bucket, Key=key)
+                return True
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            # 404 and NoSuchKey definitively mean object doesn't exist
+            if error_code in ("404", "NoSuchKey"):
+                return False
+            # Other errors (auth, network, throttling) are transient - return None
+            logger.warning(
+                "s3_check_output_transient_error",
+                job_id=job_id,
+                task_id=task_id,
+                error_code=error_code,
+                error=str(e),
+            )
+            return None
+        except Exception as e:
+            # Network errors, timeouts, etc. are transient
+            logger.warning(
+                "s3_check_output_transient_error",
+                job_id=job_id,
+                task_id=task_id,
+                error=str(e),
+            )
+            return None
+
     async def _reconcile_orphaned_db_tasks(
         self, db: AsyncSession, pel_task_ids: set[str]
     ) -> int:
@@ -232,34 +281,85 @@ class ReconciliationSweeper:
 
         for task in running_tasks:
             task_id_str = str(task.id)
+            job_id_str = str(task.job_id)
 
             if task_id_str not in pel_task_ids:
                 # Task is RUNNING in DB but not in any PEL - orphaned
-                logger.warning(
-                    "orphaned_db_task_found",
-                    task_id=task_id_str,
-                    stage=task.stage,
-                    started_at=task.started_at.isoformat() if task.started_at else None,
+                # This can happen if:
+                # 1. Engine crashed before publishing task.started
+                # 2. Task completed but task.completed event was lost
+                # 3. PEL entry was lost (Redis crash)
+
+                # Check if output exists in S3 - if so, task completed successfully
+                # but the task.completed event was lost
+                # Note: output_uri is not set in DB, so we must check S3 directly
+                # Returns: True (exists), False (not found), None (transient error)
+                output_exists = await self._check_output_exists_in_s3(
+                    job_id_str, task_id_str
                 )
 
-                # Mark as FAILED (safer than re-queuing which could cause loops)
-                task.status = TaskStatus.FAILED.value
-                task.error = (
-                    "Task orphaned: not found in Redis PEL during reconciliation"
-                )
-                task.completed_at = datetime.now(UTC)
-                orphaned_count += 1
+                if output_exists is None:
+                    # Transient S3 error - skip this task, will retry next cycle
+                    logger.warning(
+                        "orphaned_db_task_skipped_s3_error",
+                        task_id=task_id_str,
+                        stage=task.stage,
+                        note="will_retry_next_cycle",
+                    )
+                    continue
 
-                # Publish failure event
-                await publish_event(
-                    self._redis,
-                    "task.failed",
-                    {
-                        "task_id": task_id_str,
-                        "error": task.error,
-                        "reconciler_action": "marked_failed",
-                    },
-                )
+                if output_exists:
+                    logger.info(
+                        "orphaned_db_task_recovered_as_completed",
+                        task_id=task_id_str,
+                        stage=task.stage,
+                        note="output_found_in_s3",
+                    )
+                    task.status = TaskStatus.COMPLETED.value
+                    task.completed_at = datetime.now(UTC)
+                    orphaned_count += 1
+
+                    # Publish completion event
+                    await publish_event(
+                        self._redis,
+                        "task.completed",
+                        {
+                            "task_id": task_id_str,
+                            "job_id": job_id_str,
+                            "stage": task.stage,
+                            "reconciler_action": "recovered_completed",
+                        },
+                    )
+                else:
+                    # output_exists is False - definitively no output
+                    logger.warning(
+                        "orphaned_db_task_found",
+                        task_id=task_id_str,
+                        stage=task.stage,
+                        started_at=task.started_at.isoformat()
+                        if task.started_at
+                        else None,
+                    )
+
+                    # No output in S3 - mark as FAILED (safer than re-queuing)
+                    task.status = TaskStatus.FAILED.value
+                    task.error = (
+                        "Task orphaned: not found in Redis PEL during reconciliation"
+                    )
+                    task.completed_at = datetime.now(UTC)
+                    orphaned_count += 1
+
+                    # Publish failure event
+                    await publish_event(
+                        self._redis,
+                        "task.failed",
+                        {
+                            "task_id": task_id_str,
+                            "job_id": job_id_str,
+                            "error": task.error,
+                            "reconciler_action": "marked_failed",
+                        },
+                    )
 
         if orphaned_count > 0:
             await db.commit()

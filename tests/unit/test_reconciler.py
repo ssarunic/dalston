@@ -160,15 +160,17 @@ class TestOrphanedDbTasks:
 
     @pytest.mark.asyncio
     async def test_finds_orphaned_db_task(self):
-        """Test detection of task RUNNING in DB but not in PEL."""
+        """Test detection of task RUNNING in DB but not in PEL (no output in S3)."""
         from dalston.orchestrator.reconciler import ReconciliationSweeper
 
         task_id = uuid4()
+        job_id = uuid4()
         old_started_at = datetime.now(UTC) - timedelta(minutes=15)
 
-        # Mock task
+        # Mock task (output will not be found in S3 - should be marked FAILED)
         mock_task = MagicMock()
         mock_task.id = task_id
+        mock_task.job_id = job_id
         mock_task.stage = "transcribe"
         mock_task.started_at = old_started_at
         mock_task.status = TaskStatus.RUNNING.value
@@ -192,6 +194,9 @@ class TestOrphanedDbTasks:
             settings=MagicMock(),
         )
 
+        # Mock S3 check to return False (no output exists)
+        sweeper._check_output_exists_in_s3 = AsyncMock(return_value=False)
+
         # Task is not in PEL
         pel_task_ids: set[str] = set()
 
@@ -201,6 +206,115 @@ class TestOrphanedDbTasks:
         assert mock_task.status == TaskStatus.FAILED.value
         assert "orphaned" in mock_task.error.lower()
         mock_db.commit.assert_called_once()
+        sweeper._check_output_exists_in_s3.assert_called_once_with(
+            str(job_id), str(task_id)
+        )
+
+    @pytest.mark.asyncio
+    async def test_recovers_orphaned_db_task_with_output_in_s3(self):
+        """Test recovery of task RUNNING in DB when output exists in S3."""
+        from dalston.orchestrator.reconciler import ReconciliationSweeper
+
+        task_id = uuid4()
+        job_id = uuid4()
+        old_started_at = datetime.now(UTC) - timedelta(minutes=15)
+
+        # Mock task (output will be found in S3 - should be recovered as COMPLETED)
+        mock_task = MagicMock()
+        mock_task.id = task_id
+        mock_task.job_id = job_id
+        mock_task.stage = "transcribe"
+        mock_task.started_at = old_started_at
+        mock_task.status = TaskStatus.RUNNING.value
+
+        # Mock DB session
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [mock_task]
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.commit = AsyncMock()
+
+        # Mock Redis
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+        mock_redis.publish = AsyncMock()
+
+        sweeper = ReconciliationSweeper(
+            redis=mock_redis,
+            db_session_factory=MagicMock(),
+            settings=MagicMock(),
+        )
+
+        # Mock S3 check to return True (output exists)
+        sweeper._check_output_exists_in_s3 = AsyncMock(return_value=True)
+
+        # Task is not in PEL
+        pel_task_ids: set[str] = set()
+
+        count = await sweeper._reconcile_orphaned_db_tasks(mock_db, pel_task_ids)
+
+        assert count == 1
+        assert mock_task.status == TaskStatus.COMPLETED.value
+        assert mock_task.completed_at is not None
+        mock_db.commit.assert_called_once()
+        sweeper._check_output_exists_in_s3.assert_called_once_with(
+            str(job_id), str(task_id)
+        )
+
+    @pytest.mark.asyncio
+    async def test_skips_task_on_s3_transient_error(self):
+        """Test that tasks are skipped (not marked) when S3 check fails transiently."""
+        from dalston.orchestrator.reconciler import ReconciliationSweeper
+
+        task_id = uuid4()
+        job_id = uuid4()
+        old_started_at = datetime.now(UTC) - timedelta(minutes=15)
+
+        # Mock task (S3 check will fail - should be skipped)
+        mock_task = MagicMock()
+        mock_task.id = task_id
+        mock_task.job_id = job_id
+        mock_task.stage = "transcribe"
+        mock_task.started_at = old_started_at
+        mock_task.status = TaskStatus.RUNNING.value
+
+        # Mock DB session
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [mock_task]
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.commit = AsyncMock()
+
+        # Mock Redis
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+        mock_redis.publish = AsyncMock()
+
+        sweeper = ReconciliationSweeper(
+            redis=mock_redis,
+            db_session_factory=MagicMock(),
+            settings=MagicMock(),
+        )
+
+        # Mock S3 check to return None (transient error)
+        sweeper._check_output_exists_in_s3 = AsyncMock(return_value=None)
+
+        # Task is not in PEL
+        pel_task_ids: set[str] = set()
+
+        count = await sweeper._reconcile_orphaned_db_tasks(mock_db, pel_task_ids)
+
+        # Task should be skipped, not counted
+        assert count == 0
+        # Status should NOT have changed
+        assert mock_task.status == TaskStatus.RUNNING.value
+        # No commit since no changes were made
+        mock_db.commit.assert_not_called()
+        sweeper._check_output_exists_in_s3.assert_called_once_with(
+            str(job_id), str(task_id)
+        )
 
     @pytest.mark.asyncio
     async def test_ignores_task_in_pel(self):

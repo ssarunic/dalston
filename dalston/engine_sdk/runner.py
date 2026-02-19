@@ -20,6 +20,7 @@ import structlog
 import dalston.logging
 import dalston.metrics
 import dalston.telemetry
+from dalston.common.durable_events import add_durable_event_sync
 from dalston.common.streams_sync import (
     STALE_THRESHOLD_MS,
     StreamMessage,
@@ -582,7 +583,11 @@ class EngineRunner:
         logger.info("output_uploaded", output_uri=output_uri)
 
     def _publish_task_started(self, task_id: str, job_id: str) -> None:
-        """Publish task.started event to Redis pub/sub.
+        """Publish task.started event to Redis pub/sub and durable stream.
+
+        Writes to both pub/sub (real-time delivery) and the durable events
+        stream (crash recovery). This ensures the orchestrator receives the
+        event even if it restarts.
 
         Args:
             task_id: Task identifier
@@ -599,11 +604,64 @@ class EngineRunner:
         trace_context = dalston.telemetry.inject_trace_context()
         if trace_context:
             event["_trace_context"] = trace_context
+
+        # Write to durable stream FIRST (primary mechanism)
+        # Orchestrator now consumes only from durable stream, so this MUST succeed
+        # Retry up to 5 times with exponential backoff on transient failures
+        # If all retries fail, reconciliation sweeper will eventually detect the inconsistency
+        durable_success = False
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                add_durable_event_sync(
+                    self.redis_client,
+                    "task.started",
+                    {"task_id": task_id, "job_id": job_id, "engine_id": self.engine_id},
+                )
+                durable_success = True
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    # Exponential backoff: 0.1s, 0.2s, 0.4s, 0.8s
+                    backoff_seconds = 0.1 * (2**attempt)
+                    logger.warning(
+                        "durable_event_write_retry",
+                        event_type="task.started",
+                        task_id=task_id,
+                        attempt=attempt + 1,
+                        backoff_seconds=backoff_seconds,
+                        error=str(e),
+                    )
+                    time.sleep(backoff_seconds)
+                else:
+                    logger.error(
+                        "durable_event_write_failed",
+                        event_type="task.started",
+                        task_id=task_id,
+                        error=str(e),
+                    )
+
+        # Publish to pub/sub for real-time delivery (secondary, for other consumers)
         self.redis_client.publish(self.EVENTS_CHANNEL, json.dumps(event))
+
+        if not durable_success:
+            # Log critical error - reconciliation sweeper will detect orphaned tasks
+            # For task.started, the reconciler will mark as FAILED if no output exists
+            logger.error(
+                "critical_event_may_be_lost",
+                event_type="task.started",
+                task_id=task_id,
+                note="reconciliation_sweeper_will_detect",
+            )
+
         logger.debug("published_task_started")
 
     def _publish_task_completed(self, task_id: str, job_id: str) -> None:
-        """Publish task.completed event to Redis pub/sub.
+        """Publish task.completed event to Redis pub/sub and durable stream.
+
+        Writes to both pub/sub (real-time delivery) and the durable events
+        stream (crash recovery). This ensures the orchestrator receives the
+        event even if it restarts.
 
         Args:
             task_id: Task identifier
@@ -620,7 +678,56 @@ class EngineRunner:
         trace_context = dalston.telemetry.inject_trace_context()
         if trace_context:
             event["_trace_context"] = trace_context
+
+        # Write to durable stream FIRST (primary mechanism)
+        # Orchestrator now consumes only from durable stream, so this MUST succeed
+        # Retry up to 5 times with exponential backoff on transient failures
+        # If all retries fail, reconciliation sweeper will eventually detect the inconsistency
+        durable_success = False
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                add_durable_event_sync(
+                    self.redis_client,
+                    "task.completed",
+                    {"task_id": task_id, "job_id": job_id, "engine_id": self.engine_id},
+                )
+                durable_success = True
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    # Exponential backoff: 0.1s, 0.2s, 0.4s, 0.8s
+                    backoff_seconds = 0.1 * (2**attempt)
+                    logger.warning(
+                        "durable_event_write_retry",
+                        event_type="task.completed",
+                        task_id=task_id,
+                        attempt=attempt + 1,
+                        backoff_seconds=backoff_seconds,
+                        error=str(e),
+                    )
+                    time.sleep(backoff_seconds)
+                else:
+                    logger.error(
+                        "durable_event_write_failed",
+                        event_type="task.completed",
+                        task_id=task_id,
+                        error=str(e),
+                    )
+
+        # Publish to pub/sub for real-time delivery (secondary, for other consumers)
         self.redis_client.publish(self.EVENTS_CHANNEL, json.dumps(event))
+
+        if not durable_success:
+            # Log critical error - reconciliation sweeper will detect orphaned tasks
+            # For task.completed, reconciler checks output_uri and recovers as COMPLETED
+            logger.error(
+                "critical_event_may_be_lost",
+                event_type="task.completed",
+                task_id=task_id,
+                note="reconciliation_sweeper_will_recover_via_output_uri",
+            )
+
         logger.debug("published_task_completed")
 
     def _publish_task_failed(
@@ -629,7 +736,11 @@ class EngineRunner:
         job_id: str,
         error: str,
     ) -> None:
-        """Publish task.failed event to Redis pub/sub.
+        """Publish task.failed event to Redis pub/sub and durable stream.
+
+        Writes to both pub/sub (real-time delivery) and the durable events
+        stream (crash recovery). This ensures the orchestrator receives the
+        event even if it restarts.
 
         Args:
             task_id: Task identifier
@@ -648,5 +759,59 @@ class EngineRunner:
         trace_context = dalston.telemetry.inject_trace_context()
         if trace_context:
             event["_trace_context"] = trace_context
+
+        # Write to durable stream FIRST (primary mechanism)
+        # Orchestrator now consumes only from durable stream, so this MUST succeed
+        # Retry up to 5 times with exponential backoff on transient failures
+        # If all retries fail, reconciliation sweeper will eventually detect the inconsistency
+        durable_success = False
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                add_durable_event_sync(
+                    self.redis_client,
+                    "task.failed",
+                    {
+                        "task_id": task_id,
+                        "job_id": job_id,
+                        "engine_id": self.engine_id,
+                        "error": error,
+                    },
+                )
+                durable_success = True
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    # Exponential backoff: 0.1s, 0.2s, 0.4s, 0.8s
+                    backoff_seconds = 0.1 * (2**attempt)
+                    logger.warning(
+                        "durable_event_write_retry",
+                        event_type="task.failed",
+                        task_id=task_id,
+                        attempt=attempt + 1,
+                        backoff_seconds=backoff_seconds,
+                        error=str(e),
+                    )
+                    time.sleep(backoff_seconds)
+                else:
+                    logger.error(
+                        "durable_event_write_failed",
+                        event_type="task.failed",
+                        task_id=task_id,
+                        error=str(e),
+                    )
+
+        # Publish to pub/sub for real-time delivery (secondary, for other consumers)
         self.redis_client.publish(self.EVENTS_CHANNEL, json.dumps(event))
+
+        if not durable_success:
+            # Log critical error - reconciliation sweeper will detect orphaned tasks
+            # For task.failed, reconciler marks as FAILED (no output_uri to recover)
+            logger.error(
+                "critical_event_may_be_lost",
+                event_type="task.failed",
+                task_id=task_id,
+                note="reconciliation_sweeper_will_mark_failed",
+            )
+
         logger.debug("published_task_failed")

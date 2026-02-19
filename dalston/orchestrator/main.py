@@ -1,9 +1,10 @@
 """Orchestrator entry point.
 
 Runs the main event loop that:
-1. Subscribes to Redis pub/sub channel 'dalston:events'
-2. Dispatches events to appropriate handlers
-3. Manages graceful shutdown
+1. Replays pending durable events on startup (crash recovery)
+2. Subscribes to Redis pub/sub channel 'dalston:events'
+3. Dispatches events to appropriate handlers
+4. Manages graceful shutdown
 """
 
 import asyncio
@@ -11,7 +12,8 @@ import json
 import os
 import signal
 import sys
-from uuid import UUID
+import time
+from uuid import UUID, uuid4
 
 import structlog
 from aiohttp import web
@@ -21,7 +23,14 @@ import dalston.logging
 import dalston.metrics
 import dalston.telemetry
 from dalston.common.audit import AuditService
-from dalston.common.events import EVENTS_CHANNEL
+from dalston.common.durable_events import (
+    ack_event,
+    claim_stale_pending_events,
+    ensure_events_stream_group,
+    read_new_events,
+)
+
+# Note: We now consume from durable stream, not pub/sub EVENTS_CHANNEL
 from dalston.config import get_settings
 from dalston.db.models import JobModel
 from dalston.db.session import async_session, init_db
@@ -124,7 +133,7 @@ async def orchestrator_loop() -> None:
     logger.info(
         "orchestrator_starting",
         redis_url=settings.redis_url,
-        events_channel=EVENTS_CHANNEL,
+        events_stream="dalston:events:stream",
     )
 
     # Initialize database
@@ -169,38 +178,79 @@ async def orchestrator_loop() -> None:
     )
     await _reconciliation_sweeper.start()
 
-    pubsub = redis.pubsub()
-
     # Initialize batch engine registry
     batch_registry = BatchEngineRegistry(redis)
 
-    try:
-        # Subscribe to events channel
-        await pubsub.subscribe(EVENTS_CHANNEL)
-        logger.info("subscribed_to_events", channel=EVENTS_CHANNEL)
+    # Generate unique consumer ID for this orchestrator instance
+    consumer_id = f"orchestrator-{uuid4().hex[:8]}"
+    logger.info("orchestrator_consumer_id", consumer_id=consumer_id)
 
-        # Event loop
+    try:
+        # Ensure durable events stream consumer group exists
+        await ensure_events_stream_group(redis)
+
+        # Claim pending events from crashed consumers (crash recovery)
+        # Uses XAUTOCLAIM to take over messages idle for 60+ seconds from any consumer
+        await _claim_and_replay_stale_events(
+            redis, consumer_id, settings, batch_registry, is_startup=True
+        )
+
+        logger.info(
+            "consuming_from_durable_stream",
+            stream="dalston:events:stream",
+            consumer_id=consumer_id,
+        )
+
+        # Periodic stale event claiming interval (5 minutes)
+        STALE_CLAIM_INTERVAL_SECONDS = 300
+        last_stale_claim_time = time.monotonic()
+
+        # Event loop - consume from durable stream (not pub/sub)
         while not _shutdown_event.is_set():
             try:
-                # Get message with timeout to allow shutdown check
-                # Note: timeout must be passed directly to get_message() for proper blocking
-                message = await pubsub.get_message(
-                    ignore_subscribe_messages=True,
-                    timeout=1.0,
+                # Periodically claim stale events that failed processing
+                # This handles transient failures without waiting for restart
+                current_time = time.monotonic()
+                if current_time - last_stale_claim_time >= STALE_CLAIM_INTERVAL_SECONDS:
+                    last_stale_claim_time = current_time
+                    try:
+                        await _claim_and_replay_stale_events(
+                            redis, consumer_id, settings, batch_registry
+                        )
+                    except Exception as e:
+                        logger.warning("periodic_stale_claim_error", error=str(e))
+
+                # Read new events from durable stream with blocking
+                events = await read_new_events(
+                    redis, consumer_id, count=10, block_ms=1000
                 )
 
-                if message is None:
-                    # Timeout expired with no message, loop back to check shutdown flag
+                if not events:
+                    # Timeout expired with no events, loop back to check shutdown flag
                     continue
 
-                if message["type"] != "message":
-                    continue
+                for event in events:
+                    message_id = event.get("id")
+                    log = logger.bind(
+                        event_type=event.get("type"),
+                        message_id=message_id,
+                    )
 
-                await _dispatch_event(message["data"], redis, settings, batch_registry)
+                    try:
+                        await _dispatch_event_dict(
+                            event, redis, settings, batch_registry
+                        )
+                        # ACK the event after successful processing
+                        if message_id:
+                            await ack_event(redis, message_id)
+                    except Exception as e:
+                        log.exception("event_processing_error", error=str(e))
+                        # Don't ACK failed events - they'll be retried
+                        # by claim_stale_pending_events on next startup
 
             except Exception as e:
-                logger.exception("event_processing_error", error=str(e))
-                # Continue processing other events
+                logger.exception("stream_read_error", error=str(e))
+                # Continue processing after brief pause
                 await asyncio.sleep(0.1)
 
     finally:
@@ -223,33 +273,104 @@ async def orchestrator_loop() -> None:
         # Stop metrics server
         await _stop_metrics_server()
 
-        await pubsub.unsubscribe(EVENTS_CHANNEL)
-        await pubsub.close()
         await redis.close()
         dalston.telemetry.shutdown_tracing()
         logger.info("orchestrator_stopped")
 
 
-async def _dispatch_event(
-    data: str,
+async def _claim_and_replay_stale_events(
+    redis: aioredis.Redis,
+    consumer_id: str,
+    settings,
+    batch_registry: BatchEngineRegistry,
+    *,
+    is_startup: bool = False,
+) -> None:
+    """Claim and replay stale events from crashed consumers.
+
+    Uses XAUTOCLAIM to take over messages that have been idle for too long,
+    regardless of which consumer they were originally delivered to. This
+    enables crash recovery across different orchestrator instances.
+
+    Args:
+        redis: Redis client
+        consumer_id: Consumer ID for this orchestrator instance
+        settings: Application settings
+        batch_registry: Batch engine registry for availability checks
+        is_startup: If True, use higher limits for thorough startup recovery
+    """
+    logger.info("claiming_stale_events", consumer_id=consumer_id, is_startup=is_startup)
+
+    # Use higher limits at startup for thorough recovery
+    # Runtime claiming uses lower limits to avoid blocking the event loop
+    if is_startup:
+        max_iterations = 100  # Up to 10,000 events at startup
+        count = 100
+    else:
+        max_iterations = 10  # Up to 1,000 events during runtime
+        count = 100
+
+    # Claim messages idle for 5+ minutes from any consumer
+    # Use 5 minutes to avoid stealing from slow but healthy consumers
+    # Most handlers complete well under 5 minutes; longer handlers are rare
+    # This still provides reasonable recovery time for crashed consumers
+    stale_events = await claim_stale_pending_events(
+        redis,
+        consumer_id,
+        min_idle_ms=300000,
+        count=count,
+        max_iterations=max_iterations,
+    )
+
+    if not stale_events:
+        logger.info("no_stale_events_to_claim")
+        return
+
+    logger.info("claimed_stale_events", count=len(stale_events))
+
+    for event in stale_events:
+        message_id = event.get("id")
+        event_type = event.get("type")
+        log = logger.bind(
+            event_type=event_type,
+            message_id=message_id,
+            source="crash_recovery",
+        )
+
+        log.info("replaying_claimed_event")
+
+        try:
+            # Dispatch the event (event dict already has the payload fields merged)
+            await _dispatch_event_dict(event, redis, settings, batch_registry)
+
+            # ACK the event after successful processing
+            if message_id:
+                await ack_event(redis, message_id)
+                log.debug("claimed_event_acked")
+
+        except Exception as e:
+            log.exception("claimed_event_replay_failed", error=str(e))
+            # Don't ACK failed events - they'll be retried on next startup
+
+    logger.info("stale_event_replay_complete", replayed=len(stale_events))
+
+
+async def _dispatch_event_dict(
+    event: dict,
     redis: aioredis.Redis,
     settings,
     batch_registry: BatchEngineRegistry,
 ) -> None:
-    """Parse and dispatch an event to the appropriate handler.
+    """Dispatch a pre-parsed event dict to the appropriate handler.
+
+    Used for both pub/sub events (after JSON parsing) and durable event replay.
 
     Args:
-        data: Raw JSON event data
+        event: Parsed event dictionary
         redis: Redis client
         settings: Application settings
         batch_registry: Batch engine registry for availability checks
     """
-    try:
-        event = json.loads(data)
-    except json.JSONDecodeError as e:
-        logger.error("invalid_event_json", error=str(e), data=data[:100])
-        return
-
     event_type = event.get("type")
     log = logger.bind(event_type=event_type)
 
@@ -264,7 +385,7 @@ async def _dispatch_event(
     log.debug("received_event", payload=event)
 
     # Extract trace context from event (M19)
-    trace_context = event.pop("_trace_context", {})
+    trace_context = event.pop("_trace_context", {}) if "_trace_context" in event else {}
 
     # Create span for event handling, linked to parent trace if available
     with dalston.telemetry.span_from_context(
@@ -342,7 +463,34 @@ async def _dispatch_event(
                 dalston.telemetry.record_exception(e)
                 dalston.telemetry.set_span_status_error(str(e))
                 log.exception("handler_error", error=str(e))
-                # Don't re-raise - continue processing other events
+                raise  # Re-raise for durable event replay to handle
+
+
+async def _dispatch_event(
+    data: str,
+    redis: aioredis.Redis,
+    settings,
+    batch_registry: BatchEngineRegistry,
+) -> None:
+    """Parse and dispatch an event to the appropriate handler.
+
+    Args:
+        data: Raw JSON event data
+        redis: Redis client
+        settings: Application settings
+        batch_registry: Batch engine registry for availability checks
+    """
+    try:
+        event = json.loads(data)
+    except json.JSONDecodeError as e:
+        logger.error("invalid_event_json", error=str(e), data=data[:100])
+        return
+
+    try:
+        await _dispatch_event_dict(event, redis, settings, batch_registry)
+    except Exception:
+        # Don't re-raise for pub/sub events - continue processing other events
+        pass
 
 
 async def _handle_job_webhook(

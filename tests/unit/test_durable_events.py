@@ -91,6 +91,81 @@ class TestAddDurableEvent:
         assert payload["task_id"] == "task-456"
 
 
+class TestClaimStalePendingEvents:
+    """Tests for claim_stale_pending_events function."""
+
+    @pytest.fixture
+    def mock_redis(self):
+        redis = AsyncMock()
+        redis.xgroup_create = AsyncMock()
+        return redis
+
+    @pytest.mark.asyncio
+    async def test_claims_stale_events(self, mock_redis):
+        """Test claiming stale events from crashed consumers."""
+        from dalston.common.durable_events import claim_stale_pending_events
+
+        # XAUTOCLAIM returns (next_cursor, [(id, fields), ...], [deleted_ids])
+        mock_redis.xautoclaim = AsyncMock(
+            return_value=(
+                "0-0",  # cursor
+                [  # claimed messages
+                    (
+                        "1234567890-0",
+                        {
+                            "type": "job.created",
+                            "timestamp": "2024-01-01T00:00:00+00:00",
+                            "payload": '{"job_id": "test-123"}',
+                        },
+                    ),
+                    (
+                        "1234567891-0",
+                        {
+                            "type": "task.completed",
+                            "timestamp": "2024-01-01T00:00:01+00:00",
+                            "payload": '{"task_id": "task-456"}',
+                        },
+                    ),
+                ],
+                [],  # deleted IDs
+            )
+        )
+
+        events = await claim_stale_pending_events(mock_redis, "new-consumer")
+
+        assert len(events) == 2
+        assert events[0]["id"] == "1234567890-0"
+        assert events[0]["type"] == "job.created"
+        assert events[0]["job_id"] == "test-123"
+        assert events[1]["type"] == "task.completed"
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_no_stale_events(self, mock_redis):
+        """Test returning empty list when no stale events to claim."""
+        from dalston.common.durable_events import claim_stale_pending_events
+
+        mock_redis.xautoclaim = AsyncMock(return_value=("0-0", [], []))
+
+        events = await claim_stale_pending_events(mock_redis, "new-consumer")
+
+        assert events == []
+
+    @pytest.mark.asyncio
+    async def test_handles_nogroup_error(self, mock_redis):
+        """Test that NOGROUP error creates group and returns empty."""
+        from dalston.common.durable_events import claim_stale_pending_events
+
+        mock_redis.xautoclaim = AsyncMock(
+            side_effect=ResponseError("NOGROUP No such consumer group")
+        )
+
+        events = await claim_stale_pending_events(mock_redis, "new-consumer")
+
+        assert events == []
+        # Group should be created
+        mock_redis.xgroup_create.assert_called()
+
+
 class TestReadPendingEvents:
     """Tests for read_pending_events function."""
 

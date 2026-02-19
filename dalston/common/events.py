@@ -20,11 +20,13 @@ EVENTS_CHANNEL = "dalston:events"
 # These are critical for job completion and require guaranteed delivery
 DURABLE_EVENT_TYPES = {
     "job.created",
+    "task.started",  # Needed for RUNNING state tracking
     "task.completed",
     "task.failed",
     "job.completed",
     "job.failed",
     "job.cancel_requested",
+    "job.cancelled",  # Needed for webhook delivery after cancellation
 }
 
 

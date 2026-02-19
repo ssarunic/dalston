@@ -15,7 +15,8 @@ from uuid import UUID
 
 import structlog
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import dalston.metrics
@@ -196,36 +197,54 @@ async def handle_job_created(
     log.info("built_task_dag", task_count=len(tasks))
 
     # 3. Save all tasks to PostgreSQL
-    for task in tasks:
-        log.info(
-            "creating_task",
-            task_id=str(task.id),
-            stage=task.stage,
-            engine_id=task.engine_id,
-        )
-        task_model = TaskModel(
-            id=task.id,
-            job_id=task.job_id,
-            stage=task.stage,
-            engine_id=task.engine_id,
-            status=task.status.value,
-            dependencies=list(task.dependencies),
-            config=task.config,
-            input_uri=task.input_uri,
-            output_uri=task.output_uri,
-            retries=task.retries,
-            max_retries=task.max_retries,
-            required=task.required,
-        )
-        db.add(task_model)
+    # Wrap in try/except to handle race condition with other orchestrators
+    try:
+        for task in tasks:
+            log.info(
+                "creating_task",
+                task_id=str(task.id),
+                stage=task.stage,
+                engine_id=task.engine_id,
+            )
+            task_model = TaskModel(
+                id=task.id,
+                job_id=task.job_id,
+                stage=task.stage,
+                engine_id=task.engine_id,
+                status=task.status.value,
+                dependencies=list(task.dependencies),
+                config=task.config,
+                input_uri=task.input_uri,
+                output_uri=task.output_uri,
+                retries=task.retries,
+                max_retries=task.max_retries,
+                required=task.required,
+            )
+            db.add(task_model)
 
-    # 4. Update job status to 'running'
-    job.status = JobStatus.RUNNING.value
-    job.started_at = datetime.now(UTC)
+        # 4. Update job status to 'running'
+        job.status = JobStatus.RUNNING.value
+        job.started_at = datetime.now(UTC)
 
-    await db.commit()
+        await db.commit()
 
-    log.info("saved_tasks_and_updated_job", status="running")
+        log.info("saved_tasks_and_updated_job", status="running")
+
+    except IntegrityError as e:
+        # Check if this is the specific constraint violation we're expecting
+        # (duplicate tasks for job_id + stage)
+        error_str = str(e.orig) if e.orig else str(e)
+        if "uq_tasks_job_id_stage" in error_str:
+            # Another orchestrator already created tasks for this job (race condition)
+            # This is expected in multi-orchestrator deployments - just rollback and return
+            await db.rollback()
+            log.info("tasks_already_created_by_another_orchestrator")
+            return
+        else:
+            # Unexpected integrity error - re-raise to surface the issue
+            await db.rollback()
+            log.error("unexpected_integrity_error", error=error_str)
+            raise
 
     # Build audio metadata from job (already probed at upload)
     audio_metadata: dict[str, Any] | None = None
@@ -306,8 +325,6 @@ async def handle_task_started(
         db: Database session
         engine_id: ID of the engine claiming the task (for logging)
     """
-    from sqlalchemy import update
-
     log = logger.bind(task_id=str(task_id), engine_id=engine_id)
     log.info("handling_task_started")
 
@@ -376,15 +393,19 @@ async def handle_task_completed(
     log = logger.bind(task_id=str(task_id))
     log.info("handling_task_completed")
 
-    # 1. Mark task as completed
+    # 1. Mark task as completed (unless already SKIPPED for optional tasks)
     task = await db.get(TaskModel, task_id)
     if task is None:
         log.error("task_not_found")
         return
 
-    task.status = TaskStatus.COMPLETED.value
+    # Preserve SKIPPED status for optional tasks that failed - they're treated
+    # as "completed" for dependency purposes but should retain SKIPPED status
+    if task.status != TaskStatus.SKIPPED.value:
+        task.status = TaskStatus.COMPLETED.value
+        task.error = None  # Clear any error from a previous failed attempt
+
     task.completed_at = datetime.now(UTC)
-    task.error = None  # Clear any error from a previous failed attempt
     await db.commit()
 
     job_id = task.job_id
@@ -446,9 +467,29 @@ async def handle_task_completed(
         deps_met = all(dep_id in completed_ids for dep_id in dependent.dependencies)
 
         if deps_met:
-            # 4. Queue this dependent task
-            dependent.status = TaskStatus.READY.value
+            # 4. Queue this dependent task - use atomic UPDATE to prevent
+            # race conditions in multi-orchestrator deployments
+            result = await db.execute(
+                update(TaskModel)
+                .where(TaskModel.id == dependent.id)
+                .where(TaskModel.status == TaskStatus.PENDING.value)
+                .values(status=TaskStatus.READY.value)
+                .returning(TaskModel.id)
+            )
+            updated = result.scalar_one_or_none()
             await db.commit()
+
+            if not updated:
+                # Another orchestrator already advanced this task
+                log.debug(
+                    "dependent_task_already_scheduled",
+                    dependent_task_id=str(dependent.id),
+                    dependent_stage=dependent.stage,
+                )
+                continue
+
+            # Refresh the dependent object to get updated status
+            await db.refresh(dependent)
 
             # Gather outputs from dependencies
             previous_outputs = await _gather_previous_outputs(
