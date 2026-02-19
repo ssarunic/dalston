@@ -13,6 +13,9 @@ Long audio support: Uses local attention (rel_pos_local_attn) instead of full
 attention to reduce memory from O(n²) to O(n). This enables transcription of
 audio up to 3 hours on T4/A10g GPUs.
 
+Vocabulary boosting: Supports GPU-PB (GPU-accelerated Phrase Boosting) for
+biasing recognition toward specific terms without retraining.
+
 Environment variables:
     MODEL_VARIANT: Model variant (ctc-0.6b, ctc-1.1b, tdt-0.6b-v3, tdt-1.1b).
                    Defaults to ctc-0.6b.
@@ -20,6 +23,8 @@ Environment variables:
 """
 
 import os
+import tempfile
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -164,6 +169,114 @@ class ParakeetEngine(Engine):
 
         self.logger.info("model_loaded_successfully", model_name=model_name)
 
+    def _configure_vocabulary_boosting(
+        self, vocabulary: list[str], boosting_alpha: float = 0.5
+    ) -> Path | None:
+        """Configure GPU-PB vocabulary boosting for the model.
+
+        Creates a temporary file with vocabulary terms and configures the model's
+        decoding strategy to use GPU-PB (GPU-accelerated Phrase Boosting).
+
+        Args:
+            vocabulary: List of terms to boost recognition for.
+            boosting_alpha: Weight of boosting during decoding (0.0-1.0).
+                Higher values = stronger boosting. Default 0.5.
+
+        Returns:
+            Path to temporary vocabulary file (caller must clean up), or None if failed.
+
+        Note:
+            Parakeet models trained with capitalization (e.g., tdt-0.6b-v3) require
+            both uppercase and lowercase variants. This method automatically generates
+            common case variants for each term.
+        """
+        if not vocabulary or self._model is None:
+            return None
+
+        try:
+            # Generate case variants for each term
+            # Parakeet-tdt-0.6b-v2/v3 was trained with capitalization
+            expanded_terms: set[str] = set()
+            for term in vocabulary:
+                expanded_terms.add(term)  # Original
+                expanded_terms.add(term.lower())  # lowercase
+                expanded_terms.add(term.upper())  # UPPERCASE
+                expanded_terms.add(term.capitalize())  # Capitalized
+
+            # Write vocabulary to temp file (one term per line)
+            vocab_file = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False
+            )
+            for term in sorted(expanded_terms):
+                vocab_file.write(f"{term}\n")
+            vocab_file.close()
+            vocab_path = Path(vocab_file.name)
+
+            self.logger.info(
+                "vocabulary_file_created",
+                path=str(vocab_path),
+                original_terms=len(vocabulary),
+                expanded_terms=len(expanded_terms),
+            )
+
+            # Configure decoding strategy with boosting tree
+            # Different config paths for CTC vs TDT/RNNT models
+            if self._decoder_type == "ctc":
+                decoding_cfg = self._model.cfg.decoding
+                decoding_cfg.strategy = "greedy_batch"
+                decoding_cfg.greedy.boosting_tree.key_phrases_file = str(vocab_path)
+                decoding_cfg.greedy.boosting_tree.context_score = 1.0
+                decoding_cfg.greedy.boosting_tree.depth_scaling = 2.0
+                decoding_cfg.greedy.boosting_tree_alpha = boosting_alpha
+            else:
+                # TDT/RNNT models
+                decoding_cfg = self._model.cfg.decoding
+                decoding_cfg.strategy = "greedy_batch"
+                decoding_cfg.greedy.boosting_tree.key_phrases_file = str(vocab_path)
+                decoding_cfg.greedy.boosting_tree.context_score = 1.0
+                decoding_cfg.greedy.boosting_tree.depth_scaling = 2.0
+                decoding_cfg.greedy.boosting_tree_alpha = boosting_alpha
+
+            # Apply the new decoding strategy
+            self._model.change_decoding_strategy(decoding_cfg)
+
+            self.logger.info(
+                "vocabulary_boosting_enabled",
+                decoder_type=self._decoder_type,
+                boosting_alpha=boosting_alpha,
+                terms_count=len(expanded_terms),
+            )
+
+            return vocab_path
+
+        except Exception as e:
+            self.logger.warning(
+                "vocabulary_boosting_failed",
+                error=str(e),
+                message="Falling back to standard decoding without vocabulary boosting",
+            )
+            return None
+
+    def _reset_decoding_strategy(self) -> None:
+        """Reset decoding strategy to default (no vocabulary boosting)."""
+        if self._model is None:
+            return
+
+        try:
+            decoding_cfg = self._model.cfg.decoding
+            decoding_cfg.strategy = "greedy_batch"
+            # Clear boosting tree config
+            if hasattr(decoding_cfg.greedy, "boosting_tree"):
+                decoding_cfg.greedy.boosting_tree.key_phrases_file = None
+                decoding_cfg.greedy.boosting_tree_alpha = 0.0
+
+            self._model.change_decoding_strategy(decoding_cfg)
+        except Exception as e:
+            self.logger.warning(
+                "reset_decoding_failed",
+                error=str(e),
+            )
+
     def process(self, input: TaskInput) -> TaskOutput:
         """Transcribe audio using Parakeet CTC or TDT.
 
@@ -176,6 +289,7 @@ class ParakeetEngine(Engine):
         audio_path = input.audio_path
         config = input.config
         channel = config.get("channel")  # For per_channel mode
+        vocabulary = config.get("vocabulary")  # Terms to boost
 
         # Use the model configured at container build time
         model_name = self._nemo_model_id
@@ -183,7 +297,18 @@ class ParakeetEngine(Engine):
         # Load model (lazy loading)
         self._load_model(model_name)
 
-        self.logger.info("transcribing", audio_path=str(audio_path))
+        # Configure vocabulary boosting if provided
+        vocab_file: Path | None = None
+        vocabulary_enabled = False
+        if vocabulary:
+            vocab_file = self._configure_vocabulary_boosting(vocabulary)
+            vocabulary_enabled = vocab_file is not None
+
+        self.logger.info(
+            "transcribing",
+            audio_path=str(audio_path),
+            vocabulary_enabled=vocabulary_enabled,
+        )
 
         # Transcribe with word-level timestamps
         # NeMo RNNT models can return word timestamps via the alignment
@@ -193,14 +318,23 @@ class ParakeetEngine(Engine):
             if self._device == "cuda"
             else torch.inference_mode()
         )
-        with autocast_ctx:
-            # Use transcribe method with timestamps=True for word-level timing
-            transcriptions = self._model.transcribe(
-                [str(audio_path)],
-                batch_size=1,
-                return_hypotheses=True,
-                timestamps=True,  # Enable word-level timestamps
-            )
+        try:
+            with autocast_ctx:
+                # Use transcribe method with timestamps=True for word-level timing
+                transcriptions = self._model.transcribe(
+                    [str(audio_path)],
+                    batch_size=1,
+                    return_hypotheses=True,
+                    timestamps=True,  # Enable word-level timestamps
+                )
+        finally:
+            # Clean up vocabulary boosting
+            if vocab_file is not None:
+                try:
+                    vocab_file.unlink(missing_ok=True)
+                    self._reset_decoding_strategy()
+                except Exception:
+                    pass  # Best effort cleanup
 
         # Process the hypothesis
         if not transcriptions:
@@ -352,6 +486,13 @@ class ParakeetEngine(Engine):
             else TimestampGranularity.SEGMENT
         )
 
+        # Build warnings list
+        warnings: list[str] = []
+        if vocabulary and not vocabulary_enabled:
+            warnings.append(
+                f"Vocabulary boosting ({len(vocabulary)} terms) failed to configure - transcribed without boosting"
+            )
+
         output = TranscribeOutput(
             text=full_text.strip(),
             segments=segments,
@@ -364,7 +505,7 @@ class ParakeetEngine(Engine):
             engine_id=f"parakeet-{self._model_variant}",
             skipped=False,
             skip_reason=None,
-            warnings=[],
+            warnings=warnings,
         )
 
         return TaskOutput(data=output)

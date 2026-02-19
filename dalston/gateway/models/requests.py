@@ -16,11 +16,11 @@ class TranscriptionCreateParams(BaseModel):
         description="ISO 639-1 language code or 'auto' for detection",
     )
 
-    # Transcription hints
-    initial_prompt: str | None = Field(
+    # Vocabulary boosting
+    vocabulary: list[str] | None = Field(
         default=None,
-        max_length=1000,
-        description="Domain vocabulary hints to improve accuracy (e.g., technical terms, names)",
+        max_length=100,
+        description="Terms to boost recognition (e.g., product names, technical jargon). Max 100 terms.",
     )
 
     # Speaker detection (M04)
@@ -103,8 +103,8 @@ class TranscriptionCreateParams(BaseModel):
             "timestamps_granularity": self.timestamps_granularity,
         }
         # Only include optional parameters if set
-        if self.initial_prompt is not None:
-            params["initial_prompt"] = self.initial_prompt
+        if self.vocabulary is not None:
+            params["vocabulary"] = self.vocabulary
         if self.min_speakers is not None:
             params["min_speakers"] = self.min_speakers
         if self.max_speakers is not None:

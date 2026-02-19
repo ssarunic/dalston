@@ -111,6 +111,7 @@ class WhisperEngine(Engine):
         beam_size = config.get("beam_size", self.DEFAULT_BEAM_SIZE)
         vad_filter = config.get("vad_filter", self.DEFAULT_VAD_FILTER)
         channel = config.get("channel")  # For per_channel mode
+        vocabulary = config.get("vocabulary")  # Terms to boost
 
         # Load model (lazy loading, cached)
         self._load_model()
@@ -122,15 +123,31 @@ class WhisperEngine(Engine):
             language=language,
             beam_size=beam_size,
             vad_filter=vad_filter,
+            vocabulary_terms=len(vocabulary) if vocabulary else 0,
         )
+
+        # Build transcribe kwargs
+        transcribe_kwargs: dict = {
+            "language": language,
+            "beam_size": beam_size,
+            "vad_filter": vad_filter,
+            "word_timestamps": True,  # Enable word-level timestamps
+        }
+
+        # Add vocabulary as hotwords if provided
+        # faster-whisper uses hotwords parameter to boost specific terms
+        if vocabulary:
+            transcribe_kwargs["hotwords"] = " ".join(vocabulary)
+            self.logger.info(
+                "vocabulary_enabled",
+                terms=vocabulary[:5],  # Log first 5 terms
+                total_terms=len(vocabulary),
+            )
 
         # Transcribe audio
         segments_generator, info = self._model.transcribe(
             str(audio_path),
-            language=language,
-            beam_size=beam_size,
-            vad_filter=vad_filter,
-            word_timestamps=True,  # Enable word-level timestamps
+            **transcribe_kwargs,
         )
 
         # Collect segments

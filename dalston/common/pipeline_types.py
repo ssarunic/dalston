@@ -292,11 +292,10 @@ class TranscribeInput(BaseModel):
         default=TimestampGranularity.WORD, description="Requested timestamp precision"
     )
 
-    # Decoding hints
-    initial_prompt: str | None = Field(
-        default=None, description="Domain vocabulary hints"
+    # Vocabulary boosting
+    vocabulary: list[str] | None = Field(
+        default=None, description="Terms to boost recognition (max 100)"
     )
-    hotwords: list[str] | None = Field(default=None, description="Terms to boost")
     suppress_tokens: list[str] | None = Field(
         default=None, description="Tokens to suppress"
     )

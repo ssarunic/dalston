@@ -60,12 +60,12 @@ def transcribe(
             help="Language code (en, es, etc.) or 'auto' for detection.",
         ),
     ] = "auto",
-    initial_prompt: Annotated[
-        str | None,
+    vocabulary: Annotated[
+        list[str] | None,
         typer.Option(
-            "--prompt",
-            "-p",
-            help="Domain vocabulary hints (e.g., technical terms, proper names).",
+            "--vocab",
+            "-v",
+            help="Terms to boost recognition (can be repeated: -v term1 -v term2).",
         ),
     ] = None,
     output: Annotated[
@@ -212,7 +212,7 @@ def transcribe(
 
         dalston transcribe audio.mp3 -m fast  # Use 'fast' alias (distil-whisper)
 
-        dalston transcribe medical.mp3 -p "cardiology, ECG, arrhythmia"  # Domain hints
+        dalston transcribe medical.mp3 -v cardiology -v ECG -v arrhythmia  # Vocabulary hints
 
         dalston transcribe call.mp3 --speakers diarize --min-speakers 2 --max-speakers 4
 
@@ -313,7 +313,7 @@ def transcribe(
                 audio_url=audio_url,
                 model=model,
                 language=language,
-                initial_prompt=initial_prompt,
+                vocabulary=vocabulary,
                 speaker_detection=speaker_detection,
                 num_speakers=num_speakers,
                 min_speakers=min_speakers,

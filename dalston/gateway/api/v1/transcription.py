@@ -103,11 +103,10 @@ async def create_transcription(
     language: Annotated[
         str, Form(description="Language code or 'auto' for detection")
     ] = "auto",
-    initial_prompt: Annotated[
+    vocabulary: Annotated[
         str | None,
         Form(
-            description="Domain vocabulary hints to improve accuracy (e.g., technical terms, names)",
-            max_length=1000,
+            description='JSON array of terms to boost recognition (e.g., \'["Dalston", "FastAPI"]\'). Max 100 terms.',
         ),
     ] = None,
     speaker_detection: Annotated[
@@ -290,9 +289,33 @@ async def create_transcription(
     }
     if model.lower() != "auto":
         parameters["engine_transcribe"] = model
-    # Only include optional parameters if set
-    if initial_prompt is not None:
-        parameters["initial_prompt"] = initial_prompt
+    # Parse and validate vocabulary
+    if vocabulary is not None:
+        try:
+            parsed_vocabulary = json.loads(vocabulary)
+            if not isinstance(parsed_vocabulary, list):
+                raise HTTPException(
+                    status_code=400,
+                    detail="vocabulary must be a JSON array of strings",
+                )
+            if len(parsed_vocabulary) > 100:
+                raise HTTPException(
+                    status_code=400,
+                    detail="vocabulary cannot exceed 100 terms",
+                )
+            # Validate all items are strings
+            for term in parsed_vocabulary:
+                if not isinstance(term, str):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="vocabulary must contain only strings",
+                    )
+            parameters["vocabulary"] = parsed_vocabulary
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid JSON in vocabulary: {e}",
+            ) from e
 
     # PII detection parameters (M26)
     if pii_detection:

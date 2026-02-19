@@ -245,7 +245,7 @@ class Dalston:
         audio_url: str | None = None,
         model: str = "auto",
         language: str = "auto",
-        initial_prompt: str | None = None,
+        vocabulary: list[str] | None = None,
         speaker_detection: SpeakerDetection | str = SpeakerDetection.NONE,
         num_speakers: int | None = None,
         min_speakers: int | None = None,
@@ -268,8 +268,8 @@ class Dalston:
             model: Engine ID (e.g., "faster-whisper-base", "parakeet-0.6b") or "auto"
                    for automatic selection based on capabilities. Defaults to "auto".
             language: Language code or "auto" for detection.
-            initial_prompt: Domain vocabulary hints to improve accuracy
-                (e.g., technical terms, proper names).
+            vocabulary: List of terms to boost recognition (e.g., product names,
+                technical jargon). Max 100 terms.
             speaker_detection: Speaker detection mode.
             num_speakers: Exact number of speakers (for diarization).
             min_speakers: Minimum speakers for diarization auto-detection.
@@ -318,8 +318,10 @@ class Dalston:
         if audio_url is not None:
             data["audio_url"] = audio_url
 
-        if initial_prompt is not None:
-            data["initial_prompt"] = initial_prompt
+        if vocabulary is not None:
+            import json
+
+            data["vocabulary"] = json.dumps(vocabulary)
         if num_speakers is not None:
             data["num_speakers"] = num_speakers
         if min_speakers is not None:
@@ -1009,7 +1011,7 @@ class AsyncDalston:
         audio_url: str | None = None,
         model: str = "auto",
         language: str = "auto",
-        initial_prompt: str | None = None,
+        vocabulary: list[str] | None = None,
         speaker_detection: SpeakerDetection | str = SpeakerDetection.NONE,
         num_speakers: int | None = None,
         min_speakers: int | None = None,
@@ -1032,8 +1034,8 @@ class AsyncDalston:
             model: Engine ID (e.g., "faster-whisper-base", "parakeet-0.6b") or "auto"
                    for automatic selection based on capabilities. Defaults to "auto".
             language: Language code or "auto" for detection.
-            initial_prompt: Domain vocabulary hints to improve accuracy
-                (e.g., technical terms, proper names).
+            vocabulary: List of terms to boost recognition (e.g., product names,
+                technical jargon). Max 100 terms.
             speaker_detection: Speaker detection mode.
             num_speakers: Exact number of speakers (for diarization).
             min_speakers: Minimum speakers for diarization auto-detection.
@@ -1078,8 +1080,10 @@ class AsyncDalston:
         if audio_url is not None:
             data["audio_url"] = audio_url
 
-        if initial_prompt is not None:
-            data["initial_prompt"] = initial_prompt
+        if vocabulary is not None:
+            import json
+
+            data["vocabulary"] = json.dumps(vocabulary)
         if num_speakers is not None:
             data["num_speakers"] = num_speakers
         if min_speakers is not None:

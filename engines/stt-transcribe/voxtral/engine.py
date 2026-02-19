@@ -138,6 +138,15 @@ class VoxtralEngine(Engine):
         config = input.config
         channel = config.get("channel")
         language = config.get("language", "en")
+        vocabulary = config.get("vocabulary")  # Terms to boost
+
+        # Warn if vocabulary is provided - Voxtral doesn't support vocabulary boosting
+        if vocabulary:
+            self.logger.warning(
+                "vocabulary_not_supported",
+                message="Vocabulary boosting is not supported for Voxtral. Terms will be ignored.",
+                terms_count=len(vocabulary),
+            )
 
         if language not in self.SUPPORTED_LANGUAGES:
             language = "en"
@@ -187,6 +196,13 @@ class VoxtralEngine(Engine):
             char_count=len(full_text),
         )
 
+        # Build warnings list
+        warnings: list[str] = []
+        if vocabulary:
+            warnings.append(
+                f"Vocabulary boosting ({len(vocabulary)} terms) not supported by Voxtral engine"
+            )
+
         output = TranscribeOutput(
             text=full_text,
             segments=segments,
@@ -199,7 +215,7 @@ class VoxtralEngine(Engine):
             engine_id=f"voxtral-{self._model_variant}",
             skipped=False,
             skip_reason=None,
-            warnings=[],
+            warnings=warnings,
         )
 
         return TaskOutput(data=output)
