@@ -1,4 +1,8 @@
-"""Redis pub/sub event publishing."""
+"""Redis pub/sub event publishing with optional durability.
+
+Events are published via pub/sub for real-time delivery. Critical events
+can optionally be written to a durable Stream for crash recovery.
+"""
 
 import json
 from datetime import UTC, datetime
@@ -11,6 +15,17 @@ import dalston.telemetry
 
 # Event channel for orchestrator communication
 EVENTS_CHANNEL = "dalston:events"
+
+# Events that should be written to the durable stream
+# These are critical for job completion and require guaranteed delivery
+DURABLE_EVENT_TYPES = {
+    "job.created",
+    "task.completed",
+    "task.failed",
+    "job.completed",
+    "job.failed",
+    "job.cancel_requested",
+}
 
 
 def _json_serializer(obj: Any) -> str:
@@ -26,13 +41,19 @@ async def publish_event(
     redis: Redis,
     event_type: str,
     payload: dict[str, Any],
+    durable: bool | None = None,
 ) -> None:
     """Publish an event to the dalston:events channel.
+
+    For critical events (defined in DURABLE_EVENT_TYPES), also writes to
+    a durable Stream for crash recovery. This ensures events are not lost
+    if the orchestrator crashes before processing them.
 
     Args:
         redis: Async Redis client
         event_type: Event type (e.g., "job.created", "task.completed")
         payload: Event payload (will have type and timestamp added)
+        durable: Override automatic durability (None = auto based on event type)
     """
     event = {
         "type": event_type,
@@ -46,7 +67,18 @@ async def publish_event(
         event["_trace_context"] = trace_context
 
     message = json.dumps(event, default=_json_serializer)
+
+    # Publish to pub/sub for real-time delivery
     await redis.publish(EVENTS_CHANNEL, message)
+
+    # Write to durable stream for critical events
+    should_persist = (
+        durable if durable is not None else event_type in DURABLE_EVENT_TYPES
+    )
+    if should_persist:
+        from dalston.common.durable_events import add_durable_event
+
+        await add_durable_event(redis, event_type, payload)
 
 
 async def publish_job_created(
