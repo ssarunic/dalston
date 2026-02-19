@@ -1,0 +1,10 @@
+# NeMo MSDD Diarization Engine Dependencies
+
+# NeMo toolkit for ASR/diarization models
+nemo_toolkit[asr]>=1.23.0
+
+# Audio processing
+soundfile>=0.12.0
+
+# Diarization-specific (explicit for clarity, pulled by nemo)
+omegaconf>=2.3.0

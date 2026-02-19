@@ -517,6 +517,25 @@ services:
     profiles: [gpu]
     restart: unless-stopped
 
+  # NeMo MSDD (GPU preferred, CPU allowed with NEMO_ALLOW_CPU=true)
+  stt-batch-diarize-nemo-msdd:
+    image: dalston/stt-batch-diarize-nemo-msdd:latest
+    build:
+      context: .
+      dockerfile: engines/stt-diarize/nemo-msdd/Dockerfile
+      args:
+        SKIP_MODEL_DOWNLOAD: ${SKIP_MODEL_DOWNLOAD:-false}
+    environment:
+      <<: [*common-env, *observability-env]
+      ENGINE_ID: nemo-msdd
+      DIARIZATION_DISABLED: ${DIARIZATION_DISABLED:-false}
+      NEMO_ALLOW_CPU: ${NEMO_ALLOW_CPU:-false}
+    volumes:
+      - nemo-models:/models
+    depends_on: *batch-depends
+    profiles: [nemo-msdd]
+    restart: unless-stopped
+
   # --- PII DETECT STAGE ---
   stt-batch-pii-detect-presidio:
     image: dalston/stt-batch-pii-detect-presidio:latest
@@ -666,6 +685,7 @@ volumes:
   whisper-models:
   align-models:
   pyannote-models:
+  nemo-models:
   realtime-models:
   parakeet-models:
   voxtral-models:

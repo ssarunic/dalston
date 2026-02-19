@@ -1,0 +1,116 @@
+schema_version: "1.1"
+id: nemo-msdd
+stage: diarize
+name: NeMo MSDD Speaker Diarization
+version: 1.0.0
+description: |
+  Speaker diarization using NVIDIA NeMo Multi-scale Diarization Decoder.
+  Neural end-to-end system with built-in overlap detection.
+
+  No HuggingFace token required - models are open under CC-BY-4.0 license.
+  Supports optional min/max speaker count hints.
+  GPU-only (CPU inference is prohibitively slow).
+
+container:
+  gpu: required
+  memory: 8G
+  model_cache: /models
+
+capabilities:
+  languages:
+    - all  # Language-agnostic speaker diarization
+  max_audio_duration: 7200  # 2 hours
+  streaming: false
+  max_concurrency: 2
+
+input:
+  audio_formats:
+    - wav
+  sample_rate: 16000
+  channels: 1
+
+config_schema:
+  type: object
+  properties:
+    min_speakers:
+      type: integer
+      minimum: 1
+      description: Minimum number of speakers (hint for clustering)
+    max_speakers:
+      type: integer
+      minimum: 1
+      description: Maximum number of speakers (hint for clustering)
+  additionalProperties: false
+
+output_schema:
+  type: object
+  required:
+    - speakers
+    - turns
+    - num_speakers
+  properties:
+    speakers:
+      type: array
+      description: List of detected speaker IDs
+      items:
+        type: string
+    turns:
+      type: array
+      description: Speaker turns with timestamps
+      items:
+        type: object
+        required:
+          - start
+          - end
+          - speaker
+        properties:
+          start:
+            type: number
+            description: Segment start time in seconds
+          end:
+            type: number
+            description: Segment end time in seconds
+          speaker:
+            type: string
+            description: Speaker ID (e.g., "SPEAKER_00")
+    num_speakers:
+      type: integer
+      description: Number of speakers detected
+    overlap_duration:
+      type: number
+      description: Total duration of overlapping speech in seconds
+    overlap_ratio:
+      type: number
+      description: Fraction of audio with overlapping speech
+    engine_id:
+      type: string
+      description: Engine identifier
+    skipped:
+      type: boolean
+      description: Whether processing was skipped
+    skip_reason:
+      type: string
+      description: Reason for skipping if skipped
+    warnings:
+      type: array
+      items:
+        type: string
+      description: Any processing warnings
+
+hf_compat:
+  pipeline_tag: speaker-diarization
+  library_name: nemo
+  license: cc-by-4.0
+
+hardware:
+  min_vram_gb: 4
+  recommended_gpu:
+    - t4
+    - a10g
+  supports_cpu: false
+  min_ram_gb: 8
+
+performance:
+  rtf_gpu: 0.05
+  rtf_cpu: null  # CPU not supported
+  warm_start_latency_ms: 1000
