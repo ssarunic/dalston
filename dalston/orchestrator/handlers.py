@@ -288,28 +288,66 @@ async def handle_job_created(
 async def handle_task_started(
     task_id: UUID,
     db: AsyncSession,
+    engine_id: str | None = None,
 ) -> None:
-    """Handle task.started event.
+    """Handle task.started event with atomic claim.
 
-    Marks the task as RUNNING and records the start time.
+    Uses atomic UPDATE with WHERE clause to prevent race conditions:
+    - Only transitions from READY to RUNNING
+    - If task is already RUNNING (idempotent replay), logs and returns
+    - If task is in another state (e.g., CANCELLED), rejects the claim
+
+    This ensures that with Redis Streams recovery (XCLAIM), only one
+    engine's claim is recorded even if multiple task.started events
+    are received.
 
     Args:
         task_id: UUID of the started task
         db: Database session
+        engine_id: ID of the engine claiming the task (for logging)
     """
-    log = logger.bind(task_id=str(task_id))
+    from sqlalchemy import update
+
+    log = logger.bind(task_id=str(task_id), engine_id=engine_id)
     log.info("handling_task_started")
 
+    # Atomic UPDATE: only transition READY -> RUNNING
+    # This prevents race conditions when multiple engines try to claim
+    result = await db.execute(
+        update(TaskModel)
+        .where(TaskModel.id == task_id)
+        .where(TaskModel.status == TaskStatus.READY.value)
+        .values(
+            status=TaskStatus.RUNNING.value,
+            started_at=datetime.now(UTC),
+        )
+        .returning(TaskModel.stage)
+    )
+    updated = result.scalar_one_or_none()
+
+    if updated:
+        await db.commit()
+        log.info("marked_task_running", stage=updated)
+        return
+
+    # Atomic update failed - check why
     task = await db.get(TaskModel, task_id)
     if task is None:
         log.error("task_not_found")
         return
 
-    task.status = TaskStatus.RUNNING.value
-    task.started_at = datetime.now(UTC)
-    await db.commit()
+    if task.status == TaskStatus.RUNNING.value:
+        # Already running - this is idempotent (e.g., duplicate event or recovery)
+        log.debug("task_already_running", stage=task.stage)
+        return
 
-    log.info("marked_task_running", stage=task.stage)
+    # Task is in an unexpected state (e.g., CANCELLED, COMPLETED)
+    log.warning(
+        "task_claim_rejected",
+        stage=task.stage,
+        current_status=task.status,
+        reason="task_not_in_ready_state",
+    )
 
 
 async def handle_task_completed(

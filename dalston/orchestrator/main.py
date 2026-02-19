@@ -267,10 +267,11 @@ async def _dispatch_event(
 
                 elif event_type == "task.started":
                     task_id = UUID(event["task_id"])
+                    engine_id = event.get("engine_id")
                     dalston.telemetry.set_span_attribute(
                         "dalston.task_id", str(task_id)
                     )
-                    await handle_task_started(task_id, db)
+                    await handle_task_started(task_id, db, engine_id)
 
                 elif event_type == "task.completed":
                     task_id = UUID(event["task_id"])
