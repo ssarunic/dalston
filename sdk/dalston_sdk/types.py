@@ -121,6 +121,33 @@ class Speaker:
 
 
 @dataclass
+class PIIEntity:
+    """A detected PII entity in the transcript."""
+
+    entity_type: str  # e.g., "name", "ssn", "credit_card_number"
+    category: str  # e.g., "pii"
+    start_offset: int  # Character offset in text
+    end_offset: int
+    start_time: float | None = None  # Audio timestamp
+    end_time: float | None = None
+    confidence: float | None = None
+    speaker: str | None = None
+    redacted_value: str | None = None  # e.g., "[NAME]"
+    original_text: str | None = None  # The actual PII text
+
+
+@dataclass
+class PIIInfo:
+    """Summary of PII detection results."""
+
+    enabled: bool
+    detection_tier: str | None = None  # "fast", "standard", "thorough"
+    entities_detected: int = 0
+    entity_summary: dict[str, int] | None = None  # e.g., {"name": 3, "ssn": 1}
+    redacted_audio_available: bool = False
+
+
+@dataclass
 class Transcript:
     """Complete transcript with all data."""
 
@@ -130,6 +157,10 @@ class Transcript:
     segments: list[Segment] | None = None
     speakers: list[Speaker] | None = None
     metadata: dict[str, Any] | None = None
+    # PII detection results
+    redacted_text: str | None = None
+    pii_entities: list[PIIEntity] | None = None
+    pii_info: PIIInfo | None = None
 
 
 # -----------------------------------------------------------------------------

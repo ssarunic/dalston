@@ -31,12 +31,15 @@ def output_job_created(job: Job, as_json: bool = False) -> None:
         as_json: Output as JSON if True.
     """
     if as_json:
-        console.print_json(
-            data={
-                "id": str(job.id),
-                "status": job.status.value,
-                "created_at": job.created_at.isoformat(),
-            }
+        print(
+            json.dumps(
+                {
+                    "id": str(job.id),
+                    "status": job.status.value,
+                    "created_at": job.created_at.isoformat(),
+                },
+                indent=2,
+            )
         )
     else:
         console.print(f"Job submitted: {job.id}")
@@ -152,6 +155,35 @@ def _job_to_json(job: Job) -> str:
                 }
                 for sp in job.transcript.speakers
             ]
+
+        # PII detection results
+        if job.transcript.redacted_text:
+            data["redacted_text"] = job.transcript.redacted_text
+
+        if job.transcript.pii_entities:
+            data["pii_entities"] = [
+                {
+                    "entity_type": e.entity_type,
+                    "category": e.category,
+                    "start_offset": e.start_offset,
+                    "end_offset": e.end_offset,
+                    "start_time": e.start_time,
+                    "end_time": e.end_time,
+                    "confidence": e.confidence,
+                    "original_text": e.original_text,
+                    "redacted_value": e.redacted_value,
+                }
+                for e in job.transcript.pii_entities
+            ]
+
+        if job.transcript.pii_info:
+            data["pii"] = {
+                "enabled": job.transcript.pii_info.enabled,
+                "detection_tier": job.transcript.pii_info.detection_tier,
+                "entities_detected": job.transcript.pii_info.entities_detected,
+                "entity_summary": job.transcript.pii_info.entity_summary,
+                "redacted_audio_available": job.transcript.pii_info.redacted_audio_available,
+            }
 
     return json.dumps(data, indent=2)
 
@@ -271,7 +303,7 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
             }
             for j in jobs
         ]
-        console.print_json(data=data)
+        print(json.dumps(data, indent=2))
         return
 
     table = Table()
@@ -310,7 +342,8 @@ def output_job_detail(job: Job, as_json: bool = False) -> None:
         as_json: Output as JSON if True.
     """
     if as_json:
-        console.print(_job_to_json(job))
+        # Use print() for JSON to avoid Rich markup/wrapping that breaks JSON parsing
+        print(_job_to_json(job))
         return
 
     console.print(f"ID:       {job.id}")
@@ -325,6 +358,16 @@ def output_job_detail(job: Job, as_json: bool = False) -> None:
         console.print(f"[red]Error:    {job.error}[/red]")
     if job.transcript and job.transcript.language_code:
         console.print(f"Language: {job.transcript.language_code}")
+
+    # Display PII detection summary
+    if job.transcript and job.transcript.pii_info and job.transcript.pii_info.enabled:
+        pii = job.transcript.pii_info
+        console.print(
+            f"PII:      {pii.entities_detected} entities detected ({pii.detection_tier})"
+        )
+        if pii.entity_summary:
+            summary_str = ", ".join(f"{k}: {v}" for k, v in pii.entity_summary.items())
+            console.print(f"          {summary_str}")
 
 
 def format_duration(seconds: float) -> str:

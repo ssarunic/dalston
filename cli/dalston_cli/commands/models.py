@@ -49,7 +49,7 @@ def models(
             model = client.get_model(model_id)
         except Exception as e:
             if as_json:
-                console.print(json.dumps({"error": str(e)}, indent=2))
+                print(json.dumps({"error": str(e)}, indent=2))
             else:
                 console.print(f"[red]Error:[/red] {e}")
             raise typer.Exit(code=1) from None
@@ -70,7 +70,7 @@ def models(
                     "supports_cpu": model.hardware.supports_cpu,
                     "min_vram_gb": model.hardware.min_vram_gb,
                 }
-            console.print(json.dumps(output, indent=2))
+            print(json.dumps(output, indent=2))
         else:
             console.print(f"[bold]{model.id}[/bold]")
             console.print(f"  Stage: {model.stage}")
@@ -95,7 +95,7 @@ def models(
             model_list = client.list_models()
         except Exception as e:
             if as_json:
-                console.print(json.dumps({"error": str(e)}, indent=2))
+                print(json.dumps({"error": str(e)}, indent=2))
             else:
                 console.print(f"[red]Error:[/red] {e}")
             raise typer.Exit(code=1) from None
@@ -122,7 +122,7 @@ def models(
                     for m in model_list.models
                 ],
             }
-            console.print(json.dumps(output, indent=2))
+            print(json.dumps(output, indent=2))
         else:
             console.print("[bold]Available Engines[/bold]\n")
 

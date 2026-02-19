@@ -40,6 +40,8 @@ from .types import (
     ModelCapabilities,
     ModelList,
     PIIDetectionTier,
+    PIIEntity,
+    PIIInfo,
     PIIRedactionMode,
     RealtimeSessionInfo,
     RealtimeSessionList,
@@ -63,6 +65,36 @@ def _parse_word(w: dict[str, Any]) -> Word:
         end=w["end"],
         confidence=w.get("confidence"),
         speaker_id=w.get("speaker"),
+    )
+
+
+def _parse_pii_entity(e: dict[str, Any]) -> PIIEntity:
+    """Parse a PII entity dict into PIIEntity object."""
+    return PIIEntity(
+        entity_type=e.get("entity_type", "unknown"),
+        category=e.get("category", "pii"),
+        start_offset=e.get("start_offset", 0),
+        end_offset=e.get("end_offset", 0),
+        start_time=e.get("start_time"),
+        end_time=e.get("end_time"),
+        confidence=e.get("confidence"),
+        speaker=e.get("speaker"),
+        redacted_value=e.get("redacted_value"),
+        original_text=e.get("original_text"),
+    )
+
+
+def _parse_pii_info(data: dict[str, Any]) -> PIIInfo | None:
+    """Parse PII info from job response."""
+    pii_data = data.get("pii")
+    if not pii_data:
+        return None
+    return PIIInfo(
+        enabled=pii_data.get("enabled", False),
+        detection_tier=pii_data.get("detection_tier"),
+        entities_detected=pii_data.get("entities_detected", 0),
+        entity_summary=pii_data.get("entity_summary"),
+        redacted_audio_available=pii_data.get("redacted_audio_available", False),
     )
 
 
@@ -101,12 +133,22 @@ def _parse_job(data: dict[str, Any]) -> Job:
                 for sp in data["speakers"]
             ]
 
+        # Parse PII data
+        pii_entities = None
+        if data.get("entities"):
+            pii_entities = [_parse_pii_entity(e) for e in data["entities"]]
+
+        pii_info = _parse_pii_info(data)
+
         transcript = Transcript(
             text=data["text"],
             language_code=data.get("language_code"),
             words=words,
             segments=segments,
             speakers=speakers,
+            redacted_text=data.get("redacted_text"),
+            pii_entities=pii_entities,
+            pii_info=pii_info,
         )
 
     return Job(

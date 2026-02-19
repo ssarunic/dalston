@@ -73,7 +73,7 @@ def status(
         elif realtime_error:
             data["realtime"] = {"error": realtime_error}
 
-        console.print(json.dumps(data, indent=2))
+        print(json.dumps(data, indent=2))
         raise typer.Exit(code=exit_code)
 
     # Human-readable output
