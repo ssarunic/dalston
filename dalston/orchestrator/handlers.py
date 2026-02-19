@@ -29,6 +29,8 @@ from dalston.common.s3 import get_s3_client
 from dalston.config import Settings, get_settings
 from dalston.db.models import JobModel, TaskModel
 from dalston.gateway.services.rate_limiter import (
+    CONCURRENT_COUNTER_TTL_SECONDS,
+    KEY_PREFIX_JOB_DECREMENTED,
     KEY_PREFIX_JOBS,
 )
 from dalston.orchestrator.catalog import get_catalog
@@ -69,16 +71,50 @@ def _serialize_engine_error(
     return str(e)
 
 
-async def _decrement_concurrent_jobs(redis: Redis, tenant_id: UUID) -> None:
-    """Decrement concurrent job count for rate limiting.
+async def _decrement_concurrent_jobs(
+    redis: Redis, job_id: UUID, tenant_id: UUID
+) -> bool:
+    """Idempotent decrement of concurrent job count for rate limiting.
 
     Called when a job transitions to a terminal state (completed, failed, cancelled).
+    Uses SET NX guard to ensure the counter is decremented exactly once per job,
+    preventing both leaks and double-decrements.
+
+    Args:
+        redis: Redis client
+        job_id: Job UUID used as idempotency key
+        tenant_id: Tenant UUID for the counter key
+
+    Returns:
+        True if this call performed the decrement, False if already decremented.
     """
-    key = f"{KEY_PREFIX_JOBS}:{tenant_id}"
-    result = await redis.decr(key)
+    guard_key = f"{KEY_PREFIX_JOB_DECREMENTED}:{job_id}"
+
+    # SET NX returns True only if key was set (didn't exist)
+    was_set = await redis.set(
+        guard_key, "1", nx=True, ex=CONCURRENT_COUNTER_TTL_SECONDS
+    )
+
+    if not was_set:
+        logger.debug(
+            "decrement_already_done",
+            job_id=str(job_id),
+            tenant_id=str(tenant_id),
+        )
+        return False
+
+    # Guard was set - we own the decrement
+    counter_key = f"{KEY_PREFIX_JOBS}:{tenant_id}"
+    result = await redis.decr(counter_key)
     if result < 0:
-        await redis.set(key, 0)
-    logger.debug("decremented_concurrent_jobs", tenant_id=str(tenant_id))
+        await redis.set(counter_key, 0)
+
+    logger.debug(
+        "decremented_concurrent_jobs",
+        job_id=str(job_id),
+        tenant_id=str(tenant_id),
+    )
+    return True
 
 
 async def handle_job_created(
@@ -233,7 +269,7 @@ async def handle_job_created(
                 job.error = error_str
                 job.completed_at = datetime.now(UTC)
                 await db.commit()
-                await _decrement_concurrent_jobs(redis, job.tenant_id)
+                await _decrement_concurrent_jobs(redis, job_id, job.tenant_id)
                 await publish_job_failed(redis, job_id, error_str)
                 log.error(
                     "job_failed_engine_error",
@@ -424,7 +460,7 @@ async def handle_task_completed(
                     job.error = error_str
                     job.completed_at = datetime.now(UTC)
                     await db.commit()
-                    await _decrement_concurrent_jobs(redis, job.tenant_id)
+                    await _decrement_concurrent_jobs(redis, job_id, job.tenant_id)
                     await publish_job_failed(redis, job_id, error_str)
                 log.error(
                     "job_failed_engine_error",
@@ -537,7 +573,7 @@ async def handle_task_failed(
                 job.error = error_str
                 job.completed_at = datetime.now(UTC)
                 await db.commit()
-                await _decrement_concurrent_jobs(redis, job.tenant_id)
+                await _decrement_concurrent_jobs(redis, job_id, job.tenant_id)
                 await publish_job_failed(redis, job_id, error_str)
             log.error(
                 "job_failed_engine_error_on_retry",
@@ -577,7 +613,7 @@ async def handle_task_failed(
         await db.commit()
 
         # Decrement concurrent job count for rate limiting
-        await _decrement_concurrent_jobs(redis, job.tenant_id)
+        await _decrement_concurrent_jobs(redis, job_id, job.tenant_id)
 
         # Publish job failed event for webhook delivery
         await publish_job_failed(redis, job_id, job.error)
@@ -763,7 +799,7 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
     await db.commit()
 
     # Decrement concurrent job count for rate limiting
-    await _decrement_concurrent_jobs(redis, job.tenant_id)
+    await _decrement_concurrent_jobs(redis, job_id, job.tenant_id)
 
     # Publish job completion event for webhook delivery
     # This triggers both admin-registered webhooks and per-job webhook_url (legacy)
@@ -897,7 +933,7 @@ async def _check_job_cancellation_complete(
     await db.commit()
 
     # Decrement concurrent job count for rate limiting
-    await _decrement_concurrent_jobs(redis, job.tenant_id)
+    await _decrement_concurrent_jobs(redis, job_id, job.tenant_id)
 
     # Record job cancellation metric (M20)
     dalston.metrics.inc_orchestrator_jobs("cancelled")

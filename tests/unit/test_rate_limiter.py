@@ -7,6 +7,7 @@ import pytest
 
 from dalston.gateway.services.rate_limiter import (
     CONCURRENT_COUNTER_TTL_SECONDS,
+    KEY_PREFIX_JOB_DECREMENTED,
     KEY_PREFIX_JOBS,
     KEY_PREFIX_SESSIONS,
     RedisRateLimiter,
@@ -171,6 +172,81 @@ class TestConcurrentJobsLimit:
         mock_redis.set.assert_called_once_with(
             expected_key, 0, ex=CONCURRENT_COUNTER_TTL_SECONDS
         )
+
+    async def test_decrement_once_first_call_decrements(self, rate_limiter, mock_redis):
+        """First call should decrement and return True."""
+        job_id = uuid4()
+        tenant_id = uuid4()
+
+        # SET NX succeeds (key didn't exist)
+        mock_redis.set.return_value = True
+        pipe = mock_redis.pipeline.return_value
+        pipe.execute.return_value = [2, True]  # decr result, expire result
+
+        result = await rate_limiter.decrement_concurrent_jobs_once(job_id, tenant_id)
+
+        assert result is True
+        guard_key = f"{KEY_PREFIX_JOB_DECREMENTED}:{job_id}"
+        mock_redis.set.assert_called_once_with(
+            guard_key, "1", nx=True, ex=CONCURRENT_COUNTER_TTL_SECONDS
+        )
+        counter_key = f"{KEY_PREFIX_JOBS}:{tenant_id}"
+        pipe.decr.assert_called_once_with(counter_key)
+        pipe.expire.assert_called_once_with(counter_key, CONCURRENT_COUNTER_TTL_SECONDS)
+
+    async def test_decrement_once_second_call_skipped(self, rate_limiter, mock_redis):
+        """Second call for same job should skip decrement and return False."""
+        job_id = uuid4()
+        tenant_id = uuid4()
+
+        # SET NX fails (key already exists)
+        mock_redis.set.return_value = False
+
+        result = await rate_limiter.decrement_concurrent_jobs_once(job_id, tenant_id)
+
+        assert result is False
+        # Pipeline should NOT have been created for decrement
+        mock_redis.pipeline.assert_not_called()
+
+    async def test_decrement_once_prevents_negative(self, rate_limiter, mock_redis):
+        """Should reset to 0 if idempotent decrement would go negative."""
+        job_id = uuid4()
+        tenant_id = uuid4()
+
+        # SET NX succeeds, but pipeline decr goes negative
+        mock_redis.set.return_value = True
+        pipe = mock_redis.pipeline.return_value
+        pipe.execute.return_value = [-1, True]  # decr result went negative
+
+        await rate_limiter.decrement_concurrent_jobs_once(job_id, tenant_id)
+
+        counter_key = f"{KEY_PREFIX_JOBS}:{tenant_id}"
+        # Should reset to 0 (second set call after the guard key set)
+        assert mock_redis.set.call_count == 2  # guard key + reset to 0
+        mock_redis.set.assert_any_call(
+            counter_key, 0, ex=CONCURRENT_COUNTER_TTL_SECONDS
+        )
+
+    async def test_decrement_once_different_jobs_both_decrement(
+        self, rate_limiter, mock_redis
+    ):
+        """Different job IDs should both successfully decrement."""
+        job_id_1 = uuid4()
+        job_id_2 = uuid4()
+        tenant_id = uuid4()
+
+        # Both SET NX calls succeed
+        mock_redis.set.return_value = True
+        pipe = mock_redis.pipeline.return_value
+        pipe.execute.return_value = [1, True]
+
+        result1 = await rate_limiter.decrement_concurrent_jobs_once(job_id_1, tenant_id)
+        result2 = await rate_limiter.decrement_concurrent_jobs_once(job_id_2, tenant_id)
+
+        assert result1 is True
+        assert result2 is True
+        # Two calls to pipeline for decrement
+        assert mock_redis.pipeline.call_count == 2
 
 
 class TestConcurrentSessionsLimit:

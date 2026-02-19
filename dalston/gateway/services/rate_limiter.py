@@ -20,6 +20,7 @@ logger = structlog.get_logger()
 KEY_PREFIX_REQUESTS = "dalston:ratelimit:requests"
 KEY_PREFIX_JOBS = "dalston:ratelimit:jobs"
 KEY_PREFIX_SESSIONS = "dalston:ratelimit:sessions"
+KEY_PREFIX_JOB_DECREMENTED = "dalston:ratelimit:jobs:decremented"
 
 # TTL for concurrent counters (24 hours) - prevents zombie counters from crashed processes
 CONCURRENT_COUNTER_TTL_SECONDS = 86400
@@ -82,6 +83,15 @@ class RateLimiter(Protocol):
 
     async def decrement_concurrent_jobs(self, tenant_id: UUID) -> None:
         """Decrement concurrent job count for tenant."""
+        ...
+
+    async def decrement_concurrent_jobs_once(
+        self, job_id: UUID, tenant_id: UUID
+    ) -> bool:
+        """Idempotent decrement - only decrements once per job_id.
+
+        Returns True if this call performed the decrement, False if already decremented.
+        """
         ...
 
     async def check_concurrent_sessions(self, tenant_id: UUID) -> RateLimitResult:
@@ -182,6 +192,55 @@ class RedisRateLimiter:
         if results[0] < 0:
             await self._redis.set(key, 0, ex=CONCURRENT_COUNTER_TTL_SECONDS)
         logger.debug("decremented_concurrent_jobs", tenant_id=str(tenant_id))
+
+    async def decrement_concurrent_jobs_once(
+        self, job_id: UUID, tenant_id: UUID
+    ) -> bool:
+        """Idempotent decrement - only decrements once per job_id.
+
+        Uses SET NX guard to ensure the counter is decremented exactly once per job,
+        regardless of how many code paths attempt to decrement it. This prevents both
+        leaks (missed decrements) and double-decrements.
+
+        Args:
+            job_id: Job UUID used as idempotency key
+            tenant_id: Tenant UUID for the counter key
+
+        Returns:
+            True if this call performed the decrement, False if already decremented.
+        """
+        guard_key = f"{KEY_PREFIX_JOB_DECREMENTED}:{job_id}"
+
+        # SET NX returns True only if key was set (didn't exist)
+        was_set = await self._redis.set(
+            guard_key, "1", nx=True, ex=CONCURRENT_COUNTER_TTL_SECONDS
+        )
+
+        if not was_set:
+            logger.debug(
+                "decrement_already_done",
+                job_id=str(job_id),
+                tenant_id=str(tenant_id),
+            )
+            return False
+
+        # Guard was set - we own the decrement
+        counter_key = f"{KEY_PREFIX_JOBS}:{tenant_id}"
+        pipe = self._redis.pipeline()
+        pipe.decr(counter_key)
+        pipe.expire(counter_key, CONCURRENT_COUNTER_TTL_SECONDS)
+        results = await pipe.execute()
+
+        # Ensure we don't go negative
+        if results[0] < 0:
+            await self._redis.set(counter_key, 0, ex=CONCURRENT_COUNTER_TTL_SECONDS)
+
+        logger.debug(
+            "decremented_concurrent_jobs_once",
+            job_id=str(job_id),
+            tenant_id=str(tenant_id),
+        )
+        return True
 
     async def check_concurrent_sessions(self, tenant_id: UUID) -> RateLimitResult:
         """Check if tenant can start a new realtime session."""

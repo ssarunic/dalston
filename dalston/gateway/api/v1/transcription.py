@@ -677,6 +677,7 @@ async def cancel_transcription(
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     jobs_service: JobsService = Depends(get_jobs_service),
+    rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
 ) -> JobCancelledResponse:
     """Cancel a transcription job.
 
@@ -689,6 +690,7 @@ async def cancel_transcription(
     2. Mark PENDING/READY tasks as CANCELLED
     3. Set job status to CANCELLING (or CANCELLED if nothing running)
     4. Publish job.cancel_requested event for orchestrator
+    5. If immediate CANCELLED, decrement concurrent job counter
     """
     try:
         result = await jobs_service.cancel_job(db, job_id, tenant_id=api_key.tenant_id)
@@ -700,6 +702,11 @@ async def cancel_transcription(
 
     # Publish event for orchestrator to remove tasks from Redis queues
     await publish_job_cancel_requested(redis, job_id)
+
+    # If job was immediately cancelled (no running tasks), decrement counter now.
+    # Uses idempotent helper to prevent double-decrement if orchestrator also tries.
+    if result.status == JobStatus.CANCELLED:
+        await rate_limiter.decrement_concurrent_jobs_once(job_id, api_key.tenant_id)
 
     return JobCancelledResponse(
         id=result.job.id,
