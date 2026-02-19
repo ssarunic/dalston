@@ -159,6 +159,18 @@ def _init_orchestrator_metrics() -> None:
         buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25),
     )
 
+    _orchestrator_metrics["tasks_timed_out_total"] = Counter(
+        "dalston_orchestrator_tasks_timed_out_total",
+        "Tasks failed by scanner due to timeout",
+        ["stage"],
+    )
+
+    _orchestrator_metrics["scanner_scans_total"] = Counter(
+        "dalston_orchestrator_scanner_scans_total",
+        "Number of stale task scanner runs",
+        ["status"],
+    )
+
 
 def _init_engine_metrics() -> None:
     """Initialize Engine-specific metrics."""
@@ -202,6 +214,12 @@ def _init_engine_metrics() -> None:
         "dalston_engine_task_redelivery_total",
         "Number of task redeliveries (delivery_count > 1)",
         ["stage", "reason"],
+    )
+
+    _engine_metrics["tasks_skipped_cancelled_total"] = Counter(
+        "dalston_engine_tasks_skipped_cancelled_total",
+        "Tasks skipped because job was cancelled",
+        ["stage"],
     )
 
 
@@ -450,6 +468,32 @@ def observe_orchestrator_dag_build(duration: float) -> None:
     _orchestrator_metrics["dag_build_duration_seconds"].observe(duration)
 
 
+def inc_orchestrator_tasks_timed_out(stage: str) -> None:
+    """Increment tasks timed out counter.
+
+    Called by the stale task scanner when a task is failed due to timeout.
+
+    Args:
+        stage: Pipeline stage name
+    """
+    if not _metrics_enabled or "tasks_timed_out_total" not in _orchestrator_metrics:
+        return
+    _orchestrator_metrics["tasks_timed_out_total"].labels(stage=stage).inc()
+
+
+def inc_orchestrator_scanner_scans(status: str) -> None:
+    """Increment scanner scans counter.
+
+    Called after each scanner run to track scan outcomes.
+
+    Args:
+        status: Scan status (success, error, skipped_not_leader)
+    """
+    if not _metrics_enabled or "scanner_scans_total" not in _orchestrator_metrics:
+        return
+    _orchestrator_metrics["scanner_scans_total"].labels(status=status).inc()
+
+
 # =============================================================================
 # Engine Metrics
 # =============================================================================
@@ -532,6 +576,19 @@ def inc_task_redelivery(stage: str, reason: str) -> None:
     if not _metrics_enabled or "task_redelivery_total" not in _engine_metrics:
         return
     _engine_metrics["task_redelivery_total"].labels(stage=stage, reason=reason).inc()
+
+
+def inc_tasks_skipped_cancelled(stage: str) -> None:
+    """Increment counter for tasks skipped due to job cancellation.
+
+    Called when an engine skips processing a task because its job was cancelled.
+
+    Args:
+        stage: Pipeline stage name
+    """
+    if not _metrics_enabled or "tasks_skipped_cancelled_total" not in _engine_metrics:
+        return
+    _engine_metrics["tasks_skipped_cancelled_total"].labels(stage=stage).inc()
 
 
 # =============================================================================

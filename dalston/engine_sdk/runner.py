@@ -336,6 +336,7 @@ class EngineRunner:
                 task_id=message.task_id,
                 job_id=message.job_id,
             )
+            dalston.metrics.inc_tasks_skipped_cancelled(self._stage)
             # ACK the task so it's removed from PEL
             ack_task(self.redis_client, self._stage, self._current_message_id)
             self._current_message_id = None

@@ -20,6 +20,7 @@ import structlog
 from redis.asyncio import Redis
 from sqlalchemy import select
 
+import dalston.metrics
 from dalston.common.events import publish_event
 from dalston.common.models import TaskStatus
 from dalston.common.streams import (
@@ -204,11 +205,13 @@ class StaleTaskScanner:
                         )
                         self._is_leader = False
                     logger.debug("scanner_not_leader", instance_id=self._instance_id)
+                    dalston.metrics.inc_orchestrator_scanner_scans("skipped_not_leader")
 
             except asyncio.CancelledError:
                 break
             except Exception:
                 logger.error("stale_task_scan_error", exc_info=True)
+                dalston.metrics.inc_orchestrator_scanner_scans("error")
                 # Continue running despite errors
                 self._is_leader = False
 
@@ -239,6 +242,8 @@ class StaleTaskScanner:
                 stale_tasks_found=total_stale,
                 tasks_failed=total_failed,
             )
+
+        dalston.metrics.inc_orchestrator_scanner_scans("success")
 
     async def _scan_stream(self, stage: str) -> tuple[int, int]:
         """Scan a single stream for stale tasks.
@@ -291,6 +296,7 @@ class StaleTaskScanner:
                     )
                     if success:
                         failed_count += 1
+                        dalston.metrics.inc_orchestrator_tasks_timed_out(stage)
 
         return stale_count, failed_count
 
