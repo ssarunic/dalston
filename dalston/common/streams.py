@@ -38,6 +38,10 @@ logger = structlog.get_logger()
 STREAM_PREFIX = "dalston:stream:"
 CONSUMER_GROUP = "engines"
 
+# Job cancellation tracking
+JOB_CANCELLED_KEY_PREFIX = "dalston:job:cancelled:"
+JOB_CANCELLED_TTL_SECONDS = 3600 * 24  # 24 hours - longer than any job could run
+
 
 @dataclass
 class StreamMessage:
@@ -535,6 +539,35 @@ async def is_engine_alive(redis: Redis, engine_id: str) -> bool:
         return age < 60  # HEARTBEAT_TIMEOUT_SECONDS
     except ValueError:
         return False
+
+
+async def mark_job_cancelled(redis: Redis, job_id: str) -> None:
+    """Mark a job as cancelled in Redis.
+
+    Sets a key that engines can check to skip processing tasks.
+    The key has a TTL to auto-cleanup after the job would have expired anyway.
+
+    Args:
+        redis: Async Redis client
+        job_id: Job UUID string
+    """
+    key = f"{JOB_CANCELLED_KEY_PREFIX}{job_id}"
+    await redis.set(key, "1", ex=JOB_CANCELLED_TTL_SECONDS)
+    logger.debug("job_marked_cancelled", job_id=job_id)
+
+
+async def is_job_cancelled(redis: Redis, job_id: str) -> bool:
+    """Check if a job has been cancelled.
+
+    Args:
+        redis: Async Redis client
+        job_id: Job UUID string
+
+    Returns:
+        True if job is cancelled, False otherwise
+    """
+    key = f"{JOB_CANCELLED_KEY_PREFIX}{job_id}"
+    return await redis.exists(key) > 0
 
 
 def _parse_message(

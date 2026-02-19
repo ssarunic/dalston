@@ -10,6 +10,7 @@ from redis.exceptions import ResponseError
 
 from dalston.common.streams_sync import (
     CONSUMER_GROUP,
+    JOB_CANCELLED_KEY_PREFIX,
     STALE_THRESHOLD_MS,
     PendingTask,
     StreamMessage,
@@ -21,6 +22,7 @@ from dalston.common.streams_sync import (
     ensure_stream_group,
     get_pending,
     is_engine_alive,
+    is_job_cancelled,
     read_task,
 )
 
@@ -372,3 +374,27 @@ class TestDataclasses:
 
         assert task.consumer == "engine-1"
         assert task.delivery_count == 2
+
+
+class TestJobCancellation:
+    """Tests for job cancellation functions."""
+
+    def test_is_job_cancelled_when_cancelled(self):
+        """Test checking a cancelled job."""
+        mock_redis = MagicMock()
+        mock_redis.exists.return_value = 1
+
+        result = is_job_cancelled(mock_redis, "job-123")
+
+        assert result is True
+        mock_redis.exists.assert_called_once_with(f"{JOB_CANCELLED_KEY_PREFIX}job-123")
+
+    def test_is_job_cancelled_when_not_cancelled(self):
+        """Test checking a non-cancelled job."""
+        mock_redis = MagicMock()
+        mock_redis.exists.return_value = 0
+
+        result = is_job_cancelled(mock_redis, "job-456")
+
+        assert result is False
+        mock_redis.exists.assert_called_once_with(f"{JOB_CANCELLED_KEY_PREFIX}job-456")

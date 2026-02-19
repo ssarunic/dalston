@@ -26,6 +26,10 @@ CONSUMER_GROUP = "engines"
 STALE_THRESHOLD_MS = 10 * 60 * 1000  # 10 minutes
 MAX_DELIVERIES = 3
 
+# Job cancellation tracking
+JOB_CANCELLED_KEY_PREFIX = "dalston:job:cancelled:"
+JOB_CANCELLED_TTL_SECONDS = 3600 * 24  # 24 hours - longer than any job could run
+
 
 @dataclass
 class StreamMessage:
@@ -369,6 +373,22 @@ def claim_stale_from_dead_engines(
         return []
 
     return claim_tasks_by_id(r, stage, consumer, claimable)
+
+
+def is_job_cancelled(r: redis.Redis, job_id: str) -> bool:
+    """Check if a job has been cancelled.
+
+    Used by engines to skip processing tasks from cancelled jobs.
+
+    Args:
+        r: Sync Redis client
+        job_id: Job UUID string
+
+    Returns:
+        True if job is cancelled, False otherwise
+    """
+    key = f"{JOB_CANCELLED_KEY_PREFIX}{job_id}"
+    return r.exists(key) > 0
 
 
 def _parse_message(

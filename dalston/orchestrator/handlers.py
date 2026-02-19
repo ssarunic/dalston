@@ -26,6 +26,7 @@ from dalston.common.events import (
 )
 from dalston.common.models import JobStatus, RetentionMode, TaskStatus
 from dalston.common.s3 import get_s3_client
+from dalston.common.streams import mark_job_cancelled
 from dalston.config import Settings, get_settings
 from dalston.db.models import JobModel, TaskModel
 from dalston.gateway.services.rate_limiter import (
@@ -45,7 +46,6 @@ from dalston.orchestrator.registry import BatchEngineRegistry
 from dalston.orchestrator.scheduler import (
     get_task_output,
     queue_task,
-    remove_task_from_queue,
 )
 from dalston.orchestrator.stats import extract_stats_from_transcript
 
@@ -846,9 +846,13 @@ async def handle_job_cancel_requested(
     """Handle job.cancel_requested event.
 
     Steps:
-    1. Fetch all tasks for the job
-    2. For each READY task: remove from Redis queue, mark as CANCELLED
-    3. Check if cancellation is complete
+    1. Mark job as cancelled in Redis (for engines to check)
+    2. Fetch all tasks for the job
+    3. For each PENDING/READY task: mark as CANCELLED
+    4. Check if cancellation is complete
+
+    With Redis Streams (M33), we can't remove tasks from the stream.
+    Instead, engines check the cancellation flag before processing.
 
     Args:
         job_id: UUID of the job to cancel
@@ -858,30 +862,27 @@ async def handle_job_cancel_requested(
     log = logger.bind(job_id=str(job_id))
     log.info("handling_job_cancel_requested")
 
-    # Fetch all tasks for this job
+    # 1. Mark job as cancelled in Redis so engines can skip tasks
+    await mark_job_cancelled(redis, str(job_id))
+
+    # 2. Fetch all tasks for this job
     result = await db.execute(select(TaskModel).where(TaskModel.job_id == job_id))
     all_tasks = list(result.scalars().all())
 
     cancelled_count = 0
 
     for task in all_tasks:
-        if task.status == TaskStatus.READY.value:
-            # Remove from Redis queue.
-            # Note: There's a small race window where an engine may have already
-            # dequeued this task but hasn't updated DB status to RUNNING yet.
-            # This is acceptable because running tasks complete naturally under
-            # our soft cancellation semantics.
-            await remove_task_from_queue(redis, task.id, task.engine_id)
-
-            # Mark as cancelled
+        # Mark PENDING and READY tasks as cancelled
+        # READY tasks in the stream will be skipped by engines (via cancellation check)
+        if task.status in (TaskStatus.PENDING.value, TaskStatus.READY.value):
             task.status = TaskStatus.CANCELLED.value
             cancelled_count += 1
 
     await db.commit()
 
-    log.info("cancelled_ready_tasks", cancelled_count=cancelled_count)
+    log.info("cancelled_pending_ready_tasks", cancelled_count=cancelled_count)
 
-    # Check if cancellation is complete
+    # 3. Check if cancellation is complete
     await _check_job_cancellation_complete(job_id, db, redis)
 
 

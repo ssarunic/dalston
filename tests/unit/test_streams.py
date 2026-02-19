@@ -12,6 +12,7 @@ from redis.exceptions import ResponseError
 
 from dalston.common.streams import (
     CONSUMER_GROUP,
+    JOB_CANCELLED_KEY_PREFIX,
     PendingTask,
     StreamMessage,
     _parse_message,
@@ -24,6 +25,8 @@ from dalston.common.streams import (
     ensure_stream_group,
     get_pending,
     get_stream_info,
+    is_job_cancelled,
+    mark_job_cancelled,
     read_task,
 )
 
@@ -537,3 +540,44 @@ class TestDataclasses:
         assert task.consumer == "engine-1"
         assert task.idle_ms == 60000
         assert task.delivery_count == 2
+
+
+class TestJobCancellation:
+    """Tests for job cancellation tracking."""
+
+    @pytest.fixture
+    def mock_redis(self):
+        """Create mock async Redis client."""
+        return AsyncMock()
+
+    @pytest.mark.asyncio
+    async def test_mark_job_cancelled(self, mock_redis):
+        """Test marking a job as cancelled."""
+        mock_redis.set = AsyncMock(return_value=True)
+
+        await mark_job_cancelled(mock_redis, "job-123")
+
+        mock_redis.set.assert_called_once()
+        call_args = mock_redis.set.call_args
+        assert call_args[0][0] == f"{JOB_CANCELLED_KEY_PREFIX}job-123"
+        assert call_args[0][1] == "1"
+        assert "ex" in call_args[1]
+
+    @pytest.mark.asyncio
+    async def test_is_job_cancelled_true(self, mock_redis):
+        """Test checking a cancelled job."""
+        mock_redis.exists = AsyncMock(return_value=1)
+
+        result = await is_job_cancelled(mock_redis, "job-123")
+
+        assert result is True
+        mock_redis.exists.assert_called_once_with(f"{JOB_CANCELLED_KEY_PREFIX}job-123")
+
+    @pytest.mark.asyncio
+    async def test_is_job_cancelled_false(self, mock_redis):
+        """Test checking a non-cancelled job."""
+        mock_redis.exists = AsyncMock(return_value=0)
+
+        result = await is_job_cancelled(mock_redis, "job-456")
+
+        assert result is False

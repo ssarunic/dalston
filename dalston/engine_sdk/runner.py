@@ -25,6 +25,7 @@ from dalston.common.streams_sync import (
     StreamMessage,
     ack_task,
     claim_stale_from_dead_engines,
+    is_job_cancelled,
     read_task,
 )
 from dalston.engine_sdk import io
@@ -320,6 +321,7 @@ class EngineRunner:
         logger.info(
             "task_received",
             task_id=message.task_id,
+            job_id=message.job_id,
             delivery_count=message.delivery_count,
             is_redelivery=message.delivery_count > 1,
         )
@@ -327,10 +329,22 @@ class EngineRunner:
         # Store message ID for ack in finally block
         self._current_message_id = message.id
 
+        # 3. Check if job is cancelled before processing
+        if is_job_cancelled(self.redis_client, message.job_id):
+            logger.info(
+                "task_skipped_job_cancelled",
+                task_id=message.task_id,
+                job_id=message.job_id,
+            )
+            # ACK the task so it's removed from PEL
+            ack_task(self.redis_client, self._stage, self._current_message_id)
+            self._current_message_id = None
+            return
+
         try:
             self._process_task(message.task_id)
         finally:
-            # 3. Always ACK - failure handling is via task.failed event
+            # 4. Always ACK - failure handling is via task.failed event
             if self._current_message_id:
                 ack_task(self.redis_client, self._stage, self._current_message_id)
                 self._current_message_id = None
