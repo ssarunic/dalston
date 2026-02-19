@@ -6,7 +6,7 @@
 | **Duration**     | 7-8 days                                                                                   |
 | **Dependencies** | M28 (Engine Registry)                                                                      |
 | **Deliverable**  | Redis Streams for tasks + events, reconciliation sweeper, atomic claims, HA orchestrator   |
-| **Status**       | Not Started                                                                                |
+| **Status**       | Completed                                                                                  |
 
 ## User Story
 
@@ -1159,55 +1159,55 @@ No data migration needed.
 
 **Task Queue Streams (33.1-33.7):**
 
-- [ ] `dalston/common/streams.py` with helper functions
-- [ ] `discover_streams()` finds all stage streams dynamically
-- [ ] Engine SDK uses `XREADGROUP` + `XAUTOCLAIM` + `XACK`
-- [ ] Engine SDK checks heartbeat before stealing (only claim from dead engines)
-- [ ] Orchestrator uses `XADD` instead of `LPUSH`
-- [ ] Stale scanner discovers streams and fails abandoned tasks
-- [ ] Leader election for scanner
-- [ ] Task cancellation works with streams
-- [ ] `StreamMessage` includes `delivery_count` from PEL
-- [ ] Engine logs `delivery_count` on task processing
-- [ ] Redelivery metric tracks recovery reasons
-- [ ] Metrics updated
+- [x] `dalston/common/streams.py` with helper functions
+- [x] `discover_streams()` finds all stage streams dynamically
+- [x] Engine SDK uses `XREADGROUP` + `XAUTOCLAIM` + `XACK`
+- [x] Engine SDK checks heartbeat before stealing (only claim from dead engines)
+- [x] Orchestrator uses `XADD` instead of `LPUSH`
+- [x] Stale scanner discovers streams and fails abandoned tasks
+- [x] Leader election for scanner
+- [x] Task cancellation works with streams
+- [x] `StreamMessage` includes `delivery_count` from PEL
+- [x] Engine logs `delivery_count` on task processing
+- [x] Redelivery metric tracks recovery reasons
+- [x] Metrics updated
 
 **Multi-Orchestrator Safety (33.8):**
 
-- [ ] Atomic job ownership claim in `handle_job_created()`
-- [ ] Atomic task status transition in `handle_task_completed()`
-- [ ] DB migration: unique constraint on `tasks(job_id, stage)`
-- [ ] Concurrency tests for multi-orchestrator scenarios
+- [x] Atomic job ownership claim in `handle_job_created()`
+- [x] Atomic task status transition in `handle_task_completed()`
+- [x] DB migration: unique constraint on `tasks(job_id, stage)`
+- [x] Concurrency tests for multi-orchestrator scenarios
 
 **Reconciliation Sweeper (33.9):**
 
-- [ ] `dalston/orchestrator/reconciler.py` with stranded state detection
-- [ ] Reconciler finds PENDING jobs with no tasks
-- [ ] Reconciler finds READY tasks not in streams
-- [ ] Reconciler runs under leader election
-- [ ] Metrics for reconciliation repairs
+- [x] `dalston/orchestrator/reconciler.py` with stranded state detection
+- [x] Reconciler finds PENDING jobs with no tasks
+- [x] Reconciler finds READY tasks not in streams
+- [x] Reconciler runs under leader election
+- [x] Metrics for reconciliation repairs
 
 **Durable Event Transport (33.10):**
 
-- [ ] `dalston/common/events.py` migrated to Redis Streams
-- [ ] Event consumer group `orchestrators` created on startup
-- [ ] Orchestrator replays pending events on restart
-- [ ] All `publish_*` functions use `XADD`
-- [ ] Events acknowledged after successful handler execution
-- [ ] Integration test: orchestrator down during job.created
+- [x] `dalston/common/events.py` migrated to Redis Streams
+- [x] Event consumer group `orchestrators` created on startup
+- [x] Orchestrator replays pending events on restart
+- [x] All `publish_*` functions use `XADD`
+- [x] Events acknowledged after successful handler execution
+- [x] Integration test: orchestrator down during job.created
 
 **Redis AOF (33.11):**
 
-- [ ] `docker-compose.yml` Redis configured with AOF
-- [ ] Redis data volume for persistence
-- [ ] Integration test: Redis restart preserves streams
+- [x] `docker-compose.yml` Redis configured with AOF
+- [x] Redis data volume for persistence
+- [x] Integration test: Redis restart preserves streams
 
 **Acceptance Criteria:**
 
-- [ ] Orchestrator down during event → processes after restart
-- [ ] Redis restart → system recovers without manual intervention
-- [ ] No job stuck indefinitely due to missed control-plane messages
-- [ ] Integration tests simulate orchestrator/Redis restarts
+- [x] Orchestrator down during event → processes after restart
+- [x] Redis restart → system recovers without manual intervention
+- [x] No job stuck indefinitely due to missed control-plane messages
+- [x] Integration tests simulate orchestrator/Redis restarts
 
 ---
 
