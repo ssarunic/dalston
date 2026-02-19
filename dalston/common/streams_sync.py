@@ -9,66 +9,37 @@ Consumer group: "engines"
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import redis
 import structlog
 from redis.exceptions import ResponseError
 
+from dalston.common.streams_types import (
+    CONSUMER_GROUP,
+    HEARTBEAT_TIMEOUT_SECONDS,
+    JOB_CANCELLED_KEY_PREFIX,
+    JOB_CANCELLED_TTL_SECONDS,
+    MAX_DELIVERIES,
+    STALE_THRESHOLD_MS,
+    STREAM_PREFIX,
+    PendingTask,
+    StreamMessage,
+)
+
 logger = structlog.get_logger()
 
-# Stream naming (must match async version)
-STREAM_PREFIX = "dalston:stream:"
-CONSUMER_GROUP = "engines"
-
-# Recovery thresholds
-STALE_THRESHOLD_MS = 10 * 60 * 1000  # 10 minutes
-MAX_DELIVERIES = 3
-
-# Job cancellation tracking
-JOB_CANCELLED_KEY_PREFIX = "dalston:job:cancelled:"
-JOB_CANCELLED_TTL_SECONDS = 3600 * 24  # 24 hours - longer than any job could run
-
-
-@dataclass
-class StreamMessage:
-    """Message read from a Redis Stream.
-
-    Attributes:
-        id: Redis message ID (e.g., "1234567890-0")
-        task_id: Task UUID string
-        job_id: Job UUID string
-        enqueued_at: When the task was added to the stream
-        timeout_at: When the task should be considered timed out
-        delivery_count: How many times this message was delivered (1 = first attempt)
-    """
-
-    id: str
-    task_id: str
-    job_id: str
-    enqueued_at: datetime
-    timeout_at: datetime
-    delivery_count: int
-
-
-@dataclass
-class PendingTask:
-    """Task currently being processed (in Pending Entries List).
-
-    Attributes:
-        message_id: Redis message ID
-        task_id: Task UUID string
-        consumer: Engine ID that claimed it
-        idle_ms: Time since last delivery in milliseconds
-        delivery_count: How many times delivered
-    """
-
-    message_id: str
-    task_id: str
-    consumer: str
-    idle_ms: int
-    delivery_count: int
+# Re-export for backwards compatibility
+__all__ = [
+    "STREAM_PREFIX",
+    "CONSUMER_GROUP",
+    "STALE_THRESHOLD_MS",
+    "MAX_DELIVERIES",
+    "JOB_CANCELLED_KEY_PREFIX",
+    "JOB_CANCELLED_TTL_SECONDS",
+    "StreamMessage",
+    "PendingTask",
+]
 
 
 def _stream_key(stage: str) -> str:
@@ -327,7 +298,7 @@ def is_engine_alive(r: redis.Redis, engine_id: str) -> bool:
             last_heartbeat_str.replace("Z", "+00:00")
         )
         age = (datetime.now(UTC) - last_heartbeat).total_seconds()
-        return age < 60  # HEARTBEAT_TIMEOUT_SECONDS
+        return age < HEARTBEAT_TIMEOUT_SECONDS
     except ValueError:
         return False
 
