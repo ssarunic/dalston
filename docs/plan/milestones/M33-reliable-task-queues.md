@@ -1,12 +1,12 @@
 # M33: Reliable Task Queues
 
-|               |                                                                                 |
-| ------------- | ------------------------------------------------------------------------------- |
-| **Goal**      | Crash-resilient task processing with automatic recovery                         |
-| **Duration**  | 4-5 days                                                                        |
-| **Dependencies** | M28 (Engine Registry)                                                        |
-| **Deliverable** | Redis Streams task queues, stale task recovery, HA orchestrator support       |
-| **Status**    | Not Started                                                                     |
+|                  |                                                                                          |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| **Goal**         | Crash-resilient task processing with recovery and multi-orchestrator safety             |
+| **Duration**     | 5-6 days                                                                                 |
+| **Dependencies** | M28 (Engine Registry)                                                                    |
+| **Deliverable**  | Redis Streams task queues, stale task recovery, atomic event handling, HA orchestrator   |
+| **Status**       | Not Started                                                                              |
 
 ## User Story
 
@@ -21,7 +21,8 @@
 | Engine crashes mid-task | Job stuck forever | Task auto-recovers after 10 min |
 | Task exceeds 20 min timeout | Nothing happens | Task failed, job proceeds/fails |
 | Engine restarts after crash | Lost task | Claims stale tasks on startup |
-| Multiple orchestrators | Not supported | Leader election for scanner |
+| Multiple orchestrators (scanner) | Not supported | Leader election for scanner |
+| Multiple orchestrators (events) | Duplicate DAGs possible | Atomic DB ownership claims |
 | Max retries exceeded | Manual intervention | Job fails with clear error |
 
 ---
@@ -391,7 +392,7 @@ async def try_acquire_leader(redis: Redis, instance_id: str) -> bool:
     return False
 ```
 
-**Note:** Event handling remains concurrent across all orchestrators. Only the scanner needs leader election to avoid duplicate failure events.
+**Note:** Event handling remains concurrent across all orchestrators (no leader election for events). Section 33.8 ensures correctness via atomic DB ownership claims rather than event routing.
 
 ---
 
@@ -461,6 +462,167 @@ dalston_task_recovery_total = Counter(
 
 ---
 
+### 33.8: Multi-Orchestrator Event Safety
+
+**Problem:**
+
+When multiple orchestrators run concurrently, they all receive the same events via Redis pub/sub broadcast. Without atomic ownership claims, race conditions cause:
+
+1. **Duplicate DAG creation** - Two orchestrators both handle `job.created`, both see status=pending, both create tasks with different UUIDs
+2. **Duplicate dependent queueing** - Two orchestrators both handle `task.completed`, both see dependent status=pending, both queue the same task
+
+**Evidence from code review:**
+
+- `handlers.py:121-132` - Non-atomic check for job status + task existence
+- `handlers.py:368-377` - Non-atomic check-then-act for dependent task status
+- `events.py:49` - Broadcast publish to all subscribers
+- `models.py:247` - No uniqueness constraint on tasks table
+
+**Deliverables:**
+
+- Atomic job ownership claim in `handle_job_created()`
+- Atomic task status transitions in `handle_task_completed()`
+- DB migration adding uniqueness constraint for tasks
+
+**Implementation:**
+
+**1. Atomic job ownership (`handlers.py`):**
+
+```python
+from sqlalchemy import update
+
+async def handle_job_created(job_id: UUID, db: AsyncSession, ...):
+    log = logger.bind(job_id=str(job_id))
+    log.info("handling_job_created")
+
+    # Atomically claim ownership - only one orchestrator wins
+    result = await db.execute(
+        update(JobModel)
+        .where(
+            JobModel.id == job_id,
+            JobModel.status == JobStatus.PENDING.value,
+        )
+        .values(
+            status=JobStatus.RUNNING.value,
+            started_at=datetime.now(UTC),
+        )
+        .returning(JobModel.id)
+    )
+
+    claimed_id = result.scalar_one_or_none()
+    if claimed_id is None:
+        # Another orchestrator already claimed this job, or job was cancelled
+        log.info("job_already_claimed_or_cancelled")
+        return
+
+    await db.commit()
+
+    # Now safe to build DAG - we own this job
+    job = await db.get(JobModel, job_id)
+    # ... rest of handler
+```
+
+**2. Atomic dependent task transition (`handlers.py`):**
+
+```python
+async def handle_task_completed(task_id: UUID, db: AsyncSession, ...):
+    # ... mark task completed ...
+
+    # For each potential dependent:
+    for dependent in all_tasks:
+        if dependent.status != TaskStatus.PENDING.value:
+            continue
+
+        deps_met = all(dep_id in completed_ids for dep_id in dependent.dependencies)
+
+        if deps_met:
+            # Atomically claim the transition - only one orchestrator wins
+            result = await db.execute(
+                update(TaskModel)
+                .where(
+                    TaskModel.id == dependent.id,
+                    TaskModel.status == TaskStatus.PENDING.value,
+                )
+                .values(status=TaskStatus.READY.value)
+                .returning(TaskModel.id)
+            )
+
+            claimed_id = result.scalar_one_or_none()
+            if claimed_id is None:
+                # Another orchestrator already transitioned this task
+                log.debug("dependent_already_claimed", task_id=str(dependent.id))
+                continue
+
+            await db.commit()
+
+            # Now safe to queue - we own this transition
+            await queue_task(redis=redis, task=task_model, ...)
+```
+
+**3. DB uniqueness constraint (migration):**
+
+```sql
+-- Prevent duplicate tasks for same job+stage (excluding per-channel stages)
+-- For per-channel stages like transcribe_ch0, the stage name itself is unique
+ALTER TABLE tasks ADD CONSTRAINT uq_tasks_job_stage
+    UNIQUE (job_id, stage);
+```
+
+Note: This constraint works because:
+
+- Regular stages: one task per job (e.g., `prepare`, `merge`)
+- Per-channel stages: include channel in name (e.g., `transcribe_ch0`, `transcribe_ch1`)
+
+**4. Concurrency tests:**
+
+```python
+async def test_concurrent_job_created_handlers():
+    """Only one orchestrator should create DAG when both handle same event."""
+    job = await create_pending_job(db)
+
+    # Simulate two orchestrators handling same event concurrently
+    results = await asyncio.gather(
+        handle_job_created(job.id, db_session_1, redis, settings, registry),
+        handle_job_created(job.id, db_session_2, redis, settings, registry),
+        return_exceptions=True,
+    )
+
+    # Verify exactly one DAG was created
+    tasks = await db.execute(select(TaskModel).where(TaskModel.job_id == job.id))
+    task_list = tasks.scalars().all()
+
+    # Should have exactly N tasks (one DAG), not 2N (duplicate DAGs)
+    assert len(task_list) == expected_task_count
+
+    # All tasks should have same creation pattern (from single DAG build)
+    stages = [t.stage for t in task_list]
+    assert len(stages) == len(set(stages))  # No duplicate stages
+
+
+async def test_concurrent_dependent_queueing():
+    """Only one orchestrator should queue dependent when both handle same completion."""
+    job, tasks = await create_job_with_tasks(db)
+    transcribe_task = next(t for t in tasks if t.stage == "transcribe")
+    merge_task = next(t for t in tasks if t.stage == "merge")
+
+    # Complete transcribe (merge depends on it)
+    transcribe_task.status = TaskStatus.COMPLETED.value
+    await db.commit()
+
+    # Simulate two orchestrators handling same task.completed event
+    await asyncio.gather(
+        handle_task_completed(transcribe_task.id, db_session_1, redis, ...),
+        handle_task_completed(transcribe_task.id, db_session_2, redis, ...),
+    )
+
+    # Verify merge was queued exactly once
+    queue_calls = redis_mock.xadd.call_args_list
+    merge_queues = [c for c in queue_calls if "merge" in str(c)]
+    assert len(merge_queues) == 1
+```
+
+---
+
 ## Verification
 
 ```bash
@@ -499,6 +661,26 @@ curl -s http://localhost:8000/v1/audio/transcriptions/$JOB_ID | jq '.status'
 
 # 9. Check delivery count was incremented
 docker compose logs stt-batch-transcribe-whisper-cpu | grep claimed_stale
+
+# 10. Test multi-orchestrator safety
+# Scale to 2 orchestrators
+docker compose up -d --scale orchestrator=2
+
+# Submit multiple jobs rapidly
+for i in {1..5}; do
+  curl -s -X POST http://localhost:8000/v1/audio/transcriptions \
+    -F "file=@test_audio.mp3" &
+done
+wait
+
+# Verify no duplicate tasks in DB
+docker compose exec postgres psql -U dalston -c "
+  SELECT job_id, stage, COUNT(*) as cnt
+  FROM tasks
+  GROUP BY job_id, stage
+  HAVING COUNT(*) > 1;
+"
+# Should return 0 rows (no duplicates)
 ```
 
 ---
@@ -538,6 +720,10 @@ No data migration needed.
 - [ ] Task cancellation works with streams
 - [ ] Metrics updated
 - [ ] Integration test for crash recovery
+- [ ] Atomic job ownership claim in `handle_job_created()`
+- [ ] Atomic task status transition in `handle_task_completed()`
+- [ ] DB migration: unique constraint on `tasks(job_id, stage)`
+- [ ] Concurrency tests for multi-orchestrator scenarios
 
 ---
 
@@ -569,4 +755,7 @@ LEADER_TTL_S=30
 | `dalston/orchestrator/scanner.py` | New - stale task scanner |
 | `dalston/orchestrator/leader.py` | New - leader election |
 | `dalston/orchestrator/main.py` | Add scanner loop |
+| `dalston/orchestrator/handlers.py` | Atomic ownership claims for job/task transitions |
 | `dalston/metrics.py` | Add stream metrics |
+| `alembic/versions/xxx_add_task_uniqueness.py` | New - unique constraint on tasks |
+| `tests/integration/test_multi_orchestrator.py` | New - concurrency tests |
