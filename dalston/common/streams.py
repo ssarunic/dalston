@@ -54,9 +54,29 @@ __all__ = [
 ]
 
 
+def _base_stage(stage: str) -> str:
+    """Extract base stage from per-channel stage name.
+
+    Per-channel stages like "transcribe_ch0" route to the base "transcribe" stream
+    so that any engine listening on the base stream can process them.
+
+    Examples:
+        transcribe_ch0 -> transcribe
+        transcribe_ch1 -> transcribe
+        diarize -> diarize (unchanged)
+    """
+    if "_ch" in stage and stage.split("_ch")[-1].isdigit():
+        return stage.rsplit("_ch", 1)[0]
+    return stage
+
+
 def _stream_key(stage: str) -> str:
-    """Build stream key from stage name."""
-    return f"{STREAM_PREFIX}{stage}"
+    """Build stream key from stage name.
+
+    Per-channel stages route to the base stream so engines don't need
+    separate consumers for each channel.
+    """
+    return f"{STREAM_PREFIX}{_base_stage(stage)}"
 
 
 async def ensure_stream_group(redis: Redis, stage: str) -> None:
