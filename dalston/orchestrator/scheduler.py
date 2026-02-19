@@ -20,6 +20,7 @@ import dalston.telemetry
 from dalston.common.models import Task
 from dalston.common.pipeline_types import AudioMedia, TaskInputData
 from dalston.common.s3 import get_s3_client
+from dalston.common.streams import add_task
 from dalston.config import Settings
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog, get_catalog
 from dalston.orchestrator.exceptions import (
@@ -36,7 +37,7 @@ logger = structlog.get_logger()
 
 # Redis key patterns
 TASK_METADATA_KEY = "dalston:task:{task_id}"
-ENGINE_QUEUE_KEY = "dalston:queue:{engine_id}"
+# Note: ENGINE_QUEUE_KEY removed in M33 - now using Redis Streams via dalston.common.streams
 
 # Timeout calculation constants (M30)
 MIN_TIMEOUT_S = 60  # Minimum timeout for any task
@@ -329,11 +330,18 @@ async def queue_task(
         audio_metadata=audio_metadata,
     )
 
-    # 3. Push task_id to engine queue
-    queue_key = ENGINE_QUEUE_KEY.format(engine_id=task.engine_id)
-    await redis.lpush(queue_key, task_id_str)
+    # 3. Add task to stream (replaces lpush to queue)
+    message_id = await add_task(
+        redis,
+        stage=task.stage,
+        task_id=task_id_str,
+        job_id=job_id_str,
+        timeout_s=base_timeout,
+    )
 
-    log.info("task_queued", queue=queue_key)
+    log.info(
+        "task_queued", stream=f"dalston:stream:{task.stage}", message_id=message_id
+    )
 
 
 async def remove_task_from_queue(
@@ -343,6 +351,11 @@ async def remove_task_from_queue(
 ) -> bool:
     """Remove a task from its engine queue.
 
+    DEPRECATED: With Redis Streams (M33), tasks cannot be removed directly.
+    Instead, engines check job cancellation status when claiming tasks.
+    This function is kept for backwards compatibility during migration
+    but will be removed in a future version.
+
     Used during job cancellation to prevent READY tasks from being picked up.
 
     Args:
@@ -351,23 +364,18 @@ async def remove_task_from_queue(
         engine_id: Engine queue to remove from
 
     Returns:
-        True if task was found and removed, False otherwise
+        True if task was found and removed, False otherwise.
+        Always returns False with Streams (tasks handled via cancellation check).
     """
-    task_id_str = str(task_id)
-    queue_key = ENGINE_QUEUE_KEY.format(engine_id=engine_id)
-
-    # LREM removes all occurrences of value from list (count=0 means all)
-    removed = await redis.lrem(queue_key, 0, task_id_str)
-
-    if removed > 0:
-        logger.info(
-            "task_removed_from_queue",
-            task_id=task_id_str,
-            engine_id=engine_id,
-            queue=queue_key,
-        )
-        return True
-
+    # With Redis Streams, we cannot remove messages by task_id.
+    # The engine will check job cancellation status when it claims the task.
+    # See M33 Step 33.6 for updated cancellation flow.
+    logger.debug(
+        "remove_task_from_queue_noop",
+        task_id=str(task_id),
+        engine_id=engine_id,
+        reason="streams_migration",
+    )
     return False
 
 

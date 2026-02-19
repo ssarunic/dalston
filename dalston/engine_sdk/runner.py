@@ -20,6 +20,13 @@ import structlog
 import dalston.logging
 import dalston.metrics
 import dalston.telemetry
+from dalston.common.streams_sync import (
+    STALE_THRESHOLD_MS,
+    StreamMessage,
+    ack_task,
+    claim_stale_from_dead_engines,
+    read_task,
+)
 from dalston.engine_sdk import io
 from dalston.engine_sdk.registry import BatchEngineInfo, BatchEngineRegistry
 from dalston.engine_sdk.types import TaskInput, TaskOutput
@@ -101,7 +108,9 @@ class EngineRunner:
         self._metrics_thread: threading.Thread | None = None
         self._heartbeat_thread: threading.Thread | None = None
         self._current_task_id: str | None = None
+        self._current_message_id: str | None = None  # Stream message ID for ack
         self._task_lock = threading.Lock()  # Protects _current_task_id
+        self._stage: str = "unknown"  # Pipeline stage from capabilities
 
         # Load configuration from environment
         self.engine_id = os.environ.get("ENGINE_ID", "unknown")
@@ -151,12 +160,12 @@ class EngineRunner:
         capabilities = self.engine.get_capabilities()
 
         # Get stage from capabilities (derived from engine.yaml) or fallback to "unknown"
-        stage = capabilities.stages[0] if capabilities.stages else "unknown"
+        self._stage = capabilities.stages[0] if capabilities.stages else "unknown"
 
         self._registry.register(
             BatchEngineInfo(
                 engine_id=self.engine_id,
-                stage=stage,
+                stage=self._stage,
                 queue_name=self.queue_key,
                 capabilities=capabilities,
             )
@@ -267,21 +276,64 @@ class EngineRunner:
         signal.signal(signal.SIGINT, handle_signal)
 
     def _poll_and_process(self) -> None:
-        """Poll the queue and process one task."""
-        # Blocking pop with timeout
-        result = self.redis_client.brpop(
-            self.queue_key,
-            timeout=self.QUEUE_POLL_TIMEOUT,
+        """Poll the stream and process one task.
+
+        Uses Redis Streams with consumer groups for crash-resilient delivery:
+        1. Try to claim stale tasks from dead engines first (recovery)
+        2. If no stale tasks, read new ones via XREADGROUP
+        3. Always ACK after processing (success or failure)
+        """
+        message: StreamMessage | None = None
+
+        # 1. Try to claim stale tasks from DEAD engines only
+        stale = claim_stale_from_dead_engines(
+            self.redis_client,
+            stage=self._stage,
+            consumer=self.engine_id,
+            min_idle_ms=STALE_THRESHOLD_MS,
+            count=1,
         )
 
-        if result is None:
+        if stale:
+            message = stale[0]
+            logger.info(
+                "claimed_stale_task",
+                task_id=message.task_id,
+                delivery_count=message.delivery_count,
+                previous_consumer=message.id,  # Actually message ID, consumer tracked in PEL
+            )
+            # Track redelivery for observability
+            dalston.metrics.inc_task_redelivery(self._stage, reason="engine_crash")
+        else:
+            # 2. No stale tasks - read new ones
+            message = read_task(
+                self.redis_client,
+                stage=self._stage,
+                consumer=self.engine_id,
+                block_ms=self.QUEUE_POLL_TIMEOUT * 1000,
+            )
+
+        if message is None:
             # Timeout, no task available
             return
 
-        _, task_id = result
-        logger.info("task_received", task_id=task_id)
+        logger.info(
+            "task_received",
+            task_id=message.task_id,
+            delivery_count=message.delivery_count,
+            is_redelivery=message.delivery_count > 1,
+        )
 
-        self._process_task(task_id)
+        # Store message ID for ack in finally block
+        self._current_message_id = message.id
+
+        try:
+            self._process_task(message.task_id)
+        finally:
+            # 3. Always ACK - failure handling is via task.failed event
+            if self._current_message_id:
+                ack_task(self.redis_client, self._stage, self._current_message_id)
+                self._current_message_id = None
 
     def _process_task(self, task_id: str) -> None:
         """Process a single task.

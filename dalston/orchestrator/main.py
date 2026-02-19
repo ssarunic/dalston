@@ -38,6 +38,7 @@ from dalston.orchestrator.handlers import (
     handle_task_started,
 )
 from dalston.orchestrator.registry import BatchEngineRegistry
+from dalston.orchestrator.scanner import StaleTaskScanner
 
 # Configure structured logging via shared module
 dalston.logging.configure("orchestrator")
@@ -54,6 +55,7 @@ dalston.metrics.configure_metrics("orchestrator")
 _shutdown_event: asyncio.Event | None = None
 _delivery_worker: DeliveryWorker | None = None
 _cleanup_worker: CleanupWorker | None = None
+_stale_task_scanner: StaleTaskScanner | None = None
 _metrics_app: web.Application | None = None
 _metrics_runner: web.AppRunner | None = None
 
@@ -107,7 +109,7 @@ async def orchestrator_loop() -> None:
 
     Subscribes to Redis pub/sub and dispatches events to handlers.
     """
-    global _shutdown_event, _delivery_worker, _cleanup_worker
+    global _shutdown_event, _delivery_worker, _cleanup_worker, _stale_task_scanner
     _shutdown_event = asyncio.Event()
 
     settings = get_settings()
@@ -143,6 +145,14 @@ async def orchestrator_loop() -> None:
 
     # Connect to Redis
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+
+    # Start stale task scanner (M33 - Redis Streams recovery)
+    _stale_task_scanner = StaleTaskScanner(
+        redis=redis,
+        db_session_factory=async_session,
+        settings=settings,
+    )
+    await _stale_task_scanner.start()
     pubsub = redis.pubsub()
 
     # Initialize batch engine registry
@@ -178,6 +188,10 @@ async def orchestrator_loop() -> None:
                 await asyncio.sleep(0.1)
 
     finally:
+        # Stop stale task scanner
+        if _stale_task_scanner:
+            await _stale_task_scanner.stop()
+
         # Stop delivery worker
         if _delivery_worker:
             await _delivery_worker.stop()

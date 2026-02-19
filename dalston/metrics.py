@@ -198,6 +198,12 @@ def _init_engine_metrics() -> None:
         buckets=(0.01, 0.05, 0.1, 0.5, 1, 2.5, 5, 10),
     )
 
+    _engine_metrics["task_redelivery_total"] = Counter(
+        "dalston_engine_task_redelivery_total",
+        "Number of task redeliveries (delivery_count > 1)",
+        ["stage", "reason"],
+    )
+
 
 def _init_session_router_metrics() -> None:
     """Initialize Session Router-specific metrics."""
@@ -511,6 +517,21 @@ def observe_engine_s3_upload(engine_id: str, duration: float) -> None:
     if not _metrics_enabled or "s3_upload_seconds" not in _engine_metrics:
         return
     _engine_metrics["s3_upload_seconds"].labels(engine_id=engine_id).observe(duration)
+
+
+def inc_task_redelivery(stage: str, reason: str) -> None:
+    """Increment task redelivery counter.
+
+    Called when a task is redelivered (delivery_count > 1), indicating
+    recovery from a crashed engine.
+
+    Args:
+        stage: Pipeline stage name
+        reason: Reason for redelivery (e.g., "engine_crash", "timeout", "manual_retry")
+    """
+    if not _metrics_enabled or "task_redelivery_total" not in _engine_metrics:
+        return
+    _engine_metrics["task_redelivery_total"].labels(stage=stage, reason=reason).inc()
 
 
 # =============================================================================
