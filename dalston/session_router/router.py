@@ -217,6 +217,20 @@ class SessionRouter:
 
         return await self._allocator.get_session(session_id)
 
+    async def extend_session_ttl(self, session_id: str, ttl: int = 300) -> None:
+        """Extend session TTL to prevent expiration during long sessions.
+
+        Call this periodically for sessions that may exceed the default 5-minute TTL.
+
+        Args:
+            session_id: Session identifier
+            ttl: New TTL in seconds (default: 300 = 5 minutes)
+        """
+        if not self._allocator:
+            raise RuntimeError("Session router not started")
+
+        await self._allocator.extend_session_ttl(session_id, ttl)
+
     async def list_workers(self) -> list[WorkerStatus]:
         """List all workers with status.
 

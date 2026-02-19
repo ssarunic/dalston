@@ -302,8 +302,13 @@ async def realtime_transcription(
     session_error = None
     session_status = "completed"
     session_end_data = None
+    keepalive_task = None
 
     try:
+        # Start keepalive task to extend session TTL for long sessions
+        keepalive_task = asyncio.create_task(
+            _keep_session_alive(session_router, allocation.session_id)
+        )
         # Bind session_id into structlog contextvars for downstream log calls
         structlog.contextvars.bind_contextvars(session_id=allocation.session_id)
 
@@ -379,6 +384,14 @@ async def realtime_transcription(
         session_error = str(e)
         session_status = "error"
     finally:
+        # Cancel keepalive task
+        if keepalive_task:
+            keepalive_task.cancel()
+            try:
+                await keepalive_task
+            except asyncio.CancelledError:
+                pass
+
         # Release worker
         await session_router.release_worker(allocation.session_id)
         log.info("session_released")
@@ -602,7 +615,13 @@ async def elevenlabs_realtime_transcription(
     log.info("elevenlabs_session_allocated")
 
     # Wrap everything after acquire_worker in try/finally to ensure cleanup
+    keepalive_task = None
     try:
+        # Start keepalive task to extend session TTL for long sessions
+        keepalive_task = asyncio.create_task(
+            _keep_session_alive(session_router, allocation.session_id)
+        )
+
         # Send session_started message (ElevenLabs format)
         await websocket.send_json(
             {
@@ -635,8 +654,43 @@ async def elevenlabs_realtime_transcription(
     except Exception as e:
         log.error("elevenlabs_session_error", error=str(e))
     finally:
+        # Cancel keepalive task
+        if keepalive_task:
+            keepalive_task.cancel()
+            try:
+                await keepalive_task
+            except asyncio.CancelledError:
+                pass
+
         await session_router.release_worker(allocation.session_id)
         log.info("elevenlabs_session_released")
+
+
+async def _keep_session_alive(
+    session_router,
+    session_id: str,
+    interval: int = 60,
+) -> None:
+    """Periodically extend session TTL to prevent expiration.
+
+    Sessions have a 5-minute TTL in Redis. For long-running sessions,
+    this task extends the TTL every interval seconds to prevent the
+    health monitor from treating the session as orphaned.
+
+    Args:
+        session_router: SessionRouter instance
+        session_id: Session ID to keep alive
+        interval: How often to extend in seconds (default: 60s)
+    """
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await session_router.extend_session_ttl(session_id)
+            logger.debug("session_ttl_extended", session_id=session_id)
+        except Exception as e:
+            logger.warning(
+                "session_ttl_extend_failed", session_id=session_id, error=str(e)
+            )
 
 
 async def _proxy_to_worker(
