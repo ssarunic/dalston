@@ -26,6 +26,7 @@ from dalston.gateway.dependencies import get_session_router
 from dalston.gateway.middleware.auth import authenticate_websocket
 from dalston.gateway.services.auth import AuthService, Scope
 from dalston.gateway.services.enhancement import EnhancementService
+from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.realtime_sessions import RealtimeSessionService
 from dalston.gateway.services.retention import (
     RetentionPolicyNotFoundError,
@@ -82,6 +83,71 @@ async def _get_auth_service() -> tuple[AuthService, any]:
     db_gen = _get_db()
     db = await db_gen.__anext__()
     return AuthService(db, redis), db_gen
+
+
+async def _check_realtime_rate_limits(
+    websocket: WebSocket,
+    tenant_id: UUID,
+) -> bool:
+    """Check rate limits for realtime WebSocket connections.
+
+    Checks concurrent sessions limit before allowing the connection.
+    Unlike REST endpoints which use Depends(), WebSocket handlers need
+    to manually check rate limits.
+
+    Args:
+        websocket: The WebSocket connection (for sending error messages)
+        tenant_id: Tenant UUID for rate limit lookup
+
+    Returns:
+        True if rate limits pass, False if exceeded (connection will be closed)
+    """
+    settings = get_settings()
+    redis = await _get_redis()
+    rate_limiter = RedisRateLimiter(
+        redis=redis,
+        requests_per_minute=settings.rate_limit_requests_per_minute,
+        max_concurrent_jobs=settings.rate_limit_concurrent_jobs,
+        max_concurrent_sessions=settings.rate_limit_concurrent_sessions,
+    )
+
+    # Check concurrent sessions limit
+    sessions_result = await rate_limiter.check_concurrent_sessions(tenant_id)
+    if not sessions_result.allowed:
+        await websocket.send_json(
+            {
+                "type": "error",
+                "code": "rate_limit_exceeded",
+                "message": f"Concurrent session limit exceeded ({sessions_result.limit} max)",
+            }
+        )
+        await websocket.close(code=4429, reason="Rate limit exceeded")
+        return False
+
+    # Increment concurrent sessions counter (will be decremented on disconnect)
+    await rate_limiter.increment_concurrent_sessions(tenant_id)
+
+    return True
+
+
+async def _decrement_session_count(tenant_id: UUID) -> None:
+    """Decrement concurrent session count when connection closes.
+
+    Args:
+        tenant_id: Tenant UUID for rate limit lookup
+    """
+    try:
+        settings = get_settings()
+        redis = await _get_redis()
+        rate_limiter = RedisRateLimiter(
+            redis=redis,
+            requests_per_minute=settings.rate_limit_requests_per_minute,
+            max_concurrent_jobs=settings.rate_limit_concurrent_jobs,
+            max_concurrent_sessions=settings.rate_limit_concurrent_sessions,
+        )
+        await rate_limiter.decrement_concurrent_sessions(tenant_id)
+    except Exception as e:
+        logger.warning("failed_to_decrement_session_count", error=str(e))
 
 
 # Router for WebSocket endpoint (mounted under /audio/transcriptions)
@@ -197,319 +263,337 @@ async def realtime_transcription(
     # Accept WebSocket connection after successful auth
     await websocket.accept()
 
-    # Validate: enhance_on_end requires store_audio
-    if enhance_on_end and not store_audio:
-        await websocket.send_json(
-            {
-                "type": "error",
-                "code": "invalid_parameters",
-                "message": "enhance_on_end=true requires store_audio=true. "
-                "Audio must be recorded to enable batch enhancement.",
-            }
-        )
-        await websocket.close(code=4400, reason="Invalid parameters")
+    # Check rate limits (concurrent sessions)
+    if not await _check_realtime_rate_limits(websocket, api_key.tenant_id):
         return
 
-    # Validate: PII detection requires enhance_on_end (batch processing)
-    if pii_detection and not enhance_on_end:
-        await websocket.send_json(
-            {
-                "type": "error",
-                "code": "invalid_parameters",
-                "message": "pii_detection=true requires enhance_on_end=true. "
-                "PII detection runs as part of the batch enhancement pipeline.",
-            }
-        )
-        await websocket.close(code=4400, reason="Invalid parameters")
-        return
+    # Track tenant_id for decrementing session count on disconnect
+    session_tenant_id = api_key.tenant_id
 
-    # Validate: redact_pii_audio requires pii_detection and store_audio
-    if redact_pii_audio and not (pii_detection and store_audio):
-        await websocket.send_json(
-            {
-                "type": "error",
-                "code": "invalid_parameters",
-                "message": "redact_pii_audio=true requires pii_detection=true and store_audio=true.",
-            }
-        )
-        await websocket.close(code=4400, reason="Invalid parameters")
-        return
-
-    # Model parameter: use engine ID directly or None for any available worker
-    # For realtime routing, we pass the engine ID to the session router
-    routing_model = model if model else None
-    resolved_model = model or "any"  # For logging
-
-    # Get client IP for logging
-    client_ip = websocket.client.host if websocket.client else "unknown"
-
-    # Resolve retention policy (only matters if storing artifacts)
-    resolved_retention = None
-    if store_audio or store_transcript:
-        try:
-            db_gen_ret = _get_db()
-            db_ret = await db_gen_ret.__anext__()
-            try:
-                retention_service = RetentionService()
-                policy = await retention_service.resolve_policy(
-                    db_ret, api_key.tenant_id, retention_policy
-                )
-                resolved_retention = _resolve_realtime_retention(policy)
-            finally:
-                await db_gen_ret.aclose()
-        except RetentionPolicyNotFoundError as e:
+    # Wrap everything after rate limit check in try/finally to ensure
+    # the session counter is always decremented on any exit path
+    allocation = None
+    try:
+        # Validate: enhance_on_end requires store_audio
+        if enhance_on_end and not store_audio:
             await websocket.send_json(
                 {
                     "type": "error",
-                    "code": "invalid_retention_policy",
-                    "message": str(e),
+                    "code": "invalid_parameters",
+                    "message": "enhance_on_end=true requires store_audio=true. "
+                    "Audio must be recorded to enable batch enhancement.",
                 }
             )
-            await websocket.close(code=4400, reason="Invalid retention policy")
+            await websocket.close(code=4400, reason="Invalid parameters")
             return
 
-    # Acquire worker from Session Router (use alias for matching)
-    allocation = await session_router.acquire_worker(
-        language=language,
-        model=routing_model,
-        client_ip=client_ip,
-        enhance_on_end=enhance_on_end,
-    )
+        # Validate: PII detection requires enhance_on_end (batch processing)
+        if pii_detection and not enhance_on_end:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "invalid_parameters",
+                    "message": "pii_detection=true requires enhance_on_end=true. "
+                    "PII detection runs as part of the batch enhancement pipeline.",
+                }
+            )
+            await websocket.close(code=4400, reason="Invalid parameters")
+            return
 
-    if allocation is None:
-        # No capacity - send error and close
-        await websocket.send_json(
-            {
-                "type": "error",
-                "code": "no_capacity",
-                "message": "No realtime workers available. Try again later.",
-            }
-        )
-        await websocket.close(code=4503, reason="No capacity")
-        return
+        # Validate: redact_pii_audio requires pii_detection and store_audio
+        if redact_pii_audio and not (pii_detection and store_audio):
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "invalid_parameters",
+                    "message": "redact_pii_audio=true requires pii_detection=true and store_audio=true.",
+                }
+            )
+            await websocket.close(code=4400, reason="Invalid parameters")
+            return
 
-    log = logger.bind(
-        session_id=allocation.session_id,
-        worker_id=allocation.worker_id,
-        client_ip=client_ip,
-    )
-    log.info("session_allocated")
+        # Model parameter: use engine ID directly or None for any available worker
+        # For realtime routing, we pass the engine ID to the session router
+        routing_model = model if model else None
+        resolved_model = model or "any"  # For logging
 
-    # Wrap everything after acquire_worker in try/finally to ensure cleanup
-    db_session = None
-    db_gen = None
-    session_service = None
-    session_error = None
-    session_status = "completed"
-    session_end_data = None
-    keepalive_task = None
+        # Get client IP for logging
+        client_ip = websocket.client.host if websocket.client else "unknown"
 
-    try:
-        # Start keepalive task to extend session TTL for long sessions
-        keepalive_task = asyncio.create_task(
-            _keep_session_alive(session_router, allocation.session_id)
-        )
-        # Bind session_id into structlog contextvars for downstream log calls
-        structlog.contextvars.bind_contextvars(session_id=allocation.session_id)
-
-        # Create session record in PostgreSQL for persistence/visibility
-        previous_session_uuid = None
-
-        if resume_session_id:
+        # Resolve retention policy (only matters if storing artifacts)
+        resolved_retention = None
+        if store_audio or store_transcript:
             try:
-                previous_session_uuid = parse_session_id(resume_session_id)
-            except ValueError:
-                log.warning(
-                    "invalid_resume_session_id", resume_session_id=resume_session_id
+                db_gen_ret = _get_db()
+                db_ret = await db_gen_ret.__anext__()
+                try:
+                    retention_service = RetentionService()
+                    policy = await retention_service.resolve_policy(
+                        db_ret, api_key.tenant_id, retention_policy
+                    )
+                    resolved_retention = _resolve_realtime_retention(policy)
+                finally:
+                    await db_gen_ret.aclose()
+            except RetentionPolicyNotFoundError as e:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "code": "invalid_retention_policy",
+                        "message": str(e),
+                    }
                 )
+                await websocket.close(code=4400, reason="Invalid retention policy")
+                return
+
+        # Acquire worker from Session Router (use alias for matching)
+        allocation = await session_router.acquire_worker(
+            language=language,
+            model=routing_model,
+            client_ip=client_ip,
+            enhance_on_end=enhance_on_end,
+        )
+
+        if allocation is None:
+            # No capacity - send error and close
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "no_capacity",
+                    "message": "No realtime workers available. Try again later.",
+                }
+            )
+            await websocket.close(code=4503, reason="No capacity")
+            return
+
+        log = logger.bind(
+            session_id=allocation.session_id,
+            worker_id=allocation.worker_id,
+            client_ip=client_ip,
+        )
+        log.info("session_allocated")
+
+        # Session lifecycle state
+        db_session = None
+        db_gen = None
+        session_service = None
+        session_error = None
+        session_status = "completed"
+        session_end_data = None
+        keepalive_task = None
 
         try:
-            # Get fresh DB session for persistence
-            db_gen = _get_db()
-            db_session = await db_gen.__anext__()
-            settings = get_settings()
-            session_service = RealtimeSessionService(db_session, settings)
+            # Start keepalive task to extend session TTL for long sessions
+            keepalive_task = asyncio.create_task(
+                _keep_session_alive(session_router, allocation.session_id)
+            )
+            # Bind session_id into structlog contextvars for downstream log calls
+            structlog.contextvars.bind_contextvars(session_id=allocation.session_id)
 
-            # Create session record
-            # Store user's original model parameter (e.g., "fast", "parakeet-0.6b")
-            # and the actual engine that handled it (e.g., "parakeet", "whisper")
-            await session_service.create_session(
+            # Create session record in PostgreSQL for persistence/visibility
+            previous_session_uuid = None
+
+            if resume_session_id:
+                try:
+                    previous_session_uuid = parse_session_id(resume_session_id)
+                except ValueError:
+                    log.warning(
+                        "invalid_resume_session_id", resume_session_id=resume_session_id
+                    )
+
+            try:
+                # Get fresh DB session for persistence
+                db_gen = _get_db()
+                db_session = await db_gen.__anext__()
+                settings = get_settings()
+                session_service = RealtimeSessionService(db_session, settings)
+
+                # Create session record
+                # Store user's original model parameter (e.g., "fast", "parakeet-0.6b")
+                # and the actual engine that handled it (e.g., "parakeet", "whisper")
+                await session_service.create_session(
+                    session_id=allocation.session_id,
+                    tenant_id=api_key.tenant_id,
+                    worker_id=allocation.worker_id,
+                    client_ip=client_ip,
+                    language=language,
+                    model=model,
+                    engine=allocation.engine,
+                    encoding=encoding,
+                    sample_rate=sample_rate,
+                    store_audio=store_audio,
+                    store_transcript=store_transcript,
+                    enhance_on_end=enhance_on_end,
+                    previous_session_id=previous_session_uuid,
+                    retention_policy_id=resolved_retention.policy_id
+                    if resolved_retention
+                    else None,
+                    retention_mode=resolved_retention.mode
+                    if resolved_retention
+                    else "auto_delete",
+                    retention_hours=resolved_retention.hours
+                    if resolved_retention
+                    else None,
+                )
+            except Exception as e:
+                log.warning("session_db_create_failed", error=str(e))
+                # Continue without persistence - session still works via Redis
+
+            # Connect to worker and proxy bidirectionally
+            session_end_data = await _proxy_to_worker(
+                client_ws=websocket,
+                worker_endpoint=allocation.endpoint,
                 session_id=allocation.session_id,
-                tenant_id=api_key.tenant_id,
-                worker_id=allocation.worker_id,
-                client_ip=client_ip,
                 language=language,
-                model=model,
-                engine=allocation.engine,
+                model=resolved_model,
                 encoding=encoding,
                 sample_rate=sample_rate,
+                enable_vad=enable_vad,
+                interim_results=interim_results,
+                word_timestamps=word_timestamps,
                 store_audio=store_audio,
                 store_transcript=store_transcript,
-                enhance_on_end=enhance_on_end,
-                previous_session_id=previous_session_uuid,
-                retention_policy_id=resolved_retention.policy_id
-                if resolved_retention
-                else None,
-                retention_mode=resolved_retention.mode
-                if resolved_retention
-                else "auto_delete",
-                retention_hours=resolved_retention.hours
-                if resolved_retention
-                else None,
             )
+        except WebSocketDisconnect:
+            log.info("client_disconnected")
+            session_status = "interrupted"
         except Exception as e:
-            log.warning("session_db_create_failed", error=str(e))
-            # Continue without persistence - session still works via Redis
+            log.error("session_error", error=str(e))
+            session_error = str(e)
+            session_status = "error"
+        finally:
+            # Cancel keepalive task
+            if keepalive_task:
+                keepalive_task.cancel()
+                try:
+                    await keepalive_task
+                except asyncio.CancelledError:
+                    pass
 
-        # Connect to worker and proxy bidirectionally
-        session_end_data = await _proxy_to_worker(
-            client_ws=websocket,
-            worker_endpoint=allocation.endpoint,
-            session_id=allocation.session_id,
-            language=language,
-            model=resolved_model,
-            encoding=encoding,
-            sample_rate=sample_rate,
-            enable_vad=enable_vad,
-            interim_results=interim_results,
-            word_timestamps=word_timestamps,
-            store_audio=store_audio,
-            store_transcript=store_transcript,
-        )
-    except WebSocketDisconnect:
-        log.info("client_disconnected")
-        session_status = "interrupted"
-    except Exception as e:
-        log.error("session_error", error=str(e))
-        session_error = str(e)
-        session_status = "error"
-    finally:
-        # Cancel keepalive task
-        if keepalive_task:
-            keepalive_task.cancel()
-            try:
-                await keepalive_task
-            except asyncio.CancelledError:
-                pass
+            # Release worker
+            if allocation:
+                await session_router.release_worker(allocation.session_id)
+                log.info("session_released")
 
-        # Release worker
-        await session_router.release_worker(allocation.session_id)
-        log.info("session_released")
+            # Update session stats from session.end message
+            audio_uri = None
+            transcript_uri = None
+            if session_service and session_end_data:
+                try:
+                    # Debug: log the full session_end_data
+                    log.debug("session_end_data_content", data=session_end_data)
 
-        # Update session stats from session.end message
-        audio_uri = None
-        transcript_uri = None
-        if session_service and session_end_data:
-            try:
-                # Debug: log the full session_end_data
-                log.debug("session_end_data_content", data=session_end_data)
+                    # Extract stats from session.end message
+                    audio_duration = session_end_data.get("total_audio_seconds", 0)
+                    segments = session_end_data.get("segments", [])
+                    transcript = session_end_data.get("transcript", "")
+                    word_count = len(transcript.split()) if transcript else 0
 
-                # Extract stats from session.end message
-                audio_duration = session_end_data.get("total_audio_seconds", 0)
-                segments = session_end_data.get("segments", [])
-                transcript = session_end_data.get("transcript", "")
-                word_count = len(transcript.split()) if transcript else 0
-
-                # Extract storage URIs
-                audio_uri = session_end_data.get("audio_uri")
-                transcript_uri = session_end_data.get("transcript_uri")
-
-                log.info(
-                    "session_stats_captured",
-                    audio_duration=audio_duration,
-                    segment_count=len(segments),
-                    word_count=word_count,
-                    audio_uri=audio_uri,
-                    transcript_uri=transcript_uri,
-                )
-
-                await session_service.update_stats(
-                    session_id=allocation.session_id,
-                    audio_duration_seconds=audio_duration,
-                    segment_count=len(segments),
-                    word_count=word_count,
-                )
-            except Exception as e:
-                log.warning("session_stats_update_failed", error=str(e))
-        elif session_service:
-            log.warning(
-                "session_end_data_missing",
-                msg="No session.end data received from worker",
-            )
-
-        # Create enhancement job if requested (M07 Hybrid Mode)
-        enhancement_job_id = None
-        if (
-            session_service
-            and enhance_on_end
-            and session_status == "completed"
-            and audio_uri
-        ):
-            try:
-                enhancement_service = EnhancementService(db_session, get_settings())
-
-                # Get the session from DB to pass to enhancement service
-                session_record = await session_service.get_session(
-                    allocation.session_id
-                )
-                if session_record:
-                    # Parse PII entity types if provided
-                    pii_entity_types_list = None
-                    if pii_entity_types:
-                        pii_entity_types_list = [
-                            t.strip() for t in pii_entity_types.split(",")
-                        ]
-
-                    enhancement_job = (
-                        await enhancement_service.create_enhancement_job_with_audio(
-                            session=session_record,
-                            audio_uri=audio_uri,
-                            enhance_diarization=True,
-                            enhance_word_timestamps=True,
-                            enhance_llm_cleanup=False,
-                            enhance_emotions=False,
-                            # PII parameters (M26)
-                            pii_detection=pii_detection,
-                            pii_detection_tier=pii_detection_tier,
-                            pii_entity_types=pii_entity_types_list,
-                            redact_pii_audio=redact_pii_audio,
-                            pii_redaction_mode=pii_redaction_mode,
-                        )
-                    )
-                    enhancement_job_id = enhancement_job.id
-
-                    # Publish event for orchestrator to pick up the job
-                    redis_client = await _get_redis()
-                    await publish_job_created(redis_client, enhancement_job.id)
+                    # Extract storage URIs
+                    audio_uri = session_end_data.get("audio_uri")
+                    transcript_uri = session_end_data.get("transcript_uri")
 
                     log.info(
-                        "enhancement_job_created",
-                        enhancement_job_id=str(enhancement_job_id),
+                        "session_stats_captured",
+                        audio_duration=audio_duration,
+                        segment_count=len(segments),
+                        word_count=word_count,
+                        audio_uri=audio_uri,
+                        transcript_uri=transcript_uri,
                     )
-            except Exception as e:
-                log.warning("enhancement_job_creation_failed", error=str(e))
-                # Don't fail the session if enhancement fails
 
-        # Finalize session in PostgreSQL
-        if session_service:
-            try:
-                await session_service.finalize_session(
-                    session_id=allocation.session_id,
-                    status=session_status,
-                    error=session_error,
-                    audio_uri=audio_uri,
-                    transcript_uri=transcript_uri,
-                    enhancement_job_id=enhancement_job_id,
+                    await session_service.update_stats(
+                        session_id=allocation.session_id,
+                        audio_duration_seconds=audio_duration,
+                        segment_count=len(segments),
+                        word_count=word_count,
+                    )
+                except Exception as e:
+                    log.warning("session_stats_update_failed", error=str(e))
+            elif session_service:
+                log.warning(
+                    "session_end_data_missing",
+                    msg="No session.end data received from worker",
                 )
-            except Exception as e:
-                log.warning("session_db_finalize_failed", error=str(e))
 
-        # Close DB session
-        if db_session:
-            try:
-                await db_gen.aclose()
-            except Exception:
-                pass
+            # Create enhancement job if requested (M07 Hybrid Mode)
+            enhancement_job_id = None
+            if (
+                session_service
+                and enhance_on_end
+                and session_status == "completed"
+                and audio_uri
+            ):
+                try:
+                    enhancement_service = EnhancementService(db_session, get_settings())
+
+                    # Get the session from DB to pass to enhancement service
+                    session_record = await session_service.get_session(
+                        allocation.session_id
+                    )
+                    if session_record:
+                        # Parse PII entity types if provided
+                        pii_entity_types_list = None
+                        if pii_entity_types:
+                            pii_entity_types_list = [
+                                t.strip() for t in pii_entity_types.split(",")
+                            ]
+
+                        enhancement_job = (
+                            await enhancement_service.create_enhancement_job_with_audio(
+                                session=session_record,
+                                audio_uri=audio_uri,
+                                enhance_diarization=True,
+                                enhance_word_timestamps=True,
+                                enhance_llm_cleanup=False,
+                                enhance_emotions=False,
+                                # PII parameters (M26)
+                                pii_detection=pii_detection,
+                                pii_detection_tier=pii_detection_tier,
+                                pii_entity_types=pii_entity_types_list,
+                                redact_pii_audio=redact_pii_audio,
+                                pii_redaction_mode=pii_redaction_mode,
+                            )
+                        )
+                        enhancement_job_id = enhancement_job.id
+
+                        # Publish event for orchestrator to pick up the job
+                        redis_client = await _get_redis()
+                        await publish_job_created(redis_client, enhancement_job.id)
+
+                        log.info(
+                            "enhancement_job_created",
+                            enhancement_job_id=str(enhancement_job_id),
+                        )
+                except Exception as e:
+                    log.warning("enhancement_job_creation_failed", error=str(e))
+                    # Don't fail the session if enhancement fails
+
+            # Finalize session in PostgreSQL
+            if session_service:
+                try:
+                    await session_service.finalize_session(
+                        session_id=allocation.session_id,
+                        status=session_status,
+                        error=session_error,
+                        audio_uri=audio_uri,
+                        transcript_uri=transcript_uri,
+                        enhancement_job_id=enhancement_job_id,
+                    )
+                except Exception as e:
+                    log.warning("session_db_finalize_failed", error=str(e))
+
+            # Close DB session
+            if db_session:
+                try:
+                    await db_gen.aclose()
+                except Exception:
+                    pass
+
+    finally:
+        # Always decrement concurrent session count for rate limiting,
+        # regardless of whether we successfully acquired a worker or hit
+        # an early validation error. This ensures no counter leaks.
+        await _decrement_session_count(session_tenant_id)
 
 
 # -----------------------------------------------------------------------------
@@ -583,87 +667,105 @@ async def elevenlabs_realtime_transcription(
     # Accept connection
     await websocket.accept()
 
-    # ElevenLabs model_id (scribe_v1, scribe_v2, etc.) is treated as "auto"
-    # Let the session router select the best available realtime engine
-    routing_model = None  # Auto-select
-    resolved_model = model_id  # For logging
-
-    # Get client IP
-    client_ip = websocket.client.host if websocket.client else "unknown"
-
-    # Acquire worker
-    allocation = await session_router.acquire_worker(
-        language=language_code,
-        model=routing_model,
-        client_ip=client_ip,
-        enhance_on_end=True,
-    )
-
-    if allocation is None:
-        await websocket.send_json(
-            {"message_type": "error", "error": "No capacity available"}
-        )
-        await websocket.close(code=4503, reason="No capacity")
+    # Check rate limits (concurrent sessions)
+    if not await _check_realtime_rate_limits(websocket, api_key.tenant_id):
         return
 
-    log = logger.bind(
-        session_id=allocation.session_id,
-        worker_id=allocation.worker_id,
-        client_ip=client_ip,
-        protocol="elevenlabs",
-    )
-    log.info("elevenlabs_session_allocated")
+    # Track tenant_id for decrementing session count on disconnect
+    session_tenant_id = api_key.tenant_id
 
-    # Wrap everything after acquire_worker in try/finally to ensure cleanup
-    keepalive_task = None
+    # Wrap everything after rate limit check in try/finally to ensure
+    # the session counter is always decremented on any exit path
+    allocation = None
     try:
-        # Start keepalive task to extend session TTL for long sessions
-        keepalive_task = asyncio.create_task(
-            _keep_session_alive(session_router, allocation.session_id)
-        )
+        # ElevenLabs model_id (scribe_v1, scribe_v2, etc.) is treated as "auto"
+        # Let the session router select the best available realtime engine
+        routing_model = None  # Auto-select
+        resolved_model = model_id  # For logging
 
-        # Send session_started message (ElevenLabs format)
-        await websocket.send_json(
-            {
-                "message_type": "session_started",
-                "session_id": allocation.session_id,
-                "config": {
-                    "sample_rate": sample_rate,
-                    "audio_format": audio_format,
-                    "language_code": language_code,
-                    "model_id": model_id,
-                    "commit_strategy": commit_strategy,
-                },
-            }
-        )
+        # Get client IP
+        client_ip = websocket.client.host if websocket.client else "unknown"
 
-        # Connect to worker with ElevenLabs protocol translation
-        await _proxy_to_worker_elevenlabs(
-            client_ws=websocket,
-            worker_endpoint=allocation.endpoint,
-            session_id=allocation.session_id,
+        # Acquire worker
+        allocation = await session_router.acquire_worker(
             language=language_code,
-            model=resolved_model,
-            sample_rate=sample_rate,
-            enable_vad=(commit_strategy == "vad"),
-            interim_results=True,
-            word_timestamps=include_timestamps,
+            model=routing_model,
+            client_ip=client_ip,
+            enhance_on_end=True,
         )
-    except WebSocketDisconnect:
-        log.info("elevenlabs_client_disconnected")
-    except Exception as e:
-        log.error("elevenlabs_session_error", error=str(e))
-    finally:
-        # Cancel keepalive task
-        if keepalive_task:
-            keepalive_task.cancel()
-            try:
-                await keepalive_task
-            except asyncio.CancelledError:
-                pass
 
-        await session_router.release_worker(allocation.session_id)
-        log.info("elevenlabs_session_released")
+        if allocation is None:
+            await websocket.send_json(
+                {"message_type": "error", "error": "No capacity available"}
+            )
+            await websocket.close(code=4503, reason="No capacity")
+            return
+
+        log = logger.bind(
+            session_id=allocation.session_id,
+            worker_id=allocation.worker_id,
+            client_ip=client_ip,
+            protocol="elevenlabs",
+        )
+        log.info("elevenlabs_session_allocated")
+
+        # Session lifecycle state
+        keepalive_task = None
+        try:
+            # Start keepalive task to extend session TTL for long sessions
+            keepalive_task = asyncio.create_task(
+                _keep_session_alive(session_router, allocation.session_id)
+            )
+
+            # Send session_started message (ElevenLabs format)
+            await websocket.send_json(
+                {
+                    "message_type": "session_started",
+                    "session_id": allocation.session_id,
+                    "config": {
+                        "sample_rate": sample_rate,
+                        "audio_format": audio_format,
+                        "language_code": language_code,
+                        "model_id": model_id,
+                        "commit_strategy": commit_strategy,
+                    },
+                }
+            )
+
+            # Connect to worker with ElevenLabs protocol translation
+            await _proxy_to_worker_elevenlabs(
+                client_ws=websocket,
+                worker_endpoint=allocation.endpoint,
+                session_id=allocation.session_id,
+                language=language_code,
+                model=resolved_model,
+                sample_rate=sample_rate,
+                enable_vad=(commit_strategy == "vad"),
+                interim_results=True,
+                word_timestamps=include_timestamps,
+            )
+        except WebSocketDisconnect:
+            log.info("elevenlabs_client_disconnected")
+        except Exception as e:
+            log.error("elevenlabs_session_error", error=str(e))
+        finally:
+            # Cancel keepalive task
+            if keepalive_task:
+                keepalive_task.cancel()
+                try:
+                    await keepalive_task
+                except asyncio.CancelledError:
+                    pass
+
+            if allocation:
+                await session_router.release_worker(allocation.session_id)
+                log.info("elevenlabs_session_released")
+
+    finally:
+        # Always decrement concurrent session count for rate limiting,
+        # regardless of whether we successfully acquired a worker or hit
+        # an early error. This ensures no counter leaks.
+        await _decrement_session_count(session_tenant_id)
 
 
 async def _keep_session_alive(
