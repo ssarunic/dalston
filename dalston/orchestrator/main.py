@@ -37,6 +37,7 @@ from dalston.orchestrator.handlers import (
     handle_task_failed,
     handle_task_started,
 )
+from dalston.orchestrator.reconciler import ReconciliationSweeper
 from dalston.orchestrator.registry import BatchEngineRegistry
 from dalston.orchestrator.scanner import StaleTaskScanner
 
@@ -56,6 +57,7 @@ _shutdown_event: asyncio.Event | None = None
 _delivery_worker: DeliveryWorker | None = None
 _cleanup_worker: CleanupWorker | None = None
 _stale_task_scanner: StaleTaskScanner | None = None
+_reconciliation_sweeper: ReconciliationSweeper | None = None
 _metrics_app: web.Application | None = None
 _metrics_runner: web.AppRunner | None = None
 
@@ -109,7 +111,12 @@ async def orchestrator_loop() -> None:
 
     Subscribes to Redis pub/sub and dispatches events to handlers.
     """
-    global _shutdown_event, _delivery_worker, _cleanup_worker, _stale_task_scanner
+    global \
+        _shutdown_event, \
+        _delivery_worker, \
+        _cleanup_worker, \
+        _stale_task_scanner, \
+        _reconciliation_sweeper
     _shutdown_event = asyncio.Event()
 
     settings = get_settings()
@@ -153,6 +160,15 @@ async def orchestrator_loop() -> None:
         settings=settings,
     )
     await _stale_task_scanner.start()
+
+    # Start reconciliation sweeper (M33 - Streams/DB consistency)
+    _reconciliation_sweeper = ReconciliationSweeper(
+        redis=redis,
+        db_session_factory=async_session,
+        settings=settings,
+    )
+    await _reconciliation_sweeper.start()
+
     pubsub = redis.pubsub()
 
     # Initialize batch engine registry
@@ -191,6 +207,10 @@ async def orchestrator_loop() -> None:
         # Stop stale task scanner
         if _stale_task_scanner:
             await _stale_task_scanner.stop()
+
+        # Stop reconciliation sweeper
+        if _reconciliation_sweeper:
+            await _reconciliation_sweeper.stop()
 
         # Stop delivery worker
         if _delivery_worker:
