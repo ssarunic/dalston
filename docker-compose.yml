@@ -106,9 +106,21 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --appendonly no
+    # AOF persistence for durable Streams (M33)
+    # - appendonly yes: enables append-only file persistence
+    # - appendfsync everysec: fsync every second (balance of durability and performance)
+    # - auto-aof-rewrite-percentage 100: rewrite AOF when it doubles in size
+    # - auto-aof-rewrite-min-size 64mb: minimum size before rewrite
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --auto-aof-rewrite-percentage 100
+      --auto-aof-rewrite-min-size 64mb
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -681,6 +693,7 @@ services:
 
 volumes:
   postgres-data:
+  redis-data:
   minio-data:
   whisper-models:
   align-models:

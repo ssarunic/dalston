@@ -15,9 +15,9 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy engine files
-COPY engines/prepare/audio-prepare/requirements.txt .
-COPY engines/prepare/audio-prepare/engine.yaml .
-COPY engines/prepare/audio-prepare/engine.py .
+COPY engines/stt-prepare/audio-prepare/requirements.txt .
+COPY engines/stt-prepare/audio-prepare/engine.yaml .
+COPY engines/stt-prepare/audio-prepare/engine.py .
 
 # Install any additional Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt || true
