@@ -143,7 +143,7 @@ class RealtimeEngine(ABC):
         Args:
             audio: Audio samples as float32 numpy array, mono, 16kHz
             language: Language code (e.g., "en") or "auto" for detection
-            model_variant: Model variant ("fast" or "accurate")
+            model_variant: Model name (e.g., "faster-whisper-large-v3")
 
         Returns:
             TranscribeResult with text, words, language, confidence
@@ -173,15 +173,16 @@ class RealtimeEngine(ABC):
         return False
 
     def get_models(self) -> list[str]:
-        """Return list of loaded model variants.
+        """Return list of supported model identifiers.
 
-        Override to report available models (e.g., ["fast", "accurate"]).
+        Override to report available models (e.g., ["faster-whisper-large-v3"]).
+        These are the exact model names clients use when requesting this engine.
         Used when registering with Session Router.
 
         Returns:
-            List of model variant names. Default: ["fast"]
+            List of model names. Default: [] (must be overridden)
         """
-        return ["fast"]
+        return []
 
     def get_languages(self) -> list[str]:
         """Return list of supported languages.
@@ -576,10 +577,14 @@ class RealtimeEngine(ABC):
         if not session_id:
             session_id = f"sess_{uuid.uuid4().hex[:16]}"
 
+        # Model parameter: empty string or missing means None (any worker)
+        model_param = get_param("model", "")
+        model_value = model_param if model_param else None
+
         return SessionConfig(
             session_id=session_id,
             language=get_param("language", "auto"),
-            model=get_param("model", "fast"),
+            model=model_value,
             encoding=get_param("encoding", "pcm_s16le"),
             sample_rate=get_int_param(
                 "sample_rate", 16000, min_val=8000, max_val=48000

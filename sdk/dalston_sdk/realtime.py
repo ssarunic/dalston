@@ -172,7 +172,7 @@ class AsyncRealtimeSession:
         base_url: str = "ws://localhost:8000",
         api_key: str | None = None,
         language: str = "auto",
-        model: str = "fast",
+        model: str | None = None,
         encoding: str = "pcm_s16le",
         sample_rate: int = 16000,
         enable_vad: bool = True,
@@ -195,7 +195,7 @@ class AsyncRealtimeSession:
             base_url: WebSocket URL of the Dalston server.
             api_key: Optional API key for authentication.
             language: Language code or "auto" for detection.
-            model: Model variant ("fast" or "accurate").
+            model: Model name (e.g., "faster-whisper-large-v3") or None for any.
             encoding: Audio encoding (pcm_s16le, pcm_f32le, mulaw, alaw).
             sample_rate: Audio sample rate in Hz.
             enable_vad: Enable voice activity detection events.
@@ -219,7 +219,7 @@ class AsyncRealtimeSession:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.language = language
-        self.model = model
+        self.model = model or ""
         self.encoding = encoding
         self.sample_rate = sample_rate
         self.enable_vad = enable_vad
@@ -249,13 +249,18 @@ class AsyncRealtimeSession:
         """
         params: dict[str, str] = {
             "language": self.language,
-            "model": self.model,
-            "encoding": self.encoding,
-            "sample_rate": str(self.sample_rate),
-            "enable_vad": str(self.enable_vad).lower(),
-            "interim_results": str(self.interim_results).lower(),
-            "word_timestamps": str(self.word_timestamps).lower(),
         }
+        if self.model:
+            params["model"] = self.model
+        params.update(
+            {
+                "encoding": self.encoding,
+                "sample_rate": str(self.sample_rate),
+                "enable_vad": str(self.enable_vad).lower(),
+                "interim_results": str(self.interim_results).lower(),
+                "word_timestamps": str(self.word_timestamps).lower(),
+            }
+        )
 
         # Storage and enhancement options
         if self.store_audio:
@@ -491,7 +496,7 @@ class RealtimeSession:
         base_url: str = "ws://localhost:8000",
         api_key: str | None = None,
         language: str = "auto",
-        model: str = "fast",
+        model: str | None = None,
         encoding: str = "pcm_s16le",
         sample_rate: int = 16000,
         enable_vad: bool = True,
@@ -514,7 +519,7 @@ class RealtimeSession:
             base_url: WebSocket URL of the Dalston server.
             api_key: Optional API key for authentication.
             language: Language code or "auto" for detection.
-            model: Model variant ("fast" or "accurate").
+            model: Model name (e.g., "faster-whisper-large-v3") or None for any.
             encoding: Audio encoding (pcm_s16le, pcm_f32le, mulaw, alaw).
             sample_rate: Audio sample rate in Hz.
             enable_vad: Enable voice activity detection events.

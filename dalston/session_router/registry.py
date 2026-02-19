@@ -84,7 +84,7 @@ class WorkerRegistry:
 
         # Find available workers for a request
         available = await registry.get_available_workers(
-            model="fast",
+            model=None,  # None = auto, or specific model name
             language="en"
         )
 
@@ -135,13 +135,13 @@ class WorkerRegistry:
 
     async def get_available_workers(
         self,
-        model: str,
+        model: str | None,
         language: str,
     ) -> list[WorkerState]:
         """Get workers with capacity that support requested model/language.
 
         Args:
-            model: Model variant ("fast" or "accurate")
+            model: Exact model name (e.g., "parakeet-tdt-0.6b-v3") or None for any
             language: Language code or "auto"
 
         Returns:
@@ -151,19 +151,14 @@ class WorkerRegistry:
         available = []
 
         for worker in workers:
-            # Check status
             if not worker.is_available:
                 continue
 
-            # Check model support
-            model_name = self._map_model_variant(model)
-            if (
-                model_name not in worker.models_loaded
-                and model not in worker.models_loaded
-            ):
+            # Model filtering: None = any, otherwise exact match
+            if model is not None and model not in worker.models_loaded:
                 continue
 
-            # Check language support
+            # Language filtering
             if language != "auto" and "auto" not in worker.languages_supported:
                 if language not in worker.languages_supported:
                     continue
@@ -222,18 +217,3 @@ class WorkerRegistry:
             except ValueError:
                 pass
         return datetime.now(UTC)
-
-    def _map_model_variant(self, model: str) -> str:
-        """Map user-facing model name to internal name.
-
-        Args:
-            model: User-facing model name ("fast" or "accurate")
-
-        Returns:
-            Internal model name
-        """
-        mapping = {
-            "fast": "distil-whisper",
-            "accurate": "faster-whisper-large-v3",
-        }
-        return mapping.get(model, model)

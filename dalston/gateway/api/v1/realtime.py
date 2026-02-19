@@ -103,9 +103,9 @@ async def realtime_transcription(
     model: Annotated[
         str,
         Query(
-            description="Engine ID (e.g., parakeet-0.6b, faster-whisper-base) or 'auto'"
+            description="Model name (e.g., 'faster-whisper-large-v3', 'parakeet-rnnt-0.6b'). Empty for any available worker."
         ),
-    ] = "auto",
+    ] = "",
     encoding: Annotated[str, Query(description="Audio encoding")] = "pcm_s16le",
     sample_rate: Annotated[int, Query(description="Sample rate in Hz")] = 16000,
     enable_vad: Annotated[bool, Query(description="Enable VAD events")] = True,
@@ -156,7 +156,7 @@ async def realtime_transcription(
     Query Parameters:
     - api_key: API key for authentication (required)
     - language: Language code or "auto" for detection
-    - model: "fast" (distil-whisper) or "accurate" (large-v3)
+    - model: Model name (e.g., "faster-whisper-large-v3") or empty for any
     - encoding: Audio encoding (pcm_s16le, pcm_f32le, mulaw, alaw)
     - sample_rate: Audio sample rate (default: 16000)
     - enable_vad: Send vad.speech_start/end events
@@ -235,10 +235,10 @@ async def realtime_transcription(
         await websocket.close(code=4400, reason="Invalid parameters")
         return
 
-    # Model parameter: use engine ID directly or "auto" for auto-selection
+    # Model parameter: use engine ID directly or None for any available worker
     # For realtime routing, we pass the engine ID to the session router
-    routing_model = model if model.lower() != "auto" else None
-    resolved_model = model  # For logging
+    routing_model = model if model else None
+    resolved_model = model or "any"  # For logging
 
     # Get client IP for logging
     client_ip = websocket.client.host if websocket.client else "unknown"

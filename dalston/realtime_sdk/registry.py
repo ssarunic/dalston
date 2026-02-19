@@ -32,7 +32,7 @@ class WorkerInfo:
         worker_id: Unique identifier for this worker
         endpoint: WebSocket endpoint URL (e.g., "ws://localhost:9000")
         capacity: Maximum concurrent sessions this worker can handle
-        models: List of model variants this worker supports (e.g., ["fast", "accurate"])
+        models: List of model names this worker supports (e.g., ["faster-whisper-large-v3"])
         languages: List of language codes supported (e.g., ["en", "es", "auto"])
         engine: Engine type identifier (e.g., "parakeet", "whisper")
     """
@@ -62,7 +62,7 @@ class WorkerRegistry:
             worker_id="stt-rt-transcribe-whisper-1",
             endpoint="ws://localhost:9000",
             capacity=4,
-            models=["fast", "accurate"],
+            models=["faster-whisper-large-v3"],
             languages=["en", "auto"]
         ))
 

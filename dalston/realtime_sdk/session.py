@@ -53,7 +53,7 @@ class SessionConfig:
     Attributes:
         session_id: Unique session identifier
         language: Language code or "auto"
-        model: Model variant ("fast" or "accurate")
+        model: Model name (e.g., "faster-whisper-large-v3") or None for any
         encoding: Audio encoding
         sample_rate: Expected sample rate
         channels: Number of audio channels
@@ -70,7 +70,7 @@ class SessionConfig:
 
     session_id: str
     language: str = "auto"
-    model: str = "fast"
+    model: str | None = None
     encoding: str = "pcm_s16le"
     sample_rate: int = 16000
     channels: int = 1

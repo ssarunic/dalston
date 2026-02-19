@@ -29,7 +29,7 @@ RUN pip install --no-cache-dir -e ".[realtime-sdk]"
 WORKDIR /engine
 
 # Copy engine requirements first for better caching
-COPY engines/realtime/faster-whisper-streaming/requirements.txt .
+COPY engines/stt-rt/faster-whisper/requirements.txt .
 
 # Install engine dependencies
 RUN pip install --no-cache-dir -r requirements.txt
@@ -48,8 +48,8 @@ RUN python -c "import torch; torch.hub.load('snakers4/silero-vad', 'silero_vad',
     && echo "Silero VAD model downloaded successfully"
 
 # Copy engine files
-COPY engines/realtime/faster-whisper-streaming/variants/base.yaml /etc/dalston/engine.yaml
-COPY engines/realtime/faster-whisper-streaming/engine.py .
+COPY engines/stt-rt/faster-whisper/variants/base.yaml /etc/dalston/engine.yaml
+COPY engines/stt-rt/faster-whisper/engine.py .
 
 # Create model cache directory
 ENV HF_HOME=/models

@@ -85,7 +85,7 @@ class SessionRouter:
         # Acquire worker for incoming WebSocket connection
         allocation = await router.acquire_worker(
             language="en",
-            model="fast",
+            model=None,  # None = auto, or specific model name
             client_ip="192.168.1.100"
         )
 
@@ -160,7 +160,7 @@ class SessionRouter:
     async def acquire_worker(
         self,
         language: str,
-        model: str,
+        model: str | None,
         client_ip: str,
         enhance_on_end: bool = True,
     ) -> WorkerAllocation | None:
@@ -170,7 +170,7 @@ class SessionRouter:
 
         Args:
             language: Requested language code or "auto"
-            model: Requested model variant ("fast" or "accurate")
+            model: Model name (e.g., "faster-whisper-large-v3") or None for any
             client_ip: Client IP address for logging
             enhance_on_end: Whether to trigger batch enhancement on session end
 

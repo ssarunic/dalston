@@ -14,7 +14,7 @@ Example usage (embedded in Gateway):
     # Acquire worker for incoming WebSocket connection
     allocation = await router.acquire_worker(
         language="en",
-        model="fast",
+        model=None,  # None = auto, or specific model name
         client_ip="192.168.1.100"
     )
 

@@ -227,13 +227,12 @@ class ParakeetStreamingEngine(RealtimeEngine):
         return True
 
     def get_models(self) -> list[str]:
-        """Return list of supported model variants.
+        """Return list of supported model identifiers.
 
-        Returns "parakeet" plus "fast" and "accurate" aliases for session
-        router compatibility. This allows clients to request any variant
-        and be routed to Parakeet workers for English audio.
+        Returns the exact model name that clients should use when requesting
+        this specific engine variant.
         """
-        return ["parakeet", "fast", "accurate"]
+        return [f"parakeet-rnnt-{self._model_variant}"]
 
     def get_languages(self) -> list[str]:
         """Return list of supported languages.

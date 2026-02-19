@@ -260,8 +260,8 @@ class VoxtralStreamingEngine(RealtimeEngine):
         return True
 
     def get_models(self) -> list[str]:
-        """Return list of supported model variants."""
-        return ["voxtral", "multilingual", "fast"]
+        """Return list of supported model identifiers."""
+        return [f"voxtral-{self._model_variant}"]
 
     def get_languages(self) -> list[str]:
         """Return list of supported languages."""

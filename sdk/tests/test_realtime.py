@@ -18,7 +18,7 @@ class TestParseMessage:
         data = {
             "type": "session.begin",
             "session_id": "sess-123",
-            "model": "fast",
+            "model": "faster-whisper-large-v3",
             "language": "en",
             "sample_rate": 16000,
             "encoding": "pcm_s16le",
@@ -29,7 +29,7 @@ class TestParseMessage:
         assert message.type == RealtimeMessageType.SESSION_BEGIN
         assert isinstance(message.data, SessionBegin)
         assert message.data.session_id == "sess-123"
-        assert message.data.model == "fast"
+        assert message.data.model == "faster-whisper-large-v3"
         assert message.data.language == "en"
         assert message.data.sample_rate == 16000
 
@@ -172,7 +172,7 @@ class TestAsyncRealtimeSession:
         session = AsyncRealtimeSession(
             base_url="http://localhost:8000",
             language="en",
-            model="accurate",
+            model="faster-whisper-large-v3",
             encoding="pcm_f32le",
             sample_rate=44100,
             enable_vad=False,
@@ -184,7 +184,7 @@ class TestAsyncRealtimeSession:
 
         assert url.startswith("ws://localhost:8000")
         assert "language=en" in url
-        assert "model=accurate" in url
+        assert "model=faster-whisper-large-v3" in url
         assert "encoding=pcm_f32le" in url
         assert "sample_rate=44100" in url
         assert "enable_vad=false" in url

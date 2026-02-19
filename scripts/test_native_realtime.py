@@ -285,9 +285,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--model",
-        default="fast",
-        choices=["fast", "accurate", "parakeet-0.6b", "parakeet-1.1b"],
-        help="Model (default: fast)",
+        default="auto",
+        help="Model name (e.g., 'faster-whisper-large-v3', 'parakeet-rnnt-0.6b') or 'auto'",
     )
     parser.add_argument("--language", default="auto", help="Language code")
     parser.add_argument("--device", type=int, help="Audio device index")

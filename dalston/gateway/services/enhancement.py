@@ -251,8 +251,8 @@ class EnhancementService:
     def _get_batch_model(self, realtime_model: str | None) -> str:
         """Map realtime model to appropriate batch model.
 
-        For realtime, users often choose "fast" models for low latency.
-        For batch enhancement, we can use larger, more accurate models.
+        For realtime, smaller models are used for low latency.
+        For batch enhancement, we use larger, more accurate models.
 
         Args:
             realtime_model: Model used during realtime session
@@ -260,23 +260,24 @@ class EnhancementService:
         Returns:
             Model ID to use for batch processing
         """
-        # Map fast/distil models to full-size equivalents
+        # Map realtime models to full-size equivalents for batch
         # Default to large-v3 for best quality
         model_mapping = {
-            "fast": "large-v3",
-            "distil-large-v3-en": "large-v3",
-            "distil-whisper-large-v2": "large-v3",
-            "parakeet": "large-v3",
-            "parakeet-0.6b": "large-v3",
-            "parakeet-1.1b": "large-v3",
-            "scribe_v1": "large-v3",
-            "scribe_v2": "large-v3",
+            # Parakeet realtime models
+            "parakeet-rnnt-0.6b": "large-v3",
+            "parakeet-rnnt-1.1b": "large-v3",
+            # Faster-whisper realtime models
+            "faster-whisper-distil-large-v3": "large-v3",
+            "faster-whisper-large-v3": "large-v3",
+            # Voxtral realtime models
+            "voxtral-mini-4b": "large-v3",
+            # Unknown/None models fall through to default return below
         }
 
         if realtime_model and realtime_model.lower() in model_mapping:
             return model_mapping[realtime_model.lower()]
 
-        # If already a full model or unknown, default to large-v3
+        # If unknown model, default to large-v3
         return "large-v3"
 
 

@@ -1,7 +1,7 @@
 """Real-time Whisper streaming transcription engine.
 
 Uses faster-whisper for transcription with Silero VAD for speech detection.
-Supports both "fast" (distil-whisper) and "accurate" (large-v3) model variants.
+Loads both distil-whisper and large-v3 model variants.
 """
 
 from typing import Any
@@ -26,13 +26,15 @@ class WhisperStreamingEngine(RealtimeEngine):
         WORKER_PORT: WebSocket server port (default: 9000)
         MAX_SESSIONS: Maximum concurrent sessions (default: 4)
         REDIS_URL: Redis connection URL (default: redis://localhost:6379)
-        FAST_MODEL: Model for "fast" variant (default: Systran/faster-distil-whisper-large-v3)
-        ACCURATE_MODEL: Model for "accurate" variant (default: Systran/faster-whisper-large-v3)
     """
 
     # Model configurations - use Systran CTranslate2-converted models for faster-whisper
-    FAST_MODEL = "Systran/faster-distil-whisper-large-v3"
-    ACCURATE_MODEL = "Systran/faster-whisper-large-v3"
+    # Keys are canonical model names exposed to clients, values are HuggingFace model IDs
+    MODELS = {
+        "faster-whisper-distil-large-v3": "Systran/faster-distil-whisper-large-v3",
+        "faster-whisper-large-v3": "Systran/faster-whisper-large-v3",
+    }
+    DEFAULT_MODEL = "faster-whisper-distil-large-v3"
 
     def __init__(self) -> None:
         """Initialize the engine."""
@@ -42,7 +44,7 @@ class WhisperStreamingEngine(RealtimeEngine):
         self._compute_type: str = "int8"
 
     def load_models(self) -> None:
-        """Load Whisper models for fast and accurate variants.
+        """Load Whisper models.
 
         Automatically detects GPU availability and adjusts compute type.
         """
@@ -52,27 +54,15 @@ class WhisperStreamingEngine(RealtimeEngine):
             "using_device", device=self._device, compute_type=self._compute_type
         )
 
-        # Load fast model (distil-whisper)
-        import os
-
-        fast_model_name = os.environ.get("FAST_MODEL", self.FAST_MODEL)
-        logger.info("loading_fast_model", model_name=fast_model_name)
-        self._models["fast"] = WhisperModel(
-            fast_model_name,
-            device=self._device,
-            compute_type=self._compute_type,
-        )
-        logger.info("fast_model_loaded")
-
-        # Load accurate model (large-v3)
-        accurate_model_name = os.environ.get("ACCURATE_MODEL", self.ACCURATE_MODEL)
-        logger.info("loading_accurate_model", model_name=accurate_model_name)
-        self._models["accurate"] = WhisperModel(
-            accurate_model_name,
-            device=self._device,
-            compute_type=self._compute_type,
-        )
-        logger.info("accurate_model_loaded")
+        # Load all configured models
+        for model_name, hf_model_id in self.MODELS.items():
+            logger.info("loading_model", model_name=model_name, hf_model_id=hf_model_id)
+            self._models[model_name] = WhisperModel(
+                hf_model_id,
+                device=self._device,
+                compute_type=self._compute_type,
+            )
+            logger.info("model_loaded", model_name=model_name)
 
     def _detect_device(self) -> tuple[str, str]:
         """Detect the best available device and compute type.
@@ -102,7 +92,7 @@ class WhisperStreamingEngine(RealtimeEngine):
         Args:
             audio: Audio samples as float32 numpy array, mono, 16kHz
             language: Language code (e.g., "en") or "auto" for detection
-            model_variant: Model variant ("fast" or "accurate")
+            model_variant: Model name (e.g., "faster-whisper-large-v3")
 
         Returns:
             TranscribeResult with text, words, language, confidence
@@ -110,8 +100,8 @@ class WhisperStreamingEngine(RealtimeEngine):
         # Select model
         model = self._models.get(model_variant)
         if model is None:
-            # Fallback to fast model
-            model = self._models.get("fast")
+            # Fallback to default model
+            model = self._models.get(self.DEFAULT_MODEL)
             if model is None:
                 raise RuntimeError("No models loaded")
 

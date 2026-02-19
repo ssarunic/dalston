@@ -217,7 +217,7 @@ class TestCreateTranscriptionEndpoint:
                 audio_content = b"fake audio content"
                 files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
 
-                # Test scribe_v1 maps to "fast"
+                # Test scribe_v1 (ElevenLabs model) uses auto model selection
                 response = client.post(
                     "/v1/speech-to-text",
                     files=files,

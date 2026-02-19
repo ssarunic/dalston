@@ -18,7 +18,6 @@ from dalston_cli.output import (
 )
 
 FormatType = Literal["live", "json", "jsonl"]
-ModelType = Literal["fast", "accurate"]
 
 
 def listen(
@@ -47,13 +46,13 @@ def listen(
         ),
     ] = "live",
     model: Annotated[
-        ModelType,
+        str | None,
         typer.Option(
             "--model",
             "-m",
-            help="Model variant: fast (lower latency) or accurate (better quality).",
+            help="Model name (e.g., 'faster-whisper-large-v3'). Omit for any available worker.",
         ),
-    ] = "fast",
+    ] = None,
     device: Annotated[
         str | None,
         typer.Option(

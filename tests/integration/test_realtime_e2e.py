@@ -119,7 +119,7 @@ class TestRealtimeManagementEndpoints:
                 status="ready",
                 capacity=4,
                 active_sessions=2,
-                models=["fast", "accurate"],
+                models=["faster-whisper-large-v3"],
                 languages=["auto"],
             ),
             WorkerStatus(
@@ -128,7 +128,7 @@ class TestRealtimeManagementEndpoints:
                 status="busy",
                 capacity=4,
                 active_sessions=4,
-                models=["fast"],
+                models=["faster-whisper-distil-large-v3"],
                 languages=["auto"],
             ),
         ]
@@ -151,7 +151,7 @@ class TestRealtimeManagementEndpoints:
             status="ready",
             capacity=4,
             active_sessions=2,
-            models=["fast", "accurate"],
+            models=["faster-whisper-large-v3"],
             languages=["auto"],
         )
 
@@ -189,7 +189,7 @@ class TestRealtimeProtocolMessages:
             encoding="pcm_s16le",
             channels=1,
             language="en",
-            model="fast",
+            model=None,
         )
         msg = SessionBeginMessage(session_id="sess_abc123", config=config)
 
@@ -375,7 +375,7 @@ class TestWorkerStatus:
             status="ready",
             capacity=4,
             active_sessions=2,
-            models=["fast", "accurate"],
+            models=["faster-whisper-large-v3"],
             languages=["auto", "en", "es"],
         )
 
@@ -384,5 +384,5 @@ class TestWorkerStatus:
         assert status.status == "ready"
         assert status.capacity == 4
         assert status.active_sessions == 2
-        assert "fast" in status.models
+        assert "faster-whisper-large-v3" in status.models
         assert "auto" in status.languages

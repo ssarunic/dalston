@@ -39,7 +39,7 @@ class TestEnhancementService:
         status: str = "completed",
         audio_uri: str | None = "s3://bucket/sessions/test/audio.wav",
         language: str | None = "en",
-        model: str | None = "fast",
+        model: str | None = None,
         engine: str | None = "parakeet",
         enhancement_job_id: UUID | None = None,
     ):
@@ -189,29 +189,29 @@ class TestBatchModelMapping:
         """Create EnhancementService instance."""
         return EnhancementService(AsyncMock(), MagicMock())
 
-    def test_fast_model_maps_to_large_v3(self, enhancement_service):
-        """Test that 'fast' model maps to large-v3."""
-        result = enhancement_service._get_batch_model("fast")
-        assert result == "large-v3"
-
     def test_parakeet_model_maps_to_large_v3(self, enhancement_service):
         """Test that parakeet models map to large-v3."""
-        assert enhancement_service._get_batch_model("parakeet") == "large-v3"
-        assert enhancement_service._get_batch_model("parakeet-0.6b") == "large-v3"
-        assert enhancement_service._get_batch_model("parakeet-1.1b") == "large-v3"
+        assert enhancement_service._get_batch_model("parakeet-rnnt-0.6b") == "large-v3"
+        assert enhancement_service._get_batch_model("parakeet-rnnt-1.1b") == "large-v3"
 
-    def test_distil_whisper_maps_to_large_v3(self, enhancement_service):
-        """Test that distil-whisper models map to large-v3."""
-        assert enhancement_service._get_batch_model("distil-large-v3-en") == "large-v3"
+    def test_faster_whisper_maps_to_large_v3(self, enhancement_service):
+        """Test that faster-whisper models map to large-v3."""
         assert (
-            enhancement_service._get_batch_model("distil-whisper-large-v2")
+            enhancement_service._get_batch_model("faster-whisper-distil-large-v3")
+            == "large-v3"
+        )
+        assert (
+            enhancement_service._get_batch_model("faster-whisper-large-v3")
             == "large-v3"
         )
 
-    def test_elevenlabs_scribe_maps_to_large_v3(self, enhancement_service):
-        """Test that ElevenLabs scribe models map to large-v3."""
-        assert enhancement_service._get_batch_model("scribe_v1") == "large-v3"
-        assert enhancement_service._get_batch_model("scribe_v2") == "large-v3"
+    def test_voxtral_maps_to_large_v3(self, enhancement_service):
+        """Test that voxtral models map to large-v3."""
+        assert enhancement_service._get_batch_model("voxtral-mini-4b") == "large-v3"
+
+    def test_auto_model_maps_to_large_v3(self, enhancement_service):
+        """Test that 'auto' model maps to large-v3."""
+        assert enhancement_service._get_batch_model("auto") == "large-v3"
 
     def test_unknown_model_defaults_to_large_v3(self, enhancement_service):
         """Test that unknown models default to large-v3."""
@@ -251,7 +251,7 @@ class TestCreateEnhancementForSession:
         session.status = status
         session.audio_uri = audio_uri
         session.language = "en"
-        session.model = "fast"
+        session.model = None
         session.engine = "parakeet"
         session.enhancement_job_id = None
         return session
@@ -343,7 +343,7 @@ class TestEnhancementJobParameters:
     def enhancement_service(self, mock_db, mock_settings):
         return EnhancementService(mock_db, mock_settings)
 
-    def _make_session(self, language: str | None = "en", model: str | None = "fast"):
+    def _make_session(self, language: str | None = "en", model: str | None = None):
         session = MagicMock()
         session.id = UUID("11111111-1111-1111-1111-111111111111")
         session.tenant_id = UUID("00000000-0000-0000-0000-000000000000")
@@ -374,7 +374,7 @@ class TestEnhancementJobParameters:
 
         assert "_enhancement" in params
         assert params["_enhancement"]["source_session_id"] == str(session.id)
-        assert params["_enhancement"]["original_model"] == "fast"
+        assert params["_enhancement"]["original_model"] is None
         assert params["_enhancement"]["original_engine"] == "parakeet"
 
     @pytest.mark.asyncio

@@ -72,15 +72,14 @@ def mock_nemo_asr():
 class TestParakeetStreamingEngineGetModels:
     """Tests for get_models() compatibility aliases."""
 
-    def test_get_models_returns_compatibility_aliases(self, mock_cuda_available):
-        """Test that get_models returns parakeet, fast, and accurate."""
+    def test_get_models_returns_exact_model_name(self, mock_cuda_available):
+        """Test that get_models returns the exact model identifier."""
         ParakeetStreamingEngine = load_parakeet_streaming_engine()
         engine = ParakeetStreamingEngine()
         models = engine.get_models()
 
-        assert "parakeet" in models
-        assert "fast" in models
-        assert "accurate" in models
+        # Default variant is 0.6b
+        assert models == ["parakeet-rnnt-0.6b"]
 
 
 class TestParakeetStreamingEngineGetLanguages:

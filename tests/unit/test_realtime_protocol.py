@@ -61,7 +61,7 @@ class TestSessionConfigInfo:
             encoding="pcm_s16le",
             channels=1,
             language="en",
-            model="fast",
+            model=None,
         )
         result = config.to_dict()
 
@@ -70,7 +70,7 @@ class TestSessionConfigInfo:
             "encoding": "pcm_s16le",
             "channels": 1,
             "language": "en",
-            "model": "fast",
+            "model": None,
         }
 
 
@@ -83,7 +83,7 @@ class TestSessionBeginMessage:
             encoding="pcm_s16le",
             channels=1,
             language="auto",
-            model="fast",
+            model=None,
         )
         msg = SessionBeginMessage(session_id="sess_abc123", config=config)
 
@@ -100,7 +100,7 @@ class TestSessionBeginMessage:
             encoding="pcm_s16le",
             channels=1,
             language="en",
-            model="accurate",
+            model="faster-whisper-large-v3",
         )
         msg = SessionBeginMessage(session_id="sess_123", config=config)
 

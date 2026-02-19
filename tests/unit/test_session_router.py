@@ -31,7 +31,7 @@ class TestWorkerState:
             status="ready",
             capacity=4,
             active_sessions=2,
-            models_loaded=["fast"],
+            models_loaded=["faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             gpu_memory_used="2GB",
@@ -49,7 +49,7 @@ class TestWorkerState:
             status="busy",
             capacity=4,
             active_sessions=4,
-            models_loaded=["fast"],
+            models_loaded=["faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             gpu_memory_used="4GB",
@@ -67,7 +67,7 @@ class TestWorkerState:
             status="busy",
             capacity=4,
             active_sessions=5,  # Over capacity
-            models_loaded=["fast"],
+            models_loaded=["faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             gpu_memory_used="4GB",
@@ -85,7 +85,7 @@ class TestWorkerState:
             status="ready",
             capacity=4,
             active_sessions=2,
-            models_loaded=["fast"],
+            models_loaded=["faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             gpu_memory_used="2GB",
@@ -103,7 +103,7 @@ class TestWorkerState:
             status="busy",
             capacity=4,
             active_sessions=3,
-            models_loaded=["fast"],
+            models_loaded=["faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             gpu_memory_used="3GB",
@@ -121,7 +121,7 @@ class TestWorkerState:
             status="offline",
             capacity=4,
             active_sessions=0,
-            models_loaded=["fast"],
+            models_loaded=["faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             gpu_memory_used="0GB",
@@ -139,7 +139,7 @@ class TestWorkerState:
             status="draining",
             capacity=4,
             active_sessions=1,
-            models_loaded=["fast"],
+            models_loaded=["faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             gpu_memory_used="1GB",
@@ -157,7 +157,7 @@ class TestWorkerState:
             status="busy",
             capacity=4,
             active_sessions=4,
-            models_loaded=["fast"],
+            models_loaded=["faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             gpu_memory_used="4GB",
@@ -187,7 +187,7 @@ class TestWorkerRegistry:
             "status": "ready",
             "capacity": "4",
             "active_sessions": "2",
-            "models_loaded": '["fast", "accurate"]',
+            "models_loaded": '["faster-whisper-large-v3", "faster-whisper-distil-large-v3"]',
             "languages_supported": '["auto"]',
             "gpu_memory_used": "2GB",
             "gpu_memory_total": "8GB",
@@ -203,7 +203,10 @@ class TestWorkerRegistry:
         assert worker.status == "ready"
         assert worker.capacity == 4
         assert worker.active_sessions == 2
-        assert worker.models_loaded == ["fast", "accurate"]
+        assert worker.models_loaded == [
+            "faster-whisper-large-v3",
+            "faster-whisper-distil-large-v3",
+        ]
         assert worker.languages_supported == ["auto"]
 
     @pytest.mark.asyncio
@@ -261,7 +264,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "4",  # Full
-                    "models_loaded": '["fast"]',
+                    "models_loaded": '["faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
             elif "worker-2" in key:
@@ -270,14 +273,16 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",  # Available
-                    "models_loaded": '["fast"]',
+                    "models_loaded": '["faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
             return {}
 
         mock_redis.hgetall.side_effect = mock_hgetall
 
-        available = await registry.get_available_workers("fast", "auto")
+        available = await registry.get_available_workers(
+            "faster-whisper-large-v3", "auto"
+        )
 
         assert len(available) == 1
         assert available[0].endpoint == "ws://localhost:9001"
@@ -295,7 +300,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",
-                    "models_loaded": '["fast"]',  # Only fast
+                    "models_loaded": '["faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
             elif "worker-2" in key:
@@ -304,15 +309,17 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",
-                    "models_loaded": '["accurate"]',  # Only accurate
+                    "models_loaded": '["faster-whisper-distil-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
             return {}
 
         mock_redis.hgetall.side_effect = mock_hgetall
 
-        # Request accurate model
-        available = await registry.get_available_workers("accurate", "auto")
+        # Request specific model
+        available = await registry.get_available_workers(
+            "faster-whisper-distil-large-v3", "auto"
+        )
 
         assert len(available) == 1
         assert available[0].endpoint == "ws://localhost:9001"
@@ -330,7 +337,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "3",  # 1 available
-                    "models_loaded": '["fast"]',
+                    "models_loaded": '["faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
             elif "worker-2" in key:
@@ -339,7 +346,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "1",  # 3 available (most)
-                    "models_loaded": '["fast"]',
+                    "models_loaded": '["faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
             elif "worker-3" in key:
@@ -348,14 +355,16 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",  # 2 available
-                    "models_loaded": '["fast"]',
+                    "models_loaded": '["faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
             return {}
 
         mock_redis.hgetall.side_effect = mock_hgetall
 
-        available = await registry.get_available_workers("fast", "auto")
+        available = await registry.get_available_workers(
+            "faster-whisper-large-v3", "auto"
+        )
 
         # Should be sorted by available capacity descending
         assert len(available) == 3
@@ -370,6 +379,65 @@ class TestWorkerRegistry:
         mock_redis.hset.assert_called_once_with(
             f"{WORKER_KEY_PREFIX}worker-1", "status", "offline"
         )
+
+    @pytest.mark.asyncio
+    async def test_get_available_workers_model_none_returns_all(
+        self, registry: WorkerRegistry, mock_redis
+    ):
+        """model=None (auto) should return all available workers regardless of models_loaded."""
+        mock_redis.smembers.return_value = {"worker-1", "worker-2"}
+
+        async def mock_hgetall(key):
+            if "worker-1" in key:
+                return {
+                    "endpoint": "ws://localhost:9000",
+                    "status": "ready",
+                    "capacity": "4",
+                    "active_sessions": "2",
+                    "models_loaded": '["parakeet-rnnt-0.6b"]',
+                    "languages_supported": '["auto"]',
+                }
+            elif "worker-2" in key:
+                return {
+                    "endpoint": "ws://localhost:9001",
+                    "status": "ready",
+                    "capacity": "4",
+                    "active_sessions": "2",
+                    "models_loaded": '["faster-whisper-large-v3"]',
+                    "languages_supported": '["auto"]',
+                }
+            return {}
+
+        mock_redis.hgetall.side_effect = mock_hgetall
+
+        # model=None should return ALL available workers
+        available = await registry.get_available_workers(None, "auto")
+
+        assert len(available) == 2
+
+    @pytest.mark.asyncio
+    async def test_get_available_workers_empty_string_model_no_match(
+        self, registry: WorkerRegistry, mock_redis
+    ):
+        """Empty string model is treated as literal match (no workers have '' in models_loaded)."""
+        mock_redis.smembers.return_value = {"worker-1"}
+
+        mock_redis.hgetall.return_value = {
+            "endpoint": "ws://localhost:9000",
+            "status": "ready",
+            "capacity": "4",
+            "active_sessions": "2",
+            "models_loaded": '["parakeet-rnnt-0.6b"]',
+            "languages_supported": '["auto"]',
+        }
+
+        # Empty string is a literal value, not None
+        # The gateway converts empty string to None before calling the registry
+        # This test verifies the registry requires exact model match for non-None
+        available = await registry.get_available_workers("", "auto")
+
+        # "" is not in models_loaded, so no workers match
+        assert len(available) == 0
 
 
 class TestSessionAllocator:
@@ -401,7 +469,7 @@ class TestSessionAllocator:
             status="ready",
             capacity=4,
             active_sessions=2,
-            models_loaded=["fast"],
+            models_loaded=["faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             gpu_memory_used="2GB",
@@ -414,7 +482,7 @@ class TestSessionAllocator:
 
         result = await allocator.acquire_worker(
             language="en",
-            model="fast",
+            model=None,
             client_ip="192.168.1.100",
         )
 
@@ -422,7 +490,7 @@ class TestSessionAllocator:
         assert result.worker_id == "worker-1"
         assert result.endpoint == "ws://localhost:9000"
         assert result.session_id.startswith("sess_")
-        mock_registry.get_available_workers.assert_called_once_with("fast", "en")
+        mock_registry.get_available_workers.assert_called_once_with(None, "en")
         mock_redis.hincrby.assert_called()
 
     @pytest.mark.asyncio
@@ -433,7 +501,7 @@ class TestSessionAllocator:
 
         result = await allocator.acquire_worker(
             language="en",
-            model="fast",
+            model=None,
             client_ip="192.168.1.100",
         )
 
@@ -450,7 +518,7 @@ class TestSessionAllocator:
             status="ready",
             capacity=4,
             active_sessions=4,  # Already at capacity
-            models_loaded=["fast"],
+            models_loaded=["faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             gpu_memory_used="4GB",
@@ -463,7 +531,7 @@ class TestSessionAllocator:
 
         result = await allocator.acquire_worker(
             language="en",
-            model="fast",
+            model=None,
             client_ip="192.168.1.100",
         )
 
@@ -480,7 +548,7 @@ class TestSessionAllocator:
             "worker_id": "worker-1",
             "status": "active",
             "language": "en",
-            "model": "fast",
+            "model": "faster-whisper-large-v3",
             "client_ip": "192.168.1.100",
             "started_at": "2024-01-15T10:30:00+00:00",
             "enhance_on_end": "false",
@@ -510,7 +578,7 @@ class TestSessionAllocator:
             "worker_id": "worker-1",
             "status": "active",
             "language": "es",
-            "model": "accurate",
+            "model": "faster-whisper-large-v3",
             "client_ip": "10.0.0.5",
             "started_at": "2024-01-15T10:30:00+00:00",
             "enhance_on_end": "true",
@@ -522,7 +590,7 @@ class TestSessionAllocator:
         assert result.session_id == "sess_xyz"
         assert result.worker_id == "worker-1"
         assert result.language == "es"
-        assert result.model == "accurate"
+        assert result.model == "faster-whisper-large-v3"
         assert result.enhance_on_end is True
 
 
@@ -535,7 +603,7 @@ class TestSessionState:
             worker_id="worker-1",
             status="active",
             language="en",
-            model="fast",
+            model="faster-whisper-large-v3",
             client_ip="192.168.1.100",
             started_at=datetime.now(UTC),
             enhance_on_end=True,
@@ -545,7 +613,7 @@ class TestSessionState:
         assert state.worker_id == "worker-1"
         assert state.status == "active"
         assert state.language == "en"
-        assert state.model == "fast"
+        assert state.model == "faster-whisper-large-v3"
         assert state.client_ip == "192.168.1.100"
         assert state.enhance_on_end is True
 
