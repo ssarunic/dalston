@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import INET, JSONB
@@ -248,6 +249,10 @@ class TaskModel(Base):
     """Atomic processing unit within a job's DAG."""
 
     __tablename__ = "tasks"
+    __table_args__ = (
+        # Prevent duplicate tasks for the same job+stage (multi-orchestrator safety)
+        UniqueConstraint("job_id", "stage", name="uq_tasks_job_id_stage"),
+    )
 
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),

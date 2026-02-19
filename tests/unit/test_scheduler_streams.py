@@ -129,6 +129,46 @@ class TestQueueTaskWithStreams:
             # Verify lpush was NOT called
             mock_redis.lpush.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_per_channel_stage_queues_to_base_stream(
+        self, mock_redis, mock_registry, mock_catalog
+    ):
+        """Per-channel task stages should route to base stream names."""
+        per_channel_task = Task(
+            id=uuid4(),
+            job_id=uuid4(),
+            stage="transcribe_ch1",
+            engine_id="whisper-cpu",
+            status=TaskStatus.READY,
+            input_uri="s3://bucket/audio.wav",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+            config={"language": "en", "channel": 1},
+        )
+
+        with (
+            patch(
+                "dalston.orchestrator.scheduler.add_task", new_callable=AsyncMock
+            ) as mock_add_task,
+            patch(
+                "dalston.orchestrator.scheduler.write_task_input",
+                new_callable=AsyncMock,
+            ),
+        ):
+            mock_add_task.return_value = "1234567890-0"
+
+            await queue_task(
+                redis=mock_redis,
+                task=per_channel_task,
+                settings=MockSettings(),
+                registry=mock_registry,
+                catalog=mock_catalog,
+            )
+
+            mock_add_task.assert_called_once()
+            call_args = mock_add_task.call_args
+            assert call_args[1]["stage"] == "transcribe"
+
 
 class TestRemoveTaskFromQueue:
     """Tests for deprecated remove_task_from_queue."""

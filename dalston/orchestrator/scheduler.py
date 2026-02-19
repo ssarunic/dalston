@@ -8,6 +8,7 @@ Handles:
 """
 
 import json
+import re
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -43,6 +44,17 @@ TASK_METADATA_KEY = "dalston:task:{task_id}"
 MIN_TIMEOUT_S = 60  # Minimum timeout for any task
 DEFAULT_RTF = 1.0  # Fallback RTF if not specified
 TIMEOUT_SAFETY_FACTOR = 3.0  # Multiply estimated time by this factor
+
+
+def _base_stage(stage: str) -> str:
+    """Map per-channel stage names to their base stage.
+
+    Examples:
+        transcribe_ch0 -> transcribe
+        align_ch1 -> align
+        merge -> merge
+    """
+    return re.sub(r"_ch\d+$", "", stage)
 
 
 def _build_engine_info(
@@ -203,6 +215,7 @@ async def queue_task(
     """
     task_id_str = str(task.id)
     job_id_str = str(task.job_id)
+    stream_stage = _base_stage(task.stage)
 
     # Get language from task config (if present)
     # Normalize "auto" to None - it means auto-detect, not a language requirement
@@ -333,14 +346,16 @@ async def queue_task(
     # 3. Add task to stream (replaces lpush to queue)
     message_id = await add_task(
         redis,
-        stage=task.stage,
+        # Per-channel task stages share the same engine stream.
+        # Example: transcribe_ch0 / transcribe_ch1 -> transcribe.
+        stage=stream_stage,
         task_id=task_id_str,
         job_id=job_id_str,
         timeout_s=base_timeout,
     )
 
     log.info(
-        "task_queued", stream=f"dalston:stream:{task.stage}", message_id=message_id
+        "task_queued", stream=f"dalston:stream:{stream_stage}", message_id=message_id
     )
 
 
