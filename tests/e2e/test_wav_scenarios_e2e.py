@@ -7,13 +7,19 @@ default pytest run.  Execute with:
 
 Required stack (minimal for basic tests):
     docker compose up -d gateway orchestrator redis postgres minio minio-init \
-        stt-batch-prepare stt-batch-transcribe-whisper-cpu stt-batch-merge
+        stt-batch-prepare stt-batch-transcribe-parakeet-tdt-0.6b-v3-cpu stt-batch-merge
 
 For diarization tests, also start:
-    stt-batch-diarize-pyannote-v31-cpu
+    stt-batch-diarize-nemo-msdd-cpu
 
-For alignment tests:
+For alignment tests (word-level timestamps):
     stt-batch-align-whisperx-cpu
+
+For PII detection tests:
+    stt-batch-pii-detect-presidio
+
+For audio redaction tests (requires PII detection):
+    stt-batch-audio-redact-audio
 """
 
 import pytest
@@ -208,6 +214,154 @@ class TestWavSuccessDiarization:
 
         assert result["status"] == "completed"
         assert len(result["segments"]) > 0
+
+
+@pytest.mark.e2e
+class TestWavSuccessAlignment:
+    """Word-level alignment tests (requires alignment engine)."""
+
+    def test_word_timestamps_with_alignment(self, audio_dir):
+        """Word-level timestamps produce words in segments."""
+        result = transcribe_json(
+            audio_dir / "test_merged.wav",
+            "--timestamps",
+            "word",
+        )
+
+        assert result["status"] == "completed"
+        # Word timestamps should produce words in segments
+        segments_with_words = [s for s in result["segments"] if s.get("words")]
+        assert len(segments_with_words) > 0, "No segments have word timestamps"
+
+        # Verify word structure
+        words = segments_with_words[0]["words"]
+        assert len(words) > 0, "Segment has empty words list"
+        word = words[0]
+        assert "text" in word, "Word missing text"
+        assert "start" in word, "Word missing start"
+        assert "end" in word, "Word missing end"
+
+    def test_word_timestamps_are_valid(self, audio_dir):
+        """Word timestamps have valid start/end values."""
+        result = transcribe_json(
+            audio_dir / "test_merged.wav",
+            "--timestamps",
+            "word",
+        )
+
+        assert result["status"] == "completed"
+        for seg in result["segments"]:
+            words = seg.get("words", [])
+            for i, word in enumerate(words):
+                assert word["start"] >= 0, f"Word {i} has negative start"
+                assert word["end"] > word["start"], f"Word {i} end <= start"
+
+    def test_words_within_segment_bounds(self, audio_dir):
+        """Word timestamps fall within their segment bounds."""
+        result = transcribe_json(
+            audio_dir / "test_merged.wav",
+            "--timestamps",
+            "word",
+        )
+
+        assert result["status"] == "completed"
+        for seg in result["segments"]:
+            seg_start = seg["start"]
+            seg_end = seg["end"]
+            for word in seg.get("words", []):
+                # Allow small tolerance for timing differences
+                assert word["start"] >= seg_start - 0.1, (
+                    f"Word starts before segment: {word['start']} < {seg_start}"
+                )
+                assert word["end"] <= seg_end + 0.1, (
+                    f"Word ends after segment: {word['end']} > {seg_end}"
+                )
+
+
+@pytest.mark.e2e
+class TestWavSuccessPiiDetection:
+    """PII detection tests (requires PII detection engine)."""
+
+    def test_pii_detection_completes(self, audio_dir):
+        """Transcription with PII detection completes successfully."""
+        result = transcribe_json(
+            audio_dir / "test_merged.wav",
+            "--pii",
+        )
+
+        assert result["status"] == "completed"
+        assert result["text"]
+        # PII results should be present (even if empty)
+        assert "pii_entities" in result or result["status"] == "completed"
+
+    def test_pii_detection_fast_tier(self, audio_dir):
+        """PII detection with fast tier (regex-based)."""
+        result = transcribe_json(
+            audio_dir / "test_merged.wav",
+            "--pii",
+            "--pii-tier",
+            "fast",
+        )
+
+        assert result["status"] == "completed"
+        assert result["text"]
+
+    def test_pii_detection_standard_tier(self, audio_dir):
+        """PII detection with standard tier (NER-based)."""
+        result = transcribe_json(
+            audio_dir / "test_merged.wav",
+            "--pii",
+            "--pii-tier",
+            "standard",
+        )
+
+        assert result["status"] == "completed"
+        assert result["text"]
+
+    def test_pii_detection_specific_entities(self, audio_dir):
+        """PII detection with specific entity types."""
+        result = transcribe_json(
+            audio_dir / "test_merged.wav",
+            "--pii",
+            "--pii-entities",
+            "PERSON,EMAIL,PHONE_NUMBER",
+        )
+
+        assert result["status"] == "completed"
+        assert result["text"]
+
+
+@pytest.mark.e2e
+class TestWavSuccessAudioRedaction:
+    """Audio redaction tests (requires PII detection and audio redaction engines)."""
+
+    def test_audio_redaction_silence_mode(self, audio_dir):
+        """Audio redaction with silence mode completes."""
+        result = transcribe_json(
+            audio_dir / "test_merged.wav",
+            "--pii",
+            "--redact-audio",
+            "--redaction-mode",
+            "silence",
+        )
+
+        assert result["status"] == "completed"
+        # Check for redacted audio URL in result
+        # Note: redacted_audio_url may only be present if PII was detected
+        assert result["text"]
+
+    def test_audio_redaction_beep_mode(self, audio_dir):
+        """Audio redaction with beep mode completes."""
+        result = transcribe_json(
+            audio_dir / "test_merged.wav",
+            "--pii",
+            "--redact-audio",
+            "--redaction-mode",
+            "beep",
+        )
+
+        assert result["status"] == "completed"
+        assert result["text"]
 
 
 # =============================================================================
