@@ -45,12 +45,15 @@ class TestParakeetTranscription:
         )
 
         assert result["status"] == "completed"
-        # Parakeet produces native word timestamps
-        words = result.get("words", [])
-        assert len(words) > 0, "Parakeet should produce word-level timestamps"
+        # Parakeet produces native word timestamps (stored in segments)
+        segments_with_words = [s for s in result["segments"] if s.get("words")]
+        assert len(segments_with_words) > 0, (
+            "Parakeet should produce word-level timestamps"
+        )
 
         # Verify word structure
-        for word in words:
+        first_words = segments_with_words[0]["words"]
+        for word in first_words:
             assert "word" in word or "text" in word
             assert "start" in word
             assert "end" in word

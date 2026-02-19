@@ -12,8 +12,12 @@ Required stack (minimal for basic tests):
 For diarization tests, also start:
     stt-batch-diarize-nemo-msdd-cpu
 
-For alignment tests (word-level timestamps):
-    stt-batch-align-whisperx-cpu
+For alignment tests (word-level timestamps with Parakeet):
+    Note: Parakeet has native word timestamps, alignment stage is skipped.
+    For explicit alignment testing, use Faster-Whisper + WhisperX alignment.
+
+For multi-stage per-channel tests with Faster-Whisper + alignment:
+    stt-batch-transcribe-whisper-cpu stt-batch-align-whisperx-cpu
 
 For PII detection tests:
     stt-batch-pii-detect-presidio
@@ -139,6 +143,76 @@ class TestWavSuccessStereoFile:
         assert result["status"] == "completed"
         segments_with_speaker = [s for s in result["segments"] if s.get("speaker_id")]
         assert len(segments_with_speaker) > 0, "No segments have speaker attribution"
+
+    def test_stereo_per_channel_with_word_timestamps(self, audio_dir):
+        """Stereo per-channel with word-level timestamps.
+
+        Tests per-channel pipeline produces word timestamps. The pipeline is:
+            prepare → transcribe_ch0 → [align_ch0] ─┐
+                    → transcribe_ch1 → [align_ch1] ─┘→ merge
+
+        Note: align_ch* stages are only added for transcribers without native
+        word timestamps (e.g., Faster-Whisper). Parakeet has native word
+        timestamps so alignment is skipped.
+        """
+        result = transcribe_json(
+            audio_dir / "test_stereo_speakers.wav",
+            "--speakers",
+            "per-channel",
+            "--timestamps",
+            "word",
+        )
+
+        assert result["status"] == "completed"
+
+        # Should have word-level timestamps inside segments (from transcriber or alignment)
+        # Note: Words are stored in segments, not at top level
+        segments_with_words = [s for s in result["segments"] if s.get("words")]
+        assert len(segments_with_words) > 0, "No segments have word-level timestamps"
+
+        # Verify word structure
+        first_words = segments_with_words[0]["words"]
+        for word in first_words[:5]:  # Check first 5 words
+            assert "start" in word, "Word missing start time"
+            assert "end" in word, "Word missing end time"
+            assert "text" in word, "Word missing text"
+
+        # Should still have speakers from per-channel
+        speakers = result.get("speakers", [])
+        assert len(speakers) >= 2, "Expected at least 2 speakers for stereo per-channel"
+
+    def test_stereo_per_channel_multi_stage_with_whisper(self, audio_dir):
+        """Stereo per-channel with Faster-Whisper (multi-stage with alignment).
+
+        Uses Faster-Whisper which does NOT have native word timestamps,
+        so alignment stages are added:
+            prepare → transcribe_ch0 → align_ch0 ─┐
+                    → transcribe_ch1 → align_ch1 ─┘→ merge
+
+        This tests that per-channel stages (transcribe_ch*, align_ch*)
+        correctly route to their base streams.
+
+        Requires: stt-batch-transcribe-whisper-cpu, stt-batch-align-whisperx-cpu
+        """
+        result = transcribe_json(
+            audio_dir / "test_stereo_speakers.wav",
+            "--speakers",
+            "per-channel",
+            "--timestamps",
+            "word",
+            "--model",
+            "faster-whisper-large-v3",
+        )
+
+        assert result["status"] == "completed"
+
+        # Should have word-level timestamps from WhisperX alignment (inside segments)
+        segments_with_words = [s for s in result["segments"] if s.get("words")]
+        assert len(segments_with_words) > 0, "No segments have word-level timestamps"
+
+        # Should have speakers from per-channel
+        speakers = result.get("speakers", [])
+        assert len(speakers) >= 2, "Expected at least 2 speakers for stereo per-channel"
 
 
 @pytest.mark.e2e
@@ -329,6 +403,39 @@ class TestWavSuccessPiiDetection:
 
         assert result["status"] == "completed"
         assert result["text"]
+
+    def test_stereo_per_channel_with_pii_detection(self, audio_dir):
+        """Stereo per-channel with PII detection.
+
+        Tests per-channel pipeline with PII detection stages:
+            prepare → transcribe_ch0 → [align_ch0] → pii_detect_ch0 ─┐
+                    → transcribe_ch1 → [align_ch1] → pii_detect_ch1 ─┘→ merge
+
+        Per-channel stages (transcribe_ch*, pii_detect_ch*) route to their
+        respective base streams. Alignment stages only added for transcribers
+        without native word timestamps.
+
+        Requires: stt-batch-pii-detect-presidio
+        """
+        result = transcribe_json(
+            audio_dir / "test_stereo_speakers.wav",
+            "--speakers",
+            "per-channel",
+            "--pii",
+            "--pii-tier",
+            "standard",
+        )
+
+        assert result["status"] == "completed"
+
+        # Should have speakers from per-channel
+        speakers = result.get("speakers", [])
+        assert len(speakers) >= 2, "Expected at least 2 speakers for stereo per-channel"
+
+        # PII detection should complete (entities may or may not be found)
+        pii = result.get("pii", {})
+        assert pii.get("enabled") is True, "PII detection should be enabled"
+        assert pii.get("detection_tier") == "standard", "Expected standard tier"
 
 
 @pytest.mark.e2e
