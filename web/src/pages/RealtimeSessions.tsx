@@ -23,9 +23,10 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
+import { StatusBadge } from '@/components/StatusBadge'
 import { useRealtimeStatus } from '@/hooks/useRealtimeStatus'
 import { useRealtimeSessions } from '@/hooks/useRealtimeSessions'
-import type { RealtimeSessionStatus, RealtimeSessionSummary, RealtimeSessionListResponse } from '@/api/types'
+import type { RealtimeSessionSummary, RealtimeSessionListResponse } from '@/api/types'
 
 function StatusDot({ status }: { status: string }) {
   const color =
@@ -35,16 +36,6 @@ function StatusDot({ status }: { status: string }) {
         ? 'bg-yellow-500'
         : 'bg-red-500'
   return <span className={`inline-block w-3 h-3 rounded-full ${color}`} />
-}
-
-function SessionStatusBadge({ status }: { status: RealtimeSessionStatus }) {
-  const variants: Record<RealtimeSessionStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
-    active: 'default',
-    completed: 'secondary',
-    error: 'destructive',
-    interrupted: 'outline',
-  }
-  return <Badge variant={variants[status]}>{status}</Badge>
 }
 
 function formatDuration(seconds: number): string {
@@ -337,7 +328,7 @@ export function RealtimeSessions() {
                       {session.id.slice(0, 12)}...
                     </TableCell>
                     <TableCell>
-                      <SessionStatusBadge status={session.status} />
+                      <StatusBadge status={session.status} />
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
                       <div className="flex flex-col">

@@ -10,24 +10,13 @@ import {
   Cpu,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { StatusBadge } from '@/components/StatusBadge'
 import { useRealtimeSession, useSessionTranscript } from '@/hooks/useRealtimeSessions'
 import { BackButton } from '@/components/BackButton'
 import { TranscriptViewer } from '@/components/TranscriptViewer'
 import { apiClient } from '@/api/client'
-import type { RealtimeSessionStatus } from '@/api/types'
-
-function SessionStatusBadge({ status }: { status: RealtimeSessionStatus }) {
-  const variants: Record<RealtimeSessionStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
-    active: 'default',
-    completed: 'secondary',
-    error: 'destructive',
-    interrupted: 'outline',
-  }
-  return <Badge variant={variants[status]}>{status}</Badge>
-}
 
 function formatDuration(seconds: number): string {
   if (seconds < 60) {
@@ -98,7 +87,7 @@ export function RealtimeSessionDetail() {
             <p className="text-muted-foreground">Realtime Session</p>
           </div>
         </div>
-        <SessionStatusBadge status={session.status} />
+        <StatusBadge status={session.status} />
       </div>
 
       {session.error && (
