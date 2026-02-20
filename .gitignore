@@ -28,12 +28,21 @@ ENV/
 htmlcov/
 .pytest_cache/
 
-# Playwright MCP
+# Playwright
 .playwright-output/
 .playwright-mcp/
+playwright-report/
+test-results/
 
 # OS
 Thumbs.db
+
+# Node
+node_modules/
+
+# Claude Code
+.claude/
+.mcp.json
 
 # Large test fixtures
 tests/audio/large/

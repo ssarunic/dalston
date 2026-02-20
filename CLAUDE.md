@@ -41,6 +41,19 @@ cd engines/realtime/whisper-streaming
 WORKER_ID=dev-worker REDIS_URL=redis://localhost:6379 python engine.py
 ```
 
+### Local Docker Setup
+
+**Important**: Local Docker does not use volume mounts - files are baked into the images. You must rebuild containers after any code change before testing:
+
+```bash
+# Rebuild specific service after code changes
+docker compose build <service-name>
+docker compose up -d <service-name>
+
+# Or rebuild and start in one command
+docker compose up -d --build <service-name>
+```
+
 ### Docker Compose Operations
 
 ```bash

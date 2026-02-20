@@ -200,7 +200,9 @@ export function JobDetail() {
   const { data: auditData, isLoading: auditLoading } = useResourceAuditTrail('job', jobId)
   const [showRedacted, setShowRedacted] = useState(false)
 
-  if (isLoading) {
+  // Show loading state on initial fetch OR when cached data is from a different job
+  // This prevents showing stale data from a previously viewed job
+  if (isLoading || job?.id !== jobId) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-10 w-64" />

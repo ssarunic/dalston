@@ -31,6 +31,7 @@ export function useScrollRestoration(containerRef: React.RefObject<HTMLElement |
   const location = useLocation()
   const locationKey = location.key || location.pathname
   const isRestoringRef = useRef(false)
+  const prevPathnameRef = useRef(location.pathname)
 
   // Restore scroll position when location changes
   useEffect(() => {
@@ -39,6 +40,8 @@ export function useScrollRestoration(containerRef: React.RefObject<HTMLElement |
 
     const positions = getScrollPositions()
     const savedPosition = positions[locationKey]
+    const pathnameChanged = prevPathnameRef.current !== location.pathname
+    prevPathnameRef.current = location.pathname
 
     if (savedPosition !== undefined) {
       isRestoringRef.current = true
@@ -51,10 +54,12 @@ export function useScrollRestoration(containerRef: React.RefObject<HTMLElement |
           isRestoringRef.current = false
         }, 50)
       })
-    } else {
+    } else if (pathnameChanged) {
+      // Only reset scroll when navigating to a different page,
+      // not when just search params change (e.g., pagination cursor)
       container.scrollTop = 0
     }
-  }, [locationKey, containerRef])
+  }, [locationKey, containerRef, location.pathname])
 
   // Save scroll position on scroll
   useEffect(() => {

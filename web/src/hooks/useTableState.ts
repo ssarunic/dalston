@@ -114,7 +114,7 @@ export function useTableState<TItem, TData = unknown>(
           next.set('cursor', nextCursor)
           return next
         },
-        { replace: true }
+        { replace: true, preventScrollReset: true }
       )
     }
   }, [hasMore, setSearchParams, getCursor])
