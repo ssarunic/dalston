@@ -21,7 +21,7 @@ import dalston.telemetry
 from dalston.common.models import Task
 from dalston.common.pipeline_types import AudioMedia, TaskInputData
 from dalston.common.s3 import get_s3_client
-from dalston.common.streams import add_task
+from dalston.common.streams import add_task, add_task_once
 from dalston.config import Settings
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog, get_catalog
 from dalston.orchestrator.exceptions import (
@@ -188,6 +188,7 @@ async def queue_task(
     previous_outputs: dict[str, Any] | None = None,
     audio_metadata: dict[str, Any] | None = None,
     catalog: EngineCatalog | None = None,
+    enqueue_idempotency_key: str | None = None,
 ) -> None:
     """Queue a task for execution by its engine.
 
@@ -207,6 +208,8 @@ async def queue_task(
         previous_outputs: Outputs from dependency tasks (keyed by stage)
         audio_metadata: Audio file metadata (format, duration, sample_rate, channels)
         catalog: Engine catalog for validation (uses singleton if not provided)
+        enqueue_idempotency_key: Optional idempotency key for stream enqueue.
+            When provided, stream insertion is deduplicated atomically.
 
     Raises:
         CatalogValidationError: If no engine in catalog supports the requirements
@@ -344,15 +347,34 @@ async def queue_task(
     )
 
     # 3. Add task to stream (replaces lpush to queue)
-    message_id = await add_task(
-        redis,
-        # Per-channel task stages share the same engine stream.
-        # Example: transcribe_ch0 / transcribe_ch1 -> transcribe.
-        stage=stream_stage,
-        task_id=task_id_str,
-        job_id=job_id_str,
-        timeout_s=base_timeout,
-    )
+    if enqueue_idempotency_key:
+        message_id = await add_task_once(
+            redis,
+            # Per-channel task stages share the same engine stream.
+            # Example: transcribe_ch0 / transcribe_ch1 -> transcribe.
+            stage=stream_stage,
+            task_id=task_id_str,
+            job_id=job_id_str,
+            timeout_s=base_timeout,
+            dedupe_key=enqueue_idempotency_key,
+        )
+        if message_id is None:
+            log.info(
+                "task_already_enqueued",
+                stream=f"dalston:stream:{stream_stage}",
+                dedupe_key=enqueue_idempotency_key,
+            )
+            return
+    else:
+        message_id = await add_task(
+            redis,
+            # Per-channel task stages share the same engine stream.
+            # Example: transcribe_ch0 / transcribe_ch1 -> transcribe.
+            stage=stream_stage,
+            task_id=task_id_str,
+            job_id=job_id_str,
+            timeout_s=base_timeout,
+        )
 
     log.info(
         "task_queued", stream=f"dalston:stream:{stream_stage}", message_id=message_id

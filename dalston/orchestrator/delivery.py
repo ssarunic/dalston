@@ -6,9 +6,11 @@ with retry logic. This provides crash-resilient webhook delivery.
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 import structlog
 from sqlalchemy import and_, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.config import Settings
@@ -280,8 +282,8 @@ class DeliveryWorker:
 
 async def create_webhook_delivery(
     db: AsyncSession,
-    endpoint_id: str | None,
-    job_id: str | None,
+    endpoint_id: UUID | str | None,
+    job_id: UUID | str | None,
     event_type: str,
     payload: dict,
     url_override: str | None = None,
@@ -297,18 +299,59 @@ async def create_webhook_delivery(
         url_override: URL for per-job webhooks (when endpoint_id is None)
 
     Returns:
-        Created delivery record
+        Created delivery record, or existing deduplicated record
     """
-    delivery = WebhookDeliveryModel(
-        endpoint_id=endpoint_id,
-        job_id=job_id,
-        event_type=event_type,
-        payload=payload,
-        url_override=url_override,
-        status="pending",
-        attempts=0,
-        next_retry_at=datetime.now(UTC),
+    now = datetime.now(UTC)
+    values = {
+        "endpoint_id": endpoint_id,
+        "job_id": job_id,
+        "event_type": event_type,
+        "payload": payload,
+        "url_override": url_override,
+        "status": "pending",
+        "attempts": 0,
+        "next_retry_at": now,
+    }
+
+    # Conflict-safe insert:
+    # - Before migration with unique constraints, this behaves like a plain insert.
+    # - After migration, duplicate replay inserts are dropped and we fetch existing row.
+    stmt = (
+        insert(WebhookDeliveryModel)
+        .values(**values)
+        .on_conflict_do_nothing()
+        .returning(WebhookDeliveryModel.id)
     )
-    db.add(delivery)
-    await db.flush()  # Get the ID without committing
-    return delivery
+    result = await db.execute(stmt)
+    delivery_id = result.scalar_one_or_none()
+
+    if delivery_id is not None:
+        delivery = await db.get(WebhookDeliveryModel, delivery_id)
+        if delivery is None:
+            raise RuntimeError("Inserted webhook delivery row was not readable")
+        return delivery
+
+    # Conflict path: fetch existing deduped delivery.
+    query = select(WebhookDeliveryModel).where(
+        WebhookDeliveryModel.job_id == job_id,
+        WebhookDeliveryModel.event_type == event_type,
+    )
+    if endpoint_id is not None:
+        query = query.where(WebhookDeliveryModel.endpoint_id == endpoint_id)
+    else:
+        query = query.where(
+            WebhookDeliveryModel.endpoint_id.is_(None),
+            WebhookDeliveryModel.url_override == url_override,
+        )
+
+    existing = (
+        await db.execute(
+            query.order_by(
+                WebhookDeliveryModel.created_at.asc(),
+                WebhookDeliveryModel.id.asc(),
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is None:
+        raise RuntimeError("Webhook delivery dedupe conflict without existing row")
+    return existing

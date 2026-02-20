@@ -55,6 +55,7 @@ def make_engine_state(
     now = datetime.now(UTC)
     return BatchEngineState(
         engine_id=engine_id,
+        instance_id=f"{engine_id}-test-instance",
         stage=stage,
         queue_name=f"dalston:queue:{engine_id}",
         status="idle" if is_available else "offline",

@@ -942,6 +942,11 @@ class TestHandleTaskFailedIdempotency:
             assert mock_task.retries == 1
             # Task should be re-enqueued
             mock_queue_task.assert_called_once()
+            queue_kwargs = mock_queue_task.call_args.kwargs
+            assert (
+                queue_kwargs["enqueue_idempotency_key"]
+                == f"dalston:task:retry-enqueue:{task_id}:1"
+            )
 
     @pytest.mark.asyncio
     async def test_replay_skipped_task_calls_handle_task_completed(
@@ -1188,7 +1193,9 @@ class TestHandleTaskFailedIdempotency:
         mock_result.scalars.return_value.all.return_value = [mock_task]
         mock_db_session.execute = AsyncMock(return_value=mock_result)
 
-        with patch("dalston.orchestrator.handlers.queue_task", new_callable=AsyncMock):
+        with patch(
+            "dalston.orchestrator.handlers.queue_task", new_callable=AsyncMock
+        ) as mock_queue_task:
             await handle_task_failed(
                 task_id=task_id,
                 error="Task failed",
@@ -1201,6 +1208,10 @@ class TestHandleTaskFailedIdempotency:
         # Should increment retries and update status
         assert mock_task.retries == 1
         assert mock_task.status == TaskStatus.READY.value
+        assert (
+            mock_queue_task.call_args.kwargs["enqueue_idempotency_key"]
+            == f"dalston:task:retry-enqueue:{task_id}:1"
+        )
         mock_db_session.commit.assert_called()
 
 

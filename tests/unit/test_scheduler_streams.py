@@ -169,6 +169,34 @@ class TestQueueTaskWithStreams:
             call_args = mock_add_task.call_args
             assert call_args[1]["stage"] == "transcribe"
 
+    @pytest.mark.asyncio
+    async def test_uses_add_task_once_when_idempotency_key_provided(
+        self, mock_redis, mock_registry, mock_catalog, sample_task
+    ):
+        """Queue uses deduplicated enqueue when idempotency key is provided."""
+        with (
+            patch(
+                "dalston.orchestrator.scheduler.add_task_once", new_callable=AsyncMock
+            ) as mock_add_task_once,
+            patch("dalston.orchestrator.scheduler.add_task", new_callable=AsyncMock),
+            patch(
+                "dalston.orchestrator.scheduler.write_task_input",
+                new_callable=AsyncMock,
+            ),
+        ):
+            mock_add_task_once.return_value = "1234567890-0"
+
+            await queue_task(
+                redis=mock_redis,
+                task=sample_task,
+                settings=MockSettings(),
+                registry=mock_registry,
+                catalog=mock_catalog,
+                enqueue_idempotency_key="dalston:test:retry:key",
+            )
+
+            mock_add_task_once.assert_called_once()
+
 
 class TestRemoveTaskFromQueue:
     """Tests for deprecated remove_task_from_queue."""

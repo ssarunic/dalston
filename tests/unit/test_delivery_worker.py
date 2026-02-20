@@ -12,11 +12,12 @@ from uuid import uuid4
 
 import pytest
 
-from dalston.db.models import WebhookEndpointModel
+from dalston.db.models import WebhookDeliveryModel, WebhookEndpointModel
 from dalston.orchestrator.delivery import (
     AUTO_DISABLE_FAILURE_THRESHOLD,
     AUTO_DISABLE_SUCCESS_WINDOW_DAYS,
     DeliveryWorker,
+    create_webhook_delivery,
 )
 
 
@@ -246,3 +247,118 @@ class TestReEnabling:
         assert mock_endpoint.disabled_reason is None
         # consecutive_failures should also be reset
         assert mock_endpoint.consecutive_failures == 0
+
+
+@pytest.mark.asyncio
+class TestCreateWebhookDelivery:
+    """Tests for deduplicated webhook delivery creation."""
+
+    async def test_returns_inserted_delivery(self):
+        """Returns newly inserted delivery when no conflict occurs."""
+        delivery_id = uuid4()
+        inserted = MagicMock()
+        inserted.scalar_one_or_none.return_value = delivery_id
+
+        mock_delivery = WebhookDeliveryModel(
+            id=delivery_id,
+            endpoint_id=uuid4(),
+            job_id=uuid4(),
+            event_type="transcription.failed",
+            payload={"type": "transcription.failed"},
+            url_override=None,
+            status="pending",
+            attempts=0,
+            next_retry_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+        )
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=inserted)
+        mock_db.get = AsyncMock(return_value=mock_delivery)
+
+        result = await create_webhook_delivery(
+            db=mock_db,
+            endpoint_id=mock_delivery.endpoint_id,
+            job_id=mock_delivery.job_id,
+            event_type=mock_delivery.event_type,
+            payload=mock_delivery.payload,
+        )
+
+        assert result == mock_delivery
+        mock_db.get.assert_awaited_once_with(WebhookDeliveryModel, delivery_id)
+
+    async def test_returns_existing_delivery_on_conflict(self):
+        """Returns existing row when insert is deduplicated by unique constraints."""
+        job_id = uuid4()
+        endpoint_id = uuid4()
+
+        insert_result = MagicMock()
+        insert_result.scalar_one_or_none.return_value = None
+
+        existing_delivery = WebhookDeliveryModel(
+            id=uuid4(),
+            endpoint_id=endpoint_id,
+            job_id=job_id,
+            event_type="transcription.failed",
+            payload={"type": "transcription.failed"},
+            url_override=None,
+            status="pending",
+            attempts=0,
+            next_retry_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+        )
+        select_result = MagicMock()
+        select_result.scalar_one_or_none.return_value = existing_delivery
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(side_effect=[insert_result, select_result])
+        mock_db.get = AsyncMock()
+
+        result = await create_webhook_delivery(
+            db=mock_db,
+            endpoint_id=endpoint_id,
+            job_id=job_id,
+            event_type="transcription.failed",
+            payload={"type": "transcription.failed"},
+        )
+
+        assert result == existing_delivery
+        mock_db.execute.assert_awaited()
+        mock_db.get.assert_not_called()
+
+    async def test_returns_existing_per_job_url_delivery_on_conflict(self):
+        """Dedupes per-job webhook URL deliveries when endpoint_id is None."""
+        job_id = uuid4()
+
+        insert_result = MagicMock()
+        insert_result.scalar_one_or_none.return_value = None
+
+        existing_delivery = WebhookDeliveryModel(
+            id=uuid4(),
+            endpoint_id=None,
+            job_id=job_id,
+            event_type="transcription.failed",
+            payload={"type": "transcription.failed"},
+            url_override="https://example.com/webhook",
+            status="pending",
+            attempts=0,
+            next_retry_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+        )
+        select_result = MagicMock()
+        select_result.scalar_one_or_none.return_value = existing_delivery
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(side_effect=[insert_result, select_result])
+        mock_db.get = AsyncMock()
+
+        result = await create_webhook_delivery(
+            db=mock_db,
+            endpoint_id=None,
+            job_id=job_id,
+            event_type="transcription.failed",
+            payload={"type": "transcription.failed"},
+            url_override="https://example.com/webhook",
+        )
+
+        assert result == existing_delivery

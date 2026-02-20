@@ -19,6 +19,7 @@ from dalston.common.streams import (
     _stream_key,
     ack_task,
     add_task,
+    add_task_once,
     claim_stale_tasks,
     claim_tasks_by_id,
     discover_streams,
@@ -217,6 +218,47 @@ class TestReadTask:
 
         assert msg is None
         mock_redis.xgroup_create.assert_called()
+
+
+class TestAddTaskOnce:
+    """Tests for add_task_once replay-safe enqueue behavior."""
+
+    @pytest.fixture
+    def mock_redis(self):
+        mock = AsyncMock()
+        mock.xgroup_create = AsyncMock()
+        return mock
+
+    @pytest.mark.asyncio
+    async def test_adds_task_when_dedupe_key_not_set(self, mock_redis):
+        mock_redis.eval = AsyncMock(return_value="1234567890-0")
+
+        message_id = await add_task_once(
+            mock_redis,
+            stage="transcribe",
+            task_id="task-123",
+            job_id="job-456",
+            timeout_s=600,
+            dedupe_key="dalston:test:retry:task-123:1",
+        )
+
+        assert message_id == "1234567890-0"
+        mock_redis.eval.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_duplicate(self, mock_redis):
+        mock_redis.eval = AsyncMock(return_value=False)
+
+        message_id = await add_task_once(
+            mock_redis,
+            stage="transcribe",
+            task_id="task-123",
+            job_id="job-456",
+            timeout_s=600,
+            dedupe_key="dalston:test:retry:task-123:1",
+        )
+
+        assert message_id is None
 
 
 class TestClaimStaleTasks:

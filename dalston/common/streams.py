@@ -150,6 +150,91 @@ async def add_task(
     return message_id
 
 
+async def add_task_once(
+    redis: Redis,
+    stage: str,
+    task_id: str,
+    job_id: str,
+    timeout_s: int,
+    dedupe_key: str,
+    dedupe_ttl_s: int = 24 * 3600,
+) -> str | None:
+    """Add task to stream at most once for a dedupe key.
+
+    Atomically sets the dedupe key (SET NX) and appends to stream (XADD) in one
+    Lua script to prevent duplicate stream entries during replay/retry paths.
+
+    Args:
+        redis: Async Redis client
+        stage: Pipeline stage name
+        task_id: Task UUID string
+        job_id: Job UUID string
+        timeout_s: Task timeout in seconds
+        dedupe_key: Idempotency key for enqueue operation
+        dedupe_ttl_s: TTL for dedupe key in seconds (default 24h)
+
+    Returns:
+        Redis message ID if enqueued, None if dedupe key already existed
+    """
+    stream_key = _stream_key(stage)
+
+    # Ensure consumer group exists before adding
+    await ensure_stream_group(redis, stage)
+
+    now = datetime.now(UTC)
+    timeout_at = datetime.fromtimestamp(now.timestamp() + timeout_s, tz=UTC)
+
+    script = """
+    local dedupe_set = redis.call("SET", KEYS[2], ARGV[1], "NX", "EX", ARGV[2])
+    if not dedupe_set then
+        return false
+    end
+    return redis.call(
+        "XADD",
+        KEYS[1],
+        "*",
+        "task_id", ARGV[3],
+        "job_id", ARGV[4],
+        "enqueued_at", ARGV[5],
+        "timeout_at", ARGV[6]
+    )
+    """
+
+    result = await redis.eval(  # type: ignore[call-arg]
+        script,
+        2,
+        stream_key,
+        dedupe_key,
+        "1",
+        str(dedupe_ttl_s),
+        task_id,
+        job_id,
+        now.isoformat(),
+        timeout_at.isoformat(),
+    )
+
+    if not result:
+        logger.debug(
+            "task_add_deduplicated",
+            stream=stream_key,
+            task_id=task_id,
+            dedupe_key=dedupe_key,
+        )
+        return None
+
+    message_id = result.decode() if isinstance(result, bytes) else str(result)
+
+    logger.debug(
+        "task_added_to_stream_once",
+        stream=stream_key,
+        message_id=message_id,
+        task_id=task_id,
+        dedupe_key=dedupe_key,
+    )
+
+    return message_id
+
+
 async def read_task(
     redis: Redis,
     stage: str,

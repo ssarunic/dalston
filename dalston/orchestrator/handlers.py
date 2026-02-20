@@ -53,6 +53,11 @@ from dalston.orchestrator.stats import extract_stats_from_transcript
 logger = structlog.get_logger()
 
 
+def _retry_enqueue_dedupe_key(task_id: UUID, retry_count: int) -> str:
+    """Build idempotency key for retry enqueue operations."""
+    return f"dalston:task:retry-enqueue:{task_id}:{retry_count}"
+
+
 def _serialize_engine_error(
     e: EngineUnavailableError | EngineCapabilityError | CatalogValidationError,
 ) -> str:
@@ -709,6 +714,9 @@ async def handle_task_failed(
                 settings=settings,
                 registry=registry,
                 previous_outputs=previous_outputs,
+                enqueue_idempotency_key=_retry_enqueue_dedupe_key(
+                    task.id, task.retries
+                ),
             )
         except (
             EngineUnavailableError,
@@ -821,6 +829,7 @@ async def _ensure_retry_enqueued(
             settings=settings,
             registry=registry,
             previous_outputs=previous_outputs,
+            enqueue_idempotency_key=_retry_enqueue_dedupe_key(task.id, task.retries),
         )
         log.info("retry_enqueued_on_replay", retry_count=task.retries)
     except (

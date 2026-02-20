@@ -89,6 +89,7 @@ def mock_running_engines() -> list[BatchEngineState]:
     return [
         BatchEngineState(
             engine_id="faster-whisper",
+            instance_id="faster-whisper-test-instance",
             stage="transcribe",
             queue_name="dalston:queue:faster-whisper",
             status="idle",

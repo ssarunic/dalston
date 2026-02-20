@@ -201,7 +201,7 @@ class TestWavSuccessStereoFile:
             "--timestamps",
             "word",
             "--model",
-            "faster-whisper-large-v3",
+            "faster-whisper-base",
         )
 
         assert result["status"] == "completed"
@@ -271,6 +271,8 @@ class TestWavSuccessDiarization:
         """Mono file with diarization completes successfully."""
         result = transcribe_json(
             audio_dir / "test_merged.wav",
+            "--model",
+            "faster-whisper-base",
             "--speakers",
             "diarize",
         )
@@ -282,6 +284,8 @@ class TestWavSuccessDiarization:
         """Stereo file with diarization completes successfully."""
         result = transcribe_json(
             audio_dir / "test_stereo_speakers.wav",
+            "--model",
+            "faster-whisper-base",
             "--speakers",
             "diarize",
         )
@@ -360,6 +364,8 @@ class TestWavSuccessPiiDetection:
         """Transcription with PII detection completes successfully."""
         result = transcribe_json(
             audio_dir / "test_merged.wav",
+            "--model",
+            "faster-whisper-base",
             "--pii",
         )
 
@@ -372,6 +378,8 @@ class TestWavSuccessPiiDetection:
         """PII detection with fast tier (regex-based)."""
         result = transcribe_json(
             audio_dir / "test_merged.wav",
+            "--model",
+            "faster-whisper-base",
             "--pii",
             "--pii-tier",
             "fast",
@@ -384,6 +392,8 @@ class TestWavSuccessPiiDetection:
         """PII detection with standard tier (NER-based)."""
         result = transcribe_json(
             audio_dir / "test_merged.wav",
+            "--model",
+            "faster-whisper-base",
             "--pii",
             "--pii-tier",
             "standard",
@@ -396,6 +406,8 @@ class TestWavSuccessPiiDetection:
         """PII detection with specific entity types."""
         result = transcribe_json(
             audio_dir / "test_merged.wav",
+            "--model",
+            "faster-whisper-base",
             "--pii",
             "--pii-entities",
             "PERSON,EMAIL,PHONE_NUMBER",
@@ -419,6 +431,8 @@ class TestWavSuccessPiiDetection:
         """
         result = transcribe_json(
             audio_dir / "test_stereo_speakers.wav",
+            "--model",
+            "faster-whisper-base",
             "--speakers",
             "per-channel",
             "--pii",
@@ -446,6 +460,8 @@ class TestWavSuccessAudioRedaction:
         """Audio redaction with silence mode completes."""
         result = transcribe_json(
             audio_dir / "test_merged.wav",
+            "--model",
+            "faster-whisper-base",
             "--pii",
             "--redact-audio",
             "--redaction-mode",
@@ -461,6 +477,8 @@ class TestWavSuccessAudioRedaction:
         """Audio redaction with beep mode completes."""
         result = transcribe_json(
             audio_dir / "test_merged.wav",
+            "--model",
+            "faster-whisper-base",
             "--pii",
             "--redact-audio",
             "--redaction-mode",

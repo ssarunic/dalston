@@ -399,6 +399,20 @@ class WebhookDeliveryModel(Base):
     """Webhook delivery attempt record."""
 
     __tablename__ = "webhook_deliveries"
+    __table_args__ = (
+        UniqueConstraint(
+            "job_id",
+            "event_type",
+            "endpoint_id",
+            name="uq_webhook_deliveries_job_event_endpoint",
+        ),
+        UniqueConstraint(
+            "job_id",
+            "event_type",
+            "url_override",
+            name="uq_webhook_deliveries_job_event_url",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
