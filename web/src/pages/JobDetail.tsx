@@ -8,6 +8,8 @@ import {
   Trash2,
   Mic,
   ScrollText,
+  Download,
+  ShieldAlert,
 } from 'lucide-react'
 import { useJob } from '@/hooks/useJob'
 import { useJobTasks } from '@/hooks/useJobTasks'
@@ -15,10 +17,12 @@ import { useResourceAuditTrail } from '@/hooks/useAuditLog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/StatusBadge'
 import { DAGViewer } from '@/components/DAGViewer'
 import { BackButton } from '@/components/BackButton'
 import { TranscriptViewer } from '@/components/TranscriptViewer'
+import { apiClient } from '@/api/client'
 import type { RetentionInfo, AuditEvent } from '@/api/types'
 
 function MetadataCard({
@@ -119,6 +123,83 @@ const ACTION_STYLES: Record<string, string> = {
 function getActionStyle(action: string): string {
   const actionPart = action.split('.').pop() || action
   return ACTION_STYLES[actionPart] || 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+}
+
+function AudioStorageCard({
+  jobId,
+  status,
+  isPurged,
+  hasRedactedAudio,
+}: {
+  jobId: string
+  status: string
+  isPurged: boolean
+  hasRedactedAudio: boolean
+}) {
+  const isTerminal = ['completed', 'failed', 'cancelled'].includes(status)
+
+  const handleDownloadOriginal = async () => {
+    try {
+      const { url } = await apiClient.getJobAudioUrl(jobId)
+      window.open(url, '_blank')
+    } catch (err) {
+      console.error('Failed to get audio URL:', err)
+    }
+  }
+
+  const handleDownloadRedacted = async () => {
+    try {
+      const { url } = await apiClient.getJobRedactedAudioUrl(jobId)
+      window.open(url, '_blank')
+    } catch (err) {
+      console.error('Failed to get redacted audio URL:', err)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base font-medium">Audio</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Original Audio */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Mic className="h-5 w-5 text-muted-foreground" />
+            <span>Original Audio</span>
+          </div>
+          {isPurged ? (
+            <span className="text-muted-foreground text-sm">Purged</span>
+          ) : isTerminal ? (
+            <Button variant="outline" size="sm" onClick={handleDownloadOriginal}>
+              <Download className="h-4 w-4 mr-2" />
+              Download
+            </Button>
+          ) : (
+            <span className="text-muted-foreground text-sm">Processing...</span>
+          )}
+        </div>
+
+        {/* Redacted Audio */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="h-5 w-5 text-muted-foreground" />
+            <span>Redacted Audio</span>
+          </div>
+          {isPurged ? (
+            <span className="text-muted-foreground text-sm">Purged</span>
+          ) : hasRedactedAudio ? (
+            <Button variant="outline" size="sm" onClick={handleDownloadRedacted}>
+              <Download className="h-4 w-4 mr-2" />
+              Download
+            </Button>
+          ) : (
+            <span className="text-muted-foreground text-sm">Not available</span>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
 }
 
 function AuditTrailSection({ events, isLoading }: { events?: AuditEvent[]; isLoading: boolean }) {
@@ -350,6 +431,14 @@ export function JobDetail() {
           </CardContent>
         </Card>
       )}
+
+      {/* Audio Storage */}
+      <AudioStorageCard
+        jobId={job.id}
+        status={job.status}
+        isPurged={!!job.retention?.purged_at}
+        hasRedactedAudio={!!job.pii?.redacted_audio_available}
+      />
 
       {/* Audit Trail */}
       <AuditTrailSection events={auditData?.events} isLoading={auditLoading} />

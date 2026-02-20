@@ -228,6 +228,28 @@ export function RealtimeSessionDetail() {
         </CardContent>
       </Card>
 
+      {/* Transcript Card */}
+      {transcript && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Transcript</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <TranscriptViewer
+              segments={transcript.utterances?.map(utt => ({
+                id: utt.id,
+                start: utt.start,
+                end: utt.end,
+                text: utt.text,
+              })) ?? []}
+              fullText={transcript.text}
+              enableExport={!!session.transcript_uri}
+              exportConfig={{ type: 'session', id: session.id }}
+            />
+          </CardContent>
+        </Card>
+      )}
+
       {/* Storage Card */}
       <Card>
         <CardHeader>
@@ -266,28 +288,6 @@ export function RealtimeSessionDetail() {
           </div>
         </CardContent>
       </Card>
-
-      {/* Transcript Card */}
-      {transcript && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Transcript</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <TranscriptViewer
-              segments={transcript.utterances?.map(utt => ({
-                id: utt.id,
-                start: utt.start,
-                end: utt.end,
-                text: utt.text,
-              })) ?? []}
-              fullText={transcript.text}
-              enableExport={!!session.transcript_uri}
-              exportConfig={{ type: 'session', id: session.id }}
-            />
-          </CardContent>
-        </Card>
-      )}
     </div>
   )
 }

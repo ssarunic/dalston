@@ -61,6 +61,14 @@ class PIIInfo(BaseModel):
     )
 
 
+class AudioUrlResponse(BaseModel):
+    """Response for audio download URL endpoints."""
+
+    url: str = Field(description="Presigned S3 URL for download")
+    expires_in: int = Field(description="URL expiration time in seconds")
+    type: str = Field(description="Audio type: 'original' or 'redacted'")
+
+
 class JobCreatedResponse(BaseModel):
     """Response for POST /v1/audio/transcriptions."""
 

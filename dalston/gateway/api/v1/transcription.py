@@ -46,6 +46,7 @@ from dalston.gateway.dependencies import (
     get_settings,
 )
 from dalston.gateway.models.responses import (
+    AudioUrlResponse,
     JobCancelledResponse,
     JobCreatedResponse,
     JobListResponse,
@@ -72,6 +73,11 @@ from dalston.gateway.services.retention import (
 from dalston.gateway.services.storage import StorageService
 
 router = APIRouter(prefix="/audio/transcriptions", tags=["transcriptions"])
+
+# Presigned URL expiry time in seconds (1 hour) - matches realtime endpoint
+PRESIGNED_URL_EXPIRY_SECONDS = 3600
+
+logger = structlog.get_logger()
 
 
 @router.post(
@@ -657,7 +663,269 @@ async def export_transcription(
     )
 
 
-logger = structlog.get_logger()
+@router.get(
+    "/{job_id}/audio",
+    response_model=AudioUrlResponse,
+    summary="Get original audio download URL",
+    description="Get a presigned URL to download the original audio file for a job.",
+    responses={
+        200: {"description": "Presigned URL for audio download"},
+        404: {"description": "Job not found or audio not available"},
+        409: {"description": "Job not in terminal state"},
+        410: {"description": "Audio has been purged"},
+    },
+)
+async def get_job_audio(
+    job_id: UUID,
+    api_key: RequireJobsRead,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    jobs_service: JobsService = Depends(get_jobs_service),
+) -> AudioUrlResponse:
+    """Get presigned URL for original job audio.
+
+    Requirements:
+    1. Job must exist and belong to the tenant
+    2. Job must be in a terminal state (completed, failed, cancelled)
+    3. Audio must not have been purged by retention policy
+    """
+    job = await jobs_service.get_job(db, job_id, tenant_id=api_key.tenant_id)
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Check job is in terminal state
+    terminal_states = {
+        JobStatus.COMPLETED.value,
+        JobStatus.FAILED.value,
+        JobStatus.CANCELLED.value,
+    }
+    if job.status not in terminal_states:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Job not in terminal state. Current status: {job.status}",
+        )
+
+    # Check if audio has been purged by retention policy
+    if job.purged_at is not None:
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "code": "audio_purged",
+                "message": "Audio has been purged according to retention policy",
+                "purged_at": job.purged_at.isoformat(),
+            },
+        )
+
+    # Parse S3 URI to extract bucket/key
+    # Format: s3://bucket/{key}
+    audio_uri = job.audio_uri
+    if not audio_uri or not audio_uri.startswith("s3://"):
+        raise HTTPException(status_code=404, detail="Original audio not found")
+
+    uri_parts = audio_uri.replace("s3://", "").split("/", 1)
+    if len(uri_parts) != 2:
+        raise HTTPException(status_code=404, detail="Original audio not found")
+
+    bucket = uri_parts[0]
+    key = uri_parts[1]
+
+    # Verify bucket matches expected (security check)
+    if bucket != settings.s3_bucket:
+        logger.warning(
+            "audio_bucket_mismatch",
+            job_id=str(job_id),
+            expected_bucket=settings.s3_bucket,
+            actual_bucket=bucket,
+        )
+        raise HTTPException(status_code=404, detail="Original audio not found")
+
+    # Verify exact S3 object exists (handles manual deletion via DELETE /audio)
+    storage = StorageService(settings)
+    if not await storage.object_exists(key):
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "code": "audio_deleted",
+                "message": "Audio has been deleted",
+            },
+        )
+
+    # Generate presigned URL
+    try:
+        url = await storage.generate_presigned_url(
+            key,
+            expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
+        )
+        return AudioUrlResponse(
+            url=url,
+            expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
+            type="original",
+        )
+    except Exception as e:
+        logger.warning(
+            "audio_presigned_url_failed",
+            job_id=str(job_id),
+            key=key,
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=404,
+            detail="Failed to generate audio download URL",
+        ) from None
+
+
+@router.get(
+    "/{job_id}/audio/redacted",
+    response_model=AudioUrlResponse,
+    summary="Get redacted audio download URL",
+    description="Get a presigned URL to download the PII-redacted audio file for a job.",
+    responses={
+        200: {"description": "Presigned URL for redacted audio download"},
+        404: {"description": "Job not found or redacted audio not available"},
+        409: {"description": "Job not completed"},
+        410: {"description": "Audio has been purged"},
+    },
+)
+async def get_job_audio_redacted(
+    job_id: UUID,
+    api_key: RequireJobsRead,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    jobs_service: JobsService = Depends(get_jobs_service),
+) -> AudioUrlResponse:
+    """Get presigned URL for PII-redacted job audio.
+
+    Requirements:
+    1. Job must exist and belong to the tenant
+    2. Job must be completed (redaction only happens on successful jobs)
+    3. PII detection with audio redaction must have been enabled
+    4. Audio must not have been purged by retention policy
+    5. Redacted audio must actually exist in S3
+
+    Note: Uses transcript's pii_metadata.redacted_audio_uri as source of truth,
+    matching the UI's redacted_audio_available flag behavior.
+    """
+    job = await jobs_service.get_job(db, job_id, tenant_id=api_key.tenant_id)
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Redacted audio only exists for completed jobs
+    if job.status != JobStatus.COMPLETED.value:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Job not completed. Current status: {job.status}. "
+            "Redacted audio is only available for completed jobs.",
+        )
+
+    # Check if PII redaction was enabled
+    if not job.pii_redact_audio:
+        raise HTTPException(
+            status_code=404,
+            detail="PII audio redaction was not enabled for this job",
+        )
+
+    # Check if audio has been purged
+    if job.purged_at is not None:
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "code": "audio_purged",
+                "message": "Audio has been purged according to retention policy",
+                "purged_at": job.purged_at.isoformat(),
+            },
+        )
+
+    # Get redacted audio URI from transcript's pii_metadata (matches UI availability flag)
+    # This ensures consistency with the UI's redacted_audio_available indicator
+    storage = StorageService(settings)
+    transcript = await storage.get_transcript(job.id)
+
+    if not transcript:
+        raise HTTPException(
+            status_code=404,
+            detail="Transcript not found",
+        )
+
+    pii_metadata = transcript.get("pii_metadata")
+    if not pii_metadata:
+        raise HTTPException(
+            status_code=404,
+            detail="PII metadata not available in transcript",
+        )
+
+    redacted_audio_uri = pii_metadata.get("redacted_audio_uri")
+    if not redacted_audio_uri:
+        raise HTTPException(
+            status_code=404,
+            detail="Redacted audio not available. PII redaction may not have completed successfully.",
+        )
+
+    # Parse S3 URI and generate presigned URL
+    # Format: s3://bucket/jobs/{job_id}/audio/redacted.wav
+    if not redacted_audio_uri.startswith("s3://"):
+        logger.warning(
+            "invalid_redacted_audio_uri",
+            job_id=str(job_id),
+            uri=redacted_audio_uri,
+        )
+        raise HTTPException(status_code=404, detail="Redacted audio not found")
+
+    uri_parts = redacted_audio_uri.replace("s3://", "").split("/", 1)
+    if len(uri_parts) != 2:
+        logger.warning(
+            "invalid_redacted_audio_uri",
+            job_id=str(job_id),
+            uri=redacted_audio_uri,
+        )
+        raise HTTPException(status_code=404, detail="Redacted audio not found")
+
+    bucket = uri_parts[0]
+    key = uri_parts[1]
+
+    # Verify bucket matches expected (security check)
+    if bucket != settings.s3_bucket:
+        logger.warning(
+            "redacted_audio_bucket_mismatch",
+            job_id=str(job_id),
+            expected_bucket=settings.s3_bucket,
+            actual_bucket=bucket,
+        )
+        raise HTTPException(status_code=404, detail="Redacted audio not found")
+
+    # Verify the S3 object exists (handles manual deletion)
+    if not await storage.object_exists(key):
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "code": "audio_deleted",
+                "message": "Redacted audio has been deleted",
+            },
+        )
+
+    # Generate presigned URL
+    try:
+        url = await storage.generate_presigned_url(
+            key,
+            expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
+        )
+        return AudioUrlResponse(
+            url=url,
+            expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
+            type="redacted",
+        )
+    except Exception as e:
+        logger.warning(
+            "redacted_audio_presigned_url_failed",
+            job_id=str(job_id),
+            key=key,
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=404,
+            detail="Failed to generate redacted audio download URL",
+        ) from None
 
 
 @router.post(

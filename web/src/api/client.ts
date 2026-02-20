@@ -4,6 +4,7 @@ import type {
   APIKeyListResponse,
   AuditListParams,
   AuditListResponse,
+  AudioUrlResponse,
   ConsoleJobListResponse,
   CreateAPIKeyRequest,
   CreateRetentionPolicyRequest,
@@ -122,6 +123,14 @@ export const apiClient = {
     const base = `/v1/realtime/sessions/${sessionId}/export/${format}`
     return currentApiKey ? `${base}?api_key=${currentApiKey}` : base
   },
+
+  // Job audio URL (returns presigned S3 URL for download)
+  getJobAudioUrl: (jobId: string) =>
+    currentClient.get(`v1/audio/transcriptions/${jobId}/audio`).json<AudioUrlResponse>(),
+
+  // Job redacted audio URL (returns presigned S3 URL for PII-redacted audio)
+  getJobRedactedAudioUrl: (jobId: string) =>
+    currentClient.get(`v1/audio/transcriptions/${jobId}/audio/redacted`).json<AudioUrlResponse>(),
 
   // Auth validation
   validateKey: async (apiKey: string): Promise<{ valid: boolean; isAdmin: boolean }> => {

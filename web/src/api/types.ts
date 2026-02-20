@@ -220,6 +220,13 @@ export interface HealthResponse {
   version?: string
 }
 
+// Audio URL response (for job audio download)
+export interface AudioUrlResponse {
+  url: string
+  expires_in: number
+  type: 'original' | 'redacted'
+}
+
 // Job stats (for dashboard)
 export interface JobStatsResponse {
   running: number

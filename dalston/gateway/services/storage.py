@@ -189,6 +189,41 @@ class StorageService:
             )
             return response.get("KeyCount", 0) > 0
 
+    async def generate_presigned_url(self, key: str, expires_in: int = 3600) -> str:
+        """Generate a presigned URL for downloading an S3 object.
+
+        Args:
+            key: S3 object key
+            expires_in: URL expiration time in seconds (default 1 hour)
+
+        Returns:
+            Presigned URL for GET request
+        """
+        async with get_s3_client(self.settings) as s3:
+            return await s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self.bucket, "Key": key},
+                ExpiresIn=expires_in,
+            )
+
+    async def object_exists(self, key: str) -> bool:
+        """Check if a specific S3 object exists.
+
+        Args:
+            key: S3 object key
+
+        Returns:
+            True if the object exists
+        """
+        async with get_s3_client(self.settings) as s3:
+            try:
+                await s3.head_object(Bucket=self.bucket, Key=key)
+                return True
+            except ClientError as e:
+                if e.response["Error"]["Code"] in ("404", "NoSuchKey"):
+                    return False
+                raise
+
     async def get_task_input(
         self, job_id: UUID, task_id: UUID
     ) -> dict[str, Any] | None:
