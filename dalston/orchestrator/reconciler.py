@@ -34,7 +34,7 @@ from dalston.common.streams import (
     get_pending,
     is_engine_alive,
 )
-from dalston.common.streams_types import PendingTask
+from dalston.common.streams_types import CONSUMER_GROUP, PendingTask
 from dalston.config import Settings
 from dalston.db.models import TaskModel
 from dalston.orchestrator.registry import (
@@ -48,6 +48,7 @@ logger = structlog.get_logger()
 # Reconciliation configuration
 DEFAULT_RECONCILE_INTERVAL_SECONDS = 300  # 5 minutes
 ORPHAN_THRESHOLD_SECONDS = 600  # 10 minutes - only reconcile tasks older than this
+READY_TASK_RECOVERY_THRESHOLD_SECONDS = 120
 
 # Leader election (separate from scanner to allow independent operation)
 RECONCILER_LOCK_KEY = "dalston:reconciler:leader"
@@ -184,6 +185,7 @@ class ReconciliationSweeper:
         orphaned_db_count = 0
         orphaned_pel_count = 0
         stale_ready_count = 0
+        recovered_ready_count = 0
 
         # Get all pending entries from all streams
         streams = await discover_streams(self._redis)
@@ -221,6 +223,13 @@ class ReconciliationSweeper:
                 db, pel_entries_by_stage
             )
 
+        # Recover READY tasks whose stream message was consumed/ACKed but task
+        # state never transitioned out of READY.
+        async with self._db_session_factory() as db:
+            recovered_ready_count = (
+                await self._reconcile_ready_tasks_with_consumed_messages(db)
+            )
+
         # Cleanup stale engine registry entries (instances that crashed without unregister)
         stale_engine_count = await self._cleanup_stale_engine_entries()
 
@@ -228,6 +237,7 @@ class ReconciliationSweeper:
             orphaned_db_count > 0
             or orphaned_pel_count > 0
             or stale_ready_count > 0
+            or recovered_ready_count > 0
             or stale_engine_count > 0
         ):
             logger.info(
@@ -235,6 +245,7 @@ class ReconciliationSweeper:
                 orphaned_db_tasks=orphaned_db_count,
                 orphaned_pel_entries=orphaned_pel_count,
                 stale_ready_tasks=stale_ready_count,
+                recovered_ready_tasks=recovered_ready_count,
                 stale_engine_entries=stale_engine_count,
             )
 
@@ -567,6 +578,154 @@ class ReconciliationSweeper:
                 recovered_count += 1
 
         return recovered_count
+
+    async def _reconcile_ready_tasks_with_consumed_messages(
+        self, db: AsyncSession
+    ) -> int:
+        """Re-queue READY tasks whose original stream message was already consumed.
+
+        This recovers tasks that can be left in READY when their queue message
+        was acknowledged but no durable state-transition event was applied.
+        """
+        threshold = datetime.now(UTC) - timedelta(
+            seconds=READY_TASK_RECOVERY_THRESHOLD_SECONDS
+        )
+        result = await db.execute(
+            select(TaskModel).where(TaskModel.status == TaskStatus.READY.value)
+        )
+        ready_tasks = list(result.scalars().all())
+        recovered_count = 0
+        group_last_delivered: dict[str, str | None] = {}
+        now = datetime.now(UTC)
+
+        for task in ready_tasks:
+            task_id = str(task.id)
+            metadata_key = f"dalston:task:{task_id}"
+            metadata = await self._redis.hgetall(metadata_key)
+            if not metadata:
+                continue
+
+            stream_message_id = metadata.get("stream_message_id")
+            if not stream_message_id:
+                continue
+
+            enqueued_at_str = metadata.get("enqueued_at")
+            if enqueued_at_str:
+                try:
+                    enqueued_at = datetime.fromisoformat(enqueued_at_str)
+                    if enqueued_at.tzinfo is None:
+                        enqueued_at = enqueued_at.replace(tzinfo=UTC)
+                except ValueError:
+                    enqueued_at = None
+                if enqueued_at and enqueued_at > threshold:
+                    continue
+
+            queue_id = (
+                metadata.get("queue_id")
+                or metadata.get("stage")
+                or metadata.get("engine_id")
+                or task.engine_id
+            )
+            if not queue_id:
+                continue
+
+            if await self._is_stream_message_pending(queue_id, stream_message_id):
+                continue
+
+            if not await self._is_stream_message_delivered(
+                queue_id, stream_message_id, group_last_delivered
+            ):
+                continue
+
+            new_message_id = await add_task(
+                self._redis,
+                stage=queue_id,
+                task_id=task_id,
+                job_id=str(task.job_id),
+                timeout_s=600,
+            )
+            await self._redis.hset(
+                metadata_key,
+                mapping={
+                    "queue_id": queue_id,
+                    "stream_message_id": new_message_id,
+                    "reconciler_requeued_at": now.isoformat(),
+                    "reconciler_previous_message_id": stream_message_id,
+                },
+            )
+            recovered_count += 1
+            logger.warning(
+                "requeued_ready_task_with_consumed_message",
+                task_id=task_id,
+                job_id=str(task.job_id),
+                queue_id=queue_id,
+                old_message_id=stream_message_id,
+                new_message_id=new_message_id,
+            )
+
+        return recovered_count
+
+    async def _is_stream_message_pending(self, queue_id: str, message_id: str) -> bool:
+        """Return True if a message is currently in the PEL."""
+        try:
+            pending = await self._redis.xpending_range(
+                f"{STREAM_PREFIX}{queue_id}",
+                CONSUMER_GROUP,
+                min=message_id,
+                max=message_id,
+                count=1,
+            )
+            return bool(pending)
+        except Exception:
+            return False
+
+    async def _is_stream_message_delivered(
+        self,
+        queue_id: str,
+        message_id: str,
+        cache: dict[str, str | None],
+    ) -> bool:
+        """Return True if message_id is at/before group's last-delivered ID."""
+        if queue_id not in cache:
+            cache[queue_id] = await self._group_last_delivered_id(queue_id)
+        last_delivered = cache[queue_id]
+        if not last_delivered:
+            return False
+        return self._stream_id_lte(message_id, last_delivered)
+
+    async def _group_last_delivered_id(self, queue_id: str) -> str | None:
+        """Get consumer group's last delivered stream ID for a queue."""
+        try:
+            groups = await self._redis.xinfo_groups(f"{STREAM_PREFIX}{queue_id}")
+        except Exception:
+            return None
+
+        for group in groups:
+            name = group.get("name")
+            if isinstance(name, bytes):
+                name = name.decode()
+            if name != CONSUMER_GROUP:
+                continue
+            last_delivered = group.get("last-delivered-id")
+            if isinstance(last_delivered, bytes):
+                last_delivered = last_delivered.decode()
+            return str(last_delivered) if last_delivered else None
+        return None
+
+    @staticmethod
+    def _stream_id_lte(left: str, right: str) -> bool:
+        """Compare Redis stream IDs (ms-seq) safely."""
+        return ReconciliationSweeper._stream_id_to_tuple(
+            left
+        ) <= ReconciliationSweeper._stream_id_to_tuple(right)
+
+    @staticmethod
+    def _stream_id_to_tuple(stream_id: str) -> tuple[int, int]:
+        try:
+            milliseconds, sequence = stream_id.split("-", 1)
+            return int(milliseconds), int(sequence)
+        except Exception:
+            return (0, 0)
 
     async def _cleanup_stale_engine_entries(self) -> int:
         """Cleanup stale engine registry entries.

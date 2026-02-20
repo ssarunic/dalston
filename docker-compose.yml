@@ -44,6 +44,8 @@ x-observability-env: &observability-env
 x-core-env: &core-env
   <<: *common-env
   DATABASE_URL: postgresql+asyncpg://dalston:${POSTGRES_PASSWORD:-password}@postgres:5432/dalston
+  ENGINE_UNAVAILABLE_BEHAVIOR: ${ENGINE_UNAVAILABLE_BEHAVIOR:-wait}
+  ENGINE_WAIT_TIMEOUT_SECONDS: ${ENGINE_WAIT_TIMEOUT_SECONDS:-300}
 
 # Dependencies for batch engines
 x-batch-depends: &batch-depends

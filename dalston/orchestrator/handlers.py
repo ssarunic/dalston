@@ -783,6 +783,80 @@ async def handle_task_failed(
     log.error("job_failed", reason=f"Task {task.stage} failed: {error}")
 
 
+async def handle_task_wait_timeout(
+    task_id: UUID,
+    error: str,
+    db: AsyncSession,
+    redis: Redis,
+    settings: Settings,
+    registry: BatchEngineRegistry,
+) -> None:
+    """Handle task.wait_timeout events for tasks waiting on unavailable engines."""
+    log = logger.bind(task_id=str(task_id))
+    log.info("handling_task_wait_timeout", error=error)
+
+    task = await db.get(TaskModel, task_id)
+    if task is None:
+        log.error("task_not_found")
+        return
+
+    job_id = task.job_id
+    log = log.bind(job_id=str(job_id), stage=task.stage, engine_id=task.engine_id)
+
+    if task.status == TaskStatus.SKIPPED.value:
+        # Replay case: SKIPPED persisted but side effects were interrupted.
+        log.info("task_wait_timeout_already_skipped_proceeding_with_side_effects")
+        await handle_task_completed(task_id, db, redis, settings, registry)
+        return
+
+    if task.status == TaskStatus.FAILED.value:
+        # Replay case: FAILED persisted but side effects were interrupted.
+        log.info("task_wait_timeout_already_failed_proceeding_with_side_effects")
+        await _ensure_job_failed_side_effects(
+            task=task,
+            job_id=job_id,
+            error=task.error or error,
+            db=db,
+            redis=redis,
+            log=log,
+        )
+        return
+
+    # Once claimed (RUNNING) or terminal, timeout event is stale.
+    if task.status not in (TaskStatus.READY.value, TaskStatus.PENDING.value):
+        log.info(
+            "ignoring_task_wait_timeout_invalid_state",
+            current_status=task.status,
+        )
+        return
+
+    if not task.required:
+        task.status = TaskStatus.SKIPPED.value
+        task.error = error
+        task.completed_at = datetime.now(UTC)
+        await db.commit()
+        log.info("task_wait_timeout_optional_skipped")
+        await handle_task_completed(task_id, db, redis, settings, registry)
+        return
+
+    task.status = TaskStatus.FAILED.value
+    task.error = error
+    task.completed_at = datetime.now(UTC)
+    await db.commit()
+
+    dalston.metrics.inc_orchestrator_tasks_completed(task.engine_id, "failure")
+
+    await _ensure_job_failed_side_effects(
+        task=task,
+        job_id=job_id,
+        error=error,
+        db=db,
+        redis=redis,
+        log=log,
+    )
+    log.error("job_failed_wait_timeout", reason=error)
+
+
 async def _ensure_retry_enqueued(
     task: TaskModel,
     job_id: UUID,

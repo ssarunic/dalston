@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -84,6 +85,26 @@ class Settings(BaseSettings):
         default=1,
         alias="RETENTION_MIN_HOURS",
         description="Minimum retention hours allowed (1 = 1 hour minimum)",
+    )
+
+    # Engine Availability Behavior
+    engine_unavailable_behavior: Literal["fail_fast", "wait"] = Field(
+        default="fail_fast",
+        alias="ENGINE_UNAVAILABLE_BEHAVIOR",
+        description=(
+            "Behavior when a required engine is not running. "
+            "'fail_fast': fail immediately with error (default). "
+            "'wait': queue task and wait for engine to start."
+        ),
+    )
+    engine_wait_timeout_seconds: int = Field(
+        default=300,
+        alias="ENGINE_WAIT_TIMEOUT_SECONDS",
+        description=(
+            "Maximum time to wait for an engine to start (only used when "
+            "engine_unavailable_behavior='wait'). Task fails if engine "
+            "doesn't pick it up within this timeout."
+        ),
     )
 
     # Audio URL Download

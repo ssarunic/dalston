@@ -29,6 +29,7 @@ from dalston.common.streams import (
     get_pending,
     is_engine_alive,
 )
+from dalston.common.streams_types import CONSUMER_GROUP, WAITING_ENGINE_TASKS_KEY
 from dalston.config import Settings
 from dalston.db.models import TaskModel
 
@@ -220,41 +221,41 @@ class StaleTaskScanner:
         # Discover all task streams
         streams = await discover_streams(self._redis)
 
-        if not streams:
-            logger.debug("no_streams_found")
-            return
-
         total_stale = 0
         total_failed = 0
 
         for stream_key in streams:
-            # Extract stage from stream key (dalston:stream:{stage})
-            stage = stream_key.replace(STREAM_PREFIX, "")
+            # Extract queue_id from stream key (dalston:stream:{queue_id})
+            queue_id = stream_key.replace(STREAM_PREFIX, "")
 
-            stale_count, failed_count = await self._scan_stream(stage)
+            stale_count, failed_count = await self._scan_stream(queue_id)
             total_stale += stale_count
             total_failed += failed_count
 
-        if total_stale > 0:
+        wait_timeout_failed = await self._scan_waiting_engine_timeouts()
+        total_failed += wait_timeout_failed
+
+        if total_stale > 0 or wait_timeout_failed > 0:
             logger.info(
                 "stale_task_scan_complete",
                 streams_scanned=len(streams),
                 stale_tasks_found=total_stale,
                 tasks_failed=total_failed,
+                waiting_engine_timeouts=wait_timeout_failed,
             )
 
         dalston.metrics.inc_orchestrator_scanner_scans("success")
 
-    async def _scan_stream(self, stage: str) -> tuple[int, int]:
+    async def _scan_stream(self, queue_id: str) -> tuple[int, int]:
         """Scan a single stream for stale tasks.
 
         Args:
-            stage: Pipeline stage name
+            queue_id: Queue identifier (typically engine_id)
 
         Returns:
             Tuple of (stale_tasks_found, tasks_failed)
         """
-        pending = await get_pending(self._redis, stage)
+        pending = await get_pending(self._redis, queue_id)
 
         if not pending:
             return 0, 0
@@ -277,7 +278,7 @@ class StaleTaskScanner:
                 # Engine is dead - fail the task immediately
                 success = await self._fail_task(
                     task_id=task.task_id,
-                    stage=stage,
+                    queue_id=queue_id,
                     error=f"Engine '{task.consumer}' stopped heartbeating while processing task",
                     reason="engine_dead",
                 )
@@ -286,27 +287,28 @@ class StaleTaskScanner:
             else:
                 # Engine is alive - check if task has timed out
                 # Get the timeout_at from the stream message
-                timed_out = await self._check_task_timeout(stage, task.message_id, now)
+                timed_out = await self._check_task_timeout(
+                    queue_id, task.message_id, now
+                )
                 if timed_out:
                     success = await self._fail_task(
                         task_id=task.task_id,
-                        stage=stage,
+                        queue_id=queue_id,
                         error="Task exceeded configured timeout",
                         reason="timeout",
                     )
                     if success:
                         failed_count += 1
-                        dalston.metrics.inc_orchestrator_tasks_timed_out(stage)
 
         return stale_count, failed_count
 
     async def _check_task_timeout(
-        self, stage: str, message_id: str, now: datetime
+        self, queue_id: str, message_id: str, now: datetime
     ) -> bool:
         """Check if a task has exceeded its timeout_at time.
 
         Args:
-            stage: Pipeline stage name
+            queue_id: Queue identifier
             message_id: Redis message ID
             now: Current time
 
@@ -315,7 +317,7 @@ class StaleTaskScanner:
         """
         from dalston.common.streams import _stream_key
 
-        stream_key = _stream_key(stage)
+        stream_key = _stream_key(queue_id)
 
         # Get message fields to check timeout_at
         messages = await self._redis.xrange(
@@ -338,20 +340,20 @@ class StaleTaskScanner:
             return False
 
     async def _fail_task(
-        self, task_id: str, stage: str, error: str, reason: str
+        self, task_id: str, queue_id: str, error: str, reason: str
     ) -> bool:
         """Mark a task as failed in the database and publish event.
 
         Args:
             task_id: Task UUID string
-            stage: Pipeline stage name
+            queue_id: Queue identifier
             error: Error message
             reason: Reason for failure (engine_dead, timeout)
 
         Returns:
             True if task was successfully failed, False otherwise
         """
-        log = logger.bind(task_id=task_id, stage=stage, reason=reason)
+        log = logger.bind(task_id=task_id, queue_id=queue_id, reason=reason)
 
         try:
             task_uuid = UUID(task_id)
@@ -384,7 +386,10 @@ class StaleTaskScanner:
             task.completed_at = datetime.now(UTC)
             await db.commit()
 
-            log.info("task_marked_failed_by_scanner", error=error)
+            if reason == "timeout":
+                dalston.metrics.inc_orchestrator_tasks_timed_out(task.stage)
+
+            log.info("task_marked_failed_by_scanner", error=error, stage=task.stage)
 
         # Publish task.failed event
         await publish_event(
@@ -398,3 +403,148 @@ class StaleTaskScanner:
         )
 
         return True
+
+    async def _scan_waiting_engine_timeouts(self) -> int:
+        """Fail READY/PENDING tasks that exceeded wait-for-engine deadline."""
+        if (
+            getattr(self._settings, "engine_unavailable_behavior", "fail_fast")
+            != "wait"
+        ):
+            return 0
+
+        waiting_task_ids = await self._redis.smembers(WAITING_ENGINE_TASKS_KEY)
+        if not waiting_task_ids:
+            return 0
+
+        now = datetime.now(UTC)
+        timed_out_count = 0
+
+        async with self._db_session_factory() as db:
+            for task_id in waiting_task_ids:
+                metadata_key = f"dalston:task:{task_id}"
+                metadata = await self._redis.hgetall(metadata_key)
+                if not metadata:
+                    await self._redis.srem(WAITING_ENGINE_TASKS_KEY, task_id)
+                    continue
+
+                if metadata.get("waiting_for_engine") != "true":
+                    await self._redis.srem(WAITING_ENGINE_TASKS_KEY, task_id)
+                    continue
+
+                deadline_str = metadata.get("wait_deadline_at")
+                if not deadline_str:
+                    await self._clear_waiting_task_marker(task_id, metadata_key)
+                    continue
+
+                try:
+                    wait_deadline = datetime.fromisoformat(deadline_str)
+                except (TypeError, ValueError):
+                    await self._clear_waiting_task_marker(task_id, metadata_key)
+                    continue
+
+                if now <= wait_deadline:
+                    continue
+
+                try:
+                    task_uuid = UUID(task_id)
+                except ValueError:
+                    await self._clear_waiting_task_marker(task_id, metadata_key)
+                    continue
+
+                task = await db.get(TaskModel, task_uuid)
+                if task is None:
+                    await self._clear_waiting_task_marker(task_id, metadata_key)
+                    continue
+
+                # Task already moved on - no timeout action needed.
+                if task.status not in (
+                    TaskStatus.READY.value,
+                    TaskStatus.PENDING.value,
+                ):
+                    await self._clear_waiting_task_marker(task_id, metadata_key)
+                    continue
+
+                queue_id = metadata.get("queue_id") or metadata.get("engine_id")
+                message_id = metadata.get("stream_message_id")
+
+                # If already claimed into PEL, it has been picked up.
+                if (
+                    queue_id
+                    and message_id
+                    and await self._is_stream_message_pending(queue_id, message_id)
+                ):
+                    await self._clear_waiting_task_marker(task_id, metadata_key)
+                    continue
+
+                wait_timeout_s = metadata.get("wait_timeout_s") or str(
+                    getattr(self._settings, "engine_wait_timeout_seconds", 300)
+                )
+                engine_id = metadata.get("engine_id") or task.engine_id
+                error = (
+                    f"Engine '{engine_id}' did not become available "
+                    f"within {wait_timeout_s} seconds"
+                )
+
+                # Block execution first to avoid race where an engine claims
+                # the stream message before we finish timeout handling.
+                await self._redis.hset(
+                    metadata_key,
+                    mapping={
+                        "blocked_reason": "engine_wait_timeout",
+                        "blocked_at": now.isoformat(),
+                    },
+                )
+                await publish_event(
+                    self._redis,
+                    "task.wait_timeout",
+                    {
+                        "task_id": task_id,
+                        "error": error,
+                        "engine_id": engine_id,
+                        "queue_id": queue_id,
+                    },
+                )
+
+                if queue_id and message_id:
+                    from dalston.common.streams import _stream_key
+
+                    await self._redis.xdel(_stream_key(queue_id), message_id)
+
+                await self._clear_waiting_task_marker(task_id, metadata_key)
+                timed_out_count += 1
+                logger.warning(
+                    "task_wait_for_engine_timeout",
+                    task_id=task_id,
+                    engine_id=engine_id,
+                    queue_id=queue_id,
+                    wait_timeout_s=wait_timeout_s,
+                )
+
+        return timed_out_count
+
+    async def _is_stream_message_pending(self, queue_id: str, message_id: str) -> bool:
+        """Return True when a stream message is currently in the PEL."""
+        from dalston.common.streams import _stream_key
+
+        try:
+            pending = await self._redis.xpending_range(
+                _stream_key(queue_id),
+                CONSUMER_GROUP,
+                min=message_id,
+                max=message_id,
+                count=1,
+            )
+            return bool(pending)
+        except Exception:
+            return False
+
+    async def _clear_waiting_task_marker(self, task_id: str, metadata_key: str) -> None:
+        """Remove waiting-for-engine tracking markers for a task."""
+        await self._redis.srem(WAITING_ENGINE_TASKS_KEY, task_id)
+        await self._redis.hdel(
+            metadata_key,
+            "waiting_for_engine",
+            "wait_deadline_at",
+            "wait_timeout_s",
+            "wait_enqueued_at",
+        )

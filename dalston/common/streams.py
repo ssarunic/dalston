@@ -5,21 +5,21 @@ Provides abstractions over Redis Streams for:
 - Consumer group coordination
 - Stale task detection and recovery
 
-Stream naming pattern: dalston:stream:{stage}
+Stream naming pattern: dalston:stream:{queue_id}
 Consumer group: "engines" (created on first use)
 
 Example usage:
     # Producer (orchestrator)
-    msg_id = await add_task(redis, "transcribe", task_id, job_id, timeout_s=600)
+    msg_id = await add_task(redis, "whisper-cpu", task_id, job_id, timeout_s=600)
 
     # Consumer (engine)
-    msg = await read_task(redis, "transcribe", consumer="engine-1")
+    msg = await read_task(redis, "whisper-cpu", consumer="engine-1")
     if msg:
         process(msg.task_id)
-        await ack_task(redis, "transcribe", msg.id)
+        await ack_task(redis, "whisper-cpu", msg.id)
 
     # Recovery (engine startup)
-    stale = await claim_stale_tasks(redis, "transcribe", "engine-2", min_idle_ms=600000)
+    stale = await claim_stale_tasks(redis, "whisper-cpu", "engine-2", min_idle_ms=600000)
 """
 
 from __future__ import annotations
@@ -54,29 +54,9 @@ __all__ = [
 ]
 
 
-def _base_stage(stage: str) -> str:
-    """Extract base stage from per-channel stage name.
-
-    Per-channel stages like "transcribe_ch0" route to the base "transcribe" stream
-    so that any engine listening on the base stream can process them.
-
-    Examples:
-        transcribe_ch0 -> transcribe
-        transcribe_ch1 -> transcribe
-        diarize -> diarize (unchanged)
-    """
-    if "_ch" in stage and stage.split("_ch")[-1].isdigit():
-        return stage.rsplit("_ch", 1)[0]
-    return stage
-
-
 def _stream_key(stage: str) -> str:
-    """Build stream key from stage name.
-
-    Per-channel stages route to the base stream so engines don't need
-    separate consumers for each channel.
-    """
-    return f"{STREAM_PREFIX}{_base_stage(stage)}"
+    """Build stream key from queue identifier."""
+    return f"{STREAM_PREFIX}{stage}"
 
 
 async def ensure_stream_group(redis: Redis, stage: str) -> None:

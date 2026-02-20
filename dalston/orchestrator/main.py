@@ -45,6 +45,7 @@ from dalston.orchestrator.handlers import (
     handle_task_completed,
     handle_task_failed,
     handle_task_started,
+    handle_task_wait_timeout,
 )
 from dalston.orchestrator.reconciler import ReconciliationSweeper
 from dalston.orchestrator.registry import BatchEngineRegistry
@@ -431,6 +432,17 @@ async def _dispatch_event_dict(
                     )
                     dalston.telemetry.set_span_attribute("dalston.error", error)
                     await handle_task_failed(
+                        task_id, error, db, redis, settings, batch_registry
+                    )
+
+                elif event_type == "task.wait_timeout":
+                    task_id = UUID(event["task_id"])
+                    error = event.get("error", "Engine wait timeout")
+                    dalston.telemetry.set_span_attribute(
+                        "dalston.task_id", str(task_id)
+                    )
+                    dalston.telemetry.set_span_attribute("dalston.error", error)
+                    await handle_task_wait_timeout(
                         task_id, error, db, redis, settings, batch_registry
                     )
 

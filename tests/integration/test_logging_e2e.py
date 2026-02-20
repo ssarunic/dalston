@@ -284,18 +284,10 @@ class TestRequestIdInTaskMetadata:
             await queue_task(mock_redis, task, mock_settings, mock_registry)
 
         # Verify hset was called with request_id in the mapping
-        mock_redis.hset.assert_called_once()
-        call_kwargs = mock_redis.hset.call_args
-        mapping = (
-            call_kwargs.kwargs.get("mapping") or call_kwargs.args[1]
-            if len(call_kwargs.args) > 1
-            else None
-        )
-
-        # Handle both positional and keyword args
-        if mapping is None:
-            # Try keyword
-            mapping = call_kwargs.kwargs.get("mapping")
+        # First call is metadata, second call adds stream_message_id
+        assert mock_redis.hset.call_count >= 1
+        first_call = mock_redis.hset.call_args_list[0]
+        mapping = first_call.kwargs.get("mapping")
 
         assert mapping is not None
         assert mapping["request_id"] == "req_xyz789"
@@ -331,9 +323,10 @@ class TestRequestIdInTaskMetadata:
         ):
             await queue_task(mock_redis, task, mock_settings, mock_registry)
 
-        mock_redis.hset.assert_called_once()
-        call_kwargs = mock_redis.hset.call_args
-        mapping = call_kwargs.kwargs.get("mapping")
+        # First call is metadata, second call adds stream_message_id
+        assert mock_redis.hset.call_count >= 1
+        first_call = mock_redis.hset.call_args_list[0]
+        mapping = first_call.kwargs.get("mapping")
         assert "request_id" not in mapping
 
 

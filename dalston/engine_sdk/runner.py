@@ -30,6 +30,7 @@ from dalston.common.streams_sync import (
     is_job_cancelled,
     read_task,
 )
+from dalston.common.streams_types import WAITING_ENGINE_TASKS_KEY
 from dalston.engine_sdk import io
 from dalston.engine_sdk.registry import BatchEngineInfo, BatchEngineRegistry
 from dalston.engine_sdk.types import TaskInput, TaskOutput
@@ -112,6 +113,7 @@ class EngineRunner:
         self._heartbeat_thread: threading.Thread | None = None
         self._current_task_id: str | None = None
         self._current_message_id: str | None = None  # Stream message ID for ack
+        self._current_queue_id: str | None = None  # Source queue/stream for ack
         self._task_lock = threading.Lock()  # Protects _current_task_id
         self._stage: str = "unknown"  # Pipeline stage from capabilities
 
@@ -295,36 +297,60 @@ class EngineRunner:
         3. Always ACK after processing (success or failure)
         """
         message: StreamMessage | None = None
+        queue_id: str | None = None
+
+        # Primary queue is engine-specific; fallback to legacy stage queue for
+        # mixed-version rollouts where producers/consumers might briefly diverge.
+        queue_ids = self._candidate_queue_ids()
 
         # 1. Try to claim stale tasks from DEAD engines only
         # Use instance_id as consumer to ensure spot replacements don't mask old tasks
-        stale = claim_stale_from_dead_engines(
-            self.redis_client,
-            stage=self._stage,
-            consumer=self.instance_id,
-            min_idle_ms=STALE_THRESHOLD_MS,
-            count=1,
-        )
-
-        if stale:
-            message = stale[0]
-            logger.info(
-                "claimed_stale_task",
-                task_id=message.task_id,
-                delivery_count=message.delivery_count,
-                previous_consumer=message.id,  # Actually message ID, consumer tracked in PEL
+        for candidate_queue_id in queue_ids:
+            stale = claim_stale_from_dead_engines(
+                self.redis_client,
+                stage=candidate_queue_id,
+                consumer=self.instance_id,
+                min_idle_ms=STALE_THRESHOLD_MS,
+                count=1,
             )
-            # Track redelivery for observability
-            dalston.metrics.inc_task_redelivery(self._stage, reason="engine_crash")
-        else:
+            if stale:
+                message = stale[0]
+                queue_id = candidate_queue_id
+                logger.info(
+                    "claimed_stale_task",
+                    task_id=message.task_id,
+                    delivery_count=message.delivery_count,
+                    previous_consumer=message.id,  # Actually message ID, consumer tracked in PEL
+                    queue_id=queue_id,
+                )
+                # Track redelivery for observability
+                dalston.metrics.inc_task_redelivery(self._stage, reason="engine_crash")
+                break
+
+        if message is None:
             # 2. No stale tasks - read new ones
             # Use instance_id as consumer for proper PEL tracking
+            # Block only on primary queue to preserve previous latency profile.
+            primary_queue_id = queue_ids[0]
             message = read_task(
                 self.redis_client,
-                stage=self._stage,
+                stage=primary_queue_id,
                 consumer=self.instance_id,
                 block_ms=self.QUEUE_POLL_TIMEOUT * 1000,
             )
+            if message is not None:
+                queue_id = primary_queue_id
+            elif len(queue_ids) > 1:
+                # Non-blocking legacy fallback check.
+                fallback_queue_id = queue_ids[1]
+                message = read_task(
+                    self.redis_client,
+                    stage=fallback_queue_id,
+                    consumer=self.instance_id,
+                    block_ms=1,
+                )
+                if message is not None:
+                    queue_id = fallback_queue_id
 
         if message is None:
             # Timeout, no task available
@@ -336,13 +362,16 @@ class EngineRunner:
             job_id=message.job_id,
             delivery_count=message.delivery_count,
             is_redelivery=message.delivery_count > 1,
+            queue_id=queue_id,
         )
 
         # Store message ID for ack in finally block
         self._current_message_id = message.id
+        self._current_queue_id = queue_id or self.engine_id
 
         # 3. Check if job is cancelled before processing
         if is_job_cancelled(self.redis_client, message.job_id):
+            self._clear_waiting_engine_marker(message.task_id)
             logger.info(
                 "task_skipped_job_cancelled",
                 task_id=message.task_id,
@@ -350,17 +379,86 @@ class EngineRunner:
             )
             dalston.metrics.inc_tasks_skipped_cancelled(self._stage)
             # ACK the task so it's removed from PEL
-            ack_task(self.redis_client, self._stage, self._current_message_id)
+            ack_task(
+                self.redis_client,
+                self._current_queue_id or self.engine_id,
+                self._current_message_id,
+            )
             self._current_message_id = None
+            self._current_queue_id = None
             return
+
+        try:
+            task_metadata = self._get_task_metadata(message.task_id)
+        except Exception as e:
+            logger.exception(
+                "task_metadata_lookup_failed_before_process",
+                task_id=message.task_id,
+                error=str(e),
+            )
+            self._publish_task_failed(message.task_id, message.job_id, str(e))
+            ack_task(
+                self.redis_client,
+                self._current_queue_id or self.engine_id,
+                self._current_message_id,
+            )
+            self._current_message_id = None
+            self._current_queue_id = None
+            return
+
+        blocked_reason = task_metadata.get("blocked_reason")
+        if blocked_reason:
+            logger.info(
+                "task_skipped_blocked",
+                task_id=message.task_id,
+                blocked_reason=blocked_reason,
+            )
+            ack_task(
+                self.redis_client,
+                self._current_queue_id or self.engine_id,
+                self._current_message_id,
+            )
+            self._current_message_id = None
+            self._current_queue_id = None
+            return
+
+        # Task is now claimed by an engine instance; clear wait markers.
+        self._clear_waiting_engine_marker(message.task_id)
 
         try:
             self._process_task(message.task_id)
         finally:
             # 4. Always ACK - failure handling is via task.failed event
             if self._current_message_id:
-                ack_task(self.redis_client, self._stage, self._current_message_id)
+                ack_task(
+                    self.redis_client,
+                    self._current_queue_id or self.engine_id,
+                    self._current_message_id,
+                )
                 self._current_message_id = None
+                self._current_queue_id = None
+
+    def _candidate_queue_ids(self) -> list[str]:
+        """Return queue IDs to poll (engine queue first, legacy stage fallback)."""
+        queue_ids = [self.engine_id]
+        if self._stage and self._stage != "unknown" and self._stage != self.engine_id:
+            queue_ids.append(self._stage)
+        return queue_ids
+
+    def _clear_waiting_engine_marker(self, task_id: str) -> None:
+        """Clear wait-for-engine markers once a task is claimed."""
+        key = f"dalston:task:{task_id}"
+        try:
+            self.redis_client.hdel(
+                key,
+                "waiting_for_engine",
+                "wait_deadline_at",
+                "wait_timeout_s",
+                "wait_enqueued_at",
+            )
+            self.redis_client.srem(WAITING_ENGINE_TASKS_KEY, task_id)
+        except Exception:
+            logger.debug("clear_waiting_engine_marker_failed", task_id=task_id)
 
     def _process_task(self, task_id: str) -> None:
         """Process a single task.

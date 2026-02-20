@@ -16,6 +16,7 @@ CONSUMER_GROUP = "engines"
 # Job cancellation tracking
 JOB_CANCELLED_KEY_PREFIX = "dalston:job:cancelled:"
 JOB_CANCELLED_TTL_SECONDS = 3600 * 24  # 24 hours - longer than any job could run
+WAITING_ENGINE_TASKS_KEY = "dalston:waiting_engine_tasks"
 
 # Recovery thresholds
 STALE_THRESHOLD_MS = 10 * 60 * 1000  # 10 minutes

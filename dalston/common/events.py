@@ -23,10 +23,12 @@ DURABLE_EVENT_TYPES = {
     "task.started",  # Needed for RUNNING state tracking
     "task.completed",
     "task.failed",
+    "task.wait_timeout",
     "job.completed",
     "job.failed",
     "job.cancel_requested",
     "job.cancelled",  # Needed for webhook delivery after cancellation
+    "engine.needed",  # For external scalers to start engines on demand
 }
 
 
@@ -162,3 +164,36 @@ async def publish_job_cancelled(redis: Redis, job_id: UUID) -> None:
         job_id: Job UUID
     """
     await publish_event(redis, "job.cancelled", {"job_id": job_id})
+
+
+async def publish_engine_needed(
+    redis: Redis,
+    engine_id: str,
+    stage: str,
+    job_id: UUID,
+    task_id: UUID,
+    language: str | None = None,
+) -> None:
+    """Publish an engine.needed event for external scalers.
+
+    This event signals that a task is waiting for an engine that is not
+    currently running. External scalers can subscribe to this event and
+    start the required engine on demand (e.g., for spot instance recovery).
+
+    Args:
+        redis: Async Redis client
+        engine_id: The engine ID that is needed
+        stage: Pipeline stage (transcribe, align, diarize, etc.)
+        job_id: Job UUID waiting for this engine
+        task_id: Task UUID waiting for this engine
+        language: Requested language (if applicable)
+    """
+    payload: dict[str, Any] = {
+        "engine_id": engine_id,
+        "stage": stage,
+        "job_id": job_id,
+        "task_id": task_id,
+    }
+    if language:
+        payload["language"] = language
+    await publish_event(redis, "engine.needed", payload)

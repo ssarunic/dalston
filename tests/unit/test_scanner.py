@@ -20,6 +20,7 @@ class MockSettings:
     """Mock settings for testing."""
 
     redis_url = "redis://localhost:6379"
+    engine_unavailable_behavior = "fail_fast"
 
 
 @pytest.fixture
@@ -30,6 +31,11 @@ def mock_redis():
     redis.xpending_range = AsyncMock(return_value=[])
     redis.xrange = AsyncMock(return_value=[])
     redis.hgetall = AsyncMock(return_value={})
+    redis.smembers = AsyncMock(return_value=set())
+    redis.srem = AsyncMock(return_value=1)
+    redis.hdel = AsyncMock(return_value=1)
+    redis.hset = AsyncMock(return_value=1)
+    redis.xdel = AsyncMock(return_value=1)
     # Leader election methods
     redis.set = AsyncMock(return_value=True)  # Lock acquired by default
     redis.eval = AsyncMock(return_value=1)  # Lock released/extended by default
@@ -209,7 +215,7 @@ class TestScanStream:
             assert failed == 1
             mock_fail.assert_called_once_with(
                 task_id=task_id,
-                stage="transcribe",
+                queue_id="transcribe",
                 error="Engine 'dead-engine' stopped heartbeating while processing task",
                 reason="engine_dead",
             )
@@ -360,7 +366,7 @@ class TestFailTask:
         ):
             result = await scanner._fail_task(
                 task_id=str(task_id),
-                stage="transcribe",
+                queue_id="transcribe",
                 error="Engine crashed",
                 reason="engine_dead",
             )
@@ -395,7 +401,7 @@ class TestFailTask:
 
         result = await scanner._fail_task(
             task_id=str(task_id),
-            stage="transcribe",
+            queue_id="transcribe",
             error="Engine crashed",
             reason="engine_dead",
         )
@@ -446,6 +452,103 @@ class TestIsEngineAliveAsync:
         result = await is_engine_alive(mock_redis, "engine-1")
 
         assert result is False
+
+
+class WaitModeSettings(MockSettings):
+    engine_unavailable_behavior = "wait"
+    engine_wait_timeout_seconds = 120
+
+
+class TestWaitEngineTimeoutScan:
+    """Tests for waiting-engine timeout scans."""
+
+    @pytest.mark.asyncio
+    async def test_emits_wait_timeout_event_for_expired_waiting_task(self, mock_redis):
+        task_id = str(uuid4())
+        mock_redis.smembers.return_value = {task_id}
+        mock_redis.hgetall.return_value = {
+            "waiting_for_engine": "true",
+            "wait_deadline_at": (datetime.now(UTC) - timedelta(minutes=5)).isoformat(),
+            "wait_timeout_s": "120",
+            "engine_id": "whisper-cpu",
+            "queue_id": "whisper-cpu",
+            "stream_message_id": "123-0",
+        }
+        mock_redis.xpending_range.return_value = []  # Not claimed yet
+
+        mock_task = MagicMock()
+        mock_task.status = TaskStatus.READY.value
+        mock_task.engine_id = "whisper-cpu"
+
+        class MockSession:
+            async def get(self, model, key):
+                return mock_task
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+        scanner = StaleTaskScanner(
+            redis=mock_redis,
+            db_session_factory=lambda: MockSession(),
+            settings=WaitModeSettings(),
+        )
+
+        with patch(
+            "dalston.orchestrator.scanner.publish_event", new_callable=AsyncMock
+        ) as mock_publish:
+            timed_out = await scanner._scan_waiting_engine_timeouts()
+
+        assert timed_out == 1
+        mock_publish.assert_called_once()
+        assert mock_publish.call_args.args[1] == "task.wait_timeout"
+        mock_redis.xdel.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_skips_wait_timeout_when_message_already_pending(self, mock_redis):
+        task_id = str(uuid4())
+        mock_redis.smembers.return_value = {task_id}
+        mock_redis.hgetall.return_value = {
+            "waiting_for_engine": "true",
+            "wait_deadline_at": (datetime.now(UTC) - timedelta(minutes=5)).isoformat(),
+            "wait_timeout_s": "120",
+            "engine_id": "whisper-cpu",
+            "queue_id": "whisper-cpu",
+            "stream_message_id": "123-0",
+        }
+        # Message is pending (already picked up), so timeout should not fire.
+        mock_redis.xpending_range.return_value = [{"message_id": "123-0"}]
+
+        mock_task = MagicMock()
+        mock_task.status = TaskStatus.READY.value
+        mock_task.engine_id = "whisper-cpu"
+
+        class MockSession:
+            async def get(self, model, key):
+                return mock_task
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+        scanner = StaleTaskScanner(
+            redis=mock_redis,
+            db_session_factory=lambda: MockSession(),
+            settings=WaitModeSettings(),
+        )
+
+        with patch(
+            "dalston.orchestrator.scanner.publish_event", new_callable=AsyncMock
+        ) as mock_publish:
+            timed_out = await scanner._scan_waiting_engine_timeouts()
+
+        assert timed_out == 0
+        mock_publish.assert_not_called()
+        mock_redis.xdel.assert_not_called()
 
 
 class TestLeaderElection:

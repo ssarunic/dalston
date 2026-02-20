@@ -443,3 +443,117 @@ class TestOrphanedPelEntries:
 
             assert count == 0
             mock_ack.assert_not_called()
+
+
+class TestReadyTaskRecovery:
+    """Tests for recovering READY tasks whose stream message was consumed."""
+
+    @pytest.mark.asyncio
+    async def test_requeues_ready_task_with_consumed_message(self):
+        """READY task should be requeued when message was delivered and not pending."""
+        from dalston.orchestrator.reconciler import ReconciliationSweeper
+
+        task_id = uuid4()
+        job_id = uuid4()
+        message_id = "100-0"
+        queue_id = "audio-prepare"
+
+        mock_task = MagicMock()
+        mock_task.id = task_id
+        mock_task.job_id = job_id
+        mock_task.engine_id = queue_id
+        mock_task.status = TaskStatus.READY.value
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [mock_task]
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_redis = AsyncMock()
+        mock_redis.hgetall = AsyncMock(
+            return_value={
+                "queue_id": queue_id,
+                "stream_message_id": message_id,
+                "enqueued_at": (datetime.now(UTC) - timedelta(minutes=5)).isoformat(),
+            }
+        )
+        mock_redis.xpending_range = AsyncMock(return_value=[])
+        mock_redis.xinfo_groups = AsyncMock(
+            return_value=[{"name": "engines", "last-delivered-id": "200-0"}]
+        )
+        mock_redis.hset = AsyncMock(return_value=1)
+
+        sweeper = ReconciliationSweeper(
+            redis=mock_redis,
+            db_session_factory=MagicMock(),
+            settings=MagicMock(),
+        )
+
+        with patch(
+            "dalston.orchestrator.reconciler.add_task",
+            new_callable=AsyncMock,
+            return_value="201-0",
+        ) as mock_add_task:
+            count = await sweeper._reconcile_ready_tasks_with_consumed_messages(mock_db)
+
+        assert count == 1
+        mock_add_task.assert_called_once_with(
+            mock_redis,
+            stage=queue_id,
+            task_id=str(task_id),
+            job_id=str(job_id),
+            timeout_s=600,
+        )
+        mock_redis.hset.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_skips_requeue_when_message_not_delivered_yet(self):
+        """READY task should not be requeued while original message is still pending delivery."""
+        from dalston.orchestrator.reconciler import ReconciliationSweeper
+
+        task_id = uuid4()
+        job_id = uuid4()
+        message_id = "100-0"
+        queue_id = "audio-prepare"
+
+        mock_task = MagicMock()
+        mock_task.id = task_id
+        mock_task.job_id = job_id
+        mock_task.engine_id = queue_id
+        mock_task.status = TaskStatus.READY.value
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [mock_task]
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_redis = AsyncMock()
+        mock_redis.hgetall = AsyncMock(
+            return_value={
+                "queue_id": queue_id,
+                "stream_message_id": message_id,
+                "enqueued_at": (datetime.now(UTC) - timedelta(minutes=5)).isoformat(),
+            }
+        )
+        mock_redis.xpending_range = AsyncMock(return_value=[])
+        mock_redis.xinfo_groups = AsyncMock(
+            return_value=[{"name": "engines", "last-delivered-id": "99-0"}]
+        )
+        mock_redis.hset = AsyncMock(return_value=1)
+
+        sweeper = ReconciliationSweeper(
+            redis=mock_redis,
+            db_session_factory=MagicMock(),
+            settings=MagicMock(),
+        )
+
+        with patch(
+            "dalston.orchestrator.reconciler.add_task",
+            new_callable=AsyncMock,
+        ) as mock_add_task:
+            count = await sweeper._reconcile_ready_tasks_with_consumed_messages(mock_db)
+
+        assert count == 0
+        mock_add_task.assert_not_called()

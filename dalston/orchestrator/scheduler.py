@@ -8,8 +8,7 @@ Handles:
 """
 
 import json
-import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -18,10 +17,12 @@ import structlog.contextvars
 from redis.asyncio import Redis
 
 import dalston.telemetry
+from dalston.common.events import publish_engine_needed
 from dalston.common.models import Task
 from dalston.common.pipeline_types import AudioMedia, TaskInputData
 from dalston.common.s3 import get_s3_client
 from dalston.common.streams import add_task, add_task_once
+from dalston.common.streams_types import WAITING_ENGINE_TASKS_KEY
 from dalston.config import Settings
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog, get_catalog
 from dalston.orchestrator.exceptions import (
@@ -44,17 +45,6 @@ TASK_METADATA_KEY = "dalston:task:{task_id}"
 MIN_TIMEOUT_S = 60  # Minimum timeout for any task
 DEFAULT_RTF = 1.0  # Fallback RTF if not specified
 TIMEOUT_SAFETY_FACTOR = 3.0  # Multiply estimated time by this factor
-
-
-def _base_stage(stage: str) -> str:
-    """Map per-channel stage names to their base stage.
-
-    Examples:
-        transcribe_ch0 -> transcribe
-        align_ch1 -> align
-        merge -> merge
-    """
-    return re.sub(r"_ch\d+$", "", stage)
 
 
 def _build_engine_info(
@@ -218,7 +208,7 @@ async def queue_task(
     """
     task_id_str = str(task.id)
     job_id_str = str(task.job_id)
-    stream_stage = _base_stage(task.stage)
+    queue_id = task.engine_id
 
     # Get language from task config (if present)
     # Normalize "auto" to None - it means auto-detect, not a language requirement
@@ -248,18 +238,49 @@ async def queue_task(
             )
 
     # 2. Registry check - is the engine currently running? (M28)
-    if not await registry.is_engine_available(task.engine_id):
-        # Build detailed error context (M30)
-        details = await _build_error_details(
-            catalog, registry, task.stage, language, word_timestamps
-        )
-        raise EngineUnavailableError(
-            f"Engine '{task.engine_id}' is not available. "
-            f"No healthy engine registered for stage '{task.stage}'.",
-            engine_id=task.engine_id,
-            stage=task.stage,
-            details=details,
-        )
+    # Check config for behavior when engine is unavailable
+    engine_unavailable_behavior = getattr(
+        settings, "engine_unavailable_behavior", "fail_fast"
+    )
+    engine_wait_timeout_seconds = int(
+        getattr(settings, "engine_wait_timeout_seconds", 300)
+    )
+    engine_available = await registry.is_engine_available(task.engine_id)
+    waiting_for_engine = False
+
+    if not engine_available:
+        if engine_unavailable_behavior == "fail_fast":
+            # Original behavior: fail immediately with detailed error
+            details = await _build_error_details(
+                catalog, registry, task.stage, language, word_timestamps
+            )
+            raise EngineUnavailableError(
+                f"Engine '{task.engine_id}' is not available. "
+                f"No healthy engine registered for stage '{task.stage}'.",
+                engine_id=task.engine_id,
+                stage=task.stage,
+                details=details,
+            )
+        else:
+            # Wait mode: queue task and signal for external scaler
+            waiting_for_engine = True
+            logger.info(
+                "engine_not_available_waiting",
+                engine_id=task.engine_id,
+                stage=task.stage,
+                job_id=str(task.job_id),
+                task_id=str(task.id),
+                wait_timeout_seconds=engine_wait_timeout_seconds,
+            )
+            # Publish event for external scalers to start the engine
+            await publish_engine_needed(
+                redis,
+                engine_id=task.engine_id,
+                stage=task.stage,
+                job_id=task.job_id,
+                task_id=task.id,
+                language=language,
+            )
 
     # 3. Capabilities check - does running engine support job requirements? (M29)
     if language and task.stage == "transcribe":
@@ -279,9 +300,6 @@ async def queue_task(
                 details=details,
             )
 
-    task_id_str = str(task.id)
-    job_id_str = str(task.job_id)
-
     log = logger.bind(task_id=task_id_str, job_id=job_id_str, engine_id=task.engine_id)
 
     # 1. Store task metadata in Redis hash (includes request_id for correlation)
@@ -291,10 +309,19 @@ async def queue_task(
         "job_id": job_id_str,
         "stage": task.stage,
         "engine_id": task.engine_id,
+        "queue_id": queue_id,
         "enqueued_at": datetime.now(
             UTC
         ).isoformat(),  # M20: For queue wait time metrics
     }
+    if waiting_for_engine:
+        wait_enqueued_at = datetime.now(UTC)
+        metadata_mapping["waiting_for_engine"] = "true"
+        metadata_mapping["wait_enqueued_at"] = wait_enqueued_at.isoformat()
+        metadata_mapping["wait_timeout_s"] = str(engine_wait_timeout_seconds)
+        metadata_mapping["wait_deadline_at"] = (
+            wait_enqueued_at + timedelta(seconds=engine_wait_timeout_seconds)
+        ).isoformat()
     if "request_id" in ctx:
         metadata_mapping["request_id"] = ctx["request_id"]
 
@@ -307,6 +334,8 @@ async def queue_task(
         metadata_key,
         mapping=metadata_mapping,
     )
+    if waiting_for_engine:
+        await redis.sadd(WAITING_ENGINE_TASKS_KEY, task_id_str)
 
     # Calculate TTL based on expected task duration (M30)
     # Get audio duration from metadata (prepare stage) or config
@@ -326,6 +355,17 @@ async def queue_task(
 
     # Calculate timeout with safety margin for retries (max_retries + 1 attempts)
     base_timeout = calculate_task_timeout(audio_duration, rtf_gpu, rtf_cpu)
+
+    # Add engine wait timeout if waiting for engine to start
+    if waiting_for_engine:
+        base_timeout += engine_wait_timeout_seconds
+        log.debug(
+            "extended_timeout_for_engine_wait",
+            original_timeout=base_timeout - engine_wait_timeout_seconds,
+            engine_wait_timeout=engine_wait_timeout_seconds,
+            total_timeout=base_timeout,
+        )
+
     retry_factor = (task.max_retries + 1) if task.max_retries else 1
     metadata_ttl = base_timeout * retry_factor + 3600  # Add 1 hour buffer
 
@@ -350,9 +390,7 @@ async def queue_task(
     if enqueue_idempotency_key:
         message_id = await add_task_once(
             redis,
-            # Per-channel task stages share the same engine stream.
-            # Example: transcribe_ch0 / transcribe_ch1 -> transcribe.
-            stage=stream_stage,
+            stage=queue_id,
             task_id=task_id_str,
             job_id=job_id_str,
             timeout_s=base_timeout,
@@ -361,24 +399,22 @@ async def queue_task(
         if message_id is None:
             log.info(
                 "task_already_enqueued",
-                stream=f"dalston:stream:{stream_stage}",
+                stream=f"dalston:stream:{queue_id}",
                 dedupe_key=enqueue_idempotency_key,
             )
             return
     else:
         message_id = await add_task(
             redis,
-            # Per-channel task stages share the same engine stream.
-            # Example: transcribe_ch0 / transcribe_ch1 -> transcribe.
-            stage=stream_stage,
+            stage=queue_id,
             task_id=task_id_str,
             job_id=job_id_str,
             timeout_s=base_timeout,
         )
 
-    log.info(
-        "task_queued", stream=f"dalston:stream:{stream_stage}", message_id=message_id
-    )
+    await redis.hset(metadata_key, mapping={"stream_message_id": message_id})
+
+    log.info("task_queued", stream=f"dalston:stream:{queue_id}", message_id=message_id)
 
 
 async def remove_task_from_queue(
