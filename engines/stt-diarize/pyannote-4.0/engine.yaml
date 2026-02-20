@@ -114,7 +114,7 @@ output_schema:
 hf_compat:
   pipeline_tag: speaker-diarization
   library_name: pyannote
-  license: mit
+  license: cc-by-4.0
 
 hardware:
   min_vram_gb: 2

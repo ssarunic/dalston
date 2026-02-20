@@ -27,7 +27,7 @@ server:
 
 models:
   fast:
-    name: distil-whisper/distil-large-v3
+    name: Systran/faster-distil-whisper-large-v3
     description: Distil-Whisper for low-latency transcription
     latency: low
     accuracy: good
@@ -73,7 +73,7 @@ environment:
     default: redis://localhost:6379
   FAST_MODEL:
     description: Model for "fast" variant
-    default: distil-whisper/distil-large-v3
+    default: Systran/faster-distil-whisper-large-v3
   ACCURATE_MODEL:
     description: Model for "accurate" variant
     default: large-v3

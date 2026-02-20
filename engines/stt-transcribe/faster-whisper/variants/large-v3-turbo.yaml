@@ -32,7 +32,7 @@ hf_compat:
   pipeline_tag: automatic-speech-recognition
   library_name: ctranslate2
   license: mit
-  source_model: "Systran/faster-whisper-large-v3-turbo"
+  source_model: "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
 
 hardware:
   min_vram_gb: 4

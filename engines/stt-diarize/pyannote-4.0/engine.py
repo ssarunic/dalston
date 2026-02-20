@@ -73,7 +73,7 @@ class PyannoteEngine(Engine):
             raise RuntimeError(
                 "HF_TOKEN environment variable is required for pyannote diarization. "
                 "Get a token from https://huggingface.co/settings/tokens and accept "
-                "the pyannote/speaker-diarization model agreement."
+                "the pyannote/speaker-diarization-community-1 model agreement."
             )
         return token
 

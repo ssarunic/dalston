@@ -101,7 +101,7 @@ output_schema:
 hf_compat:
   pipeline_tag: automatic-speech-recognition
   library_name: whisperx
-  license: bsd-4-clause
+  license: bsd-2-clause
 
 hardware:
   min_vram_gb: 2
