@@ -27,6 +27,7 @@ ENV/
 .coverage
 htmlcov/
 .pytest_cache/
+artifacts/
 
 # Playwright
 .playwright-output/
