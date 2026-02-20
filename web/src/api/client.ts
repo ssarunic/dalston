@@ -54,9 +54,29 @@ export function setApiKey(apiKey: string | null) {
   currentClient = createClient(apiKey)
 }
 
-// Get current API key (for export URLs)
-export function getApiKey(): string | null {
-  return currentApiKey
+// Download file using authenticated fetch (avoids exposing API key in URLs)
+async function authenticatedDownload(url: string, filename: string): Promise<void> {
+  const headers: Record<string, string> = {}
+  if (currentApiKey) {
+    headers['Authorization'] = `Bearer ${currentApiKey}`
+  }
+
+  const response = await fetch(url, { headers })
+  if (!response.ok) {
+    throw new Error(`Download failed: ${response.status} ${response.statusText}`)
+  }
+
+  const blob = await response.blob()
+  const objectUrl = URL.createObjectURL(blob)
+
+  const link = document.createElement('a')
+  link.href = objectUrl
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+
+  URL.revokeObjectURL(objectUrl)
 }
 
 export interface JobListParams {
@@ -112,16 +132,18 @@ export const apiClient = {
   cancelJob: (jobId: string) =>
     currentClient.post(`api/console/jobs/${jobId}/cancel`).json<{ id: string; status: string; message: string }>(),
 
-  // Export URL (needs API key as query param for download links)
-  getExportUrl: (jobId: string, format: 'srt' | 'vtt' | 'txt' | 'json') => {
-    const base = `/v1/audio/transcriptions/${jobId}/export/${format}`
-    return currentApiKey ? `${base}?api_key=${currentApiKey}` : base
+  // Download job export (uses authenticated fetch to avoid exposing API key in URLs)
+  downloadJobExport: (jobId: string, format: 'srt' | 'vtt' | 'txt' | 'json') => {
+    const url = `/v1/audio/transcriptions/${jobId}/export/${format}`
+    const filename = `${jobId}.${format}`
+    return authenticatedDownload(url, filename)
   },
 
-  // Session export URL (needs API key as query param for download links)
-  getSessionExportUrl: (sessionId: string, format: 'srt' | 'vtt' | 'txt' | 'json') => {
-    const base = `/v1/realtime/sessions/${sessionId}/export/${format}`
-    return currentApiKey ? `${base}?api_key=${currentApiKey}` : base
+  // Download session export (uses authenticated fetch to avoid exposing API key in URLs)
+  downloadSessionExport: (sessionId: string, format: 'srt' | 'vtt' | 'txt' | 'json') => {
+    const url = `/v1/realtime/sessions/${sessionId}/export/${format}`
+    const filename = `${sessionId}.${format}`
+    return authenticatedDownload(url, filename)
   },
 
   // Job audio URL (returns presigned S3 URL for download)

@@ -1,4 +1,5 @@
-import { Download, Shield } from 'lucide-react'
+import { useState } from 'react'
+import { Download, Shield, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { apiClient } from '@/api/client'
@@ -51,28 +52,40 @@ interface ExportButtonsProps {
 
 function ExportButtons({ type, id }: ExportButtonsProps) {
   const formats = ['srt', 'vtt', 'txt', 'json'] as const
+  const [downloading, setDownloading] = useState<string | null>(null)
 
-  const getUrl = (format: typeof formats[number]) => {
-    return type === 'job'
-      ? apiClient.getExportUrl(id, format)
-      : apiClient.getSessionExportUrl(id, format)
+  const handleDownload = async (format: typeof formats[number]) => {
+    setDownloading(format)
+    try {
+      if (type === 'job') {
+        await apiClient.downloadJobExport(id, format)
+      } else {
+        await apiClient.downloadSessionExport(id, format)
+      }
+    } catch (error) {
+      console.error(`Failed to download ${format}:`, error)
+    } finally {
+      setDownloading(null)
+    }
   }
 
   return (
     <div className="flex gap-2">
       {formats.map((format) => (
-        <a
+        <Button
           key={format}
-          href={getUrl(format)}
-          download
-          target="_blank"
-          rel="noopener noreferrer"
+          variant="outline"
+          size="sm"
+          onClick={() => handleDownload(format)}
+          disabled={downloading !== null}
         >
-          <Button variant="outline" size="sm">
+          {downloading === format ? (
+            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+          ) : (
             <Download className="h-3 w-3 mr-1" />
-            {format.toUpperCase()}
-          </Button>
-        </a>
+          )}
+          {format.toUpperCase()}
+        </Button>
       ))}
     </div>
   )
