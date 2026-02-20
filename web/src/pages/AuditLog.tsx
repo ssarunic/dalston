@@ -28,6 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useAuditEvents } from '@/hooks/useAuditLog'
 import type { AuditEvent, AuditListParams, AuditListResponse } from '@/api/types'
 
@@ -86,7 +87,7 @@ function EventDetailRow({ event }: { event: AuditEvent }) {
         className="cursor-pointer hover:bg-muted/50"
         onClick={() => setExpanded(!expanded)}
       >
-        <TableCell className="w-8">
+        <TableCell className="w-8 sticky left-0 z-10 bg-card">
           {event.detail ? (
             expanded ? (
               <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -97,7 +98,7 @@ function EventDetailRow({ event }: { event: AuditEvent }) {
             <span className="w-4" />
           )}
         </TableCell>
-        <TableCell className="text-muted-foreground text-sm whitespace-nowrap">
+        <TableCell className="text-muted-foreground text-sm whitespace-nowrap sticky left-8 z-10 bg-card">
           {formatTimestamp(event.timestamp)}
         </TableCell>
         <TableCell>
@@ -142,6 +143,7 @@ function EventDetailRow({ event }: { event: AuditEvent }) {
 }
 
 export function AuditLog() {
+  const isMobile = useMediaQuery('(max-width: 767px)')
   const [searchParams, setSearchParams] = useSearchParams()
   const [showFilters, setShowFilters] = useState(false)
   const [allEvents, setAllEvents] = useState<AuditEvent[]>([])
@@ -181,11 +183,9 @@ export function AuditLog() {
 
     if (cursor) {
       // Loading more - append new events
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing API data
       setAllEvents((prev) => [...prev, ...data.events])
     } else {
       // First page - replace events
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing API data
       setAllEvents(data.events)
     }
     lastCursorRef.current = cursor
@@ -410,23 +410,77 @@ export function AuditLog() {
             </div>
           ) : (
             <>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-8" />
-                    <TableHead>Timestamp</TableHead>
-                    <TableHead>Action</TableHead>
-                    <TableHead>Resource</TableHead>
-                    <TableHead>Actor</TableHead>
-                    <TableHead>IP Address</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {allEvents.map((event) => (
-                    <EventDetailRow key={event.id} event={event} />
-                  ))}
-                </TableBody>
-              </Table>
+              {isMobile ? (
+                <div className="space-y-3">
+                  {allEvents.map((event) => {
+                    const actionStyle = getActionStyle(event.action)
+                    const resourceLink = getResourceLink(event.resource_type, event.resource_id)
+
+                    return (
+                      <div key={event.id} className="rounded-lg border border-border p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <Badge variant="outline" className={actionStyle.color}>
+                            {event.action}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">
+                            {formatTimestamp(event.timestamp)}
+                          </span>
+                        </div>
+                        <div className="mt-3 space-y-2 text-sm">
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted-foreground">{event.resource_type}/</span>
+                            {resourceLink ? (
+                              <Link to={resourceLink} className="font-mono hover:underline">
+                                {event.resource_id.slice(0, 8)}...
+                              </Link>
+                            ) : (
+                              <span className="font-mono">{event.resource_id.slice(0, 8)}...</span>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <p className="text-muted-foreground">Actor</p>
+                              <p className="font-mono break-all">{event.actor_id}</p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground">IP Address</p>
+                              <p>{event.ip_address || '-'}</p>
+                            </div>
+                          </div>
+                        </div>
+                        {event.detail && (
+                          <details className="mt-3">
+                            <summary className="text-xs text-muted-foreground cursor-pointer">
+                              View details
+                            </summary>
+                            <pre className="text-xs font-mono p-2 mt-2 bg-muted/30 rounded overflow-x-auto">
+                              {JSON.stringify(event.detail, null, 2)}
+                            </pre>
+                          </details>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <Table className="min-w-[860px]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-8 sticky left-0 z-10 bg-card" />
+                      <TableHead className="sticky left-8 z-10 bg-card">Timestamp</TableHead>
+                      <TableHead>Action</TableHead>
+                      <TableHead>Resource</TableHead>
+                      <TableHead>Actor</TableHead>
+                      <TableHead>IP Address</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {allEvents.map((event) => (
+                      <EventDetailRow key={event.id} event={event} />
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
               <div className="flex flex-col items-center gap-3 pt-4">
                 <p className="text-sm text-muted-foreground">
                   Showing {allEvents.length} events

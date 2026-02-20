@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Radio, MessageSquare, Mic, Trash2, RefreshCw, Filter, X } from 'lucide-react'
 import { apiClient } from '@/api/client'
 import { useTableState } from '@/hooks/useTableState'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
@@ -55,6 +56,7 @@ function formatDate(dateStr: string): string {
 const PAGE_SIZE = 50
 
 export function RealtimeSessions() {
+  const isMobile = useMediaQuery('(max-width: 767px)')
   const navigate = useNavigate()
   const {
     cursor,
@@ -304,86 +306,159 @@ export function RealtimeSessions() {
               No sessions found
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Session ID</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Model</TableHead>
-                  <TableHead>Duration</TableHead>
-                  <TableHead>Segments</TableHead>
-                  <TableHead>Storage</TableHead>
-                  <TableHead>Started</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            isMobile ? (
+              <div className="space-y-3">
                 {allSessions.map((session) => (
-                  <TableRow
+                  <div
                     key={session.id}
-                    className="cursor-pointer hover:bg-accent/50"
+                    className="rounded-lg border border-border p-3 cursor-pointer hover:bg-accent/50"
                     onClick={() => navigate(`/realtime/sessions/${session.id}`)}
                   >
-                    <TableCell className="font-mono text-sm">
-                      {session.id.slice(0, 12)}...
-                    </TableCell>
-                    <TableCell>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-mono text-xs break-all">{session.id}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {formatDate(session.started_at)}
+                        </p>
+                      </div>
                       <StatusBadge status={session.status} />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      <div className="flex flex-col">
-                        <span>{session.model ?? '-'}</span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Model</p>
+                        <p>{session.model ?? '-'}</p>
                         {session.engine && (
-                          <span className="text-xs text-muted-foreground">{session.engine}</span>
+                          <p className="text-xs text-muted-foreground">{session.engine}</p>
                         )}
                       </div>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {formatDuration(session.audio_duration_seconds)}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {session.segment_count}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      <div className="flex items-center gap-2">
-                        {session.store_audio && (
-                          <span title="Audio stored">
-                            <Mic className="h-3 w-3 text-green-500" />
-                          </span>
-                        )}
-                        {session.store_transcript && (
-                          <span title="Transcript stored">
-                            <MessageSquare className="h-3 w-3 text-blue-500" />
-                          </span>
-                        )}
-                        {!session.store_audio && !session.store_transcript && (
-                          <span className="text-muted-foreground">-</span>
-                        )}
+                      <div>
+                        <p className="text-xs text-muted-foreground">Duration</p>
+                        <p>{formatDuration(session.audio_duration_seconds)}</p>
                       </div>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {formatDate(session.started_at)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {session.status !== 'active' && (
+                      <div>
+                        <p className="text-xs text-muted-foreground">Segments</p>
+                        <p>{session.segment_count}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Storage</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          {session.store_audio && (
+                            <span title="Audio stored">
+                              <Mic className="h-3 w-3 text-green-500" />
+                            </span>
+                          )}
+                          {session.store_transcript && (
+                            <span title="Transcript stored">
+                              <MessageSquare className="h-3 w-3 text-blue-500" />
+                            </span>
+                          )}
+                          {!session.store_audio && !session.store_transcript && (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {session.status !== 'active' && (
+                      <div className="mt-3 flex justify-end">
                         <Button
-                          variant="ghost"
+                          variant="outline"
                           size="sm"
                           className="text-red-400 hover:text-red-300 hover:bg-red-950"
                           onClick={(e) => {
                             e.stopPropagation()
                             setDeleteTarget({ id: session.id })
                           }}
-                          title="Delete session"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-4 w-4 mr-1" />
+                          Delete
                         </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
+                      </div>
+                    )}
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+            ) : (
+              <Table className="min-w-[900px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="sticky left-0 z-10 bg-card">Session ID</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Model</TableHead>
+                    <TableHead>Duration</TableHead>
+                    <TableHead>Segments</TableHead>
+                    <TableHead>Storage</TableHead>
+                    <TableHead>Started</TableHead>
+                    <TableHead className="sticky right-0 z-10 bg-card"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {allSessions.map((session) => (
+                    <TableRow
+                      key={session.id}
+                      className="cursor-pointer hover:bg-accent/50"
+                      onClick={() => navigate(`/realtime/sessions/${session.id}`)}
+                    >
+                      <TableCell className="font-mono text-sm sticky left-0 z-10 bg-card">
+                        {session.id.slice(0, 12)}...
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge status={session.status} />
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        <div className="flex flex-col">
+                          <span>{session.model ?? '-'}</span>
+                          {session.engine && (
+                            <span className="text-xs text-muted-foreground">{session.engine}</span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {formatDuration(session.audio_duration_seconds)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {session.segment_count}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        <div className="flex items-center gap-2">
+                          {session.store_audio && (
+                            <span title="Audio stored">
+                              <Mic className="h-3 w-3 text-green-500" />
+                            </span>
+                          )}
+                          {session.store_transcript && (
+                            <span title="Transcript stored">
+                              <MessageSquare className="h-3 w-3 text-blue-500" />
+                            </span>
+                          )}
+                          {!session.store_audio && !session.store_transcript && (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {formatDate(session.started_at)}
+                      </TableCell>
+                      <TableCell className="text-right sticky right-0 z-10 bg-card">
+                        {session.status !== 'active' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-red-400 hover:text-red-300 hover:bg-red-950"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setDeleteTarget({ id: session.id })
+                            }}
+                            title="Delete session"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )
           )}
           {allSessions.length > 0 && (
             <div className="flex flex-col items-center gap-3 pt-4">

@@ -4,6 +4,7 @@ import { Trash2, X, RefreshCw, Filter } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useJobs } from '@/hooks/useJobs'
 import { useTableState } from '@/hooks/useTableState'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { apiClient } from '@/api/client'
 import type { JobStatus, ConsoleJobSummary, ConsoleJobListResponse } from '@/api/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -61,6 +62,7 @@ function formatDuration(seconds: number | undefined): string {
 }
 
 export function BatchJobs() {
+  const isMobile = useMediaQuery('(max-width: 767px)')
   const {
     cursor,
     items: allJobs,
@@ -252,83 +254,152 @@ export function BatchJobs() {
               No jobs found
             </p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Job ID</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Duration</TableHead>
-                  <TableHead>Language</TableHead>
-                  <TableHead className="text-right">Words</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            isMobile ? (
+              <div className="space-y-3">
                 {allJobs.map((job) => (
-                  <TableRow
+                  <div
                     key={job.id}
-                    className="cursor-pointer hover:bg-accent/50"
+                    className="rounded-lg border border-border p-3 cursor-pointer hover:bg-accent/50"
                     onClick={() => navigate(`/jobs/${job.id}`)}
                   >
-                    <TableCell className="font-mono text-sm">
-                      {job.id.slice(0, 12)}...
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={job.status} />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {formatDuration(job.audio_duration_seconds)}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {job.result_word_count ? job.result_language_code?.toUpperCase() || '-' : '-'}
-                    </TableCell>
-                    <TableCell className="text-right text-muted-foreground text-sm">
-                      {job.result_word_count?.toLocaleString() || '-'}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {formatDate(job.created_at)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <div className="w-8">
-                          {CANCELLABLE_STATUSES.has(job.status as JobStatus) && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-amber-400 hover:text-amber-300 hover:bg-amber-950"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setCancelTarget({ id: job.id })
-                              }}
-                              title="Cancel job"
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-                        <div className="w-8">
-                          {TERMINAL_STATUSES.has(job.status as JobStatus) && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-red-400 hover:text-red-300 hover:bg-red-950"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setDeleteTarget({ id: job.id })
-                              }}
-                              title="Delete job"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-mono text-xs break-all">{job.id}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {formatDate(job.created_at)}
+                        </p>
                       </div>
-                    </TableCell>
-                  </TableRow>
+                      <StatusBadge status={job.status} />
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Duration</p>
+                        <p>{formatDuration(job.audio_duration_seconds)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Language</p>
+                        <p>{job.result_word_count ? job.result_language_code?.toUpperCase() || '-' : '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Words</p>
+                        <p>{job.result_word_count?.toLocaleString() || '-'}</p>
+                      </div>
+                    </div>
+                    {(CANCELLABLE_STATUSES.has(job.status as JobStatus) ||
+                      TERMINAL_STATUSES.has(job.status as JobStatus)) && (
+                      <div className="mt-3 flex justify-end gap-2">
+                        {CANCELLABLE_STATUSES.has(job.status as JobStatus) && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-amber-400 hover:text-amber-300 hover:bg-amber-950"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setCancelTarget({ id: job.id })
+                            }}
+                          >
+                            <X className="h-4 w-4 mr-1" />
+                            Cancel
+                          </Button>
+                        )}
+                        {TERMINAL_STATUSES.has(job.status as JobStatus) && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-red-400 hover:text-red-300 hover:bg-red-950"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setDeleteTarget({ id: job.id })
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4 mr-1" />
+                            Delete
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+            ) : (
+              <Table className="min-w-[860px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="sticky left-0 z-10 bg-card">Job ID</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Duration</TableHead>
+                    <TableHead>Language</TableHead>
+                    <TableHead className="text-right">Words</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead className="sticky right-0 z-10 bg-card text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {allJobs.map((job) => (
+                    <TableRow
+                      key={job.id}
+                      className="cursor-pointer hover:bg-accent/50"
+                      onClick={() => navigate(`/jobs/${job.id}`)}
+                    >
+                      <TableCell className="font-mono text-sm sticky left-0 z-10 bg-card">
+                        {job.id.slice(0, 12)}...
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge status={job.status} />
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {formatDuration(job.audio_duration_seconds)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {job.result_word_count ? job.result_language_code?.toUpperCase() || '-' : '-'}
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground text-sm">
+                        {job.result_word_count?.toLocaleString() || '-'}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {formatDate(job.created_at)}
+                      </TableCell>
+                      <TableCell className="text-right sticky right-0 z-10 bg-card">
+                        <div className="flex items-center justify-end gap-1">
+                          <div className="w-8">
+                            {CANCELLABLE_STATUSES.has(job.status as JobStatus) && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-amber-400 hover:text-amber-300 hover:bg-amber-950"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setCancelTarget({ id: job.id })
+                                }}
+                                title="Cancel job"
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                          <div className="w-8">
+                            {TERMINAL_STATUSES.has(job.status as JobStatus) && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-red-400 hover:text-red-300 hover:bg-red-950"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setDeleteTarget({ id: job.id })
+                                }}
+                                title="Delete job"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )
           )}
 
           {/* Pagination */}

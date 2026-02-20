@@ -27,6 +27,7 @@ import {
   useUpdateWebhook,
   useRotateWebhookSecret,
 } from '@/hooks/useWebhooks'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { CreateWebhookDialog } from '@/components/CreateWebhookDialog'
 import { WebhookSecretModal } from '@/components/WebhookSecretModal'
 import type { WebhookEndpoint, WebhookEndpointCreated } from '@/api/types'
@@ -69,6 +70,7 @@ function truncateUrl(url: string, maxLength = 50): string {
 }
 
 export function Webhooks() {
+  const isMobile = useMediaQuery('(max-width: 767px)')
   const navigate = useNavigate()
   const [showInactive, setShowInactive] = useState(true)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
@@ -171,77 +173,48 @@ export function Webhooks() {
               <p className="text-sm mt-1">Create an endpoint to receive event notifications</p>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>URL</TableHead>
-                  <TableHead>Events</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            isMobile ? (
+              <div className="space-y-3">
                 {webhooks.map((webhook) => (
-                  <TableRow
+                  <div
                     key={webhook.id}
-                    className={`cursor-pointer hover:bg-accent/50 ${!webhook.is_active ? 'opacity-50' : ''}`}
+                    className={`rounded-lg border border-border p-3 cursor-pointer hover:bg-accent/50 ${!webhook.is_active ? 'opacity-60' : ''}`}
                     onClick={() => navigate(`/webhooks/${webhook.id}`)}
                   >
-                    <TableCell>
-                      <div className="flex flex-col">
-                        <span className="font-mono text-sm" title={webhook.url}>
-                          {truncateUrl(webhook.url)}
-                        </span>
-                        {webhook.description && (
-                          <span className="text-xs text-muted-foreground">
-                            {webhook.description}
-                          </span>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {webhook.events.map((event) => (
-                          <EventBadge key={event} event={event} />
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell>
+                    <p className="font-mono text-xs break-all">{webhook.url}</p>
+                    {webhook.description && (
+                      <p className="text-xs text-muted-foreground mt-1">{webhook.description}</p>
+                    )}
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {webhook.events.map((event) => (
+                        <EventBadge key={event} event={event} />
+                      ))}
+                    </div>
+                    <div className="mt-3 flex items-center justify-between gap-2">
                       <div className="flex flex-col gap-1">
                         {webhook.is_active ? (
-                          <Badge variant="outline" className="text-xs bg-green-500/10 text-green-500">
+                          <Badge variant="outline" className="text-xs bg-green-500/10 text-green-500 w-fit">
                             Active
                           </Badge>
                         ) : webhook.disabled_reason === 'auto_disabled' ? (
-                          <Badge variant="outline" className="text-xs bg-orange-500/10 text-orange-500 border-orange-500/20">
+                          <Badge variant="outline" className="text-xs bg-orange-500/10 text-orange-500 border-orange-500/20 w-fit">
                             Auto-disabled
                           </Badge>
                         ) : (
-                          <Badge variant="outline" className="text-xs bg-gray-500/10 text-gray-500">
+                          <Badge variant="outline" className="text-xs bg-gray-500/10 text-gray-500 w-fit">
                             Inactive
                           </Badge>
                         )}
-                        {webhook.consecutive_failures > 0 && (
-                          <span className="text-xs text-muted-foreground">
-                            {webhook.consecutive_failures} consecutive failure{webhook.consecutive_failures !== 1 ? 's' : ''}
-                          </span>
-                        )}
+                        <span className="text-xs text-muted-foreground">{formatTimeAgo(webhook.created_at)}</span>
                       </div>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatTimeAgo(webhook.created_at)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
+                      <div className="flex items-center gap-1">
                         <Button
-                          variant="ghost"
+                          variant="outline"
                           size="sm"
                           onClick={(e) => {
                             e.stopPropagation()
                             handleToggleActive(webhook)
                           }}
-                          title={webhook.is_active ? 'Deactivate' : 'Activate'}
                           disabled={updateWebhook.isPending}
                         >
                           {webhook.is_active ? (
@@ -251,35 +224,143 @@ export function Webhooks() {
                           )}
                         </Button>
                         <Button
-                          variant="ghost"
+                          variant="outline"
                           size="sm"
                           onClick={(e) => {
                             e.stopPropagation()
                             handleRotateSecret(webhook)
                           }}
-                          title="Rotate secret"
                           disabled={rotateSecret.isPending}
                         >
                           <RefreshCw className="h-4 w-4" />
                         </Button>
                         <Button
-                          variant="ghost"
+                          variant="outline"
                           size="sm"
                           onClick={(e) => {
                             e.stopPropagation()
                             setDeleteConfirm(webhook)
                           }}
-                          title="Delete"
                           className="text-red-400 hover:text-red-300 hover:bg-red-950"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
-                    </TableCell>
-                  </TableRow>
+                    </div>
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+            ) : (
+              <Table className="min-w-[900px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="sticky left-0 z-10 bg-card">URL</TableHead>
+                    <TableHead>Events</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead className="sticky right-0 z-10 bg-card text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {webhooks.map((webhook) => (
+                    <TableRow
+                      key={webhook.id}
+                      className={`cursor-pointer hover:bg-accent/50 ${!webhook.is_active ? 'opacity-50' : ''}`}
+                      onClick={() => navigate(`/webhooks/${webhook.id}`)}
+                    >
+                      <TableCell className="sticky left-0 z-10 bg-card">
+                        <div className="flex flex-col">
+                          <span className="font-mono text-sm" title={webhook.url}>
+                            {truncateUrl(webhook.url)}
+                          </span>
+                          {webhook.description && (
+                            <span className="text-xs text-muted-foreground">
+                              {webhook.description}
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {webhook.events.map((event) => (
+                            <EventBadge key={event} event={event} />
+                          ))}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-col gap-1">
+                          {webhook.is_active ? (
+                            <Badge variant="outline" className="text-xs bg-green-500/10 text-green-500">
+                              Active
+                            </Badge>
+                          ) : webhook.disabled_reason === 'auto_disabled' ? (
+                            <Badge variant="outline" className="text-xs bg-orange-500/10 text-orange-500 border-orange-500/20">
+                              Auto-disabled
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-xs bg-gray-500/10 text-gray-500">
+                              Inactive
+                            </Badge>
+                          )}
+                          {webhook.consecutive_failures > 0 && (
+                            <span className="text-xs text-muted-foreground">
+                              {webhook.consecutive_failures} consecutive failure{webhook.consecutive_failures !== 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatTimeAgo(webhook.created_at)}
+                      </TableCell>
+                      <TableCell className="text-right sticky right-0 z-10 bg-card">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleToggleActive(webhook)
+                            }}
+                            title={webhook.is_active ? 'Deactivate' : 'Activate'}
+                            disabled={updateWebhook.isPending}
+                          >
+                            {webhook.is_active ? (
+                              <ToggleRight className="h-4 w-4 text-green-500" />
+                            ) : (
+                              <ToggleLeft className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleRotateSecret(webhook)
+                            }}
+                            title="Rotate secret"
+                            disabled={rotateSecret.isPending}
+                          >
+                            <RefreshCw className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setDeleteConfirm(webhook)
+                            }}
+                            title="Delete"
+                            className="text-red-400 hover:text-red-300 hover:bg-red-950"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )
           )}
         </CardContent>
       </Card>

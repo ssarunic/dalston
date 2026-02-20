@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/table'
 import { useWebhooks, useWebhookDeliveries, useRetryDelivery } from '@/hooks/useWebhooks'
 import { useTableState } from '@/hooks/useTableState'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { BackButton } from '@/components/BackButton'
 import type { WebhookDelivery, DeliveryListResponse } from '@/api/types'
 
@@ -70,6 +71,7 @@ function formatDateTime(dateStr: string): string {
 }
 
 export function WebhookDetail() {
+  const isMobile = useMediaQuery('(max-width: 767px)')
   const { endpointId } = useParams<{ endpointId: string }>()
   const {
     cursor,
@@ -282,84 +284,143 @@ export function WebhookDetail() {
             </div>
           ) : (
             <>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Event</TableHead>
-                    <TableHead>Job</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Attempts</TableHead>
-                    <TableHead>Last Error</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
+              {isMobile ? (
+                <div className="space-y-3">
                   {allDeliveries.map((delivery) => (
-                    <TableRow key={delivery.id}>
-                      <TableCell>
+                    <div key={delivery.id} className="rounded-lg border border-border p-3">
+                      <div className="flex items-start justify-between gap-2">
                         <Badge variant="outline" className="text-xs">
                           {delivery.event_type}
                         </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {delivery.job_id ? (
-                          <Link
-                            to={`/jobs/${delivery.job_id}`}
-                            className="flex items-center gap-1 text-sm text-primary hover:underline"
-                          >
-                            {delivery.job_id.slice(0, 8)}...
-                            <ExternalLink className="h-3 w-3" />
-                          </Link>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
                         <DeliveryStatusBadge status={delivery.status} />
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-sm">
-                          {delivery.attempts}
-                          {delivery.last_status_code && (
-                            <span className="text-muted-foreground ml-1">
-                              (HTTP {delivery.last_status_code})
-                            </span>
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <p className="text-xs text-muted-foreground">Job</p>
+                          {delivery.job_id ? (
+                            <Link
+                              to={`/jobs/${delivery.job_id}`}
+                              className="flex items-center gap-1 text-sm text-primary hover:underline"
+                            >
+                              {delivery.job_id.slice(0, 8)}...
+                              <ExternalLink className="h-3 w-3" />
+                            </Link>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
                           )}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        {delivery.last_error ? (
-                          <span
-                            className="text-sm text-destructive max-w-[200px] truncate block"
-                            title={delivery.last_error}
-                          >
-                            {delivery.last_error}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-sm">
-                        {formatTimeAgo(delivery.created_at)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {delivery.status === 'failed' && (
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Created</p>
+                          <p>{formatTimeAgo(delivery.created_at)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Attempts</p>
+                          <p>
+                            {delivery.attempts}
+                            {delivery.last_status_code ? ` (HTTP ${delivery.last_status_code})` : ''}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Last Error</p>
+                          <p className="text-destructive break-words">{delivery.last_error || '-'}</p>
+                        </div>
+                      </div>
+                      {delivery.status === 'failed' && (
+                        <div className="mt-3 flex justify-end">
                           <Button
-                            variant="ghost"
+                            variant="outline"
                             size="sm"
                             onClick={() => handleRetry(delivery)}
                             disabled={retryDelivery.isPending}
-                            title="Retry delivery"
                           >
-                            <RefreshCw className="h-4 w-4" />
+                            <RefreshCw className="h-4 w-4 mr-1" />
+                            Retry
                           </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
+                        </div>
+                      )}
+                    </div>
                   ))}
-                </TableBody>
-              </Table>
+                </div>
+              ) : (
+                <Table className="min-w-[980px]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="sticky left-0 z-10 bg-card">Event</TableHead>
+                      <TableHead>Job</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Attempts</TableHead>
+                      <TableHead>Last Error</TableHead>
+                      <TableHead>Created</TableHead>
+                      <TableHead className="sticky right-0 z-10 bg-card text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {allDeliveries.map((delivery) => (
+                      <TableRow key={delivery.id}>
+                        <TableCell className="sticky left-0 z-10 bg-card">
+                          <Badge variant="outline" className="text-xs">
+                            {delivery.event_type}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {delivery.job_id ? (
+                            <Link
+                              to={`/jobs/${delivery.job_id}`}
+                              className="flex items-center gap-1 text-sm text-primary hover:underline"
+                            >
+                              {delivery.job_id.slice(0, 8)}...
+                              <ExternalLink className="h-3 w-3" />
+                            </Link>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <DeliveryStatusBadge status={delivery.status} />
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-sm">
+                            {delivery.attempts}
+                            {delivery.last_status_code && (
+                              <span className="text-muted-foreground ml-1">
+                                (HTTP {delivery.last_status_code})
+                              </span>
+                            )}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          {delivery.last_error ? (
+                            <span
+                              className="text-sm text-destructive max-w-[200px] truncate block"
+                              title={delivery.last_error}
+                            >
+                              {delivery.last_error}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-sm">
+                          {formatTimeAgo(delivery.created_at)}
+                        </TableCell>
+                        <TableCell className="text-right sticky right-0 z-10 bg-card">
+                          {delivery.status === 'failed' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRetry(delivery)}
+                              disabled={retryDelivery.isPending}
+                              title="Retry delivery"
+                            >
+                              <RefreshCw className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
 
               {/* Pagination */}
               {allDeliveries.length > 0 && (

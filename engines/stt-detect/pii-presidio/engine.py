@@ -73,6 +73,35 @@ DEFAULT_ENTITY_TYPES = [
     "iban",
 ]
 
+# Low-signal tokens that GLiNER may misclassify as PERSON in ASR text.
+# These are filtered only for "name" entities to reduce obvious false positives.
+NAME_FALSE_POSITIVE_TOKENS = {
+    "i",
+    "you",
+    "we",
+    "he",
+    "she",
+    "they",
+    "it",
+    "me",
+    "him",
+    "her",
+    "them",
+    "us",
+    "my",
+    "your",
+    "our",
+    "their",
+    "mine",
+    "yours",
+    "ours",
+    "theirs",
+    "this",
+    "that",
+    "these",
+    "those",
+}
+
 # Presidio entity type mapping (Dalston type -> Presidio type)
 PRESIDIO_TYPE_MAP = {
     "name": "PERSON",
@@ -461,6 +490,11 @@ class PIIDetectionEngine(Engine):
                 if not dalston_type:
                     continue
 
+                if self._should_filter_gliner_entity(
+                    dalston_type, pred.get("text", "")
+                ):
+                    continue
+
                 category = ENTITY_CATEGORY_MAP.get(dalston_type, PIIEntityCategory.PII)
                 start_offset = pred["start"]
                 end_offset = pred["end"]
@@ -497,6 +531,20 @@ class PIIDetectionEngine(Engine):
             self.logger.warning("gliner_prediction_failed", error=str(e))
 
         return entities
+
+    def _should_filter_gliner_entity(self, entity_type: str, text: str) -> bool:
+        """Filter low-signal GLiNER entities that are frequent false positives."""
+        if entity_type != "name":
+            return False
+
+        normalized = re.sub(r"[^a-zA-Z']+", "", text).lower()
+        if not normalized:
+            return True
+
+        if len(normalized) == 1:
+            return True
+
+        return normalized in NAME_FALSE_POSITIVE_TOKENS
 
     def _build_word_time_map(
         self, segments: list[Segment]

@@ -13,6 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useApiKeys, useRevokeApiKey } from '@/hooks/useApiKeys'
 import { CreateKeyDialog } from '@/components/CreateKeyDialog'
 import { KeyCreatedModal } from '@/components/KeyCreatedModal'
@@ -52,6 +53,7 @@ function formatTimeAgo(dateStr: string): string {
 }
 
 export function ApiKeys() {
+  const isMobile = useMediaQuery('(max-width: 767px)')
   const [showRevoked, setShowRevoked] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [createdKey, setCreatedKey] = useState<APIKeyCreatedResponse | null>(null)
@@ -134,66 +136,124 @@ export function ApiKeys() {
               <p className="text-sm mt-1">Create a key to get started</p>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Prefix</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Scopes</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Last Used</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            isMobile ? (
+              <div className="space-y-3">
                 {keys.map((key) => (
-                  <TableRow
+                  <div
                     key={key.id}
-                    className={key.is_revoked ? 'opacity-50' : undefined}
+                    className={`rounded-lg border border-border p-3 ${key.is_revoked ? 'opacity-60' : ''}`}
                   >
-                    <TableCell className="font-mono text-sm">
-                      {key.prefix}...
-                      {key.is_current && (
-                        <Badge variant="secondary" className="ml-2 text-xs">
-                          current
-                        </Badge>
-                      )}
-                      {key.is_revoked && (
-                        <Badge variant="destructive" className="ml-2 text-xs">
-                          revoked
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>{key.name}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {key.scopes.map((scope) => (
-                          <ScopeBadge key={scope} scope={scope} />
-                        ))}
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-mono text-sm break-all">{key.prefix}...</p>
+                        <p className="text-sm">{key.name}</p>
                       </div>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatTimeAgo(key.created_at)}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {key.last_used_at ? formatTimeAgo(key.last_used_at) : 'Never'}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {!key.is_revoked && (
+                      <div className="flex items-center gap-1">
+                        {key.is_current && (
+                          <Badge variant="secondary" className="text-xs">
+                            current
+                          </Badge>
+                        )}
+                        {key.is_revoked && (
+                          <Badge variant="destructive" className="text-xs">
+                            revoked
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {key.scopes.map((scope) => (
+                        <ScopeBadge key={scope} scope={scope} />
+                      ))}
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <p className="text-muted-foreground">Created</p>
+                        <p>{formatTimeAgo(key.created_at)}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Last Used</p>
+                        <p>{key.last_used_at ? formatTimeAgo(key.last_used_at) : 'Never'}</p>
+                      </div>
+                    </div>
+                    {!key.is_revoked && (
+                      <div className="mt-3 flex justify-end">
                         <Button
-                          variant="ghost"
+                          variant="outline"
                           size="sm"
                           onClick={() => setRevokeConfirm(key)}
                           className="text-red-400 hover:text-red-300 hover:bg-red-950"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-4 w-4 mr-1" />
+                          Revoke
                         </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
+                      </div>
+                    )}
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+            ) : (
+              <Table className="min-w-[900px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="sticky left-0 z-10 bg-card">Prefix</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Scopes</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead>Last Used</TableHead>
+                    <TableHead className="sticky right-0 z-10 bg-card text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {keys.map((key) => (
+                    <TableRow
+                      key={key.id}
+                      className={key.is_revoked ? 'opacity-50' : undefined}
+                    >
+                      <TableCell className="font-mono text-sm sticky left-0 z-10 bg-card">
+                        {key.prefix}...
+                        {key.is_current && (
+                          <Badge variant="secondary" className="ml-2 text-xs">
+                            current
+                          </Badge>
+                        )}
+                        {key.is_revoked && (
+                          <Badge variant="destructive" className="ml-2 text-xs">
+                            revoked
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>{key.name}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {key.scopes.map((scope) => (
+                            <ScopeBadge key={scope} scope={scope} />
+                          ))}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatTimeAgo(key.created_at)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {key.last_used_at ? formatTimeAgo(key.last_used_at) : 'Never'}
+                      </TableCell>
+                      <TableCell className="text-right sticky right-0 z-10 bg-card">
+                        {!key.is_revoked && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setRevokeConfirm(key)}
+                            className="text-red-400 hover:text-red-300 hover:bg-red-950"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )
           )}
         </CardContent>
       </Card>

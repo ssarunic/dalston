@@ -13,6 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useRetentionPolicies, useDeleteRetentionPolicy } from '@/hooks/useRetentionPolicies'
 import { CreatePolicyDialog } from '@/components/CreatePolicyDialog'
 import type { RetentionPolicy } from '@/api/types'
@@ -44,6 +45,7 @@ function formatHours(hours: number | null): string {
 }
 
 export function RetentionPolicies() {
+  const isMobile = useMediaQuery('(max-width: 767px)')
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<RetentionPolicy | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -117,39 +119,68 @@ export function RetentionPolicies() {
               <span>Failed to load policies: {error instanceof Error ? error.message : 'Unknown error'}</span>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Mode</TableHead>
-                  <TableHead>Retention</TableHead>
-                  <TableHead>Scope</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            isMobile ? (
+              <div className="space-y-3">
                 {systemPolicies.map((policy) => (
-                  <TableRow key={policy.id}>
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        <Shield className="h-4 w-4 text-muted-foreground" />
-                        {policy.name}
+                  <div key={policy.id} className="rounded-lg border border-border p-3">
+                    <div className="flex items-center gap-2">
+                      <Shield className="h-4 w-4 text-muted-foreground" />
+                      <p className="font-medium">{policy.name}</p>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Mode</p>
+                        <Badge variant="outline" className={MODE_LABELS[policy.mode]?.color}>
+                          {MODE_LABELS[policy.mode]?.label || policy.mode}
+                        </Badge>
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={MODE_LABELS[policy.mode]?.color}>
-                        {MODE_LABELS[policy.mode]?.label || policy.mode}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatHours(policy.hours)}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {SCOPE_LABELS[policy.scope] || policy.scope}
-                    </TableCell>
-                  </TableRow>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Retention</p>
+                        <p>{formatHours(policy.hours)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Scope</p>
+                        <p>{SCOPE_LABELS[policy.scope] || policy.scope}</p>
+                      </div>
+                    </div>
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+            ) : (
+              <Table className="min-w-[780px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="sticky left-0 z-10 bg-card">Name</TableHead>
+                    <TableHead>Mode</TableHead>
+                    <TableHead>Retention</TableHead>
+                    <TableHead>Scope</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {systemPolicies.map((policy) => (
+                    <TableRow key={policy.id}>
+                      <TableCell className="font-medium sticky left-0 z-10 bg-card">
+                        <div className="flex items-center gap-2">
+                          <Shield className="h-4 w-4 text-muted-foreground" />
+                          {policy.name}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={MODE_LABELS[policy.mode]?.color}>
+                          {MODE_LABELS[policy.mode]?.label || policy.mode}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatHours(policy.hours)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {SCOPE_LABELS[policy.scope] || policy.scope}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )
           )}
         </CardContent>
       </Card>
@@ -181,45 +212,82 @@ export function RetentionPolicies() {
               <p className="text-sm mt-1">Create a policy to define custom retention rules</p>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Mode</TableHead>
-                  <TableHead>Retention</TableHead>
-                  <TableHead>Scope</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            isMobile ? (
+              <div className="space-y-3">
                 {tenantPolicies.map((policy) => (
-                  <TableRow key={policy.id}>
-                    <TableCell className="font-medium">{policy.name}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={MODE_LABELS[policy.mode]?.color}>
-                        {MODE_LABELS[policy.mode]?.label || policy.mode}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatHours(policy.hours)}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {SCOPE_LABELS[policy.scope] || policy.scope}
-                    </TableCell>
-                    <TableCell className="text-right">
+                  <div key={policy.id} className="rounded-lg border border-border p-3">
+                    <p className="font-medium">{policy.name}</p>
+                    <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Mode</p>
+                        <Badge variant="outline" className={MODE_LABELS[policy.mode]?.color}>
+                          {MODE_LABELS[policy.mode]?.label || policy.mode}
+                        </Badge>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Retention</p>
+                        <p>{formatHours(policy.hours)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Scope</p>
+                        <p>{SCOPE_LABELS[policy.scope] || policy.scope}</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex justify-end">
                       <Button
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
                         onClick={() => setDeleteConfirm(policy)}
                         className="text-red-400 hover:text-red-300 hover:bg-red-950"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Delete
                       </Button>
-                    </TableCell>
-                  </TableRow>
+                    </div>
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+            ) : (
+              <Table className="min-w-[860px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="sticky left-0 z-10 bg-card">Name</TableHead>
+                    <TableHead>Mode</TableHead>
+                    <TableHead>Retention</TableHead>
+                    <TableHead>Scope</TableHead>
+                    <TableHead className="sticky right-0 z-10 bg-card text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {tenantPolicies.map((policy) => (
+                    <TableRow key={policy.id}>
+                      <TableCell className="font-medium sticky left-0 z-10 bg-card">{policy.name}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={MODE_LABELS[policy.mode]?.color}>
+                          {MODE_LABELS[policy.mode]?.label || policy.mode}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatHours(policy.hours)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {SCOPE_LABELS[policy.scope] || policy.scope}
+                      </TableCell>
+                      <TableCell className="text-right sticky right-0 z-10 bg-card">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setDeleteConfirm(policy)}
+                          className="text-red-400 hover:text-red-300 hover:bg-red-950"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )
           )}
         </CardContent>
       </Card>
