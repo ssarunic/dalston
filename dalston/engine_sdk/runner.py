@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 import redis
 import structlog
@@ -116,11 +117,14 @@ class EngineRunner:
 
         # Load configuration from environment
         self.engine_id = os.environ.get("ENGINE_ID", "unknown")
+        # Instance-unique consumer ID for Redis Streams
+        # This ensures spot instance replacements don't mask old pending tasks
+        self.instance_id = f"{self.engine_id}-{uuid4().hex[:12]}"
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
         self.s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
         self.metrics_port = int(os.environ.get("METRICS_PORT", "9100"))
 
-        # Configure structured logging
+        # Configure structured logging (use logical engine_id for aggregation)
         dalston.logging.configure(f"engine-{self.engine_id}")
 
         # Configure distributed tracing (M19)
@@ -129,7 +133,11 @@ class EngineRunner:
         # Configure Prometheus metrics (M20)
         dalston.metrics.configure_metrics(f"engine-{self.engine_id}")
 
-        logger.info("engine_runner_initialized", engine_id=self.engine_id)
+        logger.info(
+            "engine_runner_initialized",
+            engine_id=self.engine_id,
+            instance_id=self.instance_id,
+        )
 
     @property
     def redis_client(self) -> redis.Redis:
@@ -167,6 +175,7 @@ class EngineRunner:
         self._registry.register(
             BatchEngineInfo(
                 engine_id=self.engine_id,
+                instance_id=self.instance_id,
                 stage=self._stage,
                 queue_name=self.queue_key,
                 capabilities=capabilities,
@@ -204,7 +213,7 @@ class EngineRunner:
         # Unregister from registry for immediate offline status
         if self._registry:
             try:
-                self._registry.unregister(self.engine_id)
+                self._registry.unregister(self.instance_id)
             except Exception:
                 pass  # Best effort cleanup
 
@@ -259,7 +268,7 @@ class EngineRunner:
 
                 if self._registry:
                     self._registry.heartbeat(
-                        engine_id=self.engine_id,
+                        instance_id=self.instance_id,
                         status="processing" if current_task else "idle",
                         current_task=current_task,
                     )
@@ -288,10 +297,11 @@ class EngineRunner:
         message: StreamMessage | None = None
 
         # 1. Try to claim stale tasks from DEAD engines only
+        # Use instance_id as consumer to ensure spot replacements don't mask old tasks
         stale = claim_stale_from_dead_engines(
             self.redis_client,
             stage=self._stage,
-            consumer=self.engine_id,
+            consumer=self.instance_id,
             min_idle_ms=STALE_THRESHOLD_MS,
             count=1,
         )
@@ -308,10 +318,11 @@ class EngineRunner:
             dalston.metrics.inc_task_redelivery(self._stage, reason="engine_crash")
         else:
             # 2. No stale tasks - read new ones
+            # Use instance_id as consumer for proper PEL tracking
             message = read_task(
                 self.redis_client,
                 stage=self._stage,
-                consumer=self.engine_id,
+                consumer=self.instance_id,
                 block_ms=self.QUEUE_POLL_TIMEOUT * 1000,
             )
 

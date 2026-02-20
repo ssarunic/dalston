@@ -50,6 +50,7 @@ def make_capabilities(
 
 def make_engine_state(
     engine_id: str = "test-engine",
+    instance_id: str | None = None,
     stage: str = "transcribe",
     capabilities: EngineCapabilities | None = None,
     is_available: bool = True,
@@ -58,6 +59,7 @@ def make_engine_state(
     now = datetime.now(UTC)
     state = BatchEngineState(
         engine_id=engine_id,
+        instance_id=instance_id or f"{engine_id}-abc123",
         stage=stage,
         queue_name=f"dalston:queue:{engine_id}",
         status="idle" if is_available else "offline",
@@ -453,7 +455,11 @@ class TestSelectPipelineEngines:
             caps = stages_caps.get(stage)
             if caps:
                 caps.stages = [stage]
-                return [make_engine_state(caps.engine_id, stage, caps)]
+                return [
+                    make_engine_state(
+                        engine_id=caps.engine_id, stage=stage, capabilities=caps
+                    )
+                ]
             return []
 
         mock_registry.get_engines_for_stage.side_effect = get_engines_for_stage
@@ -482,7 +488,11 @@ class TestSelectPipelineEngines:
             caps = stages_caps.get(stage)
             if caps:
                 caps.stages = [stage]
-                return [make_engine_state(caps.engine_id, stage, caps)]
+                return [
+                    make_engine_state(
+                        engine_id=caps.engine_id, stage=stage, capabilities=caps
+                    )
+                ]
             return []
 
         mock_registry.get_engines_for_stage.side_effect = get_engines_for_stage
@@ -509,7 +519,11 @@ class TestSelectPipelineEngines:
             caps = stages_caps.get(stage)
             if caps:
                 caps.stages = [stage]
-                return [make_engine_state(caps.engine_id, stage, caps)]
+                return [
+                    make_engine_state(
+                        engine_id=caps.engine_id, stage=stage, capabilities=caps
+                    )
+                ]
             return []
 
         mock_registry.get_engines_for_stage.side_effect = get_engines_for_stage

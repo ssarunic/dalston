@@ -377,7 +377,7 @@ async def handle_task_completed(
     """Handle task.completed event.
 
     Steps:
-    1. Mark task as completed
+    1. Mark task as completed (idempotent - skip if already completed)
     2. Find dependent tasks
     3. For each dependent, check if all deps are completed
     4. Queue ready dependents
@@ -399,21 +399,35 @@ async def handle_task_completed(
         log.error("task_not_found")
         return
 
-    # Preserve SKIPPED status for optional tasks that failed - they're treated
-    # as "completed" for dependency purposes but should retain SKIPPED status
-    if task.status != TaskStatus.SKIPPED.value:
-        task.status = TaskStatus.COMPLETED.value
-        task.error = None  # Clear any error from a previous failed attempt
-
-    task.completed_at = datetime.now(UTC)
-    await db.commit()
-
     job_id = task.job_id
     log = log.bind(job_id=str(job_id), stage=task.stage)
-    log.info("marked_task_completed")
 
-    # Record task completion metric (M20)
-    dalston.metrics.inc_orchestrator_tasks_completed(task.engine_id, "success")
+    # Check if task is already in a terminal state (COMPLETED or SKIPPED)
+    # We still proceed to queue dependents and check job completion for replay safety:
+    # If we crashed after committing COMPLETED but before side effects, replay must
+    # still execute them. The side effects are idempotent (atomic UPDATE WHERE status=PENDING,
+    # engines check task status before processing stream messages).
+    already_terminal = task.status in (
+        TaskStatus.COMPLETED.value,
+        TaskStatus.SKIPPED.value,
+    )
+
+    if already_terminal:
+        log.info(
+            "task_already_terminal_proceeding_with_side_effects", status=task.status
+        )
+    else:
+        # Update status to COMPLETED (preserve SKIPPED for optional failed tasks)
+        if task.status != TaskStatus.SKIPPED.value:
+            task.status = TaskStatus.COMPLETED.value
+            task.error = None  # Clear any error from a previous failed attempt
+
+        task.completed_at = datetime.now(UTC)
+        await db.commit()
+        log.info("marked_task_completed")
+
+        # Record task completion metric (M20) - only on first completion
+        dalston.metrics.inc_orchestrator_tasks_completed(task.engine_id, "success")
 
     # Update job audio_duration from prepare stage output if not already set
     # This handles enhancement jobs that don't have duration set at creation time
@@ -576,9 +590,10 @@ async def handle_task_failed(
 
     Steps:
     1. Fetch task
-    2. If retries < max_retries: increment retries, re-queue
-    3. Else if not required: mark as skipped, treat as completed
-    4. Else: mark job as failed
+    2. If task already in terminal state (COMPLETED, SKIPPED, CANCELLED), ignore
+    3. If retries < max_retries: increment retries, re-queue
+    4. Else if not required: mark as skipped, treat as completed
+    5. Else: mark job as failed
 
     Args:
         task_id: UUID of the failed task
@@ -600,7 +615,67 @@ async def handle_task_failed(
     job_id = task.job_id
     log = log.bind(job_id=str(job_id), stage=task.stage)
 
-    # 2. Check if we can retry
+    # 2. Handle based on current task status for replay safety
+    # State machine for crash-safe handling:
+    # - RUNNING: Normal processing (retry, skip, or fail)
+    # - READY: Replay after crash - retry committed but requeue may be missing, ensure enqueued
+    # - SKIPPED: Replay after crash - proceed to handle_task_completed side effects
+    # - FAILED: Replay after crash - ensure job fail side effects run (at-least-once)
+    # - PENDING/COMPLETED/CANCELLED: Ignore (invalid state for failure event)
+
+    if task.status == TaskStatus.SKIPPED.value:
+        # Replay case: task was marked SKIPPED but crashed before handle_task_completed
+        # Proceed directly to handle_task_completed for dependency side effects
+        log.info("task_already_skipped_proceeding_with_side_effects")
+        await handle_task_completed(task_id, db, redis, settings, registry)
+        return
+
+    if task.status == TaskStatus.FAILED.value:
+        # Replay case: task was marked FAILED but crashed before job fail/webhook
+        # Always run side effects (at-least-once): _decrement is idempotent via SET NX,
+        # webhook delivery layer handles deduplication
+        log.info("task_already_failed_proceeding_with_side_effects")
+        await _ensure_job_failed_side_effects(
+            task=task,
+            job_id=job_id,
+            error=task.error or error,
+            db=db,
+            redis=redis,
+            log=log,
+        )
+        return
+
+    if task.status == TaskStatus.READY.value:
+        # Replay case: retry was committed (retries incremented, status=READY) but
+        # crashed before requeue. Ensure the task is enqueued without re-incrementing.
+        log.info(
+            "task_already_ready_ensuring_enqueued",
+            retry_count=task.retries,
+            max_retries=task.max_retries,
+        )
+        await _ensure_retry_enqueued(
+            task=task,
+            job_id=job_id,
+            db=db,
+            redis=redis,
+            settings=settings,
+            registry=registry,
+            log=log,
+        )
+        return
+
+    if task.status != TaskStatus.RUNNING.value:
+        # PENDING: task hasn't started yet (shouldn't receive failed event)
+        # COMPLETED: race with completion event
+        # CANCELLED: job was cancelled
+        log.info(
+            "ignoring_task_failed_invalid_state",
+            current_status=task.status,
+            error=error,
+        )
+        return
+
+    # 3. Normal path: task is RUNNING, check if we can retry
     if task.retries < task.max_retries:
         task.retries += 1
         task.status = TaskStatus.READY.value
@@ -664,7 +739,7 @@ async def handle_task_failed(
 
         return
 
-    # 3. Check if task is optional
+    # 4. Check if task is optional
     if not task.required:
         task.status = TaskStatus.SKIPPED.value
         task.error = error
@@ -676,7 +751,7 @@ async def handle_task_failed(
         await handle_task_completed(task_id, db, redis, settings, registry)
         return
 
-    # 4. Required task failed - fail the job
+    # 5. Required task failed - fail the job
     task.status = TaskStatus.FAILED.value
     task.error = error
     await db.commit()
@@ -698,6 +773,119 @@ async def handle_task_failed(
         await publish_job_failed(redis, job_id, job.error)
 
     log.error("job_failed", reason=f"Task {task.stage} failed: {error}")
+
+
+async def _ensure_retry_enqueued(
+    task: TaskModel,
+    job_id: UUID,
+    db: AsyncSession,
+    redis: Redis,
+    settings: Settings,
+    registry: BatchEngineRegistry,
+    log,
+) -> None:
+    """Ensure a retry task is enqueued (replay-safe, no re-increment).
+
+    Called when task is in READY state during replay - the retry was already
+    committed (retries incremented, status=READY) but the requeue may have
+    been missed due to crash. This ensures the task gets into the queue.
+
+    Args:
+        task: Task model in READY state
+        job_id: Job UUID
+        db: Database session
+        redis: Redis client
+        settings: Application settings
+        registry: Batch engine registry
+        log: Logger instance
+    """
+    from dalston.common.models import Task
+
+    task_model = Task.model_validate(task)
+
+    # Get previous outputs for retry
+    result = await db.execute(select(TaskModel).where(TaskModel.job_id == job_id))
+    all_tasks = list(result.scalars().all())
+    task_by_id = {t.id: t for t in all_tasks}
+
+    previous_outputs = await _gather_previous_outputs(
+        dependency_ids=task.dependencies,
+        task_by_id=task_by_id,
+        settings=settings,
+    )
+
+    try:
+        await queue_task(
+            redis=redis,
+            task=task_model,
+            settings=settings,
+            registry=registry,
+            previous_outputs=previous_outputs,
+        )
+        log.info("retry_enqueued_on_replay", retry_count=task.retries)
+    except (
+        EngineUnavailableError,
+        EngineCapabilityError,
+        CatalogValidationError,
+    ) as e:
+        # Engine became unavailable - fail the job
+        error_str = _serialize_engine_error(e)
+        task.status = TaskStatus.FAILED.value
+        task.error = error_str
+        await db.commit()
+        await _ensure_job_failed_side_effects(
+            task=task, job_id=job_id, error=error_str, db=db, redis=redis, log=log
+        )
+        log.error(
+            "job_failed_engine_error_on_retry_replay",
+            error_type=type(e).__name__,
+            engine_id=getattr(e, "engine_id", None),
+            stage=getattr(e, "stage", None),
+        )
+
+
+async def _ensure_job_failed_side_effects(
+    task: TaskModel,
+    job_id: UUID,
+    error: str,
+    db: AsyncSession,
+    redis: Redis,
+    log,
+) -> None:
+    """Ensure job failure side effects are executed (replay-safe, at-least-once).
+
+    Called when task is in FAILED state during replay. Always runs side effects:
+    - _decrement_concurrent_jobs is idempotent via SET NX guard
+    - publish_job_failed uses at-least-once delivery, dedupe at webhook layer
+
+    Args:
+        task: Task model in FAILED state
+        job_id: Job UUID
+        error: Error message
+        db: Database session
+        redis: Redis client
+        log: Logger instance
+    """
+    job = await db.get(JobModel, job_id)
+    if not job:
+        log.warning("job_not_found_for_failed_side_effects")
+        return
+
+    # Update job to FAILED if not already terminal
+    if job.status not in (JobStatus.FAILED.value, JobStatus.CANCELLED.value):
+        job.status = JobStatus.FAILED.value
+        job.error = f"Task {task.stage} failed: {error}"
+        job.completed_at = datetime.now(UTC)
+        await db.commit()
+        log.info("job_marked_failed_on_replay")
+
+    # Always run side effects (idempotent/at-least-once)
+    # _decrement_concurrent_jobs uses SET NX guard - safe to call multiple times
+    await _decrement_concurrent_jobs(redis, job_id, job.tenant_id)
+
+    # Publish job.failed - at-least-once delivery, webhook layer handles dedupe
+    await publish_job_failed(redis, job_id, job.error or error)
+    log.error("job_failed_side_effects_executed", reason=job.error or error)
 
 
 async def _gather_previous_outputs(

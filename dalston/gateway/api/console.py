@@ -373,6 +373,11 @@ class EnginesResponse(BaseModel):
 # Heartbeat timeout thresholds (seconds)
 HEARTBEAT_STALE_THRESHOLD = 30  # Mark as stale after 30s without heartbeat
 
+# Redis key patterns for engine registry (shared with orchestrator)
+ENGINE_SET_KEY = "dalston:batch:engines"
+ENGINE_KEY_PREFIX = "dalston:batch:engine:"
+ENGINE_INSTANCES_PREFIX = "dalston:batch:engine:instances:"
+
 
 @router.get(
     "/engines",
@@ -395,12 +400,23 @@ async def get_engines(
     catalog = get_catalog()
 
     # Fetch heartbeats for all registered engines from Redis
-    registered_engine_ids = await redis.smembers("dalston:batch:engines")
-    discovered_heartbeats: dict[str, dict[str, str]] = {}
+    # Now uses instance-based lookup: engine_id -> instance set -> instance heartbeats
+    registered_engine_ids = await redis.smembers(ENGINE_SET_KEY)
+    discovered_heartbeats: dict[str, list[dict[str, str]]] = {}
+
     for engine_id in registered_engine_ids:
-        data = await redis.hgetall(f"dalston:batch:engine:{engine_id}")
-        if data and "engine_id" in data:
-            discovered_heartbeats[data["engine_id"]] = data
+        # Get all instances for this logical engine
+        instances_key = f"{ENGINE_INSTANCES_PREFIX}{engine_id}"
+        instance_ids = await redis.smembers(instances_key)
+
+        instance_heartbeats = []
+        for instance_id in instance_ids:
+            data = await redis.hgetall(f"{ENGINE_KEY_PREFIX}{instance_id}")
+            if data and "engine_id" in data:
+                instance_heartbeats.append(data)
+
+        if instance_heartbeats:
+            discovered_heartbeats[engine_id] = instance_heartbeats
 
     now = datetime.now(UTC)
     batch_engines = []
@@ -417,25 +433,38 @@ async def get_engines(
         queue_key = f"dalston:queue:{engine_id}"
         queue_depth = await redis.llen(queue_key) or 0
 
-        heartbeat = discovered_heartbeats.get(engine_id)
-        if not heartbeat:
-            # No heartbeat = offline
+        instance_heartbeats = discovered_heartbeats.get(engine_id, [])
+        if not instance_heartbeats:
+            # No heartbeats = offline
             status = "offline"
             processing = 0
         else:
-            # Check heartbeat age
-            try:
-                last_seen = datetime.fromisoformat(heartbeat["last_heartbeat"])
-                age = (now - last_seen).total_seconds()
-            except (KeyError, ValueError):
-                age = float("inf")
+            # Aggregate status across instances:
+            # - Any instance processing = processing
+            # - Any instance healthy = idle
+            # - All instances stale = stale
+            best_status = "stale"
+            total_processing = 0
 
-            if age > HEARTBEAT_STALE_THRESHOLD:
-                status = "stale"
-            else:
-                status = heartbeat.get("status", "idle")
+            for heartbeat in instance_heartbeats:
+                try:
+                    last_seen = datetime.fromisoformat(heartbeat["last_heartbeat"])
+                    age = (now - last_seen).total_seconds()
+                except (KeyError, ValueError):
+                    age = float("inf")
 
-            processing = 1 if heartbeat.get("current_task") else 0
+                if age <= HEARTBEAT_STALE_THRESHOLD:
+                    instance_status = heartbeat.get("status", "idle")
+                    if instance_status == "processing":
+                        best_status = "processing"
+                    elif best_status != "processing":
+                        best_status = instance_status
+
+                    if heartbeat.get("current_task"):
+                        total_processing += 1
+
+            status = best_status
+            processing = total_processing
 
         batch_engines.append(
             BatchEngine(

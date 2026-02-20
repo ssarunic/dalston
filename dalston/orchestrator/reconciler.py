@@ -29,11 +29,19 @@ from dalston.common.s3 import get_s3_client
 from dalston.common.streams import (
     STREAM_PREFIX,
     ack_task,
+    add_task,
     discover_streams,
     get_pending,
+    is_engine_alive,
 )
+from dalston.common.streams_types import PendingTask
 from dalston.config import Settings
 from dalston.db.models import TaskModel
+from dalston.orchestrator.registry import (
+    ENGINE_INSTANCES_PREFIX,
+    ENGINE_KEY_PREFIX,
+    ENGINE_SET_KEY,
+)
 
 logger = structlog.get_logger()
 
@@ -175,20 +183,25 @@ class ReconciliationSweeper:
         """Perform one reconciliation pass."""
         orphaned_db_count = 0
         orphaned_pel_count = 0
+        stale_ready_count = 0
 
         # Get all pending entries from all streams
         streams = await discover_streams(self._redis)
         pel_task_ids: set[str] = set()
         pel_by_stage: dict[str, set[str]] = {}
+        # Track full PendingTask objects for stale READY recovery
+        pel_entries_by_stage: dict[str, dict[str, PendingTask]] = {}
 
         for stream_key in streams:
             stage = stream_key.replace(STREAM_PREFIX, "")
             pending = await get_pending(self._redis, stage)
             pel_by_stage[stage] = set()
+            pel_entries_by_stage[stage] = {}
 
             for entry in pending:
                 pel_task_ids.add(entry.task_id)
                 pel_by_stage[stage].add(entry.task_id)
+                pel_entries_by_stage[stage][entry.task_id] = entry
 
         # Find orphaned DB tasks (RUNNING but not in PEL)
         async with self._db_session_factory() as db:
@@ -196,17 +209,33 @@ class ReconciliationSweeper:
                 db, pel_task_ids
             )
 
-        # Find orphaned PEL entries (in PEL but not RUNNING in DB)
+        # Find orphaned PEL entries (in PEL but task in terminal state in DB)
         async with self._db_session_factory() as db:
             orphaned_pel_count = await self._reconcile_orphaned_pel_entries(
                 db, pel_by_stage
             )
 
-        if orphaned_db_count > 0 or orphaned_pel_count > 0:
+        # Recover stale READY/PENDING tasks from dead engines
+        async with self._db_session_factory() as db:
+            stale_ready_count = await self._reconcile_stale_ready_tasks(
+                db, pel_entries_by_stage
+            )
+
+        # Cleanup stale engine registry entries (instances that crashed without unregister)
+        stale_engine_count = await self._cleanup_stale_engine_entries()
+
+        if (
+            orphaned_db_count > 0
+            or orphaned_pel_count > 0
+            or stale_ready_count > 0
+            or stale_engine_count > 0
+        ):
             logger.info(
                 "reconciliation_complete",
                 orphaned_db_tasks=orphaned_db_count,
                 orphaned_pel_entries=orphaned_pel_count,
+                stale_ready_tasks=stale_ready_count,
+                stale_engine_entries=stale_engine_count,
             )
 
     async def _check_output_exists_in_s3(
@@ -403,19 +432,31 @@ class ReconciliationSweeper:
             )
             db_tasks = {str(row[0]): row[1] for row in result.all()}
 
-            # Find PEL entries where DB task is not RUNNING
+            # Only ACK PEL entries for tasks in TERMINAL statuses
+            # Don't ACK RUNNING (normal), READY (race condition), or PENDING (shouldn't happen)
+            # This prevents losing tasks that were just claimed but not yet marked RUNNING
+            terminal_statuses = {
+                TaskStatus.COMPLETED.value,
+                TaskStatus.FAILED.value,
+                TaskStatus.SKIPPED.value,
+                TaskStatus.CANCELLED.value,
+            }
+
+            # Find PEL entries where DB task is in terminal state
             for task_id in task_ids:
                 db_status = db_tasks.get(task_id)
-
-                # Skip if task is RUNNING (normal state)
-                if db_status == TaskStatus.RUNNING.value:
-                    continue
 
                 # Skip if task doesn't exist in DB (will be handled by scanner)
                 if db_status is None:
                     continue
 
-                # PEL entry exists but task is not RUNNING - orphaned PEL
+                # Only ACK if task is in a terminal state
+                # This prevents the race condition where a task was just claimed
+                # (in PEL) but task.started hasn't been processed yet (still READY)
+                if db_status not in terminal_statuses:
+                    continue
+
+                # PEL entry exists but task is in terminal state - safe to ACK
                 logger.warning(
                     "orphaned_pel_entry_found",
                     task_id=task_id,
@@ -437,3 +478,147 @@ class ReconciliationSweeper:
                         break
 
         return orphaned_count
+
+    async def _reconcile_stale_ready_tasks(
+        self, db: AsyncSession, pel_entries_by_stage: dict[str, dict[str, PendingTask]]
+    ) -> int:
+        """Recover READY/PENDING tasks with stale PEL entries from dead engines.
+
+        Handles the case where:
+        - Task is READY/PENDING in DB (engine claimed but task.started not processed)
+        - PEL entry exists but is stale (idle > threshold)
+        - Owning engine is dead (no heartbeat)
+
+        Action: ACK old PEL entry and re-queue task to stream.
+        """
+        recovered_count = 0
+
+        for stage, entries in pel_entries_by_stage.items():
+            for task_id, pel_entry in entries.items():
+                # Only process stale entries (idle > ORPHAN_THRESHOLD_SECONDS)
+                if pel_entry.idle_ms < ORPHAN_THRESHOLD_SECONDS * 1000:
+                    continue
+
+                # Check DB status
+                try:
+                    task_uuid = UUID(task_id)
+                except ValueError:
+                    continue
+
+                task = await db.get(TaskModel, task_uuid)
+                if task is None:
+                    continue
+
+                # Only handle READY or PENDING tasks
+                if task.status not in (
+                    TaskStatus.READY.value,
+                    TaskStatus.PENDING.value,
+                ):
+                    continue
+
+                # Check if owning engine is alive
+                engine_alive = await is_engine_alive(self._redis, pel_entry.consumer)
+
+                if engine_alive:
+                    # Engine is alive but task is stale - log warning, don't take action
+                    # This could be a slow engine or a bug, but we don't want to interfere
+                    logger.warning(
+                        "stale_ready_task_engine_alive",
+                        task_id=task_id,
+                        stage=stage,
+                        consumer=pel_entry.consumer,
+                        idle_ms=pel_entry.idle_ms,
+                        db_status=task.status,
+                    )
+                    continue
+
+                # Engine is dead, task is stuck in READY/PENDING - re-queue
+                logger.info(
+                    "recovering_stale_ready_task",
+                    task_id=task_id,
+                    job_id=str(task.job_id),
+                    stage=stage,
+                    consumer=pel_entry.consumer,
+                    idle_ms=pel_entry.idle_ms,
+                    db_status=task.status,
+                )
+
+                # IMPORTANT: Add task FIRST, then ACK the old PEL entry.
+                # This order is critical for crash safety:
+                # - If crash after add but before ACK: Task in both stream and PEL,
+                #   duplicate will be deduplicated when engine claims.
+                # - If ACK first and crash before add: Task is lost forever.
+                # Duplicates are recoverable, lost tasks are not.
+
+                # Re-add task to stream with default timeout
+                # The scheduler would normally calculate timeout from audio duration,
+                # but we don't have that info here. Use a safe default.
+                await add_task(
+                    self._redis,
+                    stage=stage,
+                    task_id=task_id,
+                    job_id=str(task.job_id),
+                    timeout_s=600,  # 10 minute default timeout
+                )
+
+                # Now ACK old PEL entry to clear it
+                await ack_task(self._redis, stage, pel_entry.message_id)
+
+                recovered_count += 1
+
+        return recovered_count
+
+    async def _cleanup_stale_engine_entries(self) -> int:
+        """Cleanup stale engine registry entries.
+
+        Handles the case where engines crash without calling unregister():
+        - Engine's Redis hash key expires (TTL)
+        - But ENGINE_INSTANCES_PREFIX{engine_id} set still contains the instance_id
+        - And ENGINE_SET_KEY still contains the engine_id
+
+        Action:
+        1. For each engine_id in ENGINE_SET_KEY, check its instances
+        2. Remove instance_ids from instance set if their hash key doesn't exist
+        3. Remove engine_id from ENGINE_SET_KEY if it has no remaining instances
+        """
+        cleaned_count = 0
+
+        # Get all logical engine IDs
+        engine_ids = await self._redis.smembers(ENGINE_SET_KEY)
+
+        for engine_id in engine_ids:
+            instances_key = f"{ENGINE_INSTANCES_PREFIX}{engine_id}"
+            instance_ids = await self._redis.smembers(instances_key)
+
+            # Check each instance
+            stale_instances = []
+            for instance_id in instance_ids:
+                engine_key = f"{ENGINE_KEY_PREFIX}{instance_id}"
+                # Check if the hash key exists (TTL not expired)
+                exists = await self._redis.exists(engine_key)
+                if not exists:
+                    stale_instances.append(instance_id)
+
+            # Remove stale instances from the set
+            for instance_id in stale_instances:
+                await self._redis.srem(instances_key, instance_id)
+                cleaned_count += 1
+                logger.info(
+                    "cleaned_stale_engine_instance",
+                    engine_id=engine_id,
+                    instance_id=instance_id,
+                )
+
+            # If no instances remain, remove the engine_id from the main set
+            remaining = await self._redis.scard(instances_key)
+            if remaining == 0:
+                await self._redis.srem(ENGINE_SET_KEY, engine_id)
+                # Also delete the now-empty instances set
+                await self._redis.delete(instances_key)
+                logger.info(
+                    "cleaned_stale_engine_type",
+                    engine_id=engine_id,
+                    reason="no_remaining_instances",
+                )
+
+        return cleaned_count

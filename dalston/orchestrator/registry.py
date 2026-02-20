@@ -17,8 +17,11 @@ logger = structlog.get_logger()
 
 
 # Redis key patterns (shared with engine_sdk)
-ENGINE_SET_KEY = "dalston:batch:engines"
-ENGINE_KEY_PREFIX = "dalston:batch:engine:"
+ENGINE_SET_KEY = "dalston:batch:engines"  # Contains logical engine_ids
+ENGINE_KEY_PREFIX = "dalston:batch:engine:"  # Hash key prefix for instance state
+ENGINE_INSTANCES_PREFIX = (
+    "dalston:batch:engine:instances:"  # Set of instances per engine
+)
 
 # Heartbeat timeout - engine considered offline if no heartbeat within this period
 HEARTBEAT_TIMEOUT_SECONDS = 60
@@ -29,7 +32,8 @@ class BatchEngineState:
     """Batch engine state read from Redis.
 
     Attributes:
-        engine_id: Unique identifier (e.g., "faster-whisper")
+        engine_id: Logical identifier for grouping (e.g., "faster-whisper")
+        instance_id: Unique instance identifier (e.g., "faster-whisper-abc123")
         stage: Pipeline stage this engine handles (e.g., "transcribe")
         queue_name: Redis queue name this engine polls
         status: Current status ("idle", "processing", "offline")
@@ -40,6 +44,7 @@ class BatchEngineState:
     """
 
     engine_id: str
+    instance_id: str
     stage: str
     queue_name: str
     status: str
@@ -112,35 +117,78 @@ class BatchEngineRegistry:
     async def get_engines(self) -> list[BatchEngineState]:
         """Get all registered engines.
 
+        Returns all instances across all logical engine types.
+
         Returns:
-            List of all engine states
+            List of all engine instance states
         """
         engine_ids = await self._redis.smembers(ENGINE_SET_KEY)
         engines = []
 
         for engine_id in engine_ids:
-            engine = await self.get_engine(engine_id)
-            if engine is not None:
-                engines.append(engine)
+            instances = await self.get_engine_instances(engine_id)
+            engines.extend(instances)
 
         return engines
 
     async def get_engine(self, engine_id: str) -> BatchEngineState | None:
-        """Get specific engine state.
+        """Get specific engine state (first available instance).
+
+        Queries the per-engine instance set and returns the first available
+        instance, or any instance if none are available.
 
         Args:
-            engine_id: Engine identifier
+            engine_id: Logical engine identifier (e.g., "faster-whisper")
+
+        Returns:
+            BatchEngineState of first available instance, or None if no instances
+        """
+        instances = await self.get_engine_instances(engine_id)
+        if not instances:
+            return None
+
+        # Return first available instance, or first instance if none available
+        for instance in instances:
+            if instance.is_available:
+                return instance
+        return instances[0]
+
+    async def get_engine_instances(self, engine_id: str) -> list[BatchEngineState]:
+        """Get all instances for a logical engine type.
+
+        Args:
+            engine_id: Logical engine identifier (e.g., "faster-whisper")
+
+        Returns:
+            List of all instance states for this engine type
+        """
+        instances_key = f"{ENGINE_INSTANCES_PREFIX}{engine_id}"
+        instance_ids = await self._redis.smembers(instances_key)
+        instances = []
+
+        for instance_id in instance_ids:
+            instance = await self.get_engine_instance(instance_id)
+            if instance is not None:
+                instances.append(instance)
+
+        return instances
+
+    async def get_engine_instance(self, instance_id: str) -> BatchEngineState | None:
+        """Get specific engine instance state by instance_id.
+
+        Args:
+            instance_id: Instance-unique identifier (e.g., "faster-whisper-abc123")
 
         Returns:
             BatchEngineState if found, None otherwise
         """
-        engine_key = f"{ENGINE_KEY_PREFIX}{engine_id}"
+        engine_key = f"{ENGINE_KEY_PREFIX}{instance_id}"
         data = await self._redis.hgetall(engine_key)
 
         if not data:
             return None
 
-        return self._parse_engine_state(engine_id, data)
+        return self._parse_engine_state(instance_id, data)
 
     async def get_engines_for_stage(self, stage: str) -> list[BatchEngineState]:
         """Get all engines that handle a specific pipeline stage.
@@ -155,31 +203,44 @@ class BatchEngineRegistry:
         return [e for e in engines if e.stage == stage]
 
     async def is_engine_available(self, engine_id: str) -> bool:
-        """Check if an engine is registered and healthy.
+        """Check if an engine has at least one healthy instance.
 
         Args:
-            engine_id: Engine identifier
+            engine_id: Logical engine identifier (e.g., "faster-whisper")
 
         Returns:
-            True if engine is available for task routing
+            True if at least one instance is available for task routing
         """
-        engine = await self.get_engine(engine_id)
-        if engine is None:
-            return False
-        return engine.is_available
+        instances = await self.get_engine_instances(engine_id)
+        return any(instance.is_available for instance in instances)
 
-    async def mark_engine_offline(self, engine_id: str) -> None:
-        """Mark engine as offline due to stale heartbeat.
+    async def mark_instance_offline(self, instance_id: str) -> None:
+        """Mark engine instance as offline due to stale heartbeat.
 
         Args:
-            engine_id: Engine identifier
+            instance_id: Instance-unique identifier
         """
-        engine_key = f"{ENGINE_KEY_PREFIX}{engine_id}"
+        engine_key = f"{ENGINE_KEY_PREFIX}{instance_id}"
         await self._redis.hset(engine_key, "status", "offline")
-        logger.warning("batch_engine_marked_offline", engine_id=engine_id)
+        logger.warning("batch_engine_instance_marked_offline", instance_id=instance_id)
 
-    def _parse_engine_state(self, engine_id: str, data: dict) -> BatchEngineState:
-        """Parse engine state from Redis hash data."""
+    async def mark_engine_offline(self, engine_id: str) -> None:
+        """Mark all instances of an engine as offline.
+
+        Args:
+            engine_id: Logical engine identifier
+        """
+        instances = await self.get_engine_instances(engine_id)
+        for instance in instances:
+            await self.mark_instance_offline(instance.instance_id)
+
+    def _parse_engine_state(self, instance_id: str, data: dict) -> BatchEngineState:
+        """Parse engine state from Redis hash data.
+
+        Args:
+            instance_id: Instance-unique identifier used as Redis key
+            data: Hash data from Redis
+        """
         current_task = data.get("current_task", "")
 
         # Parse capabilities JSON if present
@@ -191,14 +252,20 @@ class BatchEngineRegistry:
             except Exception:
                 logger.warning(
                     "failed_to_parse_capabilities",
-                    engine_id=engine_id,
+                    instance_id=instance_id,
                     capabilities_json=capabilities_json[:100]
                     if capabilities_json
                     else None,
                 )
 
+        # Use instance_id from data if available, fallback to key
+        actual_instance_id = data.get("instance_id", instance_id)
+        # Use engine_id from data if available, fallback to instance_id (backward compat)
+        engine_id = data.get("engine_id", instance_id)
+
         return BatchEngineState(
             engine_id=engine_id,
+            instance_id=actual_instance_id,
             stage=data.get("stage", "unknown"),
             queue_name=data.get("queue_name", ""),
             status=data.get("status", "offline"),

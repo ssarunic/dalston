@@ -168,6 +168,7 @@ class TestRegistryWithCapabilities:
 
         info = BatchEngineInfo(
             engine_id="test",
+            instance_id="test-abc123def456",
             stage="transcribe",
             queue_name="dalston:queue:test",
             capabilities=caps,
@@ -191,8 +192,11 @@ class TestRegistryWithCapabilities:
             stages=["transcribe"],
         )
 
+        # Simulate key exists (normal heartbeat path)
+        mock_redis.hget.return_value = "test"
+
         registry.heartbeat(
-            engine_id="test",
+            instance_id="test-abc123def456",
             status="idle",
             current_task=None,
             capabilities=caps,
@@ -217,6 +221,7 @@ class TestBatchEngineStateWithCapabilities:
 
         state = BatchEngineState(
             engine_id="test",
+            instance_id="test-abc123",
             stage="transcribe",
             queue_name="dalston:queue:test",
             status="idle",
@@ -241,6 +246,7 @@ class TestBatchEngineStateWithCapabilities:
 
         state = BatchEngineState(
             engine_id="test",
+            instance_id="test-abc123",
             stage="transcribe",
             queue_name="dalston:queue:test",
             status="idle",
@@ -264,6 +270,7 @@ class TestBatchEngineStateWithCapabilities:
 
         state = BatchEngineState(
             engine_id="test",
+            instance_id="test-abc123",
             stage="transcribe",
             queue_name="dalston:queue:test",
             status="idle",
@@ -281,6 +288,7 @@ class TestBatchEngineStateWithCapabilities:
         """Test backward compatibility - no capabilities means all supported."""
         state = BatchEngineState(
             engine_id="test",
+            instance_id="test-abc123",
             stage="transcribe",
             queue_name="dalston:queue:test",
             status="idle",
@@ -503,8 +511,11 @@ class TestServerRegistryCapabilities:
             }
         )
 
+        # Server registry now queries instance set first, then hgetall for instance
+        mock_redis.smembers.return_value = {"parakeet-abc123"}
         mock_redis.hgetall.return_value = {
             "engine_id": "parakeet",
+            "instance_id": "parakeet-abc123",
             "stage": "transcribe",
             "queue_name": "dalston:queue:parakeet",
             "status": "idle",
@@ -528,8 +539,10 @@ class TestServerRegistryCapabilities:
         """Test get_engine works without capabilities (M28 compat)."""
         now = datetime.now(UTC).isoformat()
 
+        mock_redis.smembers.return_value = {"old-engine-abc123"}
         mock_redis.hgetall.return_value = {
             "engine_id": "old-engine",
+            "instance_id": "old-engine-abc123",
             "stage": "transcribe",
             "queue_name": "dalston:queue:old-engine",
             "status": "idle",
@@ -551,8 +564,10 @@ class TestServerRegistryCapabilities:
         """Test get_engine handles malformed capabilities gracefully."""
         now = datetime.now(UTC).isoformat()
 
+        mock_redis.smembers.return_value = {"bad-engine-abc123"}
         mock_redis.hgetall.return_value = {
             "engine_id": "bad-engine",
+            "instance_id": "bad-engine-abc123",
             "stage": "transcribe",
             "queue_name": "dalston:queue:bad-engine",
             "status": "idle",
