@@ -1,5 +1,6 @@
-import { useState, useMemo, useEffect, useRef, forwardRef } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback, forwardRef } from 'react'
 import { Download, Shield, Loader2 } from 'lucide-react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { AudioPlayer } from '@/components/AudioPlayer'
@@ -8,6 +9,12 @@ import { cn } from '@/lib/utils'
 import type { UnifiedSegment, Speaker } from '@/api/types'
 
 const SPEAKER_COLORS = ['#60a5fa', '#34d399', '#f472b6', '#fbbf24', '#a78bfa', '#fb923c']
+
+/** Threshold for enabling virtualization. */
+const VIRTUALIZATION_THRESHOLD = 100
+
+/** Estimated height of each segment row in pixels. */
+const ESTIMATED_ROW_HEIGHT = 52
 
 function formatTime(seconds: number): string {
   const mins = Math.floor(seconds / 60)
@@ -142,7 +149,7 @@ export function TranscriptViewer({
   const [currentTime, setCurrentTime] = useState(0)
   const [seekTo, setSeekTo] = useState<number | undefined>(undefined)
   const [autoScroll, setAutoScroll] = useState(false)
-  const segmentRefs = useRef<Map<string | number, HTMLDivElement>>(new Map())
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   // Generate colors for speakers
   const speakerColors: Record<string, string> = {}
@@ -153,45 +160,91 @@ export function TranscriptViewer({
 
   const hasSpeakers = speakers && speakers.length > 0
   const hasSegments = segments.length > 0
+  const useVirtual = segments.length >= VIRTUALIZATION_THRESHOLD
 
   // Check if segments have per-segment redacted_text
   const hasPerSegmentRedaction = segments.some(s => s.redacted_text)
   // Check if PII toggle should be shown
   const showPiiToggle = piiConfig?.enabled && (hasPerSegmentRedaction || piiConfig?.redactedText)
 
-  // Find active segment based on playback time
-  const activeSegmentId = useMemo(() => {
-    if (!audioSrc) return null
-    const active = segments.find(
+  // Find active segment index based on playback time
+  const activeSegmentIndex = useMemo(() => {
+    if (!audioSrc) return -1
+    return segments.findIndex(
       (s) => currentTime >= s.start && currentTime < s.end
     )
-    return active?.id ?? null
   }, [currentTime, segments, audioSrc])
+
+  const activeSegmentId = activeSegmentIndex >= 0 ? segments[activeSegmentIndex].id : null
+
+  // Virtualizer for large segment lists
+  const virtualizer = useVirtualizer({
+    count: useVirtual ? segments.length : 0,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => ESTIMATED_ROW_HEIGHT,
+    overscan: 10,
+  })
 
   // Auto-scroll to active segment
   useEffect(() => {
-    if (autoScroll && activeSegmentId !== null) {
-      const el = segmentRefs.current.get(activeSegmentId)
-      el?.scrollIntoView({
+    if (!autoScroll || activeSegmentIndex < 0) return
+
+    if (useVirtual) {
+      virtualizer.scrollToIndex(activeSegmentIndex, {
+        align: 'center',
         behavior: 'smooth',
-        block: 'center',
       })
+    } else {
+      const el = scrollContainerRef.current?.querySelector(
+        `[data-segment-index="${activeSegmentIndex}"]`
+      )
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
-  }, [activeSegmentId, autoScroll])
+  }, [activeSegmentIndex, autoScroll, useVirtual, virtualizer])
 
   const handleSegmentClick = (segment: UnifiedSegment) => {
     if (!audioSrc) return
-    // Use a new value each time to ensure the effect triggers even when clicking the same segment
     setSeekTo(segment.start)
   }
 
-  const setSegmentRef = (id: string | number) => (el: HTMLDivElement | null) => {
-    if (el) {
-      segmentRefs.current.set(id, el)
-    } else {
-      segmentRefs.current.delete(id)
-    }
-  }
+  // Navigate to prev/next segment (for j/k keyboard shortcuts)
+  const handleNavigateSegment = useCallback(
+    (direction: 'prev' | 'next') => {
+      if (segments.length === 0) return
+
+      let targetIndex: number
+      if (direction === 'next') {
+        targetIndex = activeSegmentIndex >= 0
+          ? Math.min(activeSegmentIndex + 1, segments.length - 1)
+          : 0
+      } else {
+        targetIndex = activeSegmentIndex >= 0
+          ? Math.max(activeSegmentIndex - 1, 0)
+          : 0
+      }
+
+      const target = segments[targetIndex]
+      setSeekTo(target.start)
+    },
+    [activeSegmentIndex, segments]
+  )
+
+  const renderSegmentRow = (segment: UnifiedSegment, index: number) => (
+    <TranscriptSegmentRow
+      key={segment.id}
+      segment={segment}
+      speakerColors={speakerColors}
+      showSpeakerColumn={!!hasSpeakers}
+      showRedacted={piiConfig?.showRedacted}
+      isActive={segment.id === activeSegmentId}
+      onClick={audioSrc ? () => handleSegmentClick(segment) : undefined}
+      ref={(el) => {
+        if (el) {
+          el.setAttribute('data-segment-index', String(index))
+        }
+      }}
+    />
+  )
 
   return (
     <div className="space-y-0">
@@ -201,6 +254,7 @@ export function TranscriptViewer({
           src={audioSrc}
           onTimeUpdate={setCurrentTime}
           onAutoScrollChange={setAutoScroll}
+          onNavigateSegment={handleNavigateSegment}
           seekTo={seekTo}
         />
       )}
@@ -249,23 +303,54 @@ export function TranscriptViewer({
       )}
 
       {/* Transcript content */}
-      <div className="overflow-y-auto" style={{ maxHeight }}>
+      <div
+        ref={scrollContainerRef}
+        className="overflow-y-auto"
+        style={{ maxHeight }}
+      >
         {hasSegments ? (
-          // Segment list view (works for both original and redacted)
-          <div>
-            {segments.map((segment) => (
-              <TranscriptSegmentRow
-                key={segment.id}
-                ref={setSegmentRef(segment.id)}
-                segment={segment}
-                speakerColors={speakerColors}
-                showSpeakerColumn={!!hasSpeakers}
-                showRedacted={piiConfig?.showRedacted}
-                isActive={segment.id === activeSegmentId}
-                onClick={audioSrc ? () => handleSegmentClick(segment) : undefined}
-              />
-            ))}
-          </div>
+          useVirtual ? (
+            // Virtualized list for large transcripts
+            <div
+              style={{
+                height: `${virtualizer.getTotalSize()}px`,
+                width: '100%',
+                position: 'relative',
+              }}
+            >
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const segment = segments[virtualRow.index]
+                return (
+                  <div
+                    key={virtualRow.key}
+                    data-index={virtualRow.index}
+                    ref={virtualizer.measureElement}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                  >
+                    <TranscriptSegmentRow
+                      segment={segment}
+                      speakerColors={speakerColors}
+                      showSpeakerColumn={!!hasSpeakers}
+                      showRedacted={piiConfig?.showRedacted}
+                      isActive={segment.id === activeSegmentId}
+                      onClick={audioSrc ? () => handleSegmentClick(segment) : undefined}
+                    />
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            // Standard list for small transcripts
+            <div>
+              {segments.map((segment, index) => renderSegmentRow(segment, index))}
+            </div>
+          )
         ) : piiConfig?.showRedacted && piiConfig?.redactedText ? (
           // Fallback: plain redacted text if no segments
           <p className="text-sm whitespace-pre-wrap px-2">{piiConfig.redactedText}</p>
