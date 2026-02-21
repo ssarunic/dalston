@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useParams, Link, useSearchParams } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import {
   Webhook,
   AlertCircle,
@@ -23,10 +23,16 @@ import {
 } from '@/components/ui/table'
 import { useWebhooks, useWebhookDeliveries, useRetryDelivery } from '@/hooks/useWebhooks'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
+import { useSharedTableState } from '@/hooks/useSharedTableState'
 import { BackButton } from '@/components/BackButton'
 import type { WebhookDelivery } from '@/api/types'
 
-const PAGE_SIZE = 20
+const DEFAULT_PAGE_SIZE = 20
+const PAGE_SIZE_OPTIONS = [20, 50, 100] as const
+const SORT_OPTIONS = [
+  { label: 'Newest first', value: 'created_desc' },
+  { label: 'Oldest first', value: 'created_asc' },
+] as const
 
 const STATUS_CONFIG: Record<
   string,
@@ -72,8 +78,22 @@ function formatDateTime(dateStr: string): string {
 export function WebhookDetail() {
   const isMobile = useMediaQuery('(max-width: 767px)')
   const { endpointId } = useParams<{ endpointId: string }>()
-  const [searchParams, setSearchParams] = useSearchParams()
-  const statusFilter = searchParams.get('status') || undefined
+  const {
+    status,
+    sort,
+    limit,
+    setStatus,
+    setSort,
+    setLimit,
+  } = useSharedTableState({
+    defaultStatus: '',
+    statusOptions: ['', 'pending', 'success', 'failed'],
+    defaultSort: 'created_desc',
+    sortOptions: SORT_OPTIONS.map((option) => option.value),
+    defaultLimit: DEFAULT_PAGE_SIZE,
+    limitOptions: PAGE_SIZE_OPTIONS,
+  })
+  const statusFilter = status || undefined
 
   const { data: webhooksData, isLoading: webhooksLoading } = useWebhooks()
   const {
@@ -87,24 +107,33 @@ export function WebhookDetail() {
     refetch,
   } = useWebhookDeliveries(endpointId!, {
     status: statusFilter,
-    limit: PAGE_SIZE,
+    limit,
   })
   const allDeliveries = useMemo(
     () => deliveriesData?.pages.flatMap((page) => page.deliveries) ?? [],
     [deliveriesData]
   )
+  const visibleDeliveries = useMemo(() => {
+    const sorted = [...allDeliveries]
+    sorted.sort((a, b) => {
+      const left = new Date(a.created_at).getTime()
+      const right = new Date(b.created_at).getTime()
+      return sort === 'created_asc' ? left - right : right - left
+    })
+    return sorted
+  }, [allDeliveries, sort])
   const retryDelivery = useRetryDelivery()
 
-  const handleFilterChange = (value: string | undefined) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      if (value) {
-        next.set('status', value)
-      } else {
-        next.delete('status')
-      }
-      return next
-    }, { replace: true })
+  const handleFilterChange = (value: string) => {
+    setStatus(value)
+  }
+
+  const handleSortChange = (value: string) => {
+    setSort(value)
+  }
+
+  const handleLimitChange = (value: string) => {
+    setLimit(Number(value))
   }
 
   const handleRefresh = () => {
@@ -234,14 +263,36 @@ export function WebhookDetail() {
           <CardTitle>Delivery History</CardTitle>
           <div className="flex items-center gap-2">
             <select
-              value={statusFilter || ''}
-              onChange={(e) => handleFilterChange(e.target.value || undefined)}
+              value={status}
+              onChange={(e) => handleFilterChange(e.target.value)}
               className="px-3 py-1.5 text-sm rounded-md border border-input bg-background"
             >
               <option value="">All statuses</option>
               <option value="pending">Pending</option>
               <option value="success">Success</option>
               <option value="failed">Failed</option>
+            </select>
+            <select
+              value={sort}
+              onChange={(e) => handleSortChange(e.target.value)}
+              className="px-3 py-1.5 text-sm rounded-md border border-input bg-background"
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={String(limit)}
+              onChange={(e) => handleLimitChange(e.target.value)}
+              className="px-3 py-1.5 text-sm rounded-md border border-input bg-background"
+            >
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
             </select>
             <Button
               variant="outline"
@@ -265,7 +316,7 @@ export function WebhookDetail() {
               <AlertCircle className="h-4 w-4" />
               <span>Failed to load deliveries</span>
             </div>
-          ) : allDeliveries.length === 0 ? (
+          ) : visibleDeliveries.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Clock className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No deliveries yet</p>
@@ -277,7 +328,7 @@ export function WebhookDetail() {
             <>
               {isMobile ? (
                 <div className="space-y-3">
-                  {allDeliveries.map((delivery) => (
+                  {visibleDeliveries.map((delivery) => (
                     <div key={delivery.id} className="rounded-lg border border-border p-3">
                       <div className="flex items-start justify-between gap-2">
                         <Badge variant="outline" className="text-xs">
@@ -346,7 +397,7 @@ export function WebhookDetail() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {allDeliveries.map((delivery) => (
+                    {visibleDeliveries.map((delivery) => (
                       <TableRow key={delivery.id} className="group hover:bg-accent/50">
                         <TableCell className="sticky left-0 z-10 bg-card group-hover:bg-accent/50">
                           <Badge variant="outline" className="text-xs">
@@ -414,10 +465,10 @@ export function WebhookDetail() {
               )}
 
               {/* Pagination */}
-              {allDeliveries.length > 0 && (
+              {visibleDeliveries.length > 0 && (
                 <div className="flex flex-col items-center gap-3 pt-4 mt-4 border-t">
                   <p className="text-sm text-muted-foreground">
-                    Showing {allDeliveries.length} deliveries
+                    Showing {visibleDeliveries.length} deliveries
                   </p>
                   {hasNextPage && (
                     <Button

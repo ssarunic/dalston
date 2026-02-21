@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import {
   ScrollText,
   AlertCircle,
@@ -30,7 +30,15 @@ import {
 } from '@/components/ui/select'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useAuditEvents } from '@/hooks/useAuditLog'
+import { useSharedTableState } from '@/hooks/useSharedTableState'
 import type { AuditEvent, AuditListParams } from '@/api/types'
+
+const DEFAULT_PAGE_SIZE = 50
+const PAGE_SIZE_OPTIONS = [25, 50, 100] as const
+const SORT_OPTIONS = [
+  { label: 'Newest first', value: 'timestamp_desc' },
+  { label: 'Oldest first', value: 'timestamp_asc' },
+] as const
 
 const RESOURCE_TYPES = [
   { value: '', label: 'All Resources' },
@@ -144,13 +152,28 @@ function EventDetailRow({ event }: { event: AuditEvent }) {
 
 export function AuditLog() {
   const isMobile = useMediaQuery('(max-width: 767px)')
-  const [searchParams, setSearchParams] = useSearchParams()
+  const {
+    searchParams,
+    setSearchParams,
+    sort,
+    limit,
+    setSort,
+    setLimit,
+    updateParams,
+  } = useSharedTableState({
+    defaultStatus: 'all',
+    statusOptions: ['all'],
+    defaultSort: 'timestamp_desc',
+    sortOptions: SORT_OPTIONS.map((option) => option.value),
+    defaultLimit: DEFAULT_PAGE_SIZE,
+    limitOptions: PAGE_SIZE_OPTIONS,
+  })
   const [showFilters, setShowFilters] = useState(false)
   const sinceRef = useRef<HTMLInputElement>(null)
   const untilRef = useRef<HTMLInputElement>(null)
 
   const filters: AuditListParams = {
-    limit: 50,
+    limit,
     resource_type: searchParams.get('resource_type') || undefined,
     action: searchParams.get('action') || undefined,
     actor_id: searchParams.get('actor_id') || undefined,
@@ -172,6 +195,15 @@ export function AuditLog() {
     () => data?.pages.flatMap((page) => page.events as AuditEvent[]) ?? [],
     [data]
   )
+  const visibleEvents = useMemo(() => {
+    const sorted = [...allEvents]
+    sorted.sort((a, b) => {
+      const left = new Date(a.timestamp).getTime()
+      const right = new Date(b.timestamp).getTime()
+      return sort === 'timestamp_asc' ? left - right : right - left
+    })
+    return sorted
+  }, [allEvents, sort])
 
   const handleFilterChange = (key: keyof AuditListParams, value: string) => {
     setSearchParams((prev) => {
@@ -186,7 +218,15 @@ export function AuditLog() {
   }
 
   const clearFilters = () => {
-    setSearchParams({}, { replace: true })
+    updateParams({
+      resource_type: null,
+      action: null,
+      actor_id: null,
+      since: null,
+      until: null,
+      sort: null,
+      limit: null,
+    })
     if (sinceRef.current) sinceRef.current.value = ''
     if (untilRef.current) untilRef.current.value = ''
   }
@@ -196,8 +236,18 @@ export function AuditLog() {
     filters.action ||
     filters.actor_id ||
     filters.since ||
-    filters.until
+    filters.until ||
+    sort !== 'timestamp_desc' ||
+    limit !== DEFAULT_PAGE_SIZE
   )
+
+  const handleSortChange = (value: string) => {
+    setSort(value)
+  }
+
+  const handleLimitChange = (value: string) => {
+    setLimit(Number(value))
+  }
 
   const loadMore = () => {
     if (!hasNextPage || isFetchingNextPage) return
@@ -273,7 +323,7 @@ export function AuditLog() {
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className="grid gap-4 md:grid-cols-5">
+            <div className="grid gap-4 md:grid-cols-7">
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
                   Resource Type
@@ -342,6 +392,40 @@ export function AuditLog() {
                   className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm h-10 dark:[color-scheme:dark]"
                 />
               </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Sort
+                </label>
+                <Select value={sort} onValueChange={handleSortChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Newest first" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SORT_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Rows per page
+                </label>
+                <Select value={String(limit)} onValueChange={handleLimitChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={String(DEFAULT_PAGE_SIZE)} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <SelectItem key={size} value={String(size)}>
+                        {size}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -370,7 +454,7 @@ export function AuditLog() {
                 {error instanceof Error ? error.message : 'Unknown error'}
               </span>
             </div>
-          ) : allEvents.length === 0 ? (
+          ) : visibleEvents.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <ScrollText className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No audit events found</p>
@@ -382,7 +466,7 @@ export function AuditLog() {
             <>
               {isMobile ? (
                 <div className="space-y-3">
-                  {allEvents.map((event) => {
+                  {visibleEvents.map((event) => {
                     const actionStyle = getActionStyle(event.action)
                     const resourceLink = getResourceLink(event.resource_type, event.resource_id)
 
@@ -445,7 +529,7 @@ export function AuditLog() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {allEvents.map((event) => (
+                    {visibleEvents.map((event) => (
                       <EventDetailRow key={event.id} event={event} />
                     ))}
                   </TableBody>
@@ -453,7 +537,7 @@ export function AuditLog() {
               )}
               <div className="flex flex-col items-center gap-3 pt-4">
                 <p className="text-sm text-muted-foreground">
-                  Showing {allEvents.length} events
+                  Showing {visibleEvents.length} events
                 </p>
                 {hasNextPage && (
                   <Button variant="outline" onClick={loadMore} disabled={isFetchingNextPage}>

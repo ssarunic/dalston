@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { Radio, MessageSquare, Mic, Trash2, RefreshCw, Filter, X } from 'lucide-react'
 import { apiClient } from '@/api/client'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
+import { useSharedTableState } from '@/hooks/useSharedTableState'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
@@ -52,19 +53,41 @@ function formatDate(dateStr: string): string {
   return date.toLocaleString()
 }
 
-const PAGE_SIZE = 50
+const DEFAULT_PAGE_SIZE = 50
+const PAGE_SIZE_OPTIONS = [20, 50, 100] as const
+const SORT_OPTIONS = [
+  { label: 'Newest first', value: 'started_desc' },
+  { label: 'Oldest first', value: 'started_asc' },
+] as const
 
 export function RealtimeSessions() {
   const isMobile = useMediaQuery('(max-width: 767px)')
   const navigate = useNavigate()
-  const [searchParams, setSearchParams] = useSearchParams()
-  const statusFilter = searchParams.get('status') || 'all'
+  const {
+    status: statusFilter,
+    sort,
+    limit,
+    setStatus,
+    setSort,
+    setLimit,
+    updateParams,
+  } = useSharedTableState({
+    defaultStatus: 'all',
+    statusOptions: ['all', 'active', 'completed', 'error', 'interrupted'],
+    defaultSort: 'started_desc',
+    sortOptions: SORT_OPTIONS.map((option) => option.value),
+    defaultLimit: DEFAULT_PAGE_SIZE,
+    limitOptions: PAGE_SIZE_OPTIONS,
+  })
   const [deleteTarget, setDeleteTarget] = useState<{ id: string } | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [showFilters, setShowFilters] = useState(false)
 
-  const hasActiveFilters = statusFilter !== 'all'
+  const hasActiveFilters =
+    statusFilter !== 'all' ||
+    sort !== 'started_desc' ||
+    limit !== DEFAULT_PAGE_SIZE
   const { data: statusData, isLoading: statusLoading, error: statusError } = useRealtimeStatus()
   const {
     data: sessionsData,
@@ -76,23 +99,32 @@ export function RealtimeSessions() {
     refetch,
   } = useRealtimeSessions({
     status: statusFilter === 'all' ? undefined : statusFilter,
-    limit: PAGE_SIZE,
+    limit,
   })
   const allSessions = useMemo(
     () => sessionsData?.pages.flatMap((page) => page.sessions as RealtimeSessionSummary[]) ?? [],
     [sessionsData]
   )
+  const visibleSessions = useMemo(() => {
+    const sorted = [...allSessions]
+    sorted.sort((a, b) => {
+      const left = new Date(a.started_at).getTime()
+      const right = new Date(b.started_at).getTime()
+      return sort === 'started_asc' ? left - right : right - left
+    })
+    return sorted
+  }, [allSessions, sort])
 
   const handleFilterChange = (value: string) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      if (value === 'all') {
-        next.delete('status')
-      } else {
-        next.set('status', value)
-      }
-      return next
-    }, { replace: true })
+    setStatus(value)
+  }
+
+  const handleSortChange = (value: string) => {
+    setSort(value)
+  }
+
+  const handleLimitChange = (value: string) => {
+    setLimit(Number(value))
   }
 
   const handleRefresh = async () => {
@@ -158,7 +190,11 @@ export function RealtimeSessions() {
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-muted-foreground">Filters</span>
               {hasActiveFilters && (
-                <Button variant="ghost" size="sm" onClick={() => handleFilterChange('all')}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => updateParams({ status: null, sort: null, limit: null })}
+                >
                   <X className="h-4 w-4 mr-1" />
                   Clear
                 </Button>
@@ -166,7 +202,7 @@ export function RealtimeSessions() {
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className="grid gap-4 md:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-6">
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
                   Status
@@ -181,6 +217,40 @@ export function RealtimeSessions() {
                     <SelectItem value="completed">Completed</SelectItem>
                     <SelectItem value="error">Error</SelectItem>
                     <SelectItem value="interrupted">Interrupted</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Sort
+                </label>
+                <Select value={sort} onValueChange={handleSortChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Newest first" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SORT_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Rows per page
+                </label>
+                <Select value={String(limit)} onValueChange={handleLimitChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={String(DEFAULT_PAGE_SIZE)} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <SelectItem key={size} value={String(size)}>
+                        {size}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -293,14 +363,14 @@ export function RealtimeSessions() {
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
             </div>
-          ) : allSessions.length === 0 ? (
+          ) : visibleSessions.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               No sessions found
             </div>
           ) : (
             isMobile ? (
               <div className="space-y-3">
-                {allSessions.map((session) => (
+                {visibleSessions.map((session) => (
                   <div
                     key={session.id}
                     className="rounded-lg border border-border p-3 cursor-pointer hover:bg-accent/50"
@@ -384,7 +454,7 @@ export function RealtimeSessions() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {allSessions.map((session) => (
+                  {visibleSessions.map((session) => (
                     <TableRow
                       key={session.id}
                       className="cursor-pointer hover:bg-accent/50"
@@ -452,10 +522,10 @@ export function RealtimeSessions() {
               </Table>
             )
           )}
-          {allSessions.length > 0 && (
+          {visibleSessions.length > 0 && (
             <div className="flex flex-col items-center gap-3 pt-4">
               <p className="text-sm text-muted-foreground">
-                Showing {allSessions.length} sessions
+                Showing {visibleSessions.length} sessions
               </p>
               {hasNextPage && (
                 <Button
