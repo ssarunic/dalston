@@ -1,10 +1,11 @@
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { apiClient, type JobListParams } from '@/api/client'
+import type { ConsoleJobListResponse } from '@/api/types'
 
 type JobsFilters = Omit<JobListParams, 'cursor'>
 
 export function useJobs(params: JobsFilters = {}) {
-  return useInfiniteQuery({
+  return useInfiniteQuery<ConsoleJobListResponse>({
     queryKey: ['jobs', params],
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) =>

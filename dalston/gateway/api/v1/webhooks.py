@@ -11,7 +11,7 @@ POST   /v1/webhooks/{endpoint_id}/deliveries/{id}/retry - Retry delivery
 """
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -371,6 +371,10 @@ async def list_webhook_deliveries(
     cursor: Annotated[
         str | None, Query(description="Pagination cursor from previous response")
     ] = None,
+    sort: Annotated[
+        Literal["created_desc", "created_asc"],
+        Query(description="Sort order by created timestamp"),
+    ] = "created_desc",
     db: AsyncSession = Depends(get_db),
     service: WebhookEndpointService = Depends(get_webhook_endpoint_service),
 ) -> DeliveryListResponse:
@@ -382,6 +386,7 @@ async def list_webhook_deliveries(
         status=status,
         limit=limit,
         cursor=cursor,
+        sort=sort,
     )
 
     # Compute next cursor from last delivery

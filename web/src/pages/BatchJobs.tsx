@@ -31,6 +31,8 @@ import {
 
 const DEFAULT_PAGE_SIZE = 20
 const PAGE_SIZE_OPTIONS = [20, 50, 100] as const
+const STATUS_OPTIONS = ['', 'pending', 'running', 'completed', 'failed', 'cancelled'] as const
+const SORT_OPTION_VALUES = ['created_desc', 'created_asc'] as const
 const SORT_OPTIONS = [
   { label: 'Newest first', value: 'created_desc' },
   { label: 'Oldest first', value: 'created_asc' },
@@ -39,7 +41,7 @@ const SORT_OPTIONS = [
 const TERMINAL_STATUSES: Set<JobStatus> = new Set(['completed', 'failed', 'cancelled'])
 const CANCELLABLE_STATUSES: Set<JobStatus> = new Set(['pending', 'running'])
 
-const STATUS_FILTERS: { label: string; value: JobStatus | '' }[] = [
+const STATUS_FILTERS: { label: string; value: (typeof STATUS_OPTIONS)[number] }[] = [
   { label: 'All', value: '' },
   { label: 'Pending', value: 'pending' },
   { label: 'Running', value: 'running' },
@@ -75,12 +77,12 @@ export function BatchJobs() {
     setStatus,
     setSort,
     setLimit,
-    updateParams,
+    resetAll,
   } = useSharedTableState({
     defaultStatus: '',
-    statusOptions: STATUS_FILTERS.map((filter) => filter.value),
+    statusOptions: STATUS_OPTIONS,
     defaultSort: 'created_desc',
-    sortOptions: SORT_OPTIONS.map((option) => option.value),
+    sortOptions: SORT_OPTION_VALUES,
     defaultLimit: DEFAULT_PAGE_SIZE,
     limitOptions: PAGE_SIZE_OPTIONS,
   })
@@ -112,17 +114,10 @@ export function BatchJobs() {
   } = useJobs({
     limit,
     status: statusFilter || undefined,
+    sort,
   })
   const allJobs = useMemo(() => data?.pages.flatMap((page) => page.jobs) ?? [], [data])
-  const visibleJobs = useMemo(() => {
-    const sorted = [...allJobs]
-    sorted.sort((a, b) => {
-      const left = new Date(a.created_at).getTime()
-      const right = new Date(b.created_at).getTime()
-      return sort === 'created_asc' ? left - right : right - left
-    })
-    return sorted
-  }, [allJobs, sort])
+  const visibleJobs = allJobs
 
   const handleFilterChange = (value: string) => {
     setStatus(value)
@@ -227,7 +222,7 @@ export function BatchJobs() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => updateParams({ status: null, sort: null, limit: null })}
+                  onClick={() => resetAll()}
                 >
                   <X className="h-4 w-4 mr-1" />
                   Clear

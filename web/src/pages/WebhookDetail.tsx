@@ -29,6 +29,8 @@ import type { WebhookDelivery } from '@/api/types'
 
 const DEFAULT_PAGE_SIZE = 20
 const PAGE_SIZE_OPTIONS = [20, 50, 100] as const
+const STATUS_OPTIONS = ['', 'pending', 'success', 'failed'] as const
+const SORT_OPTION_VALUES = ['created_desc', 'created_asc'] as const
 const SORT_OPTIONS = [
   { label: 'Newest first', value: 'created_desc' },
   { label: 'Oldest first', value: 'created_asc' },
@@ -87,9 +89,9 @@ export function WebhookDetail() {
     setLimit,
   } = useSharedTableState({
     defaultStatus: '',
-    statusOptions: ['', 'pending', 'success', 'failed'],
+    statusOptions: STATUS_OPTIONS,
     defaultSort: 'created_desc',
-    sortOptions: SORT_OPTIONS.map((option) => option.value),
+    sortOptions: SORT_OPTION_VALUES,
     defaultLimit: DEFAULT_PAGE_SIZE,
     limitOptions: PAGE_SIZE_OPTIONS,
   })
@@ -107,21 +109,14 @@ export function WebhookDetail() {
     refetch,
   } = useWebhookDeliveries(endpointId!, {
     status: statusFilter,
+    sort,
     limit,
   })
   const allDeliveries = useMemo(
     () => deliveriesData?.pages.flatMap((page) => page.deliveries) ?? [],
     [deliveriesData]
   )
-  const visibleDeliveries = useMemo(() => {
-    const sorted = [...allDeliveries]
-    sorted.sort((a, b) => {
-      const left = new Date(a.created_at).getTime()
-      const right = new Date(b.created_at).getTime()
-      return sort === 'created_asc' ? left - right : right - left
-    })
-    return sorted
-  }, [allDeliveries, sort])
+  const visibleDeliveries = allDeliveries
   const retryDelivery = useRetryDelivery()
 
   const handleFilterChange = (value: string) => {

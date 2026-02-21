@@ -27,7 +27,7 @@ import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useRealtimeStatus } from '@/hooks/useRealtimeStatus'
 import { useRealtimeSessions } from '@/hooks/useRealtimeSessions'
-import type { RealtimeSessionSummary, RealtimeStatusResponse } from '@/api/types'
+import type { RealtimeStatusResponse } from '@/api/types'
 
 function StatusDot({ status }: { status: string }) {
   const color =
@@ -55,6 +55,8 @@ function formatDate(dateStr: string): string {
 
 const DEFAULT_PAGE_SIZE = 50
 const PAGE_SIZE_OPTIONS = [20, 50, 100] as const
+const STATUS_OPTIONS = ['all', 'active', 'completed', 'error', 'interrupted'] as const
+const SORT_OPTION_VALUES = ['started_desc', 'started_asc'] as const
 const SORT_OPTIONS = [
   { label: 'Newest first', value: 'started_desc' },
   { label: 'Oldest first', value: 'started_asc' },
@@ -131,12 +133,12 @@ export function RealtimeSessions() {
     setStatus,
     setSort,
     setLimit,
-    updateParams,
+    resetAll,
   } = useSharedTableState({
     defaultStatus: 'all',
-    statusOptions: ['all', 'active', 'completed', 'error', 'interrupted'],
+    statusOptions: STATUS_OPTIONS,
     defaultSort: 'started_desc',
-    sortOptions: SORT_OPTIONS.map((option) => option.value),
+    sortOptions: SORT_OPTION_VALUES,
     defaultLimit: DEFAULT_PAGE_SIZE,
     limitOptions: PAGE_SIZE_OPTIONS,
   })
@@ -163,20 +165,10 @@ export function RealtimeSessions() {
   } = useRealtimeSessions({
     status: statusFilter === 'all' ? undefined : statusFilter,
     limit,
+    sort,
   })
-  const allSessions = useMemo(
-    () => sessionsData?.pages.flatMap((page) => page.sessions as RealtimeSessionSummary[]) ?? [],
-    [sessionsData]
-  )
-  const visibleSessions = useMemo(() => {
-    const sorted = [...allSessions]
-    sorted.sort((a, b) => {
-      const left = new Date(a.started_at).getTime()
-      const right = new Date(b.started_at).getTime()
-      return sort === 'started_asc' ? left - right : right - left
-    })
-    return sorted
-  }, [allSessions, sort])
+  const allSessions = useMemo(() => sessionsData?.pages.flatMap((page) => page.sessions) ?? [], [sessionsData])
+  const visibleSessions = allSessions
 
   const handleFilterChange = (value: string) => {
     setStatus(value)
@@ -256,7 +248,7 @@ export function RealtimeSessions() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => updateParams({ status: null, sort: null, limit: null })}
+                  onClick={() => resetAll()}
                 >
                   <X className="h-4 w-4 mr-1" />
                   Clear
@@ -658,7 +650,7 @@ export function RealtimeSessions() {
               {hasNextPage && (
                 <Button
                   variant="outline"
-                  onClick={() => fetchNextPage()}
+                  onClick={() => void fetchNextPage()}
                   disabled={isFetchingNextPage}
                 >
                   {isFetchingNextPage ? 'Loading...' : 'Load More'}

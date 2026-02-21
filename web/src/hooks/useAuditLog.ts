@@ -1,11 +1,11 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
-import type { AuditListParams } from '@/api/types'
+import type { AuditListParams, AuditListResponse } from '@/api/types'
 
 type AuditEventFilters = Omit<AuditListParams, 'cursor'>
 
 export function useAuditEvents(params: AuditEventFilters = {}) {
-  return useInfiniteQuery({
+  return useInfiniteQuery<AuditListResponse>({
     queryKey: ['audit-events', params],
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) =>

@@ -2,49 +2,64 @@ import { useSearchParams } from 'react-router-dom'
 
 type SearchParamValue = string | number | null | undefined
 
-export interface SharedTableStateConfig {
-  defaultStatus?: string
-  statusOptions?: readonly string[]
-  defaultSort: string
-  sortOptions: readonly string[]
-  defaultLimit: number
-  limitOptions: readonly number[]
+export interface SharedTableStateConfig<
+  TStatus extends string = string,
+  TSort extends string = string,
+  TLimit extends number = number,
+> {
+  defaultStatus: TStatus
+  statusOptions: readonly TStatus[]
+  defaultSort: TSort
+  sortOptions: readonly TSort[]
+  defaultLimit: TLimit
+  limitOptions: readonly TLimit[]
 }
 
-export interface SharedTableState {
+export interface SharedTableState<
+  TStatus extends string = string,
+  TSort extends string = string,
+  TLimit extends number = number,
+> {
   searchParams: URLSearchParams
   setSearchParams: ReturnType<typeof useSearchParams>[1]
-  status: string
-  sort: string
-  limit: number
+  status: TStatus
+  sort: TSort
+  limit: TLimit
   setStatus: (value: string) => void
   setSort: (value: string) => void
   setLimit: (value: number) => void
   updateParams: (updates: Record<string, SearchParamValue>) => void
+  resetAll: (extraUpdates?: Record<string, SearchParamValue>) => void
 }
 
-function readEnum(value: string | null, options: readonly string[], fallback: string): string {
-  if (!value) return fallback
-  return options.includes(value) ? value : fallback
-}
-
-function readLimit(
+function readEnum<T extends string>(
   value: string | null,
-  options: readonly number[],
-  fallback: number
-): number {
+  options: readonly T[],
+  fallback: T
+): T {
+  if (!value) return fallback
+  return (options as readonly string[]).includes(value) ? (value as T) : fallback
+}
+
+function readLimit<T extends number>(
+  value: string | null,
+  options: readonly T[],
+  fallback: T
+): T {
   if (!value) return fallback
   const parsed = Number(value)
-  return Number.isFinite(parsed) && options.includes(parsed) ? parsed : fallback
+  if (!Number.isFinite(parsed)) return fallback
+  return (options as readonly number[]).includes(parsed) ? (parsed as T) : fallback
 }
 
-export function useSharedTableState(config: SharedTableStateConfig): SharedTableState {
+export function useSharedTableState<
+  TStatus extends string,
+  TSort extends string,
+  TLimit extends number,
+>(config: SharedTableStateConfig<TStatus, TSort, TLimit>): SharedTableState<TStatus, TSort, TLimit> {
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const statusOptions = config.statusOptions ?? [config.defaultStatus ?? 'all']
-  const defaultStatus = config.defaultStatus ?? statusOptions[0] ?? 'all'
-
-  const status = readEnum(searchParams.get('status'), statusOptions, defaultStatus)
+  const status = readEnum(searchParams.get('status'), config.statusOptions, config.defaultStatus)
   const sort = readEnum(searchParams.get('sort'), config.sortOptions, config.defaultSort)
   const limit = readLimit(searchParams.get('limit'), config.limitOptions, config.defaultLimit)
 
@@ -66,15 +81,27 @@ export function useSharedTableState(config: SharedTableStateConfig): SharedTable
   }
 
   const setStatus = (value: string) => {
-    updateParams({ status: value === defaultStatus ? null : value })
+    const normalized = readEnum(value, config.statusOptions, config.defaultStatus)
+    updateParams({ status: normalized === config.defaultStatus ? null : normalized })
   }
 
   const setSort = (value: string) => {
-    updateParams({ sort: value === config.defaultSort ? null : value })
+    const normalized = readEnum(value, config.sortOptions, config.defaultSort)
+    updateParams({ sort: normalized === config.defaultSort ? null : normalized })
   }
 
   const setLimit = (value: number) => {
-    updateParams({ limit: value === config.defaultLimit ? null : value })
+    const normalized = readLimit(String(value), config.limitOptions, config.defaultLimit)
+    updateParams({ limit: normalized === config.defaultLimit ? null : normalized })
+  }
+
+  const resetAll = (extraUpdates: Record<string, SearchParamValue> = {}) => {
+    updateParams({
+      status: null,
+      sort: null,
+      limit: null,
+      ...extraUpdates,
+    })
   }
 
   return {
@@ -87,5 +114,6 @@ export function useSharedTableState(config: SharedTableStateConfig): SharedTable
     setSort,
     setLimit,
     updateParams,
+    resetAll,
   }
 }

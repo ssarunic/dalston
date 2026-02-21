@@ -1,8 +1,17 @@
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
-import type { CreateWebhookRequest, UpdateWebhookRequest } from '@/api/types'
+import type {
+  CreateWebhookRequest,
+  DeliveryListResponse,
+  UpdateWebhookRequest,
+} from '@/api/types'
 
-type WebhookDeliveryParams = { status?: string; limit?: number; cursor?: string }
+type WebhookDeliveryParams = {
+  status?: string
+  sort?: 'created_desc' | 'created_asc'
+  limit?: number
+  cursor?: string
+}
 type WebhookDeliveryFilters = Omit<WebhookDeliveryParams, 'cursor'>
 
 export function useWebhooks(isActive?: boolean) {
@@ -61,7 +70,7 @@ export function useWebhookDeliveries(
   endpointId: string,
   params: WebhookDeliveryFilters = {}
 ) {
-  return useInfiniteQuery({
+  return useInfiniteQuery<DeliveryListResponse>({
     queryKey: ['webhookDeliveries', endpointId, params],
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) =>

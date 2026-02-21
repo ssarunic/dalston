@@ -7,6 +7,7 @@ DELETE /api/console/jobs/{job_id} - Delete a job and its artifacts (admin)
 """
 
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import UUID
 
 import structlog
@@ -587,6 +588,7 @@ async def list_console_jobs(
     limit: int = 20,
     cursor: str | None = None,
     status: str | None = None,
+    sort: Literal["created_desc", "created_asc"] = "created_desc",
 ) -> ConsoleJobListResponse:
     """List all jobs for console (admin view) with cursor-based pagination."""
     # Build base query - no tenant filter for admin
@@ -596,24 +598,36 @@ async def list_console_jobs(
     if status:
         query = query.where(JobModel.status == status)
 
-    # Apply cursor filter (jobs older than cursor)
+    # Apply cursor filter
     if cursor:
         decoded = _decode_job_cursor(cursor)
         if decoded:
             cursor_created_at, cursor_id = decoded
-            # Get jobs created before the cursor OR same time but with smaller ID
-            query = query.where(
-                (JobModel.created_at < cursor_created_at)
-                | (
-                    (JobModel.created_at == cursor_created_at)
-                    & (JobModel.id < cursor_id)
+            if sort == "created_asc":
+                # Get jobs created after the cursor OR same time but with larger ID
+                query = query.where(
+                    (JobModel.created_at > cursor_created_at)
+                    | (
+                        (JobModel.created_at == cursor_created_at)
+                        & (JobModel.id > cursor_id)
+                    )
                 )
-            )
+            else:
+                # Get jobs created before the cursor OR same time but with smaller ID
+                query = query.where(
+                    (JobModel.created_at < cursor_created_at)
+                    | (
+                        (JobModel.created_at == cursor_created_at)
+                        & (JobModel.id < cursor_id)
+                    )
+                )
 
     # Fetch limit + 1 to determine has_more
-    query = query.order_by(JobModel.created_at.desc(), JobModel.id.desc()).limit(
-        limit + 1
-    )
+    if sort == "created_asc":
+        query = query.order_by(JobModel.created_at.asc(), JobModel.id.asc())
+    else:
+        query = query.order_by(JobModel.created_at.desc(), JobModel.id.desc())
+    query = query.limit(limit + 1)
     result = await db.execute(query)
     jobs = list(result.scalars().all())
 

@@ -382,6 +382,7 @@ export interface RealtimeSessionListParams {
   status?: string
   since?: string
   until?: string
+  sort?: 'started_desc' | 'started_asc'
   limit?: number
   cursor?: string
 }
@@ -474,6 +475,7 @@ export interface AuditListParams {
   actor_id?: string
   since?: string
   until?: string
+  sort?: 'timestamp_desc' | 'timestamp_asc'
   limit?: number
   cursor?: string
 }

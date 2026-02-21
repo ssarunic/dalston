@@ -54,6 +54,58 @@ function parseErrorJsonCandidate(raw: string): Record<string, unknown> | null {
   return null
 }
 
+function extractFirstJsonObject(raw: string): Record<string, unknown> | null {
+  let depth = 0
+  let startIndex = -1
+  let inString = false
+  let escaped = false
+
+  for (let i = 0; i < raw.length; i += 1) {
+    const char = raw[i]
+
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+      continue
+    }
+
+    if (char === '{') {
+      if (depth === 0) {
+        startIndex = i
+      }
+      depth += 1
+      continue
+    }
+
+    if (char === '}') {
+      if (depth === 0 || startIndex < 0) {
+        continue
+      }
+      depth -= 1
+      if (depth === 0) {
+        const candidate = raw.slice(startIndex, i + 1)
+        const parsed = parseErrorJsonCandidate(candidate)
+        if (parsed) {
+          return parsed
+        }
+        startIndex = -1
+      }
+    }
+  }
+
+  return null
+}
+
 function parseJobError(rawError: string): ParsedJobError {
   const trimmed = rawError.trim()
   const taskPrefixMatch = trimmed.match(/^Task\s+([a-zA-Z0-9_.-]+)\s+failed:\s*(.*)$/s)
@@ -66,12 +118,7 @@ function parseJobError(rawError: string): ParsedJobError {
 
   // Some messages may include additional prefix/suffix text around JSON.
   if (!parsed) {
-    const firstBrace = suffix.indexOf('{')
-    const lastBrace = suffix.lastIndexOf('}')
-    if (firstBrace >= 0 && lastBrace > firstBrace) {
-      const jsonFragment = suffix.slice(firstBrace, lastBrace + 1)
-      parsed = parseErrorJsonCandidate(jsonFragment)
-    }
+    parsed = extractFirstJsonObject(suffix) ?? extractFirstJsonObject(trimmed)
   }
 
   if (!parsed) {

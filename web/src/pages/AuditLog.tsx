@@ -35,6 +35,8 @@ import type { AuditEvent, AuditListParams } from '@/api/types'
 
 const DEFAULT_PAGE_SIZE = 50
 const PAGE_SIZE_OPTIONS = [25, 50, 100] as const
+const STATUS_OPTIONS = ['all'] as const
+const SORT_OPTION_VALUES = ['timestamp_desc', 'timestamp_asc'] as const
 const SORT_OPTIONS = [
   { label: 'Newest first', value: 'timestamp_desc' },
   { label: 'Oldest first', value: 'timestamp_asc' },
@@ -159,12 +161,12 @@ export function AuditLog() {
     limit,
     setSort,
     setLimit,
-    updateParams,
+    resetAll,
   } = useSharedTableState({
     defaultStatus: 'all',
-    statusOptions: ['all'],
+    statusOptions: STATUS_OPTIONS,
     defaultSort: 'timestamp_desc',
-    sortOptions: SORT_OPTIONS.map((option) => option.value),
+    sortOptions: SORT_OPTION_VALUES,
     defaultLimit: DEFAULT_PAGE_SIZE,
     limitOptions: PAGE_SIZE_OPTIONS,
   })
@@ -174,6 +176,7 @@ export function AuditLog() {
 
   const filters: AuditListParams = {
     limit,
+    sort,
     resource_type: searchParams.get('resource_type') || undefined,
     action: searchParams.get('action') || undefined,
     actor_id: searchParams.get('actor_id') || undefined,
@@ -191,19 +194,8 @@ export function AuditLog() {
     fetchNextPage,
     refetch,
   } = useAuditEvents(filters)
-  const allEvents = useMemo(
-    () => data?.pages.flatMap((page) => page.events as AuditEvent[]) ?? [],
-    [data]
-  )
-  const visibleEvents = useMemo(() => {
-    const sorted = [...allEvents]
-    sorted.sort((a, b) => {
-      const left = new Date(a.timestamp).getTime()
-      const right = new Date(b.timestamp).getTime()
-      return sort === 'timestamp_asc' ? left - right : right - left
-    })
-    return sorted
-  }, [allEvents, sort])
+  const allEvents = useMemo(() => data?.pages.flatMap((page) => page.events) ?? [], [data])
+  const visibleEvents = allEvents
 
   const handleFilterChange = (key: keyof AuditListParams, value: string) => {
     setSearchParams((prev) => {
@@ -218,14 +210,12 @@ export function AuditLog() {
   }
 
   const clearFilters = () => {
-    updateParams({
+    resetAll({
       resource_type: null,
       action: null,
       actor_id: null,
       since: null,
       until: null,
-      sort: null,
-      limit: null,
     })
     if (sinceRef.current) sinceRef.current.value = ''
     if (untilRef.current) untilRef.current.value = ''

@@ -6,6 +6,7 @@ delivery log queries.
 
 import secrets
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import and_, select
@@ -251,6 +252,7 @@ class WebhookEndpointService:
         status: str | None = None,
         limit: int = 20,
         cursor: str | None = None,
+        sort: Literal["created_desc", "created_asc"] = "created_desc",
     ) -> tuple[list[WebhookDeliveryModel], bool]:
         """List delivery attempts for an endpoint with cursor-based pagination.
 
@@ -261,6 +263,7 @@ class WebhookEndpointService:
             status: Optional filter by status
             limit: Max results to return
             cursor: Pagination cursor (format: created_at_iso:delivery_id)
+            sort: Sort order for created_at
 
         Returns:
             Tuple of (deliveries list, has_more)
@@ -277,25 +280,42 @@ class WebhookEndpointService:
         if status is not None:
             query = query.where(WebhookDeliveryModel.status == status)
 
-        # Apply cursor filter (deliveries older than cursor)
+        # Apply cursor filter
         if cursor:
             decoded = self._decode_delivery_cursor(cursor)
             if decoded:
                 cursor_created_at, cursor_id = decoded
-                # Get deliveries created before cursor OR same time but with smaller ID
-                query = query.where(
-                    (WebhookDeliveryModel.created_at < cursor_created_at)
-                    | (
-                        (WebhookDeliveryModel.created_at == cursor_created_at)
-                        & (WebhookDeliveryModel.id < cursor_id)
+                if sort == "created_asc":
+                    # Get deliveries created after cursor OR same time but with larger ID
+                    query = query.where(
+                        (WebhookDeliveryModel.created_at > cursor_created_at)
+                        | (
+                            (WebhookDeliveryModel.created_at == cursor_created_at)
+                            & (WebhookDeliveryModel.id > cursor_id)
+                        )
                     )
-                )
+                else:
+                    # Get deliveries created before cursor OR same time but with smaller ID
+                    query = query.where(
+                        (WebhookDeliveryModel.created_at < cursor_created_at)
+                        | (
+                            (WebhookDeliveryModel.created_at == cursor_created_at)
+                            & (WebhookDeliveryModel.id < cursor_id)
+                        )
+                    )
 
-        # Fetch limit + 1 to determine has_more, order by created_at descending
-        query = query.order_by(
-            WebhookDeliveryModel.created_at.desc(),
-            WebhookDeliveryModel.id.desc(),
-        ).limit(limit + 1)
+        # Fetch limit + 1 to determine has_more
+        if sort == "created_asc":
+            query = query.order_by(
+                WebhookDeliveryModel.created_at.asc(),
+                WebhookDeliveryModel.id.asc(),
+            )
+        else:
+            query = query.order_by(
+                WebhookDeliveryModel.created_at.desc(),
+                WebhookDeliveryModel.id.desc(),
+            )
+        query = query.limit(limit + 1)
 
         result = await db.execute(query)
         deliveries = list(result.scalars().all())

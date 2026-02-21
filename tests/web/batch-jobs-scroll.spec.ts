@@ -26,6 +26,52 @@ function makePageResponse(
 }
 
 test.describe('Batch Jobs', () => {
+  test('Sort change reloads server-ordered rows', async ({ page }) => {
+    await page.addInitScript(() => {
+      sessionStorage.setItem('dalston_api_key', 'test-admin-key')
+    })
+
+    await page.route('**/api/console/jobs*', (route, request) => {
+      const url = new URL(request.url())
+      const sort = url.searchParams.get('sort')
+
+      if (sort === 'created_asc') {
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            jobs: [makeJob(5001), makeJob(5002)],
+            cursor: null,
+            has_more: false,
+          }),
+        })
+        return
+      }
+
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          jobs: [makeJob(1), makeJob(2)],
+          cursor: null,
+          has_more: false,
+        }),
+      })
+    })
+
+    await page.goto('/console/jobs')
+
+    const firstIdCell = page.locator('tbody tr').first().locator('td').first()
+    await expect(firstIdCell).toContainText('job-00000001')
+
+    await page.getByRole('button', { name: 'Filters' }).click()
+    await page.getByRole('button', { name: 'created_desc' }).click()
+    await page.getByRole('option', { name: 'Oldest first' }).click()
+
+    await expect(page).toHaveURL(/\/console\/jobs\?(?=.*sort=created_asc)/)
+    await expect(firstIdCell).toContainText('job-00005001')
+  })
+
   test('Load More increases rows and status/sort/limit update URL', async ({ page }) => {
     // Set API key in sessionStorage before page loads
     await page.addInitScript(() => {
@@ -37,6 +83,7 @@ test.describe('Batch Jobs', () => {
       const url = new URL(request.url())
       const cursor = url.searchParams.get('cursor')
       const status = url.searchParams.get('status')
+      const sort = url.searchParams.get('sort')
 
       if (status === 'running') {
         route.fulfill({
@@ -47,6 +94,15 @@ test.describe('Batch Jobs', () => {
             cursor: null,
             has_more: false,
           }),
+        })
+        return
+      }
+
+      if (sort === 'created_asc') {
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(makePageResponse(1001, 20, false, null)),
         })
         return
       }
