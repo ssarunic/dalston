@@ -280,17 +280,26 @@ export function JobDetail() {
   const { data: tasksData } = useJobTasks(jobId)
   const { data: auditData, isLoading: auditLoading } = useResourceAuditTrail('job', jobId)
   const [showRedacted, setShowRedacted] = useState(false)
-  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const [audioUrlData, setAudioUrlData] = useState<{ forJobId: string; url: string } | null>(null)
 
   // Fetch audio URL for completed jobs with non-purged audio
   useEffect(() => {
     if (job?.status === 'completed' && !job.retention?.purged_at) {
       apiClient
         .getJobAudioUrl(job.id)
-        .then(({ url }) => setAudioUrl(url))
+        .then(({ url }) => setAudioUrlData({ forJobId: job.id, url }))
         .catch((err) => console.error('Failed to get audio URL:', err))
     }
   }, [job?.id, job?.status, job?.retention?.purged_at])
+
+  // Derive audio URL - only use if fetched for current job and conditions still met
+  const audioUrl =
+    audioUrlData &&
+    audioUrlData.forJobId === job?.id &&
+    job?.status === 'completed' &&
+    !job?.retention?.purged_at
+      ? audioUrlData.url
+      : null
 
   // Show loading state on initial fetch OR when cached data is from a different job
   // This prevents showing stale data from a previously viewed job

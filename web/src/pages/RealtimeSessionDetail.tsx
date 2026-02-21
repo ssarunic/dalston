@@ -46,17 +46,25 @@ export function RealtimeSessionDetail() {
     sessionId,
     !!session?.store_transcript && !!session?.transcript_uri
   )
-  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const [audioUrlData, setAudioUrlData] = useState<{ forSessionId: string; url: string } | null>(null)
 
   // Fetch audio URL for sessions with stored audio
   useEffect(() => {
     if (session?.store_audio && session?.audio_uri && sessionId) {
       apiClient
         .getSessionAudioUrl(sessionId)
-        .then(({ url }) => setAudioUrl(url))
+        .then(({ url }) => setAudioUrlData({ forSessionId: sessionId, url }))
         .catch((err) => console.error('Failed to get audio URL:', err))
     }
   }, [session?.store_audio, session?.audio_uri, sessionId])
+
+  // Derive audio URL - only use if fetched for current session and conditions still met
+  const audioUrl =
+    audioUrlData?.forSessionId === sessionId &&
+    session?.store_audio &&
+    session?.audio_uri
+      ? audioUrlData.url
+      : null
 
   const handleDownloadAudio = async () => {
     if (!sessionId) return
