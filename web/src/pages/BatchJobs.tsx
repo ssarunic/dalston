@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/StatusBadge'
+import { ListLoadMoreFooter } from '@/components/ListLoadMoreFooter'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -460,23 +461,13 @@ export function BatchJobs() {
             )
           )}
 
-          {/* Pagination */}
-          {visibleJobs.length > 0 && (
-            <div className="flex flex-col items-center gap-3 pt-4">
-              <p className="text-sm text-muted-foreground">
-                Showing {visibleJobs.length} jobs
-              </p>
-              {hasNextPage && (
-                <Button
-                  variant="outline"
-                  onClick={loadMore}
-                  disabled={isFetchingNextPage}
-                >
-                  {isFetchingNextPage ? 'Loading...' : 'Load More'}
-                </Button>
-              )}
-            </div>
-          )}
+          <ListLoadMoreFooter
+            count={visibleJobs.length}
+            itemLabel="jobs"
+            hasNextPage={hasNextPage}
+            isFetchingNextPage={isFetchingNextPage}
+            onLoadMore={loadMore}
+          />
         </CardContent>
       </Card>
 

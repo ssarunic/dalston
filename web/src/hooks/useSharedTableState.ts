@@ -32,7 +32,7 @@ export interface SharedTableState<
   resetAll: (extraUpdates?: Record<string, SearchParamValue>) => void
 }
 
-function readEnum<T extends string>(
+function normalizeEnumValue<T extends string>(
   value: string | null,
   options: readonly T[],
   fallback: T
@@ -41,7 +41,7 @@ function readEnum<T extends string>(
   return (options as readonly string[]).includes(value) ? (value as T) : fallback
 }
 
-function readLimit<T extends number>(
+function normalizeLimitValue<T extends number>(
   value: string | null,
   options: readonly T[],
   fallback: T
@@ -52,6 +52,32 @@ function readLimit<T extends number>(
   return (options as readonly number[]).includes(parsed) ? (parsed as T) : fallback
 }
 
+function applySearchParamUpdates(
+  source: URLSearchParams,
+  updates: Record<string, SearchParamValue>
+): URLSearchParams {
+  const next = new URLSearchParams(source)
+  for (const [key, value] of Object.entries(updates)) {
+    if (value === null || value === undefined || value === '') {
+      next.delete(key)
+    } else {
+      next.set(key, String(value))
+    }
+  }
+  return next
+}
+
+function buildResetAllUpdates(
+  extraUpdates: Record<string, SearchParamValue> = {}
+): Record<string, SearchParamValue> {
+  return {
+    status: null,
+    sort: null,
+    limit: null,
+    ...extraUpdates,
+  }
+}
+
 export function useSharedTableState<
   TStatus extends string,
   TSort extends string,
@@ -59,49 +85,34 @@ export function useSharedTableState<
 >(config: SharedTableStateConfig<TStatus, TSort, TLimit>): SharedTableState<TStatus, TSort, TLimit> {
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const status = readEnum(searchParams.get('status'), config.statusOptions, config.defaultStatus)
-  const sort = readEnum(searchParams.get('sort'), config.sortOptions, config.defaultSort)
-  const limit = readLimit(searchParams.get('limit'), config.limitOptions, config.defaultLimit)
+  const status = normalizeEnumValue(searchParams.get('status'), config.statusOptions, config.defaultStatus)
+  const sort = normalizeEnumValue(searchParams.get('sort'), config.sortOptions, config.defaultSort)
+  const limit = normalizeLimitValue(searchParams.get('limit'), config.limitOptions, config.defaultLimit)
 
   const updateParams = (updates: Record<string, SearchParamValue>) => {
     setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev)
-        for (const [key, value] of Object.entries(updates)) {
-          if (value === null || value === undefined || value === '') {
-            next.delete(key)
-          } else {
-            next.set(key, String(value))
-          }
-        }
-        return next
-      },
+      (prev) => applySearchParamUpdates(prev, updates),
       { replace: true }
     )
   }
 
   const setStatus = (value: string) => {
-    const normalized = readEnum(value, config.statusOptions, config.defaultStatus)
+    const normalized = normalizeEnumValue(value, config.statusOptions, config.defaultStatus)
     updateParams({ status: normalized === config.defaultStatus ? null : normalized })
   }
 
   const setSort = (value: string) => {
-    const normalized = readEnum(value, config.sortOptions, config.defaultSort)
+    const normalized = normalizeEnumValue(value, config.sortOptions, config.defaultSort)
     updateParams({ sort: normalized === config.defaultSort ? null : normalized })
   }
 
   const setLimit = (value: number) => {
-    const normalized = readLimit(String(value), config.limitOptions, config.defaultLimit)
+    const normalized = normalizeLimitValue(String(value), config.limitOptions, config.defaultLimit)
     updateParams({ limit: normalized === config.defaultLimit ? null : normalized })
   }
 
   const resetAll = (extraUpdates: Record<string, SearchParamValue> = {}) => {
-    updateParams({
-      status: null,
-      sort: null,
-      limit: null,
-      ...extraUpdates,
-    })
+    updateParams(buildResetAllUpdates(extraUpdates))
   }
 
   return {

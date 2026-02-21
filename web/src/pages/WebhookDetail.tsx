@@ -24,6 +24,7 @@ import {
 import { useWebhooks, useWebhookDeliveries, useRetryDelivery } from '@/hooks/useWebhooks'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useSharedTableState } from '@/hooks/useSharedTableState'
+import { ListLoadMoreFooter } from '@/components/ListLoadMoreFooter'
 import { BackButton } from '@/components/BackButton'
 import type { WebhookDelivery } from '@/api/types'
 
@@ -459,23 +460,14 @@ export function WebhookDetail() {
                 </Table>
               )}
 
-              {/* Pagination */}
-              {visibleDeliveries.length > 0 && (
-                <div className="flex flex-col items-center gap-3 pt-4 mt-4 border-t">
-                  <p className="text-sm text-muted-foreground">
-                    Showing {visibleDeliveries.length} deliveries
-                  </p>
-                  {hasNextPage && (
-                    <Button
-                      variant="outline"
-                      onClick={loadMore}
-                      disabled={isFetchingNextPage}
-                    >
-                      {isFetchingNextPage ? 'Loading...' : 'Load More'}
-                    </Button>
-                  )}
-                </div>
-              )}
+              <ListLoadMoreFooter
+                count={visibleDeliveries.length}
+                itemLabel="deliveries"
+                hasNextPage={hasNextPage}
+                isFetchingNextPage={isFetchingNextPage}
+                onLoadMore={loadMore}
+                className="mt-4 border-t"
+              />
             </>
           )}
         </CardContent>

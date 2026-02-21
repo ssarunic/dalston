@@ -31,6 +31,7 @@ import {
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useAuditEvents } from '@/hooks/useAuditLog'
 import { useSharedTableState } from '@/hooks/useSharedTableState'
+import { ListLoadMoreFooter } from '@/components/ListLoadMoreFooter'
 import type { AuditEvent, AuditListParams } from '@/api/types'
 
 const DEFAULT_PAGE_SIZE = 50
@@ -525,16 +526,13 @@ export function AuditLog() {
                   </TableBody>
                 </Table>
               )}
-              <div className="flex flex-col items-center gap-3 pt-4">
-                <p className="text-sm text-muted-foreground">
-                  Showing {visibleEvents.length} events
-                </p>
-                {hasNextPage && (
-                  <Button variant="outline" onClick={loadMore} disabled={isFetchingNextPage}>
-                    {isFetchingNextPage ? 'Loading...' : 'Load More'}
-                  </Button>
-                )}
-              </div>
+              <ListLoadMoreFooter
+                count={visibleEvents.length}
+                itemLabel="events"
+                hasNextPage={hasNextPage}
+                isFetchingNextPage={isFetchingNextPage}
+                onLoadMore={loadMore}
+              />
             </>
           )}
         </CardContent>

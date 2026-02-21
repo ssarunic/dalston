@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/StatusBadge'
+import { ListLoadMoreFooter } from '@/components/ListLoadMoreFooter'
 import { useRealtimeStatus } from '@/hooks/useRealtimeStatus'
 import { useRealtimeSessions } from '@/hooks/useRealtimeSessions'
 import type { RealtimeStatusResponse } from '@/api/types'
@@ -184,6 +185,11 @@ export function RealtimeSessions() {
 
   const handleRefresh = async () => {
     await refetch()
+  }
+
+  const loadMore = () => {
+    if (!hasNextPage || isFetchingNextPage) return
+    void fetchNextPage()
   }
 
   const handleDelete = async () => {
@@ -642,22 +648,13 @@ export function RealtimeSessions() {
               </Table>
             )
           )}
-          {visibleSessions.length > 0 && (
-            <div className="flex flex-col items-center gap-3 pt-4">
-              <p className="text-sm text-muted-foreground">
-                Showing {visibleSessions.length} sessions
-              </p>
-              {hasNextPage && (
-                <Button
-                  variant="outline"
-                  onClick={() => void fetchNextPage()}
-                  disabled={isFetchingNextPage}
-                >
-                  {isFetchingNextPage ? 'Loading...' : 'Load More'}
-                </Button>
-              )}
-            </div>
-          )}
+          <ListLoadMoreFooter
+            count={visibleSessions.length}
+            itemLabel="sessions"
+            hasNextPage={hasNextPage}
+            isFetchingNextPage={isFetchingNextPage}
+            onLoadMore={loadMore}
+          />
         </CardContent>
       </Card>
 
