@@ -7,6 +7,8 @@ import {
   Repeat,
   Scissors,
   Loader2,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react'
 import WaveSurfer from 'wavesurfer.js'
 import { Button } from '@/components/ui/button'
@@ -66,6 +68,8 @@ export function AudioPlayer({
   const [playbackRate, setPlaybackRate] = useState(1)
   const [autoScroll, setAutoScroll] = useState(false)
   const [isReady, setIsReady] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [retryKey, setRetryKey] = useState(0)
 
   // A-B loop state
   const [loopA, setLoopA] = useState<number | null>(null)
@@ -81,6 +85,9 @@ export function AudioPlayer({
   // Initialize WaveSurfer
   useEffect(() => {
     if (!waveformRef.current) return
+
+    // Clear previous error state on retry
+    setLoadError(null)
 
     const ws = WaveSurfer.create({
       container: waveformRef.current,
@@ -100,6 +107,7 @@ export function AudioPlayer({
     ws.on('ready', () => {
       setDuration(ws.getDuration())
       setIsReady(true)
+      setLoadError(null)
 
       // Restore saved position
       if (!restoredRef.current) {
@@ -112,6 +120,12 @@ export function AudioPlayer({
           }
         }
       }
+    })
+
+    ws.on('error', (err: Error) => {
+      console.error('WaveSurfer error:', err)
+      setLoadError(err.message || 'Failed to load audio')
+      setIsReady(false)
     })
 
     ws.on('timeupdate', (time: number) => {
@@ -132,7 +146,7 @@ export function AudioPlayer({
       restoredRef.current = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [src])
+  }, [src, retryKey])
 
   // Sync playback rate
   useEffect(() => {
@@ -352,7 +366,8 @@ export function AudioPlayer({
           ref={waveformRef}
           className={cn(
             'w-full rounded cursor-pointer',
-            !isReady && 'opacity-50'
+            !isReady && !loadError && 'opacity-50',
+            loadError && 'opacity-20'
           )}
         />
         {/* A-B loop region overlay */}
@@ -371,9 +386,23 @@ export function AudioPlayer({
             )}
           </div>
         )}
-        {!isReady && (
+        {!isReady && !loadError && (
           <div className="absolute inset-0 flex items-center justify-center">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        )}
+        {loadError && (
+          <div className="absolute inset-0 flex items-center justify-center gap-3 bg-background/80">
+            <AlertCircle className="h-4 w-4 text-destructive" />
+            <span className="text-sm text-destructive">Audio failed to load</span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRetryKey((k) => k + 1)}
+            >
+              <RefreshCw className="h-3 w-3 mr-1" />
+              Retry
+            </Button>
           </div>
         )}
       </div>
