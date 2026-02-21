@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   Clock,
@@ -45,6 +46,17 @@ export function RealtimeSessionDetail() {
     sessionId,
     !!session?.store_transcript && !!session?.transcript_uri
   )
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+
+  // Fetch audio URL for sessions with stored audio
+  useEffect(() => {
+    if (session?.store_audio && session?.audio_uri && sessionId) {
+      apiClient
+        .getSessionAudioUrl(sessionId)
+        .then(({ url }) => setAudioUrl(url))
+        .catch((err) => console.error('Failed to get audio URL:', err))
+    }
+  }, [session?.store_audio, session?.audio_uri, sessionId])
 
   const handleDownloadAudio = async () => {
     if (!sessionId) return
@@ -223,7 +235,7 @@ export function RealtimeSessionDetail() {
           <CardHeader>
             <CardTitle>Transcript</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-0">
             <TranscriptViewer
               segments={transcript.utterances?.map(utt => ({
                 id: utt.id,
@@ -232,6 +244,7 @@ export function RealtimeSessionDetail() {
                 text: utt.text,
               })) ?? []}
               fullText={transcript.text}
+              audioSrc={audioUrl ?? undefined}
               enableExport={!!session.transcript_uri}
               exportConfig={{ type: 'session', id: session.id }}
             />

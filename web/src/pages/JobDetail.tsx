@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   Globe,
@@ -280,6 +280,17 @@ export function JobDetail() {
   const { data: tasksData } = useJobTasks(jobId)
   const { data: auditData, isLoading: auditLoading } = useResourceAuditTrail('job', jobId)
   const [showRedacted, setShowRedacted] = useState(false)
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+
+  // Fetch audio URL for completed jobs with non-purged audio
+  useEffect(() => {
+    if (job?.status === 'completed' && !job.retention?.purged_at) {
+      apiClient
+        .getJobAudioUrl(job.id)
+        .then(({ url }) => setAudioUrl(url))
+        .catch((err) => console.error('Failed to get audio URL:', err))
+    }
+  }, [job?.id, job?.status, job?.retention?.purged_at])
 
   // Show loading state on initial fetch OR when cached data is from a different job
   // This prevents showing stale data from a previously viewed job
@@ -413,11 +424,12 @@ export function JobDetail() {
           <CardHeader>
             <CardTitle className="text-base font-medium">Transcript</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-0">
             <TranscriptViewer
               segments={job.segments ?? []}
               speakers={job.speakers}
               fullText={job.text}
+              audioSrc={audioUrl ?? undefined}
               enableExport={true}
               exportConfig={{ type: 'job', id: job.id }}
               piiConfig={job.pii?.enabled ? {
