@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   ScrollText,
   AlertCircle,
@@ -30,7 +30,18 @@ import {
 } from '@/components/ui/select'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useAuditEvents } from '@/hooks/useAuditLog'
-import type { AuditEvent, AuditListParams, AuditListResponse } from '@/api/types'
+import { useSharedTableState } from '@/hooks/useSharedTableState'
+import { ListLoadMoreFooter } from '@/components/ListLoadMoreFooter'
+import type { AuditEvent, AuditListParams } from '@/api/types'
+
+const DEFAULT_PAGE_SIZE = 50
+const PAGE_SIZE_OPTIONS = [25, 50, 100] as const
+const STATUS_OPTIONS = ['all'] as const
+const SORT_OPTION_VALUES = ['timestamp_desc', 'timestamp_asc'] as const
+const SORT_OPTIONS = [
+  { label: 'Newest first', value: 'timestamp_desc' },
+  { label: 'Oldest first', value: 'timestamp_asc' },
+] as const
 
 const RESOURCE_TYPES = [
   { value: '', label: 'All Resources' },
@@ -144,20 +155,29 @@ function EventDetailRow({ event }: { event: AuditEvent }) {
 
 export function AuditLog() {
   const isMobile = useMediaQuery('(max-width: 767px)')
-  const [searchParams, setSearchParams] = useSearchParams()
+  const {
+    searchParams,
+    setSearchParams,
+    sort,
+    limit,
+    setSort,
+    setLimit,
+    resetAll,
+  } = useSharedTableState({
+    defaultStatus: 'all',
+    statusOptions: STATUS_OPTIONS,
+    defaultSort: 'timestamp_desc',
+    sortOptions: SORT_OPTION_VALUES,
+    defaultLimit: DEFAULT_PAGE_SIZE,
+    limitOptions: PAGE_SIZE_OPTIONS,
+  })
   const [showFilters, setShowFilters] = useState(false)
-  const [allEvents, setAllEvents] = useState<AuditEvent[]>([])
-  const [hasMore, setHasMore] = useState(false)
   const sinceRef = useRef<HTMLInputElement>(null)
   const untilRef = useRef<HTMLInputElement>(null)
-  const lastCursorRef = useRef<string | undefined>(undefined)
-  const lastDataRef = useRef<AuditListResponse | null>(null)
 
-  // Read filters from URL params
-  const cursor = searchParams.get('cursor') || undefined
   const filters: AuditListParams = {
-    limit: 50,
-    cursor,
+    limit,
+    sort,
     resource_type: searchParams.get('resource_type') || undefined,
     action: searchParams.get('action') || undefined,
     actor_id: searchParams.get('actor_id') || undefined,
@@ -165,36 +185,22 @@ export function AuditLog() {
     until: searchParams.get('until') || undefined,
   }
 
-  const { data, isLoading, error, isFetching, refetch } = useAuditEvents(filters)
-
-  // Process data and accumulate events
-  useEffect(() => {
-    if (!data) return
-    lastDataRef.current = data
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing API data
-    setHasMore(data.has_more)
-
-    // If cursor changed (pagination), append events
-    // If no cursor (first page or filter changed), replace events
-    if (cursor && cursor === lastCursorRef.current) {
-      // Same cursor, data might be refetched - don't duplicate
-      return
-    }
-
-    if (cursor) {
-      // Loading more - append new events
-      setAllEvents((prev) => [...prev, ...data.events])
-    } else {
-      // First page - replace events
-      setAllEvents(data.events)
-    }
-    lastCursorRef.current = cursor
-  }, [data, cursor])
+  const {
+    data,
+    isLoading,
+    error,
+    isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    refetch,
+  } = useAuditEvents(filters)
+  const allEvents = useMemo(() => data?.pages.flatMap((page) => page.events) ?? [], [data])
+  const visibleEvents = allEvents
 
   const handleFilterChange = (key: keyof AuditListParams, value: string) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
-      next.delete('cursor')
       if (value) {
         next.set(key, value)
       } else {
@@ -202,14 +208,16 @@ export function AuditLog() {
       }
       return next
     }, { replace: true })
-    setAllEvents([])
-    lastCursorRef.current = undefined
   }
 
   const clearFilters = () => {
-    setSearchParams({}, { replace: true })
-    setAllEvents([])
-    lastCursorRef.current = undefined
+    resetAll({
+      resource_type: null,
+      action: null,
+      actor_id: null,
+      since: null,
+      until: null,
+    })
     if (sinceRef.current) sinceRef.current.value = ''
     if (untilRef.current) untilRef.current.value = ''
   }
@@ -219,16 +227,22 @@ export function AuditLog() {
     filters.action ||
     filters.actor_id ||
     filters.since ||
-    filters.until
+    filters.until ||
+    sort !== 'timestamp_desc' ||
+    limit !== DEFAULT_PAGE_SIZE
   )
 
+  const handleSortChange = (value: string) => {
+    setSort(value)
+  }
+
+  const handleLimitChange = (value: string) => {
+    setLimit(Number(value))
+  }
+
   const loadMore = () => {
-    if (!hasMore || !lastDataRef.current?.cursor) return
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      next.set('cursor', lastDataRef.current!.cursor!)
-      return next
-    }, { replace: true })
+    if (!hasNextPage || isFetchingNextPage) return
+    void fetchNextPage()
   }
 
   const handleRefresh = () => {
@@ -236,7 +250,6 @@ export function AuditLog() {
     const untilValue = untilRef.current?.value || ''
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
-      next.delete('cursor')
       // Apply date filters from input fields
       if (sinceValue) {
         next.set('since', new Date(sinceValue).toISOString())
@@ -250,9 +263,7 @@ export function AuditLog() {
       }
       return next
     }, { replace: true })
-    setAllEvents([])
-    lastCursorRef.current = undefined
-    refetch()
+    void refetch()
   }
 
   return (
@@ -303,7 +314,7 @@ export function AuditLog() {
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className="grid gap-4 md:grid-cols-5">
+            <div className="grid gap-4 md:grid-cols-7">
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
                   Resource Type
@@ -372,6 +383,40 @@ export function AuditLog() {
                   className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm h-10 dark:[color-scheme:dark]"
                 />
               </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Sort
+                </label>
+                <Select value={sort} onValueChange={handleSortChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Newest first" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SORT_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Rows per page
+                </label>
+                <Select value={String(limit)} onValueChange={handleLimitChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={String(DEFAULT_PAGE_SIZE)} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <SelectItem key={size} value={String(size)}>
+                        {size}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -386,7 +431,7 @@ export function AuditLog() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {(isLoading || (isFetching && allEvents.length === 0)) && !cursor ? (
+          {(isLoading || (isFetching && allEvents.length === 0)) ? (
             <div className="space-y-3">
               {[...Array(10)].map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
@@ -400,7 +445,7 @@ export function AuditLog() {
                 {error instanceof Error ? error.message : 'Unknown error'}
               </span>
             </div>
-          ) : allEvents.length === 0 ? (
+          ) : visibleEvents.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <ScrollText className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No audit events found</p>
@@ -412,7 +457,7 @@ export function AuditLog() {
             <>
               {isMobile ? (
                 <div className="space-y-3">
-                  {allEvents.map((event) => {
+                  {visibleEvents.map((event) => {
                     const actionStyle = getActionStyle(event.action)
                     const resourceLink = getResourceLink(event.resource_type, event.resource_id)
 
@@ -475,22 +520,19 @@ export function AuditLog() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {allEvents.map((event) => (
+                    {visibleEvents.map((event) => (
                       <EventDetailRow key={event.id} event={event} />
                     ))}
                   </TableBody>
                 </Table>
               )}
-              <div className="flex flex-col items-center gap-3 pt-4">
-                <p className="text-sm text-muted-foreground">
-                  Showing {allEvents.length} events
-                </p>
-                {hasMore && (
-                  <Button variant="outline" onClick={loadMore} disabled={isFetching}>
-                    {isFetching ? 'Loading...' : 'Load More'}
-                  </Button>
-                )}
-              </div>
+              <ListLoadMoreFooter
+                count={visibleEvents.length}
+                itemLabel="events"
+                hasNextPage={hasNextPage}
+                isFetchingNextPage={isFetchingNextPage}
+                onLoadMore={loadMore}
+              />
             </>
           )}
         </CardContent>

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -133,6 +133,10 @@ async def list_realtime_sessions(
     cursor: Annotated[
         str | None, Query(description="Pagination cursor from previous response")
     ] = None,
+    sort: Annotated[
+        Literal["started_desc", "started_asc"],
+        Query(description="Sort order by started timestamp"),
+    ] = "started_desc",
 ) -> SessionsListResponse:
     """List realtime sessions for the authenticated tenant."""
     # Parse datetime filters
@@ -163,6 +167,7 @@ async def list_realtime_sessions(
         until=until_dt,
         limit=limit,
         cursor=cursor,
+        sort=sort,
     )
 
     # Compute next cursor from last session

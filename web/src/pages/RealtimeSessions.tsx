@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Radio, MessageSquare, Mic, Trash2, RefreshCw, Filter, X } from 'lucide-react'
 import { apiClient } from '@/api/client'
-import { useTableState } from '@/hooks/useTableState'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
+import { useSharedTableState } from '@/hooks/useSharedTableState'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
@@ -25,9 +25,10 @@ import {
 } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/StatusBadge'
+import { ListLoadMoreFooter } from '@/components/ListLoadMoreFooter'
 import { useRealtimeStatus } from '@/hooks/useRealtimeStatus'
 import { useRealtimeSessions } from '@/hooks/useRealtimeSessions'
-import type { RealtimeSessionSummary, RealtimeSessionListResponse } from '@/api/types'
+import type { RealtimeStatusResponse } from '@/api/types'
 
 function StatusDot({ status }: { status: string }) {
   const color =
@@ -53,56 +54,142 @@ function formatDate(dateStr: string): string {
   return date.toLocaleString()
 }
 
-const PAGE_SIZE = 50
+const DEFAULT_PAGE_SIZE = 50
+const PAGE_SIZE_OPTIONS = [20, 50, 100] as const
+const STATUS_OPTIONS = ['all', 'active', 'completed', 'error', 'interrupted'] as const
+const SORT_OPTION_VALUES = ['started_desc', 'started_asc'] as const
+const SORT_OPTIONS = [
+  { label: 'Newest first', value: 'started_desc' },
+  { label: 'Oldest first', value: 'started_asc' },
+] as const
+
+interface StatusGuidance {
+  title: string
+  summary: string
+  details: string
+  level: 'normal' | 'warning' | 'error'
+  showStartWorker: boolean
+}
+
+function buildStatusGuidance(statusData?: RealtimeStatusResponse): StatusGuidance {
+  if (!statusData) {
+    return {
+      title: 'Status not available',
+      summary: 'Realtime status data has not loaded yet.',
+      details: 'Refresh status and check engine health if this persists.',
+      level: 'warning',
+      showStartWorker: false,
+    }
+  }
+
+  if (statusData.status === 'unavailable') {
+    if (statusData.worker_count === 0) {
+      return {
+        title: 'No realtime workers running',
+        summary: 'Realtime is unavailable because no workers are registered.',
+        details:
+          'Start at least one realtime worker, then refresh this page. If you run on AWS/ECS/Kubernetes, scale the worker service/deployment instead of using local Docker commands.',
+        level: 'error',
+        showStartWorker: true,
+      }
+    }
+
+    return {
+      title: 'Workers unhealthy',
+      summary: `Realtime is unavailable: 0/${statusData.worker_count} workers are ready.`,
+      details:
+        'Workers are registered but not healthy. Check worker logs, model loading, and health checks.',
+      level: 'error',
+      showStartWorker: false,
+    }
+  }
+
+  if (statusData.status === 'at_capacity') {
+    return {
+      title: 'At capacity',
+      summary:
+        `All available capacity is currently in use (${statusData.active_sessions}/${statusData.total_capacity}).`,
+      details: 'Wait for active sessions to finish or scale workers to increase available capacity.',
+      level: 'warning',
+      showStartWorker: false,
+    }
+  }
+
+  return {
+    title: 'Realtime healthy',
+    summary: `Workers are ready and can accept new sessions (${statusData.ready_workers}/${statusData.worker_count} ready).`,
+    details: 'No action needed unless you expect higher throughput.',
+    level: 'normal',
+    showStartWorker: false,
+  }
+}
 
 export function RealtimeSessions() {
   const isMobile = useMediaQuery('(max-width: 767px)')
   const navigate = useNavigate()
   const {
-    cursor,
-    items: allSessions,
-    filters,
-    hasMore,
-    setFilter,
-    loadMore,
-    processData,
-    clearItems,
-  } = useTableState<RealtimeSessionSummary, RealtimeSessionListResponse>({
-    defaultFilters: { status: 'all' },
-    dataKey: 'sessions',
-    getItems: (data) => data.sessions,
-    getCursor: (data) => data.cursor,
-    getHasMore: (data) => data.has_more,
+    status: statusFilter,
+    sort,
+    limit,
+    setStatus,
+    setSort,
+    setLimit,
+    resetAll,
+  } = useSharedTableState({
+    defaultStatus: 'all',
+    statusOptions: STATUS_OPTIONS,
+    defaultSort: 'started_desc',
+    sortOptions: SORT_OPTION_VALUES,
+    defaultLimit: DEFAULT_PAGE_SIZE,
+    limitOptions: PAGE_SIZE_OPTIONS,
   })
-
-  const statusFilter = filters.status || 'all'
   const [deleteTarget, setDeleteTarget] = useState<{ id: string } | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [showFilters, setShowFilters] = useState(false)
+  const [showStatusWhy, setShowStatusWhy] = useState(false)
 
-  const hasActiveFilters = statusFilter !== 'all'
+  const hasActiveFilters =
+    statusFilter !== 'all' ||
+    sort !== 'started_desc' ||
+    limit !== DEFAULT_PAGE_SIZE
   const { data: statusData, isLoading: statusLoading, error: statusError } = useRealtimeStatus()
-  const { data: sessionsData, isLoading: sessionsLoading, isFetching, refetch } = useRealtimeSessions({
+  const statusGuidance = useMemo(() => buildStatusGuidance(statusData), [statusData])
+  const {
+    data: sessionsData,
+    isLoading: sessionsLoading,
+    isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    refetch,
+  } = useRealtimeSessions({
     status: statusFilter === 'all' ? undefined : statusFilter,
-    limit: PAGE_SIZE,
-    cursor,
+    limit,
+    sort,
   })
-
-  // Process data when it changes
-  useEffect(() => {
-    if (sessionsData) {
-      processData(sessionsData)
-    }
-  }, [sessionsData, processData])
+  const allSessions = useMemo(() => sessionsData?.pages.flatMap((page) => page.sessions) ?? [], [sessionsData])
+  const visibleSessions = allSessions
 
   const handleFilterChange = (value: string) => {
-    setFilter('status', value)
+    setStatus(value)
+  }
+
+  const handleSortChange = (value: string) => {
+    setSort(value)
+  }
+
+  const handleLimitChange = (value: string) => {
+    setLimit(Number(value))
   }
 
   const handleRefresh = async () => {
-    clearItems()
     await refetch()
+  }
+
+  const loadMore = () => {
+    if (!hasNextPage || isFetchingNextPage) return
+    void fetchNextPage()
   }
 
   const handleDelete = async () => {
@@ -112,9 +199,7 @@ export function RealtimeSessions() {
     try {
       await apiClient.deleteRealtimeSession(deleteTarget.id)
       setDeleteTarget(null)
-      // Reset and refetch to get fresh data
-      clearItems()
-      refetch()
+      await refetch()
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to delete session'
@@ -166,7 +251,11 @@ export function RealtimeSessions() {
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-muted-foreground">Filters</span>
               {hasActiveFilters && (
-                <Button variant="ghost" size="sm" onClick={() => handleFilterChange('all')}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => resetAll()}
+                >
                   <X className="h-4 w-4 mr-1" />
                   Clear
                 </Button>
@@ -174,7 +263,7 @@ export function RealtimeSessions() {
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className="grid gap-4 md:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-6">
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
                   Status
@@ -189,6 +278,40 @@ export function RealtimeSessions() {
                     <SelectItem value="completed">Completed</SelectItem>
                     <SelectItem value="error">Error</SelectItem>
                     <SelectItem value="interrupted">Interrupted</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Sort
+                </label>
+                <Select value={sort} onValueChange={handleSortChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Newest first" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SORT_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Rows per page
+                </label>
+                <Select value={String(limit)} onValueChange={handleLimitChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={String(DEFAULT_PAGE_SIZE)} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <SelectItem key={size} value={String(size)}>
+                        {size}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -289,26 +412,91 @@ export function RealtimeSessions() {
         </Card>
       </div>
 
+      {!statusLoading && !statusError && (
+        <Card
+          className={
+            statusGuidance.level === 'error'
+              ? 'border-red-500/40 bg-red-500/5'
+              : statusGuidance.level === 'warning'
+                ? 'border-amber-500/40 bg-amber-500/5'
+                : ''
+          }
+        >
+          <CardContent className="py-4 space-y-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <p className="text-sm font-medium">{statusGuidance.title}</p>
+                <p className="text-sm text-muted-foreground">{statusGuidance.summary}</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate('/engines')}
+                >
+                  Check engine health
+                </Button>
+                {statusGuidance.showStartWorker && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowStatusWhy(true)}
+                  >
+                    Start worker (self-hosted)
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowStatusWhy((prev) => !prev)}
+                >
+                  {showStatusWhy ? 'Hide why this state' : 'Why this state?'}
+                </Button>
+              </div>
+            </div>
+
+            {showStatusWhy && (
+              <div className="rounded-md border border-border bg-muted/20 p-3 text-sm space-y-2">
+                <p className="text-muted-foreground">{statusGuidance.details}</p>
+                {statusGuidance.showStartWorker && (
+                  <>
+                    <p className="text-xs text-muted-foreground">
+                      Self-hosted quick start:
+                    </p>
+                    <code className="block rounded bg-muted px-2 py-1 text-xs font-mono">
+                      docker compose up -d stt-rt-transcribe-parakeet-rnnt-0.6b-cpu
+                    </code>
+                    <p className="text-xs text-muted-foreground">
+                      On AWS/ECS/Kubernetes, scale your realtime worker service/deployment instead.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Session History */}
       <Card>
         <CardHeader>
           <CardTitle>Session History</CardTitle>
         </CardHeader>
         <CardContent>
-          {(sessionsLoading || (isFetching && allSessions.length === 0)) && cursor === undefined ? (
+          {(sessionsLoading || (isFetching && allSessions.length === 0)) ? (
             <div className="space-y-2">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
             </div>
-          ) : allSessions.length === 0 ? (
+          ) : visibleSessions.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               No sessions found
             </div>
           ) : (
             isMobile ? (
               <div className="space-y-3">
-                {allSessions.map((session) => (
+                {visibleSessions.map((session) => (
                   <div
                     key={session.id}
                     className="rounded-lg border border-border p-3 cursor-pointer hover:bg-accent/50"
@@ -392,7 +580,7 @@ export function RealtimeSessions() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {allSessions.map((session) => (
+                  {visibleSessions.map((session) => (
                     <TableRow
                       key={session.id}
                       className="cursor-pointer hover:bg-accent/50"
@@ -460,22 +648,13 @@ export function RealtimeSessions() {
               </Table>
             )
           )}
-          {allSessions.length > 0 && (
-            <div className="flex flex-col items-center gap-3 pt-4">
-              <p className="text-sm text-muted-foreground">
-                Showing {allSessions.length} sessions
-              </p>
-              {hasMore && (
-                <Button
-                  variant="outline"
-                  onClick={loadMore}
-                  disabled={isFetching}
-                >
-                  {isFetching ? 'Loading...' : 'Load More'}
-                </Button>
-              )}
-            </div>
-          )}
+          <ListLoadMoreFooter
+            count={visibleSessions.length}
+            itemLabel="sessions"
+            hasNextPage={hasNextPage}
+            isFetchingNextPage={isFetchingNextPage}
+            onLoadMore={loadMore}
+          />
         </CardContent>
       </Card>
 

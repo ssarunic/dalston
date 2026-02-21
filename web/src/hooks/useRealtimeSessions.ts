@@ -1,11 +1,19 @@
-import { useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
-import type { RealtimeSessionListParams } from '@/api/types'
+import type { RealtimeSessionListParams, RealtimeSessionListResponse } from '@/api/types'
 
-export function useRealtimeSessions(params: RealtimeSessionListParams = {}) {
-  return useQuery({
+type RealtimeSessionsFilters = Omit<RealtimeSessionListParams, 'cursor'>
+
+export function useRealtimeSessions(params: RealtimeSessionsFilters = {}) {
+  return useInfiniteQuery<RealtimeSessionListResponse>({
     queryKey: ['realtime-sessions', params],
-    queryFn: () => apiClient.getRealtimeSessions(params),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      apiClient.getRealtimeSessions({
+        ...params,
+        cursor: typeof pageParam === 'string' ? pageParam : undefined,
+      }),
+    getNextPageParam: (lastPage) => (lastPage.has_more ? (lastPage.cursor ?? undefined) : undefined),
     refetchInterval: 5000,
   })
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Webhook,
@@ -28,9 +28,29 @@ import {
   useRotateWebhookSecret,
 } from '@/hooks/useWebhooks'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
+import { useSharedTableState } from '@/hooks/useSharedTableState'
 import { CreateWebhookDialog } from '@/components/CreateWebhookDialog'
 import { WebhookSecretModal } from '@/components/WebhookSecretModal'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import type { WebhookEndpoint, WebhookEndpointCreated } from '@/api/types'
+
+const DEFAULT_LIMIT = 20
+const LIMIT_OPTIONS = [20, 50, 100] as const
+const STATUS_OPTIONS = [
+  { label: 'All', value: 'all' },
+  { label: 'Active', value: 'active' },
+  { label: 'Inactive', value: 'inactive' },
+] as const
+const SORT_OPTIONS = [
+  { label: 'Newest first', value: 'created_desc' },
+  { label: 'Oldest first', value: 'created_asc' },
+] as const
 
 const EVENT_COLORS: Record<string, string> = {
   'transcription.completed': 'bg-green-500/10 text-green-500 border-green-500/20',
@@ -72,14 +92,30 @@ function truncateUrl(url: string, maxLength = 50): string {
 export function Webhooks() {
   const isMobile = useMediaQuery('(max-width: 767px)')
   const navigate = useNavigate()
-  const [showInactive, setShowInactive] = useState(true)
+  const {
+    status,
+    sort,
+    limit,
+    setStatus,
+    setSort,
+    setLimit,
+  } = useSharedTableState({
+    defaultStatus: 'all',
+    statusOptions: STATUS_OPTIONS.map((option) => option.value),
+    defaultSort: 'created_desc',
+    sortOptions: SORT_OPTIONS.map((option) => option.value),
+    defaultLimit: DEFAULT_LIMIT,
+    limitOptions: LIMIT_OPTIONS,
+  })
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [createdWebhook, setCreatedWebhook] = useState<WebhookEndpointCreated | null>(null)
   const [rotatedWebhook, setRotatedWebhook] = useState<WebhookEndpointCreated | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<WebhookEndpoint | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  const { data, isLoading, error } = useWebhooks(showInactive ? undefined : true)
+  const isActiveFilter =
+    status === 'all' ? undefined : status === 'active'
+  const { data, isLoading, error } = useWebhooks(isActiveFilter)
   const deleteWebhook = useDeleteWebhook()
   const updateWebhook = useUpdateWebhook()
   const rotateSecret = useRotateWebhookSecret()
@@ -123,7 +159,16 @@ export function Webhooks() {
     }
   }
 
-  const webhooks = data?.endpoints ?? []
+  const webhooks = useMemo(() => data?.endpoints ?? [], [data])
+  const visibleWebhooks = useMemo(() => {
+    const sorted = [...webhooks]
+    sorted.sort((a, b) => {
+      const left = new Date(a.created_at).getTime()
+      const right = new Date(b.created_at).getTime()
+      return sort === 'created_asc' ? left - right : right - left
+    })
+    return sorted.slice(0, limit)
+  }, [webhooks, sort, limit])
 
   return (
     <div className="space-y-6">
@@ -144,15 +189,44 @@ export function Webhooks() {
             <Webhook className="h-5 w-5" />
             Webhook Endpoints
           </CardTitle>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={showInactive}
-              onChange={(e) => setShowInactive(e.target.checked)}
-              className="rounded border-input"
-            />
-            Show inactive
-          </label>
+          <div className="flex items-center gap-2">
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger className="w-[130px]">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                {STATUS_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={sort} onValueChange={setSort}>
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="Sort" />
+              </SelectTrigger>
+              <SelectContent>
+                {SORT_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={String(limit)} onValueChange={(value) => setLimit(Number(value))}>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue placeholder="Rows" />
+              </SelectTrigger>
+              <SelectContent>
+                {LIMIT_OPTIONS.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -166,16 +240,16 @@ export function Webhooks() {
               <AlertCircle className="h-4 w-4" />
               <span>Failed to load webhooks</span>
             </div>
-          ) : webhooks.length === 0 ? (
+          ) : visibleWebhooks.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Webhook className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No webhook endpoints found</p>
-              <p className="text-sm mt-1">Create an endpoint to receive event notifications</p>
+              <p className="text-sm mt-1">Try changing filters or create a new endpoint</p>
             </div>
           ) : (
             isMobile ? (
               <div className="space-y-3">
-                {webhooks.map((webhook) => (
+                {visibleWebhooks.map((webhook) => (
                   <div
                     key={webhook.id}
                     className={`rounded-lg border border-border p-3 cursor-pointer hover:bg-accent/50 ${!webhook.is_active ? 'opacity-60' : ''}`}
@@ -262,7 +336,7 @@ export function Webhooks() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {webhooks.map((webhook) => (
+                  {visibleWebhooks.map((webhook) => (
                     <TableRow
                       key={webhook.id}
                       className={`cursor-pointer hover:bg-accent/50 ${!webhook.is_active ? 'opacity-50' : ''}`}
@@ -361,6 +435,11 @@ export function Webhooks() {
                 </TableBody>
               </Table>
             )
+          )}
+          {webhooks.length > 0 && (
+            <p className="pt-4 text-sm text-muted-foreground text-center">
+              Showing {visibleWebhooks.length} of {webhooks.length} webhooks
+            </p>
           )}
         </CardContent>
       </Card>

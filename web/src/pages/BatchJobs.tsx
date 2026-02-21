@@ -1,16 +1,17 @@
-import { useState, useEffect } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Trash2, X, RefreshCw, Filter } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useJobs } from '@/hooks/useJobs'
-import { useTableState } from '@/hooks/useTableState'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
+import { useSharedTableState } from '@/hooks/useSharedTableState'
 import { apiClient } from '@/api/client'
-import type { JobStatus, ConsoleJobSummary, ConsoleJobListResponse } from '@/api/types'
+import type { JobStatus } from '@/api/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/StatusBadge'
+import { ListLoadMoreFooter } from '@/components/ListLoadMoreFooter'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -29,12 +30,19 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
-const PAGE_SIZE = 20
+const DEFAULT_PAGE_SIZE = 20
+const PAGE_SIZE_OPTIONS = [20, 50, 100] as const
+const STATUS_OPTIONS = ['', 'pending', 'running', 'completed', 'failed', 'cancelled'] as const
+const SORT_OPTION_VALUES = ['created_desc', 'created_asc'] as const
+const SORT_OPTIONS = [
+  { label: 'Newest first', value: 'created_desc' },
+  { label: 'Oldest first', value: 'created_asc' },
+] as const
 
 const TERMINAL_STATUSES: Set<JobStatus> = new Set(['completed', 'failed', 'cancelled'])
 const CANCELLABLE_STATUSES: Set<JobStatus> = new Set(['pending', 'running'])
 
-const STATUS_FILTERS: { label: string; value: JobStatus | '' }[] = [
+const STATUS_FILTERS: { label: string; value: (typeof STATUS_OPTIONS)[number] }[] = [
   { label: 'All', value: '' },
   { label: 'Pending', value: 'pending' },
   { label: 'Running', value: 'running' },
@@ -64,23 +72,21 @@ function formatDuration(seconds: number | undefined): string {
 export function BatchJobs() {
   const isMobile = useMediaQuery('(max-width: 767px)')
   const {
-    cursor,
-    items: allJobs,
-    filters,
-    hasMore,
-    setFilter,
-    loadMore,
-    processData,
-    clearItems,
-  } = useTableState<ConsoleJobSummary, ConsoleJobListResponse>({
-    defaultFilters: { status: '' },
-    dataKey: 'jobs',
-    getItems: (data) => data.jobs,
-    getCursor: (data) => data.cursor,
-    getHasMore: (data) => data.has_more,
+    status: statusFilter,
+    sort,
+    limit,
+    setStatus,
+    setSort,
+    setLimit,
+    resetAll,
+  } = useSharedTableState({
+    defaultStatus: '',
+    statusOptions: STATUS_OPTIONS,
+    defaultSort: 'created_desc',
+    sortOptions: SORT_OPTION_VALUES,
+    defaultLimit: DEFAULT_PAGE_SIZE,
+    limitOptions: PAGE_SIZE_OPTIONS,
   })
-
-  const statusFilter = filters.status
   const [deleteTarget, setDeleteTarget] = useState<{ id: string } | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -92,28 +98,47 @@ export function BatchJobs() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
 
-  const hasActiveFilters = !!statusFilter
+  const hasActiveFilters =
+    !!statusFilter ||
+    sort !== 'created_desc' ||
+    limit !== DEFAULT_PAGE_SIZE
 
-  const { data, isLoading, isFetching, error, refetch } = useJobs({
-    limit: PAGE_SIZE,
-    cursor,
+  const {
+    data,
+    isLoading,
+    isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    error,
+    refetch,
+  } = useJobs({
+    limit,
     status: statusFilter || undefined,
+    sort,
   })
-
-  // Process data when it changes
-  useEffect(() => {
-    if (data) {
-      processData(data)
-    }
-  }, [data, processData])
+  const allJobs = useMemo(() => data?.pages.flatMap((page) => page.jobs) ?? [], [data])
+  const visibleJobs = allJobs
 
   const handleFilterChange = (value: string) => {
-    setFilter('status', value)
+    setStatus(value)
+  }
+
+  const handleSortChange = (value: string) => {
+    setSort(value)
+  }
+
+  const handleLimitChange = (value: string) => {
+    setLimit(Number(value))
   }
 
   const handleRefresh = async () => {
-    clearItems()
     await refetch()
+  }
+
+  const loadMore = () => {
+    if (!hasNextPage || isFetchingNextPage) return
+    void fetchNextPage()
   }
 
   async function handleDelete() {
@@ -123,9 +148,7 @@ export function BatchJobs() {
     try {
       await apiClient.deleteJob(deleteTarget.id)
       setDeleteTarget(null)
-      // Reset and refetch to get fresh data
-      clearItems()
-      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] })
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to delete job'
@@ -143,9 +166,7 @@ export function BatchJobs() {
       const result = await apiClient.cancelJob(cancelTarget.id)
       setCancelTarget(null)
       setCancelSuccess(result.message)
-      // Reset and refetch to get fresh data
-      clearItems()
-      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] })
       // Clear success message after 3 seconds
       setTimeout(() => setCancelSuccess(null), 3000)
     } catch (err) {
@@ -199,7 +220,11 @@ export function BatchJobs() {
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-muted-foreground">Filters</span>
               {hasActiveFilters && (
-                <Button variant="ghost" size="sm" onClick={() => handleFilterChange('')}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => resetAll()}
+                >
                   <X className="h-4 w-4 mr-1" />
                   Clear
                 </Button>
@@ -207,7 +232,7 @@ export function BatchJobs() {
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className="grid gap-4 md:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-5">
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
                   Status
@@ -228,6 +253,40 @@ export function BatchJobs() {
                   </SelectContent>
                 </Select>
               </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Sort
+                </label>
+                <Select value={sort} onValueChange={handleSortChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Newest first" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SORT_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Rows per page
+                </label>
+                <Select value={String(limit)} onValueChange={handleLimitChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={String(DEFAULT_PAGE_SIZE)} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <SelectItem key={size} value={String(size)}>
+                        {size}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -241,7 +300,7 @@ export function BatchJobs() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {(isLoading || (isFetching && allJobs.length === 0)) && cursor === undefined ? (
+          {isLoading && allJobs.length === 0 ? (
             <div className="space-y-3">
               {[...Array(5)].map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
@@ -249,14 +308,14 @@ export function BatchJobs() {
             </div>
           ) : error ? (
             <p className="text-red-400 py-4">Error loading jobs</p>
-          ) : allJobs.length === 0 ? (
+          ) : visibleJobs.length === 0 ? (
             <p className="text-muted-foreground py-8 text-center">
               No jobs found
             </p>
           ) : (
             isMobile ? (
               <div className="space-y-3">
-                {allJobs.map((job) => (
+                {visibleJobs.map((job) => (
                   <div
                     key={job.id}
                     className="rounded-lg border border-border p-3 cursor-pointer hover:bg-accent/50"
@@ -335,13 +394,13 @@ export function BatchJobs() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {allJobs.map((job) => (
+                  {visibleJobs.map((job) => (
                     <TableRow
                       key={job.id}
-                      className="cursor-pointer hover:bg-accent/50"
+                      className="group cursor-pointer hover:bg-accent/50"
                       onClick={() => navigate(`/jobs/${job.id}`)}
                     >
-                      <TableCell className="font-mono text-sm sticky left-0 z-10 bg-card">
+                      <TableCell className="font-mono text-sm sticky left-0 z-10 bg-card group-hover:bg-accent/50">
                         {job.id.slice(0, 12)}...
                       </TableCell>
                       <TableCell>
@@ -359,7 +418,7 @@ export function BatchJobs() {
                       <TableCell className="text-muted-foreground text-sm">
                         {formatDate(job.created_at)}
                       </TableCell>
-                      <TableCell className="text-right sticky right-0 z-10 bg-card">
+                      <TableCell className="text-right sticky right-0 z-10 bg-card group-hover:bg-accent/50">
                         <div className="flex items-center justify-end gap-1">
                           <div className="w-8">
                             {CANCELLABLE_STATUSES.has(job.status as JobStatus) && (
@@ -402,23 +461,13 @@ export function BatchJobs() {
             )
           )}
 
-          {/* Pagination */}
-          {allJobs.length > 0 && (
-            <div className="flex flex-col items-center gap-3 pt-4">
-              <p className="text-sm text-muted-foreground">
-                Showing {allJobs.length} jobs
-              </p>
-              {hasMore && (
-                <Button
-                  variant="outline"
-                  onClick={loadMore}
-                  disabled={isFetching}
-                >
-                  {isFetching ? 'Loading...' : 'Load More'}
-                </Button>
-              )}
-            </div>
-          )}
+          <ListLoadMoreFooter
+            count={visibleJobs.length}
+            itemLabel="jobs"
+            hasNextPage={hasNextPage}
+            isFetchingNextPage={isFetchingNextPage}
+            onLoadMore={loadMore}
+          />
         </CardContent>
       </Card>
 

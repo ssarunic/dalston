@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import type { Task, TaskStatus } from '@/api/types'
@@ -5,10 +6,13 @@ import type { Task, TaskStatus } from '@/api/types'
 interface DAGViewerProps {
   tasks: Task[]
   jobId: string
+  jobStatus?: string
   className?: string
 }
 
-const statusConfig: Record<TaskStatus, { bg: string; text: string; ring?: string }> = {
+type TaskDisplayStatus = TaskStatus | 'blocked'
+
+const statusConfig: Record<TaskDisplayStatus, { bg: string; text: string; ring?: string }> = {
   pending: { bg: 'bg-zinc-500/20', text: 'text-zinc-400' },
   ready: { bg: 'bg-yellow-500/20', text: 'text-yellow-400', ring: 'ring-yellow-500/50' },
   running: { bg: 'bg-blue-500/20', text: 'text-blue-400', ring: 'ring-blue-500/50' },
@@ -16,6 +20,7 @@ const statusConfig: Record<TaskStatus, { bg: string; text: string; ring?: string
   failed: { bg: 'bg-red-500/20', text: 'text-red-400', ring: 'ring-red-500/50' },
   skipped: { bg: 'bg-zinc-500/10', text: 'text-zinc-500' },
   cancelled: { bg: 'bg-orange-500/20', text: 'text-orange-400' },
+  blocked: { bg: 'bg-amber-500/10', text: 'text-amber-300', ring: 'ring-amber-500/40' },
 }
 
 const stageOrder = ['prepare', 'transcribe', 'align', 'diarize', 'pii_detect', 'audio_redact', 'refine', 'merge']
@@ -25,9 +30,42 @@ interface StageGroup {
   tasks: Task[]
 }
 
-function TaskNode({ task, jobId }: { task: Task; jobId: string }) {
-  const config = statusConfig[task.status] || statusConfig.pending
-  const isActive = task.status === 'running' || task.status === 'ready'
+function normalizeStage(stage: string): string {
+  return stage.replace(/_ch\d+$/, '')
+}
+
+function stageOrderIndex(stage: string): number {
+  const idx = stageOrder.indexOf(normalizeStage(stage))
+  return idx === -1 ? 99 : idx
+}
+
+function TaskNode({
+  task,
+  jobId,
+  displayStatus,
+  blockedByStage,
+}: {
+  task: Task
+  jobId: string
+  displayStatus: TaskDisplayStatus
+  blockedByStage?: string | null
+}) {
+  const config = statusConfig[displayStatus] || statusConfig.pending
+  const isActive = displayStatus === 'running' || displayStatus === 'ready'
+  const dotColorClass =
+    displayStatus === 'completed'
+      ? 'bg-green-400'
+      : displayStatus === 'running'
+        ? 'bg-blue-400'
+        : displayStatus === 'ready'
+          ? 'bg-yellow-400'
+          : displayStatus === 'failed'
+            ? 'bg-red-400'
+            : displayStatus === 'blocked'
+              ? 'bg-amber-400'
+              : displayStatus === 'cancelled'
+                ? 'bg-orange-400'
+                : 'bg-zinc-400'
 
   return (
     <Link to={`/jobs/${jobId}/tasks/${task.id}`}>
@@ -47,13 +85,7 @@ function TaskNode({ task, jobId }: { task: Task; jobId: string }) {
           <div
             className={cn(
               'w-2 h-2 rounded-full',
-              task.status === 'completed' && 'bg-green-400',
-              task.status === 'running' && 'bg-blue-400',
-              task.status === 'ready' && 'bg-yellow-400',
-              task.status === 'failed' && 'bg-red-400',
-              task.status === 'pending' && 'bg-zinc-400',
-              task.status === 'skipped' && 'bg-zinc-500',
-              task.status === 'cancelled' && 'bg-orange-400'
+              dotColorClass
             )}
           />
           <span className={cn('text-xs font-semibold uppercase', config.text)}>
@@ -67,11 +99,15 @@ function TaskNode({ task, jobId }: { task: Task; jobId: string }) {
         </span>
 
         {/* Error indicator */}
-        {task.error && (
+        {displayStatus === 'blocked' && blockedByStage ? (
+          <span className="text-[10px] text-amber-300 truncate" title={`Blocked by ${blockedByStage}`}>
+            Blocked by {blockedByStage}
+          </span>
+        ) : task.error ? (
           <span className="text-[10px] text-red-400 truncate" title={task.error}>
             Error
           </span>
-        )}
+        ) : null}
       </div>
     </Link>
   )
@@ -99,12 +135,30 @@ function Arrow() {
   )
 }
 
-function StageColumn({ stageGroup, jobId, isLast }: { stageGroup: StageGroup; jobId: string; isLast: boolean }) {
+function StageColumn({
+  stageGroup,
+  jobId,
+  isLast,
+  getDisplayStatus,
+  blockedByStage,
+}: {
+  stageGroup: StageGroup
+  jobId: string
+  isLast: boolean
+  getDisplayStatus: (task: Task) => TaskDisplayStatus
+  blockedByStage?: string | null
+}) {
   return (
     <div className="flex items-center">
       <div className="flex flex-col gap-2">
         {stageGroup.tasks.map((task) => (
-          <TaskNode key={task.id} task={task} jobId={jobId} />
+          <TaskNode
+            key={task.id}
+            task={task}
+            jobId={jobId}
+            displayStatus={getDisplayStatus(task)}
+            blockedByStage={blockedByStage}
+          />
         ))}
       </div>
       {!isLast && <Arrow />}
@@ -112,7 +166,38 @@ function StageColumn({ stageGroup, jobId, isLast }: { stageGroup: StageGroup; jo
   )
 }
 
-export function DAGViewer({ tasks, jobId, className }: DAGViewerProps) {
+export function DAGViewer({ tasks, jobId, jobStatus, className }: DAGViewerProps) {
+  const [showWhyState, setShowWhyState] = useState(false)
+  const isJobFailed = jobStatus === 'failed'
+  const failedTask = useMemo(() => {
+    if (!isJobFailed) return null
+    const failed = tasks.filter((task) => task.status === 'failed')
+    if (failed.length === 0) return null
+    return failed.sort((a, b) => {
+      const stageDiff = stageOrderIndex(a.stage) - stageOrderIndex(b.stage)
+      if (stageDiff !== 0) return stageDiff
+      const aTime = a.started_at ? new Date(a.started_at).getTime() : 0
+      const bTime = b.started_at ? new Date(b.started_at).getTime() : 0
+      return aTime - bTime
+    })[0]
+  }, [isJobFailed, tasks])
+  const failedStage = failedTask ? normalizeStage(failedTask.stage) : null
+  const failedStageIdx = failedTask ? stageOrderIndex(failedTask.stage) : -1
+  const displayStatusByTaskId = useMemo(() => {
+    const result: Record<string, TaskDisplayStatus> = {}
+    for (const task of tasks) {
+      const isDownstream =
+        failedTask !== null &&
+        stageOrderIndex(task.stage) > failedStageIdx
+      const shouldMarkBlocked =
+        isJobFailed &&
+        isDownstream &&
+        (task.status === 'pending' || task.status === 'ready')
+      result[task.id] = shouldMarkBlocked ? 'blocked' : task.status
+    }
+    return result
+  }, [tasks, isJobFailed, failedTask, failedStageIdx])
+
   // Group tasks by stage
   const stageGroups: StageGroup[] = stageOrder
     .map((stage) => ({
@@ -133,9 +218,10 @@ export function DAGViewer({ tasks, jobId, className }: DAGViewerProps) {
 
   // Calculate overall progress
   const totalTasks = tasks.length
-  const completedTasks = tasks.filter((t) => t.status === 'completed').length
-  const failedTasks = tasks.filter((t) => t.status === 'failed').length
-  const runningTasks = tasks.filter((t) => t.status === 'running').length
+  const completedTasks = tasks.filter((t) => displayStatusByTaskId[t.id] === 'completed').length
+  const failedTasks = tasks.filter((t) => displayStatusByTaskId[t.id] === 'failed').length
+  const blockedTasks = tasks.filter((t) => displayStatusByTaskId[t.id] === 'blocked').length
+  const runningTasks = tasks.filter((t) => displayStatusByTaskId[t.id] === 'running').length
 
   return (
     <div className={cn('space-y-4', className)}>
@@ -163,6 +249,14 @@ export function DAGViewer({ tasks, jobId, className }: DAGViewerProps) {
             </span>
           </div>
         )}
+        {blockedTasks > 0 && (
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-amber-400" />
+            <span className="text-amber-300">
+              {blockedTasks} blocked
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Progress bar */}
@@ -184,9 +278,39 @@ export function DAGViewer({ tasks, jobId, className }: DAGViewerProps) {
             stageGroup={group}
             jobId={jobId}
             isLast={idx === stageGroups.length - 1}
+            getDisplayStatus={(task) => displayStatusByTaskId[task.id]}
+            blockedByStage={failedStage}
           />
         ))}
       </div>
+
+      {isJobFailed && failedTask && (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-amber-300">
+              Job failed at <span className="font-semibold">{failedTask.stage}</span>.
+              Downstream tasks are shown as blocked because they were not executed.
+            </p>
+            <button
+              type="button"
+              className="text-xs text-amber-200 underline"
+              onClick={() => setShowWhyState((prev) => !prev)}
+            >
+              {showWhyState ? 'Hide why this state' : 'Why this state?'}
+            </button>
+          </div>
+          {showWhyState && (
+            <div className="mt-2 flex flex-wrap gap-3 text-xs text-amber-200">
+              <Link to={`/jobs/${jobId}/tasks/${failedTask.id}`} className="underline">
+                View failed task
+              </Link>
+              <Link to="/engines" className="underline">
+                Check engine health
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Legend */}
       <div className="flex flex-wrap gap-4 text-xs text-muted-foreground pt-2 border-t border-border">
@@ -209,6 +333,10 @@ export function DAGViewer({ tasks, jobId, className }: DAGViewerProps) {
         <div className="flex items-center gap-1.5">
           <div className="w-2 h-2 rounded-full bg-red-400" />
           <span>Failed</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-2 rounded-full bg-amber-400" />
+          <span>Blocked</span>
         </div>
         <div className="flex items-center gap-1.5">
           <div className="w-2 h-2 rounded-full bg-zinc-500" />

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   Globe,
@@ -24,6 +24,193 @@ import { BackButton } from '@/components/BackButton'
 import { TranscriptViewer } from '@/components/TranscriptViewer'
 import { apiClient } from '@/api/client'
 import type { RetentionInfo, AuditEvent } from '@/api/types'
+
+interface ParsedJobError {
+  error: string | null
+  message: string | null
+  engine: string | null
+  stage: string | null
+  suggestion: string | null
+  rawJson: string | null
+}
+
+function asString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function parseErrorJsonCandidate(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+function extractFirstJsonObject(raw: string): Record<string, unknown> | null {
+  let depth = 0
+  let startIndex = -1
+  let inString = false
+  let escaped = false
+
+  for (let i = 0; i < raw.length; i += 1) {
+    const char = raw[i]
+
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+      continue
+    }
+
+    if (char === '{') {
+      if (depth === 0) {
+        startIndex = i
+      }
+      depth += 1
+      continue
+    }
+
+    if (char === '}') {
+      if (depth === 0 || startIndex < 0) {
+        continue
+      }
+      depth -= 1
+      if (depth === 0) {
+        const candidate = raw.slice(startIndex, i + 1)
+        const parsed = parseErrorJsonCandidate(candidate)
+        if (parsed) {
+          return parsed
+        }
+        startIndex = -1
+      }
+    }
+  }
+
+  return null
+}
+
+function parseJobError(rawError: string): ParsedJobError {
+  const trimmed = rawError.trim()
+  const taskPrefixMatch = trimmed.match(/^Task\s+([a-zA-Z0-9_.-]+)\s+failed:\s*(.*)$/s)
+  const stageFromPrefix = taskPrefixMatch?.[1] ?? null
+  const suffix = taskPrefixMatch?.[2]?.trim() ?? trimmed
+
+  let parsed =
+    parseErrorJsonCandidate(suffix) ??
+    parseErrorJsonCandidate(trimmed)
+
+  // Some messages may include additional prefix/suffix text around JSON.
+  if (!parsed) {
+    parsed = extractFirstJsonObject(suffix) ?? extractFirstJsonObject(trimmed)
+  }
+
+  if (!parsed) {
+    return {
+      error: null,
+      message: trimmed,
+      engine: null,
+      stage: stageFromPrefix,
+      suggestion: null,
+      rawJson: null,
+    }
+  }
+
+  const details =
+    parsed.details && typeof parsed.details === 'object' && !Array.isArray(parsed.details)
+      ? (parsed.details as Record<string, unknown>)
+      : null
+
+  return {
+    error: asString(parsed.error),
+    message: asString(parsed.message) ?? trimmed,
+    engine:
+      asString(parsed.engine) ??
+      asString(parsed.engine_id) ??
+      asString(parsed.engineId),
+    stage:
+      asString(parsed.stage) ??
+      stageFromPrefix,
+    suggestion:
+      asString(parsed.suggestion) ??
+      asString(details?.suggestion),
+    rawJson: JSON.stringify(parsed, null, 2),
+  }
+}
+
+function ErrorField({
+  label,
+  value,
+}: {
+  label: string
+  value: string | null
+}) {
+  return (
+    <div className="rounded-md border border-red-500/25 bg-red-500/5 p-3">
+      <p className="text-[11px] uppercase tracking-wide text-red-400/70">{label}</p>
+      <p className="mt-1 text-sm text-red-200 break-words">{value ?? '-'}</p>
+    </div>
+  )
+}
+
+function FailureDetailsCard({ error }: { error: string }) {
+  const parsed = useMemo(() => parseJobError(error), [error])
+  const [showRawJson, setShowRawJson] = useState(false)
+
+  return (
+    <Card className="border-red-500/50 bg-red-500/10">
+      <CardContent className="py-4">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="h-5 w-5 text-red-400 mt-0.5" />
+          <div className="min-w-0 flex-1 space-y-3">
+            <p className="font-medium text-red-400">Job Failed</p>
+            <div className="grid gap-2 md:grid-cols-2">
+              <ErrorField label="Error" value={parsed.error} />
+              <ErrorField label="Message" value={parsed.message} />
+              <ErrorField label="Engine" value={parsed.engine} />
+              <ErrorField label="Stage" value={parsed.stage} />
+              <ErrorField label="Suggestion" value={parsed.suggestion} />
+            </div>
+            {parsed.rawJson && (
+              <div className="space-y-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowRawJson((prev) => !prev)}
+                  className="border-red-500/40 bg-transparent text-red-200 hover:bg-red-500/15"
+                >
+                  {showRawJson ? 'Hide raw JSON' : 'View raw JSON'}
+                </Button>
+                {showRawJson && (
+                  <pre className="max-h-80 overflow-auto rounded-md border border-red-500/30 bg-black/30 p-3 text-xs text-red-100 whitespace-pre-wrap break-all">
+                    {parsed.rawJson}
+                  </pre>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
 
 function MetadataCard({
   icon: Icon,
@@ -341,19 +528,9 @@ export function JobDetail() {
         </div>
       </div>
 
-      {/* Error message */}
+      {/* Error details */}
       {job.error && (
-        <Card className="border-red-500/50 bg-red-500/10">
-          <CardContent className="py-4">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-red-400 mt-0.5" />
-              <div>
-                <p className="font-medium text-red-400">Job Failed</p>
-                <p className="text-sm text-red-400/80 mt-1">{job.error}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <FailureDetailsCard error={job.error} />
       )}
 
       {/* Metadata */}
@@ -398,7 +575,7 @@ export function JobDetail() {
         </CardHeader>
         <CardContent>
           {tasksData?.tasks && jobId ? (
-            <DAGViewer tasks={tasksData.tasks} jobId={jobId} />
+            <DAGViewer tasks={tasksData.tasks} jobId={jobId} jobStatus={job.status} />
           ) : (
             <p className="text-sm text-muted-foreground">
               {job.current_stage ? `Current stage: ${job.current_stage}` : 'Loading pipeline...'}

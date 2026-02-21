@@ -83,6 +83,7 @@ export interface JobListParams {
   limit?: number
   cursor?: string
   status?: string
+  sort?: 'created_desc' | 'created_asc'
 }
 
 export const apiClient = {
@@ -101,6 +102,7 @@ export const apiClient = {
     if (params.limit) searchParams.set('limit', String(params.limit))
     if (params.cursor) searchParams.set('cursor', params.cursor)
     if (params.status) searchParams.set('status', params.status)
+    if (params.sort) searchParams.set('sort', params.sort)
     return currentClient.get('api/console/jobs', { searchParams }).json<ConsoleJobListResponse>()
   },
 
@@ -205,10 +207,16 @@ export const apiClient = {
 
   getWebhookDeliveries: (
     endpointId: string,
-    params: { status?: string; limit?: number; cursor?: string } = {}
+    params: {
+      status?: string
+      sort?: 'created_desc' | 'created_asc'
+      limit?: number
+      cursor?: string
+    } = {}
   ) => {
     const searchParams = new URLSearchParams()
     if (params.status) searchParams.set('status', params.status)
+    if (params.sort) searchParams.set('sort', params.sort)
     if (params.limit) searchParams.set('limit', String(params.limit))
     if (params.cursor) searchParams.set('cursor', params.cursor)
     return currentClient
@@ -225,6 +233,7 @@ export const apiClient = {
     if (params.status) searchParams.set('status', params.status)
     if (params.since) searchParams.set('since', params.since)
     if (params.until) searchParams.set('until', params.until)
+    if (params.sort) searchParams.set('sort', params.sort)
     if (params.limit) searchParams.set('limit', String(params.limit))
     if (params.cursor) searchParams.set('cursor', params.cursor)
     return currentClient.get('v1/realtime/sessions', { searchParams }).json<RealtimeSessionListResponse>()
@@ -262,6 +271,7 @@ export const apiClient = {
     if (params.actor_id) searchParams.set('actor_id', params.actor_id)
     if (params.since) searchParams.set('start_time', params.since)
     if (params.until) searchParams.set('end_time', params.until)
+    if (params.sort) searchParams.set('sort', params.sort)
     if (params.limit) searchParams.set('limit', String(params.limit))
     if (params.cursor) searchParams.set('cursor', params.cursor)
     return currentClient.get('v1/audit', { searchParams }).json<AuditListResponse>()

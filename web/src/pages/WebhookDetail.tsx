@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   Webhook,
@@ -22,12 +22,20 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useWebhooks, useWebhookDeliveries, useRetryDelivery } from '@/hooks/useWebhooks'
-import { useTableState } from '@/hooks/useTableState'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
+import { useSharedTableState } from '@/hooks/useSharedTableState'
+import { ListLoadMoreFooter } from '@/components/ListLoadMoreFooter'
 import { BackButton } from '@/components/BackButton'
-import type { WebhookDelivery, DeliveryListResponse } from '@/api/types'
+import type { WebhookDelivery } from '@/api/types'
 
-const PAGE_SIZE = 20
+const DEFAULT_PAGE_SIZE = 20
+const PAGE_SIZE_OPTIONS = [20, 50, 100] as const
+const STATUS_OPTIONS = ['', 'pending', 'success', 'failed'] as const
+const SORT_OPTION_VALUES = ['created_desc', 'created_asc'] as const
+const SORT_OPTIONS = [
+  { label: 'Newest first', value: 'created_desc' },
+  { label: 'Oldest first', value: 'created_asc' },
+] as const
 
 const STATUS_CONFIG: Record<
   string,
@@ -74,52 +82,63 @@ export function WebhookDetail() {
   const isMobile = useMediaQuery('(max-width: 767px)')
   const { endpointId } = useParams<{ endpointId: string }>()
   const {
-    cursor,
-    items: allDeliveries,
-    filters,
-    hasMore,
-    setFilter,
-    loadMore,
-    processData,
-    clearItems,
-  } = useTableState<WebhookDelivery, DeliveryListResponse>({
-    defaultFilters: { status: '' },
-    dataKey: 'deliveries',
-    getItems: (data) => data.deliveries,
-    getCursor: (data) => data.cursor,
-    getHasMore: (data) => data.has_more,
+    status,
+    sort,
+    limit,
+    setStatus,
+    setSort,
+    setLimit,
+  } = useSharedTableState({
+    defaultStatus: '',
+    statusOptions: STATUS_OPTIONS,
+    defaultSort: 'created_desc',
+    sortOptions: SORT_OPTION_VALUES,
+    defaultLimit: DEFAULT_PAGE_SIZE,
+    limitOptions: PAGE_SIZE_OPTIONS,
   })
-
-  const statusFilter = filters.status || undefined
+  const statusFilter = status || undefined
 
   const { data: webhooksData, isLoading: webhooksLoading } = useWebhooks()
   const {
     data: deliveriesData,
     isLoading: deliveriesLoading,
     isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
     error: deliveriesError,
     refetch,
   } = useWebhookDeliveries(endpointId!, {
     status: statusFilter,
-    limit: PAGE_SIZE,
-    cursor,
+    sort,
+    limit,
   })
+  const allDeliveries = useMemo(
+    () => deliveriesData?.pages.flatMap((page) => page.deliveries) ?? [],
+    [deliveriesData]
+  )
+  const visibleDeliveries = allDeliveries
   const retryDelivery = useRetryDelivery()
 
-  // Process data when it changes
-  useEffect(() => {
-    if (deliveriesData) {
-      processData(deliveriesData)
-    }
-  }, [deliveriesData, processData])
+  const handleFilterChange = (value: string) => {
+    setStatus(value)
+  }
 
-  const handleFilterChange = (value: string | undefined) => {
-    setFilter('status', value || '')
+  const handleSortChange = (value: string) => {
+    setSort(value)
+  }
+
+  const handleLimitChange = (value: string) => {
+    setLimit(Number(value))
   }
 
   const handleRefresh = () => {
-    clearItems()
-    refetch()
+    void refetch()
+  }
+
+  const loadMore = () => {
+    if (!hasNextPage || isFetchingNextPage) return
+    void fetchNextPage()
   }
 
   // Find the webhook endpoint from the list
@@ -132,9 +151,6 @@ export function WebhookDetail() {
         endpointId,
         deliveryId: delivery.id,
       })
-      // Reset and refetch after retry
-      clearItems()
-      refetch()
     } catch (err) {
       console.error('Failed to retry delivery:', err)
     }
@@ -243,14 +259,36 @@ export function WebhookDetail() {
           <CardTitle>Delivery History</CardTitle>
           <div className="flex items-center gap-2">
             <select
-              value={statusFilter || ''}
-              onChange={(e) => handleFilterChange(e.target.value || undefined)}
+              value={status}
+              onChange={(e) => handleFilterChange(e.target.value)}
               className="px-3 py-1.5 text-sm rounded-md border border-input bg-background"
             >
               <option value="">All statuses</option>
               <option value="pending">Pending</option>
               <option value="success">Success</option>
               <option value="failed">Failed</option>
+            </select>
+            <select
+              value={sort}
+              onChange={(e) => handleSortChange(e.target.value)}
+              className="px-3 py-1.5 text-sm rounded-md border border-input bg-background"
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={String(limit)}
+              onChange={(e) => handleLimitChange(e.target.value)}
+              className="px-3 py-1.5 text-sm rounded-md border border-input bg-background"
+            >
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
             </select>
             <Button
               variant="outline"
@@ -263,7 +301,7 @@ export function WebhookDetail() {
           </div>
         </CardHeader>
         <CardContent>
-          {deliveriesLoading && cursor === undefined ? (
+          {deliveriesLoading && allDeliveries.length === 0 ? (
             <div className="space-y-3">
               {[...Array(5)].map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
@@ -274,7 +312,7 @@ export function WebhookDetail() {
               <AlertCircle className="h-4 w-4" />
               <span>Failed to load deliveries</span>
             </div>
-          ) : allDeliveries.length === 0 ? (
+          ) : visibleDeliveries.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Clock className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No deliveries yet</p>
@@ -286,7 +324,7 @@ export function WebhookDetail() {
             <>
               {isMobile ? (
                 <div className="space-y-3">
-                  {allDeliveries.map((delivery) => (
+                  {visibleDeliveries.map((delivery) => (
                     <div key={delivery.id} className="rounded-lg border border-border p-3">
                       <div className="flex items-start justify-between gap-2">
                         <Badge variant="outline" className="text-xs">
@@ -355,9 +393,9 @@ export function WebhookDetail() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {allDeliveries.map((delivery) => (
-                      <TableRow key={delivery.id}>
-                        <TableCell className="sticky left-0 z-10 bg-card">
+                    {visibleDeliveries.map((delivery) => (
+                      <TableRow key={delivery.id} className="group hover:bg-accent/50">
+                        <TableCell className="sticky left-0 z-10 bg-card group-hover:bg-accent/50">
                           <Badge variant="outline" className="text-xs">
                             {delivery.event_type}
                           </Badge>
@@ -403,7 +441,7 @@ export function WebhookDetail() {
                         <TableCell className="text-muted-foreground text-sm">
                           {formatTimeAgo(delivery.created_at)}
                         </TableCell>
-                        <TableCell className="text-right sticky right-0 z-10 bg-card">
+                        <TableCell className="text-right sticky right-0 z-10 bg-card group-hover:bg-accent/50">
                           {delivery.status === 'failed' && (
                             <Button
                               variant="ghost"
@@ -422,23 +460,14 @@ export function WebhookDetail() {
                 </Table>
               )}
 
-              {/* Pagination */}
-              {allDeliveries.length > 0 && (
-                <div className="flex flex-col items-center gap-3 pt-4 mt-4 border-t">
-                  <p className="text-sm text-muted-foreground">
-                    Showing {allDeliveries.length} deliveries
-                  </p>
-                  {hasMore && (
-                    <Button
-                      variant="outline"
-                      onClick={loadMore}
-                      disabled={isFetching}
-                    >
-                      {isFetching ? 'Loading...' : 'Load More'}
-                    </Button>
-                  )}
-                </div>
-              )}
+              <ListLoadMoreFooter
+                count={visibleDeliveries.length}
+                itemLabel="deliveries"
+                hasNextPage={hasNextPage}
+                isFetchingNextPage={isFetchingNextPage}
+                onLoadMore={loadMore}
+                className="mt-4 border-t"
+              />
             </>
           )}
         </CardContent>

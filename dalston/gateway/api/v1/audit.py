@@ -5,7 +5,7 @@ GET /v1/audit/resources/{type}/{id}     Get audit trail for a resource
 """
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -95,6 +95,10 @@ async def list_audit_events(
     cursor: Annotated[
         str | None, Query(description="Cursor for pagination (last event ID)")
     ] = None,
+    sort: Annotated[
+        Literal["timestamp_desc", "timestamp_asc"],
+        Query(description="Sort order by timestamp"),
+    ] = "timestamp_desc",
     db: AsyncSession = Depends(get_db),
 ) -> AuditListResponse:
     """List audit events with filtering and cursor-based pagination.
@@ -120,16 +124,23 @@ async def list_audit_events(
     if end_time:
         query = query.where(AuditLogModel.timestamp < end_time)
 
-    # Apply cursor filter (events older than cursor)
+    # Apply cursor filter
     if cursor:
         try:
             cursor_id = int(cursor)
-            query = query.where(AuditLogModel.id < cursor_id)
+            if sort == "timestamp_asc":
+                query = query.where(AuditLogModel.id > cursor_id)
+            else:
+                query = query.where(AuditLogModel.id < cursor_id)
         except ValueError:
             pass  # Invalid cursor, ignore
 
     # Fetch limit + 1 to determine has_more
-    query = query.order_by(AuditLogModel.id.desc()).limit(limit + 1)
+    if sort == "timestamp_asc":
+        query = query.order_by(AuditLogModel.id.asc())
+    else:
+        query = query.order_by(AuditLogModel.id.desc())
+    query = query.limit(limit + 1)
     result = await db.execute(query)
     events = list(result.scalars().all())
 

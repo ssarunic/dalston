@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
 import structlog
@@ -292,6 +292,7 @@ class RealtimeSessionService:
         until: datetime | None = None,
         limit: int = 50,
         cursor: str | None = None,
+        sort: Literal["started_desc", "started_asc"] = "started_desc",
     ) -> tuple[list[RealtimeSessionModel], bool]:
         """List sessions for a tenant with optional filters and cursor pagination.
 
@@ -302,6 +303,7 @@ class RealtimeSessionService:
             until: Filter sessions started before this time
             limit: Max results
             cursor: Pagination cursor (format: started_at_iso:session_id)
+            sort: Sort order for started_at
 
         Returns:
             Tuple of (sessions, has_more)
@@ -318,25 +320,42 @@ class RealtimeSessionService:
         if until:
             stmt = stmt.where(RealtimeSessionModel.started_at <= until)
 
-        # Apply cursor filter (sessions older than cursor)
+        # Apply cursor filter
         if cursor:
             decoded = self._decode_session_cursor(cursor)
             if decoded:
                 cursor_started_at, cursor_id = decoded
-                # Get sessions started before cursor OR same time but with smaller ID
-                stmt = stmt.where(
-                    (RealtimeSessionModel.started_at < cursor_started_at)
-                    | (
-                        (RealtimeSessionModel.started_at == cursor_started_at)
-                        & (RealtimeSessionModel.id < cursor_id)
+                if sort == "started_asc":
+                    # Get sessions started after cursor OR same time but with larger ID
+                    stmt = stmt.where(
+                        (RealtimeSessionModel.started_at > cursor_started_at)
+                        | (
+                            (RealtimeSessionModel.started_at == cursor_started_at)
+                            & (RealtimeSessionModel.id > cursor_id)
+                        )
                     )
-                )
+                else:
+                    # Get sessions started before cursor OR same time but with smaller ID
+                    stmt = stmt.where(
+                        (RealtimeSessionModel.started_at < cursor_started_at)
+                        | (
+                            (RealtimeSessionModel.started_at == cursor_started_at)
+                            & (RealtimeSessionModel.id < cursor_id)
+                        )
+                    )
 
-        # Fetch limit + 1 to determine has_more, order by started_at descending
-        stmt = stmt.order_by(
-            RealtimeSessionModel.started_at.desc(),
-            RealtimeSessionModel.id.desc(),
-        ).limit(limit + 1)
+        # Fetch limit + 1 to determine has_more
+        if sort == "started_asc":
+            stmt = stmt.order_by(
+                RealtimeSessionModel.started_at.asc(),
+                RealtimeSessionModel.id.asc(),
+            )
+        else:
+            stmt = stmt.order_by(
+                RealtimeSessionModel.started_at.desc(),
+                RealtimeSessionModel.id.desc(),
+            )
+        stmt = stmt.limit(limit + 1)
 
         result = await self.db.execute(stmt)
         sessions = list(result.scalars().all())

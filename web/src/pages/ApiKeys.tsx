@@ -1,10 +1,17 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Key, Plus, Trash2, AlertCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog } from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Table,
   TableBody,
@@ -14,10 +21,25 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
+import { useSharedTableState } from '@/hooks/useSharedTableState'
 import { useApiKeys, useRevokeApiKey } from '@/hooks/useApiKeys'
 import { CreateKeyDialog } from '@/components/CreateKeyDialog'
 import { KeyCreatedModal } from '@/components/KeyCreatedModal'
 import type { APIKey, APIKeyCreatedResponse } from '@/api/types'
+
+const DEFAULT_LIMIT = 20
+const LIMIT_OPTIONS = [20, 50, 100] as const
+const STATUS_OPTIONS = [
+  { label: 'Active', value: 'active' },
+  { label: 'All', value: 'all' },
+  { label: 'Revoked', value: 'revoked' },
+] as const
+const SORT_OPTIONS = [
+  { label: 'Newest first', value: 'created_desc' },
+  { label: 'Oldest first', value: 'created_asc' },
+  { label: 'Last used first', value: 'last_used_desc' },
+  { label: 'Least recently used', value: 'last_used_asc' },
+] as const
 
 const SCOPE_COLORS: Record<string, string> = {
   admin: 'bg-red-500/10 text-red-500 border-red-500/20',
@@ -54,13 +76,27 @@ function formatTimeAgo(dateStr: string): string {
 
 export function ApiKeys() {
   const isMobile = useMediaQuery('(max-width: 767px)')
-  const [showRevoked, setShowRevoked] = useState(false)
+  const {
+    status,
+    sort,
+    limit,
+    setStatus,
+    setSort,
+    setLimit,
+  } = useSharedTableState({
+    defaultStatus: 'active',
+    statusOptions: STATUS_OPTIONS.map((option) => option.value),
+    defaultSort: 'created_desc',
+    sortOptions: SORT_OPTIONS.map((option) => option.value),
+    defaultLimit: DEFAULT_LIMIT,
+    limitOptions: LIMIT_OPTIONS,
+  })
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [createdKey, setCreatedKey] = useState<APIKeyCreatedResponse | null>(null)
   const [revokeConfirm, setRevokeConfirm] = useState<APIKey | null>(null)
   const [revokeError, setRevokeError] = useState<string | null>(null)
 
-  const { data, isLoading, error } = useApiKeys(showRevoked)
+  const { data, isLoading, error } = useApiKeys(status !== 'active')
   const revokeApiKey = useRevokeApiKey()
 
   const handleKeyCreated = (key: APIKeyCreatedResponse) => {
@@ -86,7 +122,26 @@ export function ApiKeys() {
     }
   }
 
-  const keys = data?.keys ?? []
+  const keys = useMemo(() => data?.keys ?? [], [data])
+  const filteredKeys = useMemo(() => {
+    if (status === 'revoked') return keys.filter((key) => key.is_revoked)
+    if (status === 'active') return keys.filter((key) => !key.is_revoked)
+    return keys
+  }, [keys, status])
+  const visibleKeys = useMemo(() => {
+    const sorted = [...filteredKeys]
+    sorted.sort((a, b) => {
+      if (sort.startsWith('last_used')) {
+        const left = a.last_used_at ? new Date(a.last_used_at).getTime() : 0
+        const right = b.last_used_at ? new Date(b.last_used_at).getTime() : 0
+        return sort === 'last_used_asc' ? left - right : right - left
+      }
+      const left = new Date(a.created_at).getTime()
+      const right = new Date(b.created_at).getTime()
+      return sort === 'created_asc' ? left - right : right - left
+    })
+    return sorted.slice(0, limit)
+  }, [filteredKeys, sort, limit])
 
   return (
     <div className="space-y-6">
@@ -107,15 +162,44 @@ export function ApiKeys() {
             <Key className="h-5 w-5" />
             API Keys
           </CardTitle>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={showRevoked}
-              onChange={(e) => setShowRevoked(e.target.checked)}
-              className="rounded border-input"
-            />
-            Show revoked
-          </label>
+          <div className="flex items-center gap-2">
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger className="w-[130px]">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                {STATUS_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={sort} onValueChange={setSort}>
+              <SelectTrigger className="w-[170px]">
+                <SelectValue placeholder="Sort" />
+              </SelectTrigger>
+              <SelectContent>
+                {SORT_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={String(limit)} onValueChange={(value) => setLimit(Number(value))}>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue placeholder="Rows" />
+              </SelectTrigger>
+              <SelectContent>
+                {LIMIT_OPTIONS.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -129,16 +213,16 @@ export function ApiKeys() {
               <AlertCircle className="h-4 w-4" />
               <span>Failed to load API keys</span>
             </div>
-          ) : keys.length === 0 ? (
+          ) : visibleKeys.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Key className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No API keys found</p>
-              <p className="text-sm mt-1">Create a key to get started</p>
+              <p className="text-sm mt-1">Try changing filters or create a key</p>
             </div>
           ) : (
             isMobile ? (
               <div className="space-y-3">
-                {keys.map((key) => (
+                {visibleKeys.map((key) => (
                   <div
                     key={key.id}
                     className={`rounded-lg border border-border p-3 ${key.is_revoked ? 'opacity-60' : ''}`}
@@ -205,7 +289,7 @@ export function ApiKeys() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {keys.map((key) => (
+                  {visibleKeys.map((key) => (
                     <TableRow
                       key={key.id}
                       className={key.is_revoked ? 'opacity-50' : undefined}
@@ -254,6 +338,11 @@ export function ApiKeys() {
                 </TableBody>
               </Table>
             )
+          )}
+          {filteredKeys.length > 0 && (
+            <p className="pt-4 text-sm text-muted-foreground text-center">
+              Showing {visibleKeys.length} of {filteredKeys.length} keys
+            </p>
           )}
         </CardContent>
       </Card>
