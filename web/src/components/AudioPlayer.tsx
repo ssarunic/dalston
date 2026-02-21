@@ -62,6 +62,7 @@ export function AudioPlayer({
 }: AudioPlayerProps) {
   const waveformRef = useRef<HTMLDivElement>(null)
   const wavesurferRef = useRef<WaveSurfer | null>(null)
+  const isPlayingRef = useRef(false)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
@@ -133,15 +134,25 @@ export function AudioPlayer({
       onTimeUpdate?.(time)
     })
 
-    ws.on('play', () => setIsPlaying(true))
-    ws.on('pause', () => setIsPlaying(false))
-    ws.on('finish', () => setIsPlaying(false))
+    ws.on('play', () => {
+      isPlayingRef.current = true
+      setIsPlaying(true)
+    })
+    ws.on('pause', () => {
+      isPlayingRef.current = false
+      setIsPlaying(false)
+    })
+    ws.on('finish', () => {
+      isPlayingRef.current = false
+      setIsPlaying(false)
+    })
 
     wavesurferRef.current = ws
 
     return () => {
       ws.destroy()
       wavesurferRef.current = null
+      isPlayingRef.current = false
       setIsReady(false)
       restoredRef.current = false
     }
@@ -212,31 +223,34 @@ export function AudioPlayer({
   // Track pending seek request (for when player isn't ready yet)
   const pendingSeekRef = useRef<SeekRequest | null>(null)
 
+  const applySeekRequest = useCallback(
+    (request: SeekRequest) => {
+      const ws = wavesurferRef.current
+      if (!ws || !isReady || duration <= 0) {
+        pendingSeekRef.current = request
+        return
+      }
+
+      ws.seekTo(request.time / duration)
+      if (!isPlayingRef.current) {
+        void ws.play()
+      }
+      pendingSeekRef.current = null
+    },
+    [isReady, duration]
+  )
+
   // Handle external seek requests
   useEffect(() => {
     if (seekTo === undefined) return
-
-    if (wavesurferRef.current && isReady && duration > 0) {
-      // Player is ready, seek immediately
-      wavesurferRef.current.seekTo(seekTo.time / duration)
-      if (!isPlaying) {
-        wavesurferRef.current.play()
-      }
-      pendingSeekRef.current = null
-    } else {
-      // Player not ready, store for later
-      pendingSeekRef.current = seekTo
-    }
-  }, [seekTo, isReady, duration, isPlaying])
+    applySeekRequest(seekTo)
+  }, [seekTo, applySeekRequest])
 
   // Apply pending seek when player becomes ready
   useEffect(() => {
-    if (isReady && duration > 0 && pendingSeekRef.current && wavesurferRef.current) {
-      wavesurferRef.current.seekTo(pendingSeekRef.current.time / duration)
-      wavesurferRef.current.play()
-      pendingSeekRef.current = null
-    }
-  }, [isReady, duration])
+    if (!isReady || duration <= 0 || !pendingSeekRef.current) return
+    applySeekRequest(pendingSeekRef.current)
+  }, [isReady, duration, applySeekRequest])
 
   // Keyboard shortcuts
   useEffect(() => {

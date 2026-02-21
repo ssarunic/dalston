@@ -47,7 +47,7 @@ Legend:
 
 | Question | Decision | Rationale |
 |----------|----------|-----------|
-| Waveform visualization? | No (v1) | Adds ~200KB dependency (wavesurfer.js), complexity. Value is in transcript sync. Easy to add later. |
+| Waveform visualization? | Yes (implemented) | Added via wavesurfer.js to improve scrubbing/review; accepted dependency cost for better UX. |
 | Player position? | Sticky top of transcript card | Contextually close to content. Always visible while scrolling. |
 | Both batch & realtime? | Yes | TranscriptViewer already serves both. Pass optional `audioSrc` prop. |
 | Playback speed? | Yes | Essential for reviewing transcripts: 0.5×, 0.75×, 1×, 1.25×, 1.5×, 2× |

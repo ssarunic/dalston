@@ -60,7 +60,8 @@ export function RealtimeSessionDetail() {
 
   // Derive audio URL - only use if fetched for current session and conditions still met
   const audioUrl =
-    audioUrlData?.forSessionId === sessionId &&
+    audioUrlData &&
+    audioUrlData.forSessionId === sessionId &&
     session?.store_audio &&
     session?.audio_uri
       ? audioUrlData.url
