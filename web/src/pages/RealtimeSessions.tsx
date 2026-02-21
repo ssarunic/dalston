@@ -1,8 +1,7 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useMemo, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Radio, MessageSquare, Mic, Trash2, RefreshCw, Filter, X } from 'lucide-react'
 import { apiClient } from '@/api/client'
-import { useTableState } from '@/hooks/useTableState'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -27,7 +26,7 @@ import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useRealtimeStatus } from '@/hooks/useRealtimeStatus'
 import { useRealtimeSessions } from '@/hooks/useRealtimeSessions'
-import type { RealtimeSessionSummary, RealtimeSessionListResponse } from '@/api/types'
+import type { RealtimeSessionSummary } from '@/api/types'
 
 function StatusDot({ status }: { status: string }) {
   const color =
@@ -58,24 +57,8 @@ const PAGE_SIZE = 50
 export function RealtimeSessions() {
   const isMobile = useMediaQuery('(max-width: 767px)')
   const navigate = useNavigate()
-  const {
-    cursor,
-    items: allSessions,
-    filters,
-    hasMore,
-    setFilter,
-    loadMore,
-    processData,
-    clearItems,
-  } = useTableState<RealtimeSessionSummary, RealtimeSessionListResponse>({
-    defaultFilters: { status: 'all' },
-    dataKey: 'sessions',
-    getItems: (data) => data.sessions,
-    getCursor: (data) => data.cursor,
-    getHasMore: (data) => data.has_more,
-  })
-
-  const statusFilter = filters.status || 'all'
+  const [searchParams, setSearchParams] = useSearchParams()
+  const statusFilter = searchParams.get('status') || 'all'
   const [deleteTarget, setDeleteTarget] = useState<{ id: string } | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -83,25 +66,36 @@ export function RealtimeSessions() {
 
   const hasActiveFilters = statusFilter !== 'all'
   const { data: statusData, isLoading: statusLoading, error: statusError } = useRealtimeStatus()
-  const { data: sessionsData, isLoading: sessionsLoading, isFetching, refetch } = useRealtimeSessions({
+  const {
+    data: sessionsData,
+    isLoading: sessionsLoading,
+    isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    refetch,
+  } = useRealtimeSessions({
     status: statusFilter === 'all' ? undefined : statusFilter,
     limit: PAGE_SIZE,
-    cursor,
   })
-
-  // Process data when it changes
-  useEffect(() => {
-    if (sessionsData) {
-      processData(sessionsData)
-    }
-  }, [sessionsData, processData])
+  const allSessions = useMemo(
+    () => sessionsData?.pages.flatMap((page) => page.sessions as RealtimeSessionSummary[]) ?? [],
+    [sessionsData]
+  )
 
   const handleFilterChange = (value: string) => {
-    setFilter('status', value)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (value === 'all') {
+        next.delete('status')
+      } else {
+        next.set('status', value)
+      }
+      return next
+    }, { replace: true })
   }
 
   const handleRefresh = async () => {
-    clearItems()
     await refetch()
   }
 
@@ -112,9 +106,7 @@ export function RealtimeSessions() {
     try {
       await apiClient.deleteRealtimeSession(deleteTarget.id)
       setDeleteTarget(null)
-      // Reset and refetch to get fresh data
-      clearItems()
-      refetch()
+      await refetch()
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to delete session'
@@ -295,7 +287,7 @@ export function RealtimeSessions() {
           <CardTitle>Session History</CardTitle>
         </CardHeader>
         <CardContent>
-          {(sessionsLoading || (isFetching && allSessions.length === 0)) && cursor === undefined ? (
+          {(sessionsLoading || (isFetching && allSessions.length === 0)) ? (
             <div className="space-y-2">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
@@ -465,13 +457,13 @@ export function RealtimeSessions() {
               <p className="text-sm text-muted-foreground">
                 Showing {allSessions.length} sessions
               </p>
-              {hasMore && (
+              {hasNextPage && (
                 <Button
                   variant="outline"
-                  onClick={loadMore}
-                  disabled={isFetching}
+                  onClick={() => fetchNextPage()}
+                  disabled={isFetchingNextPage}
                 >
-                  {isFetching ? 'Loading...' : 'Load More'}
+                  {isFetchingNextPage ? 'Loading...' : 'Load More'}
                 </Button>
               )}
             </div>

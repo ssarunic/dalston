@@ -1,12 +1,11 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useMemo, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Trash2, X, RefreshCw, Filter } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useJobs } from '@/hooks/useJobs'
-import { useTableState } from '@/hooks/useTableState'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { apiClient } from '@/api/client'
-import type { JobStatus, ConsoleJobSummary, ConsoleJobListResponse } from '@/api/types'
+import type { JobStatus } from '@/api/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -63,24 +62,8 @@ function formatDuration(seconds: number | undefined): string {
 
 export function BatchJobs() {
   const isMobile = useMediaQuery('(max-width: 767px)')
-  const {
-    cursor,
-    items: allJobs,
-    filters,
-    hasMore,
-    setFilter,
-    loadMore,
-    processData,
-    clearItems,
-  } = useTableState<ConsoleJobSummary, ConsoleJobListResponse>({
-    defaultFilters: { status: '' },
-    dataKey: 'jobs',
-    getItems: (data) => data.jobs,
-    getCursor: (data) => data.cursor,
-    getHasMore: (data) => data.has_more,
-  })
-
-  const statusFilter = filters.status
+  const [searchParams, setSearchParams] = useSearchParams()
+  const statusFilter = searchParams.get('status') || ''
   const [deleteTarget, setDeleteTarget] = useState<{ id: string } | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -94,26 +77,40 @@ export function BatchJobs() {
 
   const hasActiveFilters = !!statusFilter
 
-  const { data, isLoading, isFetching, error, refetch } = useJobs({
+  const {
+    data,
+    isLoading,
+    isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    error,
+    refetch,
+  } = useJobs({
     limit: PAGE_SIZE,
-    cursor,
     status: statusFilter || undefined,
   })
-
-  // Process data when it changes
-  useEffect(() => {
-    if (data) {
-      processData(data)
-    }
-  }, [data, processData])
+  const allJobs = useMemo(() => data?.pages.flatMap((page) => page.jobs) ?? [], [data])
 
   const handleFilterChange = (value: string) => {
-    setFilter('status', value)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (value) {
+        next.set('status', value)
+      } else {
+        next.delete('status')
+      }
+      return next
+    }, { replace: true })
   }
 
   const handleRefresh = async () => {
-    clearItems()
     await refetch()
+  }
+
+  const loadMore = () => {
+    if (!hasNextPage || isFetchingNextPage) return
+    void fetchNextPage()
   }
 
   async function handleDelete() {
@@ -123,9 +120,7 @@ export function BatchJobs() {
     try {
       await apiClient.deleteJob(deleteTarget.id)
       setDeleteTarget(null)
-      // Reset and refetch to get fresh data
-      clearItems()
-      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] })
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to delete job'
@@ -143,9 +138,7 @@ export function BatchJobs() {
       const result = await apiClient.cancelJob(cancelTarget.id)
       setCancelTarget(null)
       setCancelSuccess(result.message)
-      // Reset and refetch to get fresh data
-      clearItems()
-      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] })
       // Clear success message after 3 seconds
       setTimeout(() => setCancelSuccess(null), 3000)
     } catch (err) {
@@ -241,7 +234,7 @@ export function BatchJobs() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {(isLoading || (isFetching && allJobs.length === 0)) && cursor === undefined ? (
+          {isLoading && allJobs.length === 0 ? (
             <div className="space-y-3">
               {[...Array(5)].map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
@@ -338,10 +331,10 @@ export function BatchJobs() {
                   {allJobs.map((job) => (
                     <TableRow
                       key={job.id}
-                      className="cursor-pointer hover:bg-accent/50"
+                      className="group cursor-pointer hover:bg-accent/50"
                       onClick={() => navigate(`/jobs/${job.id}`)}
                     >
-                      <TableCell className="font-mono text-sm sticky left-0 z-10 bg-card">
+                      <TableCell className="font-mono text-sm sticky left-0 z-10 bg-card group-hover:bg-accent/50">
                         {job.id.slice(0, 12)}...
                       </TableCell>
                       <TableCell>
@@ -359,7 +352,7 @@ export function BatchJobs() {
                       <TableCell className="text-muted-foreground text-sm">
                         {formatDate(job.created_at)}
                       </TableCell>
-                      <TableCell className="text-right sticky right-0 z-10 bg-card">
+                      <TableCell className="text-right sticky right-0 z-10 bg-card group-hover:bg-accent/50">
                         <div className="flex items-center justify-end gap-1">
                           <div className="w-8">
                             {CANCELLABLE_STATUSES.has(job.status as JobStatus) && (
@@ -408,13 +401,13 @@ export function BatchJobs() {
               <p className="text-sm text-muted-foreground">
                 Showing {allJobs.length} jobs
               </p>
-              {hasMore && (
+              {hasNextPage && (
                 <Button
                   variant="outline"
                   onClick={loadMore}
-                  disabled={isFetching}
+                  disabled={isFetchingNextPage}
                 >
-                  {isFetching ? 'Loading...' : 'Load More'}
+                  {isFetchingNextPage ? 'Loading...' : 'Load More'}
                 </Button>
               )}
             </div>

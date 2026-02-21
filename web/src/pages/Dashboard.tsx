@@ -110,7 +110,7 @@ export function Dashboard() {
 
   // Handle error state - show basic dashboard with error indicator
   const isHealthy = !error && health?.status === 'healthy'
-  const recentSessions = sessionsData?.sessions ?? []
+  const recentSessions = sessionsData?.pages?.[0]?.sessions ?? []
 
   return (
     <div className="space-y-6">

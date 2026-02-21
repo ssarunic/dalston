@@ -1,6 +1,9 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import type { CreateWebhookRequest, UpdateWebhookRequest } from '@/api/types'
+
+type WebhookDeliveryParams = { status?: string; limit?: number; cursor?: string }
+type WebhookDeliveryFilters = Omit<WebhookDeliveryParams, 'cursor'>
 
 export function useWebhooks(isActive?: boolean) {
   return useQuery({
@@ -56,11 +59,17 @@ export function useRotateWebhookSecret() {
 
 export function useWebhookDeliveries(
   endpointId: string,
-  params: { status?: string; limit?: number; cursor?: string } = {}
+  params: WebhookDeliveryFilters = {}
 ) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: ['webhookDeliveries', endpointId, params],
-    queryFn: () => apiClient.getWebhookDeliveries(endpointId, params),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      apiClient.getWebhookDeliveries(endpointId, {
+        ...params,
+        cursor: typeof pageParam === 'string' ? pageParam : undefined,
+      }),
+    getNextPageParam: (lastPage) => (lastPage.has_more ? (lastPage.cursor ?? undefined) : undefined),
     enabled: !!endpointId,
   })
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   ScrollText,
@@ -30,7 +30,7 @@ import {
 } from '@/components/ui/select'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useAuditEvents } from '@/hooks/useAuditLog'
-import type { AuditEvent, AuditListParams, AuditListResponse } from '@/api/types'
+import type { AuditEvent, AuditListParams } from '@/api/types'
 
 const RESOURCE_TYPES = [
   { value: '', label: 'All Resources' },
@@ -146,18 +146,11 @@ export function AuditLog() {
   const isMobile = useMediaQuery('(max-width: 767px)')
   const [searchParams, setSearchParams] = useSearchParams()
   const [showFilters, setShowFilters] = useState(false)
-  const [allEvents, setAllEvents] = useState<AuditEvent[]>([])
-  const [hasMore, setHasMore] = useState(false)
   const sinceRef = useRef<HTMLInputElement>(null)
   const untilRef = useRef<HTMLInputElement>(null)
-  const lastCursorRef = useRef<string | undefined>(undefined)
-  const lastDataRef = useRef<AuditListResponse | null>(null)
 
-  // Read filters from URL params
-  const cursor = searchParams.get('cursor') || undefined
   const filters: AuditListParams = {
     limit: 50,
-    cursor,
     resource_type: searchParams.get('resource_type') || undefined,
     action: searchParams.get('action') || undefined,
     actor_id: searchParams.get('actor_id') || undefined,
@@ -165,36 +158,24 @@ export function AuditLog() {
     until: searchParams.get('until') || undefined,
   }
 
-  const { data, isLoading, error, isFetching, refetch } = useAuditEvents(filters)
-
-  // Process data and accumulate events
-  useEffect(() => {
-    if (!data) return
-    lastDataRef.current = data
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing API data
-    setHasMore(data.has_more)
-
-    // If cursor changed (pagination), append events
-    // If no cursor (first page or filter changed), replace events
-    if (cursor && cursor === lastCursorRef.current) {
-      // Same cursor, data might be refetched - don't duplicate
-      return
-    }
-
-    if (cursor) {
-      // Loading more - append new events
-      setAllEvents((prev) => [...prev, ...data.events])
-    } else {
-      // First page - replace events
-      setAllEvents(data.events)
-    }
-    lastCursorRef.current = cursor
-  }, [data, cursor])
+  const {
+    data,
+    isLoading,
+    error,
+    isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    refetch,
+  } = useAuditEvents(filters)
+  const allEvents = useMemo(
+    () => data?.pages.flatMap((page) => page.events as AuditEvent[]) ?? [],
+    [data]
+  )
 
   const handleFilterChange = (key: keyof AuditListParams, value: string) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
-      next.delete('cursor')
       if (value) {
         next.set(key, value)
       } else {
@@ -202,14 +183,10 @@ export function AuditLog() {
       }
       return next
     }, { replace: true })
-    setAllEvents([])
-    lastCursorRef.current = undefined
   }
 
   const clearFilters = () => {
     setSearchParams({}, { replace: true })
-    setAllEvents([])
-    lastCursorRef.current = undefined
     if (sinceRef.current) sinceRef.current.value = ''
     if (untilRef.current) untilRef.current.value = ''
   }
@@ -223,12 +200,8 @@ export function AuditLog() {
   )
 
   const loadMore = () => {
-    if (!hasMore || !lastDataRef.current?.cursor) return
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      next.set('cursor', lastDataRef.current!.cursor!)
-      return next
-    }, { replace: true })
+    if (!hasNextPage || isFetchingNextPage) return
+    void fetchNextPage()
   }
 
   const handleRefresh = () => {
@@ -236,7 +209,6 @@ export function AuditLog() {
     const untilValue = untilRef.current?.value || ''
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
-      next.delete('cursor')
       // Apply date filters from input fields
       if (sinceValue) {
         next.set('since', new Date(sinceValue).toISOString())
@@ -250,9 +222,7 @@ export function AuditLog() {
       }
       return next
     }, { replace: true })
-    setAllEvents([])
-    lastCursorRef.current = undefined
-    refetch()
+    void refetch()
   }
 
   return (
@@ -386,7 +356,7 @@ export function AuditLog() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {(isLoading || (isFetching && allEvents.length === 0)) && !cursor ? (
+          {(isLoading || (isFetching && allEvents.length === 0)) ? (
             <div className="space-y-3">
               {[...Array(10)].map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
@@ -485,9 +455,9 @@ export function AuditLog() {
                 <p className="text-sm text-muted-foreground">
                   Showing {allEvents.length} events
                 </p>
-                {hasMore && (
-                  <Button variant="outline" onClick={loadMore} disabled={isFetching}>
-                    {isFetching ? 'Loading...' : 'Load More'}
+                {hasNextPage && (
+                  <Button variant="outline" onClick={loadMore} disabled={isFetchingNextPage}>
+                    {isFetchingNextPage ? 'Loading...' : 'Load More'}
                   </Button>
                 )}
               </div>

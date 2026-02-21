@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useMemo } from 'react'
+import { useParams, Link, useSearchParams } from 'react-router-dom'
 import {
   Webhook,
   AlertCircle,
@@ -22,10 +22,9 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useWebhooks, useWebhookDeliveries, useRetryDelivery } from '@/hooks/useWebhooks'
-import { useTableState } from '@/hooks/useTableState'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { BackButton } from '@/components/BackButton'
-import type { WebhookDelivery, DeliveryListResponse } from '@/api/types'
+import type { WebhookDelivery } from '@/api/types'
 
 const PAGE_SIZE = 20
 
@@ -73,53 +72,48 @@ function formatDateTime(dateStr: string): string {
 export function WebhookDetail() {
   const isMobile = useMediaQuery('(max-width: 767px)')
   const { endpointId } = useParams<{ endpointId: string }>()
-  const {
-    cursor,
-    items: allDeliveries,
-    filters,
-    hasMore,
-    setFilter,
-    loadMore,
-    processData,
-    clearItems,
-  } = useTableState<WebhookDelivery, DeliveryListResponse>({
-    defaultFilters: { status: '' },
-    dataKey: 'deliveries',
-    getItems: (data) => data.deliveries,
-    getCursor: (data) => data.cursor,
-    getHasMore: (data) => data.has_more,
-  })
-
-  const statusFilter = filters.status || undefined
+  const [searchParams, setSearchParams] = useSearchParams()
+  const statusFilter = searchParams.get('status') || undefined
 
   const { data: webhooksData, isLoading: webhooksLoading } = useWebhooks()
   const {
     data: deliveriesData,
     isLoading: deliveriesLoading,
     isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
     error: deliveriesError,
     refetch,
   } = useWebhookDeliveries(endpointId!, {
     status: statusFilter,
     limit: PAGE_SIZE,
-    cursor,
   })
+  const allDeliveries = useMemo(
+    () => deliveriesData?.pages.flatMap((page) => page.deliveries) ?? [],
+    [deliveriesData]
+  )
   const retryDelivery = useRetryDelivery()
 
-  // Process data when it changes
-  useEffect(() => {
-    if (deliveriesData) {
-      processData(deliveriesData)
-    }
-  }, [deliveriesData, processData])
-
   const handleFilterChange = (value: string | undefined) => {
-    setFilter('status', value || '')
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (value) {
+        next.set('status', value)
+      } else {
+        next.delete('status')
+      }
+      return next
+    }, { replace: true })
   }
 
   const handleRefresh = () => {
-    clearItems()
-    refetch()
+    void refetch()
+  }
+
+  const loadMore = () => {
+    if (!hasNextPage || isFetchingNextPage) return
+    void fetchNextPage()
   }
 
   // Find the webhook endpoint from the list
@@ -132,9 +126,6 @@ export function WebhookDetail() {
         endpointId,
         deliveryId: delivery.id,
       })
-      // Reset and refetch after retry
-      clearItems()
-      refetch()
     } catch (err) {
       console.error('Failed to retry delivery:', err)
     }
@@ -263,7 +254,7 @@ export function WebhookDetail() {
           </div>
         </CardHeader>
         <CardContent>
-          {deliveriesLoading && cursor === undefined ? (
+          {deliveriesLoading && allDeliveries.length === 0 ? (
             <div className="space-y-3">
               {[...Array(5)].map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
@@ -356,8 +347,8 @@ export function WebhookDetail() {
                   </TableHeader>
                   <TableBody>
                     {allDeliveries.map((delivery) => (
-                      <TableRow key={delivery.id}>
-                        <TableCell className="sticky left-0 z-10 bg-card">
+                      <TableRow key={delivery.id} className="group hover:bg-accent/50">
+                        <TableCell className="sticky left-0 z-10 bg-card group-hover:bg-accent/50">
                           <Badge variant="outline" className="text-xs">
                             {delivery.event_type}
                           </Badge>
@@ -403,7 +394,7 @@ export function WebhookDetail() {
                         <TableCell className="text-muted-foreground text-sm">
                           {formatTimeAgo(delivery.created_at)}
                         </TableCell>
-                        <TableCell className="text-right sticky right-0 z-10 bg-card">
+                        <TableCell className="text-right sticky right-0 z-10 bg-card group-hover:bg-accent/50">
                           {delivery.status === 'failed' && (
                             <Button
                               variant="ghost"
@@ -428,13 +419,13 @@ export function WebhookDetail() {
                   <p className="text-sm text-muted-foreground">
                     Showing {allDeliveries.length} deliveries
                   </p>
-                  {hasMore && (
+                  {hasNextPage && (
                     <Button
                       variant="outline"
                       onClick={loadMore}
-                      disabled={isFetching}
+                      disabled={isFetchingNextPage}
                     >
-                      {isFetching ? 'Loading...' : 'Load More'}
+                      {isFetchingNextPage ? 'Loading...' : 'Load More'}
                     </Button>
                   )}
                 </div>
