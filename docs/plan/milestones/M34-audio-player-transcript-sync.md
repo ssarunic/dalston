@@ -653,6 +653,7 @@ The following "future enhancements" were implemented as part of this milestone:
 
 Additional improvements:
 
+- Stale audio URL prevention after navigation (derive URL validity from job/session ID)
 - Error handling with retry for failed audio loads
 - Optimized segment lookup (O(1) for continuous playback, O(log n) for seeks)
 - Seek request IDs to handle repeated clicks on same segment
