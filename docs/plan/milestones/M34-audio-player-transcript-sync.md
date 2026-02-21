@@ -6,7 +6,7 @@
 | **Duration**     | 2-3 days                                                                                |
 | **Dependencies** | M10 (Web Console), M24 (Realtime Session Persistence)                                   |
 | **Deliverable**  | AudioPlayer component, click-to-seek, segment highlighting, playback controls           |
-| **Status**       | Not Started                                                                             |
+| **Status**       | Completed                                                                               |
 
 ## User Story
 
@@ -614,33 +614,45 @@ open http://localhost:5173/jobs/$JOB_ID
 
 ## Dependencies
 
-No new npm dependencies required. Uses:
+New npm dependencies added:
 
-- Native HTML5 `<audio>` element
-- Existing shadcn/ui components (Button, Select, Slider)
+- `wavesurfer.js` - Waveform visualization and audio playback
+- `@tanstack/react-virtual` - Virtualized scrolling for large transcript lists
+
+Also uses:
+
+- Existing shadcn/ui components (Button, Select)
 - Existing Lucide icons
 
 ---
 
 ## Checkpoint
 
-- [ ] `AudioPlayer` component with play/pause, seek, speed, download
-- [ ] Keyboard shortcuts (Space, ← →)
-- [ ] TranscriptViewer accepts `audioSrc` prop
-- [ ] Segment click seeks audio
-- [ ] Active segment highlighted
-- [ ] Auto-scroll to active segment (optional)
-- [ ] JobDetail fetches and passes audio URL
-- [ ] RealtimeSessionDetail fetches and passes audio URL
-- [ ] Purged/processing audio handled gracefully
+- [x] `AudioPlayer` component with play/pause, seek, speed, download
+- [x] Keyboard shortcuts (Space, ← →)
+- [x] TranscriptViewer accepts `audioSrc` prop
+- [x] Segment click seeks audio
+- [x] Active segment highlighted
+- [x] Auto-scroll to active segment (optional)
+- [x] JobDetail fetches and passes audio URL
+- [x] RealtimeSessionDetail fetches and passes audio URL
+- [x] Purged/processing audio handled gracefully
 
 ---
 
-## Future Enhancements (Not in M34)
+## Enhancements Implemented (Beyond Original M34 Scope)
 
-- **Waveform visualization** - wavesurfer.js integration
-- **Loop segment** - A-B repeat for reviewing sections
-- **Keyboard navigation** - j/k to jump between segments
-- **Clip export** - download selected time range
-- **Playback persistence** - remember position on page refresh
-- **Virtualized transcript** - for 500+ segment transcripts (see M27.5)
+The following "future enhancements" were implemented as part of this milestone:
+
+- [x] **Waveform visualization** - wavesurfer.js integration with interactive waveform
+- [x] **Loop segment** - A-B repeat for reviewing sections (set loop points with button)
+- [x] **Keyboard navigation** - j/k to jump between segments
+- [x] **Clip export** - download selected time range as audio file
+- [x] **Playback persistence** - remember position on page refresh (sessionStorage)
+- [x] **Virtualized transcript** - @tanstack/react-virtual for 100+ segment transcripts
+
+Additional improvements:
+
+- Error handling with retry for failed audio loads
+- Optimized segment lookup (O(1) for continuous playback, O(log n) for seeks)
+- Seek request IDs to handle repeated clicks on same segment
