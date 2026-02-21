@@ -4,8 +4,6 @@ import {
   Pause,
   RotateCcw,
   Download,
-  Repeat,
-  Scissors,
   Loader2,
   AlertCircle,
   RefreshCw,
@@ -78,14 +76,6 @@ export function AudioPlayer({
   const [isReady, setIsReady] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [retryKey, setRetryKey] = useState(0)
-
-  // A-B loop state
-  const [loopA, setLoopA] = useState<number | null>(null)
-  const [loopB, setLoopB] = useState<number | null>(null)
-  const isLooping = loopA !== null && loopB !== null
-
-  // Clip export state
-  const [isExporting, setIsExporting] = useState(false)
 
   // Restore position from sessionStorage
   const restoredRef = useRef(false)
@@ -201,23 +191,6 @@ export function AudioPlayer({
     }
   }, [src])
 
-  // A-B loop enforcement
-  useEffect(() => {
-    if (!isLooping || !wavesurferRef.current || !isReady) return
-
-    const ws = wavesurferRef.current
-    const checkLoop = (time: number) => {
-      if (loopB !== null && time >= loopB) {
-        ws.seekTo(loopA! / duration)
-      }
-    }
-
-    ws.on('timeupdate', checkLoop)
-    return () => {
-      ws.un('timeupdate', checkLoop)
-    }
-  }, [loopA, loopB, isLooping, duration, isReady])
-
   const togglePlay = useCallback(() => {
     wavesurferRef.current?.playPause()
   }, [])
@@ -312,77 +285,6 @@ export function AudioPlayer({
     onAutoScrollChange?.(next)
   }
 
-  // A-B loop toggle: first press sets A, second sets B, third clears
-  const handleLoopToggle = () => {
-    if (loopA === null) {
-      setLoopA(currentTime)
-    } else if (loopB === null) {
-      // B must be after A
-      if (currentTime > loopA) {
-        setLoopB(currentTime)
-      } else {
-        // If cursor is before A, reset and set new A
-        setLoopA(currentTime)
-        setLoopB(null)
-      }
-    } else {
-      // Clear loop
-      setLoopA(null)
-      setLoopB(null)
-    }
-  }
-
-  // Clip export: download the audio between A and B markers
-  const handleClipExport = async () => {
-    if (!isLooping || isExporting) return
-    setIsExporting(true)
-
-    try {
-      const response = await fetch(src)
-      const arrayBuffer = await response.arrayBuffer()
-
-      const audioCtx = new AudioContext()
-      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
-
-      const sampleRate = audioBuffer.sampleRate
-      const startSample = Math.floor(loopA! * sampleRate)
-      const endSample = Math.floor(loopB! * sampleRate)
-      const clipLength = endSample - startSample
-
-      if (clipLength <= 0) {
-        audioCtx.close()
-        return
-      }
-
-      const channels = audioBuffer.numberOfChannels
-      const clipBuffer = audioCtx.createBuffer(channels, clipLength, sampleRate)
-
-      for (let ch = 0; ch < channels; ch++) {
-        const source = audioBuffer.getChannelData(ch)
-        const dest = clipBuffer.getChannelData(ch)
-        for (let i = 0; i < clipLength; i++) {
-          dest[i] = source[startSample + i]
-        }
-      }
-
-      // Encode as WAV
-      const wavBlob = encodeWav(clipBuffer)
-      const url = URL.createObjectURL(wavBlob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `clip_${formatTime(loopA!).replace(':', 'm')}s-${formatTime(loopB!).replace(':', 'm')}s.wav`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      audioCtx.close()
-    } catch (err) {
-      console.error('Failed to export clip:', err)
-    } finally {
-      setIsExporting(false)
-    }
-  }
-
   return (
     <div className="sticky top-0 z-10 bg-background border-b">
       {/* Waveform */}
@@ -395,22 +297,6 @@ export function AudioPlayer({
             loadError && 'opacity-20'
           )}
         />
-        {/* A-B loop region overlay */}
-        {loopA !== null && duration > 0 && (
-          <div
-            className="absolute top-3 bottom-0 bg-primary/10 border-l-2 border-primary pointer-events-none"
-            style={{
-              left: `calc(0.75rem + ${(loopA / duration) * 100}%)`,
-              width: loopB !== null
-                ? `${((loopB - loopA) / duration) * 100}%`
-                : '2px',
-            }}
-          >
-            {loopB !== null && (
-              <div className="absolute right-0 top-0 bottom-0 border-r-2 border-primary" />
-            )}
-          </div>
-        )}
         {!isReady && !loadError && (
           <div className="absolute inset-0 flex items-center justify-center">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -457,47 +343,6 @@ export function AudioPlayer({
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* A-B Loop toggle */}
-        <Button
-          variant={isLooping ? 'secondary' : loopA !== null ? 'outline' : 'ghost'}
-          size="icon"
-          onClick={handleLoopToggle}
-          title={
-            isLooping
-              ? `Loop ${formatTime(loopA!)} - ${formatTime(loopB!)} (click to clear)`
-              : loopA !== null
-                ? `A: ${formatTime(loopA)} (click at B point)`
-                : 'Set loop A point'
-          }
-          aria-label="Toggle A-B loop"
-          className="relative"
-        >
-          <Repeat className="h-4 w-4" />
-          {loopA !== null && !isLooping && (
-            <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-primary text-[8px] text-primary-foreground flex items-center justify-center font-bold">
-              A
-            </span>
-          )}
-        </Button>
-
-        {/* Clip export (only when loop is active) */}
-        {isLooping && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleClipExport}
-            disabled={isExporting}
-            title={`Export clip ${formatTime(loopA!)} - ${formatTime(loopB!)}`}
-            aria-label="Export clip"
-          >
-            {isExporting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Scissors className="h-4 w-4" />
-            )}
-          </Button>
-        )}
-
         {/* Playback speed */}
         <Select
           value={String(playbackRate)}
@@ -538,79 +383,6 @@ export function AudioPlayer({
           <Download className="h-4 w-4" />
         </a>
       </div>
-
-      {/* Loop info bar */}
-      {isLooping && (
-        <div className="px-3 pb-2 flex items-center gap-2 text-xs text-muted-foreground">
-          <Repeat className="h-3 w-3 text-primary" />
-          <span>
-            Loop: {formatTime(loopA!)} - {formatTime(loopB!)}
-          </span>
-          <button
-            onClick={() => { setLoopA(null); setLoopB(null) }}
-            className="text-primary hover:underline ml-1"
-          >
-            Clear
-          </button>
-        </div>
-      )}
     </div>
   )
-}
-
-/** Encode an AudioBuffer as a WAV Blob. */
-function encodeWav(buffer: AudioBuffer): Blob {
-  const numChannels = buffer.numberOfChannels
-  const sampleRate = buffer.sampleRate
-  const length = buffer.length
-  const bytesPerSample = 2
-  const blockAlign = numChannels * bytesPerSample
-  const dataSize = length * blockAlign
-  const headerSize = 44
-  const totalSize = headerSize + dataSize
-
-  const arrayBuffer = new ArrayBuffer(totalSize)
-  const view = new DataView(arrayBuffer)
-
-  // RIFF header
-  writeString(view, 0, 'RIFF')
-  view.setUint32(4, totalSize - 8, true)
-  writeString(view, 8, 'WAVE')
-
-  // fmt chunk
-  writeString(view, 12, 'fmt ')
-  view.setUint32(16, 16, true) // chunk size
-  view.setUint16(20, 1, true) // PCM format
-  view.setUint16(22, numChannels, true)
-  view.setUint32(24, sampleRate, true)
-  view.setUint32(28, sampleRate * blockAlign, true)
-  view.setUint16(32, blockAlign, true)
-  view.setUint16(34, bytesPerSample * 8, true)
-
-  // data chunk
-  writeString(view, 36, 'data')
-  view.setUint32(40, dataSize, true)
-
-  // Interleave channels
-  let offset = 44
-  const channels: Float32Array[] = []
-  for (let ch = 0; ch < numChannels; ch++) {
-    channels.push(buffer.getChannelData(ch))
-  }
-
-  for (let i = 0; i < length; i++) {
-    for (let ch = 0; ch < numChannels; ch++) {
-      const sample = Math.max(-1, Math.min(1, channels[ch][i]))
-      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true)
-      offset += 2
-    }
-  }
-
-  return new Blob([arrayBuffer], { type: 'audio/wav' })
-}
-
-function writeString(view: DataView, offset: number, str: string) {
-  for (let i = 0; i < str.length; i++) {
-    view.setUint8(offset + i, str.charCodeAt(i))
-  }
 }
