@@ -27,7 +27,7 @@ import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useRealtimeStatus } from '@/hooks/useRealtimeStatus'
 import { useRealtimeSessions } from '@/hooks/useRealtimeSessions'
-import type { RealtimeSessionSummary } from '@/api/types'
+import type { RealtimeSessionSummary, RealtimeStatusResponse } from '@/api/types'
 
 function StatusDot({ status }: { status: string }) {
   const color =
@@ -60,6 +60,67 @@ const SORT_OPTIONS = [
   { label: 'Oldest first', value: 'started_asc' },
 ] as const
 
+interface StatusGuidance {
+  title: string
+  summary: string
+  details: string
+  level: 'normal' | 'warning' | 'error'
+  showStartWorker: boolean
+}
+
+function buildStatusGuidance(statusData?: RealtimeStatusResponse): StatusGuidance {
+  if (!statusData) {
+    return {
+      title: 'Status not available',
+      summary: 'Realtime status data has not loaded yet.',
+      details: 'Refresh status and check engine health if this persists.',
+      level: 'warning',
+      showStartWorker: false,
+    }
+  }
+
+  if (statusData.status === 'unavailable') {
+    if (statusData.worker_count === 0) {
+      return {
+        title: 'No realtime workers running',
+        summary: 'Realtime is unavailable because no workers are registered.',
+        details:
+          'Start at least one realtime worker, then refresh this page. If you run on AWS/ECS/Kubernetes, scale the worker service/deployment instead of using local Docker commands.',
+        level: 'error',
+        showStartWorker: true,
+      }
+    }
+
+    return {
+      title: 'Workers unhealthy',
+      summary: `Realtime is unavailable: 0/${statusData.worker_count} workers are ready.`,
+      details:
+        'Workers are registered but not healthy. Check worker logs, model loading, and health checks.',
+      level: 'error',
+      showStartWorker: false,
+    }
+  }
+
+  if (statusData.status === 'at_capacity') {
+    return {
+      title: 'At capacity',
+      summary:
+        `All available capacity is currently in use (${statusData.active_sessions}/${statusData.total_capacity}).`,
+      details: 'Wait for active sessions to finish or scale workers to increase available capacity.',
+      level: 'warning',
+      showStartWorker: false,
+    }
+  }
+
+  return {
+    title: 'Realtime healthy',
+    summary: `Workers are ready and can accept new sessions (${statusData.ready_workers}/${statusData.worker_count} ready).`,
+    details: 'No action needed unless you expect higher throughput.',
+    level: 'normal',
+    showStartWorker: false,
+  }
+}
+
 export function RealtimeSessions() {
   const isMobile = useMediaQuery('(max-width: 767px)')
   const navigate = useNavigate()
@@ -83,12 +144,14 @@ export function RealtimeSessions() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [showFilters, setShowFilters] = useState(false)
+  const [showStatusWhy, setShowStatusWhy] = useState(false)
 
   const hasActiveFilters =
     statusFilter !== 'all' ||
     sort !== 'started_desc' ||
     limit !== DEFAULT_PAGE_SIZE
   const { data: statusData, isLoading: statusLoading, error: statusError } = useRealtimeStatus()
+  const statusGuidance = useMemo(() => buildStatusGuidance(statusData), [statusData])
   const {
     data: sessionsData,
     isLoading: sessionsLoading,
@@ -350,6 +413,71 @@ export function RealtimeSessions() {
           </CardContent>
         </Card>
       </div>
+
+      {!statusLoading && !statusError && (
+        <Card
+          className={
+            statusGuidance.level === 'error'
+              ? 'border-red-500/40 bg-red-500/5'
+              : statusGuidance.level === 'warning'
+                ? 'border-amber-500/40 bg-amber-500/5'
+                : ''
+          }
+        >
+          <CardContent className="py-4 space-y-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <p className="text-sm font-medium">{statusGuidance.title}</p>
+                <p className="text-sm text-muted-foreground">{statusGuidance.summary}</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate('/engines')}
+                >
+                  Check engine health
+                </Button>
+                {statusGuidance.showStartWorker && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowStatusWhy(true)}
+                  >
+                    Start worker (self-hosted)
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowStatusWhy((prev) => !prev)}
+                >
+                  {showStatusWhy ? 'Hide why this state' : 'Why this state?'}
+                </Button>
+              </div>
+            </div>
+
+            {showStatusWhy && (
+              <div className="rounded-md border border-border bg-muted/20 p-3 text-sm space-y-2">
+                <p className="text-muted-foreground">{statusGuidance.details}</p>
+                {statusGuidance.showStartWorker && (
+                  <>
+                    <p className="text-xs text-muted-foreground">
+                      Self-hosted quick start:
+                    </p>
+                    <code className="block rounded bg-muted px-2 py-1 text-xs font-mono">
+                      docker compose up -d stt-rt-transcribe-parakeet-rnnt-0.6b-cpu
+                    </code>
+                    <p className="text-xs text-muted-foreground">
+                      On AWS/ECS/Kubernetes, scale your realtime worker service/deployment instead.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Session History */}
       <Card>
