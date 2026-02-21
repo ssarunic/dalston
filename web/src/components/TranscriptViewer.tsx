@@ -152,12 +152,15 @@ export function TranscriptViewer({
   const seekIdRef = useRef(0)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
-  // Generate colors for speakers
-  const speakerColors: Record<string, string> = {}
-  speakers?.forEach((s, i) => {
-    speakerColors[s.id] = SPEAKER_COLORS[i % SPEAKER_COLORS.length]
-    speakerColors[s.label] = SPEAKER_COLORS[i % SPEAKER_COLORS.length]
-  })
+  // Generate colors for speakers (memoized to avoid rebuilding on every render)
+  const speakerColors = useMemo(() => {
+    const colors: Record<string, string> = {}
+    speakers?.forEach((s, i) => {
+      colors[s.id] = SPEAKER_COLORS[i % SPEAKER_COLORS.length]
+      colors[s.label] = SPEAKER_COLORS[i % SPEAKER_COLORS.length]
+    })
+    return colors
+  }, [speakers])
 
   const hasSpeakers = speakers && speakers.length > 0
   const hasSegments = segments.length > 0
@@ -168,13 +171,54 @@ export function TranscriptViewer({
   // Check if PII toggle should be shown
   const showPiiToggle = piiConfig?.enabled && (hasPerSegmentRedaction || piiConfig?.redactedText)
 
+  // Track last known segment index for O(1) lookups during continuous playback
+  const lastSegmentIndexRef = useRef(-1)
+
   // Find active segment index based on playback time
+  // Optimized: check nearby segments first, fall back to binary search
   const activeSegmentIndex = useMemo(() => {
-    if (!audioSrc) return -1
-    return segments.findIndex(
-      (s) => currentTime >= s.start && currentTime < s.end
-    )
+    if (!audioSrc || segments.length === 0) return -1
+
+    const isInSegment = (idx: number) => {
+      const s = segments[idx]
+      return currentTime >= s.start && currentTime < s.end
+    }
+
+    // Check last known index first (common case: continuous playback)
+    const lastIdx = lastSegmentIndexRef.current
+    if (lastIdx >= 0 && lastIdx < segments.length) {
+      if (isInSegment(lastIdx)) return lastIdx
+      // Check next segment (playback moved forward)
+      if (lastIdx + 1 < segments.length && isInSegment(lastIdx + 1)) {
+        return lastIdx + 1
+      }
+      // Check previous segment (playback moved backward slightly)
+      if (lastIdx > 0 && isInSegment(lastIdx - 1)) {
+        return lastIdx - 1
+      }
+    }
+
+    // Binary search for larger seeks
+    let lo = 0
+    let hi = segments.length - 1
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2)
+      const s = segments[mid]
+      if (currentTime < s.start) {
+        hi = mid - 1
+      } else if (currentTime >= s.end) {
+        lo = mid + 1
+      } else {
+        return mid
+      }
+    }
+    return -1
   }, [currentTime, segments, audioSrc])
+
+  // Update last known index when it changes
+  useEffect(() => {
+    lastSegmentIndexRef.current = activeSegmentIndex
+  }, [activeSegmentIndex])
 
   const activeSegmentId = activeSegmentIndex >= 0 ? segments[activeSegmentIndex].id : null
 
