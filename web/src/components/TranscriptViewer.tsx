@@ -3,7 +3,7 @@ import { Download, Shield, Loader2 } from 'lucide-react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { AudioPlayer } from '@/components/AudioPlayer'
+import { AudioPlayer, type SeekRequest } from '@/components/AudioPlayer'
 import { apiClient } from '@/api/client'
 import { cn } from '@/lib/utils'
 import type { UnifiedSegment, Speaker } from '@/api/types'
@@ -147,8 +147,9 @@ export function TranscriptViewer({
   audioSrc,
 }: TranscriptViewerProps) {
   const [currentTime, setCurrentTime] = useState(0)
-  const [seekTo, setSeekTo] = useState<number | undefined>(undefined)
+  const [seekTo, setSeekTo] = useState<SeekRequest | undefined>(undefined)
   const [autoScroll, setAutoScroll] = useState(false)
+  const seekIdRef = useRef(0)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   // Generate colors for speakers
@@ -204,7 +205,8 @@ export function TranscriptViewer({
 
   const handleSegmentClick = (segment: UnifiedSegment) => {
     if (!audioSrc) return
-    setSeekTo(segment.start)
+    seekIdRef.current += 1
+    setSeekTo({ time: segment.start, id: seekIdRef.current })
   }
 
   // Navigate to prev/next segment (for j/k keyboard shortcuts)
@@ -224,7 +226,8 @@ export function TranscriptViewer({
       }
 
       const target = segments[targetIndex]
-      setSeekTo(target.start)
+      seekIdRef.current += 1
+      setSeekTo({ time: target.start, id: seekIdRef.current })
     },
     [activeSegmentIndex, segments]
   )

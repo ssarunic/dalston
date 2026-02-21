@@ -32,12 +32,17 @@ function getStorageKey(src: string): string {
   }
 }
 
+export interface SeekRequest {
+  time: number
+  id: number // Unique ID to trigger re-seek on repeated clicks to same time
+}
+
 export interface AudioPlayerProps {
   src: string
   onTimeUpdate?: (time: number) => void
   onAutoScrollChange?: (enabled: boolean) => void
   onNavigateSegment?: (direction: 'prev' | 'next') => void
-  seekTo?: number // External seek request (from segment click)
+  seekTo?: SeekRequest // External seek request (from segment click)
 }
 
 function formatTime(seconds: number): string {
@@ -158,7 +163,6 @@ export function AudioPlayer({
         sessionStorage.setItem(getStorageKey(src), String(time))
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src])
 
   // A-B loop enforcement
@@ -191,16 +195,34 @@ export function AudioPlayer({
     [duration]
   )
 
+  // Track pending seek request (for when player isn't ready yet)
+  const pendingSeekRef = useRef<SeekRequest | null>(null)
+
   // Handle external seek requests
   useEffect(() => {
-    if (seekTo !== undefined && wavesurferRef.current && isReady && duration > 0) {
-      wavesurferRef.current.seekTo(seekTo / duration)
+    if (seekTo === undefined) return
+
+    if (wavesurferRef.current && isReady && duration > 0) {
+      // Player is ready, seek immediately
+      wavesurferRef.current.seekTo(seekTo.time / duration)
       if (!isPlaying) {
         wavesurferRef.current.play()
       }
+      pendingSeekRef.current = null
+    } else {
+      // Player not ready, store for later
+      pendingSeekRef.current = seekTo
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seekTo])
+  }, [seekTo, isReady, duration, isPlaying])
+
+  // Apply pending seek when player becomes ready
+  useEffect(() => {
+    if (isReady && duration > 0 && pendingSeekRef.current && wavesurferRef.current) {
+      wavesurferRef.current.seekTo(pendingSeekRef.current.time / duration)
+      wavesurferRef.current.play()
+      pendingSeekRef.current = null
+    }
+  }, [isReady, duration])
 
   // Keyboard shortcuts
   useEffect(() => {
