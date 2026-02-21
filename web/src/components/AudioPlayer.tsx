@@ -53,6 +53,13 @@ function formatTime(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
+function resolveThemeColor(variable: string, alpha?: number, fallback = '#ffffff'): string {
+  if (typeof window === 'undefined') return fallback
+  const value = getComputedStyle(document.documentElement).getPropertyValue(variable).trim()
+  if (!value) return fallback
+  return alpha === undefined ? `hsl(${value})` : `hsl(${value} / ${alpha})`
+}
+
 export function AudioPlayer({
   src,
   onTimeUpdate,
@@ -90,12 +97,16 @@ export function AudioPlayer({
     // Clear previous error state on retry
     setLoadError(null)
 
+    const waveColor = resolveThemeColor('--foreground', 0.95, '#ffffff')
+    const progressColor = resolveThemeColor('--primary', undefined, '#3b82f6')
+    const cursorColor = resolveThemeColor('--ring', undefined, '#60a5fa')
+
     const ws = WaveSurfer.create({
       container: waveformRef.current,
       height: 48,
-      waveColor: 'hsl(var(--muted-foreground) / 0.35)',
-      progressColor: 'hsl(var(--primary))',
-      cursorColor: 'hsl(var(--primary))',
+      waveColor,
+      progressColor,
+      cursorColor,
       cursorWidth: 2,
       barWidth: 2,
       barGap: 1,

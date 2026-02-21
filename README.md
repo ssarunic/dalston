@@ -51,6 +51,20 @@ The API is available at `http://localhost:8000`. See the [deployment guide](docs
 - [WebSocket API](docs/specs/realtime/WEBSOCKET_API.md)
 - [Deployment Guide](docs/guides/self-hosted-deployment-tutorial.md)
 
+## Web Console Tests
+
+Run Playwright tests:
+
+```bash
+npx playwright test tests/web
+```
+
+By default tests target `http://localhost:8000`. Override target URL with:
+
+```bash
+PLAYWRIGHT_BASE_URL=http://localhost:3000 npx playwright test tests/web
+```
+
 ## License
 
 [Apache 2.0](LICENSE)

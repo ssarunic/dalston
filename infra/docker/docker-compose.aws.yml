@@ -6,6 +6,7 @@ services:
     environment:
       - S3_BUCKET=${S3_BUCKET}
       - AWS_REGION=${AWS_REGION}
+      - S3_PUBLIC_ENDPOINT_URL=${S3_PUBLIC_ENDPOINT_URL:-}
       # No S3_ENDPOINT - SDK auto-detects on EC2
       # No credentials - uses IAM instance role
     # Bind to all interfaces for Tailscale access

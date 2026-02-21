@@ -28,6 +28,7 @@ x-common-env: &common-env
   S3_BUCKET: ${S3_BUCKET:-dalston-artifacts}
   S3_REGION: ${S3_REGION:-us-east-1}
   S3_ENDPOINT_URL: http://minio:9000
+  S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-}
   AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
   AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
