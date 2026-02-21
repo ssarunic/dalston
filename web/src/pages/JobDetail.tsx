@@ -8,8 +8,6 @@ import {
   Trash2,
   Mic,
   ScrollText,
-  Download,
-  ShieldAlert,
 } from 'lucide-react'
 import { useJob } from '@/hooks/useJob'
 import { useJobTasks } from '@/hooks/useJobTasks'
@@ -17,7 +15,6 @@ import { useResourceAuditTrail } from '@/hooks/useAuditLog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/StatusBadge'
 import { DAGViewer } from '@/components/DAGViewer'
 import { BackButton } from '@/components/BackButton'
@@ -125,83 +122,6 @@ function getActionStyle(action: string): string {
   return ACTION_STYLES[actionPart] || 'bg-slate-500/10 text-slate-400 border-slate-500/20'
 }
 
-function AudioStorageCard({
-  jobId,
-  status,
-  isPurged,
-  hasRedactedAudio,
-}: {
-  jobId: string
-  status: string
-  isPurged: boolean
-  hasRedactedAudio: boolean
-}) {
-  const isTerminal = ['completed', 'failed', 'cancelled'].includes(status)
-
-  const handleDownloadOriginal = async () => {
-    try {
-      const { url } = await apiClient.getJobAudioUrl(jobId)
-      window.open(url, '_blank')
-    } catch (err) {
-      console.error('Failed to get audio URL:', err)
-    }
-  }
-
-  const handleDownloadRedacted = async () => {
-    try {
-      const { url } = await apiClient.getJobRedactedAudioUrl(jobId)
-      window.open(url, '_blank')
-    } catch (err) {
-      console.error('Failed to get redacted audio URL:', err)
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base font-medium">Audio</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Original Audio */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Mic className="h-5 w-5 text-muted-foreground" />
-            <span>Original Audio</span>
-          </div>
-          {isPurged ? (
-            <span className="text-muted-foreground text-sm">Purged</span>
-          ) : isTerminal ? (
-            <Button variant="outline" size="sm" onClick={handleDownloadOriginal}>
-              <Download className="h-4 w-4 mr-2" />
-              Download
-            </Button>
-          ) : (
-            <span className="text-muted-foreground text-sm">Processing...</span>
-          )}
-        </div>
-
-        {/* Redacted Audio */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="h-5 w-5 text-muted-foreground" />
-            <span>Redacted Audio</span>
-          </div>
-          {isPurged ? (
-            <span className="text-muted-foreground text-sm">Purged</span>
-          ) : hasRedactedAudio ? (
-            <Button variant="outline" size="sm" onClick={handleDownloadRedacted}>
-              <Download className="h-4 w-4 mr-2" />
-              Download
-            </Button>
-          ) : (
-            <span className="text-muted-foreground text-sm">Not available</span>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
 function AuditTrailSection({ events, isLoading }: { events?: AuditEvent[]; isLoading: boolean }) {
   if (isLoading) {
     return (
@@ -280,26 +200,52 @@ export function JobDetail() {
   const { data: tasksData } = useJobTasks(jobId)
   const { data: auditData, isLoading: auditLoading } = useResourceAuditTrail('job', jobId)
   const [showRedacted, setShowRedacted] = useState(false)
-  const [audioUrlData, setAudioUrlData] = useState<{ forJobId: string; url: string } | null>(null)
+  const [audioUrlData, setAudioUrlData] = useState<{
+    forJobId: string
+    originalUrl: string
+    redactedUrl?: string
+  } | null>(null)
 
-  // Fetch audio URL for completed jobs with non-purged audio
+  // Fetch audio URLs for completed jobs with non-purged audio
   useEffect(() => {
-    if (job?.status === 'completed' && !job.retention?.purged_at) {
-      apiClient
-        .getJobAudioUrl(job.id)
-        .then(({ url }) => setAudioUrlData({ forJobId: job.id, url }))
-        .catch((err) => console.error('Failed to get audio URL:', err))
+    if (job?.status === 'completed' && !job.retention?.purged_at && jobId) {
+      const fetchUrls = async () => {
+        try {
+          const { url: originalUrl } = await apiClient.getJobAudioUrl(job.id)
+          let redactedUrl: string | undefined
+          if (job.pii?.redacted_audio_available) {
+            try {
+              const { url } = await apiClient.getJobRedactedAudioUrl(job.id)
+              redactedUrl = url
+            } catch {
+              // Redacted audio not available
+            }
+          }
+          setAudioUrlData({ forJobId: job.id, originalUrl, redactedUrl })
+        } catch (err) {
+          console.error('Failed to get audio URL:', err)
+        }
+      }
+      fetchUrls()
     }
-  }, [job?.id, job?.status, job?.retention?.purged_at])
+  }, [job?.id, job?.status, job?.retention?.purged_at, job?.pii?.redacted_audio_available, jobId])
 
-  // Derive audio URL - only use if fetched for current job and conditions still met
+  // Derive audio URLs - only use if fetched for current job and conditions still met
   const audioUrl =
     audioUrlData &&
     audioUrlData.forJobId === job?.id &&
     job?.status === 'completed' &&
     !job?.retention?.purged_at
-      ? audioUrlData.url
+      ? audioUrlData.originalUrl
       : null
+
+  const redactedAudioUrl =
+    audioUrlData &&
+    audioUrlData.forJobId === job?.id &&
+    job?.status === 'completed' &&
+    !job?.retention?.purged_at
+      ? audioUrlData.redactedUrl
+      : undefined
 
   // Show loading state on initial fetch OR when cached data is from a different job
   // This prevents showing stale data from a previously viewed job
@@ -439,6 +385,7 @@ export function JobDetail() {
               speakers={job.speakers}
               fullText={job.text}
               audioSrc={audioUrl ?? undefined}
+              redactedAudioSrc={redactedAudioUrl}
               enableExport={true}
               exportConfig={{ type: 'job', id: job.id }}
               piiConfig={job.pii?.enabled ? {
@@ -452,14 +399,6 @@ export function JobDetail() {
           </CardContent>
         </Card>
       )}
-
-      {/* Audio Storage */}
-      <AudioStorageCard
-        jobId={job.id}
-        status={job.status}
-        isPurged={!!job.retention?.purged_at}
-        hasRedactedAudio={!!job.pii?.redacted_audio_available}
-      />
 
       {/* Audit Trail */}
       <AuditTrailSection events={auditData?.events} isLoading={auditLoading} />

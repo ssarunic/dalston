@@ -133,6 +133,7 @@ export interface TranscriptViewerProps {
   maxHeight?: string
   emptyMessage?: string
   audioSrc?: string
+  redactedAudioSrc?: string
 }
 
 export function TranscriptViewer({
@@ -145,6 +146,7 @@ export function TranscriptViewer({
   maxHeight = '500px',
   emptyMessage = 'No transcript available',
   audioSrc,
+  redactedAudioSrc,
 }: TranscriptViewerProps) {
   const [currentTime, setCurrentTime] = useState(0)
   const [seekTo, setSeekTo] = useState<SeekRequest | undefined>(undefined)
@@ -295,56 +297,62 @@ export function TranscriptViewer({
 
   return (
     <div className="space-y-0">
-      {/* Audio player (sticky) */}
-      {audioSrc && (
-        <AudioPlayer
-          src={audioSrc}
-          onTimeUpdate={setCurrentTime}
-          onAutoScrollChange={setAutoScroll}
-          onNavigateSegment={handleNavigateSegment}
-          seekTo={seekTo}
-        />
-      )}
-
-      {/* Header with PII toggle and export buttons */}
-      {(showPiiToggle || enableExport) && (
-        <div className="flex items-center justify-between px-2 py-4">
-          <div className="flex items-center gap-4">
-            {showPiiToggle && (
-              <div className="flex items-center gap-2">
-                <Shield className="h-4 w-4 text-muted-foreground" />
-                <div className="flex rounded-md border border-border overflow-hidden">
-                  <button
-                    onClick={() => piiConfig.onToggle(false)}
-                    className={`px-3 py-1 text-xs font-medium transition-colors ${
-                      !piiConfig.showRedacted
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-background text-muted-foreground hover:bg-muted'
-                    }`}
-                  >
-                    Original
-                  </button>
-                  <button
-                    onClick={() => piiConfig.onToggle(true)}
-                    className={`px-3 py-1 text-xs font-medium transition-colors ${
-                      piiConfig.showRedacted
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-background text-muted-foreground hover:bg-muted'
-                    }`}
-                  >
-                    Redacted
-                  </button>
-                </div>
-                {piiConfig.entitiesDetected && piiConfig.entitiesDetected > 0 && (
-                  <Badge variant="secondary">
-                    {piiConfig.entitiesDetected} PII
-                  </Badge>
-                )}
+      {/* Header bar with PII toggle, player, and export buttons */}
+      {(audioSrc || showPiiToggle || enableExport) && (
+        <div className="flex items-center gap-4 px-2 py-3 border-b border-border">
+          {/* PII toggle */}
+          {showPiiToggle && (
+            <div className="flex items-center gap-2 shrink-0">
+              <Shield className="h-4 w-4 text-muted-foreground" />
+              <div className="flex rounded-md border border-border overflow-hidden">
+                <button
+                  onClick={() => piiConfig.onToggle(false)}
+                  className={`px-3 py-1 text-xs font-medium transition-colors ${
+                    !piiConfig.showRedacted
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-background text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  Original
+                </button>
+                <button
+                  onClick={() => piiConfig.onToggle(true)}
+                  className={`px-3 py-1 text-xs font-medium transition-colors ${
+                    piiConfig.showRedacted
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-background text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  Redacted
+                </button>
               </div>
-            )}
-          </div>
+              {piiConfig.entitiesDetected && piiConfig.entitiesDetected > 0 && (
+                <Badge variant="secondary">
+                  {piiConfig.entitiesDetected} PII
+                </Badge>
+              )}
+            </div>
+          )}
+
+          {/* Audio player */}
+          {audioSrc && (
+            <AudioPlayer
+              src={audioSrc}
+              redactedSrc={redactedAudioSrc}
+              showRedacted={piiConfig?.showRedacted}
+              onTimeUpdate={setCurrentTime}
+              onAutoScrollChange={setAutoScroll}
+              onNavigateSegment={handleNavigateSegment}
+              seekTo={seekTo}
+              className="flex-1 min-w-0"
+            />
+          )}
+
+          {/* Export buttons */}
           {enableExport && exportConfig && (
-            <ExportButtons type={exportConfig.type} id={exportConfig.id} />
+            <div className="shrink-0">
+              <ExportButtons type={exportConfig.type} id={exportConfig.id} />
+            </div>
           )}
         </div>
       )}

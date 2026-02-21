@@ -18,9 +18,9 @@
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  Transcript                                              [SRT] [VTT] [JSON] │
+│  Transcript                                                                 │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  ▶ │ 2:34 / 12:45 │ ═══════════●══════════════ │ 1× ▾ │ ⟳ │ ⬇ │            │
+│  ▶ ═══●═══ 2:34/12:45 🔊 1× ⟳ ⬇▾ │ 🛡 [Original│Redacted] │ SRT VTT TXT JSON│
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  0:00   Speaker A   Hello, how are you today?                               │
@@ -33,11 +33,12 @@
 └─────────────────────────────────────────────────────────────────────────────┘
 
 Legend:
-  ▶       Play/Pause toggle
+  ▶       Play/Pause toggle (Plyr native controls)
   ═●═     Seek slider (current position)
-  1× ▾    Playback speed dropdown (0.5×, 0.75×, 1×, 1.25×, 1.5×, 2×)
+  1×      Playback speed (Plyr settings menu: 0.5×, 0.75×, 1×, 1.25×, 1.5×, 2×)
   ⟳       Auto-scroll toggle (follow playback)
-  ⬇       Download audio button
+  ⬇▾      Download dropdown (Original/Redacted audio)
+  🛡       PII toggle (Original/Redacted text AND audio)
   [0:12]  Active segment (highlighted, auto-scrolled to)
 ```
 
@@ -47,8 +48,8 @@ Legend:
 
 | Question | Decision | Rationale |
 |----------|----------|-----------|
-| Waveform visualization? | Yes (implemented) | Added via wavesurfer.js to improve scrubbing/review; accepted dependency cost for better UX. |
-| Player position? | Sticky top of transcript card | Contextually close to content. Always visible while scrolling. |
+| Player library? | Plyr (~30KB) | Lightweight HTML5 player with native controls. Replaced wavesurfer.js (~150KB) for smaller bundle and simpler UX. Future stereo visualization can be added separately. |
+| Player position? | Header bar (not sticky) | In same row as PII toggle and export buttons. Compact layout. |
 | Both batch & realtime? | Yes | TranscriptViewer already serves both. Pass optional `audioSrc` prop. |
 | Playback speed? | Yes | Essential for reviewing transcripts: 0.5×, 0.75×, 1×, 1.25×, 1.5×, 2× |
 | Click segment to seek? | Yes | Core value prop - transforms the UX |
@@ -62,13 +63,13 @@ Legend:
 
 ```text
 TranscriptViewer (modified)
-├── AudioPlayer (new - sticky at top)
-│   ├── Play/Pause button
-│   ├── Time display (current / duration)
-│   ├── Seek slider (range input)
-│   ├── Playback speed selector
-│   ├── Auto-scroll toggle
-│   └── Download button
+├── Header bar
+│   ├── AudioPlayer (Plyr-based)
+│   │   ├── Plyr controls (play, progress, time, mute, speed)
+│   │   ├── Auto-scroll toggle
+│   │   └── Download dropdown (Original/Redacted audio)
+│   ├── PII toggle (Original/Redacted)
+│   └── Export buttons (SRT/VTT/TXT/JSON)
 └── TranscriptSegmentRow (modified)
     ├── onClick → seek to segment.start
     └── isActive prop → highlight style
@@ -616,12 +617,12 @@ open http://localhost:5173/jobs/$JOB_ID
 
 New npm dependencies added:
 
-- `wavesurfer.js` - Waveform visualization and audio playback
+- `plyr` (~30KB) - Lightweight HTML5 media player with native controls
 - `@tanstack/react-virtual` - Virtualized scrolling for large transcript lists
 
 Also uses:
 
-- Existing shadcn/ui components (Button, Select)
+- Existing shadcn/ui components (Button, DropdownMenu)
 - Existing Lucide icons
 
 ---
@@ -642,14 +643,14 @@ Also uses:
 
 ## Enhancements Implemented (Beyond Original M34 Scope)
 
-The following "future enhancements" were implemented as part of this milestone:
+Core features implemented:
 
-- [x] **Waveform visualization** - wavesurfer.js integration with interactive waveform
-- [x] **Loop segment** - A-B repeat for reviewing sections (set loop points with button)
-- [x] **Keyboard navigation** - j/k to jump between segments
-- [x] **Clip export** - download selected time range as audio file
+- [x] **Plyr player** - Lightweight HTML5 player with built-in speed control, progress bar
+- [x] **Keyboard navigation** - j/k to jump between segments, Space to play/pause, arrows to seek
 - [x] **Playback persistence** - remember position on page refresh (sessionStorage)
 - [x] **Virtualized transcript** - @tanstack/react-virtual for 100+ segment transcripts
+- [x] **Original/Redacted audio sync** - Player source changes with PII toggle
+- [x] **Unified header bar** - Player, PII toggle, and exports in single row (not sticky)
 
 Additional improvements:
 
@@ -657,3 +658,10 @@ Additional improvements:
 - Error handling with retry for failed audio loads
 - Optimized segment lookup (O(1) for continuous playback, O(log n) for seeks)
 - Seek request IDs to handle repeated clicks on same segment
+- Audio download dropdown with Original/Redacted options
+
+Future enhancements (not yet implemented):
+
+- [ ] Waveform/stereo visualization (can be added separately)
+- [ ] A-B loop for segment repeat
+- [ ] Clip export for time range download

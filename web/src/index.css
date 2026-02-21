@@ -33,3 +33,16 @@
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
+
+/* Plyr player - transparent background */
+.plyr {
+  --plyr-color-main: hsl(var(--primary));
+  --plyr-audio-controls-background: transparent;
+  --plyr-audio-control-color: hsl(var(--foreground));
+  --plyr-audio-control-color-hover: hsl(var(--primary));
+}
+
+.plyr--audio .plyr__controls {
+  background: transparent;
+  padding: 0;
+}
