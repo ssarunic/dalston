@@ -8,7 +8,8 @@ def make_settings(**overrides) -> Settings:
         "S3_REGION": "us-east-1",
     }
     base.update(overrides)
-    return Settings(**base)
+    # Disable env file loading to isolate test from .env
+    return Settings(**base, _env_file=None)
 
 
 def test_presign_endpoint_uses_explicit_public_endpoint() -> None:

@@ -198,6 +198,7 @@ class TestRankAndSelect:
         assert result.engine_id == "fast"
 
     def test_prefers_language_specific_over_universal(self):
+        """When language is specified, prefer language-specific engines."""
         engines = [
             make_engine_state(
                 "universal",
@@ -208,8 +209,25 @@ class TestRankAndSelect:
                 capabilities=make_capabilities("english-only", languages=["en"]),
             ),
         ]
-        result = _rank_and_select(engines, {})
+        # Specify English - should prefer the English-specific engine
+        result = _rank_and_select(engines, {"language": "en"})
         assert result.engine_id == "english-only"
+
+    def test_prefers_universal_for_auto_detection(self):
+        """When no language specified (auto), prefer universal engines for safety."""
+        engines = [
+            make_engine_state(
+                "universal",
+                capabilities=make_capabilities("universal", languages=None),
+            ),
+            make_engine_state(
+                "english-only",
+                capabilities=make_capabilities("english-only", languages=["en"]),
+            ),
+        ]
+        # No language specified - should prefer universal for safety
+        result = _rank_and_select(engines, {})
+        assert result.engine_id == "universal"
 
 
 # =============================================================================

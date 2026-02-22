@@ -393,6 +393,10 @@
         "license": {
           "type": "string",
           "description": "SPDX license identifier"
+        },
+        "source_model": {
+          "type": "string",
+          "description": "HuggingFace model identifier (e.g., 'Systran/faster-whisper-base')"
         }
       },
       "additionalProperties": false
@@ -410,7 +414,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["a10g", "t4", "l4", "a100", "h100"]
+            "enum": ["a10g", "t4", "l4", "a100", "h100", "rtx4090"]
           },
           "description": "Recommended GPU types"
         },

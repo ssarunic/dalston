@@ -41,7 +41,7 @@ hf_compat:
   license: apache-2.0
 
 hardware:
-  min_vram_gb: 9.5
+  min_vram_gb: 10
   recommended_gpu:
     - a10g
     - l4
