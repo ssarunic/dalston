@@ -1,5 +1,5 @@
 # Docker Compose override for AWS deployment
-# Usage: docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml up -d --profile prod
+# Usage: docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml up -d --profile prod --profile gpu
 
 services:
   gateway:
@@ -44,7 +44,17 @@ services:
     volumes:
       - /data/models:/data/models
 
-  stt-batch-align-whisperx-cpu:
+  stt-batch-transcribe-parakeet-ctc-0.6b:
+    environment:
+      S3_BUCKET: ${S3_BUCKET}
+      S3_REGION: ${AWS_REGION}
+      AWS_REGION: ${AWS_REGION}
+      HF_HOME: /data/models
+      NEMO_CACHE: /data/models
+    volumes:
+      - /data/models:/data/models
+
+  stt-batch-align-whisperx:
     environment:
       S3_BUCKET: ${S3_BUCKET}
       S3_REGION: ${AWS_REGION}
@@ -53,7 +63,16 @@ services:
     volumes:
       - /data/models:/data/models
 
-  stt-batch-diarize-pyannote-3.1-cpu:
+  stt-batch-diarize-pyannote-3.1:
+    environment:
+      S3_BUCKET: ${S3_BUCKET}
+      S3_REGION: ${AWS_REGION}
+      AWS_REGION: ${AWS_REGION}
+      HF_HOME: /data/models
+    volumes:
+      - /data/models:/data/models
+
+  stt-batch-pii-detect-presidio-gpu:
     environment:
       S3_BUCKET: ${S3_BUCKET}
       S3_REGION: ${AWS_REGION}
@@ -67,6 +86,16 @@ services:
       S3_BUCKET: ${S3_BUCKET}
       S3_REGION: ${AWS_REGION}
       AWS_REGION: ${AWS_REGION}
+
+  stt-rt-transcribe-parakeet-rnnt-0.6b:
+    environment:
+      S3_BUCKET: ${S3_BUCKET}
+      S3_REGION: ${AWS_REGION}
+      AWS_REGION: ${AWS_REGION}
+      HF_HOME: /data/models
+      NEMO_CACHE: /data/models
+    volumes:
+      - /data/models:/data/models
 
 # Exclude MinIO services - using S3 instead
 # The base docker-compose.yml may define minio and minio-init

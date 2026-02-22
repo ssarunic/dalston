@@ -87,7 +87,7 @@ MINIO_ROOT_PASSWORD=change-this-password
 
 # S3 configuration (uses MinIO)
 S3_BUCKET=dalston-artifacts
-S3_REGION=us-east-1
+S3_REGION=eu-west-2
 AWS_ACCESS_KEY_ID=minioadmin
 AWS_SECRET_ACCESS_KEY=change-this-password
 S3_ENDPOINT_URL=http://minio:9000

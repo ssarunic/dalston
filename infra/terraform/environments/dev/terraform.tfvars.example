@@ -4,8 +4,8 @@
 key_name = "your-key-pair-name"
 
 # Optional: Override defaults
-# aws_region       = "us-west-2"
-# instance_type    = "t3.xlarge"
+# aws_region       = "eu-west-2"
+# instance_type    = "g5.xlarge"
 # root_volume_size = 30
 # data_volume_size = 50
 

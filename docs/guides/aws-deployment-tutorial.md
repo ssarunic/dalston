@@ -104,8 +104,8 @@ The bootstrap script automatically:
 - Mounts the data volume at `/data`
 - Clones the Dalston repository
 - Creates `/data/dalston/.env.aws` with S3/region config
-- Creates `/data/dalston/docker-compose.minimal.yml`
-- Creates a systemd service (disabled by default)
+- Configures NVIDIA container runtime (GPU-only deployment)
+- Creates a systemd service for `docker-compose.yml` + AWS override with `--profile prod --profile gpu` (disabled by default)
 
 ## 6. Setup Tailscale on EC2
 

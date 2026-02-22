@@ -30,7 +30,7 @@ class Settings(BaseSettings):
 
     # S3 Storage
     s3_bucket: str = Field(default="dalston-artifacts", alias="S3_BUCKET")
-    s3_region: str = Field(default="us-east-1", alias="S3_REGION")
+    s3_region: str = Field(default="eu-west-2", alias="S3_REGION")
     s3_endpoint_url: str | None = Field(default=None, alias="S3_ENDPOINT_URL")
     s3_public_endpoint_url: str | None = Field(
         default=None,
