@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   Clock,
@@ -44,23 +44,54 @@ export function RealtimeSessionDetail() {
     !!session?.store_transcript && !!session?.transcript_uri
   )
   const [audioUrlData, setAudioUrlData] = useState<{ forSessionId: string; url: string } | null>(null)
+  const canAccessAudio = !!session?.store_audio && !!session?.audio_uri
+
+  const fetchAudioUrl = useCallback(async () => {
+    if (!sessionId || !canAccessAudio) return null
+    try {
+      const { url } = await apiClient.getSessionAudioUrl(sessionId)
+      return { forSessionId: sessionId, url }
+    } catch (err) {
+      console.error('Failed to get audio URL:', err)
+      return null
+    }
+  }, [sessionId, canAccessAudio])
+
+  const refreshAudioUrls = useCallback(async () => {
+    const data = await fetchAudioUrl()
+    if (data) {
+      setAudioUrlData(data)
+    }
+  }, [fetchAudioUrl])
+
+  const resolveAudioDownloadUrl = useCallback(async () => {
+    const data = await fetchAudioUrl()
+    if (data) {
+      setAudioUrlData(data)
+    }
+    return data?.url ?? null
+  }, [fetchAudioUrl])
 
   // Fetch audio URL for sessions with stored audio
   useEffect(() => {
-    if (session?.store_audio && session?.audio_uri && sessionId) {
-      apiClient
-        .getSessionAudioUrl(sessionId)
-        .then(({ url }) => setAudioUrlData({ forSessionId: sessionId, url }))
-        .catch((err) => console.error('Failed to get audio URL:', err))
+    if (!canAccessAudio) return
+    let cancelled = false
+    void (async () => {
+      const data = await fetchAudioUrl()
+      if (!cancelled && data) {
+        setAudioUrlData(data)
+      }
+    })()
+    return () => {
+      cancelled = true
     }
-  }, [session?.store_audio, session?.audio_uri, sessionId])
+  }, [canAccessAudio, fetchAudioUrl])
 
   // Derive audio URL - only use if fetched for current session and conditions still met
   const audioUrl =
     audioUrlData &&
     audioUrlData.forSessionId === sessionId &&
-    session?.store_audio &&
-    session?.audio_uri
+    canAccessAudio
       ? audioUrlData.url
       : null
 
@@ -225,24 +256,31 @@ export function RealtimeSessionDetail() {
         </CardContent>
       </Card>
 
-      {/* Transcript Card */}
-      {transcript && (
+      {/* Transcript/Audio Card */}
+      {(transcript || audioUrl) && (
         <Card>
           <CardHeader>
-            <CardTitle>Transcript</CardTitle>
+            <CardTitle>{transcript ? 'Transcript' : 'Audio'}</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <TranscriptViewer
-              segments={transcript.utterances?.map(utt => ({
+              segments={transcript?.utterances?.map((utt) => ({
                 id: utt.id,
                 start: utt.start,
                 end: utt.end,
                 text: utt.text,
               })) ?? []}
-              fullText={transcript.text}
+              fullText={transcript?.text}
               audioSrc={audioUrl ?? undefined}
-              enableExport={!!session.transcript_uri}
+              onRefreshAudioUrls={refreshAudioUrls}
+              onResolveAudioDownloadUrl={resolveAudioDownloadUrl}
+              enableExport={!!transcript && !!session.transcript_uri}
               exportConfig={{ type: 'session', id: session.id }}
+              emptyMessage={
+                transcript
+                  ? 'No transcript available'
+                  : 'Transcript not stored for this session'
+              }
             />
           </CardContent>
         </Card>

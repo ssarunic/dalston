@@ -35,6 +35,8 @@ export interface AudioPlayerProps {
   onTimeUpdate?: (time: number) => void
   onAutoScrollChange?: (enabled: boolean) => void
   onNavigateSegment?: (direction: 'prev' | 'next') => void
+  onRefreshSourceUrls?: () => Promise<void>
+  onResolveDownloadUrl?: (variant: 'original' | 'redacted') => Promise<string | null>
   seekTo?: SeekRequest
   className?: string
 }
@@ -46,6 +48,8 @@ export function AudioPlayer({
   onTimeUpdate,
   onAutoScrollChange,
   onNavigateSegment,
+  onRefreshSourceUrls,
+  onResolveDownloadUrl,
   seekTo,
   className,
 }: AudioPlayerProps) {
@@ -57,12 +61,15 @@ export function AudioPlayer({
   const [retryKey, setRetryKey] = useState(0)
   const [autoScroll, setAutoScroll] = useState(false)
   const [duration, setDuration] = useState(0)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isDownloading, setIsDownloading] = useState(false)
 
   const restoredRef = useRef(false)
   const pendingSeekRef = useRef<SeekRequest | null>(null)
 
   // Determine active source based on redacted toggle
   const activeSrc = showRedacted && redactedSrc ? redactedSrc : src
+  const activeVariant: 'original' | 'redacted' = showRedacted && redactedSrc ? 'redacted' : 'original'
 
   // Initialize Plyr
   useEffect(() => {
@@ -242,6 +249,45 @@ export function AudioPlayer({
     onAutoScrollChange?.(next)
   }
 
+  const handleRetry = async () => {
+    if (isRefreshing) return
+    setLoadError(null)
+    setIsRefreshing(true)
+    try {
+      await onRefreshSourceUrls?.()
+    } catch (err) {
+      console.error('Failed to refresh audio URL:', err)
+    } finally {
+      setIsRefreshing(false)
+      setRetryKey((k) => k + 1)
+    }
+  }
+
+  const handleDownload = async () => {
+    if (isDownloading) return
+
+    setIsDownloading(true)
+    try {
+      const resolved = onResolveDownloadUrl
+        ? await onResolveDownloadUrl(activeVariant)
+        : activeSrc
+      if (!resolved) return
+
+      const a = document.createElement('a')
+      a.href = resolved
+      a.download = ''
+      a.target = '_blank'
+      a.rel = 'noopener'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    } catch (err) {
+      console.error('Failed to download audio:', err)
+    } finally {
+      setIsDownloading(false)
+    }
+  }
+
   return (
     <div className={cn('flex items-center gap-2', className)}>
       {/* Plyr audio player */}
@@ -265,10 +311,15 @@ export function AudioPlayer({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setRetryKey((k) => k + 1)}
+            onClick={handleRetry}
+            disabled={isRefreshing}
             className="h-6 px-2"
           >
-            <RefreshCw className="h-3 w-3" />
+            {isRefreshing ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3 w-3" />
+            )}
           </Button>
         </div>
       )}
@@ -289,12 +340,15 @@ export function AudioPlayer({
         variant="ghost"
         size="icon"
         className="h-8 w-8 shrink-0"
-        asChild
+        onClick={() => void handleDownload()}
+        disabled={isDownloading}
         title="Download audio"
       >
-        <a href={activeSrc} download>
+        {isDownloading ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
           <Download className="h-4 w-4" />
-        </a>
+        )}
       </Button>
     </div>
   )

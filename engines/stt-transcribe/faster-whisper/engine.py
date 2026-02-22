@@ -61,6 +61,11 @@ class WhisperEngine(Engine):
         Returns:
             Tuple of (device, compute_type)
         """
+        # Check for explicit device override
+        requested_device = os.environ.get("DEVICE", "").lower()
+        if requested_device == "cpu":
+            return "cpu", "int8"
+
         try:
             import torch
 

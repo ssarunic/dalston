@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   Globe,
@@ -205,45 +205,81 @@ export function JobDetail() {
     originalUrl: string
     redactedUrl?: string
   } | null>(null)
+  const currentJobId = job?.id
+  const hasRedactedAudio = !!job?.pii?.redacted_audio_available
+  const isTerminalStatus = job
+    ? ['completed', 'failed', 'cancelled'].includes(job.status)
+    : false
+  const canAccessAudio = isTerminalStatus && !job?.retention?.purged_at
 
-  // Fetch audio URLs for completed jobs with non-purged audio
-  useEffect(() => {
-    if (job?.status === 'completed' && !job.retention?.purged_at && jobId) {
-      const fetchUrls = async () => {
+  const fetchAudioUrls = useCallback(async () => {
+    if (!jobId || !currentJobId || !canAccessAudio) return null
+
+    try {
+      const { url: originalUrl } = await apiClient.getJobAudioUrl(currentJobId)
+      let redactedUrl: string | undefined
+      if (hasRedactedAudio) {
         try {
-          const { url: originalUrl } = await apiClient.getJobAudioUrl(job.id)
-          let redactedUrl: string | undefined
-          if (job.pii?.redacted_audio_available) {
-            try {
-              const { url } = await apiClient.getJobRedactedAudioUrl(job.id)
-              redactedUrl = url
-            } catch {
-              // Redacted audio not available
-            }
-          }
-          setAudioUrlData({ forJobId: job.id, originalUrl, redactedUrl })
-        } catch (err) {
-          console.error('Failed to get audio URL:', err)
+          const { url } = await apiClient.getJobRedactedAudioUrl(currentJobId)
+          redactedUrl = url
+        } catch {
+          // Redacted audio unavailable; keep original playback.
         }
       }
-      fetchUrls()
+      return { forJobId: currentJobId, originalUrl, redactedUrl }
+    } catch (err) {
+      console.error('Failed to get audio URL:', err)
+      return null
     }
-  }, [job?.id, job?.status, job?.retention?.purged_at, job?.pii?.redacted_audio_available, jobId])
+  }, [jobId, currentJobId, canAccessAudio, hasRedactedAudio])
+
+  const refreshAudioUrls = useCallback(async () => {
+    const urls = await fetchAudioUrls()
+    if (urls) {
+      setAudioUrlData(urls)
+    }
+  }, [fetchAudioUrls])
+
+  const resolveAudioDownloadUrl = useCallback(
+    async (variant: 'original' | 'redacted') => {
+      const urls = await fetchAudioUrls()
+      if (!urls) return null
+      setAudioUrlData(urls)
+      if (variant === 'redacted') {
+        return urls.redactedUrl ?? urls.originalUrl
+      }
+      return urls.originalUrl
+    },
+    [fetchAudioUrls]
+  )
+
+  // Fetch audio URLs for terminal jobs with non-purged audio
+  useEffect(() => {
+    if (!canAccessAudio) return
+    let cancelled = false
+    void (async () => {
+      const urls = await fetchAudioUrls()
+      if (!cancelled && urls) {
+        setAudioUrlData(urls)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [canAccessAudio, fetchAudioUrls])
 
   // Derive audio URLs - only use if fetched for current job and conditions still met
   const audioUrl =
     audioUrlData &&
     audioUrlData.forJobId === job?.id &&
-    job?.status === 'completed' &&
-    !job?.retention?.purged_at
+    canAccessAudio
       ? audioUrlData.originalUrl
       : null
 
   const redactedAudioUrl =
     audioUrlData &&
     audioUrlData.forJobId === job?.id &&
-    job?.status === 'completed' &&
-    !job?.retention?.purged_at
+    canAccessAudio
       ? audioUrlData.redactedUrl
       : undefined
 
@@ -373,21 +409,30 @@ export function JobDetail() {
         </CardContent>
       </Card>
 
-      {/* Transcript */}
-      {job.status === 'completed' && (
+      {/* Transcript / Audio */}
+      {(job.status === 'completed' || canAccessAudio) && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base font-medium">Transcript</CardTitle>
+            <CardTitle className="text-base font-medium">
+              {job.status === 'completed' ? 'Transcript' : 'Audio'}
+            </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <TranscriptViewer
-              segments={job.segments ?? []}
+              segments={job.status === 'completed' ? (job.segments ?? []) : []}
               speakers={job.speakers}
-              fullText={job.text}
+              fullText={job.status === 'completed' ? job.text : undefined}
               audioSrc={audioUrl ?? undefined}
               redactedAudioSrc={redactedAudioUrl}
-              enableExport={true}
+              onRefreshAudioUrls={refreshAudioUrls}
+              onResolveAudioDownloadUrl={resolveAudioDownloadUrl}
+              enableExport={job.status === 'completed'}
               exportConfig={{ type: 'job', id: job.id }}
+              emptyMessage={
+                job.status === 'completed'
+                  ? 'No transcript available'
+                  : 'Transcript not available for this job status'
+              }
               piiConfig={job.pii?.enabled ? {
                 enabled: true,
                 entitiesDetected: job.pii.entities_detected,

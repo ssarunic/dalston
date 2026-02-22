@@ -89,7 +89,7 @@ function ExportButtons({ type, id }: ExportButtonsProps) {
   }
 
   return (
-    <div className="flex gap-2">
+    <div className="flex flex-wrap justify-end gap-2">
       {formats.map((format) => (
         <Button
           key={format}
@@ -134,6 +134,8 @@ export interface TranscriptViewerProps {
   emptyMessage?: string
   audioSrc?: string
   redactedAudioSrc?: string
+  onRefreshAudioUrls?: () => Promise<void>
+  onResolveAudioDownloadUrl?: (variant: 'original' | 'redacted') => Promise<string | null>
 }
 
 export function TranscriptViewer({
@@ -147,6 +149,8 @@ export function TranscriptViewer({
   emptyMessage = 'No transcript available',
   audioSrc,
   redactedAudioSrc,
+  onRefreshAudioUrls,
+  onResolveAudioDownloadUrl,
 }: TranscriptViewerProps) {
   const [currentTime, setCurrentTime] = useState(0)
   const [seekTo, setSeekTo] = useState<SeekRequest | undefined>(undefined)
@@ -299,10 +303,10 @@ export function TranscriptViewer({
     <div className="space-y-0">
       {/* Header bar with PII toggle, player, and export buttons */}
       {(audioSrc || showPiiToggle || enableExport) && (
-        <div className="flex items-center gap-4 px-2 py-3 border-b border-border">
+        <div className="flex flex-wrap items-start gap-3 px-2 py-3 border-b border-border">
           {/* PII toggle */}
           {showPiiToggle && (
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="order-1 flex items-center gap-2 shrink-0">
               <Shield className="h-4 w-4 text-muted-foreground" />
               <div className="flex rounded-md border border-border overflow-hidden">
                 <button
@@ -343,14 +347,16 @@ export function TranscriptViewer({
               onTimeUpdate={setCurrentTime}
               onAutoScrollChange={setAutoScroll}
               onNavigateSegment={handleNavigateSegment}
+              onRefreshSourceUrls={onRefreshAudioUrls}
+              onResolveDownloadUrl={onResolveAudioDownloadUrl}
               seekTo={seekTo}
-              className="flex-1 min-w-0"
+              className="order-3 w-full sm:order-2 sm:flex-1 min-w-0"
             />
           )}
 
           {/* Export buttons */}
           {enableExport && exportConfig && (
-            <div className="shrink-0">
+            <div className="order-2 ml-auto sm:order-3 sm:ml-0 w-full sm:w-auto">
               <ExportButtons type={exportConfig.type} id={exportConfig.id} />
             </div>
           )}

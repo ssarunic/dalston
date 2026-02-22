@@ -43,7 +43,9 @@ WORKER_ID=dev-worker REDIS_URL=redis://localhost:6379 python engine.py
 
 ### Local Docker Setup
 
-**Important**: Local Docker does not use volume mounts - files are baked into the images. You must rebuild containers after any code change before testing:
+**Important**: Local Docker does not use volume mounts - files are baked into the images. You must rebuild containers after any code change before testing.
+
+**CPU-only testing**: When testing locally on a dev machine without GPU, use the `-cpu` suffixed services or set `DEVICE=cpu` in `.env`. All engines respect the `DEVICE` environment variable.
 
 ```bash
 # Rebuild specific service after code changes

@@ -369,7 +369,7 @@ services:
     profiles: [parakeet-tdt-1.1b]
     restart: unless-stopped
 
-  # Faster Whisper base (GPU - balanced speed/accuracy)
+  # Faster Whisper base (CPU/GPU - balanced speed/accuracy)
   stt-batch-transcribe-faster-whisper-base:
     image: dalston/stt-batch-transcribe-faster-whisper-base:1.0.0
     build:
@@ -383,8 +383,6 @@ services:
     volumes:
       - whisper-models:/models
     depends_on: *batch-depends
-    deploy: *gpu-deploy
-    profiles: [faster-whisper-base]
     restart: unless-stopped
 
   # Faster Whisper large-v3 (GPU - highest accuracy)
