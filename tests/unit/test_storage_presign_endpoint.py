@@ -3,6 +3,7 @@ from dalston.gateway.services.storage import StorageService
 
 
 def make_settings(**overrides) -> Settings:
+    """Create Settings with explicit values, ignoring .env file."""
     base = {
         "S3_BUCKET": "dalston-artifacts",
         "S3_REGION": "us-east-1",
