@@ -40,26 +40,24 @@ curl -L "https://github.com/docker/compose/releases/download/$${DOCKER_COMPOSE_V
 chmod +x /usr/local/bin/docker-compose
 ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
 
-# Configure required GPU runtime support (AWS deployment is GPU-only)
-COMPOSE_PROFILE_FLAGS="--profile prod --profile gpu"
-if ! lspci | grep -qi nvidia; then
-  echo "ERROR: No NVIDIA GPU detected. AWS deployment is configured as GPU-only."
-  exit 1
+# Configure GPU runtime if available
+COMPOSE_PROFILE_FLAGS="--profile prod"
+if lspci | grep -qi nvidia; then
+  echo "NVIDIA GPU detected. Installing NVIDIA Container Toolkit..."
+  curl -fsSL https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
+    -o /etc/yum.repos.d/nvidia-container-toolkit.repo
+  dnf install -y nvidia-container-toolkit || true
+  if command -v nvidia-ctk >/dev/null 2>&1; then
+    nvidia-ctk runtime configure --runtime=docker
+    systemctl restart docker
+    COMPOSE_PROFILE_FLAGS="--profile prod --profile gpu"
+    echo "NVIDIA runtime configured. GPU engines will be started."
+  else
+    echo "WARNING: NVIDIA toolkit installation incomplete. GPU engines will NOT be started."
+  fi
+else
+  echo "No NVIDIA GPU detected. Only CPU-safe services will be started."
 fi
-
-echo "NVIDIA GPU detected. Installing NVIDIA Container Toolkit..."
-curl -fsSL https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
-  -o /etc/yum.repos.d/nvidia-container-toolkit.repo
-dnf install -y nvidia-container-toolkit
-
-if ! command -v nvidia-ctk >/dev/null 2>&1; then
-  echo "ERROR: nvidia-ctk not available after toolkit installation."
-  exit 1
-fi
-
-nvidia-ctk runtime configure --runtime=docker
-systemctl restart docker
-echo "NVIDIA runtime configured. GPU profile will be enabled."
 
 # Wait for data volume to be attached
 echo "Waiting for data volume..."
