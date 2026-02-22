@@ -159,6 +159,7 @@ test.describe('Job Detail audio player', () => {
     await expect(page.getByLabel('Pause')).toBeVisible()
     await page.getByLabel('Pause').click()
 
+    await page.getByText('Segment two text').first().click()
     await expect(page.getByLabel('Play')).toBeVisible()
     await page.waitForTimeout(1000)
     await expect(page.getByLabel('Play')).toBeVisible()

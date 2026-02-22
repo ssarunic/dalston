@@ -133,6 +133,7 @@ export interface TranscriptViewerProps {
   maxHeight?: string
   emptyMessage?: string
   audioSrc?: string
+  showAudioPlayer?: boolean
   redactedAudioSrc?: string
   onRefreshAudioUrls?: () => Promise<void>
   onResolveAudioDownloadUrl?: (variant: 'original' | 'redacted') => Promise<string | null>
@@ -148,6 +149,7 @@ export function TranscriptViewer({
   maxHeight = '500px',
   emptyMessage = 'No transcript available',
   audioSrc,
+  showAudioPlayer = false,
   redactedAudioSrc,
   onRefreshAudioUrls,
   onResolveAudioDownloadUrl,
@@ -176,6 +178,7 @@ export function TranscriptViewer({
   const hasPerSegmentRedaction = segments.some(s => s.redacted_text)
   // Check if PII toggle should be shown
   const showPiiToggle = piiConfig?.enabled && (hasPerSegmentRedaction || piiConfig?.redactedText)
+  const shouldShowAudioPlayer = !!audioSrc || showAudioPlayer
 
   // Track last known segment index for O(1) lookups during continuous playback
   const lastSegmentIndexRef = useRef(-1)
@@ -302,7 +305,7 @@ export function TranscriptViewer({
   return (
     <div className="space-y-0">
       {/* Header bar with PII toggle, player, and export buttons */}
-      {(audioSrc || showPiiToggle || enableExport) && (
+      {(shouldShowAudioPlayer || showPiiToggle || enableExport) && (
         <div className="flex flex-wrap items-start gap-3 px-2 py-3 border-b border-border">
           {/* PII toggle */}
           {showPiiToggle && (
@@ -339,7 +342,7 @@ export function TranscriptViewer({
           )}
 
           {/* Audio player */}
-          {audioSrc && (
+          {shouldShowAudioPlayer && (
             <AudioPlayer
               src={audioSrc}
               redactedSrc={redactedAudioSrc}

@@ -29,7 +29,7 @@ export interface SeekRequest {
 }
 
 export interface AudioPlayerProps {
-  src: string
+  src?: string
   redactedSrc?: string
   showRedacted?: boolean
   onTimeUpdate?: (time: number) => void
@@ -69,16 +69,34 @@ export function AudioPlayer({
 
   // Determine active source based on redacted toggle
   const activeSrc = showRedacted && redactedSrc ? redactedSrc : src
-  const activeVariant: 'original' | 'redacted' = showRedacted && redactedSrc ? 'redacted' : 'original'
+  const activeVariant: 'original' | 'redacted' =
+    showRedacted && redactedSrc ? 'redacted' : 'original'
+  const hasActiveSource = Boolean(activeSrc)
 
-  // Initialize Plyr
+  // Initialize Plyr instance.
+  // Keep it alive across source switches to avoid teardown/re-init races.
   useEffect(() => {
-    if (!audioRef.current) return
+    if (!hasActiveSource) {
+      setIsReady(false)
+      setDuration(0)
+      return
+    }
+
+    // React can transiently clear refs while the previous Plyr instance is torn down.
+    // Retry once on next tick instead of getting stuck without a player.
+    if (!audioRef.current) {
+      setIsReady(false)
+      const retryTimer = window.setTimeout(() => {
+        setRetryKey((k) => k + 1)
+      }, 0)
+      return () => window.clearTimeout(retryTimer)
+    }
 
     setLoadError(null)
     setIsReady(false)
 
-    const player = new Plyr(audioRef.current, {
+    const audioEl = audioRef.current
+    const player = new Plyr(audioEl, {
       controls: ['play', 'progress', 'current-time', 'duration', 'mute', 'settings'],
       settings: ['speed'],
       speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
@@ -87,14 +105,20 @@ export function AudioPlayer({
       invertTime: false,
     })
 
-    player.on('ready', () => {
+    const getCurrentStorageKey = () => {
+      const currentSource = audioEl.currentSrc || audioEl.getAttribute('src')
+      return currentSource ? getStorageKey(currentSource) : null
+    }
+
+    const markReady = () => {
       setIsReady(true)
       setDuration(player.duration || 0)
 
       // Restore saved position
       if (!restoredRef.current) {
         restoredRef.current = true
-        const savedTime = sessionStorage.getItem(getStorageKey(activeSrc))
+        const storageKey = getCurrentStorageKey()
+        const savedTime = storageKey ? sessionStorage.getItem(storageKey) : null
         if (savedTime) {
           const time = parseFloat(savedTime)
           if (!isNaN(time) && time > 0 && time < player.duration) {
@@ -111,7 +135,9 @@ export function AudioPlayer({
         }
         pendingSeekRef.current = null
       }
-    })
+    }
+
+    player.on('ready', markReady)
 
     player.on('error', () => {
       setLoadError('Failed to load audio')
@@ -127,7 +153,15 @@ export function AudioPlayer({
     const handleDurationChange = () => {
       setDuration(player.duration || 0)
     }
-    audioRef.current.addEventListener('durationchange', handleDurationChange)
+    audioEl.addEventListener('durationchange', handleDurationChange)
+    audioEl.addEventListener('loadedmetadata', markReady)
+    audioEl.addEventListener('canplay', markReady)
+    audioEl.addEventListener('canplaythrough', markReady)
+
+    // If metadata is already available (e.g. cached source), do not wait for events.
+    if (audioEl.readyState >= 1) {
+      markReady()
+    }
 
     player.on('play', () => {
       isPlayingRef.current = true
@@ -143,14 +177,18 @@ export function AudioPlayer({
 
     plyrRef.current = player
 
-    const audioEl = audioRef.current
-
     return () => {
       // Save position before destroying
       if (player.currentTime > 0) {
-        sessionStorage.setItem(getStorageKey(activeSrc), String(player.currentTime))
+        const storageKey = getCurrentStorageKey()
+        if (storageKey) {
+          sessionStorage.setItem(storageKey, String(player.currentTime))
+        }
       }
-      audioEl?.removeEventListener('durationchange', handleDurationChange)
+      audioEl.removeEventListener('durationchange', handleDurationChange)
+      audioEl.removeEventListener('loadedmetadata', markReady)
+      audioEl.removeEventListener('canplay', markReady)
+      audioEl.removeEventListener('canplaythrough', markReady)
       player.destroy()
       plyrRef.current = null
       isPlayingRef.current = false
@@ -158,11 +196,27 @@ export function AudioPlayer({
       restoredRef.current = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSrc, retryKey])
+  }, [hasActiveSource, retryKey])
+
+  // Switch media source without tearing down Plyr.
+  useEffect(() => {
+    const audioEl = audioRef.current
+    if (!audioEl || !activeSrc) return
+
+    const currentSrc = audioEl.getAttribute('src')
+    if (currentSrc === activeSrc) return
+
+    restoredRef.current = false
+    setLoadError(null)
+    setIsReady(false)
+
+    audioEl.src = activeSrc
+    audioEl.load()
+  }, [activeSrc])
 
   // Persist playback position periodically
   useEffect(() => {
-    if (!isReady) return
+    if (!isReady || !activeSrc) return
 
     const interval = setInterval(() => {
       const player = plyrRef.current
@@ -196,6 +250,23 @@ export function AudioPlayer({
     if (seekTo === undefined) return
     applySeekRequest(seekTo)
   }, [seekTo, applySeekRequest])
+
+  // Apply queued seek once metadata becomes ready.
+  useEffect(() => {
+    if (!pendingSeekRef.current || !isReady || duration <= 0) return
+    applySeekRequest(pendingSeekRef.current)
+  }, [isReady, duration, applySeekRequest])
+
+  // Self-heal when a source exists but Plyr instance is missing.
+  useEffect(() => {
+    if (!activeSrc || plyrRef.current) return
+    const retryTimer = window.setTimeout(() => {
+      if (!plyrRef.current) {
+        setRetryKey((k) => k + 1)
+      }
+    }, 150)
+    return () => window.clearTimeout(retryTimer)
+  }, [activeSrc, retryKey])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -292,11 +363,31 @@ export function AudioPlayer({
     <div className={cn('flex items-center gap-2', className)}>
       {/* Plyr audio player */}
       <div className="flex-1 min-w-0">
-        <audio ref={audioRef} src={activeSrc} preload="metadata" />
+        {activeSrc ? (
+          <audio ref={audioRef} src={activeSrc} preload="metadata" />
+        ) : (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>Audio unavailable</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleRetry}
+              disabled={isRefreshing || !onRefreshSourceUrls}
+              className="h-6 px-2"
+              title="Retry audio URL"
+            >
+              {isRefreshing ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3" />
+              )}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Loading state overlay */}
-      {!isReady && !loadError && (
+      {activeSrc && !isReady && !loadError && (
         <div className="flex items-center gap-2 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           <span className="text-xs">Loading...</span>
@@ -331,6 +422,7 @@ export function AudioPlayer({
         className="h-8 w-8 shrink-0"
         onClick={handleAutoScrollToggle}
         title={autoScroll ? 'Auto-scroll on' : 'Auto-scroll off'}
+        aria-label={autoScroll ? 'Auto-scroll on' : 'Auto-scroll off'}
       >
         <RotateCcw className="h-4 w-4" />
       </Button>
@@ -341,8 +433,9 @@ export function AudioPlayer({
         size="icon"
         className="h-8 w-8 shrink-0"
         onClick={() => void handleDownload()}
-        disabled={isDownloading}
+        disabled={isDownloading || (!activeSrc && !onResolveDownloadUrl)}
         title="Download audio"
+        aria-label="Download audio"
       >
         {isDownloading ? (
           <Loader2 className="h-4 w-4 animate-spin" />

@@ -626,6 +626,7 @@ export function JobDetail() {
               speakers={job.speakers}
               fullText={job.status === 'completed' ? job.text : undefined}
               audioSrc={audioUrl ?? undefined}
+              showAudioPlayer={canAccessAudio}
               redactedAudioSrc={redactedAudioUrl}
               onRefreshAudioUrls={refreshAudioUrls}
               onResolveAudioDownloadUrl={resolveAudioDownloadUrl}

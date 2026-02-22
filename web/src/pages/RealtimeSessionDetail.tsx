@@ -66,7 +66,8 @@ export function RealtimeSessionDetail() {
     }
   }, [fetchAudioUrl])
 
-  const resolveAudioDownloadUrl = useCallback(async () => {
+  const resolveAudioDownloadUrl = useCallback(async (variant: 'original' | 'redacted') => {
+    void variant
     const data = await fetchAudioUrl()
     if (data) {
       setAudioUrlData(data)
@@ -278,7 +279,7 @@ export function RealtimeSessionDetail() {
       </Card>
 
       {/* Transcript/Audio Card */}
-      {(transcript || audioUrl) && (
+      {(transcript || canAccessAudio) && (
         <Card>
           <CardHeader>
             <CardTitle>{transcript ? 'Transcript' : 'Audio'}</CardTitle>
@@ -293,6 +294,7 @@ export function RealtimeSessionDetail() {
               })) ?? []}
               fullText={transcript?.text}
               audioSrc={audioUrl ?? undefined}
+              showAudioPlayer={canAccessAudio}
               onRefreshAudioUrls={refreshAudioUrls}
               onResolveAudioDownloadUrl={resolveAudioDownloadUrl}
               enableExport={!!transcript && !!session.transcript_uri}
