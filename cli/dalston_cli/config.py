@@ -3,8 +3,9 @@
 Supports configuration from:
 1. Default values
 2. Config file (~/.dalston/config.yaml)
-3. Environment variables
-4. CLI arguments (handled by Click)
+3. .env file (current directory)
+4. Environment variables
+5. CLI arguments (handled by Typer)
 """
 
 from __future__ import annotations
@@ -14,7 +15,12 @@ import os
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 logger = logging.getLogger(__name__)
+
+# Load .env from current directory (does not override existing env vars)
+load_dotenv()
 
 
 def load_config() -> dict[str, Any]:
@@ -22,8 +28,9 @@ def load_config() -> dict[str, Any]:
 
     Priority (lowest to highest):
     1. Default values
-    2. Config file
-    3. Environment variables
+    2. Config file (~/.dalston/config.yaml)
+    3. .env file (loaded at module import, does not override existing env vars)
+    4. Environment variables
 
     Returns:
         Configuration dictionary.
