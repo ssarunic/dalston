@@ -16,7 +16,7 @@
 #
 # Usage:
 #   docker compose up -d
-#   docker compose up -d --scale stt-batch-transcribe-whisper=2  # scale specific engine
+#   docker compose up -d --scale stt-batch-transcribe-faster-whisper-base=2
 
 # ============================================================
 # EXTENSION FIELDS (shared configurations)

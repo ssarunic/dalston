@@ -82,6 +82,7 @@ fi
 # Create environment file for Docker Compose
 cat > "$DATA_MOUNT/dalston/.env.aws" << EOF
 S3_BUCKET=${S3_BUCKET}
+S3_REGION=${AWS_REGION}
 AWS_REGION=${AWS_REGION}
 REDIS_URL=redis://redis:6379
 DATABASE_URL=postgresql://dalston:dalston@postgres:5432/dalston
@@ -104,6 +105,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - DATABASE_URL=postgresql+asyncpg://dalston:dalston@postgres:5432/dalston
       - S3_BUCKET=$${S3_BUCKET}
+      - S3_REGION=$${S3_REGION}
       - AWS_REGION=$${AWS_REGION}
     depends_on:
       - redis
