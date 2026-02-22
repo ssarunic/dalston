@@ -42,6 +42,7 @@ class VoxtralStreamingEngine(RealtimeEngine):
     MODEL_VARIANT_MAP = {
         "mini-4b": "mistralai/Voxtral-Mini-4B-Realtime-2602",
     }
+    GPU_ONLY_VARIANTS = set(MODEL_VARIANT_MAP.keys())
     DEFAULT_MODEL_VARIANT = "mini-4b"
     DEFAULT_DELAY_MS = 480  # Sweet spot between latency and accuracy
 
@@ -82,18 +83,35 @@ class VoxtralStreamingEngine(RealtimeEngine):
 
         requested_device = os.environ.get("DEVICE", "").lower()
         cuda_available = torch.cuda.is_available()
+        gpu_only_variant = model_variant in self.GPU_ONLY_VARIANTS
 
         if requested_device == "cpu":
             self._device = "cpu"
-            logger.warning(
-                "using_cpu_device",
-                message="Running on CPU - realtime latency will NOT be achievable",
-            )
-        elif requested_device == "cuda" or requested_device == "":
+            if gpu_only_variant:
+                logger.warning(
+                    "gpu_only_variant_forced_cpu",
+                    variant=model_variant,
+                    message=(
+                        "GPU-optimized realtime variant forced to CPU. "
+                        "Use only for development/testing."
+                    ),
+                )
+            else:
+                logger.warning(
+                    "using_cpu_device",
+                    message="Running on CPU - realtime latency will NOT be achievable",
+                )
+        elif requested_device in ("", "auto", "cuda"):
             if cuda_available:
                 self._device = "cuda"
                 logger.info("cuda_available", device_count=torch.cuda.device_count())
             else:
+                if requested_device == "cuda" or gpu_only_variant:
+                    raise RuntimeError(
+                        f"Model variant '{model_variant}' requires CUDA, "
+                        "but CUDA is not available. Set DEVICE=cpu only for "
+                        "local development/testing."
+                    )
                 self._device = "cpu"
                 logger.warning(
                     "cuda_not_available",

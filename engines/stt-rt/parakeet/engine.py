@@ -45,6 +45,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
         "0.6b": "nvidia/parakeet-rnnt-0.6b",
         "1.1b": "nvidia/parakeet-rnnt-1.1b",
     }
+    GPU_ONLY_VARIANTS = set(MODEL_VARIANT_MAP.keys())
     DEFAULT_MODEL_VARIANT = "0.6b"
     DEFAULT_CHUNK_SIZE_MS = 100  # 100ms chunks for low latency
 
@@ -70,18 +71,35 @@ class ParakeetStreamingEngine(RealtimeEngine):
         # Determine device from environment or availability
         requested_device = os.environ.get("DEVICE", "").lower()
         cuda_available = torch.cuda.is_available()
+        gpu_only_variant = model_variant in self.GPU_ONLY_VARIANTS
 
         if requested_device == "cpu":
             self._device = "cpu"
-            logger.warning(
-                "using_cpu_device",
-                message="Running on CPU - real-time latency may not be achievable",
-            )
-        elif requested_device == "cuda" or requested_device == "":
+            if gpu_only_variant:
+                logger.warning(
+                    "gpu_only_variant_forced_cpu",
+                    variant=model_variant,
+                    message=(
+                        "GPU-optimized realtime variant forced to CPU. "
+                        "Use only for development/testing."
+                    ),
+                )
+            else:
+                logger.warning(
+                    "using_cpu_device",
+                    message="Running on CPU - real-time latency may not be achievable",
+                )
+        elif requested_device in ("", "auto", "cuda"):
             if cuda_available:
                 self._device = "cuda"
                 logger.info("cuda_available", device_count=torch.cuda.device_count())
             else:
+                if requested_device == "cuda" or gpu_only_variant:
+                    raise RuntimeError(
+                        f"Model variant '{model_variant}' requires CUDA, "
+                        "but CUDA is not available. Set DEVICE=cpu only for "
+                        "local development/testing."
+                    )
                 self._device = "cpu"
                 logger.warning(
                     "cuda_not_available",

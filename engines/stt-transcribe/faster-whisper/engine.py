@@ -32,12 +32,14 @@ class WhisperEngine(Engine):
     for subsequent transcriptions. The model variant is determined by
     the MODEL_VARIANT environment variable, set at container build time.
 
-    Automatically detects GPU availability and falls back to CPU mode.
+    Automatically detects GPU availability. GPU-only variants fail fast
+    when CUDA is unavailable unless explicitly forced with DEVICE=cpu.
     """
 
     # Default configuration
     DEFAULT_BEAM_SIZE = 5
     DEFAULT_VAD_FILTER = True
+    GPU_ONLY_VARIANTS = {"large-v3", "large-v3-turbo"}
 
     def __init__(self) -> None:
         super().__init__()
@@ -63,16 +65,44 @@ class WhisperEngine(Engine):
         """
         # Check for explicit device override
         requested_device = os.environ.get("DEVICE", "").lower()
+        gpu_only_variant = self._model_variant in self.GPU_ONLY_VARIANTS
         if requested_device == "cpu":
+            if gpu_only_variant:
+                self.logger.warning(
+                    "gpu_only_variant_forced_cpu",
+                    model_variant=self._model_variant,
+                    message=(
+                        "GPU-only variant forced to CPU. "
+                        "Use only for local development/testing."
+                    ),
+                )
             return "cpu", "int8"
 
         try:
             import torch
 
-            if torch.cuda.is_available():
+            cuda_available = torch.cuda.is_available()
+            if cuda_available:
                 return "cuda", "float16"
         except ImportError:
-            pass
+            cuda_available = False
+
+        if requested_device == "cuda":
+            raise RuntimeError(
+                "DEVICE=cuda but CUDA is not available for faster-whisper."
+            )
+
+        if requested_device not in ("", "auto"):
+            raise ValueError(
+                f"Unknown DEVICE value: {requested_device}. Use cuda or cpu."
+            )
+
+        if gpu_only_variant:
+            raise RuntimeError(
+                f"Model variant '{self._model_variant}' requires CUDA, "
+                "but CUDA is not available. Set DEVICE=cpu only for local "
+                "development/testing."
+            )
 
         # Fallback to CPU
         return "cpu", "int8"

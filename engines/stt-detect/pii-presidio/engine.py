@@ -10,6 +10,7 @@ The engine maps detected entities to word timestamps from the transcript
 to enable audio redaction in the subsequent stage.
 """
 
+import os
 import re
 import time
 from collections import defaultdict
@@ -125,6 +126,34 @@ class PIIDetectionEngine(Engine):
         self._anonymizer = None
         self._gliner_model = None
         self._tier: PIIDetectionTier | None = None
+        self._device = self._resolve_device()
+        self.logger.info("pii_detection_engine_initialized", device=self._device)
+
+    def _resolve_device(self) -> str:
+        """Resolve inference device from DEVICE env with auto-detect fallback."""
+        requested_device = os.environ.get("DEVICE", "").lower()
+
+        try:
+            import torch
+
+            cuda_available = torch.cuda.is_available()
+        except ImportError:
+            cuda_available = False
+
+        if requested_device == "cpu":
+            return "cpu"
+
+        if requested_device == "cuda":
+            if not cuda_available:
+                raise RuntimeError(
+                    "DEVICE=cuda but CUDA is not available for pii-presidio."
+                )
+            return "cuda"
+
+        if requested_device in ("", "auto"):
+            return "cuda" if cuda_available else "cpu"
+
+        raise ValueError(f"Unknown DEVICE value: {requested_device}. Use cuda or cpu.")
 
     def _load_presidio(self) -> None:
         """Load Presidio analyzer and anonymizer."""
@@ -213,9 +242,21 @@ class PIIDetectionEngine(Engine):
         try:
             from gliner import GLiNER
 
-            self.logger.info("loading_gliner_model")
-            self._gliner_model = GLiNER.from_pretrained("urchade/gliner_multi-v2.1")
-            self.logger.info("gliner_model_loaded")
+            self.logger.info("loading_gliner_model", device=self._device)
+            try:
+                self._gliner_model = GLiNER.from_pretrained(
+                    "urchade/gliner_multi-v2.1",
+                    device=self._device,
+                )
+            except TypeError:
+                # Backward compatibility for GLiNER versions without device kwarg.
+                self._gliner_model = GLiNER.from_pretrained("urchade/gliner_multi-v2.1")
+                if hasattr(self._gliner_model, "to"):
+                    moved = self._gliner_model.to(self._device)
+                    if moved is not None:
+                        self._gliner_model = moved
+
+            self.logger.info("gliner_model_loaded", device=self._device)
         except ImportError:
             self.logger.warning("gliner_not_available")
         except Exception as e:

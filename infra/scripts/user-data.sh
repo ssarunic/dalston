@@ -18,7 +18,7 @@ AWS_REGION="${AWS_REGION}"
 # Install Docker
 echo "Installing Docker..."
 dnf update -y
-dnf install -y docker git
+dnf install -y docker git pciutils
 
 # Install Tailscale
 echo "Installing Tailscale..."
@@ -39,6 +39,25 @@ curl -L "https://github.com/docker/compose/releases/download/$${DOCKER_COMPOSE_V
   -o /usr/local/bin/docker-compose
 chmod +x /usr/local/bin/docker-compose
 ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+
+# Configure optional GPU runtime support
+COMPOSE_PROFILE_FLAGS="--profile prod"
+if lspci | grep -qi nvidia; then
+  echo "NVIDIA GPU detected. Installing NVIDIA Container Toolkit..."
+  curl -fsSL https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
+    -o /etc/yum.repos.d/nvidia-container-toolkit.repo
+  dnf install -y nvidia-container-toolkit || true
+  if command -v nvidia-ctk >/dev/null 2>&1; then
+    nvidia-ctk runtime configure --runtime=docker
+    systemctl restart docker
+    COMPOSE_PROFILE_FLAGS="--profile prod --profile gpu"
+    echo "NVIDIA runtime configured. GPU profile will be enabled."
+  else
+    echo "Warning: NVIDIA toolkit was not fully configured; continuing with CPU profiles."
+  fi
+else
+  echo "No NVIDIA GPU detected. Using CPU-safe compose profiles."
+fi
 
 # Wait for data volume to be attached
 echo "Waiting for data volume..."
@@ -89,59 +108,9 @@ DATABASE_URL=postgresql://dalston:dalston@postgres:5432/dalston
 HF_HOME=/data/models
 EOF
 
-# Create minimal docker-compose file for reliable startup
-echo "Creating docker-compose.minimal.yml..."
-cat > "$DATA_MOUNT/dalston/docker-compose.minimal.yml" << 'COMPOSE_EOF'
-services:
-  gateway:
-    image: python:3.11-slim
-    working_dir: /app
-    command: bash -c "apt-get update && apt-get install -y gcc libpq-dev && pip install psycopg2-binary asyncpg && pip install -e '.[gateway]' && uvicorn dalston.gateway.main:app --host 0.0.0.0 --port 8000"
-    volumes:
-      - .:/app
-    ports:
-      - "8000:8000"
-    environment:
-      - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=postgresql+asyncpg://dalston:dalston@postgres:5432/dalston
-      - S3_BUCKET=$${S3_BUCKET}
-      - S3_REGION=$${S3_REGION}
-      - AWS_REGION=$${AWS_REGION}
-    depends_on:
-      - redis
-      - postgres
-
-  web:
-    image: node:20-alpine
-    working_dir: /app/web
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
-    volumes:
-      - .:/app
-    ports:
-      - "3000:3000"
-    depends_on:
-      - gateway
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      - POSTGRES_USER=dalston
-      - POSTGRES_PASSWORD=dalston
-      - POSTGRES_DB=dalston
-    volumes:
-      - /data/postgres:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-COMPOSE_EOF
-
-# Create systemd service for Docker Compose (uses minimal compose by default)
+# Create systemd service for full Dalston stack (core + engines via profiles)
 echo "Creating systemd service..."
-cat > /etc/systemd/system/dalston.service << 'EOF'
+cat > /etc/systemd/system/dalston.service << EOF
 [Unit]
 Description=Dalston Transcription Server
 Requires=docker.service
@@ -151,8 +120,8 @@ After=docker.service
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/data/dalston
-ExecStart=/usr/bin/docker-compose -f docker-compose.minimal.yml --env-file .env.aws up -d
-ExecStop=/usr/bin/docker-compose -f docker-compose.minimal.yml down
+ExecStart=/usr/bin/docker-compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml --env-file .env.aws ${COMPOSE_PROFILE_FLAGS} up -d
+ExecStop=/usr/bin/docker-compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml --env-file .env.aws ${COMPOSE_PROFILE_FLAGS} down
 TimeoutStartSec=600
 
 [Install]

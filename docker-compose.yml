@@ -562,12 +562,33 @@ services:
     build:
       context: .
       dockerfile: engines/stt-detect/pii-presidio/Dockerfile
+      args:
+        DEVICE: cpu
     environment:
       <<: [*common-env, *observability-env]
       ENGINE_ID: pii-presidio
+      DEVICE: cpu
     volumes:
       - gliner-models:/models
     depends_on: *batch-depends
+    restart: unless-stopped
+
+  stt-batch-pii-detect-presidio-gpu:
+    image: dalston/stt-batch-pii-detect-presidio-gpu:latest
+    build:
+      context: .
+      dockerfile: engines/stt-detect/pii-presidio/Dockerfile
+      args:
+        DEVICE: cuda
+    environment:
+      <<: [*common-env, *observability-env]
+      ENGINE_ID: pii-presidio
+      DEVICE: cuda
+    volumes:
+      - gliner-models:/models
+    depends_on: *batch-depends
+    deploy: *gpu-deploy
+    profiles: [gpu]
     restart: unless-stopped
 
   # --- AUDIO REDACT STAGE ---
@@ -610,6 +631,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       MODEL_VARIANT: 0.6b
+      DEVICE: cpu
       WORKER_PORT: 9000
       MAX_SESSIONS: 4
     volumes:

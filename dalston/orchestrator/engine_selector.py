@@ -204,10 +204,23 @@ def _rank_and_select(
         EngineSelectionResult with the best engine
     """
 
+    requested_language = requirements.get("language")
+
     def score(engine: BatchEngineState) -> tuple:
         caps = engine.capabilities
         if caps is None:
-            return (0, 0, 0, -999.0)
+            return (0, 0, 0, 0, -999.0)
+
+        # For unknown language ("auto"), prioritize language-safe engines:
+        # universal (None) > multilingual > single-language.
+        if requested_language:
+            unknown_lang_safety = 0
+        elif caps.languages is None:
+            unknown_lang_safety = 2
+        elif len(caps.languages) > 1:
+            unknown_lang_safety = 1
+        else:
+            unknown_lang_safety = 0
 
         # Prefer native word timestamps (skips alignment stage)
         native_ts = 1 if caps.supports_word_timestamps else 0
@@ -222,7 +235,7 @@ def _rank_and_select(
         rtf = caps.rtf_gpu if caps.rtf_gpu else 999.0
         speed = -rtf
 
-        return (native_ts, native_diar, specific, speed)
+        return (unknown_lang_safety, native_ts, native_diar, specific, speed)
 
     ranked = sorted(capable, key=score, reverse=True)
     winner = ranked[0]
