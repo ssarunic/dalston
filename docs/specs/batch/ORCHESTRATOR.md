@@ -27,7 +27,7 @@ The Orchestrator is a background service responsible for expanding jobs into tas
 
 ---
 
-## Two-Level Queue Model
+## Two-Level Dispatch Model
 
 ```
 LEVEL 1: JOB QUEUE
@@ -49,8 +49,8 @@ ORCHESTRATOR expands each job into task DAG
      │            │            │
      ▼            ▼            ▼
 
-LEVEL 2: TASK QUEUES (per engine)
-─────────────────────────────────
+LEVEL 2: TASK STREAMS (per engine)
+──────────────────────────────────
 
 "Run this specific engine on this specific input"
 
@@ -61,7 +61,7 @@ Tasks are atomic units of work. Each task:
 - May depend on other tasks
 
 ┌────────────────┐  ┌────────────────┐  ┌────────────────┐
-│ dalston:queue: │  │ dalston:queue: │  │ dalston:queue: │
+│ dalston:stream:│  │ dalston:stream:│  │ dalston:stream:│
 │ faster-whisper │  │ pyannote-3.1   │  │ whisperx-align │
 │                │  │                │  │                │
 │ [task] [task]  │  │ [task]         │  │ [task] [task]  │
@@ -354,11 +354,14 @@ async def handle_job_created(job_id: str):
     for task in tasks:
         await db.tasks.create(task)
 
-    # Queue tasks with no dependencies (Redis)
+    # Enqueue tasks with no dependencies (Redis Stream)
     for task in tasks:
         if not task.dependencies:
             await db.tasks.update(task.id, status="ready")
-            await redis.lpush(f"dalston:queue:{task.engine_id}", str(task.id))
+            await redis.xadd(
+                f"dalston:stream:{task.engine_id}",
+                {"task_id": str(task.id), "job_id": str(task.job_id)},
+            )
 
     # Update job status
     await db.jobs.update(job_id, status="running", started_at=datetime.utcnow())
@@ -380,9 +383,12 @@ async def handle_task_completed(task_id: str):
         dep_tasks = await db.tasks.get_many(dependent.dependencies)
 
         if all(t.status == "completed" for t in dep_tasks):
-            # All dependencies met - queue this task (Redis)
+            # All dependencies met - enqueue this task (Redis Stream)
             await db.tasks.update(dependent.id, status="ready")
-            await redis.lpush(f"dalston:queue:{dependent.engine_id}", str(dependent.id))
+            await redis.xadd(
+                f"dalston:stream:{dependent.engine_id}",
+                {"task_id": str(dependent.id), "job_id": str(dependent.job_id)},
+            )
 
     # Check if job is complete
     if all(t.status in ["completed", "skipped"] for t in all_tasks):
@@ -401,9 +407,12 @@ async def handle_task_failed(task_id: str):
     job = await db.jobs.get(task.job_id)
 
     if task.retries < task.max_retries:
-        # Retry - update PostgreSQL, queue to Redis
+        # Retry - update PostgreSQL, enqueue to Redis Stream
         await db.tasks.update(task.id, retries=task.retries + 1, status="ready", error=None)
-        await redis.lpush(f"dalston:queue:{task.engine_id}", str(task.id))
+        await redis.xadd(
+            f"dalston:stream:{task.engine_id}",
+            {"task_id": str(task.id), "job_id": str(task.job_id)},
+        )
 
     elif not task.required:
         # Optional task - skip and continue
@@ -634,8 +643,8 @@ s3:
   bucket: dalston-artifacts
   region: eu-west-2
 
-queues:
-  # How long workers wait on empty queue
+streams:
+  # How long workers wait on an empty stream read
   poll_timeout: 30
 
 tasks:
@@ -663,6 +672,6 @@ The orchestrator exposes metrics for monitoring:
 
 - `dalston_jobs_total` — Total jobs by status
 - `dalston_tasks_total` — Total tasks by stage and status
-- `dalston_queue_depth` — Current queue depth per engine
+- `dalston_queue_depth` — Current stream backlog per engine
 - `dalston_task_duration_seconds` — Task execution duration histogram
 - `dalston_job_duration_seconds` — Job total duration histogram

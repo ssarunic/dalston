@@ -83,7 +83,7 @@ When a job is cancelled, tasks are handled based on their current state:
 | Task State | Action |
 |------------|--------|
 | `PENDING` | Mark as `CANCELLED`, never queued |
-| `READY` | Remove from Redis queue (LREM), mark as `CANCELLED` |
+| `READY` | Mark as `CANCELLED`; engine skips stream message via cancellation check |
 | `RUNNING` | Let complete naturally (task → COMPLETED/FAILED) |
 | `COMPLETED` | No action (already done) |
 | `FAILED` | No action (already terminal) |
@@ -186,21 +186,22 @@ async def handle_job_cancel_requested(
 ) -> None:
     """Handle job.cancel_requested event.
 
-    1. Fetch all tasks for the job
-    2. For READY tasks: remove from Redis queue
-    3. For PENDING tasks: mark CANCELLED (already done by gateway)
+    1. Mark job as cancelled in Redis (engines check this before processing)
+    2. Fetch all tasks for the job
+    3. For READY/PENDING tasks: mark CANCELLED
     4. If no RUNNING tasks: transition job to CANCELLED
     """
+    await mark_job_cancelled(redis, str(job_id))
+
     result = await db.execute(
         select(TaskModel).where(TaskModel.job_id == job_id)
     )
     tasks = list(result.scalars().all())
 
     for task in tasks:
-        if task.status == TaskStatus.READY.value:
-            # Remove from Redis queue
-            queue_key = f"dalston:queue:{task.engine_id}"
-            await redis.lrem(queue_key, 0, str(task.id))
+        if task.status in (TaskStatus.PENDING.value, TaskStatus.READY.value):
+            # With Streams, tasks are not removed from Redis.
+            # Engines skip them after reading due to cancellation flag.
             task.status = TaskStatus.CANCELLED.value
 
     await db.commit()
@@ -476,7 +477,7 @@ async def cancel_job(
 - [ ] Add cancellation check in `handle_job_created()` before initial task queuing
 - [ ] Add cancellation check in `handle_task_completed()` before dependent task queuing
 - [ ] Subscribe to `job.cancel_requested` event in `dalston/orchestrator/main.py`
-- [ ] Add Redis queue removal logic (LREM) for READY tasks
+- [ ] Ensure READY stream messages are skipped via cancellation flag checks
 
 #### Phase 3: Webhook Delivery (Day 2-3)
 

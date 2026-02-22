@@ -299,7 +299,7 @@ class MyEngine(Engine):
 
 if __name__ == "__main__":
     engine = MyEngine()
-    engine.run()  # SDK handles queue polling
+    engine.run()  # SDK handles stream polling
 ```
 
 ### TaskInput
@@ -327,12 +327,12 @@ class TaskOutput:
 
 The SDK handles:
 
-1. Connecting to Redis (for queue polling)
-2. Polling the engine's queue (`dalston:queue:{engine_id}`)
+1. Connecting to Redis (for stream polling)
+2. Polling the engine's stream via consumer group (`dalston:stream:{engine_id}`)
 3. Downloading task input from S3 to local temp
 4. Calling `engine.process()`
 5. Uploading task output to S3
-6. Publishing completion event (Redis pub/sub)
+6. Acknowledging the stream message (`XACK`) and publishing completion event
 7. Cleaning up local temp files
 8. Error handling and reporting
 
@@ -342,13 +342,24 @@ class Engine:
         """Main loop - SDK implementation."""
         redis = Redis.from_url(os.environ["REDIS_URL"])
         engine_id = os.environ["ENGINE_ID"]
+        stream_key = f"dalston:stream:{engine_id}"
 
         while True:
-            # Blocking pop from queue
-            _, task_id = redis.brpop(f"dalston:queue:{engine_id}", timeout=30)
+            # Blocking read from stream via consumer group
+            results = redis.xreadgroup(
+                groupname="engines",
+                consumername=engine_id,
+                streams={stream_key: ">"},
+                count=1,
+                block=30000,
+            )
 
-            if task_id is None:
+            if not results:
                 continue  # Timeout, check again
+
+            _stream, entries = results[0]
+            message_id, fields = entries[0]
+            task_id = fields["task_id"]
 
             try:
                 # Load task
@@ -364,6 +375,9 @@ class Engine:
                 # Save output
                 self.save_output(task, output)
                 self.update_status(task, "completed")
+
+                # Acknowledge stream message
+                redis.xack(stream_key, "engines", message_id)
 
                 # Publish event
                 redis.publish("dalston:events", json.dumps({

@@ -20,6 +20,7 @@ from sqlalchemy.orm import selectinload
 
 from dalston.common.events import publish_job_cancel_requested
 from dalston.common.models import JobStatus
+from dalston.common.streams_types import CONSUMER_GROUP
 from dalston.config import Settings
 from dalston.db.models import JobModel
 from dalston.db.session import DEFAULT_TENANT_ID
@@ -39,6 +40,33 @@ from dalston.session_router import SessionRouter
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/api/console", tags=["console"])
+
+
+async def _get_stream_backlog(redis: Redis, stream_key: str) -> int:
+    """Return undelivered message count (group lag) for an engine stream."""
+    try:
+        groups = await redis.xinfo_groups(stream_key)
+    except Exception:
+        return 0
+
+    for group in groups:
+        name = group.get("name")
+        if isinstance(name, bytes):
+            name = name.decode()
+        if name != CONSUMER_GROUP:
+            continue
+
+        lag = group.get("lag")
+        if lag is None:
+            return 0
+        if isinstance(lag, bytes):
+            lag = lag.decode()
+        try:
+            return max(0, int(lag))
+        except (TypeError, ValueError):
+            return 0
+
+    return 0
 
 
 # Dashboard models
@@ -431,8 +459,8 @@ async def get_engines(
         engine_id = entry.engine_id
         stage = entry.capabilities.stages[0]
 
-        queue_key = f"dalston:queue:{engine_id}"
-        queue_depth = await redis.llen(queue_key) or 0
+        stream_key = f"dalston:stream:{engine_id}"
+        queue_depth = await _get_stream_backlog(redis, stream_key)
 
         instance_heartbeats = discovered_heartbeats.get(engine_id, [])
         if not instance_heartbeats:

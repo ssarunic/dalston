@@ -1,6 +1,6 @@
-"""Redis queue metrics exporter for Prometheus.
+"""Redis stream backlog metrics exporter for Prometheus.
 
-Periodically reads Redis queue depths and exposes them at /metrics
+Periodically reads Redis stream backlog metrics and exposes them at /metrics
 for Prometheus scraping.
 
 Usage:
@@ -9,7 +9,7 @@ Usage:
 Environment Variables:
     REDIS_URL: Redis connection URL (default: redis://localhost:6379)
     METRICS_PORT: Port for /metrics endpoint (default: 9100)
-    SCRAPE_INTERVAL: Interval between queue depth reads (default: 15 seconds)
+    SCRAPE_INTERVAL: Interval between stream backlog reads (default: 15 seconds)
 """
 
 from __future__ import annotations
@@ -26,13 +26,14 @@ from redis import asyncio as aioredis
 
 import dalston.logging
 import dalston.metrics
+from dalston.common.streams_types import CONSUMER_GROUP
 
 # Configure structured logging
 dalston.logging.configure("metrics-exporter")
 logger = structlog.get_logger()
 
-# Known engine queue patterns
-QUEUE_KEY_PATTERN = "dalston:queue:{engine_id}"
+# Known engine stream patterns
+STREAM_KEY_PATTERN = "dalston:stream:{engine_id}"
 KNOWN_ENGINES = [
     "audio-prepare",
     "faster-whisper",
@@ -51,40 +52,102 @@ _redis: aioredis.Redis | None = None
 TASK_METADATA_KEY = "dalston:task:{task_id}"
 
 
-async def _get_oldest_task_age(queue_key: str) -> float:
-    """Get the age of the oldest task in a queue.
+async def _get_oldest_task_age(
+    stream_key: str, depth: int, last_delivered_id: str | None
+) -> float:
+    """Get the age of the oldest undelivered task in a stream.
 
-    Uses LINDEX to peek at the oldest task (right end of list, index -1)
-    and reads its enqueued_at timestamp from metadata.
+    Uses consumer-group progress to find the first message after
+    `last-delivered-id`, then reads its enqueued_at timestamp.
 
     Args:
-        queue_key: Redis key for the engine queue
+        stream_key: Redis key for the engine stream
+        depth: Current consumer-group lag for the stream
+        last_delivered_id: Consumer-group cursor used to find first undelivered task
 
     Returns:
-        Age in seconds, or 0 if queue is empty or timestamp unavailable
+        Age in seconds, or 0 if stream is empty or timestamp unavailable
     """
     if _redis is None:
         return 0.0
 
     try:
-        # Peek at oldest task (engines pop from right with BRPOP, so oldest is at index -1)
-        oldest_task_id = await _redis.lindex(queue_key, -1)
-        if not oldest_task_id:
+        if depth <= 0 or not last_delivered_id:
             return 0.0
 
-        # Fetch task metadata
-        metadata_key = TASK_METADATA_KEY.format(task_id=oldest_task_id)
-        enqueued_at_str = await _redis.hget(metadata_key, "enqueued_at")
-        if not enqueued_at_str:
+        # Get oldest undelivered message (first message after last-delivered-id)
+        messages = await _redis.xrange(
+            stream_key,
+            min=f"({last_delivered_id}",
+            max="+",
+            count=1,
+        )
+        if not messages:
             return 0.0
+
+        # Extract enqueued_at from message fields
+        _msg_id, fields = messages[0]
+        enqueued_at_str = _decode_redis_str(fields.get("enqueued_at"))
+        if not enqueued_at_str:
+            # Fall back to task metadata if not in stream message
+            task_id = _decode_redis_str(fields.get("task_id"))
+            if task_id:
+                metadata_key = TASK_METADATA_KEY.format(task_id=task_id)
+                enqueued_at_str = await _redis.hget(metadata_key, "enqueued_at")
+                enqueued_at_str = _decode_redis_str(enqueued_at_str)
+            if not enqueued_at_str:
+                return 0.0
 
         # Calculate age
         enqueued_at = datetime.fromisoformat(enqueued_at_str)
         now = datetime.now(UTC)
         return (now - enqueued_at).total_seconds()
 
-    except (ValueError, TypeError):
+    except Exception:
         return 0.0
+
+
+def _decode_redis_str(value: str | bytes | None) -> str | None:
+    """Decode Redis response values to strings."""
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value.decode()
+    return value
+
+
+def _parse_nonnegative_int(value: int | str | bytes | None) -> int:
+    """Parse an integer-like value and clamp to zero."""
+    if value is None:
+        return 0
+    if isinstance(value, bytes):
+        value = value.decode()
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+async def _get_stream_backlog_state(stream_key: str) -> tuple[int, str | None]:
+    """Return (consumer-group lag, last-delivered-id) for the engine stream."""
+    if _redis is None:
+        return 0, None
+
+    try:
+        groups = await _redis.xinfo_groups(stream_key)
+    except Exception:
+        return 0, None
+
+    for group in groups:
+        group_name = _decode_redis_str(group.get("name"))
+        if group_name != CONSUMER_GROUP:
+            continue
+
+        lag = _parse_nonnegative_int(group.get("lag"))
+        last_delivered_id = _decode_redis_str(group.get("last-delivered-id"))
+        return lag, last_delivered_id
+
+    return 0, None
 
 
 async def collect_queue_metrics() -> None:
@@ -99,14 +162,16 @@ async def collect_queue_metrics() -> None:
         await _redis.ping()
         dalston.metrics.set_redis_connected(True)
 
-        # Collect queue depths for known engines
+        # Collect stream depths for known engines
         for engine_id in KNOWN_ENGINES:
-            queue_key = QUEUE_KEY_PATTERN.format(engine_id=engine_id)
-            depth = await _redis.llen(queue_key)
+            stream_key = STREAM_KEY_PATTERN.format(engine_id=engine_id)
+            depth, last_delivered_id = await _get_stream_backlog_state(stream_key)
             dalston.metrics.set_queue_depth(engine_id, depth)
 
             # Calculate oldest task age from enqueued_at timestamp (M20)
-            oldest_age = await _get_oldest_task_age(queue_key)
+            oldest_age = await _get_oldest_task_age(
+                stream_key, depth=depth, last_delivered_id=last_delivered_id
+            )
             dalston.metrics.set_queue_oldest_task_age(engine_id, oldest_age)
 
     except Exception as e:

@@ -161,17 +161,17 @@
 | Layer | Technology | Purpose |
 |-------|------------|---------|
 | **PostgreSQL** | Primary database | Persistent business data (jobs, tasks, API keys, tenants) |
-| **Redis** | In-memory store | Ephemeral data (queues, session state, rate limits, pub/sub) |
+| **Redis** | In-memory store | Ephemeral data (streams, session state, rate limits, pub/sub) |
 | **S3** | Object storage | All artifacts (audio files, transcripts, exports, models) |
 | **Local** | Temp filesystem | In-flight processing files only |
 
 ### Redis (Ephemeral)
 
-**Purpose**: Queues, pub/sub, rate limiting, session state
+**Purpose**: Streams, pub/sub, rate limiting, session state
 
 **Batch Structures**:
 
-- `dalston:queue:{engine_id}` — Engine work queues
+- `dalston:stream:{engine_id}` — Engine work streams
 - `dalston:ratelimit:{key_id}` — Rate limit counters
 - `dalston:events` — Event pub/sub
 
@@ -189,7 +189,7 @@
 
 **Purpose**: Execute processing tasks in isolated environments
 
-**Execution Model**: Poll Redis queue, process task, publish completion
+**Execution Model**: Poll Redis stream (consumer group), process task, acknowledge completion
 
 **Engine Categories**:
 

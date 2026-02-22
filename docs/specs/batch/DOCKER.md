@@ -667,8 +667,8 @@ sudo systemctl restart docker
 ### Engine Not Processing
 
 ```bash
-# Check queue depth
-docker compose exec redis redis-cli LLEN dalston:queue:faster-whisper
+# Check stream backlog (lag field in consumer-group info)
+docker compose exec redis redis-cli XINFO GROUPS dalston:stream:faster-whisper
 
 # Check engine logs
 docker compose logs -f stt-batch-transcribe-whisper-cpu

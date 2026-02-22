@@ -184,17 +184,18 @@ CREATE INDEX idx_api_keys_prefix ON api_keys(prefix);
 
 Redis is used exclusively for ephemeral, real-time data that doesn't require durability.
 
-### Engine Work Queue
+### Engine Work Stream
 
-**Key**: `dalston:queue:{engine_id}`
-**Type**: List (FIFO)
+**Key**: `dalston:stream:{engine_id}`
+**Type**: Redis Stream (consumer group: `engines`)
 
 ```
-RPUSH dalston:queue:faster-whisper task_uuid
-BRPOP dalston:queue:faster-whisper 30
+XADD dalston:stream:faster-whisper * task_id task_uuid job_id job_uuid enqueued_at 2026-01-01T00:00:00+00:00 timeout_at 2026-01-01T00:10:00+00:00 delivery_count 1
+XREADGROUP GROUP engines faster-whisper COUNT 1 BLOCK 30000 STREAMS dalston:stream:faster-whisper >
+XACK dalston:stream:faster-whisper engines 1736352000000-0
 ```
 
-Workers use `BRPOP` for blocking dequeue with timeout. Task UUIDs reference the PostgreSQL tasks table.
+Workers use `XREADGROUP` for blocking dequeue with timeout and `XACK` after completion. Task UUIDs reference the PostgreSQL tasks table.
 
 ---
 

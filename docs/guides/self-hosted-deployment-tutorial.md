@@ -384,11 +384,11 @@ docker compose build
 docker compose up -d
 ```
 
-### Check queue depths
+### Check stream backlogs
 
 ```bash
-docker compose exec redis redis-cli LLEN dalston:queue:faster-whisper
-docker compose exec redis redis-cli LLEN dalston:queue:whisperx-align
+docker compose exec redis redis-cli XINFO GROUPS dalston:stream:faster-whisper
+docker compose exec redis redis-cli XINFO GROUPS dalston:stream:whisperx-align
 ```
 
 ## Backup Strategy
@@ -463,8 +463,9 @@ docker compose up -d --scale stt-batch-transcribe-whisper-cpu=1
 # Check orchestrator logs
 docker compose logs orchestrator
 
-# Check queue depths
-docker compose exec redis redis-cli KEYS "dalston:queue:*"
+# Check stream keys/backlogs
+docker compose exec redis redis-cli KEYS "dalston:stream:*"
+docker compose exec redis redis-cli XINFO GROUPS dalston:stream:faster-whisper
 
 # Verify engines are running
 docker compose ps | grep engine

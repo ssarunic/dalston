@@ -9,15 +9,15 @@ Terminology used throughout Dalston documentation.
 | **Job** | A batch request to transcribe one audio file. Jobs are expanded into task DAGs by the Orchestrator. |
 | **Task** | An atomic unit of work in the batch pipeline. Each task runs on a specific engine and may depend on other tasks. |
 | **DAG** | Directed Acyclic Graph — the dependency structure of tasks within a job. Tasks execute in topological order. |
-| **Engine** | A containerized processor that performs a specific pipeline stage. Can be batch (queue-based) or real-time (WebSocket-based). |
+| **Engine** | A containerized processor that performs a specific pipeline stage. Can be batch (stream-based) or real-time (WebSocket-based). |
 | **Stage** | A processing category in the pipeline: `prepare`, `transcribe`, `align`, `diarize`, `detect`, `refine`, `merge`. |
 
 ## Batch Processing
 
 | Term | Definition |
 | --- | --- |
-| **Orchestrator** | The service that expands jobs into task DAGs, schedules tasks to engine queues, and manages job lifecycle. |
-| **Work Queue** | A Redis list where tasks wait for engine workers. Each engine type has its own queue (`dalston:queue:{engine_id}`). |
+| **Orchestrator** | The service that expands jobs into task DAGs, schedules tasks to engine streams, and manages job lifecycle. |
+| **Work Queue** | A Redis Stream + consumer-group backlog where tasks wait for engine workers. Each engine type has its own stream (`dalston:stream:{engine_id}`). |
 | **Multi-stage Engine** | An engine that handles multiple pipeline stages in one pass (e.g., WhisperX doing transcribe + align + diarize). |
 
 ## Real-time Processing
