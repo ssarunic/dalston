@@ -40,8 +40,10 @@ curl -L "https://github.com/docker/compose/releases/download/$${DOCKER_COMPOSE_V
 chmod +x /usr/local/bin/docker-compose
 ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
 
-# Configure GPU runtime if available
-COMPOSE_PROFILE_FLAGS="--profile core"
+# Configure profiles for deployment
+# - local-infra: local postgres/redis on the instance
+# - gpu: GPU engine variants (enabled when NVIDIA runtime is available)
+COMPOSE_PROFILE_FLAGS="--profile local-infra"
 if lspci | grep -qi nvidia; then
   echo "NVIDIA GPU detected. Installing NVIDIA Container Toolkit..."
   curl -fsSL https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
@@ -50,7 +52,7 @@ if lspci | grep -qi nvidia; then
   if command -v nvidia-ctk >/dev/null 2>&1; then
     nvidia-ctk runtime configure --runtime=docker
     systemctl restart docker
-    COMPOSE_PROFILE_FLAGS="--profile core --profile gpu"
+    COMPOSE_PROFILE_FLAGS="--profile local-infra --profile gpu"
     echo "NVIDIA runtime configured. GPU engines will be started."
   else
     echo "WARNING: NVIDIA toolkit installation incomplete. GPU engines will NOT be started."
@@ -108,7 +110,7 @@ DATABASE_URL=postgresql://dalston:dalston@postgres:5432/dalston
 HF_HOME=/data/models
 EOF
 
-# Create systemd service for full Dalston stack (core + engines via profiles)
+# Create systemd service for full Dalston stack
 echo "Creating systemd service..."
 cat > /etc/systemd/system/dalston.service << EOF
 [Unit]

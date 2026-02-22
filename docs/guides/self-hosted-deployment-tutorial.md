@@ -104,10 +104,9 @@ OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxx
 Best for: Testing, development, or when you only need basic transcription without word timestamps.
 
 ```bash
-docker compose up -d \
-  postgres redis minio minio-init \
+docker compose --profile local-infra --profile local-object-storage up -d \
   gateway orchestrator \
-  stt-batch-prepare stt-batch-transcribe-whisper-cpu stt-batch-merge
+  stt-batch-prepare stt-batch-transcribe-faster-whisper-base stt-batch-merge
 ```
 
 Submit jobs with `timestamps_granularity=segment` to skip alignment.
@@ -117,10 +116,9 @@ Submit jobs with `timestamps_granularity=segment` to skip alignment.
 Best for: Production use requiring word-level timestamps.
 
 ```bash
-docker compose up -d \
-  postgres redis minio minio-init \
+docker compose --profile local-infra --profile local-object-storage up -d \
   gateway orchestrator \
-  stt-batch-prepare stt-batch-transcribe-whisper-cpu stt-batch-align-whisperx-cpu stt-batch-merge
+  stt-batch-prepare stt-batch-transcribe-faster-whisper-base stt-batch-align-whisperx-cpu stt-batch-merge
 ```
 
 ### Option C: Full Pipeline (With Speaker Diarization)
@@ -128,17 +126,17 @@ docker compose up -d \
 Best for: Meeting transcription, interviews, multi-speaker content.
 
 ```bash
-docker compose up -d
+docker compose --profile local-infra --profile local-object-storage up -d
 ```
 
-This starts all engines including `stt-batch-diarize-pyannote-v31-cpu` for speaker identification.
+This starts the default CPU-safe stack, including `stt-batch-diarize-pyannote-3.1-cpu` for speaker identification.
 
 ### Option D: GPU-Accelerated
 
 Best for: High-throughput production deployments.
 
 ```bash
-docker compose --profile gpu up -d
+docker compose --profile local-infra --profile local-object-storage --profile gpu up -d
 ```
 
 This uses GPU variants of transcription, alignment, and diarization engines.
@@ -148,10 +146,9 @@ This uses GPU variants of transcription, alignment, and diarization engines.
 Best for: Live transcription without batch processing.
 
 ```bash
-docker compose up -d \
-  postgres redis \
-  gateway \
-  stt-rt-transcribe-whisper-1 stt-rt-transcribe-whisper-2
+docker compose --profile local-infra --profile local-object-storage up -d \
+  gateway orchestrator \
+  stt-rt-transcribe-parakeet-rnnt-0.6b-cpu
 ```
 
 ## 5. Verify Deployment

@@ -15,8 +15,8 @@
 #   This saves disk space and ensures consistency.
 #
 # Usage:
-#   docker compose up -d
-#   docker compose up -d --scale stt-batch-transcribe-faster-whisper-base=2
+#   docker compose --profile local-infra --profile local-object-storage up -d
+#   docker compose --profile local-infra --profile local-object-storage up -d --scale stt-batch-transcribe-faster-whisper-base=2
 
 # ============================================================
 # EXTENSION FIELDS (shared configurations)
@@ -52,22 +52,28 @@ x-core-env: &core-env
 x-batch-depends: &batch-depends
   redis:
     condition: service_healthy
+    required: false
   minio-init:
     condition: service_completed_successfully
+    required: false
 
 # Dependencies for realtime engines
 x-realtime-depends: &realtime-depends
   redis:
     condition: service_healthy
+    required: false
 
 # Dependencies for core services
 x-core-depends: &core-depends
   postgres:
     condition: service_healthy
+    required: false
   redis:
     condition: service_healthy
+    required: false
   minio-init:
     condition: service_completed_successfully
+    required: false
 
 # GPU deployment configuration
 x-gpu-deploy: &gpu-deploy
@@ -105,6 +111,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    profiles: [local-infra]
     restart: unless-stopped
 
   redis:
@@ -129,6 +136,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    profiles: [local-infra]
     restart: unless-stopped
 
   minio:
@@ -147,6 +155,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    profiles: [local-object-storage]
     restart: unless-stopped
 
   minio-init:
@@ -164,6 +173,7 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
       S3_BUCKET: ${S3_BUCKET:-dalston-artifacts}
+    profiles: [local-object-storage]
 
   # Jaeger for distributed tracing (M19)
   jaeger:
@@ -174,7 +184,7 @@ services:
       - "4318:4318"
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
-    profiles: [tracing]
+    profiles: [observability]
     restart: unless-stopped
 
   # Prometheus for metrics collection (M20)
@@ -191,7 +201,7 @@ services:
       - '--web.enable-lifecycle'
       - '--storage.tsdb.retention.time=1d'
       - '--storage.tsdb.retention.size=500MB'
-    profiles: [monitoring]
+    profiles: [observability]
     restart: unless-stopped
 
   # Grafana for dashboards (M20)
@@ -209,7 +219,7 @@ services:
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/dalston-overview.json
     depends_on: [prometheus]
-    profiles: [monitoring]
+    profiles: [observability]
     restart: unless-stopped
 
   # Metrics exporter for Redis queue depths (M20)
@@ -220,7 +230,7 @@ services:
       <<: *common-env
       SCRAPE_INTERVAL: 15
     depends_on: *realtime-depends
-    profiles: [monitoring]
+    profiles: [observability]
     restart: unless-stopped
 
   # ============================================================
@@ -234,7 +244,6 @@ services:
       dockerfile: docker/Dockerfile.gateway
     ports:
       - "8000:8000"
-    profiles: [core]
     environment:
       <<: [*core-env, *observability-env]
     depends_on: *core-depends
@@ -250,15 +259,10 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.orchestrator
-    profiles: [core]
     environment:
       <<: [*core-env, *observability-env]
       METRICS_PORT: 8001
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+    depends_on: *core-depends
     restart: unless-stopped
 
   # ============================================================
@@ -314,7 +318,7 @@ services:
       - parakeet-models:/models
     depends_on: *batch-depends
     deploy: *gpu-deploy
-    profiles: [parakeet-ctc-1.1b]
+    profiles: [gpu]
     restart: unless-stopped
 
   # Parakeet TDT 0.6B v3 (GPU - accurate English transcription)
@@ -334,7 +338,7 @@ services:
       - parakeet-models:/models
     depends_on: *batch-depends
     deploy: *gpu-deploy
-    profiles: [parakeet-tdt-0.6b-v3]
+    profiles: [gpu]
     restart: unless-stopped
 
   # Parakeet TDT 0.6B v3 (CPU - for testing without GPU)
@@ -372,7 +376,7 @@ services:
       - parakeet-models:/models
     depends_on: *batch-depends
     deploy: *gpu-deploy
-    profiles: [parakeet-tdt-1.1b]
+    profiles: [gpu]
     restart: unless-stopped
 
   # Faster Whisper base (CPU/GPU - balanced speed/accuracy)
@@ -424,7 +428,7 @@ services:
       - whisper-models:/models
     depends_on: *batch-depends
     deploy: *gpu-deploy
-    profiles: [faster-whisper-turbo]
+    profiles: [gpu]
     restart: unless-stopped
 
   # Voxtral Mini 3B (GPU - multilingual transcription)
@@ -443,7 +447,7 @@ services:
       - voxtral-models:/models
     depends_on: *batch-depends
     deploy: *gpu-deploy
-    profiles: [voxtral]
+    profiles: [gpu]
     restart: unless-stopped
 
   # --- ALIGN STAGE ---
@@ -553,7 +557,7 @@ services:
     volumes:
       - nemo-models:/models
     depends_on: *batch-depends
-    profiles: [nemo-msdd]
+    profiles: [gpu]
     restart: unless-stopped
 
   # --- PII DETECT STAGE ---
@@ -631,7 +635,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       MODEL_VARIANT: 0.6b
-      DEVICE: cpu
+      DEVICE: cuda
       WORKER_PORT: 9000
       MAX_SESSIONS: 4
     volumes:
@@ -654,6 +658,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       MODEL_VARIANT: 0.6b
+      DEVICE: cpu
       WORKER_PORT: 9000
       MAX_SESSIONS: 4
     volumes:
@@ -681,7 +686,7 @@ services:
     depends_on: *realtime-depends
     healthcheck: *ws-healthcheck
     deploy: *gpu-deploy
-    profiles: [parakeet-rnnt-1.1b]
+    profiles: [gpu]
     restart: unless-stopped
 
   # Faster Whisper base (GPU)
@@ -699,7 +704,7 @@ services:
     depends_on: *realtime-depends
     healthcheck: *ws-healthcheck
     deploy: *gpu-deploy
-    profiles: [faster-whisper]
+    profiles: [gpu]
     restart: unless-stopped
 
   # Voxtral Mini 4B (GPU - multilingual realtime)
@@ -721,7 +726,7 @@ services:
     depends_on: *realtime-depends
     healthcheck: *ws-healthcheck
     deploy: *gpu-deploy
-    profiles: [voxtral]
+    profiles: [gpu]
     restart: unless-stopped
 
 volumes:

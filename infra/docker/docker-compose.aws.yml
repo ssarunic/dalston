@@ -1,5 +1,5 @@
 # Docker Compose override for AWS deployment
-# Usage: docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml up -d --profile core --profile gpu
+# Usage: docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml up -d --profile local-infra --profile gpu
 
 services:
   gateway:

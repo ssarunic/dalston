@@ -31,7 +31,7 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 ```bash
 git clone https://github.com/ssarunic/dalston.git
 cd dalston
-docker compose --profile core up -d
+docker compose --profile local-infra --profile local-object-storage up -d
 ```
 
 The API is available at `http://localhost:8000`. See the [deployment guide](docs/guides/self-hosted-deployment-tutorial.md) for production setup.
