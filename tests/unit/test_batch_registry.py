@@ -39,13 +39,13 @@ class TestBatchEngineInfo:
             engine_id="faster-whisper",
             instance_id="faster-whisper-abc123def456",
             stage="transcribe",
-            queue_name="dalston:queue:faster-whisper",
+            stream_name="dalston:stream:faster-whisper",
         )
 
         assert info.engine_id == "faster-whisper"
         assert info.instance_id == "faster-whisper-abc123def456"
         assert info.stage == "transcribe"
-        assert info.queue_name == "dalston:queue:faster-whisper"
+        assert info.stream_name == "dalston:stream:faster-whisper"
 
 
 class TestClientRegistry:
@@ -76,7 +76,7 @@ class TestClientRegistry:
             engine_id="faster-whisper",
             instance_id="faster-whisper-abc123def456",
             stage="transcribe",
-            queue_name="dalston:queue:faster-whisper",
+            stream_name="dalston:stream:faster-whisper",
         )
 
         registry.register(info)
@@ -89,7 +89,7 @@ class TestClientRegistry:
         assert mapping["engine_id"] == "faster-whisper"
         assert mapping["instance_id"] == "faster-whisper-abc123def456"
         assert mapping["stage"] == "transcribe"
-        assert mapping["queue_name"] == "dalston:queue:faster-whisper"
+        assert mapping["stream_name"] == "dalston:stream:faster-whisper"
         assert mapping["status"] == "idle"
 
         # Check TTL was set
@@ -148,7 +148,7 @@ class TestClientRegistry:
             engine_id="faster-whisper",
             instance_id="faster-whisper-abc123def456",
             stage="transcribe",
-            queue_name="dalston:queue:faster-whisper",
+            stream_name="dalston:stream:faster-whisper",
         )
         registry._registered_engines[info.instance_id] = info
 
@@ -181,7 +181,7 @@ class TestBatchEngineState:
             engine_id="faster-whisper",
             instance_id="faster-whisper-abc123",
             stage="transcribe",
-            queue_name="dalston:queue:faster-whisper",
+            stream_name="dalston:stream:faster-whisper",
             status="idle",
             current_task=None,
             last_heartbeat=now,
@@ -198,7 +198,7 @@ class TestBatchEngineState:
             engine_id="faster-whisper",
             instance_id="faster-whisper-abc123",
             stage="transcribe",
-            queue_name="dalston:queue:faster-whisper",
+            stream_name="dalston:stream:faster-whisper",
             status="idle",
             current_task=None,
             last_heartbeat=old,
@@ -214,7 +214,7 @@ class TestBatchEngineState:
             engine_id="faster-whisper",
             instance_id="faster-whisper-abc123",
             stage="transcribe",
-            queue_name="dalston:queue:faster-whisper",
+            stream_name="dalston:stream:faster-whisper",
             status="offline",
             current_task=None,
             last_heartbeat=now,
@@ -270,7 +270,7 @@ class TestServerRegistry:
                 "engine_id": "faster-whisper",
                 "instance_id": "faster-whisper-abc123",
                 "stage": "transcribe",
-                "queue_name": "dalston:queue:faster-whisper",
+                "stream_name": "dalston:stream:faster-whisper",
                 "status": "idle",
                 "current_task": "",
                 "last_heartbeat": now,
@@ -280,7 +280,7 @@ class TestServerRegistry:
                 "engine_id": "whisperx",
                 "instance_id": "whisperx-def456",
                 "stage": "align",
-                "queue_name": "dalston:queue:whisperx",
+                "stream_name": "dalston:stream:whisperx",
                 "status": "processing",
                 "current_task": "task-456",
                 "last_heartbeat": now,
@@ -305,7 +305,7 @@ class TestServerRegistry:
             "engine_id": "faster-whisper",
             "instance_id": "faster-whisper-abc123",
             "stage": "transcribe",
-            "queue_name": "dalston:queue:faster-whisper",
+            "stream_name": "dalston:stream:faster-whisper",
             "status": "idle",
             "current_task": "",
             "last_heartbeat": now,
@@ -352,7 +352,7 @@ class TestServerRegistry:
                 "engine_id": "faster-whisper",
                 "instance_id": "faster-whisper-abc123",
                 "stage": "transcribe",
-                "queue_name": "dalston:queue:faster-whisper",
+                "stream_name": "dalston:stream:faster-whisper",
                 "status": "idle",
                 "current_task": "",
                 "last_heartbeat": now,
@@ -362,7 +362,7 @@ class TestServerRegistry:
                 "engine_id": "whisperx",
                 "instance_id": "whisperx-def456",
                 "stage": "align",
-                "queue_name": "dalston:queue:whisperx",
+                "stream_name": "dalston:stream:whisperx",
                 "status": "idle",
                 "current_task": "",
                 "last_heartbeat": now,
@@ -372,7 +372,7 @@ class TestServerRegistry:
                 "engine_id": "pyannote",
                 "instance_id": "pyannote-ghi789",
                 "stage": "diarize",
-                "queue_name": "dalston:queue:pyannote",
+                "stream_name": "dalston:stream:pyannote",
                 "status": "idle",
                 "current_task": "",
                 "last_heartbeat": now,
@@ -395,7 +395,7 @@ class TestServerRegistry:
             "engine_id": "faster-whisper",
             "instance_id": "faster-whisper-abc123",
             "stage": "transcribe",
-            "queue_name": "dalston:queue:faster-whisper",
+            "stream_name": "dalston:stream:faster-whisper",
             "status": "idle",
             "current_task": "",
             "last_heartbeat": now,
@@ -425,7 +425,7 @@ class TestServerRegistry:
             "engine_id": "faster-whisper",
             "instance_id": "faster-whisper-abc123",
             "stage": "transcribe",
-            "queue_name": "dalston:queue:faster-whisper",
+            "stream_name": "dalston:stream:faster-whisper",
             "status": "idle",
             "current_task": "",
             "last_heartbeat": old,
@@ -452,7 +452,7 @@ class TestServerRegistry:
                 "engine_id": "faster-whisper",
                 "instance_id": "faster-whisper-abc123",
                 "stage": "transcribe",
-                "queue_name": "dalston:queue:faster-whisper",
+                "stream_name": "dalston:stream:faster-whisper",
                 "status": "idle",
                 "current_task": "",
                 "last_heartbeat": old,
@@ -463,7 +463,7 @@ class TestServerRegistry:
                 "engine_id": "faster-whisper",
                 "instance_id": "faster-whisper-def456",
                 "stage": "transcribe",
-                "queue_name": "dalston:queue:faster-whisper",
+                "stream_name": "dalston:stream:faster-whisper",
                 "status": "idle",
                 "current_task": "",
                 "last_heartbeat": now,
@@ -500,7 +500,7 @@ class TestServerRegistry:
                 "engine_id": "faster-whisper",
                 "instance_id": "faster-whisper-abc123",
                 "stage": "transcribe",
-                "queue_name": "dalston:queue:faster-whisper",
+                "stream_name": "dalston:stream:faster-whisper",
                 "status": "idle",
                 "current_task": "",
                 "last_heartbeat": now,
@@ -510,7 +510,7 @@ class TestServerRegistry:
                 "engine_id": "faster-whisper",
                 "instance_id": "faster-whisper-def456",
                 "stage": "transcribe",
-                "queue_name": "dalston:queue:faster-whisper",
+                "stream_name": "dalston:stream:faster-whisper",
                 "status": "idle",
                 "current_task": "",
                 "last_heartbeat": now,

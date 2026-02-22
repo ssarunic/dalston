@@ -91,7 +91,7 @@ def mock_running_engines() -> list[BatchEngineState]:
             engine_id="faster-whisper",
             instance_id="faster-whisper-test-instance",
             stage="transcribe",
-            queue_name="dalston:queue:faster-whisper",
+            stream_name="dalston:stream:faster-whisper",
             status="idle",
             current_task=None,
             last_heartbeat=datetime.now(UTC),

@@ -33,14 +33,14 @@ class BatchEngineInfo:
         engine_id: Logical identifier for this engine type (e.g., "faster-whisper")
         instance_id: Instance-unique identifier (e.g., "faster-whisper-a1b2c3d4e5f6")
         stage: Pipeline stage this engine handles (e.g., "transcribe")
-        queue_name: Redis queue name this engine polls (e.g., "dalston:queue:faster-whisper")
+        stream_name: Redis stream this engine polls (e.g., "dalston:stream:faster-whisper")
         capabilities: Engine capabilities for validation and routing
     """
 
     engine_id: str
     instance_id: str
     stage: str
-    queue_name: str
+    stream_name: str
     capabilities: EngineCapabilities | None = None
 
 
@@ -59,7 +59,7 @@ class BatchEngineRegistry:
         await registry.register(BatchEngineInfo(
             engine_id="faster-whisper",
             stage="transcribe",
-            queue_name="dalston:queue:faster-whisper",
+            stream_name="dalston:stream:faster-whisper",
         ))
 
         # Send heartbeats periodically
@@ -116,7 +116,7 @@ class BatchEngineRegistry:
             "engine_id": info.engine_id,  # Logical ID for grouping/metrics
             "instance_id": info.instance_id,  # Unique instance identifier
             "stage": info.stage,
-            "queue_name": info.queue_name,
+            "stream_name": info.stream_name,
             "status": "idle",
             "current_task": "",
             "last_heartbeat": now,
@@ -148,7 +148,7 @@ class BatchEngineRegistry:
             engine_id=info.engine_id,
             instance_id=info.instance_id,
             stage=info.stage,
-            queue_name=info.queue_name,
+            stream_name=info.stream_name,
             has_capabilities=info.capabilities is not None,
         )
 
@@ -186,7 +186,7 @@ class BatchEngineRegistry:
                 "engine_id": info.engine_id,
                 "instance_id": info.instance_id,
                 "stage": info.stage,
-                "queue_name": info.queue_name,
+                "stream_name": info.stream_name,
                 "status": status,
                 "current_task": current_task or "",
                 "last_heartbeat": now,

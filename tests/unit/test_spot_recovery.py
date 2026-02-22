@@ -1231,7 +1231,7 @@ class TestBatchEngineRegistry:
                 engine_id="whisper-cpu",
                 instance_id="whisper-cpu-abc123def456",
                 stage="transcribe",
-                queue_name="dalston:queue:whisper-cpu",
+                stream_name="dalston:stream:whisper-cpu",
             )
 
             registry.register(info)
@@ -1258,7 +1258,7 @@ class TestBatchEngineRegistry:
                 engine_id="whisper-cpu",
                 instance_id="whisper-cpu-abc123def456",
                 stage="transcribe",
-                queue_name="dalston:queue:whisper-cpu",
+                stream_name="dalston:stream:whisper-cpu",
             )
             registry.register(info)
             mock_redis.reset_mock()

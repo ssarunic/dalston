@@ -1,4 +1,4 @@
-"""Queue polling runner for batch processing engines."""
+"""Stream polling runner for batch processing engines."""
 
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ class EngineRunner:
 
     The runner:
     1. Connects to Redis for queue polling and event publishing
-    2. Polls the engine's queue (dalston:queue:{engine_id})
+    2. Polls the engine's stream (dalston:stream:{engine_id})
     3. Downloads task input from S3
     4. Calls engine.process()
     5. Uploads task output to S3
@@ -88,12 +88,12 @@ class EngineRunner:
     7. Cleans up temp files
     """
 
-    # Redis key patterns
-    QUEUE_KEY = "dalston:queue:{engine_id}"
+    # Redis key patterns (display only - actual stream key built by streams module)
+    STREAM_KEY = "dalston:stream:{engine_id}"
     EVENTS_CHANNEL = "dalston:events"
 
     # Configuration
-    QUEUE_POLL_TIMEOUT = 30  # seconds
+    STREAM_POLL_TIMEOUT = 30  # seconds
     TEMP_DIR_PREFIX = "dalston_task_"
     HEARTBEAT_INTERVAL = 10  # seconds between heartbeats
     HEARTBEAT_TTL = 60  # auto-expire heartbeat if engine crashes
@@ -113,7 +113,7 @@ class EngineRunner:
         self._heartbeat_thread: threading.Thread | None = None
         self._current_task_id: str | None = None
         self._current_message_id: str | None = None  # Stream message ID for ack
-        self._current_queue_id: str | None = None  # Source queue/stream for ack
+        self._current_stream_id: str | None = None  # Source stream for ack
         self._task_lock = threading.Lock()  # Protects _current_task_id
         self._stage: str = "unknown"  # Pipeline stage from capabilities
 
@@ -152,9 +152,9 @@ class EngineRunner:
         return self._redis
 
     @property
-    def queue_key(self) -> str:
-        """Get the Redis queue key for this engine."""
-        return self.QUEUE_KEY.format(engine_id=self.engine_id)
+    def stream_key(self) -> str:
+        """Get the Redis stream key for this engine."""
+        return self.STREAM_KEY.format(engine_id=self.engine_id)
 
     def run(self) -> None:
         """Start the processing loop.
@@ -179,7 +179,7 @@ class EngineRunner:
                 engine_id=self.engine_id,
                 instance_id=self.instance_id,
                 stage=self._stage,
-                queue_name=self.queue_key,
+                stream_name=self.stream_key,
                 capabilities=capabilities,
             )
         )
@@ -188,7 +188,7 @@ class EngineRunner:
         self._start_heartbeat_thread()
 
         logger.info(
-            "engine_loop_starting", engine_id=self.engine_id, queue=self.queue_key
+            "engine_loop_starting", engine_id=self.engine_id, queue=self.stream_key
         )
 
         try:
@@ -297,31 +297,31 @@ class EngineRunner:
         3. Always ACK after processing (success or failure)
         """
         message: StreamMessage | None = None
-        queue_id: str | None = None
+        stream_id: str | None = None
 
-        # Primary queue is engine-specific; fallback to legacy stage queue for
+        # Primary stream is engine-specific; fallback to legacy stage stream for
         # mixed-version rollouts where producers/consumers might briefly diverge.
-        queue_ids = self._candidate_queue_ids()
+        stream_ids = self._candidate_stream_ids()
 
         # 1. Try to claim stale tasks from DEAD engines only
         # Use instance_id as consumer to ensure spot replacements don't mask old tasks
-        for candidate_queue_id in queue_ids:
+        for candidate_stream_id in stream_ids:
             stale = claim_stale_from_dead_engines(
                 self.redis_client,
-                stage=candidate_queue_id,
+                stage=candidate_stream_id,
                 consumer=self.instance_id,
                 min_idle_ms=STALE_THRESHOLD_MS,
                 count=1,
             )
             if stale:
                 message = stale[0]
-                queue_id = candidate_queue_id
+                stream_id = candidate_stream_id
                 logger.info(
                     "claimed_stale_task",
                     task_id=message.task_id,
                     delivery_count=message.delivery_count,
                     previous_consumer=message.id,  # Actually message ID, consumer tracked in PEL
-                    queue_id=queue_id,
+                    stream_id=stream_id,
                 )
                 # Track redelivery for observability
                 dalston.metrics.inc_task_redelivery(self._stage, reason="engine_crash")
@@ -330,27 +330,27 @@ class EngineRunner:
         if message is None:
             # 2. No stale tasks - read new ones
             # Use instance_id as consumer for proper PEL tracking
-            # Block only on primary queue to preserve previous latency profile.
-            primary_queue_id = queue_ids[0]
+            # Block only on primary stream to preserve previous latency profile.
+            primary_stream_id = stream_ids[0]
             message = read_task(
                 self.redis_client,
-                stage=primary_queue_id,
+                stage=primary_stream_id,
                 consumer=self.instance_id,
-                block_ms=self.QUEUE_POLL_TIMEOUT * 1000,
+                block_ms=self.STREAM_POLL_TIMEOUT * 1000,
             )
             if message is not None:
-                queue_id = primary_queue_id
-            elif len(queue_ids) > 1:
+                stream_id = primary_stream_id
+            elif len(stream_ids) > 1:
                 # Non-blocking legacy fallback check.
-                fallback_queue_id = queue_ids[1]
+                fallback_stream_id = stream_ids[1]
                 message = read_task(
                     self.redis_client,
-                    stage=fallback_queue_id,
+                    stage=fallback_stream_id,
                     consumer=self.instance_id,
                     block_ms=1,
                 )
                 if message is not None:
-                    queue_id = fallback_queue_id
+                    stream_id = fallback_stream_id
 
         if message is None:
             # Timeout, no task available
@@ -362,12 +362,12 @@ class EngineRunner:
             job_id=message.job_id,
             delivery_count=message.delivery_count,
             is_redelivery=message.delivery_count > 1,
-            queue_id=queue_id,
+            stream_id=stream_id,
         )
 
         # Store message ID for ack in finally block
         self._current_message_id = message.id
-        self._current_queue_id = queue_id or self.engine_id
+        self._current_stream_id = stream_id or self.engine_id
 
         # 3. Check if job is cancelled before processing
         if is_job_cancelled(self.redis_client, message.job_id):
@@ -381,11 +381,11 @@ class EngineRunner:
             # ACK the task so it's removed from PEL
             ack_task(
                 self.redis_client,
-                self._current_queue_id or self.engine_id,
+                self._current_stream_id or self.engine_id,
                 self._current_message_id,
             )
             self._current_message_id = None
-            self._current_queue_id = None
+            self._current_stream_id = None
             return
 
         try:
@@ -399,11 +399,11 @@ class EngineRunner:
             self._publish_task_failed(message.task_id, message.job_id, str(e))
             ack_task(
                 self.redis_client,
-                self._current_queue_id or self.engine_id,
+                self._current_stream_id or self.engine_id,
                 self._current_message_id,
             )
             self._current_message_id = None
-            self._current_queue_id = None
+            self._current_stream_id = None
             return
 
         blocked_reason = task_metadata.get("blocked_reason")
@@ -415,11 +415,11 @@ class EngineRunner:
             )
             ack_task(
                 self.redis_client,
-                self._current_queue_id or self.engine_id,
+                self._current_stream_id or self.engine_id,
                 self._current_message_id,
             )
             self._current_message_id = None
-            self._current_queue_id = None
+            self._current_stream_id = None
             return
 
         # Task is now claimed by an engine instance; clear wait markers.
@@ -432,18 +432,18 @@ class EngineRunner:
             if self._current_message_id:
                 ack_task(
                     self.redis_client,
-                    self._current_queue_id or self.engine_id,
+                    self._current_stream_id or self.engine_id,
                     self._current_message_id,
                 )
                 self._current_message_id = None
-                self._current_queue_id = None
+                self._current_stream_id = None
 
-    def _candidate_queue_ids(self) -> list[str]:
-        """Return queue IDs to poll (engine queue first, legacy stage fallback)."""
-        queue_ids = [self.engine_id]
+    def _candidate_stream_ids(self) -> list[str]:
+        """Return stream IDs to poll (engine stream first, legacy stage fallback)."""
+        stream_ids = [self.engine_id]
         if self._stage and self._stage != "unknown" and self._stage != self.engine_id:
-            queue_ids.append(self._stage)
-        return queue_ids
+            stream_ids.append(self._stage)
+        return stream_ids
 
     def _clear_waiting_engine_marker(self, task_id: str) -> None:
         """Clear wait-for-engine markers once a task is claimed."""

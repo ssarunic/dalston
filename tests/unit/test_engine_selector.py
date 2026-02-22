@@ -61,7 +61,7 @@ def make_engine_state(
         engine_id=engine_id,
         instance_id=instance_id or f"{engine_id}-abc123",
         stage=stage,
-        queue_name=f"dalston:queue:{engine_id}",
+        stream_name=f"dalston:stream:{engine_id}",
         status="idle" if is_available else "offline",
         current_task=None,
         last_heartbeat=now,

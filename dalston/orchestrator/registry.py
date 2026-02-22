@@ -35,7 +35,7 @@ class BatchEngineState:
         engine_id: Logical identifier for grouping (e.g., "faster-whisper")
         instance_id: Unique instance identifier (e.g., "faster-whisper-abc123")
         stage: Pipeline stage this engine handles (e.g., "transcribe")
-        queue_name: Redis queue name this engine polls
+        stream_name: Redis stream this engine polls
         status: Current status ("idle", "processing", "offline")
         current_task: Task ID currently being processed, or None
         last_heartbeat: Last heartbeat timestamp
@@ -46,7 +46,7 @@ class BatchEngineState:
     engine_id: str
     instance_id: str
     stage: str
-    queue_name: str
+    stream_name: str
     status: str
     current_task: str | None
     last_heartbeat: datetime
@@ -267,7 +267,8 @@ class BatchEngineRegistry:
             engine_id=engine_id,
             instance_id=actual_instance_id,
             stage=data.get("stage", "unknown"),
-            queue_name=data.get("queue_name", ""),
+            # Prefer stream_name, fall back to queue_name for backward compat
+            stream_name=data.get("stream_name") or data.get("queue_name", ""),
             status=data.get("status", "offline"),
             current_task=current_task if current_task else None,
             last_heartbeat=self._parse_datetime(data.get("last_heartbeat")),
