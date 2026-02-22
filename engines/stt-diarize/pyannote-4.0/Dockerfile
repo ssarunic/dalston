@@ -36,14 +36,14 @@ RUN pip install --no-cache-dir -e ".[engine-sdk]"
 WORKDIR /engine
 
 # Copy engine requirements first for better caching
-COPY engines/diarize/pyannote-4.0/requirements.txt .
+COPY engines/stt-diarize/pyannote-4.0/requirements.txt .
 
 # Install pyannote 4.0 and dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy engine files
-COPY engines/diarize/pyannote-4.0/engine.yaml .
-COPY engines/diarize/pyannote-4.0/engine.py .
+COPY engines/stt-diarize/pyannote-4.0/engine.yaml .
+COPY engines/stt-diarize/pyannote-4.0/engine.py .
 
 # Create model cache directory
 ENV HF_HOME=/models
