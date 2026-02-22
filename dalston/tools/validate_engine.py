@@ -109,8 +109,26 @@ def validate_engine(
 
 
 def find_all_engine_yamls(engines_dir: Path) -> list[Path]:
-    """Find all engine.yaml files in the engines directory."""
-    return sorted(engines_dir.glob("**/engine.yaml"))
+    """Find all engine metadata YAML files in the engines directory.
+
+    Includes:
+    - engines/**/engine.yaml (legacy single-engine layout)
+    - engines/**/variants/*.yaml (variant-based layout)
+
+    If an engine directory has variants/*.yaml, its top-level engine.yaml is skipped
+    to avoid validating stale duplicate metadata.
+    """
+    yamls: list[Path] = []
+
+    for yaml_path in engines_dir.glob("**/engine.yaml"):
+        variants_dir = yaml_path.parent / "variants"
+        if variants_dir.exists() and any(variants_dir.glob("*.yaml")):
+            continue
+        yamls.append(yaml_path)
+
+    yamls.extend(engines_dir.glob("**/variants/*.yaml"))
+
+    return sorted(yamls)
 
 
 def format_languages(languages: list[str] | None) -> str:
@@ -210,7 +228,10 @@ Examples:
     if args.all:
         engine_files = find_all_engine_yamls(args.engines_dir)
         if not engine_files:
-            print(f"No engine.yaml files found in {args.engines_dir}", file=sys.stderr)
+            print(
+                f"No engine metadata YAML files found in {args.engines_dir}",
+                file=sys.stderr,
+            )
             return 1
     else:
         engine_files = [args.path]
