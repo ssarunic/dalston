@@ -101,6 +101,7 @@ class NemoMSDDEngine(Engine):
 
     Environment Variables:
         DIARIZATION_DISABLED: Set to "true" to skip diarization (returns mock output)
+        DEVICE: Device to use ("cuda", "cpu", or unset for auto-detect)
         NEMO_ALLOW_CPU: Set to "true" to allow slow CPU inference
     """
 
@@ -116,20 +117,46 @@ class NemoMSDDEngine(Engine):
             self.logger.info("nemo_msdd_engine_initialized", device=self._device)
 
     def _detect_device(self) -> str:
-        """Detect best available device (CUDA preferred, CPU if allowed)."""
+        """Resolve inference device from DEVICE env with NeMo CPU guardrails."""
+        requested_device = os.environ.get("DEVICE", "").lower()
         allow_cpu = os.environ.get("NEMO_ALLOW_CPU", "").lower() == "true"
 
         try:
             import torch
 
-            if torch.cuda.is_available():
-                self.logger.info(
-                    "cuda_available", device_count=torch.cuda.device_count()
-                )
-                return "cuda"
+            cuda_available = torch.cuda.is_available()
+            cuda_device_count = torch.cuda.device_count() if cuda_available else 0
         except ImportError:
-            pass
+            cuda_available = False
+            cuda_device_count = 0
 
+        if requested_device == "cpu":
+            self.logger.warning(
+                "device_forced_cpu",
+                message=(
+                    "DEVICE=cpu set. NeMo MSDD on CPU is very slow "
+                    "(recommended only for development/testing)."
+                ),
+            )
+            return "cpu"
+
+        if requested_device == "cuda":
+            if not cuda_available:
+                raise RuntimeError("DEVICE=cuda but CUDA is not available.")
+            self.logger.info("cuda_available", device_count=cuda_device_count)
+            return "cuda"
+
+        if requested_device not in ("", "auto"):
+            raise ValueError(
+                f"Unknown DEVICE value: {requested_device}. Use cuda or cpu."
+            )
+
+        if cuda_available:
+            self.logger.info(
+                "cuda_available",
+                device_count=cuda_device_count,
+            )
+            return "cuda"
         if allow_cpu:
             self.logger.warning(
                 "cuda_not_available_using_cpu",
@@ -141,7 +168,7 @@ class NemoMSDDEngine(Engine):
         self.logger.error("cuda_not_available")
         raise RuntimeError(
             "NeMo MSDD requires GPU. CUDA is not available. "
-            "Set NEMO_ALLOW_CPU=true to allow slow CPU inference, "
+            "Set DEVICE=cpu or NEMO_ALLOW_CPU=true to allow slow CPU inference, "
             "or use pyannote-3.1 for CPU-based diarization."
         )
 

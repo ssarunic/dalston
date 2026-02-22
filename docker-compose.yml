@@ -287,6 +287,7 @@ services:
       dockerfile: engines/stt-transcribe/parakeet/Dockerfile
       args:
         MODEL_VARIANT: ctc-0.6b
+        DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
       ENGINE_ID: parakeet-ctc-0.6b
@@ -294,6 +295,7 @@ services:
       - parakeet-models:/models
     depends_on: *batch-depends
     deploy: *gpu-deploy
+    profiles: [gpu]
     restart: unless-stopped
 
   # Parakeet CTC 1.1B (GPU - fast English transcription, larger model)
@@ -304,6 +306,7 @@ services:
       dockerfile: engines/stt-transcribe/parakeet/Dockerfile
       args:
         MODEL_VARIANT: ctc-1.1b
+        DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
       ENGINE_ID: parakeet-ctc-1.1b
@@ -322,6 +325,7 @@ services:
       dockerfile: engines/stt-transcribe/parakeet/Dockerfile
       args:
         MODEL_VARIANT: tdt-0.6b-v3
+        DEVICE: cuda
         SKIP_MODEL_DOWNLOAD: "false"
     environment:
       <<: [*common-env, *observability-env]
@@ -341,6 +345,7 @@ services:
       dockerfile: engines/stt-transcribe/parakeet/Dockerfile
       args:
         MODEL_VARIANT: tdt-0.6b-v3
+        DEVICE: cpu
         SKIP_MODEL_DOWNLOAD: "true"
     environment:
       <<: [*common-env, *observability-env]
@@ -359,6 +364,7 @@ services:
       dockerfile: engines/stt-transcribe/parakeet/Dockerfile
       args:
         MODEL_VARIANT: tdt-1.1b
+        DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
       ENGINE_ID: parakeet-tdt-1.1b
@@ -429,6 +435,7 @@ services:
       dockerfile: engines/stt-transcribe/voxtral/Dockerfile
       args:
         MODEL_VARIANT: mini-3b
+        DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
       ENGINE_ID: voxtral-mini-3b
@@ -599,6 +606,7 @@ services:
       dockerfile: engines/stt-rt/parakeet/Dockerfile
       args:
         MODEL_VARIANT: 0.6b
+        DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
       MODEL_VARIANT: 0.6b
@@ -609,6 +617,7 @@ services:
     depends_on: *realtime-depends
     healthcheck: *ws-healthcheck
     deploy: *gpu-deploy
+    profiles: [gpu]
     restart: unless-stopped
 
   # Parakeet RNNT 0.6B CPU (CPU-only realtime worker)
@@ -639,6 +648,7 @@ services:
       dockerfile: engines/stt-rt/parakeet/Dockerfile
       args:
         MODEL_VARIANT: 1.1b
+        DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
       MODEL_VARIANT: 1.1b

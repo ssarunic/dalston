@@ -48,14 +48,22 @@ COPY engines/stt-transcribe/faster-whisper/engine.py .
 ARG MODEL_VARIANT
 COPY engines/stt-transcribe/faster-whisper/variants/${MODEL_VARIANT}.yaml /etc/dalston/engine.yaml
 
+# Create model cache directory before predownload so runtime reuses build cache
+ENV HF_HOME=/models
+ENV TORCH_HOME=/models
+RUN mkdir -p /models
+
 # Pre-download the model at build time for faster startup
 # This makes container startup faster at the cost of larger image size
-RUN python -c "from faster_whisper import WhisperModel; WhisperModel('${MODEL_VARIANT}', device='cpu', compute_type='int8')" \
-    && echo "Model ${MODEL_VARIANT} downloaded successfully"
+ARG SKIP_MODEL_DOWNLOAD=false
+RUN if [ "$SKIP_MODEL_DOWNLOAD" = "false" ]; then \
+        python -c "from faster_whisper import WhisperModel; WhisperModel('${MODEL_VARIANT}', device='cpu', compute_type='int8')" \
+        && echo "Model ${MODEL_VARIANT} downloaded successfully"; \
+    else \
+        echo "Skipping model download (SKIP_MODEL_DOWNLOAD=true)"; \
+    fi
 
 # Set model variant via environment
 ENV MODEL_VARIANT=${MODEL_VARIANT}
-ENV HF_HOME=/models
-RUN mkdir -p /models
 
 CMD ["python", "engine.py"]
