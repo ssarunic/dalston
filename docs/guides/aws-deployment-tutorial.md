@@ -105,7 +105,7 @@ The bootstrap script automatically:
 - Clones the Dalston repository
 - Creates `/data/dalston/.env.aws` with S3/region config
 - Configures NVIDIA container runtime if a GPU is detected
-- Creates a systemd service for `docker-compose.yml` + AWS override with `--profile prod` and optional `--profile gpu` (disabled by default)
+- Creates a systemd service for `docker-compose.yml` + AWS override with `--profile core` and optional `--profile gpu` (disabled by default)
 
 ## 6. Setup Tailscale on EC2
 

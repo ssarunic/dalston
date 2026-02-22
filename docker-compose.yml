@@ -234,7 +234,7 @@ services:
       dockerfile: docker/Dockerfile.gateway
     ports:
       - "8000:8000"
-    profiles: [prod]
+    profiles: [core]
     environment:
       <<: [*core-env, *observability-env]
     depends_on: *core-depends
@@ -250,7 +250,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.orchestrator
-    profiles: [prod]
+    profiles: [core]
     environment:
       <<: [*core-env, *observability-env]
       METRICS_PORT: 8001

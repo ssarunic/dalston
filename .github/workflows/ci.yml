@@ -46,10 +46,10 @@ jobs:
       - name: Validate compose config combinations
         run: |
           docker compose -f docker-compose.yml config > /tmp/compose-base.yaml
-          docker compose --profile prod -f docker-compose.yml config > /tmp/compose-prod.yaml
+          docker compose --profile core -f docker-compose.yml config > /tmp/compose-core.yaml
           docker compose --profile gpu -f docker-compose.yml config > /tmp/compose-gpu.yaml
           S3_BUCKET=test-bucket AWS_REGION=us-west-2 docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml config > /tmp/compose-aws.yaml
-          S3_BUCKET=test-bucket AWS_REGION=us-west-2 docker compose --profile prod -f docker-compose.yml -f infra/docker/docker-compose.aws.yml config > /tmp/compose-aws-prod.yaml
+          S3_BUCKET=test-bucket AWS_REGION=us-west-2 docker compose --profile core -f docker-compose.yml -f infra/docker/docker-compose.aws.yml config > /tmp/compose-aws-core.yaml
 
       - name: Validate catalog-compose mapping
         run: python scripts/validate_catalog_compose.py
