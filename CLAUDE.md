@@ -41,86 +41,91 @@ cd engines/realtime/whisper-streaming
 WORKER_ID=dev-worker REDIS_URL=redis://localhost:6379 python engine.py
 ```
 
-### Local Docker Setup
+### Local Docker Setup (via Makefile)
 
-**Important**: Local Docker does not use volume mounts - files are baked into the images. You must rebuild containers after any code change before testing.
+**IMPORTANT**: Always use Makefile commands instead of raw docker compose. Run `make help` for all available commands.
 
-**CPU-only testing**: When testing locally on a dev machine without GPU, use the `-cpu` suffixed services or set `DEVICE=cpu` in `.env`. All engines respect the `DEVICE` environment variable.
-
-```bash
-# Rebuild specific service after code changes
-docker compose build <service-name>
-docker compose up -d <service-name>
-
-# Or rebuild and start in one command
-docker compose up -d --build <service-name>
-```
-
-### Docker Compose Operations
+**CPU-only testing**: When testing locally on a dev machine without GPU, use `make dev` or `make dev-minimal`. GPU engines require `make dev-gpu`.
 
 ```bash
-# Start all services
-docker compose up -d
+# See all available commands
+make help
 
-# Start core services only (minimal setup with word timestamps)
-docker compose up -d gateway orchestrator redis postgres minio minio-init \
-  stt-batch-prepare stt-batch-transcribe-whisper-cpu stt-batch-align-whisperx-cpu stt-batch-merge
+# Start full local stack (postgres, redis, minio, gateway, orchestrator, CPU engines)
+make dev
 
-# Start without word-level alignment (faster, smaller setup)
-# Note: Submit jobs with timestamps_granularity=segment to skip alignment
-docker compose up -d gateway orchestrator redis postgres minio minio-init \
-  stt-batch-prepare stt-batch-transcribe-whisper-cpu stt-batch-merge
+# Start minimal stack for quick iteration
+make dev-minimal
 
-# Start with real-time workers
-docker compose up -d gateway orchestrator redis \
-  stt-batch-transcribe-whisper-cpu stt-batch-merge \
-  stt-rt-transcribe-whisper-1 stt-rt-transcribe-whisper-2
+# Start with GPU engines (requires NVIDIA GPU)
+make dev-gpu
 
-# Scale engines for high load
-docker compose up -d --scale stt-batch-transcribe-whisper-cpu=2 --scale stt-batch-diarize-pyannote-v31-cpu=2
+# Stop all services
+make stop
 
 # View logs
-docker compose logs -f gateway
-docker compose logs -f stt-batch-transcribe-whisper-cpu
+make logs          # gateway only
+make logs-all      # all services
 
-# Stop services
-docker compose down
+# Show running services
+make ps
 
-# Rebuild specific service
-docker compose build stt-batch-transcribe-whisper-cpu
-docker compose up -d --build stt-batch-transcribe-whisper-cpu
+# Rebuild and restart a specific engine
+make rebuild ENGINE=stt-batch-transcribe-faster-whisper-base
+
+# Build CPU variants (for Mac development)
+make build-cpu
+
+# Build GPU variants
+make build-gpu
+
+# Check service health
+make health
+
+# Validate compose configurations
+make validate
+```
+
+### AWS Deployment
+
+```bash
+# Start on AWS with local infra + GPU
+make aws-start
+
+# Stop AWS services
+make aws-stop
+
+# Follow logs on AWS
+make aws-logs
 ```
 
 ### Testing
 
 ```bash
 # All tests
-pytest
-
-# Batch-specific tests
-pytest tests/unit/test_dag.py tests/integration/test_batch_api.py
-
-# Real-time specific tests
-pytest tests/unit/test_vad.py tests/integration/test_realtime_api.py
+make test
 
 # With coverage
-pytest --cov=dalston --cov-report=html
+make test-cov
+
+# Run linters (ruff, mypy)
+make lint
+
+# Format code
+make fmt
 ```
 
 ### Health Checks
 
 ```bash
-# Gateway health
-curl http://localhost:8000/health
+# Check all services
+make health
 
-# System status
-curl http://localhost:8000/v1/system/status
+# Show system status
+make status
 
-# Redis connectivity
-docker compose exec redis redis-cli ping
-
-# Check queue depths
-docker compose exec redis redis-cli LLEN dalston:queue:faster-whisper
+# Show queue depths
+make queues
 ```
 
 ## Development Workflow
