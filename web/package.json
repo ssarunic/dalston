@@ -11,10 +11,12 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.20",
+    "@tanstack/react-virtual": "^3.13.18",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "ky": "^1.14.3",
     "lucide-react": "^0.563.0",
+    "plyr": "^3.8.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.0",

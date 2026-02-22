@@ -12,6 +12,7 @@
 
 ## Build, Test, and Development Commands
 
+- Prefer `make <target>` for common workflows; use raw commands only when no suitable Makefile target exists.
 - `docker compose up -d`: start full local stack (gateway, workers, dependencies).
 - `pip install -e ".[gateway,orchestrator,dev]"`: install backend for development.
 - `pytest`: run default tests (`e2e` excluded by config).

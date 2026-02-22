@@ -1,11 +1,14 @@
 # Docker Compose override for AWS deployment
-# Usage: docker-compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml up -d
+# Usage: docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml up -d --profile local-infra --profile gpu
 
 services:
   gateway:
     environment:
-      - S3_BUCKET=${S3_BUCKET}
-      - AWS_REGION=${AWS_REGION}
+      S3_BUCKET: ${S3_BUCKET}
+      # App settings read S3_REGION; keep AWS_REGION too for SDK defaults.
+      S3_REGION: ${AWS_REGION}
+      AWS_REGION: ${AWS_REGION}
+      S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-}
       # No S3_ENDPOINT - SDK auto-detects on EC2
       # No credentials - uses IAM instance role
     # Bind to all interfaces for Tailscale access
@@ -14,8 +17,9 @@ services:
 
   orchestrator:
     environment:
-      - S3_BUCKET=${S3_BUCKET}
-      - AWS_REGION=${AWS_REGION}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_REGION: ${AWS_REGION}
+      AWS_REGION: ${AWS_REGION}
 
   postgres:
     volumes:
@@ -27,37 +31,71 @@ services:
 
   stt-batch-prepare:
     environment:
-      - S3_BUCKET=${S3_BUCKET}
-      - AWS_REGION=${AWS_REGION}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_REGION: ${AWS_REGION}
+      AWS_REGION: ${AWS_REGION}
 
-  stt-batch-transcribe-whisper:
+  stt-batch-transcribe-faster-whisper-base:
     environment:
-      - S3_BUCKET=${S3_BUCKET}
-      - AWS_REGION=${AWS_REGION}
-      - HF_HOME=/data/models
+      S3_BUCKET: ${S3_BUCKET}
+      S3_REGION: ${AWS_REGION}
+      AWS_REGION: ${AWS_REGION}
+      HF_HOME: /data/models
+    volumes:
+      - /data/models:/data/models
+
+  stt-batch-transcribe-parakeet-ctc-0.6b:
+    environment:
+      S3_BUCKET: ${S3_BUCKET}
+      S3_REGION: ${AWS_REGION}
+      AWS_REGION: ${AWS_REGION}
+      HF_HOME: /data/models
+      NEMO_CACHE: /data/models
     volumes:
       - /data/models:/data/models
 
   stt-batch-align-whisperx:
     environment:
-      - S3_BUCKET=${S3_BUCKET}
-      - AWS_REGION=${AWS_REGION}
-      - HF_HOME=/data/models
+      S3_BUCKET: ${S3_BUCKET}
+      S3_REGION: ${AWS_REGION}
+      AWS_REGION: ${AWS_REGION}
+      HF_HOME: /data/models
     volumes:
       - /data/models:/data/models
 
-  stt-batch-diarize-pyannote-v31:
+  stt-batch-diarize-pyannote-3.1:
     environment:
-      - S3_BUCKET=${S3_BUCKET}
-      - AWS_REGION=${AWS_REGION}
-      - HF_HOME=/data/models
+      S3_BUCKET: ${S3_BUCKET}
+      S3_REGION: ${AWS_REGION}
+      AWS_REGION: ${AWS_REGION}
+      HF_HOME: /data/models
+    volumes:
+      - /data/models:/data/models
+
+  stt-batch-pii-detect-presidio-gpu:
+    environment:
+      S3_BUCKET: ${S3_BUCKET}
+      S3_REGION: ${AWS_REGION}
+      AWS_REGION: ${AWS_REGION}
+      HF_HOME: /data/models
     volumes:
       - /data/models:/data/models
 
   stt-batch-merge:
     environment:
-      - S3_BUCKET=${S3_BUCKET}
-      - AWS_REGION=${AWS_REGION}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_REGION: ${AWS_REGION}
+      AWS_REGION: ${AWS_REGION}
+
+  stt-rt-transcribe-parakeet-rnnt-0.6b:
+    environment:
+      S3_BUCKET: ${S3_BUCKET}
+      S3_REGION: ${AWS_REGION}
+      AWS_REGION: ${AWS_REGION}
+      HF_HOME: /data/models
+      NEMO_CACHE: /data/models
+    volumes:
+      - /data/models:/data/models
 
 # Exclude MinIO services - using S3 instead
 # The base docker-compose.yml may define minio and minio-init

@@ -4,6 +4,7 @@ import json
 import mimetypes
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
 from botocore.exceptions import ClientError
@@ -199,12 +200,67 @@ class StorageService:
         Returns:
             Presigned URL for GET request
         """
-        async with get_s3_client(self.settings) as s3:
+        return await self.generate_presigned_url_for_bucket(
+            bucket=self.bucket,
+            key=key,
+            expires_in=expires_in,
+        )
+
+    async def generate_presigned_url_for_bucket(
+        self,
+        bucket: str,
+        key: str,
+        expires_in: int = 3600,
+        endpoint_url_override: str | None = None,
+    ) -> str:
+        """Generate a presigned URL for downloading an S3 object in a bucket.
+
+        Args:
+            bucket: S3 bucket name
+            key: S3 object key
+            expires_in: URL expiration time in seconds
+            endpoint_url_override: Optional endpoint to use for URL signing
+
+        Returns:
+            Presigned URL for GET request
+        """
+        presign_endpoint = endpoint_url_override or self.resolve_presign_endpoint()
+        async with get_s3_client(
+            self.settings, endpoint_url_override=presign_endpoint
+        ) as s3:
             return await s3.generate_presigned_url(
                 "get_object",
-                Params={"Bucket": self.bucket, "Key": key},
+                Params={"Bucket": bucket, "Key": key},
                 ExpiresIn=expires_in,
             )
+
+    def resolve_presign_endpoint(self) -> str | None:
+        """Resolve endpoint used for presigned URLs.
+
+        Priority:
+        1. Explicit S3_PUBLIC_ENDPOINT_URL (preferred).
+        2. Local MinIO fallback: if internal endpoint host is `minio`,
+           use `localhost` with same scheme/port for browser reachability.
+        3. None (use internal S3 endpoint as-is).
+        """
+        if self.settings.s3_public_endpoint_url:
+            return self.settings.s3_public_endpoint_url
+
+        if not self.settings.s3_endpoint_url:
+            return None
+
+        parsed = urlsplit(self.settings.s3_endpoint_url)
+        host = (parsed.hostname or "").lower()
+        if host != "minio":
+            return None
+
+        scheme = parsed.scheme or "http"
+        port = parsed.port or (443 if scheme == "https" else 80)
+        default_port = (scheme == "https" and port == 443) or (
+            scheme == "http" and port == 80
+        )
+        netloc = "localhost" if default_port else f"localhost:{port}"
+        return urlunsplit((scheme, netloc, "", "", ""))
 
     async def object_exists(self, key: str) -> bool:
         """Check if a specific S3 object exists.

@@ -104,8 +104,8 @@ The bootstrap script automatically:
 - Mounts the data volume at `/data`
 - Clones the Dalston repository
 - Creates `/data/dalston/.env.aws` with S3/region config
-- Creates `/data/dalston/docker-compose.minimal.yml`
-- Creates a systemd service (disabled by default)
+- Configures NVIDIA container runtime if a GPU is detected
+- Creates a systemd service for `docker-compose.yml` + AWS override with `--profile local-infra` and `--profile gpu` (when NVIDIA runtime is configured)
 
 ## 6. Setup Tailscale on EC2
 
@@ -195,7 +195,7 @@ dalston-ssh
 The bootstrap script has already created:
 
 - `/data/dalston/.env.aws` - environment variables
-- `/data/dalston/docker-compose.minimal.yml` - minimal compose file with gateway, web, redis, postgres
+- `/etc/systemd/system/dalston.service` - systemd unit for Docker Compose startup
 
 Start services using the systemd service:
 
@@ -207,13 +207,15 @@ Or start manually with docker-compose:
 
 ```bash
 cd /data/dalston
-sudo docker-compose -f docker-compose.minimal.yml --env-file .env.aws up -d
+sudo docker-compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml --env-file .env.aws --profile local-infra --profile gpu up -d
 ```
+
+If you use managed Redis/Postgres, omit `--profile local-infra`.
 
 Check logs:
 
 ```bash
-sudo docker-compose -f docker-compose.minimal.yml logs -f gateway
+sudo docker-compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml --env-file .env.aws logs -f gateway
 ```
 
 ## 10. Verify Deployment

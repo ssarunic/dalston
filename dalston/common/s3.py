@@ -22,7 +22,10 @@ def _get_session() -> aioboto3.Session:
 
 
 @asynccontextmanager
-async def get_s3_client(settings: Settings | None = None):
+async def get_s3_client(
+    settings: Settings | None = None,
+    endpoint_url_override: str | None = None,
+):
     """Async context manager for S3 client.
 
     Usage:
@@ -40,8 +43,9 @@ async def get_s3_client(settings: Settings | None = None):
     }
 
     # Use custom endpoint for MinIO local dev
-    if settings.s3_endpoint_url:
-        kwargs["endpoint_url"] = settings.s3_endpoint_url
+    endpoint_url = endpoint_url_override or settings.s3_endpoint_url
+    if endpoint_url:
+        kwargs["endpoint_url"] = endpoint_url
 
     # Use explicit credentials if provided
     if settings.aws_access_key_id and settings.aws_secret_access_key:

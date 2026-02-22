@@ -32,7 +32,7 @@ Environment variables:
     ENGINE_ID: Unique identifier for this engine (used for queue name)
     REDIS_URL: Redis connection URL (default: redis://localhost:6379)
     S3_BUCKET: S3 bucket for artifacts (default: dalston-artifacts)
-    S3_REGION: AWS region (default: us-east-1)
+    S3_REGION: AWS region (default: eu-west-2)
     S3_ENDPOINT_URL: Custom S3 endpoint (optional, for MinIO)
     AWS_ACCESS_KEY_ID: AWS access key (optional, can use IAM roles)
     AWS_SECRET_ACCESS_KEY: AWS secret key (optional, can use IAM roles)

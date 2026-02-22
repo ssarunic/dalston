@@ -31,7 +31,7 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 ```bash
 git clone https://github.com/ssarunic/dalston.git
 cd dalston
-docker compose up -d
+docker compose --profile local-infra --profile local-object-storage up -d
 ```
 
 The API is available at `http://localhost:8000`. See the [deployment guide](docs/guides/self-hosted-deployment-tutorial.md) for production setup.
@@ -50,6 +50,20 @@ The API is available at `http://localhost:8000`. See the [deployment guide](docs
 - [REST API](docs/specs/batch/API.md)
 - [WebSocket API](docs/specs/realtime/WEBSOCKET_API.md)
 - [Deployment Guide](docs/guides/self-hosted-deployment-tutorial.md)
+
+## Web Console Tests
+
+Run Playwright tests:
+
+```bash
+npx playwright test tests/web
+```
+
+By default tests target `http://localhost:8000`. Override target URL with:
+
+```bash
+PLAYWRIGHT_BASE_URL=http://localhost:3000 npx playwright test tests/web
+```
 
 ## License
 

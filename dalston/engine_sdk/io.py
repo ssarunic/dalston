@@ -20,12 +20,12 @@ def get_s3_client():
 
     Environment variables:
         S3_ENDPOINT_URL: Custom endpoint (e.g., MinIO for local dev)
-        S3_REGION: AWS region (default: us-east-1)
+        S3_REGION: AWS region (default: eu-west-2)
         AWS_ACCESS_KEY_ID: AWS access key
         AWS_SECRET_ACCESS_KEY: AWS secret key
     """
     endpoint_url = os.environ.get("S3_ENDPOINT_URL")
-    region = os.environ.get("S3_REGION", "us-east-1")
+    region = os.environ.get("S3_REGION", "eu-west-2")
 
     config = Config(
         retries={"max_attempts": 3, "mode": "standard"},

@@ -1,16 +1,14 @@
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   Clock,
   MessageSquare,
-  Mic,
-  Download,
   ExternalLink,
   AlertCircle,
   Hash,
   Cpu,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useRealtimeSession, useSessionTranscript } from '@/hooks/useRealtimeSessions'
@@ -45,16 +43,57 @@ export function RealtimeSessionDetail() {
     sessionId,
     !!session?.store_transcript && !!session?.transcript_uri
   )
+  const [audioUrlData, setAudioUrlData] = useState<{ forSessionId: string; url: string } | null>(null)
+  const canAccessAudio = !!session?.store_audio && !!session?.audio_uri
 
-  const handleDownloadAudio = async () => {
-    if (!sessionId) return
+  const fetchAudioUrl = useCallback(async () => {
+    if (!sessionId || !canAccessAudio) return null
     try {
       const { url } = await apiClient.getSessionAudioUrl(sessionId)
-      window.open(url, '_blank')
+      return { forSessionId: sessionId, url }
     } catch (err) {
       console.error('Failed to get audio URL:', err)
+      return null
     }
-  }
+  }, [sessionId, canAccessAudio])
+
+  const refreshAudioUrls = useCallback(async () => {
+    const data = await fetchAudioUrl()
+    if (data) {
+      setAudioUrlData(data)
+    }
+  }, [fetchAudioUrl])
+
+  const resolveAudioDownloadUrl = useCallback(async () => {
+    const data = await fetchAudioUrl()
+    if (data) {
+      setAudioUrlData(data)
+    }
+    return data?.url ?? null
+  }, [fetchAudioUrl])
+
+  // Fetch audio URL for sessions with stored audio
+  useEffect(() => {
+    if (!canAccessAudio) return
+    let cancelled = false
+    void (async () => {
+      const data = await fetchAudioUrl()
+      if (!cancelled && data) {
+        setAudioUrlData(data)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [canAccessAudio, fetchAudioUrl])
+
+  // Derive audio URL - only use if fetched for current session and conditions still met
+  const audioUrl =
+    audioUrlData &&
+    audioUrlData.forSessionId === sessionId &&
+    canAccessAudio
+      ? audioUrlData.url
+      : null
 
   if (isLoading) {
     return (
@@ -217,66 +256,36 @@ export function RealtimeSessionDetail() {
         </CardContent>
       </Card>
 
-      {/* Transcript Card */}
-      {transcript && (
+      {/* Transcript/Audio Card */}
+      {(transcript || audioUrl) && (
         <Card>
           <CardHeader>
-            <CardTitle>Transcript</CardTitle>
+            <CardTitle>{transcript ? 'Transcript' : 'Audio'}</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-0">
             <TranscriptViewer
-              segments={transcript.utterances?.map(utt => ({
+              segments={transcript?.utterances?.map((utt) => ({
                 id: utt.id,
                 start: utt.start,
                 end: utt.end,
                 text: utt.text,
               })) ?? []}
-              fullText={transcript.text}
-              enableExport={!!session.transcript_uri}
+              fullText={transcript?.text}
+              audioSrc={audioUrl ?? undefined}
+              onRefreshAudioUrls={refreshAudioUrls}
+              onResolveAudioDownloadUrl={resolveAudioDownloadUrl}
+              enableExport={!!transcript && !!session.transcript_uri}
               exportConfig={{ type: 'session', id: session.id }}
+              emptyMessage={
+                transcript
+                  ? 'No transcript available'
+                  : 'Transcript not stored for this session'
+              }
             />
           </CardContent>
         </Card>
       )}
 
-      {/* Storage Card */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Storage</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Mic className={session.store_audio ? 'h-5 w-5 text-green-500' : 'h-5 w-5 text-muted-foreground'} />
-              <span>Audio Recording</span>
-            </div>
-            {session.store_audio && session.audio_uri ? (
-              <Button variant="outline" size="sm" onClick={handleDownloadAudio}>
-                <Download className="h-4 w-4 mr-2" />
-                Download Audio
-              </Button>
-            ) : (
-              <span className="text-muted-foreground text-sm">
-                {session.store_audio ? 'Processing...' : 'Not enabled'}
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <MessageSquare className={session.store_transcript ? 'h-5 w-5 text-blue-500' : 'h-5 w-5 text-muted-foreground'} />
-              <span>Transcript</span>
-            </div>
-            {session.store_transcript && session.transcript_uri ? (
-              <span className="text-green-500 text-sm">Stored</span>
-            ) : (
-              <span className="text-muted-foreground text-sm">
-                {session.store_transcript ? 'Processing...' : 'Not enabled'}
-              </span>
-            )}
-          </div>
-        </CardContent>
-      </Card>
     </div>
   )
 }

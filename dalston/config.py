@@ -30,8 +30,16 @@ class Settings(BaseSettings):
 
     # S3 Storage
     s3_bucket: str = Field(default="dalston-artifacts", alias="S3_BUCKET")
-    s3_region: str = Field(default="us-east-1", alias="S3_REGION")
+    s3_region: str = Field(default="eu-west-2", alias="S3_REGION")
     s3_endpoint_url: str | None = Field(default=None, alias="S3_ENDPOINT_URL")
+    s3_public_endpoint_url: str | None = Field(
+        default=None,
+        alias="S3_PUBLIC_ENDPOINT_URL",
+        description=(
+            "Browser-reachable S3/MinIO endpoint used for presigned download URLs. "
+            "If unset, the backend uses S3_ENDPOINT_URL and local MinIO fallback logic."
+        ),
+    )
 
     # AWS Credentials (optional, can use IAM roles)
     aws_access_key_id: str | None = Field(default=None, alias="AWS_ACCESS_KEY_ID")

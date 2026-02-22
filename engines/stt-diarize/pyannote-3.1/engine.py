@@ -25,6 +25,7 @@ class PyannoteEngine(Engine):
     Environment Variables:
         HF_TOKEN: HuggingFace token for accessing gated pyannote models
         DIARIZATION_DISABLED: Set to "true" to skip diarization (returns mock output)
+        DEVICE: Device to use ("cuda", "cpu", or unset for auto-detect)
     """
 
     MODEL_ID = "pyannote/speaker-diarization-3.1"
@@ -41,18 +42,37 @@ class PyannoteEngine(Engine):
             self.logger.info("pyannote_engine_initialized", device=self._device)
 
     def _detect_device(self) -> str:
-        """Detect the best available device (CUDA or CPU)."""
+        """Resolve inference device from DEVICE env with auto-detect fallback."""
+        requested_device = os.environ.get("DEVICE", "").lower()
+
         try:
             import torch
 
-            if torch.cuda.is_available():
+            cuda_available = torch.cuda.is_available()
+        except ImportError:
+            cuda_available = False
+
+        if requested_device == "cpu":
+            self.logger.info("device_forced_cpu")
+            return "cpu"
+
+        if requested_device == "cuda":
+            if not cuda_available:
+                raise RuntimeError(
+                    "DEVICE=cuda but CUDA is not available for pyannote-3.1."
+                )
+            self.logger.info("cuda_available_using_gpu")
+            return "cuda"
+
+        if requested_device in ("", "auto"):
+            if cuda_available:
                 self.logger.info("cuda_available_using_gpu")
                 return "cuda"
-        except ImportError:
-            pass
 
-        self.logger.info("cuda_not_available_using_cpu")
-        return "cpu"
+            self.logger.info("cuda_not_available_using_cpu")
+            return "cpu"
+
+        raise ValueError(f"Unknown DEVICE value: {requested_device}. Use cuda or cpu.")
 
     def _get_hf_token(self, config: dict[str, Any]) -> str:
         """Get HuggingFace token from config or environment.

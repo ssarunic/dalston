@@ -42,6 +42,7 @@ class VoxtralEngine(Engine):
         "mini-3b": "mistralai/Voxtral-Mini-3B-2507",
         "small-24b": "mistralai/Voxtral-Small-24B-2507",
     }
+    GPU_ONLY_VARIANTS = set(MODEL_VARIANT_MAP.keys())
     DEFAULT_MODEL_VARIANT = "mini-3b"
 
     SUPPORTED_LANGUAGES = ["en", "es", "fr", "pt", "hi", "de", "nl", "it"]
@@ -65,20 +66,37 @@ class VoxtralEngine(Engine):
 
         requested_device = os.environ.get("DEVICE", "").lower()
         cuda_available = torch.cuda.is_available()
+        gpu_only_variant = model_variant in self.GPU_ONLY_VARIANTS
 
         if requested_device == "cpu":
             self._device = "cpu"
-            self.logger.warning(
-                "using_cpu_device",
-                message="Running on CPU - inference will be significantly slower",
-            )
-        elif requested_device == "cuda" or requested_device == "":
+            if gpu_only_variant:
+                self.logger.warning(
+                    "gpu_only_variant_forced_cpu",
+                    variant=model_variant,
+                    message=(
+                        "GPU-optimized variant forced to CPU. "
+                        "Use only for local development/testing."
+                    ),
+                )
+            else:
+                self.logger.warning(
+                    "using_cpu_device",
+                    message="Running on CPU - inference will be significantly slower",
+                )
+        elif requested_device in ("", "auto", "cuda"):
             if cuda_available:
                 self._device = "cuda"
                 self.logger.info(
                     "cuda_available", device_count=torch.cuda.device_count()
                 )
             else:
+                if requested_device == "cuda" or gpu_only_variant:
+                    raise RuntimeError(
+                        f"Model variant '{model_variant}' requires CUDA, "
+                        "but CUDA is not available. Set DEVICE=cpu only for "
+                        "local development/testing."
+                    )
                 self._device = "cpu"
                 self.logger.warning(
                     "cuda_not_available",

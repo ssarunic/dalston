@@ -7,7 +7,7 @@ variable "name_prefix" {
 variable "instance_type" {
   description = "EC2 instance type"
   type        = string
-  default     = "t3.xlarge"
+  default     = "g5.xlarge"
 }
 
 variable "key_name" {

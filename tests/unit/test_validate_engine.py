@@ -269,12 +269,27 @@ class TestFindAllEngineYamls:
     """Tests for find_all_engine_yamls function."""
 
     def test_finds_engine_yamls_in_subdirectories(self) -> None:
-        """Should find engine.yaml files in nested directories."""
+        """Should find engine metadata YAML files in nested directories."""
         engines_dir = Path(__file__).parent.parent.parent / "engines"
         if engines_dir.exists():
             files = find_all_engine_yamls(engines_dir)
             assert len(files) >= 1
-            assert all(f.name == "engine.yaml" for f in files)
+            assert all(f.suffix == ".yaml" for f in files)
+            for f in files:
+                assert f.name == "engine.yaml" or f.parent.name == "variants"
+
+    def test_skips_parent_engine_yaml_when_variants_exist(self) -> None:
+        """Variant metadata should take precedence over parent engine.yaml."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir) / "transcribe" / "example"
+            variants = base / "variants"
+            variants.mkdir(parents=True)
+
+            (base / "engine.yaml").write_text("id: stale\n")
+            (variants / "v1.yaml").write_text("id: example-v1\n")
+
+            files = find_all_engine_yamls(Path(tmpdir))
+            assert files == [variants / "v1.yaml"]
 
     def test_returns_empty_for_nonexistent_directory(self) -> None:
         """Should return empty list for non-existent directory."""
@@ -304,25 +319,24 @@ class TestFormatLanguages:
 
 
 class TestAllExistingEngines:
-    """Test that all existing engines in the repository pass validation."""
+    """Test that all existing engine metadata in the repository passes validation."""
 
     def test_all_engines_valid(self, schema: dict) -> None:
-        """All engine.yaml files in the engines directory should be valid."""
+        """All engine metadata YAML files in the engines directory should be valid."""
         engines_dir = Path(__file__).parent.parent.parent / "engines"
         if not engines_dir.exists():
             pytest.skip("Engines directory not found")
 
         engine_files = find_all_engine_yamls(engines_dir)
         if not engine_files:
-            pytest.skip("No engine.yaml files found")
+            pytest.skip("No engine metadata YAML files found")
 
         results = [validate_engine(path, schema) for path in engine_files]
         failed = [r for r in results if not r.valid]
 
         if failed:
             error_msg = "\n".join(f"{r.path}: {', '.join(r.errors)}" for r in failed)
-            pytest.fail(f"Invalid engine.yaml files:\n{error_msg}")
+            pytest.fail(f"Invalid engine metadata YAML files:\n{error_msg}")
 
-        # Transcribe engines use variants/ structure, not engine.yaml
-        # So we only have: prepare, align, diarize (x2), detect, redact, merge = 7
-        assert len(results) >= 7, f"Expected at least 7 engines, found {len(results)}"
+        # We expect both engine.yaml and variants/*.yaml entries.
+        assert len(results) >= 11, f"Expected at least 11 engines, found {len(results)}"

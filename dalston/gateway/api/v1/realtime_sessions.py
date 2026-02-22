@@ -31,6 +31,7 @@ from dalston.gateway.services.enhancement import EnhancementError, EnhancementSe
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.realtime_sessions import RealtimeSessionService
+from dalston.gateway.services.storage import StorageService
 
 logger = structlog.get_logger()
 
@@ -475,23 +476,23 @@ async def get_session_audio(
     bucket = uri_parts[0]
     key = uri_parts[1] if len(uri_parts) > 1 else ""
 
-    async with get_s3_client(settings) as s3:
-        try:
-            url = await s3.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": bucket, "Key": key},
-                ExpiresIn=PRESIGNED_URL_EXPIRY_SECONDS,
-            )
-            return {"url": url, "expires_in": PRESIGNED_URL_EXPIRY_SECONDS}
-        except Exception as e:
-            logger.warning(
-                "audio_presigned_url_failed",
-                session_id=session_id,
-                bucket=bucket,
-                key=key,
-                error=str(e),
-            )
-            raise HTTPException(status_code=404, detail="Audio not found") from None
+    storage = StorageService(settings)
+    try:
+        url = await storage.generate_presigned_url_for_bucket(
+            bucket=bucket,
+            key=key,
+            expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
+        )
+        return {"url": url, "expires_in": PRESIGNED_URL_EXPIRY_SECONDS}
+    except Exception as e:
+        logger.warning(
+            "audio_presigned_url_failed",
+            session_id=session_id,
+            bucket=bucket,
+            key=key,
+            error=str(e),
+        )
+        raise HTTPException(status_code=404, detail="Audio not found") from None
 
 
 # -----------------------------------------------------------------------------
