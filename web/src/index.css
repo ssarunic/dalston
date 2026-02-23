@@ -39,10 +39,65 @@
   --plyr-color-main: hsl(var(--primary));
   --plyr-audio-controls-background: transparent;
   --plyr-audio-control-color: hsl(var(--foreground));
-  --plyr-audio-control-color-hover: hsl(var(--primary));
+  --plyr-audio-control-color-hover: hsl(var(--foreground));
+  --plyr-audio-control-background-hover: hsl(var(--muted));
+  --plyr-tooltip-background: hsl(var(--card));
+  --plyr-tooltip-color: hsl(var(--card-foreground));
+  --plyr-tooltip-arrow-size: 4px;
+  --plyr-tooltip-radius: 4px;
+  --plyr-tooltip-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+}
+
+/* Fix Plyr control button hover - ensure icon stays visible */
+.plyr__control:hover {
+  background: hsl(var(--muted)) !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+.plyr__control:hover svg {
+  fill: currentColor;
 }
 
 .plyr--audio .plyr__controls {
   background: transparent;
   padding: 0;
+}
+
+/* Ensure Plyr can shrink on mobile - prevent horizontal overflow */
+.plyr--audio {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.plyr__controls {
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.plyr__progress {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+/* Mobile: hide secondary Plyr controls to prevent overflow */
+@media (max-width: 639px) {
+  .plyr__controls [data-plyr="current-time"],
+  .plyr__controls [data-plyr="duration"],
+  .plyr__controls [data-plyr="mute"],
+  .plyr__controls [data-plyr="settings"] {
+    display: none;
+  }
+}
+
+/* Plyr tooltip styling */
+.plyr__tooltip {
+  z-index: 100;
+  background: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  border: 1px solid hsl(var(--border));
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+}
+
+.plyr__tooltip::before {
+  border-top-color: hsl(var(--card));
 }

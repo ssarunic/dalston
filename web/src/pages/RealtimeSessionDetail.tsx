@@ -304,6 +304,7 @@ export function RealtimeSessionDetail() {
                   ? 'No transcript available'
                   : 'Transcript not stored for this session'
               }
+              showSectionTitle={false}
             />
           </CardContent>
         </Card>

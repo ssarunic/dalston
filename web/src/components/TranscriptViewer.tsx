@@ -1,8 +1,14 @@
 import { useState, useMemo, useEffect, useRef, useCallback, forwardRef } from 'react'
-import { Download, Shield, Loader2 } from 'lucide-react'
+import { Download, Shield, Loader2, ChevronDown } from 'lucide-react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
 import { AudioPlayer, type SeekRequest } from '@/components/AudioPlayer'
 import { apiClient } from '@/api/client'
 import { cn } from '@/lib/utils'
@@ -40,13 +46,17 @@ const TranscriptSegmentRow = forwardRef<HTMLDivElement, TranscriptSegmentRowProp
       <div
         ref={ref}
         className={cn(
-          'flex gap-4 py-3 px-2 border-b border-border last:border-0 transition-colors',
+          'group flex gap-4 py-3 px-2 border-b border-border last:border-0 transition-colors',
           onClick && 'cursor-pointer hover:bg-muted/50',
           isActive && 'bg-primary/10 border-l-2 border-l-primary'
         )}
         onClick={onClick}
       >
-        <div className="w-16 flex-shrink-0 text-xs text-muted-foreground font-mono">
+        <div className={cn(
+          'w-16 flex-shrink-0 text-xs font-mono transition-colors',
+          isActive ? 'text-primary font-medium' : 'text-muted-foreground',
+          onClick && 'group-hover:text-primary'
+        )}>
           {formatTime(segment.start)}
         </div>
         {showSpeakerColumn && segment.speaker && (
@@ -64,17 +74,24 @@ const TranscriptSegmentRow = forwardRef<HTMLDivElement, TranscriptSegmentRowProp
 )
 TranscriptSegmentRow.displayName = 'TranscriptSegmentRow'
 
-interface ExportButtonsProps {
+interface ExportDropdownProps {
   type: 'job' | 'session'
   id: string
 }
 
-function ExportButtons({ type, id }: ExportButtonsProps) {
-  const formats = ['srt', 'vtt', 'txt', 'json'] as const
+function ExportDropdown({ type, id }: ExportDropdownProps) {
+  const formats = [
+    { key: 'srt', label: 'SRT', description: 'Subtitles' },
+    { key: 'vtt', label: 'VTT', description: 'Web Subtitles' },
+    { key: 'txt', label: 'TXT', description: 'Plain Text' },
+    { key: 'json', label: 'JSON', description: 'Structured' },
+  ] as const
   const [downloading, setDownloading] = useState<string | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
 
-  const handleDownload = async (format: typeof formats[number]) => {
+  const handleDownload = async (format: typeof formats[number]['key']) => {
     setDownloading(format)
+    setExportError(null)
     try {
       if (type === 'job') {
         await apiClient.downloadJobExport(id, format)
@@ -83,29 +100,42 @@ function ExportButtons({ type, id }: ExportButtonsProps) {
       }
     } catch (error) {
       console.error(`Failed to download ${format}:`, error)
+      setExportError(error instanceof Error ? error.message : 'Export failed')
     } finally {
       setDownloading(null)
     }
   }
 
   return (
-    <div className="flex flex-wrap justify-end gap-2">
-      {formats.map((format) => (
-        <Button
-          key={format}
-          variant="outline"
-          size="sm"
-          onClick={() => handleDownload(format)}
-          disabled={downloading !== null}
-        >
-          {downloading === format ? (
-            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-          ) : (
-            <Download className="h-3 w-3 mr-1" />
-          )}
-          {format.toUpperCase()}
-        </Button>
-      ))}
+    <div className="flex items-center gap-2">
+      {exportError && (
+        <span className="text-xs text-destructive">{exportError}</span>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="sm" className="h-9" disabled={downloading !== null}>
+            {downloading ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4 mr-2" />
+            )}
+            Export
+            <ChevronDown className="h-4 w-4 ml-1 opacity-50" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {formats.map((format) => (
+            <DropdownMenuItem
+              key={format.key}
+              onSelect={() => handleDownload(format.key)}
+              disabled={downloading !== null}
+            >
+              <span className="font-medium mr-2">{format.label}</span>
+              <span className="text-muted-foreground text-xs">{format.description}</span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   )
 }
@@ -137,6 +167,9 @@ export interface TranscriptViewerProps {
   redactedAudioSrc?: string
   onRefreshAudioUrls?: () => Promise<void>
   onResolveAudioDownloadUrl?: (variant: 'original' | 'redacted') => Promise<string | null>
+  title?: string
+  /** Hide the section title (useful when parent already shows it). Export button remains visible if enabled. */
+  showSectionTitle?: boolean
 }
 
 export function TranscriptViewer({
@@ -153,6 +186,8 @@ export function TranscriptViewer({
   redactedAudioSrc,
   onRefreshAudioUrls,
   onResolveAudioDownloadUrl,
+  title = 'Transcript',
+  showSectionTitle = true,
 }: TranscriptViewerProps) {
   const [currentTime, setCurrentTime] = useState(0)
   const [seekTo, setSeekTo] = useState<SeekRequest | undefined>(undefined)
@@ -179,6 +214,9 @@ export function TranscriptViewer({
   // Check if PII toggle should be shown
   const showPiiToggle = piiConfig?.enabled && (hasPerSegmentRedaction || piiConfig?.redactedText)
   const shouldShowAudioPlayer = !!audioSrc || showAudioPlayer
+  // Show title row if title is visible OR export is enabled (export needs the row)
+  const showTitleRow = showSectionTitle || (enableExport && exportConfig)
+  const showHeader = showTitleRow || showPiiToggle || shouldShowAudioPlayer
 
   // Track last known segment index for O(1) lookups during continuous playback
   const lastSegmentIndexRef = useRef(-1)
@@ -244,11 +282,13 @@ export function TranscriptViewer({
     if (!autoScroll || activeSegmentIndex < 0) return
 
     if (useVirtual) {
+      // For virtualized lists, use the virtualizer's scroll method
       virtualizer.scrollToIndex(activeSegmentIndex, {
         align: 'center',
         behavior: 'smooth',
       })
     } else {
+      // For regular lists, use native scrollIntoView
       const el = scrollContainerRef.current?.querySelector(
         `[data-segment-index="${activeSegmentIndex}"]`
       )
@@ -303,32 +343,49 @@ export function TranscriptViewer({
   )
 
   return (
-    <div className="space-y-0">
-      {/* Header bar with PII toggle, player, and export buttons */}
-      {(shouldShowAudioPlayer || showPiiToggle || enableExport) && (
-        <div className="flex flex-wrap items-start gap-3 px-2 py-3 border-b border-border">
-          {/* PII toggle */}
+    <div className="flex flex-col">
+      {/* Sticky header with 3 zones */}
+      {showHeader && (
+        <div className="sticky top-0 z-10 bg-card border-b border-border overflow-visible">
+          {/* Row 1: Title + Export (only if title visible or export enabled) */}
+          {showTitleRow && (
+            <div className={cn(
+              "flex items-center px-3 py-2 border-b border-border/50",
+              showSectionTitle ? "justify-between" : "justify-end"
+            )}>
+              {showSectionTitle && (
+                <h3 className="text-sm font-medium text-foreground">{title}</h3>
+              )}
+              {enableExport && exportConfig && (
+                <ExportDropdown type={exportConfig.type} id={exportConfig.id} />
+              )}
+            </div>
+          )}
+
+          {/* Row 2: PII toggle (if applicable) */}
           {showPiiToggle && (
-            <div className="order-1 flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-border/50">
               <Shield className="h-4 w-4 text-muted-foreground" />
               <div className="flex rounded-md border border-border overflow-hidden">
                 <button
                   onClick={() => piiConfig.onToggle(false)}
-                  className={`px-3 py-1 text-xs font-medium transition-colors ${
+                  className={cn(
+                    'px-3 py-1.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-inset',
                     !piiConfig.showRedacted
                       ? 'bg-primary text-primary-foreground'
                       : 'bg-background text-muted-foreground hover:bg-muted'
-                  }`}
+                  )}
                 >
                   Original
                 </button>
                 <button
                   onClick={() => piiConfig.onToggle(true)}
-                  className={`px-3 py-1 text-xs font-medium transition-colors ${
+                  className={cn(
+                    'px-3 py-1.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-inset',
                     piiConfig.showRedacted
                       ? 'bg-primary text-primary-foreground'
                       : 'bg-background text-muted-foreground hover:bg-muted'
-                  }`}
+                  )}
                 >
                   Redacted
                 </button>
@@ -341,26 +398,21 @@ export function TranscriptViewer({
             </div>
           )}
 
-          {/* Audio player */}
+          {/* Row 3: Audio player (full width) */}
           {shouldShowAudioPlayer && (
-            <AudioPlayer
-              src={audioSrc}
-              redactedSrc={redactedAudioSrc}
-              showRedacted={piiConfig?.showRedacted}
-              onTimeUpdate={setCurrentTime}
-              onAutoScrollChange={setAutoScroll}
-              onNavigateSegment={handleNavigateSegment}
-              onRefreshSourceUrls={onRefreshAudioUrls}
-              onResolveDownloadUrl={onResolveAudioDownloadUrl}
-              seekTo={seekTo}
-              className="order-3 w-full sm:order-2 sm:flex-1 min-w-0"
-            />
-          )}
-
-          {/* Export buttons */}
-          {enableExport && exportConfig && (
-            <div className="order-2 ml-auto sm:order-3 sm:ml-0 w-full sm:w-auto">
-              <ExportButtons type={exportConfig.type} id={exportConfig.id} />
+            <div className="px-3 py-2 overflow-visible">
+              <AudioPlayer
+                src={audioSrc}
+                redactedSrc={redactedAudioSrc}
+                showRedacted={piiConfig?.showRedacted}
+                onTimeUpdate={setCurrentTime}
+                onAutoScrollChange={setAutoScroll}
+                onNavigateSegment={handleNavigateSegment}
+                onRefreshSourceUrls={onRefreshAudioUrls}
+                onResolveDownloadUrl={onResolveAudioDownloadUrl}
+                seekTo={seekTo}
+                className="w-full"
+              />
             </div>
           )}
         </div>
@@ -369,7 +421,7 @@ export function TranscriptViewer({
       {/* Transcript content */}
       <div
         ref={scrollContainerRef}
-        className="overflow-y-auto"
+        className="overflow-y-auto scroll-smooth"
         style={{ maxHeight }}
       >
         {hasSegments ? (
@@ -417,10 +469,10 @@ export function TranscriptViewer({
           )
         ) : piiConfig?.showRedacted && piiConfig?.redactedText ? (
           // Fallback: plain redacted text if no segments
-          <p className="text-sm whitespace-pre-wrap px-2">{piiConfig.redactedText}</p>
+          <p className="text-sm whitespace-pre-wrap px-2 py-3">{piiConfig.redactedText}</p>
         ) : fullText ? (
           // Plain text fallback
-          <p className="text-sm whitespace-pre-wrap px-2">{fullText}</p>
+          <p className="text-sm whitespace-pre-wrap px-2 py-3">{fullText}</p>
         ) : (
           // Empty state
           <p className="text-sm text-muted-foreground py-4 text-center">

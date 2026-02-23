@@ -271,17 +271,19 @@ export function DAGViewer({ tasks, jobId, jobStatus, className }: DAGViewerProps
       </div>
 
       {/* DAG visualization */}
-      <div className="flex items-center gap-0 overflow-x-auto py-2 px-1">
-        {stageGroups.map((group, idx) => (
-          <StageColumn
-            key={group.stage}
-            stageGroup={group}
-            jobId={jobId}
-            isLast={idx === stageGroups.length - 1}
-            getDisplayStatus={(task) => displayStatusByTaskId[task.id]}
-            blockedByStage={failedStage}
-          />
-        ))}
+      <div className="max-w-full overflow-x-auto py-2 px-1">
+        <div className="flex w-max items-center gap-0">
+          {stageGroups.map((group, idx) => (
+            <StageColumn
+              key={group.stage}
+              stageGroup={group}
+              jobId={jobId}
+              isLast={idx === stageGroups.length - 1}
+              getDisplayStatus={(task) => displayStatusByTaskId[task.id]}
+              blockedByStage={failedStage}
+            />
+          ))}
+        </div>
       </div>
 
       {isJobFailed && failedTask && (

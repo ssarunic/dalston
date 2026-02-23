@@ -23,7 +23,7 @@ export function Layout({ children }: LayoutProps) {
       </div>
 
       {/* Mobile header with hamburger menu */}
-      <div className="flex flex-col flex-1">
+      <div className="flex flex-col flex-1 min-w-0">
         <header className="md:hidden flex items-center gap-4 border-b border-border px-4 py-3 bg-card">
           <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
             <SheetTrigger asChild>
@@ -41,7 +41,7 @@ export function Layout({ children }: LayoutProps) {
           </div>
         </header>
 
-        <main ref={mainRef} className="flex-1 overflow-auto p-4 md:p-6">
+        <main ref={mainRef} className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 md:p-6">
           {children}
         </main>
       </div>

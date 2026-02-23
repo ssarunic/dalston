@@ -210,6 +210,9 @@ function FailureDetailsCard({ error }: { error: string }) {
   )
 }
 
+/** URLs are typically valid for 1 hour; refresh if older than 50 minutes */
+const URL_MAX_AGE_MS = 50 * 60 * 1000
+
 function MetadataCard({
   icon: Icon,
   label,
@@ -417,6 +420,7 @@ export function JobDetail() {
     forJobId: string
     originalUrl: string
     redactedUrl?: string
+    fetchedAt: number
   } | null>(null)
   const currentJobId = job?.id
   const hasRedactedAudio = !!job?.pii?.redacted_audio_available
@@ -439,7 +443,7 @@ export function JobDetail() {
           // Redacted audio unavailable; keep original playback.
         }
       }
-      return { forJobId: currentJobId, originalUrl, redactedUrl }
+      return { forJobId: currentJobId, originalUrl, redactedUrl, fetchedAt: Date.now() }
     } catch (err) {
       console.error('Failed to get audio URL:', err)
       return null
@@ -455,6 +459,19 @@ export function JobDetail() {
 
   const resolveAudioDownloadUrl = useCallback(
     async (variant: 'original' | 'redacted') => {
+      // Reuse cached URL if still valid (less than 50 minutes old)
+      if (
+        audioUrlData &&
+        audioUrlData.forJobId === currentJobId &&
+        Date.now() - audioUrlData.fetchedAt < URL_MAX_AGE_MS
+      ) {
+        if (variant === 'redacted') {
+          return audioUrlData.redactedUrl ?? audioUrlData.originalUrl
+        }
+        return audioUrlData.originalUrl
+      }
+
+      // Fetch fresh URLs
       const urls = await fetchAudioUrls()
       if (!urls) return null
       setAudioUrlData(urls)
@@ -463,7 +480,7 @@ export function JobDetail() {
       }
       return urls.originalUrl
     },
-    [fetchAudioUrls]
+    [fetchAudioUrls, audioUrlData, currentJobId]
   )
 
   // Fetch audio URLs for terminal jobs with non-purged audio
@@ -630,7 +647,10 @@ export function JobDetail() {
               redactedAudioSrc={redactedAudioUrl}
               onRefreshAudioUrls={refreshAudioUrls}
               onResolveAudioDownloadUrl={resolveAudioDownloadUrl}
-              enableExport={job.status === 'completed'}
+              enableExport={
+                job.status === 'completed' &&
+                ((job.segments && job.segments.length > 0) || !!job.text)
+              }
               exportConfig={{ type: 'job', id: job.id }}
               emptyMessage={
                 job.status === 'completed'
@@ -644,6 +664,7 @@ export function JobDetail() {
                 onToggle: setShowRedacted,
                 showRedacted,
               } : undefined}
+              showSectionTitle={false}
             />
           </CardContent>
         </Card>

@@ -2,17 +2,31 @@ import { useRef, useState, useEffect, useCallback } from 'react'
 import Plyr from 'plyr'
 import 'plyr/dist/plyr.css'
 import {
-  RotateCcw,
   Download,
   Loader2,
   AlertCircle,
   RefreshCw,
+  SkipBack,
+  SkipForward,
+  ListMusic,
+  MoreVertical,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip } from '@/components/ui/tooltip'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { cn } from '@/lib/utils'
 
 /** Persistence key for saving playback position per audio src. */
 const POSITION_STORAGE_PREFIX = 'dalston:playback:'
+
+/** Skip amount in seconds for skip buttons */
+const SKIP_SECONDS = 10
 
 function getStorageKey(src: string): string {
   try {
@@ -73,6 +87,9 @@ export function AudioPlayer({
     showRedacted && redactedSrc ? 'redacted' : 'original'
   const hasActiveSource = Boolean(activeSrc)
 
+  // Mobile: collapse secondary controls into overflow menu
+  const isMobile = useMediaQuery('(max-width: 639px)')
+
   // Initialize Plyr instance.
   // Keep it alive across source switches to avoid teardown/re-init races.
   useEffect(() => {
@@ -96,6 +113,7 @@ export function AudioPlayer({
     setIsReady(false)
 
     const audioEl = audioRef.current
+    // Always use full controls - CSS hides some on mobile to prevent overflow
     const player = new Plyr(audioEl, {
       controls: ['play', 'progress', 'current-time', 'duration', 'mute', 'settings'],
       settings: ['speed'],
@@ -314,6 +332,12 @@ export function AudioPlayer({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [duration, onNavigateSegment])
 
+  const handleSkip = (seconds: number) => {
+    const player = plyrRef.current
+    if (!player) return
+    player.currentTime = Math.max(0, Math.min(duration, player.currentTime + seconds))
+  }
+
   const handleAutoScrollToggle = () => {
     const next = !autoScroll
     setAutoScroll(next)
@@ -344,14 +368,36 @@ export function AudioPlayer({
         : activeSrc
       if (!resolved) return
 
+      // Fetch as blob for consistent download behavior across browsers
+      // This avoids opening new tabs and ensures the file actually downloads
+      const response = await fetch(resolved)
+      if (!response.ok) throw new Error('Failed to fetch audio')
+      const blob = await response.blob()
+      const blobUrl = URL.createObjectURL(blob)
+
+      // Extract filename from URL or use default
+      let filename = 'audio'
+      try {
+        const urlPath = new URL(resolved).pathname
+        const pathFilename = urlPath.split('/').pop()
+        if (pathFilename && pathFilename.includes('.')) {
+          filename = pathFilename
+        } else {
+          // Add extension based on blob type
+          const ext = blob.type.split('/')[1] || 'mp3'
+          filename = `audio.${ext}`
+        }
+      } catch {
+        filename = 'audio.mp3'
+      }
+
       const a = document.createElement('a')
-      a.href = resolved
-      a.download = ''
-      a.target = '_blank'
-      a.rel = 'noopener'
+      a.href = blobUrl
+      a.download = filename
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
+      URL.revokeObjectURL(blobUrl)
     } catch (err) {
       console.error('Failed to download audio:', err)
     } finally {
@@ -359,8 +405,101 @@ export function AudioPlayer({
     }
   }
 
+  // Render secondary controls (desktop: inline, mobile: overflow menu)
+  const renderSecondaryControls = () => {
+    if (isMobile) {
+      return (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-10 w-10 shrink-0"
+              aria-label="More options"
+            >
+              <MoreVertical className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => handleSkip(-SKIP_SECONDS)} disabled={!isReady}>
+              <SkipBack className="h-4 w-4 mr-2" />
+              Back {SKIP_SECONDS}s
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => handleSkip(SKIP_SECONDS)} disabled={!isReady}>
+              <SkipForward className="h-4 w-4 mr-2" />
+              Forward {SKIP_SECONDS}s
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={handleAutoScrollToggle}>
+              <ListMusic className="h-4 w-4 mr-2" />
+              {autoScroll ? 'Disable auto-scroll' : 'Enable auto-scroll'}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => void handleDownload()}
+              disabled={isDownloading || (!activeSrc && !onResolveDownloadUrl)}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Download audio
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )
+    }
+
+    return (
+      <>
+        {/* Auto-scroll toggle */}
+        <Tooltip content={autoScroll ? 'Auto-scroll enabled' : 'Enable auto-scroll'} side="bottom">
+          <Button
+            variant={autoScroll ? 'secondary' : 'ghost'}
+            size="icon"
+            className="h-10 w-10 shrink-0"
+            onClick={handleAutoScrollToggle}
+            aria-label={autoScroll ? 'Disable auto-scroll' : 'Enable auto-scroll'}
+            aria-pressed={autoScroll}
+          >
+            <ListMusic className="h-4 w-4" />
+          </Button>
+        </Tooltip>
+
+        {/* Download button */}
+        <Tooltip content="Download audio" side="bottom">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-10 w-10 shrink-0"
+            onClick={() => void handleDownload()}
+            disabled={isDownloading || (!activeSrc && !onResolveDownloadUrl)}
+            aria-label="Download audio"
+          >
+            {isDownloading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+          </Button>
+        </Tooltip>
+      </>
+    )
+  }
+
   return (
-    <div className={cn('flex items-center gap-2', className)}>
+    <div className={cn('flex items-center gap-2 min-w-0 max-w-full', className)}>
+      {/* Skip back button - hidden on mobile (in overflow menu) */}
+      {!isMobile && (
+        <Tooltip content={`Back ${SKIP_SECONDS}s`} side="bottom">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-10 w-10 shrink-0"
+            onClick={() => handleSkip(-SKIP_SECONDS)}
+            disabled={!isReady}
+            aria-label={`Skip back ${SKIP_SECONDS} seconds`}
+          >
+            <SkipBack className="h-4 w-4" />
+          </Button>
+        </Tooltip>
+      )}
+
       {/* Plyr audio player */}
       <div className="flex-1 min-w-0">
         {activeSrc ? (
@@ -373,8 +512,8 @@ export function AudioPlayer({
               size="sm"
               onClick={handleRetry}
               disabled={isRefreshing || !onRefreshSourceUrls}
-              className="h-6 px-2"
-              title="Retry audio URL"
+              className="h-8 px-2"
+              aria-label="Retry loading audio"
             >
               {isRefreshing ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -385,6 +524,22 @@ export function AudioPlayer({
           </div>
         )}
       </div>
+
+      {/* Skip forward button - hidden on mobile (in overflow menu) */}
+      {!isMobile && (
+        <Tooltip content={`Forward ${SKIP_SECONDS}s`} side="bottom">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-10 w-10 shrink-0"
+            onClick={() => handleSkip(SKIP_SECONDS)}
+            disabled={!isReady}
+            aria-label={`Skip forward ${SKIP_SECONDS} seconds`}
+          >
+            <SkipForward className="h-4 w-4" />
+          </Button>
+        </Tooltip>
+      )}
 
       {/* Loading state overlay */}
       {activeSrc && !isReady && !loadError && (
@@ -404,7 +559,8 @@ export function AudioPlayer({
             size="sm"
             onClick={handleRetry}
             disabled={isRefreshing}
-            className="h-6 px-2"
+            className="h-8 px-2"
+            aria-label="Retry loading audio"
           >
             {isRefreshing ? (
               <Loader2 className="h-3 w-3 animate-spin" />
@@ -415,34 +571,8 @@ export function AudioPlayer({
         </div>
       )}
 
-      {/* Auto-scroll toggle */}
-      <Button
-        variant={autoScroll ? 'secondary' : 'ghost'}
-        size="icon"
-        className="h-8 w-8 shrink-0"
-        onClick={handleAutoScrollToggle}
-        title={autoScroll ? 'Auto-scroll on' : 'Auto-scroll off'}
-        aria-label={autoScroll ? 'Auto-scroll on' : 'Auto-scroll off'}
-      >
-        <RotateCcw className="h-4 w-4" />
-      </Button>
-
-      {/* Download button - downloads currently active audio */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8 shrink-0"
-        onClick={() => void handleDownload()}
-        disabled={isDownloading || (!activeSrc && !onResolveDownloadUrl)}
-        title="Download audio"
-        aria-label="Download audio"
-      >
-        {isDownloading ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <Download className="h-4 w-4" />
-        )}
-      </Button>
+      {/* Secondary controls (desktop: inline buttons, mobile: overflow menu) */}
+      {renderSecondaryControls()}
     </div>
   )
 }

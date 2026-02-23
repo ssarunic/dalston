@@ -64,6 +64,12 @@ async function authenticatedDownload(url: string, filename: string): Promise<voi
   }
 
   const blob = await response.blob()
+
+  // Guard against empty exports (no transcript content)
+  if (blob.size === 0) {
+    throw new Error('No transcript content available to export')
+  }
+
   const objectUrl = URL.createObjectURL(blob)
 
   const link = document.createElement('a')
