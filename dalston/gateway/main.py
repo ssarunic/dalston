@@ -24,7 +24,6 @@ from dalston.db.session import DEFAULT_TENANT_ID, engine, init_db
 from dalston.gateway.api.auth import router as auth_router
 from dalston.gateway.api.console import router as console_router
 from dalston.gateway.api.v1 import router as v1_router
-from dalston.gateway.api.v2.router import router as v2_router
 from dalston.gateway.middleware import setup_exception_handlers
 from dalston.gateway.middleware.correlation import CorrelationIdMiddleware
 from dalston.gateway.middleware.metrics import MetricsMiddleware
@@ -196,7 +195,6 @@ setup_exception_handlers(app)
 
 # Mount API routes
 app.include_router(v1_router)
-app.include_router(v2_router)  # V2 API (artifact-centric retention)
 app.include_router(auth_router)
 app.include_router(console_router)
 
