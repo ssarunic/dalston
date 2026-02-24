@@ -564,6 +564,25 @@ def _encode_job_cursor(job: JobModel) -> str:
     return f"{job.created_at.isoformat()}:{job.id}"
 
 
+def _get_transcribe_engine(job: JobModel) -> str | None:
+    """Extract the transcribe engine from a job's tasks.
+
+    Returns the engine_id of the 'transcribe' stage task, or falls back
+    to the explicitly requested engine in parameters.
+    """
+    # First try to find the transcribe task
+    if job.tasks:
+        for task in job.tasks:
+            if task.stage == "transcribe":
+                return task.engine_id
+
+    # Fallback to explicitly requested engine in parameters
+    if job.parameters:
+        return job.parameters.get("engine_transcribe")
+
+    return None
+
+
 def _decode_job_cursor(cursor: str) -> tuple[datetime, UUID] | None:
     """Decode a cursor into created_at and id."""
     try:
@@ -593,7 +612,8 @@ async def list_console_jobs(
 ) -> ConsoleJobListResponse:
     """List all jobs for console (admin view) with cursor-based pagination."""
     # Build base query - no tenant filter for admin
-    query = select(JobModel)
+    # Eager load tasks to extract transcribe engine
+    query = select(JobModel).options(selectinload(JobModel.tasks))
 
     # Optional status filter
     if status:
@@ -644,6 +664,7 @@ async def list_console_jobs(
             ConsoleJobSummary(
                 id=job.id,
                 status=job.status,
+                model=_get_transcribe_engine(job),
                 audio_uri=job.audio_uri,
                 created_at=job.created_at,
                 started_at=job.started_at,
