@@ -48,3 +48,6 @@ node_modules/
 
 # Large test fixtures
 tests/audio/large/
+
+# Temporary files
+tmp/
