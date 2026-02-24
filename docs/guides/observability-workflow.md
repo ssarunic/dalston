@@ -2,11 +2,11 @@
 
 How to use Dalston's observability stack (M18–M20) day-to-day for debugging, performance analysis, and operational monitoring.
 
-**Prerequisites**: Services running with `--profile monitoring` and/or `--profile tracing` enabled.
+**Prerequisites**: Services running with `--profile observability` enabled.
 
 ```bash
 # Start with full observability
-OTEL_ENABLED=true docker compose --profile monitoring --profile tracing up -d
+OTEL_ENABLED=true docker compose --profile local-infra --profile observability up -d
 
 # Jaeger UI:     http://localhost:16686
 # Grafana:       http://localhost:3001  (admin / dalston)
