@@ -6,7 +6,7 @@
 | **Duration**  | 8-10 days                                                                                 |
 | **Dependencies** | M3 (Word Timestamps), M4 (Speaker Diarization), M25 (Data Retention)                   |
 | **Deliverable** | PII detection engine, audio redaction, dual output, configurable entity types          |
-| **Status**    | Not Started                                                                               |
+| **Status**    | Completed                                                                                 |
 
 ## User Story
 

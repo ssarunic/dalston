@@ -14,7 +14,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 
 ## Status Overview
 
-### Completed (9)
+### Completed (12)
 
 | # | Milestone | Completed |
 |---|-----------|-----------|
@@ -25,8 +25,11 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M5](milestones/M05-export-webhooks.md) | Export & Webhooks | January 2026 |
 | [M10](milestones/M10-web-console.md) | Web Console | 2026-01-30 |
 | [M11](milestones/M11-api-authentication.md) | API Authentication | February 2026 |
+| [M15](milestones/M15-console-authentication.md) | Console Auth | February 2026 |
 | [M17](milestones/M17-api-key-management.md) | API Key Management | February 2026 |
 | [M21](milestones/M21-admin-webhooks.md) | Admin Webhooks | February 2026 |
+| [M25](milestones/M25-data-retention.md) | Data Retention & Audit | February 2026 |
+| [M26](milestones/M26-pii-detection-redaction.md) | PII Detection & Audio Redaction | February 2026 |
 
 ### In Progress (8)
 
@@ -41,17 +44,14 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Audio/transcript S3 storage working; session resume pending |
 
-### Not Started (7)
+### Not Started (4)
 
 | # | Milestone | Goal |
 |---|-----------|------|
 | [M9](milestones/M09-enrichment.md) | Enrichment | Emotions, events, LLM cleanup |
 | [M14](milestones/M14-model-selection.md) | Model Selection | User-selectable transcription models |
-| [M15](milestones/M15-console-authentication.md) | Console Auth | Secure web console access |
 | [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | OpenTelemetry spans |
 | [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | Prometheus + Grafana |
-| [M25](milestones/M25-data-retention.md) | Data Retention & Audit | Retention policies, cleanup, audit logging |
-| [M26](milestones/M26-pii-detection-redaction.md) | PII Detection & Audio Redaction | Detect PII, redact text and audio |
 
 ---
 
@@ -73,7 +73,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M12](milestones/M12-python-sdk.md) | Python SDK | Native SDK for Dalston features | 3-4 | In Progress |
 | [M13](milestones/M13-cli.md) | CLI | Command-line interface | 2-3 | In Progress |
 | [M14](milestones/M14-model-selection.md) | Model Selection | User-selectable transcription models | 2-3 | Not Started |
-| [M15](milestones/M15-console-authentication.md) | Console Auth | Secure web console access | 2-3 | Not Started |
+| [M15](milestones/M15-console-authentication.md) | Console Auth | Secure web console access | 2-3 | Completed |
 
 **Total: ~42-55 days (~8-11 weeks)**
 
@@ -122,13 +122,13 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 
 | # | Milestone | Goal | Days | Status |
 |---|-----------|------|------|--------|
-| [M25](milestones/M25-data-retention.md) | Data Retention & Audit | Named retention policies, cleanup worker, audit logging | 5-6 | Not Started |
+| [M25](milestones/M25-data-retention.md) | Data Retention & Audit | Named retention policies, cleanup worker, audit logging | 5-6 | Completed |
 
 ## Compliance Milestones
 
 | # | Milestone | Goal | Days | Status |
 |---|-----------|------|------|--------|
-| [M26](milestones/M26-pii-detection-redaction.md) | PII Detection & Audio Redaction | Detect PII, redact text and audio | 8-10 | Not Started |
+| [M26](milestones/M26-pii-detection-redaction.md) | PII Detection & Audio Redaction | Detect PII, redact text and audio | 8-10 | Completed |
 
 ## Engine Infrastructure Milestones
 
