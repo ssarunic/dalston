@@ -536,6 +536,7 @@ class ConsoleJobSummary(BaseModel):
 
     id: UUID
     status: str
+    model: str | None = None
     audio_uri: str | None = None
     created_at: datetime
     started_at: datetime | None = None

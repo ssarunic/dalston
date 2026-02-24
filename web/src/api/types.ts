@@ -97,6 +97,7 @@ export interface JobListResponse {
 export interface ConsoleJobSummary {
   id: string
   status: JobStatus
+  model?: string
   audio_uri?: string
   created_at: string
   started_at?: string

@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Radio, Trash2, RefreshCw, Filter, X } from 'lucide-react'
 import { apiClient } from '@/api/client'
-import { formatRetentionDisplay } from '@/lib/retention'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useSharedTableState } from '@/hooks/useSharedTableState'
 import { Button } from '@/components/ui/button'
@@ -481,7 +480,7 @@ export function RealtimeSessions() {
       {/* Session History */}
       <Card>
         <CardHeader>
-          <CardTitle>Session History</CardTitle>
+          <CardTitle>Sessions</CardTitle>
         </CardHeader>
         <CardContent>
           {(sessionsLoading || (isFetching && allSessions.length === 0)) ? (
@@ -512,13 +511,10 @@ export function RealtimeSessions() {
                       </div>
                       <StatusBadge status={session.status} />
                     </div>
-                    <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                    <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
                       <div>
                         <p className="text-xs text-muted-foreground">Model</p>
                         <p>{session.model ?? '-'}</p>
-                        {session.engine && (
-                          <p className="text-xs text-muted-foreground">{session.engine}</p>
-                        )}
                       </div>
                       <div>
                         <p className="text-xs text-muted-foreground">Duration</p>
@@ -527,10 +523,6 @@ export function RealtimeSessions() {
                       <div>
                         <p className="text-xs text-muted-foreground">Segments</p>
                         <p>{session.segment_count}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Retention</p>
-                        <p>{formatRetentionDisplay(session.retention)}</p>
                       </div>
                     </div>
                     {session.status !== 'active' && (
@@ -556,13 +548,12 @@ export function RealtimeSessions() {
               <Table className="min-w-[900px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="sticky left-0 z-10 bg-card">Session ID</TableHead>
+                    <TableHead className="sticky left-0 z-10 bg-card">ID</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Model</TableHead>
                     <TableHead>Duration</TableHead>
                     <TableHead>Segments</TableHead>
-                    <TableHead>Retention</TableHead>
-                    <TableHead>Started</TableHead>
+                    <TableHead>Created</TableHead>
                     <TableHead className="sticky right-0 z-10 bg-card"></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -592,9 +583,6 @@ export function RealtimeSessions() {
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm">
                         {session.segment_count}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-sm">
-                        {formatRetentionDisplay(session.retention)}
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm">
                         {formatDate(session.started_at)}

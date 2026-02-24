@@ -332,16 +332,16 @@ export function BatchJobs() {
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
                       <div>
+                        <p className="text-xs text-muted-foreground">Model</p>
+                        <p>{job.model ?? '-'}</p>
+                      </div>
+                      <div>
                         <p className="text-xs text-muted-foreground">Duration</p>
                         <p>{formatDuration(job.audio_duration_seconds)}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-muted-foreground">Language</p>
-                        <p>{job.result_word_count ? job.result_language_code?.toUpperCase() || '-' : '-'}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Words</p>
-                        <p>{job.result_word_count?.toLocaleString() || '-'}</p>
+                        <p className="text-xs text-muted-foreground">Segments</p>
+                        <p>{job.result_segment_count ?? '-'}</p>
                       </div>
                     </div>
                     {(CANCELLABLE_STATUSES.has(job.status as JobStatus) ||
@@ -384,11 +384,11 @@ export function BatchJobs() {
               <Table className="min-w-[860px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="sticky left-0 z-10 bg-card">Job ID</TableHead>
+                    <TableHead className="sticky left-0 z-10 bg-card">ID</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Model</TableHead>
                     <TableHead>Duration</TableHead>
-                    <TableHead>Language</TableHead>
-                    <TableHead className="text-right">Words</TableHead>
+                    <TableHead>Segments</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead className="sticky right-0 z-10 bg-card text-right">Actions</TableHead>
                   </TableRow>
@@ -407,13 +407,13 @@ export function BatchJobs() {
                         <StatusBadge status={job.status} />
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm">
+                        {job.model ?? '-'}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
                         {formatDuration(job.audio_duration_seconds)}
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm">
-                        {job.result_word_count ? job.result_language_code?.toUpperCase() || '-' : '-'}
-                      </TableCell>
-                      <TableCell className="text-right text-muted-foreground text-sm">
-                        {job.result_word_count?.toLocaleString() || '-'}
+                        {job.result_segment_count ?? '-'}
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm">
                         {formatDate(job.created_at)}
