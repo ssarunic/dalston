@@ -282,13 +282,11 @@ export function TranscriptViewer({
     if (!autoScroll || activeSegmentIndex < 0) return
 
     if (useVirtual) {
-      // For virtualized lists, use the virtualizer's scroll method
       virtualizer.scrollToIndex(activeSegmentIndex, {
         align: 'center',
         behavior: 'smooth',
       })
     } else {
-      // For regular lists, use native scrollIntoView
       const el = scrollContainerRef.current?.querySelector(
         `[data-segment-index="${activeSegmentIndex}"]`
       )
@@ -421,7 +419,7 @@ export function TranscriptViewer({
       {/* Transcript content */}
       <div
         ref={scrollContainerRef}
-        className="overflow-y-auto scroll-smooth"
+        className="overflow-y-auto"
         style={{ maxHeight }}
       >
         {hasSegments ? (
@@ -440,6 +438,7 @@ export function TranscriptViewer({
                   <div
                     key={virtualRow.key}
                     data-index={virtualRow.index}
+                    data-segment-index={virtualRow.index}
                     ref={virtualizer.measureElement}
                     style={{
                       position: 'absolute',
