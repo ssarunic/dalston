@@ -315,40 +315,7 @@ span inside that context, before the processing span.
 
 ---
 
-## 7. X-Trace-ID in API responses
-
-**Why**: The gateway returns `X-Request-ID` but not the OTEL trace ID.
-Enterprise integrations and compliance workflows need the trace ID to
-correlate their logs with Dalston's traces in Jaeger.
-
-**What**: Add `X-Trace-ID` response header containing the OTEL trace ID.
-
-**Where**: `dalston/gateway/middleware/correlation.py` — `send_with_header()`,
-line 91–93.
-
-**How**:
-
-```python
-async def send_with_header(message):
-    if message["type"] == "http.response.start":
-        headers = MutableHeaders(scope=message)
-        headers.append(REQUEST_ID_HEADER, request_id)
-        # Include trace ID for external correlation (M19)
-        trace_id = dalston.telemetry.get_current_trace_id()
-        if trace_id:
-            headers.append("X-Trace-ID", trace_id)
-    await send(message)
-```
-
-**Considerations**:
-- Only set the header when tracing is enabled (when disabled,
-  `get_current_trace_id()` returns `None`).
-- The trace ID is a 32-character hex string (128-bit), safe for headers.
-- Document the header in the API reference.
-
----
-
-## 8. Prometheus alerting rules
+## 7. Prometheus alerting rules
 
 **Why**: The guide proposes three alerts but they aren't actually configured.
 Without alerts, the metrics are passive — you only notice problems when
@@ -428,9 +395,9 @@ Add to the prometheus service volumes:
 
 ---
 
-## 9. Update the observability workflow guide
+## 8. Update the observability workflow guide
 
-**Why**: After implementing items 1–8, the "Gaps to address" section of the
+**Why**: After implementing items 1–7, the "Gaps to address" section of the
 guide should be updated to reflect what's been completed, and new dashboard
 panels should be documented.
 
@@ -438,7 +405,6 @@ panels should be documented.
 - Move completed gaps to a "Recently added" section
 - Add instance type to the cost dashboard PromQL examples
 - Add realtime factor panel to the per-engine performance section
-- Document the `X-Trace-ID` header in the compliance section
 
 **Where**: `docs/guides/observability-workflow.md`
 
@@ -452,14 +418,12 @@ Recommended sequence based on value/effort:
 |----------|------|--------|-------|
 | 1 | Audio duration on spans (#3) | Small | High — unlocks realtime factor |
 | 2 | `INSTANCE_TYPE` env var (#2) | Small | High — enables hardware comparison |
-| 3 | X-Trace-ID header (#7) | Small | Medium — compliance/integration |
-| 4 | EC2 resource detector (#1) | Small | Medium — automatic trace enrichment |
-| 5 | Language on spans (#4) | Small | Medium — per-language analysis |
-| 6 | Alerting rules (#8) | Small | Medium — proactive monitoring |
-| 7 | Queue wait span (#6) | Medium | Medium — trace visibility |
-| 8 | Model warm-up separation (#5) | Medium | Medium — cleaner metrics, per-engine |
-| 9 | Guide update (#9) | Small | Low — do last |
+| 3 | EC2 resource detector (#1) | Small | Medium — automatic trace enrichment |
+| 4 | Language on spans (#4) | Small | Medium — per-language analysis |
+| 5 | Alerting rules (#7) | Small | Medium — proactive monitoring |
+| 6 | Queue wait span (#6) | Medium | Medium — trace visibility |
+| 7 | Model warm-up separation (#5) | Medium | Medium — cleaner metrics, per-engine |
+| 8 | Guide update (#8) | Small | Low — do last |
 
-Items 1–6 can be done in parallel (no dependencies). Item 7 (X-Trace-ID)
-depends on item 1 (resource detector) only if you want the trace ID to
-reflect the EC2-enriched resource. Item 9 should be done after all others.
+Items 1–5 can be done in parallel (no dependencies). Item 8 should be done
+after all others.

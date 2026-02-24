@@ -195,7 +195,7 @@ For regulated industries, the observability stack provides audit evidence:
 - **Audit log entries** (`dalston/common/audit.py`) record job creation, completion, and deletion events with `audio_duration` and `tenant_id`.
 - The stage breakdown API (`/v1/audio/transcriptions/{id}` with `stages` array) lets clients programmatically verify which pipeline stages ran.
 
-To strengthen the compliance story, include the `trace_id` in API responses so clients can reference it in their own audit logs. The gateway already returns `X-Request-ID` — adding `X-Trace-ID` would complete the picture.
+Clients can look up the full trace in Jaeger using the `job_id` returned in every API response — a job maps 1:1 to a trace, so no separate trace ID header is needed.
 
 ---
 
@@ -226,31 +226,9 @@ The current engine span hierarchy has `engine.download_input` → `engine.proces
 
 Queue wait time is captured as a Prometheus metric (`dalston_engine_queue_wait_seconds`) but **not** as a span in the trace. Adding a span between `orchestrator.schedule_task` and `engine.*.process` would make queue wait visible in the Jaeger waterfall. This requires tracking the enqueue timestamp in the trace context and creating a synthetic span when the engine picks up the task.
 
-### EC2 instance ID on spot instances
+### EC2 instance metadata on spot instances
 
-When running engines on spot instances, add the EC2 instance ID as a resource attribute in the OTel SDK:
+When running engines on spot instances, use the `opentelemetry-resource-detector-aws` package to automatically populate `host.id` (instance ID), `host.type` (instance type), and `cloud.availability_zone` as OTEL resource attributes. Merge the detected resource in `dalston/telemetry.py:74` via `resource.merge(AwsEc2ResourceDetector().detect())`. This lets you distinguish infrastructure failure from model errors when a spot instance is reclaimed mid-job, and enables per-instance-type performance comparison in Jaeger.
 
-```python
-import requests
+For Prometheus metrics and structlog (which don't see OTEL resource attributes), set `INSTANCE_TYPE` as an environment variable in ECS task definitions or EC2 launch templates.
 
-def get_instance_id() -> str | None:
-    try:
-        token = requests.put(
-            "http://169.254.169.254/latest/api/token",
-            headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"},
-            timeout=1,
-        ).text
-        return requests.get(
-            "http://169.254.169.254/latest/meta-data/instance-id",
-            headers={"X-aws-ec2-metadata-token": token},
-            timeout=1,
-        ).text
-    except Exception:
-        return None
-```
-
-Pass this to `Resource.create()` in `dalston/telemetry.py:74` so that when a spot instance is reclaimed mid-job, you can distinguish infrastructure failure from model errors in the trace.
-
-### Trace ID in API responses
-
-The gateway returns `X-Request-ID` but not `X-Trace-ID`. Adding the trace ID to response headers (via the correlation middleware) would let API consumers correlate their logs with Dalston's traces — valuable for enterprise integrations and compliance.
