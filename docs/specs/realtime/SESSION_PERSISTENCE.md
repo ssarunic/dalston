@@ -60,10 +60,10 @@ CREATE TABLE realtime_sessions (
     encoding VARCHAR(20),        -- pcm_s16le, mulaw, etc.
     sample_rate INTEGER,
 
-    -- Feature flags
-    store_audio BOOLEAN DEFAULT FALSE,
-    store_transcript BOOLEAN DEFAULT FALSE,
-    enhance_on_end BOOLEAN DEFAULT FALSE,
+    -- Retention (0=transient, -1=permanent, N=days)
+    retention INTEGER NOT NULL DEFAULT 30,
+    purge_after TIMESTAMP WITH TIME ZONE,
+    purged_at TIMESTAMP WITH TIME ZONE,
 
     -- Results
     audio_uri TEXT,              -- s3://bucket/sessions/{id}/audio.wav
@@ -110,9 +110,7 @@ dalston:realtime:session:{session_id}        (Hash)
   "model": "fast",
   "started_at": "2025-01-28T12:00:00Z",
   "audio_duration": 45.6,
-  "store_audio": true,
-  "store_transcript": true,
-  "enhance_on_end": true
+  "retention": 30
 }
 ```
 
@@ -130,17 +128,22 @@ s3://{bucket}/
 
 ## WebSocket Parameters
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `store_audio` | bool | true | Record audio to S3 during session |
-| `store_transcript` | bool | true | Save final transcript to S3 on end |
-| `enhance_on_end` | bool | false | Create batch job on session end (requires store_audio) |
-| `resume_session_id` | string | null | Link this session to a previous one |
+| Parameter           | Type   | Default | Description                                           |
+| ------------------- | ------ | ------- | ----------------------------------------------------- |
+| `retention`         | int    | 30      | Retention in days (0=transient, -1=permanent, N=days) |
+| `resume_session_id` | string | null    | Link this session to a previous one                   |
 
-**Example:**
+**Examples:**
 
 ```
-ws://localhost:8000/v1/audio/transcriptions/stream?store_audio=true&store_transcript=true
+# Default 30-day retention
+ws://localhost:8000/v1/audio/transcriptions/stream
+
+# Transient (no storage)
+ws://localhost:8000/v1/audio/transcriptions/stream?retention=0
+
+# 7-day retention
+ws://localhost:8000/v1/audio/transcriptions/stream?retention=7
 ```
 
 ---
@@ -331,8 +334,7 @@ GET /v1/realtime/sessions
       "word_count": 156,
       "started_at": "2025-01-28T12:00:00Z",
       "ended_at": "2025-01-28T12:01:00Z",
-      "store_audio": true,
-      "store_transcript": true
+      "retention": 30
     }
   ],
   "total": 1,
@@ -360,9 +362,9 @@ GET /v1/realtime/sessions/{session_id}
   "audio_duration_seconds": 45.6,
   "utterance_count": 12,
   "word_count": 156,
-  "store_audio": true,
-  "store_transcript": true,
-  "enhance_on_end": false,
+  "retention": 30,
+  "purge_after": "2025-02-27T12:01:00Z",
+  "purged_at": null,
   "audio_uri": "s3://bucket/sessions/sess_abc123/audio.wav",
   "transcript_uri": "s3://bucket/sessions/sess_abc123/transcript.json",
   "worker_id": "stt-rt-transcribe-whisper-1",

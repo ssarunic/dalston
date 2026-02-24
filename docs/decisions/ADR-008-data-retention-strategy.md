@@ -2,7 +2,19 @@
 
 ## Status
 
-Proposed
+**Superseded** - Replaced by simplified integer-based retention model (February 2026).
+
+The named retention policies approach was replaced with a simpler integer-based model:
+
+- `0` = transient (no storage)
+- `-1` = permanent (never delete)
+- `1-3650` = days until purge
+
+See [DATA_RETENTION.md](../specs/DATA_RETENTION.md) for the current implementation.
+
+---
+
+## Original Proposal (Historical)
 
 ## Context
 

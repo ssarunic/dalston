@@ -146,9 +146,9 @@ Audit log rotation is performed by a dedicated maintenance function that uses ta
 
 | Action | Trigger | Detail Fields |
 |--------|---------|---------------|
-| `session.started` | WebSocket connection established | `{worker_id, store_audio, store_transcript}` |
+| `session.started` | WebSocket connection established | `{worker_id, retention}` |
 | `session.ended` | WebSocket connection closed | `{duration_seconds, audio_duration_ms, status}` |
-| `session.purged` | Session artifacts removed by retention | `{retention_policy, scope}` |
+| `session.purged` | Session artifacts removed by retention | `{retention}` |
 
 #### Authentication Events
 
