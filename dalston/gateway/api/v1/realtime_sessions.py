@@ -1,12 +1,10 @@
-"""Real-time session history and enhancement endpoints.
+"""Real-time session history endpoints.
 
 GET /v1/realtime/sessions - List sessions
 GET /v1/realtime/sessions/{session_id} - Get session details
 DELETE /v1/realtime/sessions/{session_id} - Delete session
 GET /v1/realtime/sessions/{session_id}/transcript - Get transcript
 GET /v1/realtime/sessions/{session_id}/audio - Get audio URL
-GET /v1/realtime/sessions/{session_id}/enhancement - Get enhancement status
-POST /v1/realtime/sessions/{session_id}/enhance - Trigger enhancement
 """
 
 from __future__ import annotations
@@ -21,15 +19,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dalston.common.events import publish_job_created
-from dalston.common.redis import get_redis as _get_redis
 from dalston.common.s3 import get_s3_client
 from dalston.config import get_settings
+from dalston.db.models import RealtimeSessionModel
 from dalston.db.session import get_db
 from dalston.gateway.dependencies import RequireJobsRead
-from dalston.gateway.services.enhancement import EnhancementError, EnhancementService
 from dalston.gateway.services.export import ExportService
-from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.realtime_sessions import RealtimeSessionService
 from dalston.gateway.services.storage import StorageService
 
@@ -57,8 +52,7 @@ class SessionSummary(BaseModel):
     audio_duration_seconds: float
     segment_count: int
     word_count: int
-    store_audio: bool
-    store_transcript: bool
+    retention: int  # 0=transient, -1=permanent, N=days
     started_at: str
     ended_at: str | None
 
@@ -76,12 +70,11 @@ class SessionDetail(BaseModel):
     audio_duration_seconds: float
     segment_count: int
     word_count: int
-    store_audio: bool
-    store_transcript: bool
-    enhance_on_end: bool
+    retention: int  # 0=transient, -1=permanent, N=days
+    purge_after: str | None
+    purged_at: str | None
     audio_uri: str | None
     transcript_uri: str | None
-    enhancement_job_id: str | None
     worker_id: str | None
     client_ip: str | None
     previous_session_id: str | None
@@ -96,17 +89,6 @@ class SessionsListResponse(BaseModel):
     sessions: list[SessionSummary]
     cursor: str | None
     has_more: bool
-
-
-class EnhancementStatusResponse(BaseModel):
-    """Enhancement job status for a session."""
-
-    session_id: str
-    status: str  # not_requested, pending, processing, completed, failed
-    enhancement_job_id: str | None = None
-    job_status: str | None = None
-    transcript: dict | None = None
-    error: str | None = None
 
 
 # -----------------------------------------------------------------------------
@@ -176,24 +158,23 @@ async def list_realtime_sessions(
         service.encode_session_cursor(sessions[-1]) if sessions and has_more else None
     )
 
+    def _build_session_summary(s: RealtimeSessionModel) -> SessionSummary:
+        return SessionSummary(
+            id=str(s.id),
+            status=s.status,
+            language=s.language,
+            model=s.model,
+            engine=s.engine,
+            audio_duration_seconds=s.audio_duration_seconds,
+            segment_count=s.segment_count,
+            word_count=s.word_count,
+            retention=s.retention if s.retention is not None else 30,
+            started_at=s.started_at.isoformat(),
+            ended_at=s.ended_at.isoformat() if s.ended_at else None,
+        )
+
     return SessionsListResponse(
-        sessions=[
-            SessionSummary(
-                id=str(s.id),
-                status=s.status,
-                language=s.language,
-                model=s.model,
-                engine=s.engine,
-                audio_duration_seconds=s.audio_duration_seconds,
-                segment_count=s.segment_count,
-                word_count=s.word_count,
-                store_audio=s.store_audio,
-                store_transcript=s.store_transcript,
-                started_at=s.started_at.isoformat(),
-                ended_at=s.ended_at.isoformat() if s.ended_at else None,
-            )
-            for s in sessions
-        ],
+        sessions=[_build_session_summary(s) for s in sessions],
         cursor=next_cursor,
         has_more=has_more,
     )
@@ -235,14 +216,11 @@ async def get_realtime_session(
         audio_duration_seconds=session.audio_duration_seconds,
         segment_count=session.segment_count,
         word_count=session.word_count,
-        store_audio=session.store_audio,
-        store_transcript=session.store_transcript,
-        enhance_on_end=session.enhance_on_end,
+        retention=session.retention if session.retention is not None else 30,
+        purge_after=session.purge_after.isoformat() if session.purge_after else None,
+        purged_at=session.purged_at.isoformat() if session.purged_at else None,
         audio_uri=session.audio_uri,
         transcript_uri=session.transcript_uri,
-        enhancement_job_id=str(session.enhancement_job_id)
-        if session.enhancement_job_id
-        else None,
         worker_id=session.worker_id,
         client_ip=session.client_ip,
         previous_session_id=str(session.previous_session_id)
@@ -493,214 +471,3 @@ async def get_session_audio(
             error=str(e),
         )
         raise HTTPException(status_code=404, detail="Audio not found") from None
-
-
-# -----------------------------------------------------------------------------
-# Enhancement Endpoints (M07 Hybrid Mode)
-# -----------------------------------------------------------------------------
-
-
-@router.get(
-    "/sessions/{session_id}/enhancement",
-    response_model=EnhancementStatusResponse,
-    summary="Get session enhancement status",
-    description="Get the status and results of batch enhancement for a realtime session.",
-    responses={
-        404: {"description": "Session not found"},
-    },
-)
-async def get_session_enhancement(
-    session_id: str,
-    api_key: RequireJobsRead,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> EnhancementStatusResponse:
-    """Get enhancement job status for a realtime session.
-
-    Returns the status of the batch enhancement job triggered when the session
-    ended (if enhance_on_end was enabled). When the job is complete, includes
-    the enhanced transcript with speaker diarization and word timestamps.
-    """
-    settings = get_settings()
-    session_service = RealtimeSessionService(db, settings)
-    jobs_service = JobsService()
-
-    # Get session
-    session = await session_service.get_session(session_id)
-
-    if session is None or session.tenant_id != api_key.tenant_id:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    # Check if enhancement was requested
-    if not session.enhance_on_end:
-        return EnhancementStatusResponse(
-            session_id=session_id,
-            status="not_requested",
-        )
-
-    # Check if enhancement job exists
-    if session.enhancement_job_id is None:
-        # Enhancement was requested but job not created yet
-        # This could happen if session is still active or job creation failed
-        if session.status == "active":
-            return EnhancementStatusResponse(
-                session_id=session_id,
-                status="pending",
-            )
-        else:
-            return EnhancementStatusResponse(
-                session_id=session_id,
-                status="failed",
-                error="Enhancement job was not created. "
-                "Check that store_audio=true was enabled.",
-            )
-
-    # Get the enhancement job
-    job = await jobs_service.get_job(
-        db, session.enhancement_job_id, tenant_id=api_key.tenant_id
-    )
-
-    if job is None:
-        return EnhancementStatusResponse(
-            session_id=session_id,
-            status="failed",
-            enhancement_job_id=str(session.enhancement_job_id),
-            error="Enhancement job not found",
-        )
-
-    # Map job status to enhancement status
-    job_status = job.status
-    if job_status in ("pending", "running"):
-        status = "processing"
-    elif job_status == "completed":
-        status = "completed"
-    else:
-        status = "failed"
-
-    response = EnhancementStatusResponse(
-        session_id=session_id,
-        status=status,
-        enhancement_job_id=str(job.id),
-        job_status=job_status,
-    )
-
-    # If completed, fetch the enhanced transcript
-    if status == "completed":
-        # The merge task output contains the final transcript
-        # Find the merge task and get its output
-        tasks = await jobs_service.get_job_tasks(
-            db, job.id, tenant_id=api_key.tenant_id
-        )
-        merge_task = next((t for t in tasks if t.stage == "merge"), None)
-
-        if merge_task and merge_task.output_uri:
-            try:
-                # Fetch transcript from S3
-                uri_parts = merge_task.output_uri.replace("s3://", "").split("/", 1)
-                bucket = uri_parts[0]
-                key = uri_parts[1] if len(uri_parts) > 1 else ""
-
-                async with get_s3_client(settings) as s3:
-                    obj = await s3.get_object(Bucket=bucket, Key=key)
-                    body = await obj["Body"].read()
-                    response.transcript = json.loads(body.decode("utf-8"))
-            except Exception as e:
-                logger.warning(
-                    "enhancement_transcript_fetch_failed",
-                    session_id=session_id,
-                    job_id=str(job.id),
-                    error=str(e),
-                )
-
-    # If failed, include error
-    if status == "failed" and job.error:
-        response.error = job.error
-
-    return response
-
-
-@router.post(
-    "/sessions/{session_id}/enhance",
-    response_model=EnhancementStatusResponse,
-    summary="Trigger enhancement for a session",
-    description="Manually trigger batch enhancement for a completed session that has recorded audio.",
-    responses={
-        404: {"description": "Session not found"},
-        409: {"description": "Enhancement already exists or session not eligible"},
-    },
-)
-async def trigger_session_enhancement(
-    session_id: str,
-    api_key: RequireJobsRead,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    enable_diarization: Annotated[
-        bool, Query(description="Enable speaker diarization")
-    ] = True,
-    enable_word_timestamps: Annotated[
-        bool, Query(description="Enable word-level timestamps")
-    ] = True,
-    enable_llm_cleanup: Annotated[
-        bool, Query(description="Enable LLM-based cleanup")
-    ] = False,
-    enable_emotions: Annotated[
-        bool, Query(description="Enable emotion detection")
-    ] = False,
-) -> EnhancementStatusResponse:
-    """Manually trigger batch enhancement for a completed session.
-
-    This allows triggering enhancement for sessions that:
-    - Had store_audio=true but enhance_on_end=false
-    - Need re-enhancement with different options
-
-    Requires the session to have recorded audio (store_audio=true).
-    """
-    settings = get_settings()
-    session_service = RealtimeSessionService(db, settings)
-    enhancement_service = EnhancementService(db, settings)
-
-    # Get session
-    session = await session_service.get_session(session_id)
-
-    if session is None or session.tenant_id != api_key.tenant_id:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    # Check if session already has enhancement job
-    if session.enhancement_job_id is not None:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Session already has enhancement job: {session.enhancement_job_id}",
-        )
-
-    # Create enhancement job
-    try:
-        job = await enhancement_service.create_enhancement_job(
-            session=session,
-            enhance_diarization=enable_diarization,
-            enhance_word_timestamps=enable_word_timestamps,
-            enhance_llm_cleanup=enable_llm_cleanup,
-            enhance_emotions=enable_emotions,
-        )
-    except EnhancementError as e:
-        logger.warning(
-            "enhancement_job_creation_failed",
-            session_id=session_id,
-            error=str(e),
-        )
-        raise HTTPException(status_code=409, detail=str(e)) from None
-
-    # Publish event for orchestrator to pick up the job
-    redis = await _get_redis()
-    await publish_job_created(redis, job.id)
-
-    # Update session with enhancement job ID
-    await session_service.finalize_session(
-        session_id=session_id,
-        status=session.status,
-        enhancement_job_id=job.id,
-    )
-
-    return EnhancementStatusResponse(
-        session_id=session_id,
-        status="processing",
-        enhancement_job_id=str(job.id),
-        job_status=job.status,
-    )

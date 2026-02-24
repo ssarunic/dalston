@@ -43,11 +43,8 @@ export interface JobSummary {
 }
 
 export interface RetentionInfo {
-  policy_id?: string
-  policy_name?: string
   mode: 'auto_delete' | 'keep' | 'none'
   hours?: number
-  scope: 'all' | 'audio_only'
   purge_after?: string
   purged_at?: string
 }
@@ -353,8 +350,7 @@ export interface RealtimeSessionSummary {
   audio_duration_seconds: number
   segment_count: number
   word_count: number
-  store_audio: boolean
-  store_transcript: boolean
+  retention: number  // 0=transient, -1=permanent, N=days
   started_at: string
   ended_at: string | null
 }
@@ -362,10 +358,10 @@ export interface RealtimeSessionSummary {
 export interface RealtimeSessionDetail extends RealtimeSessionSummary {
   encoding: string | null
   sample_rate: number | null
-  enhance_on_end: boolean
+  purge_after?: string
+  purged_at?: string
   audio_uri: string | null
   transcript_uri: string | null
-  enhancement_job_id: string | null
   worker_id: string | null
   client_ip: string | null
   previous_session_id: string | null
@@ -409,38 +405,6 @@ export interface UnifiedSegment {
   redacted_text?: string
   speaker?: string
   confidence?: number
-}
-
-// Retention Policy types
-export type RetentionMode = 'auto_delete' | 'keep' | 'none'
-export type RetentionScope = 'all' | 'audio_only'
-
-export interface RetentionPolicy {
-  id: string
-  tenant_id: string | null
-  name: string
-  mode: RetentionMode
-  hours: number | null
-  scope: RetentionScope
-  realtime_mode: string
-  realtime_hours: number | null
-  delete_realtime_on_enhancement: boolean
-  is_system: boolean
-  created_at: string
-}
-
-export interface RetentionPolicyListResponse {
-  policies: RetentionPolicy[]
-}
-
-export interface CreateRetentionPolicyRequest {
-  name: string
-  mode: RetentionMode
-  hours?: number | null
-  scope?: RetentionScope
-  realtime_mode?: string
-  realtime_hours?: number | null
-  delete_realtime_on_enhancement?: boolean
 }
 
 // Audit Log types

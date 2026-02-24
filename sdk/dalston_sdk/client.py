@@ -29,6 +29,8 @@ from .exceptions import (
     ValidationError,
 )
 from .types import (
+    Artifact,
+    ArtifactList,
     ExportFormat,
     HardwareRequirements,
     HealthStatus,
@@ -295,12 +297,12 @@ class Dalston:
         timestamps_granularity: TimestampGranularity | str = TimestampGranularity.WORD,
         webhook_url: str | None = None,
         webhook_metadata: dict[str, Any] | None = None,
-        retention_policy: str | None = None,
         pii_detection: bool = False,
         pii_detection_tier: PIIDetectionTier | str | None = None,
         pii_entity_types: list[str] | None = None,
         redact_pii_audio: bool = False,
         pii_redaction_mode: PIIRedactionMode | str | None = None,
+        retention: int = 30,
     ) -> Job:
         """Submit audio for transcription.
 
@@ -319,14 +321,14 @@ class Dalston:
             timestamps_granularity: Level of timestamp detail.
             webhook_url: URL for completion callback.
             webhook_metadata: Custom data to include in webhook.
-            retention_policy: Name of retention policy to apply (e.g., "short", "long").
-                If not specified, uses the tenant's default retention settings.
             pii_detection: Enable PII detection in transcript.
             pii_detection_tier: Detection thoroughness (fast, standard, thorough).
             pii_entity_types: Specific entity types to detect (e.g., ["ssn", "credit_card_number"]).
                 If not specified, uses default entity types.
             redact_pii_audio: Generate redacted audio file with PII removed.
             pii_redaction_mode: Audio redaction mode (silence or beep).
+            retention: Retention in days. 0=transient (no storage), -1=permanent
+                (never delete), 1-3650=days. Default 30.
 
         Returns:
             Job object with ID and initial status.
@@ -376,8 +378,6 @@ class Dalston:
             import json
 
             data["webhook_metadata"] = json.dumps(webhook_metadata)
-        if retention_policy is not None:
-            data["retention_policy"] = retention_policy
 
         # PII detection parameters
         if pii_detection:
@@ -400,6 +400,9 @@ class Dalston:
                 if isinstance(pii_redaction_mode, PIIRedactionMode)
                 else pii_redaction_mode
             )
+
+        # Retention: 0=transient, -1=permanent, N=days
+        data["retention"] = retention
 
         # Handle file upload
         files: dict[str, Any] | None = None
@@ -985,6 +988,106 @@ class Dalston:
 
         return True
 
+    def get_job_artifacts(
+        self,
+        job_id: str,
+        include_purged: bool = False,
+    ) -> ArtifactList:
+        """List artifacts for a job.
+
+        Args:
+            job_id: Job ID.
+            include_purged: Include already-purged artifacts.
+
+        Returns:
+            ArtifactList with all job artifacts.
+
+        Raises:
+            NotFoundError: If job doesn't exist.
+        """
+        params = {}
+        if include_purged:
+            params["include_purged"] = "true"
+
+        try:
+            response = self._client.get(
+                f"{self.base_url}/v2/jobs/{job_id}/artifacts",
+                headers=self._headers(),
+                params=params,
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        return _parse_artifact_list(response.json())
+
+    def get_session_artifacts(
+        self,
+        session_id: str,
+        include_purged: bool = False,
+    ) -> ArtifactList:
+        """List artifacts for a realtime session.
+
+        Args:
+            session_id: Session ID.
+            include_purged: Include already-purged artifacts.
+
+        Returns:
+            ArtifactList with all session artifacts.
+
+        Raises:
+            NotFoundError: If session doesn't exist.
+        """
+        params = {}
+        if include_purged:
+            params["include_purged"] = "true"
+
+        try:
+            response = self._client.get(
+                f"{self.base_url}/v2/realtime/sessions/{session_id}/artifacts",
+                headers=self._headers(),
+                params=params,
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        return _parse_artifact_list(response.json())
+
+
+def _parse_artifact(data: dict[str, Any]) -> Artifact:
+    """Parse artifact response."""
+    return Artifact(
+        id=data["id"],
+        artifact_type=data["artifact_type"],
+        uri=data["uri"],
+        sensitivity=data["sensitivity"],
+        compliance_tags=data.get("compliance_tags"),
+        store=data.get("store", True),
+        ttl_seconds=data.get("ttl_seconds"),
+        created_at=_parse_datetime(data["created_at"]),
+        available_at=_parse_datetime(data["available_at"]),
+        purge_after=_parse_datetime(data.get("purge_after")),
+        purged_at=_parse_datetime(data.get("purged_at")),
+    )
+
+
+def _parse_artifact_list(data: dict[str, Any]) -> ArtifactList:
+    """Parse artifact list response."""
+    return ArtifactList(
+        owner_type=data["owner_type"],
+        owner_id=data["owner_id"],
+        artifacts=[_parse_artifact(a) for a in data.get("artifacts", [])],
+    )
+
 
 class AsyncDalston:
     """Asynchronous client for Dalston batch transcription API.
@@ -1061,12 +1164,12 @@ class AsyncDalston:
         timestamps_granularity: TimestampGranularity | str = TimestampGranularity.WORD,
         webhook_url: str | None = None,
         webhook_metadata: dict[str, Any] | None = None,
-        retention_policy: str | None = None,
         pii_detection: bool = False,
         pii_detection_tier: PIIDetectionTier | str | None = None,
         pii_entity_types: list[str] | None = None,
         redact_pii_audio: bool = False,
         pii_redaction_mode: PIIRedactionMode | str | None = None,
+        retention: int = 30,
     ) -> Job:
         """Submit audio for transcription.
 
@@ -1085,13 +1188,13 @@ class AsyncDalston:
             timestamps_granularity: Level of timestamp detail.
             webhook_url: URL for completion callback.
             webhook_metadata: Custom data to include in webhook.
-            retention_policy: Name of retention policy to apply (e.g., "short", "long").
-                If not specified, uses the tenant's default retention settings.
             pii_detection: Enable PII detection in transcript.
             pii_detection_tier: Detection thoroughness (fast, standard, thorough).
             pii_entity_types: Specific entity types to detect (e.g., ["ssn", "credit_card_number"]).
                 If not specified, uses default entity types.
             redact_pii_audio: Generate redacted audio file with PII removed.
+            retention: Retention in days. 0=transient (no storage), -1=permanent
+                (never delete), 1-3650=days. Default 30.
             pii_redaction_mode: Audio redaction mode (silence or beep).
 
         Returns:
@@ -1138,8 +1241,6 @@ class AsyncDalston:
             import json
 
             data["webhook_metadata"] = json.dumps(webhook_metadata)
-        if retention_policy is not None:
-            data["retention_policy"] = retention_policy
 
         # PII detection parameters
         if pii_detection:
@@ -1162,6 +1263,9 @@ class AsyncDalston:
                 if isinstance(pii_redaction_mode, PIIRedactionMode)
                 else pii_redaction_mode
             )
+
+        # Retention: 0=transient, -1=permanent, N=days
+        data["retention"] = retention
 
         # Handle file upload
         files: dict[str, Any] | None = None
@@ -1736,3 +1840,71 @@ class AsyncDalston:
             _handle_error(response)
 
         return True
+
+    async def get_job_artifacts(
+        self,
+        job_id: str,
+        include_purged: bool = False,
+    ) -> ArtifactList:
+        """List artifacts for a job.
+
+        Args:
+            job_id: Job ID.
+            include_purged: Include already-purged artifacts.
+
+        Returns:
+            ArtifactList with all job artifacts.
+        """
+        params = {}
+        if include_purged:
+            params["include_purged"] = "true"
+
+        try:
+            response = await self._client.get(
+                f"{self.base_url}/v2/jobs/{job_id}/artifacts",
+                headers=self._headers(),
+                params=params,
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        return _parse_artifact_list(response.json())
+
+    async def get_session_artifacts(
+        self,
+        session_id: str,
+        include_purged: bool = False,
+    ) -> ArtifactList:
+        """List artifacts for a realtime session.
+
+        Args:
+            session_id: Session ID.
+            include_purged: Include already-purged artifacts.
+
+        Returns:
+            ArtifactList with all session artifacts.
+        """
+        params = {}
+        if include_purged:
+            params["include_purged"] = "true"
+
+        try:
+            response = await self._client.get(
+                f"{self.base_url}/v2/realtime/sessions/{session_id}/artifacts",
+                headers=self._headers(),
+                params=params,
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        return _parse_artifact_list(response.json())

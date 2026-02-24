@@ -14,7 +14,6 @@ import { Engines } from '@/pages/Engines'
 import { ApiKeys } from '@/pages/ApiKeys'
 import { Webhooks } from '@/pages/Webhooks'
 import { WebhookDetail } from '@/pages/WebhookDetail'
-import { RetentionPolicies } from '@/pages/RetentionPolicies'
 import { AuditLog } from '@/pages/AuditLog'
 
 const queryClient = new QueryClient({
@@ -56,7 +55,6 @@ const router = createBrowserRouter(
         { path: '/keys', element: <ApiKeys /> },
         { path: '/webhooks', element: <Webhooks /> },
         { path: '/webhooks/:endpointId', element: <WebhookDetail /> },
-        { path: '/retention', element: <RetentionPolicies /> },
         { path: '/audit', element: <AuditLog /> },
       ],
     },

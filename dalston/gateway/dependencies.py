@@ -19,7 +19,6 @@ from dalston.gateway.services.auth import APIKey, AuthService, Scope
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.rate_limiter import RedisRateLimiter
-from dalston.gateway.services.retention import RetentionService
 
 if TYPE_CHECKING:
     from dalston.common.audit import AuditService
@@ -48,7 +47,6 @@ def get_settings() -> Settings:
 # Service singletons for dependency injection
 _jobs_service: JobsService | None = None
 _export_service: ExportService | None = None
-_retention_service: RetentionService | None = None
 _audit_service: AuditService | None = None
 
 
@@ -66,14 +64,6 @@ def get_export_service() -> ExportService:
     if _export_service is None:
         _export_service = ExportService()
     return _export_service
-
-
-def get_retention_service() -> RetentionService:
-    """Get RetentionService instance (singleton)."""
-    global _retention_service
-    if _retention_service is None:
-        _retention_service = RetentionService()
-    return _retention_service
 
 
 def get_audit_service() -> AuditService:

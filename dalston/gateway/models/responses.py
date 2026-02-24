@@ -10,16 +10,17 @@ from dalston.common.models import JobStatus
 
 
 class RetentionInfo(BaseModel):
-    """Retention information for a job or session."""
+    """Retention information for a job or session.
 
-    policy_id: UUID | None = Field(
-        default=None, description="Reference to retention policy"
-    )
-    policy_name: str | None = Field(default=None, description="Policy name at creation")
+    Uses simplified unified retention model:
+    - "none": Transient, no storage
+    - "{N}d": Keep for N days (e.g., "30d", "90d", "365d")
+    - "forever": Never auto-delete
+    """
+
     mode: str = Field(description="Retention mode: auto_delete, keep, none")
-    hours: int | None = Field(default=None, description="Hours to retain")
-    scope: str | None = Field(
-        default=None, description="Deletion scope: all, audio_only"
+    hours: int | None = Field(
+        default=None, description="Hours to retain (for auto_delete)"
     )
     purge_after: datetime | None = Field(
         default=None, description="Scheduled purge time (computed on completion)"

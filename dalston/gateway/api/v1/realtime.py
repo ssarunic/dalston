@@ -10,14 +10,13 @@ import asyncio
 import base64
 import binascii
 import json
-from dataclasses import dataclass
 from typing import Annotated
 from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
-from dalston.common.events import publish_job_created
+from dalston.common.models import validate_retention
 from dalston.common.redis import get_redis as _get_redis
 from dalston.common.utils import parse_session_id
 from dalston.config import get_settings
@@ -25,51 +24,10 @@ from dalston.db.session import get_db as _get_db
 from dalston.gateway.dependencies import get_session_router
 from dalston.gateway.middleware.auth import authenticate_websocket
 from dalston.gateway.services.auth import AuthService, Scope
-from dalston.gateway.services.enhancement import EnhancementService
 from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.realtime_sessions import RealtimeSessionService
-from dalston.gateway.services.retention import (
-    RetentionPolicyNotFoundError,
-    RetentionService,
-)
 
 logger = structlog.get_logger()
-
-
-@dataclass
-class ResolvedRetention:
-    """Resolved retention settings for a realtime session."""
-
-    policy_id: UUID
-    mode: str
-    hours: int | None
-
-
-def _resolve_realtime_retention(policy) -> ResolvedRetention:
-    """Extract realtime-specific retention settings from a policy.
-
-    The policy has realtime_mode which can be:
-    - "inherit": Use the batch mode/hours
-    - "auto_delete", "keep", "none": Use this mode with realtime_hours
-
-    Args:
-        policy: RetentionPolicyModel
-
-    Returns:
-        ResolvedRetention with the effective mode and hours
-    """
-    if policy.realtime_mode == "inherit":
-        return ResolvedRetention(
-            policy_id=policy.id,
-            mode=policy.mode,
-            hours=policy.hours,
-        )
-    else:
-        return ResolvedRetention(
-            policy_id=policy.id,
-            mode=policy.realtime_mode,
-            hours=policy.realtime_hours if policy.realtime_hours else policy.hours,
-        )
 
 
 async def _get_auth_service() -> tuple[AuthService, any]:
@@ -179,21 +137,14 @@ async def realtime_transcription(
         bool, Query(description="Send partial transcripts")
     ] = True,
     word_timestamps: Annotated[bool, Query(description="Include word timing")] = False,
-    enhance_on_end: Annotated[
-        bool, Query(description="Trigger batch enhancement")
-    ] = True,
-    store_audio: Annotated[bool, Query(description="Record audio to S3")] = True,
-    store_transcript: Annotated[
-        bool, Query(description="Save final transcript to S3")
-    ] = True,
+    retention: Annotated[
+        int,
+        Query(
+            description="Retention in days: 0 (transient), -1 (permanent), or 1-3650 (days)"
+        ),
+    ] = 30,
     resume_session_id: Annotated[
         str | None, Query(description="Link to previous session for resume")
-    ] = None,
-    retention_policy: Annotated[
-        str | None,
-        Query(
-            description="Retention policy name (e.g., 'default', 'zero-retention', 'keep')"
-        ),
     ] = None,
     # PII detection parameters (M26)
     pii_detection: Annotated[
@@ -228,14 +179,12 @@ async def realtime_transcription(
     - enable_vad: Send vad.speech_start/end events
     - interim_results: Send transcript.partial messages
     - word_timestamps: Include word-level timing in results
-    - enhance_on_end: Trigger batch enhancement when session ends
-    - store_audio: Record audio to S3 during session
-    - store_transcript: Save final transcript to S3 on end
+    - retention: Retention in days - 0 (transient), -1 (permanent), 1-3650 (days)
     - resume_session_id: Link to previous session for continuity
     - pii_detection: Enable PII detection on stored/enhanced transcript
     - pii_detection_tier: Detection tier (fast, standard, thorough)
     - pii_entity_types: Comma-separated entity types to detect
-    - redact_pii_audio: Generate redacted audio file (requires store_audio)
+    - redact_pii_audio: Generate redacted audio file (requires retention != 0)
     - pii_redaction_mode: Audio redaction mode (silence, beep)
     """
     # Get session router via dependency (note: WebSocket endpoints can't use Depends
@@ -274,39 +223,32 @@ async def realtime_transcription(
     # the session counter is always decremented on any exit path
     allocation = None
     try:
-        # Validate: enhance_on_end requires store_audio
-        if enhance_on_end and not store_audio:
+        # Validate retention parameter (0=transient, -1=permanent, 1-3650=days)
+        try:
+            validate_retention(retention)
+        except ValueError as e:
             await websocket.send_json(
                 {
                     "type": "error",
                     "code": "invalid_parameters",
-                    "message": "enhance_on_end=true requires store_audio=true. "
-                    "Audio must be recorded to enable batch enhancement.",
+                    "message": str(e),
                 }
             )
             await websocket.close(code=4400, reason="Invalid parameters")
             return
 
-        # Validate: PII detection requires enhance_on_end (batch processing)
-        if pii_detection and not enhance_on_end:
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "code": "invalid_parameters",
-                    "message": "pii_detection=true requires enhance_on_end=true. "
-                    "PII detection runs as part of the batch enhancement pipeline.",
-                }
-            )
-            await websocket.close(code=4400, reason="Invalid parameters")
-            return
+        # Derive storage flags from retention for downstream use
+        # 0 = transient (no storage)
+        store_audio = retention != 0
+        store_transcript = retention != 0
 
-        # Validate: redact_pii_audio requires pii_detection and store_audio
+        # Validate: redact_pii_audio requires pii_detection and storage enabled
         if redact_pii_audio and not (pii_detection and store_audio):
             await websocket.send_json(
                 {
                     "type": "error",
                     "code": "invalid_parameters",
-                    "message": "redact_pii_audio=true requires pii_detection=true and store_audio=true.",
+                    "message": "redact_pii_audio=true requires pii_detection=true and retention != 0.",
                 }
             )
             await websocket.close(code=4400, reason="Invalid parameters")
@@ -320,37 +262,11 @@ async def realtime_transcription(
         # Get client IP for logging
         client_ip = websocket.client.host if websocket.client else "unknown"
 
-        # Resolve retention policy (only matters if storing artifacts)
-        resolved_retention = None
-        if store_audio or store_transcript:
-            try:
-                db_gen_ret = _get_db()
-                db_ret = await db_gen_ret.__anext__()
-                try:
-                    retention_service = RetentionService()
-                    policy = await retention_service.resolve_policy(
-                        db_ret, api_key.tenant_id, retention_policy
-                    )
-                    resolved_retention = _resolve_realtime_retention(policy)
-                finally:
-                    await db_gen_ret.aclose()
-            except RetentionPolicyNotFoundError as e:
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "code": "invalid_retention_policy",
-                        "message": str(e),
-                    }
-                )
-                await websocket.close(code=4400, reason="Invalid retention policy")
-                return
-
         # Acquire worker from Session Router (use alias for matching)
         allocation = await session_router.acquire_worker(
             language=language,
             model=routing_model,
             client_ip=client_ip,
-            enhance_on_end=enhance_on_end,
         )
 
         if allocation is None:
@@ -420,19 +336,8 @@ async def realtime_transcription(
                     engine=allocation.engine,
                     encoding=encoding,
                     sample_rate=sample_rate,
-                    store_audio=store_audio,
-                    store_transcript=store_transcript,
-                    enhance_on_end=enhance_on_end,
+                    retention=retention,
                     previous_session_id=previous_session_uuid,
-                    retention_policy_id=resolved_retention.policy_id
-                    if resolved_retention
-                    else None,
-                    retention_mode=resolved_retention.mode
-                    if resolved_retention
-                    else "auto_delete",
-                    retention_hours=resolved_retention.hours
-                    if resolved_retention
-                    else None,
                 )
             except Exception as e:
                 log.warning("session_db_create_failed", error=str(e))
@@ -515,59 +420,6 @@ async def realtime_transcription(
                     msg="No session.end data received from worker",
                 )
 
-            # Create enhancement job if requested (M07 Hybrid Mode)
-            enhancement_job_id = None
-            if (
-                session_service
-                and enhance_on_end
-                and session_status == "completed"
-                and audio_uri
-            ):
-                try:
-                    enhancement_service = EnhancementService(db_session, get_settings())
-
-                    # Get the session from DB to pass to enhancement service
-                    session_record = await session_service.get_session(
-                        allocation.session_id
-                    )
-                    if session_record:
-                        # Parse PII entity types if provided
-                        pii_entity_types_list = None
-                        if pii_entity_types:
-                            pii_entity_types_list = [
-                                t.strip() for t in pii_entity_types.split(",")
-                            ]
-
-                        enhancement_job = (
-                            await enhancement_service.create_enhancement_job_with_audio(
-                                session=session_record,
-                                audio_uri=audio_uri,
-                                enhance_diarization=True,
-                                enhance_word_timestamps=True,
-                                enhance_llm_cleanup=False,
-                                enhance_emotions=False,
-                                # PII parameters (M26)
-                                pii_detection=pii_detection,
-                                pii_detection_tier=pii_detection_tier,
-                                pii_entity_types=pii_entity_types_list,
-                                redact_pii_audio=redact_pii_audio,
-                                pii_redaction_mode=pii_redaction_mode,
-                            )
-                        )
-                        enhancement_job_id = enhancement_job.id
-
-                        # Publish event for orchestrator to pick up the job
-                        redis_client = await _get_redis()
-                        await publish_job_created(redis_client, enhancement_job.id)
-
-                        log.info(
-                            "enhancement_job_created",
-                            enhancement_job_id=str(enhancement_job_id),
-                        )
-                except Exception as e:
-                    log.warning("enhancement_job_creation_failed", error=str(e))
-                    # Don't fail the session if enhancement fails
-
             # Finalize session in PostgreSQL
             if session_service:
                 try:
@@ -577,7 +429,6 @@ async def realtime_transcription(
                         error=session_error,
                         audio_uri=audio_uri,
                         transcript_uri=transcript_uri,
-                        enhancement_job_id=enhancement_job_id,
                     )
                 except Exception as e:
                     log.warning("session_db_finalize_failed", error=str(e))
@@ -691,7 +542,6 @@ async def elevenlabs_realtime_transcription(
             language=language_code,
             model=routing_model,
             client_ip=client_ip,
-            enhance_on_end=True,
         )
 
         if allocation is None:

@@ -82,7 +82,7 @@ def listen(
             help="Disable voice activity detection events.",
         ),
     ] = False,
-    # Storage and enhancement options
+    # Storage options
     store_audio: Annotated[
         bool,
         typer.Option(
@@ -97,19 +97,12 @@ def listen(
             help="Save final transcript to S3 on session end.",
         ),
     ] = True,
-    enhance: Annotated[
-        bool,
-        typer.Option(
-            "--enhance",
-            help="Run batch enhancement after session ends (requires --store-audio).",
-        ),
-    ] = True,
     # PII detection options
     pii: Annotated[
         bool,
         typer.Option(
             "--pii/--no-pii",
-            help="Enable PII detection on enhanced transcript (requires --enhance).",
+            help="Enable PII detection.",
         ),
     ] = False,
     pii_tier: Annotated[
@@ -197,14 +190,6 @@ def listen(
         handler = JsonOutputHandler(output_path)
 
     # Validate PII options
-    if pii and not enhance:
-        error_console.print(
-            "[red]Error:[/red] --pii requires --enhance (batch enhancement)"
-        )
-        raise typer.Exit(code=1)
-    if enhance and not store_audio:
-        error_console.print("[red]Error:[/red] --enhance requires --store-audio")
-        raise typer.Exit(code=1)
     if redact_audio and not pii:
         error_console.print("[red]Error:[/red] --redact-audio requires --pii")
         raise typer.Exit(code=1)
@@ -219,7 +204,6 @@ def listen(
         interim_results=not no_interim,
         store_audio=store_audio,
         store_transcript=store_transcript,
-        enhance_on_end=enhance,
         pii_detection=pii,
         pii_detection_tier=pii_tier,
         redact_pii_audio=redact_audio,
@@ -300,10 +284,6 @@ def listen(
             end_data = session.close(timeout=15.0)
             if end_data:
                 total_duration = end_data.total_audio_seconds
-                if enhance:
-                    error_console.print(
-                        f"\n[Enhancement job created - PII detection: {pii}]"
-                    )
         except Exception:
             pass
 

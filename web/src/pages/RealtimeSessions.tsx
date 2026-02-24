@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Radio, MessageSquare, Mic, Trash2, RefreshCw, Filter, X } from 'lucide-react'
+import { Radio, Trash2, RefreshCw, Filter, X } from 'lucide-react'
 import { apiClient } from '@/api/client'
+import { formatRetentionDisplay } from '@/lib/retention'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useSharedTableState } from '@/hooks/useSharedTableState'
 import { Button } from '@/components/ui/button'
@@ -528,22 +529,8 @@ export function RealtimeSessions() {
                         <p>{session.segment_count}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-muted-foreground">Storage</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          {session.store_audio && (
-                            <span title="Audio stored">
-                              <Mic className="h-3 w-3 text-green-500" />
-                            </span>
-                          )}
-                          {session.store_transcript && (
-                            <span title="Transcript stored">
-                              <MessageSquare className="h-3 w-3 text-blue-500" />
-                            </span>
-                          )}
-                          {!session.store_audio && !session.store_transcript && (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </div>
+                        <p className="text-xs text-muted-foreground">Retention</p>
+                        <p>{formatRetentionDisplay(session.retention)}</p>
                       </div>
                     </div>
                     {session.status !== 'active' && (
@@ -574,7 +561,7 @@ export function RealtimeSessions() {
                     <TableHead>Model</TableHead>
                     <TableHead>Duration</TableHead>
                     <TableHead>Segments</TableHead>
-                    <TableHead>Storage</TableHead>
+                    <TableHead>Retention</TableHead>
                     <TableHead>Started</TableHead>
                     <TableHead className="sticky right-0 z-10 bg-card"></TableHead>
                   </TableRow>
@@ -607,21 +594,7 @@ export function RealtimeSessions() {
                         {session.segment_count}
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm">
-                        <div className="flex items-center gap-2">
-                          {session.store_audio && (
-                            <span title="Audio stored">
-                              <Mic className="h-3 w-3 text-green-500" />
-                            </span>
-                          )}
-                          {session.store_transcript && (
-                            <span title="Transcript stored">
-                              <MessageSquare className="h-3 w-3 text-blue-500" />
-                            </span>
-                          )}
-                          {!session.store_audio && !session.store_transcript && (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </div>
+                        {formatRetentionDisplay(session.retention)}
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm">
                         {formatDate(session.started_at)}

@@ -148,13 +148,6 @@ def transcribe(
             help="Display word-level timestamps in text output.",
         ),
     ] = False,
-    retention_policy: Annotated[
-        str | None,
-        typer.Option(
-            "--retention-policy",
-            help="Retention policy name (e.g., 'short', 'long'). Uses tenant default if not specified.",
-        ),
-    ] = None,
     # PII Detection Options
     pii_detection: Annotated[
         bool,
@@ -191,6 +184,14 @@ def transcribe(
             help="Audio redaction mode: silence or beep.",
         ),
     ] = None,
+    retention: Annotated[
+        int,
+        typer.Option(
+            "--retention",
+            "-r",
+            help="Retention in days. 0=transient (no storage), -1=permanent, 1-3650=days.",
+        ),
+    ] = 30,
 ) -> None:
     """Transcribe audio files.
 
@@ -218,8 +219,6 @@ def transcribe(
 
         dalston transcribe audio.mp3 --show-words  # Display word-level timestamps
 
-        dalston transcribe audio.mp3 --retention-policy short  # Use short retention policy
-
         dalston transcribe call.mp3 --pii --pii-tier standard  # Detect PII entities
 
         dalston transcribe call.mp3 --pii --redact-audio --redaction-mode beep  # Detect and redact PII
@@ -227,6 +226,12 @@ def transcribe(
         dalston transcribe --url "https://example.com/audio.mp3"  # Transcribe from URL
 
         dalston transcribe --url "https://drive.google.com/file/d/.../view"  # Google Drive URL
+
+        dalston transcribe audio.mp3 --retention 90  # Keep for 90 days
+
+        dalston transcribe temp.mp3 --retention 0  # Transient (no storage)
+
+        dalston transcribe important.mp3 --retention -1  # Permanent (never delete)
     """
     client = state.client
     quiet = state.quiet
@@ -319,12 +324,12 @@ def transcribe(
                 min_speakers=min_speakers,
                 max_speakers=max_speakers,
                 timestamps_granularity=timestamps_granularity,
-                retention_policy=retention_policy,
                 pii_detection=pii_detection,
                 pii_detection_tier=pii_detection_tier,
                 pii_entity_types=pii_entity_types,
                 redact_pii_audio=redact_audio,
                 pii_redaction_mode=pii_redaction_mode,
+                retention=retention,
             )
 
             if not wait:

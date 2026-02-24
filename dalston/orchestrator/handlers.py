@@ -9,7 +9,7 @@ Handles Redis pub/sub events:
 import json
 import re
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -25,11 +25,12 @@ from dalston.common.events import (
     publish_job_completed,
     publish_job_failed,
 )
-from dalston.common.models import JobStatus, RetentionMode, TaskStatus
+from dalston.common.models import ArtifactOwnerType, JobStatus, TaskStatus
 from dalston.common.s3 import get_s3_client
 from dalston.common.streams import mark_job_cancelled
 from dalston.config import Settings, get_settings
 from dalston.db.models import JobModel, TaskModel
+from dalston.gateway.services.artifacts import ArtifactService
 from dalston.gateway.services.rate_limiter import (
     CONCURRENT_COUNTER_TTL_SECONDS,
     KEY_PREFIX_JOB_DECREMENTED,
@@ -1012,28 +1013,6 @@ async def _gather_previous_outputs(
     return previous_outputs
 
 
-async def _compute_purge_after(job: JobModel, log) -> None:
-    """Compute purge_after based on job's retention settings.
-
-    Args:
-        job: Job model with retention settings
-        log: Logger instance
-    """
-    if job.retention_mode == RetentionMode.AUTO_DELETE.value:
-        if job.retention_hours and job.completed_at:
-            job.purge_after = job.completed_at + timedelta(hours=job.retention_hours)
-            log.info(
-                "purge_scheduled",
-                purge_after=job.purge_after.isoformat(),
-                retention_hours=job.retention_hours,
-            )
-    elif job.retention_mode == RetentionMode.NONE.value:
-        # Immediate purge - set purge_after to now, cleanup worker will process
-        job.purge_after = datetime.now(UTC)
-        log.info("immediate_purge_scheduled", retention_mode="none")
-    # mode == "keep": purge_after stays NULL (never purge)
-
-
 async def _populate_job_result_stats(job: JobModel, log) -> None:
     """Fetch transcript and populate result stats on job.
 
@@ -1143,8 +1122,15 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
 
     job.completed_at = datetime.now(UTC)
 
-    # Compute purge_after based on retention settings (M25)
-    await _compute_purge_after(job, log)
+    # Mark V2 artifacts as available and compute their purge_after (M35)
+    # This prevents the race condition where artifacts could be purged
+    # before the pipeline finishes using them.
+    artifact_service = ArtifactService()
+    artifacts_marked = await artifact_service.mark_owner_artifacts_available(
+        db, ArtifactOwnerType.JOB, job.id, available_at=job.completed_at
+    )
+    if artifacts_marked > 0:
+        log.info("artifacts_marked_available", count=artifacts_marked)
 
     await db.commit()
 

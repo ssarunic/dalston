@@ -28,6 +28,134 @@ class RetentionScope(str, Enum):
     )
 
 
+def retention_to_ttl_seconds(retention_days: int) -> int | None:
+    """Convert retention days to TTL in seconds.
+
+    Args:
+        retention_days: Number of days to retain, 0 for transient, -1 for permanent
+
+    Returns:
+        0 for transient (immediate purge after completion)
+        None for permanent (never auto-delete)
+        N*86400 for N days retention
+    """
+    if retention_days == 0:
+        return 0
+    if retention_days == -1:
+        return None
+    return retention_days * 86400
+
+
+def validate_retention(retention_days: int) -> None:
+    """Validate retention days value.
+
+    Args:
+        retention_days: Number of days (0=transient, -1=permanent, 1-3650=days)
+
+    Raises:
+        ValueError: Invalid retention value
+    """
+    if retention_days == 0 or retention_days == -1:
+        return
+    if retention_days < 1 or retention_days > 3650:
+        raise ValueError(
+            "Retention days must be 0 (transient), -1 (permanent), or 1-3650"
+        )
+
+
+def format_retention_display(retention_days: int) -> str:
+    """Format retention days for human display.
+
+    Args:
+        retention_days: Number of days (0=transient, -1=permanent, N=days)
+
+    Returns:
+        Human-readable string: "Transient", "Permanent", "1 day", "30 days"
+    """
+    if retention_days == 0:
+        return "Transient"
+    if retention_days == -1:
+        return "Permanent"
+    if retention_days == 1:
+        return "1 day"
+    return f"{retention_days} days"
+
+
+# Legacy function for backwards compatibility during migration
+def parse_retention(value: str) -> int | None:
+    """Parse legacy retention string to TTL in seconds.
+
+    DEPRECATED: Use retention_to_ttl_seconds() with integer retention_days.
+    """
+    if value == "none":
+        return 0
+    if value == "forever":
+        return None
+    if value.endswith("d"):
+        try:
+            days = int(value[:-1])
+        except ValueError as err:
+            raise ValueError(f"Invalid retention format: {value}") from err
+        if days < 1 or days > 3650:
+            raise ValueError("Retention days must be between 1 and 3650")
+        return days * 86400
+    raise ValueError(
+        f"Invalid retention format: {value}. "
+        "Use 'none', 'forever', or '{N}d' (e.g., '30d')"
+    )
+
+
+RETENTION_DEFAULT = 30  # 30 days
+
+
+# =============================================================================
+# Retention V2 Types (Artifact-Centric Model)
+# =============================================================================
+
+
+class ArtifactType(str, Enum):
+    """Standard artifact types for retention V2."""
+
+    AUDIO_SOURCE = "audio.source"
+    AUDIO_REDACTED = "audio.redacted"
+    TRANSCRIPT_RAW = "transcript.raw"
+    TRANSCRIPT_REDACTED = "transcript.redacted"
+    PII_ENTITIES = "pii.entities"
+    PIPELINE_INTERMEDIATE = "pipeline.intermediate"
+
+
+class ArtifactSensitivity(str, Enum):
+    """Sensitivity classification for artifacts."""
+
+    RAW_PII = "raw_pii"  # Contains unredacted PII
+    REDACTED = "redacted"  # PII has been redacted
+    METADATA = "metadata"  # No PII content (e.g., stats, counts)
+
+
+class ArtifactOwnerType(str, Enum):
+    """Owner type for artifacts."""
+
+    JOB = "job"
+    SESSION = "session"
+
+
+@dataclass
+class RetentionRule:
+    """Single artifact retention rule."""
+
+    store: bool
+    ttl_seconds: int | None = None  # null = keep forever, 0 = immediate purge
+
+
+@dataclass
+class ResolvedRetention:
+    """Fully resolved retention configuration for all artifact types."""
+
+    rules: dict[str, RetentionRule]
+    template_id: UUID | None = None
+    template_name: str | None = None
+
+
 # =============================================================================
 # PII Detection Types (M26)
 # =============================================================================

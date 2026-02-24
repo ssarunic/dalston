@@ -11,7 +11,6 @@ from dalston.gateway.api.v1 import (
     realtime,
     realtime_sessions,
     realtime_status,
-    retention_policies,
     speech_to_text,
     tasks,
     transcription,
@@ -48,9 +47,6 @@ router.include_router(realtime_sessions.router)  # GET /v1/realtime/sessions/*
 
 # Mount webhook management routes
 router.include_router(webhooks.router)  # /v1/webhooks/*
-
-# Mount retention policy routes (M25)
-router.include_router(retention_policies.router)  # /v1/retention-policies/*
 
 # Mount audit log routes (M25)
 router.include_router(audit.router)  # /v1/audit/*

@@ -478,3 +478,45 @@ class ModelList:
     """List of available models/engines."""
 
     models: list[Model]
+
+
+# -----------------------------------------------------------------------------
+# Retention V2 Types
+# -----------------------------------------------------------------------------
+
+
+class ArtifactType(str, Enum):
+    """Standard artifact types for retention V2."""
+
+    AUDIO_SOURCE = "audio.source"
+    AUDIO_REDACTED = "audio.redacted"
+    TRANSCRIPT_RAW = "transcript.raw"
+    TRANSCRIPT_REDACTED = "transcript.redacted"
+    PII_ENTITIES = "pii.entities"
+    PIPELINE_INTERMEDIATE = "pipeline.intermediate"
+
+
+@dataclass
+class Artifact:
+    """Persisted artifact with retention metadata."""
+
+    id: str
+    artifact_type: str
+    uri: str
+    sensitivity: str
+    compliance_tags: list[str] | None
+    store: bool
+    ttl_seconds: int | None
+    created_at: datetime
+    available_at: datetime
+    purge_after: datetime | None
+    purged_at: datetime | None
+
+
+@dataclass
+class ArtifactList:
+    """List of artifacts for an owner."""
+
+    owner_type: str  # job | session
+    owner_id: str
+    artifacts: list[Artifact]

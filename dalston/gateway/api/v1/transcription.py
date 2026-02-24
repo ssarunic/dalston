@@ -29,7 +29,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_cancel_requested, publish_job_created
-from dalston.common.models import JobStatus
+from dalston.common.models import (
+    JobStatus,
+    validate_retention,
+)
 from dalston.common.utils import compute_duration_ms
 from dalston.config import WEBHOOK_METADATA_MAX_SIZE, Settings
 from dalston.gateway.dependencies import (
@@ -42,7 +45,6 @@ from dalston.gateway.dependencies import (
     get_jobs_service,
     get_rate_limiter,
     get_redis,
-    get_retention_service,
     get_settings,
 )
 from dalston.gateway.models.responses import (
@@ -66,10 +68,6 @@ from dalston.gateway.services.audio_url import (
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.rate_limiter import RedisRateLimiter
-from dalston.gateway.services.retention import (
-    RetentionPolicyNotFoundError,
-    RetentionService,
-)
 from dalston.gateway.services.storage import StorageService
 
 router = APIRouter(prefix="/audio/transcriptions", tags=["transcriptions"])
@@ -146,12 +144,6 @@ async def create_transcription(
         str | None,
         Form(description="JSON object echoed in webhook callback (max 16KB)"),
     ] = None,
-    retention_policy: Annotated[
-        str | None,
-        Form(
-            description="Retention policy name (e.g., 'default', 'zero-retention', 'keep')"
-        ),
-    ] = None,
     # PII Detection (M26)
     pii_detection: Annotated[
         bool,
@@ -175,12 +167,18 @@ async def create_transcription(
         str,
         Form(description="Audio redaction mode: 'silence', 'beep'"),
     ] = "silence",
+    # Retention: 0=transient, -1=permanent, N=days
+    retention: Annotated[
+        int,
+        Form(
+            description="Retention in days: 0 (transient), -1 (permanent), or 1-3650 (days)"
+        ),
+    ] = 30,
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
     rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
-    retention_service: RetentionService = Depends(get_retention_service),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> JobCreatedResponse:
     """Create a new transcription job.
@@ -323,6 +321,12 @@ async def create_transcription(
                 detail=f"Invalid JSON in vocabulary: {e}",
             ) from e
 
+    # Validate retention parameter (0=transient, -1=permanent, 1-3650=days)
+    try:
+        validate_retention(retention)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
     # PII detection parameters (M26)
     if pii_detection:
         parameters["pii_detection"] = True
@@ -341,21 +345,6 @@ async def create_transcription(
             parameters["redact_pii_audio"] = True
             parameters["pii_redaction_mode"] = pii_redaction_mode
 
-    # Resolve retention policy
-    try:
-        policy = await retention_service.resolve_policy(
-            db, api_key.tenant_id, retention_policy
-        )
-    except RetentionPolicyNotFoundError as e:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "type": "invalid_request_error",
-                "message": str(e),
-                "param": "retention_policy",
-            },
-        ) from e
-
     # Upload audio to S3
     storage = StorageService(settings)
     audio_uri = await storage.upload_audio(
@@ -370,7 +359,7 @@ async def create_transcription(
     if pii_detection and pii_entity_types:
         pii_entity_types_list = parameters.get("pii_entity_types")
 
-    # Create job in database with retention policy snapshotted
+    # Create job in database
     job = await jobs_service.create_job(
         db=db,
         tenant_id=api_key.tenant_id,
@@ -383,10 +372,8 @@ async def create_transcription(
         audio_sample_rate=audio_metadata.sample_rate,
         audio_channels=audio_metadata.channels,
         audio_bit_depth=audio_metadata.bit_depth,
-        retention_policy_id=policy.id,
-        retention_mode=policy.mode,
-        retention_hours=policy.hours,
-        retention_scope=policy.scope,
+        # Retention
+        retention=retention,
         # PII fields (M26)
         pii_detection_enabled=pii_detection,
         pii_detection_tier=pii_detection_tier if pii_detection else None,
@@ -425,7 +412,6 @@ async def create_transcription(
         correlation_id=request_id,
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
-        retention_policy=policy.name,
     )
 
     return JobCreatedResponse(
@@ -480,13 +466,23 @@ async def get_transcription(
             for task in sorted_tasks
         ]
 
-    # Build retention info
+    # Build retention info from integer retention field
+    # retention: 0=transient, -1=permanent, N=days
+    retention_days = job.retention if job.retention is not None else 30
+
+    if retention_days == 0:
+        mode = "none"
+        hours = None
+    elif retention_days == -1:
+        mode = "keep"
+        hours = None
+    else:
+        mode = "auto_delete"
+        hours = retention_days * 24
+
     retention_info = RetentionInfo(
-        policy_id=job.retention_policy_id,
-        policy_name=job.retention_policy.name if job.retention_policy else None,
-        mode=job.retention_mode,
-        hours=job.retention_hours,
-        scope=job.retention_scope,
+        mode=mode,
+        hours=hours,
         purge_after=job.purge_after,
         purged_at=job.purged_at,
     )

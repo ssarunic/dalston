@@ -55,11 +55,8 @@ class JobsService:
         audio_sample_rate: int | None = None,
         audio_channels: int | None = None,
         audio_bit_depth: int | None = None,
-        # Retention fields (M25)
-        retention_policy_id: UUID | None = None,
-        retention_mode: str = "auto_delete",
-        retention_hours: int | None = None,
-        retention_scope: str = "all",
+        # Retention: 0=transient, -1=permanent, N=days
+        retention: int = 30,
         # PII fields (M26)
         pii_detection_enabled: bool = False,
         pii_detection_tier: str | None = None,
@@ -81,10 +78,7 @@ class JobsService:
             audio_sample_rate: Sample rate in Hz
             audio_channels: Number of audio channels
             audio_bit_depth: Bits per sample (e.g., 16, 24)
-            retention_policy_id: Reference to retention policy
-            retention_mode: Snapshotted mode (auto_delete, keep, none)
-            retention_hours: Snapshotted hours
-            retention_scope: Snapshotted scope (all, audio_only)
+            retention: Retention in days (0=transient, -1=permanent, N=days)
 
         Returns:
             Created JobModel instance
@@ -101,10 +95,7 @@ class JobsService:
             audio_sample_rate=audio_sample_rate,
             audio_channels=audio_channels,
             audio_bit_depth=audio_bit_depth,
-            retention_policy_id=retention_policy_id,
-            retention_mode=retention_mode,
-            retention_hours=retention_hours,
-            retention_scope=retention_scope,
+            retention=retention,
             pii_detection_enabled=pii_detection_enabled,
             pii_detection_tier=pii_detection_tier,
             pii_entity_types=pii_entity_types,

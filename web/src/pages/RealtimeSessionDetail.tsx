@@ -7,6 +7,7 @@ import {
   AlertCircle,
   Hash,
   Cpu,
+  Archive,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -15,6 +16,7 @@ import { useRealtimeSession, useSessionTranscript } from '@/hooks/useRealtimeSes
 import { BackButton } from '@/components/BackButton'
 import { TranscriptViewer } from '@/components/TranscriptViewer'
 import { apiClient } from '@/api/client'
+import { formatRetentionDisplay, formatPurgeCountdown } from '@/lib/retention'
 
 function formatDuration(seconds: number): string {
   if (seconds < 60) {
@@ -41,10 +43,10 @@ export function RealtimeSessionDetail() {
   const { data: session, isLoading, error } = useRealtimeSession(sessionId)
   const { data: transcript } = useSessionTranscript(
     sessionId,
-    !!session?.store_transcript && !!session?.transcript_uri
+    session?.retention !== 0 && !!session?.transcript_uri
   )
   const [audioUrlData, setAudioUrlData] = useState<{ forSessionId: string; url: string } | null>(null)
-  const canAccessAudio = !!session?.store_audio && !!session?.audio_uri
+  const canAccessAudio = session?.retention !== 0 && !!session?.audio_uri
 
   const fetchAudioUrl = useCallback(async () => {
     if (!sessionId || !canAccessAudio) return null
@@ -137,7 +139,7 @@ export function RealtimeSessionDetail() {
       )}
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         <Card>
           <CardHeader className="pb-2">
             <span className="text-sm font-medium text-muted-foreground flex items-center gap-2">
@@ -187,6 +189,39 @@ export function RealtimeSessionDetail() {
             <div className="text-2xl font-bold">{session.model ?? '-'}</div>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <span className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+              <Archive className="h-4 w-4" />
+              Retention
+            </span>
+          </CardHeader>
+          <CardContent>
+            {session.purged_at ? (
+              <>
+                <div className="text-2xl font-bold">{formatRetentionDisplay(session.retention)}</div>
+                <p className="text-sm text-muted-foreground">Purged</p>
+              </>
+            ) : session.retention === 0 ? (
+              <>
+                <div className="text-2xl font-bold">Transient</div>
+                <p className="text-sm text-muted-foreground">No storage</p>
+              </>
+            ) : session.retention === -1 ? (
+              <div className="text-2xl font-bold">Permanent</div>
+            ) : (
+              <>
+                <div className="text-2xl font-bold">{formatRetentionDisplay(session.retention)}</div>
+                <p className="text-sm text-muted-foreground">
+                  {session.purge_after
+                    ? `${formatPurgeCountdown(session.purge_after).text} ${formatPurgeCountdown(session.purge_after).subtitle ?? ''}`
+                    : 'after session end'}
+                </p>
+              </>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Details Card */}
@@ -233,20 +268,6 @@ export function RealtimeSessionDetail() {
                     className="text-primary hover:underline flex items-center gap-1"
                   >
                     {session.previous_session_id.slice(0, 12)}...
-                    <ExternalLink className="h-3 w-3" />
-                  </Link>
-                </dd>
-              </div>
-            )}
-            {session.enhancement_job_id && (
-              <div>
-                <dt className="text-muted-foreground">Enhancement Job</dt>
-                <dd className="font-medium">
-                  <Link
-                    to={`/jobs/${session.enhancement_job_id}`}
-                    className="text-primary hover:underline flex items-center gap-1"
-                  >
-                    View Job
                     <ExternalLink className="h-3 w-3" />
                   </Link>
                 </dd>

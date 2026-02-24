@@ -10,9 +10,13 @@ import structlog
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dalston.common.models import RetentionMode
+from dalston.common.models import (
+    ArtifactOwnerType,
+    retention_to_ttl_seconds,
+)
 from dalston.common.utils import parse_session_id
 from dalston.db.models import RealtimeSessionModel
+from dalston.gateway.services.artifacts import ArtifactService
 
 if TYPE_CHECKING:
     from dalston.config import Settings
@@ -45,14 +49,8 @@ class RealtimeSessionService:
         engine: str | None = None,
         encoding: str | None = None,
         sample_rate: int | None = None,
-        store_audio: bool = True,
-        store_transcript: bool = True,
-        enhance_on_end: bool = True,
+        retention: int = 30,
         previous_session_id: UUID | None = None,
-        # Retention fields (M25)
-        retention_policy_id: UUID | None = None,
-        retention_mode: str = "auto_delete",
-        retention_hours: int | None = None,
     ) -> RealtimeSessionModel:
         """Create a new session record in PostgreSQL.
 
@@ -66,13 +64,8 @@ class RealtimeSessionService:
             engine: Engine type that handled the session (e.g., "parakeet", "whisper")
             encoding: Audio encoding
             sample_rate: Audio sample rate
-            store_audio: Whether to record audio to S3
-            store_transcript: Whether to save transcript to S3
-            enhance_on_end: Whether to trigger batch enhancement
+            retention: Retention in days (0=transient, -1=permanent, N=days)
             previous_session_id: Previous session for resume linking
-            retention_policy_id: Reference to retention policy
-            retention_mode: Snapshotted mode (auto_delete, keep, none)
-            retention_hours: Snapshotted hours for auto_delete
 
         Returns:
             Created RealtimeSessionModel
@@ -89,17 +82,11 @@ class RealtimeSessionService:
             engine=engine,
             encoding=encoding,
             sample_rate=sample_rate,
-            store_audio=store_audio,
-            store_transcript=store_transcript,
-            enhance_on_end=enhance_on_end,
+            retention=retention,
             worker_id=worker_id,
             client_ip=client_ip,
             previous_session_id=previous_session_id,
             started_at=datetime.now(UTC),
-            # Retention fields
-            retention_policy_id=retention_policy_id,
-            retention_mode=retention_mode,
-            retention_hours=retention_hours,
         )
 
         self.db.add(session)
@@ -110,8 +97,7 @@ class RealtimeSessionService:
             "realtime_session_created",
             session_id=session_id,
             tenant_id=str(tenant_id),
-            store_audio=store_audio,
-            store_transcript=store_transcript,
+            retention=retention,
         )
 
         return session
@@ -161,7 +147,6 @@ class RealtimeSessionService:
         word_count: int | None = None,
         audio_uri: str | None = None,
         transcript_uri: str | None = None,
-        enhancement_job_id: UUID | None = None,
         error: str | None = None,
     ) -> RealtimeSessionModel | None:
         """Finalize a session on completion or error.
@@ -179,7 +164,6 @@ class RealtimeSessionService:
             word_count: Final word count
             audio_uri: S3 URI for recorded audio
             transcript_uri: S3 URI for transcript
-            enhancement_job_id: ID of enhancement job if created
             error: Error message if session failed
 
         Returns:
@@ -208,12 +192,10 @@ class RealtimeSessionService:
             values["audio_uri"] = audio_uri
         if transcript_uri is not None:
             values["transcript_uri"] = transcript_uri
-        if enhancement_job_id is not None:
-            values["enhancement_job_id"] = enhancement_job_id
         if error is not None:
             values["error"] = error
 
-        # Compute purge_after based on retention settings (M25)
+        # Compute purge_after based on retention settings (M25 - V1)
         purge_after = self._compute_purge_after(existing, ended_at)
         if purge_after is not None:
             values["purge_after"] = purge_after
@@ -225,6 +207,21 @@ class RealtimeSessionService:
             .returning(RealtimeSessionModel)
         )
         result = await self.db.execute(stmt)
+
+        # Mark V2 artifacts as available and compute their purge_after (M35)
+        # This prevents the race condition where artifacts could be purged
+        # before the session finishes writing them.
+        artifact_service = ArtifactService()
+        artifacts_marked = await artifact_service.mark_owner_artifacts_available(
+            self.db, ArtifactOwnerType.SESSION, session_uuid, available_at=ended_at
+        )
+        if artifacts_marked > 0:
+            logger.info(
+                "session_artifacts_marked_available",
+                session_id=session_id,
+                count=artifacts_marked,
+            )
+
         await self.db.commit()
 
         session = result.scalar_one_or_none()
@@ -253,20 +250,19 @@ class RealtimeSessionService:
         Returns:
             purge_after datetime, or None if should never be purged
         """
-        # Only compute purge_after if session has stored artifacts
-        if not session.store_audio and not session.store_transcript:
-            return None
+        # Use the integer retention field: 0=transient, -1=permanent, N=days
+        retention_days = session.retention if session.retention is not None else 30
+        ttl_seconds = retention_to_ttl_seconds(retention_days)
 
-        if session.retention_mode == RetentionMode.AUTO_DELETE.value:
-            if session.retention_hours:
-                return ended_at + timedelta(hours=session.retention_hours)
-            # No hours specified, use default (shouldn't happen with proper validation)
-            return None
-        elif session.retention_mode == RetentionMode.NONE.value:
-            # Immediate purge
+        if ttl_seconds == 0:
+            # 0 = transient - immediate purge (nothing was stored)
             return ended_at
-        # mode == "keep": never purge
-        return None
+        elif ttl_seconds is None:
+            # -1 = permanent - never purge
+            return None
+        else:
+            # N = days - purge after N days
+            return ended_at + timedelta(seconds=ttl_seconds)
 
     async def get_session(self, session_id: str) -> RealtimeSessionModel | None:
         """Get session by ID.

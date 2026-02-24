@@ -5,7 +5,7 @@ import {
   Users,
   FileText,
   AlertCircle,
-  Trash2,
+  Archive,
   Mic,
   ScrollText,
 } from 'lucide-react'
@@ -13,6 +13,7 @@ import { useJob } from '@/hooks/useJob'
 import { useJobTasks } from '@/hooks/useJobTasks'
 import { useResourceAuditTrail } from '@/hooks/useAuditLog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -233,7 +234,7 @@ function RetentionCard({ retention }: { retention?: RetentionInfo }) {
   if (!retention) {
     return (
       <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
-        <Trash2 className="h-4 w-4 text-muted-foreground" />
+        <Archive className="h-4 w-4 text-muted-foreground" />
         <div>
           <p className="text-xs text-muted-foreground">Retention</p>
           <p className="text-sm font-medium">-</p>
@@ -242,50 +243,75 @@ function RetentionCard({ retention }: { retention?: RetentionInfo }) {
     )
   }
 
-  const { mode, policy_name, hours, purge_after, purged_at } = retention
+  const { mode, hours, purge_after, purged_at } = retention
 
-  let statusText = ''
+  // Calculate the original retention period text
+  const getRetentionPeriod = (): string => {
+    if (mode === 'keep') return 'Permanent'
+    if (mode === 'none') return 'Transient'
+    if (hours) {
+      const days = Math.floor(hours / 24)
+      if (days > 0) {
+        return days === 1 ? '1 day' : `${days} days`
+      }
+      return `${hours}h`
+    }
+    return 'Default'
+  }
 
-  if (purged_at) {
-    statusText = 'Purged'
-  } else if (mode === 'keep') {
-    statusText = 'Indefinitely'
-  } else if (mode === 'none') {
-    statusText = 'None'
-  } else if (purge_after) {
+  // Calculate remaining time until purge
+  const getRemainingTime = (): string | null => {
+    if (!purge_after) return null
     const purgeDate = new Date(purge_after)
     const now = new Date()
     const diffMs = purgeDate.getTime() - now.getTime()
 
-    if (diffMs <= 0) {
-      statusText = 'Pending'
-    } else {
-      const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-      const diffDays = Math.floor(diffHours / 24)
+    if (diffMs <= 0) return 'Pending purge'
 
-      if (diffDays > 0) {
-        statusText = `In ${diffDays}d ${diffHours % 24}h`
-      } else if (diffHours > 0) {
-        statusText = `In ${diffHours}h`
-      } else {
-        const diffMins = Math.floor(diffMs / (1000 * 60))
-        statusText = `In ${diffMins}m`
-      }
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+    const diffDays = Math.floor(diffHours / 24)
+
+    if (diffDays > 0) {
+      return `${diffDays}d ${diffHours % 24}h until purge`
+    } else if (diffHours > 0) {
+      return `${diffHours}h until purge`
     }
+    const diffMins = Math.floor(diffMs / (1000 * 60))
+    return `${diffMins}m until purge`
+  }
+
+  let statusText: string
+  let subtitleText: string | null = null
+
+  if (purged_at) {
+    // Show original retention period with "Purged" as subtitle
+    statusText = getRetentionPeriod()
+    subtitleText = 'Purged'
+  } else if (mode === 'keep') {
+    statusText = 'Permanent'
+  } else if (mode === 'none') {
+    statusText = 'Transient'
+    subtitleText = 'No storage'
   } else {
-    statusText = hours ? `${hours}h` : 'Pending'
+    // Show original retention period as main text
+    statusText = getRetentionPeriod()
+    // Show remaining time as subtitle (or "after completion" if job not finished)
+    const remaining = getRemainingTime()
+    if (remaining) {
+      subtitleText = remaining
+    } else if (hours) {
+      subtitleText = 'after completion'
+    }
   }
 
   return (
     <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
-      <Trash2 className="h-4 w-4 text-muted-foreground" />
+      <Archive className="h-4 w-4 text-muted-foreground" />
       <div className="min-w-0 flex-1">
         <p className="text-xs text-muted-foreground">Retention</p>
         <p className="text-sm font-medium">{statusText}</p>
-        {policy_name && (
-          <p className="text-xs text-muted-foreground truncate">
-            Policy: {policy_name}
-          </p>
+        {subtitleText && (
+          <p className="text-xs text-muted-foreground">{subtitleText}</p>
         )}
       </div>
     </div>

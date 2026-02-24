@@ -197,7 +197,16 @@ class JobModel(Base):
         nullable=True,
     )
 
-    # Retention fields (M25)
+    # Retention: 0=transient, -1=permanent, N=days
+    retention: Mapped[int] = mapped_column(Integer, nullable=False, server_default="30")
+    purge_after: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    purged_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+
+    # Legacy retention fields (M25) - kept for backwards compatibility
     retention_policy_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("retention_policies.id"),
@@ -209,12 +218,6 @@ class JobModel(Base):
     retention_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
     retention_scope: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default="all"
-    )
-    purge_after: Mapped[datetime | None] = mapped_column(
-        TIMESTAMP(timezone=True), nullable=True
-    )
-    purged_at: Mapped[datetime | None] = mapped_column(
-        TIMESTAMP(timezone=True), nullable=True
     )
 
     # Result summary stats (populated on successful completion)
@@ -479,6 +482,62 @@ class PIIEntityTypeModel(Base):
     )
 
 
+# =============================================================================
+# Artifact Model (Simplified Retention)
+# =============================================================================
+
+
+class ArtifactObjectModel(Base):
+    """Persisted artifact with retention metadata."""
+
+    __tablename__ = "artifact_objects"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id"),
+        nullable=False,
+        index=True,
+    )
+    owner_type: Mapped[str] = mapped_column(String(20), nullable=False)  # job | session
+    owner_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    artifact_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # audio.source, transcript.redacted, etc.
+    uri: Mapped[str] = mapped_column(Text, nullable=False)
+    sensitivity: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # raw_pii | redacted | metadata
+    compliance_tags: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String), nullable=True
+    )  # gdpr, hipaa, pci, pii-processed
+    store: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    ttl_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    available_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    purge_after: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    purged_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+
+    # Relationships
+    tenant: Mapped["TenantModel"] = relationship()
+
+
 class RealtimeSessionModel(Base):
     """Real-time transcription session with optional persistence."""
 
@@ -510,21 +569,12 @@ class RealtimeSessionModel(Base):
     encoding: Mapped[str | None] = mapped_column(String(20), nullable=True)
     sample_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # Feature flags
-    store_audio: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    store_transcript: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
-    enhance_on_end: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Retention: 0=transient, -1=permanent, N=days
+    retention: Mapped[int] = mapped_column(Integer, nullable=False, server_default="30")
 
     # Results (populated during/after session)
     audio_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     transcript_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
-    enhancement_job_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("jobs.id", ondelete="SET NULL"),
-        nullable=True,
-    )
 
     # Stats (updated periodically during session)
     audio_duration_seconds: Mapped[float] = mapped_column(
@@ -557,7 +607,15 @@ class RealtimeSessionModel(Base):
     # Error tracking
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Retention fields (M25)
+    # Purge tracking
+    purge_after: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    purged_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+
+    # Legacy retention fields (M25) - kept for backwards compatibility
     retention_policy_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("retention_policies.id"),
@@ -567,16 +625,9 @@ class RealtimeSessionModel(Base):
         String(20), nullable=False, server_default="auto_delete"
     )
     retention_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    purge_after: Mapped[datetime | None] = mapped_column(
-        TIMESTAMP(timezone=True), nullable=True
-    )
-    purged_at: Mapped[datetime | None] = mapped_column(
-        TIMESTAMP(timezone=True), nullable=True
-    )
 
     # Relationships
     tenant: Mapped["TenantModel"] = relationship()
-    enhancement_job: Mapped["JobModel | None"] = relationship()
     previous_session: Mapped["RealtimeSessionModel | None"] = relationship(
         remote_side="RealtimeSessionModel.id"
     )
