@@ -72,19 +72,6 @@ class TestAudioUrlTranscription:
         return service
 
     @pytest.fixture
-    def mock_retention_service(self):
-        """Create mock retention service."""
-        service = AsyncMock()
-        mock_policy = MagicMock()
-        mock_policy.id = UUID("00000000-0000-0000-0000-000000000001")
-        mock_policy.name = "default"
-        mock_policy.mode = "after_completion"
-        mock_policy.hours = 168
-        mock_policy.scope = "all"
-        service.resolve_policy.return_value = mock_policy
-        return service
-
-    @pytest.fixture
     def mock_rate_limiter(self):
         """Create mock rate limiter."""
         limiter = AsyncMock()
@@ -104,7 +91,6 @@ class TestAudioUrlTranscription:
         mock_db,
         mock_redis,
         mock_jobs_service,
-        mock_retention_service,
         mock_rate_limiter,
         mock_audit_service,
     ):
@@ -115,7 +101,6 @@ class TestAudioUrlTranscription:
             get_jobs_service,
             get_rate_limiter,
             get_redis,
-            get_retention_service,
             get_settings,
             require_auth,
         )
@@ -128,7 +113,6 @@ class TestAudioUrlTranscription:
         app.dependency_overrides[get_redis] = lambda: mock_redis
         app.dependency_overrides[get_settings] = lambda: mock_settings
         app.dependency_overrides[get_jobs_service] = lambda: mock_jobs_service
-        app.dependency_overrides[get_retention_service] = lambda: mock_retention_service
         app.dependency_overrides[get_rate_limiter] = lambda: mock_rate_limiter
         app.dependency_overrides[get_audit_service] = lambda: mock_audit_service
 

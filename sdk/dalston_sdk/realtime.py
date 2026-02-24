@@ -178,10 +178,9 @@ class AsyncRealtimeSession:
         enable_vad: bool = True,
         interim_results: bool = True,
         word_timestamps: bool = False,
-        # Storage and enhancement options
+        # Storage options
         store_audio: bool = True,
         store_transcript: bool = True,
-        enhance_on_end: bool = True,
         # PII detection options (M26)
         pii_detection: bool = False,
         pii_detection_tier: str = "standard",
@@ -203,8 +202,7 @@ class AsyncRealtimeSession:
             word_timestamps: Include word-level timing.
             store_audio: Record audio to S3 during session.
             store_transcript: Save final transcript to S3.
-            enhance_on_end: Trigger batch enhancement when session ends.
-            pii_detection: Enable PII detection on enhanced transcript.
+            pii_detection: Enable PII detection.
             pii_detection_tier: Detection tier (fast, standard, thorough).
             pii_entity_types: Entity types to detect (None = all).
             redact_pii_audio: Generate redacted audio file.
@@ -225,10 +223,9 @@ class AsyncRealtimeSession:
         self.enable_vad = enable_vad
         self.interim_results = interim_results
         self.word_timestamps = word_timestamps
-        # Storage and enhancement
+        # Storage
         self.store_audio = store_audio
         self.store_transcript = store_transcript
-        self.enhance_on_end = enhance_on_end
         # PII detection
         self.pii_detection = pii_detection
         self.pii_detection_tier = pii_detection_tier
@@ -267,8 +264,6 @@ class AsyncRealtimeSession:
             params["store_audio"] = "true"
         if self.store_transcript:
             params["store_transcript"] = "true"
-        if self.enhance_on_end:
-            params["enhance_on_end"] = "true"
 
         # PII detection options (M26)
         if self.pii_detection:
@@ -502,10 +497,9 @@ class RealtimeSession:
         enable_vad: bool = True,
         interim_results: bool = True,
         word_timestamps: bool = False,
-        # Storage and enhancement options
+        # Storage options
         store_audio: bool = True,
         store_transcript: bool = True,
-        enhance_on_end: bool = True,
         # PII detection options (M26)
         pii_detection: bool = False,
         pii_detection_tier: str = "standard",
@@ -527,8 +521,7 @@ class RealtimeSession:
             word_timestamps: Include word-level timing.
             store_audio: Record audio to S3 during session.
             store_transcript: Save final transcript to S3.
-            enhance_on_end: Trigger batch enhancement when session ends.
-            pii_detection: Enable PII detection on enhanced transcript.
+            pii_detection: Enable PII detection.
             pii_detection_tier: Detection tier (fast, standard, thorough).
             pii_entity_types: Entity types to detect (None = all).
             redact_pii_audio: Generate redacted audio file.
@@ -546,7 +539,6 @@ class RealtimeSession:
             word_timestamps=word_timestamps,
             store_audio=store_audio,
             store_transcript=store_transcript,
-            enhance_on_end=enhance_on_end,
             pii_detection=pii_detection,
             pii_detection_tier=pii_detection_tier,
             pii_entity_types=pii_entity_types,

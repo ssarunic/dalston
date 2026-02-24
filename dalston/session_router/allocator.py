@@ -6,7 +6,6 @@ sessions across available workers.
 
 from __future__ import annotations
 
-import json
 import time
 import uuid
 from dataclasses import dataclass
@@ -57,7 +56,6 @@ class SessionState:
         model: Requested model variant
         client_ip: Client IP address
         started_at: Session start timestamp
-        enhance_on_end: Whether to trigger batch enhancement
     """
 
     session_id: str
@@ -67,7 +65,6 @@ class SessionState:
     model: str
     client_ip: str
     started_at: datetime
-    enhance_on_end: bool = True
 
 
 class SessionAllocator:
@@ -119,7 +116,6 @@ class SessionAllocator:
         language: str,
         model: str | None,
         client_ip: str,
-        enhance_on_end: bool = True,
     ) -> WorkerAllocation | None:
         """Find worker with capacity and reserve a slot.
 
@@ -129,7 +125,6 @@ class SessionAllocator:
             language: Requested language code or "auto"
             model: Model name (e.g., "faster-whisper-large-v3") or None for any
             client_ip: Client IP address for logging
-            enhance_on_end: Whether to trigger batch enhancement on session end
 
         Returns:
             WorkerAllocation if successful, None if no capacity available
@@ -169,7 +164,7 @@ class SessionAllocator:
                 # Try next worker
                 if len(available) > 1:
                     return await self._acquire_from_list(
-                        available[1:], language, model, client_ip, enhance_on_end
+                        available[1:], language, model, client_ip
                     )
                 return None
 
@@ -180,7 +175,6 @@ class SessionAllocator:
                 language=language,
                 model=model,
                 client_ip=client_ip,
-                enhance_on_end=enhance_on_end,
             )
 
             # Add to worker's session set
@@ -226,7 +220,6 @@ class SessionAllocator:
         language: str,
         model: str | None,
         client_ip: str,
-        enhance_on_end: bool,
     ) -> WorkerAllocation | None:
         """Try to acquire from remaining workers in list."""
         for worker in workers:
@@ -241,7 +234,6 @@ class SessionAllocator:
                     language=language,
                     model=model,
                     client_ip=client_ip,
-                    enhance_on_end=enhance_on_end,
                 )
 
                 sessions_key = (
@@ -275,7 +267,6 @@ class SessionAllocator:
         language: str,
         model: str | None,
         client_ip: str,
-        enhance_on_end: bool,
     ) -> None:
         """Create session record in Redis."""
         session_key = f"{SESSION_KEY_PREFIX}{session_id}"
@@ -289,7 +280,6 @@ class SessionAllocator:
                 "model": model or "",  # Redis can't store None
                 "client_ip": client_ip,
                 "started_at": datetime.now(UTC).isoformat(),
-                "enhance_on_end": json.dumps(enhance_on_end),
             },
         )
 
@@ -348,7 +338,6 @@ class SessionAllocator:
             model=data.get("model", "fast"),
             client_ip=data.get("client_ip", ""),
             started_at=self._parse_datetime(data.get("started_at")),
-            enhance_on_end=json.loads(data.get("enhance_on_end", "false")),
         )
 
     async def get_session(self, session_id: str) -> SessionState | None:
@@ -374,7 +363,6 @@ class SessionAllocator:
             model=data.get("model", "fast"),
             client_ip=data.get("client_ip", ""),
             started_at=self._parse_datetime(data.get("started_at")),
-            enhance_on_end=json.loads(data.get("enhance_on_end", "false")),
         )
 
     async def extend_session_ttl(self, session_id: str, ttl: int = 300) -> None:

@@ -102,33 +102,6 @@ class TestDalston:
         assert b"diarize" in request.content
         assert job.status == JobStatus.PENDING
 
-    def test_transcribe_with_retention_policy(self, client, httpx_mock, tmp_path):
-        """Test transcribe with retention policy."""
-        audio_file = tmp_path / "test.mp3"
-        audio_file.write_bytes(b"fake audio data")
-
-        httpx_mock.add_response(
-            method="POST",
-            url="http://test/v1/audio/transcriptions",
-            json={
-                "id": "550e8400-e29b-41d4-a716-446655440000",
-                "status": "pending",
-                "created_at": "2024-01-01T00:00:00Z",
-            },
-            status_code=201,
-        )
-
-        job = client.transcribe(
-            file=str(audio_file),
-            retention_policy="short",
-        )
-
-        # Check that request included retention_policy param
-        request = httpx_mock.get_request()
-        assert b"retention_policy" in request.content
-        assert b"short" in request.content
-        assert job.status == JobStatus.PENDING
-
     def test_transcribe_without_file_raises(self, client):
         """Test that transcribe without file or URL raises error."""
         with pytest.raises(ValidationError, match="Either file or audio_url"):
@@ -306,36 +279,6 @@ class TestAsyncDalston:
 
         job = await async_client.transcribe(file=str(audio_file))
 
-        assert job.status == JobStatus.PENDING
-
-    @pytest.mark.asyncio
-    async def test_transcribe_with_retention_policy(
-        self, async_client, httpx_mock, tmp_path
-    ):
-        """Test async transcribe with retention policy."""
-        audio_file = tmp_path / "test.mp3"
-        audio_file.write_bytes(b"fake audio data")
-
-        httpx_mock.add_response(
-            method="POST",
-            url="http://test/v1/audio/transcriptions",
-            json={
-                "id": "550e8400-e29b-41d4-a716-446655440000",
-                "status": "pending",
-                "created_at": "2024-01-01T00:00:00Z",
-            },
-            status_code=201,
-        )
-
-        job = await async_client.transcribe(
-            file=str(audio_file),
-            retention_policy="long",
-        )
-
-        # Check that request included retention_policy param
-        request = httpx_mock.get_request()
-        assert b"retention_policy" in request.content
-        assert b"long" in request.content
         assert job.status == JobStatus.PENDING
 
     @pytest.mark.asyncio

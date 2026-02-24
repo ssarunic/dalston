@@ -551,7 +551,6 @@ class TestSessionAllocator:
             "model": "faster-whisper-large-v3",
             "client_ip": "192.168.1.100",
             "started_at": "2024-01-15T10:30:00+00:00",
-            "enhance_on_end": "false",
         }
 
         result = await allocator.release_worker("sess_abc123")
@@ -581,7 +580,6 @@ class TestSessionAllocator:
             "model": "faster-whisper-large-v3",
             "client_ip": "10.0.0.5",
             "started_at": "2024-01-15T10:30:00+00:00",
-            "enhance_on_end": "true",
         }
 
         result = await allocator.get_session("sess_xyz")
@@ -591,7 +589,6 @@ class TestSessionAllocator:
         assert result.worker_id == "worker-1"
         assert result.language == "es"
         assert result.model == "faster-whisper-large-v3"
-        assert result.enhance_on_end is True
 
 
 class TestSessionState:
@@ -606,7 +603,6 @@ class TestSessionState:
             model="faster-whisper-large-v3",
             client_ip="192.168.1.100",
             started_at=datetime.now(UTC),
-            enhance_on_end=True,
         )
 
         assert state.session_id == "sess_abc123"
@@ -615,7 +611,6 @@ class TestSessionState:
         assert state.language == "en"
         assert state.model == "faster-whisper-large-v3"
         assert state.client_ip == "192.168.1.100"
-        assert state.enhance_on_end is True
 
 
 class TestWorkerAllocation:

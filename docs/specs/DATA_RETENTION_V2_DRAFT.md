@@ -10,7 +10,7 @@ Replace policy-centric retention with an artifact-centric model that:
 
 1. Supports independent retention for audio and transcript (and other artifacts)
 2. Removes contradictory combinations at request time
-3. Handles batch, realtime, hybrid, and PII consistently
+3. Handles batch, realtime, and PII consistently
 4. Makes defaults explicit and enforceable
 5. Is operationally simple to purge and audit
 
@@ -215,29 +215,6 @@ Validation happens before job/session creation. Invalid combinations fail with 4
 
 ---
 
-## Hybrid Semantics
-
-Hybrid has two owners:
-
-- realtime session artifacts
-- enhancement job artifacts
-
-To prevent races, source audio used by enhancement is pinned until enhancement ingest completes.
-
-### Pinning
-
-- `audio.source` gets a temporary processing lock (`locked_until` or dependency row)
-- Purge worker skips locked artifacts
-- Lock is released when enhancement prepare step confirms ingest
-
-### Recommended Defaults (hybrid)
-
-- `realtime.transcript`: short TTL or disabled
-- `audio.source`: short TTL (enough for enhancement)
-- `transcript.redacted`: business TTL
-
----
-
 ## PII Semantics
 
 PII requires explicit handling of raw vs redacted data.
@@ -249,6 +226,50 @@ PII requires explicit handling of raw vs redacted data.
 - `audio.redacted.store=true` business TTL
 - `transcript.redacted.store=true` business TTL
 - `pii.entities.store=true` same TTL as redacted transcript (or shorter)
+
+### System Template: `pii-compliant`
+
+A seeded system template enforcing PII-safe defaults. When `pii.enabled=true` and no explicit retention is provided, this template is automatically applied.
+
+**Template Rules:**
+
+| Artifact Type | store | ttl_seconds | Rationale |
+|---------------|-------|-------------|-----------|
+| `audio.source` | true | 0 | Delete original immediately after redaction completes |
+| `audio.redacted` | true | null | Keep redacted audio forever (or business TTL) |
+| `transcript.raw` | false | - | Never persist raw transcript containing PII |
+| `transcript.redacted` | true | null | Keep redacted transcript forever |
+| `pii.entities` | true | 7776000 (90d) | Audit trail for detected entities, then purge |
+| `pipeline.intermediate` | false | - | No debug artifacts |
+
+**Behavior:**
+
+1. When job/session has `pii.enabled=true`:
+   - If no `retention` or `retention_template_id` provided: system auto-selects `pii-compliant`
+   - If explicit retention provided: validate against tenant constraints (may require `transcript.raw.store=false`)
+
+2. Tenant override:
+   - Tenants can create custom PII-compliant templates with stricter rules
+   - `tenant.settings.retention_constraints.require_redacted_only_when_pii=true` enforces raw artifact prohibition
+
+3. Compliance tags:
+   - Artifacts from PII jobs get `compliance_tags: ["pii-processed"]`
+   - If tenant specifies GDPR/HIPAA, those tags are added automatically
+
+**Seeded Template SQL:**
+
+```sql
+INSERT INTO retention_templates (id, tenant_id, name, is_system, created_at)
+VALUES ('00000000-0000-0000-0000-000000000010', NULL, 'pii-compliant', TRUE, NOW());
+
+INSERT INTO retention_template_rules (template_id, artifact_type, store, ttl_seconds) VALUES
+('00000000-0000-0000-0000-000000000010', 'audio.source', TRUE, 0),
+('00000000-0000-0000-0000-000000000010', 'audio.redacted', TRUE, NULL),
+('00000000-0000-0000-0000-000000000010', 'transcript.raw', FALSE, NULL),
+('00000000-0000-0000-0000-000000000010', 'transcript.redacted', TRUE, NULL),
+('00000000-0000-0000-0000-000000000010', 'pii.entities', TRUE, 7776000),
+('00000000-0000-0000-0000-000000000010', 'pipeline.intermediate', FALSE, NULL);
+```
 
 ### Security Classification
 
@@ -279,11 +300,8 @@ CREATE TABLE artifact_objects (
   store BOOLEAN NOT NULL,
   ttl_seconds INTEGER,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   purge_after TIMESTAMPTZ,
   purged_at TIMESTAMPTZ,
-  lock_reason VARCHAR(50),
-  lock_until TIMESTAMPTZ,
   UNIQUE(owner_type, owner_id, artifact_type, uri)
 );
 ```
@@ -340,7 +358,6 @@ Single artifact-driven sweep:
 SELECT * FROM artifact_objects
 WHERE purge_after <= NOW()
   AND purged_at IS NULL
-  AND (lock_until IS NULL OR lock_until < NOW())
 ORDER BY purge_after
 LIMIT :batch_size;
 ```
@@ -381,14 +398,12 @@ Each artifact entry includes `purge_after`, `purged_at`, `sensitivity`.
 
 1. `audio.source:7d`, `transcript.redacted:30d`: independent purge times.
 2. `audio.source:0`, `transcript.redacted:30d`: audio removed immediately post-processing, transcript kept.
-3. `audio.source:false`, `enhance_on_end:true`: rejected.
-4. `transcript.raw:false`, `pii:true`: raw not retrievable, redacted only.
-5. `pii.entities:false`: redacted transcript can exist without entity payload persistence.
-6. `pipeline.intermediate:false`: tasks/debug payloads do not persist.
-7. `audio.redacted:true`, `audio.source:0`: keep only redacted audio.
-8. `all store=false`: metadata-only job/session.
-9. hybrid session with short source TTL + lock: enhancement succeeds, then source purges.
-10. `ttl_seconds=null`: explicit keep forever for that artifact only.
+3. `transcript.raw:false`, `pii:true`: raw not retrievable, redacted only.
+4. `pii.entities:false`: redacted transcript can exist without entity payload persistence.
+5. `pipeline.intermediate:false`: tasks/debug payloads do not persist.
+6. `audio.redacted:true`, `audio.source:0`: keep only redacted audio.
+7. `all store=false`: metadata-only job/session.
+8. `ttl_seconds=null`: explicit keep forever for that artifact only.
 
 ---
 

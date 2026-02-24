@@ -329,6 +329,8 @@ class TestPerChannelTaskCompletion:
     @pytest.mark.asyncio
     async def test_task_error_cleared_on_completion(self):
         """handle_task_completed clears task.error from a previous failed attempt."""
+        from unittest.mock import patch
+
         from dalston.orchestrator.handlers import handle_task_completed
 
         task_id = uuid4()
@@ -349,6 +351,7 @@ class TestPerChannelTaskCompletion:
         # No other tasks in the job (just this one for simplicity)
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [mock_task]
+        mock_result.scalar_one_or_none.return_value = mock_task  # For job query
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         mock_redis = AsyncMock()
@@ -357,9 +360,14 @@ class TestPerChannelTaskCompletion:
         mock_registry = AsyncMock()
         mock_registry.is_engine_available = AsyncMock(return_value=True)
 
-        await handle_task_completed(
-            task_id, mock_db, mock_redis, mock_settings, mock_registry
-        )
+        # Patch artifact service to avoid TTL issues with MagicMock
+        with patch(
+            "dalston.orchestrator.handlers.ArtifactService.mark_owner_artifacts_available",
+            new=AsyncMock(return_value=0),
+        ):
+            await handle_task_completed(
+                task_id, mock_db, mock_redis, mock_settings, mock_registry
+            )
 
         # Error should be cleared
         assert mock_task.error is None

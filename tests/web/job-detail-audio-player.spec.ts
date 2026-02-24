@@ -60,7 +60,7 @@ test.describe('Job Detail audio player', () => {
           confidence: 0.99,
         },
       ],
-      retention: { mode: 'keep', scope: 'all' },
+      retention: { mode: 'keep' },
       pii: { enabled: false, redacted_audio_available: false },
     }
 
@@ -146,14 +146,14 @@ test.describe('Job Detail audio player', () => {
           id: jobId,
           ...baseJob,
           retention: isPurged
-            ? { mode: 'auto_delete', scope: 'all', purged_at: now }
+            ? { mode: 'auto_delete', purged_at: now }
             : baseJob.retention,
         }),
       })
     })
 
-    await page.goto(`http://127.0.0.1:8000/jobs/${jobWithAudioId}`)
-    await expect(page.getByLabel('Download audio')).toBeVisible()
+    await page.goto(`/console/jobs/${jobWithAudioId}`)
+    await expect(page.getByRole('button', { name: 'Download audio' })).toBeVisible()
 
     await page.getByText('Segment one text').first().click()
     await expect(page.getByLabel('Pause')).toBeVisible()
@@ -163,7 +163,7 @@ test.describe('Job Detail audio player', () => {
     await page.waitForTimeout(1000)
     await expect(page.getByLabel('Play')).toBeVisible()
 
-    await page.goto(`http://127.0.0.1:8000/jobs/${jobPurgedId}`)
-    await expect(page.getByLabel('Download audio')).toHaveCount(0)
+    await page.goto(`/console/jobs/${jobPurgedId}`)
+    await expect(page.getByRole('button', { name: 'Download audio' })).toHaveCount(0)
   })
 })

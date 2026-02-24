@@ -465,20 +465,16 @@ class LiveOutputHandler:
         self,
         duration: float,
         speech_duration: float,
-        enhancement_job_id: str | None = None,
     ) -> None:
         """Handle session end.
 
         Args:
             duration: Total session duration.
             speech_duration: Total speech duration.
-            enhancement_job_id: Enhancement job ID if triggered.
         """
         error_console.print(
             f"\n[Session ended: {duration:.1f}s total, {speech_duration:.1f}s speech]"
         )
-        if enhancement_job_id:
-            error_console.print(f"Enhancement job: {enhancement_job_id}")
 
         self.close()
 
@@ -545,22 +541,18 @@ class JsonlOutputHandler:
         self,
         duration: float,
         speech_duration: float,
-        enhancement_job_id: str | None = None,
     ) -> None:
         """Handle session end.
 
         Args:
             duration: Total session duration.
             speech_duration: Total speech duration.
-            enhancement_job_id: Enhancement job ID if triggered.
         """
         obj: dict[str, Any] = {
             "type": "session_end",
             "duration": duration,
             "speech_duration": speech_duration,
         }
-        if enhancement_job_id:
-            obj["enhancement_job_id"] = enhancement_job_id
         self.file.write(json.dumps(obj) + "\n")
 
         self.close()
@@ -606,22 +598,18 @@ class JsonOutputHandler:
         self,
         duration: float,
         speech_duration: float,
-        enhancement_job_id: str | None = None,
     ) -> None:
         """Handle session end - output full JSON.
 
         Args:
             duration: Total session duration.
             speech_duration: Total speech duration.
-            enhancement_job_id: Enhancement job ID if triggered.
         """
         data: dict[str, Any] = {
             "duration": duration,
             "speech_duration": speech_duration,
             "transcripts": self.transcripts,
         }
-        if enhancement_job_id:
-            data["enhancement_job_id"] = enhancement_job_id
 
         content = json.dumps(data, indent=2)
 

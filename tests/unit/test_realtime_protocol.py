@@ -233,21 +233,6 @@ class TestSessionEndMessage:
         assert result["total_speech_duration"] == 4.0
         assert result["transcript"] == "Hello World"
         assert len(result["segments"]) == 2
-        assert "enhancement_job_id" not in result
-
-    def test_to_dict_with_enhancement_job(self):
-        msg = SessionEndMessage(
-            session_id="sess_abc",
-            total_audio_seconds=10.0,
-            total_speech_duration=4.0,
-            transcript="Hello",
-            segments=[],
-            enhancement_job_id="job_xyz789",
-        )
-
-        result = msg.to_dict()
-
-        assert result["enhancement_job_id"] == "job_xyz789"
 
 
 class TestErrorMessage:

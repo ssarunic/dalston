@@ -173,7 +173,6 @@ class SessionEndMessage:
     total_speech_duration: float
     transcript: str
     segments: list[SegmentInfo]
-    enhancement_job_id: str | None = None
     audio_uri: str | None = None
     transcript_uri: str | None = None
     type: str = field(default="session.end", init=False)
@@ -187,8 +186,6 @@ class SessionEndMessage:
             "transcript": self.transcript,
             "segments": [s.to_dict() for s in self.segments],
         }
-        if self.enhancement_job_id is not None:
-            result["enhancement_job_id"] = self.enhancement_job_id
         if self.audio_uri is not None:
             result["audio_uri"] = self.audio_uri
         if self.transcript_uri is not None:
