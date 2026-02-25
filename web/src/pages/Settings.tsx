@@ -454,12 +454,11 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
             )}
           </span>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="default" className="flex-1 sm:flex-initial h-11 sm:h-9" onClick={handleCancel}>
+            <Button variant="outline" className="flex-1 sm:flex-initial h-11 sm:h-9 px-4" onClick={handleCancel}>
               Cancel
             </Button>
             <Button
-              size="default"
-              className="flex-1 sm:flex-initial h-11 sm:h-9"
+              className="flex-1 sm:flex-initial h-11 sm:h-9 px-4"
               onClick={handleSave}
               disabled={updateMutation.isPending || hasValidationErrors}
             >
