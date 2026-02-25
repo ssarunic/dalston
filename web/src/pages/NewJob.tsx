@@ -129,6 +129,15 @@ const PII_REDACTION_MODE_OPTIONS: { value: PIIRedactionMode; label: string }[] =
   { value: 'beep', label: 'Beep' },
 ]
 
+type RetentionMode = 'default' | 'transient' | 'permanent' | 'days'
+
+const RETENTION_OPTIONS: { value: RetentionMode; label: string }[] = [
+  { value: 'default', label: 'Server default' },
+  { value: 'transient', label: "Don't store" },
+  { value: 'permanent', label: 'Keep forever' },
+  { value: 'days', label: 'Delete after...' },
+]
+
 export function NewJob() {
   const navigate = useNavigate()
   const isMobile = useMediaQuery('(max-width: 767px)')
@@ -157,7 +166,8 @@ export function NewJob() {
   const [minSpeakers, setMinSpeakers] = useState<string>('')
   const [maxSpeakers, setMaxSpeakers] = useState<string>('')
   const [vocabulary, setVocabulary] = useState('')
-  const [retentionPolicy, setRetentionPolicy] = useState('')
+  const [retentionMode, setRetentionMode] = useState<RetentionMode>('default')
+  const [retentionDays, setRetentionDays] = useState('30')
 
   // Compute available models (running transcribe engines)
   const availableModels = useMemo(() => {
@@ -319,7 +329,14 @@ export function NewJob() {
         vocabulary: vocabulary.trim()
           ? vocabulary.split(',').map((t) => t.trim()).filter(Boolean)
           : undefined,
-        retention_policy: retentionPolicy || undefined,
+        retention_policy:
+          retentionMode === 'default'
+            ? undefined
+            : retentionMode === 'transient'
+              ? '0'
+              : retentionMode === 'permanent'
+                ? '-1'
+                : retentionDays,
         pii_detection: piiDetection || undefined,
         pii_detection_tier: piiDetection ? piiTier : undefined,
         pii_entity_types: piiDetection && piiEntityTypes.trim()
@@ -619,17 +636,37 @@ export function NewJob() {
 
                     {/* Retention Policy */}
                     <div className="space-y-2">
-                      <label htmlFor="retentionPolicy" className="text-sm font-medium">
-                        Retention Policy
-                      </label>
-                      <input
-                        id="retentionPolicy"
-                        type="text"
-                        value={retentionPolicy}
-                        onChange={(e) => setRetentionPolicy(e.target.value)}
-                        placeholder="Server default"
-                        className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm"
-                      />
+                      <label className="text-sm font-medium">Retention Policy</label>
+                      <div className="flex gap-2">
+                        <Select
+                          value={retentionMode}
+                          onValueChange={(v) => setRetentionMode(v as RetentionMode)}
+                        >
+                          <SelectTrigger className="w-[180px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {RETENTION_OPTIONS.map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {retentionMode === 'days' && (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min="1"
+                              max="3650"
+                              value={retentionDays}
+                              onChange={(e) => setRetentionDays(e.target.value)}
+                              className="w-20 px-3 py-2 rounded-md border border-input bg-background text-sm"
+                            />
+                            <span className="text-sm text-muted-foreground">days</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
 
