@@ -21,7 +21,9 @@ import {
   RotateCcw,
   Copy,
   Check,
+  Info,
 } from 'lucide-react'
+import { Tooltip } from '@/components/ui/tooltip'
 
 const NAMESPACE_ICONS: Record<string, typeof Gauge> = {
   rate_limits: Gauge,
@@ -101,37 +103,34 @@ function SettingField({
   const errorId = `${inputId}-error`
   const hasError = error !== null
 
-  const baseInputClasses = "flex h-11 w-full sm:max-w-xs rounded-md border bg-background px-3 py-2 text-base sm:text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-offset-2"
+  const baseInputClasses = "flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-offset-2"
   const normalInputClasses = `${baseInputClasses} border-input focus:ring-ring`
   const errorInputClasses = `${baseInputClasses} border-red-500 focus:ring-red-500`
 
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <label htmlFor={inputId} className="text-sm font-medium text-foreground">
-          {setting.label}
-        </label>
-        {isOverridden && (
-          <span className="inline-block h-2 w-2 rounded-full bg-primary" title="Overridden" aria-label="Setting overridden" />
-        )}
-      </div>
-      <p className="text-sm text-muted-foreground">{setting.description}</p>
+  const tooltipContent = (
+    <div className="space-y-1">
+      <div>Default: {String(setting.default_value)}</div>
+      {setting.env_var && <div className="text-muted-foreground">Env: {setting.env_var}</div>}
+    </div>
+  )
 
-      {setting.value_type === 'bool' ? (
-        <div className="flex items-center gap-3 pt-1">
+  const renderInput = () => {
+    if (setting.value_type === 'bool') {
+      return (
+        <div className="flex items-center gap-3">
           <button
             id={inputId}
             type="button"
             role="switch"
             aria-checked={value === true}
-            aria-label={`${setting.label}: ${value ? 'Enabled' : 'Disabled'}`}
+            aria-label={setting.description}
             onClick={() => onChange(setting.key, !value)}
-            className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors touch-manipulation ${
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors touch-manipulation ${
               value ? 'bg-primary' : 'bg-muted'
             }`}
           >
             <span
-              className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
                 value ? 'translate-x-6' : 'translate-x-1'
               }`}
             />
@@ -140,14 +139,18 @@ function SettingField({
             {value ? 'Enabled' : 'Disabled'}
           </span>
         </div>
-      ) : setting.value_type === 'select' ? (
+      )
+    }
+
+    if (setting.value_type === 'select') {
+      return (
         <select
           id={inputId}
           value={String(value)}
           onChange={(e) => onChange(setting.key, e.target.value)}
           aria-invalid={hasError}
           aria-describedby={hasError ? errorId : undefined}
-          className={hasError ? errorInputClasses : normalInputClasses}
+          className={`${hasError ? errorInputClasses : normalInputClasses} w-auto min-w-[120px]`}
         >
           {setting.options?.map((opt) => (
             <option key={opt} value={opt}>
@@ -155,41 +158,67 @@ function SettingField({
             </option>
           ))}
         </select>
-      ) : (
-        <input
-          id={inputId}
-          type="number"
-          inputMode="numeric"
-          value={String(value ?? '')}
-          onChange={(e) => {
-            const raw = e.target.value
-            if (raw === '') {
-              onChange(setting.key, '')
-              return
-            }
-            const parsed =
-              setting.value_type === 'float' ? parseFloat(raw) : parseInt(raw, 10)
-            if (!isNaN(parsed)) onChange(setting.key, parsed)
-          }}
-          min={setting.min_value ?? undefined}
-          max={setting.max_value ?? undefined}
-          step={setting.value_type === 'float' ? 'any' : '1'}
-          aria-invalid={hasError}
-          aria-describedby={hasError ? errorId : undefined}
-          className={hasError ? errorInputClasses : normalInputClasses}
-        />
-      )}
+      )
+    }
 
+    return (
+      <input
+        id={inputId}
+        type="number"
+        inputMode="numeric"
+        value={String(value ?? '')}
+        onChange={(e) => {
+          const raw = e.target.value
+          if (raw === '') {
+            onChange(setting.key, '')
+            return
+          }
+          const parsed =
+            setting.value_type === 'float' ? parseFloat(raw) : parseInt(raw, 10)
+          if (!isNaN(parsed)) onChange(setting.key, parsed)
+        }}
+        min={setting.min_value ?? undefined}
+        max={setting.max_value ?? undefined}
+        step={setting.value_type === 'float' ? 'any' : '1'}
+        aria-invalid={hasError}
+        aria-describedby={hasError ? errorId : undefined}
+        className={`${hasError ? errorInputClasses : normalInputClasses} w-24`}
+      />
+    )
+  }
+
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
+      {/* Label with info icon */}
+      <div className="flex items-center gap-2 min-w-0 flex-1">
+        <label htmlFor={inputId} className="text-sm text-muted-foreground">
+          {setting.description}
+        </label>
+        {isOverridden && (
+          <span className="inline-block h-2 w-2 rounded-full bg-primary shrink-0" title="Modified" aria-label="Setting modified" />
+        )}
+        <Tooltip content={tooltipContent} side="top">
+          <button
+            type="button"
+            className="text-muted-foreground/50 hover:text-muted-foreground shrink-0 p-1 -m-1"
+            aria-label="Show default value and environment variable"
+          >
+            <Info className="h-3.5 w-3.5" />
+          </button>
+        </Tooltip>
+      </div>
+
+      {/* Input aligned right */}
+      <div className="flex items-center gap-2 shrink-0">
+        {renderInput()}
+      </div>
+
+      {/* Error message - full width on new line */}
       {hasError && (
-        <p id={errorId} className="text-xs text-red-500" role="alert">
+        <p id={errorId} className="text-xs text-red-500 w-full sm:order-last" role="alert">
           {error}
         </p>
       )}
-
-      <p className="text-xs text-muted-foreground">
-        Default: {String(setting.default_value)}
-        {setting.env_var && <span className="hidden sm:inline"> &middot; Env: {setting.env_var}</span>}
-      </p>
     </div>
   )
 }

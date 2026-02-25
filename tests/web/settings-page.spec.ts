@@ -148,10 +148,10 @@ test.describe('Settings Page', () => {
     await setupRoutes(page)
     await page.goto('/console/settings')
 
-    // Use getByLabel to target the setting field labels specifically
-    await expect(page.getByLabel('Requests per minute')).toBeVisible()
-    await expect(page.getByLabel('Max concurrent batch jobs')).toBeVisible()
-    await expect(page.getByLabel('Max concurrent realtime sessions')).toBeVisible()
+    // Labels now show descriptions, not short labels
+    await expect(page.getByLabel('Maximum API requests per minute per tenant')).toBeVisible()
+    await expect(page.getByLabel('Maximum concurrent batch transcription jobs per tenant')).toBeVisible()
+    await expect(page.getByLabel('Maximum concurrent realtime WebSocket sessions per tenant')).toBeVisible()
   })
 
   test('tab switching syncs with URL', async ({ page }) => {
@@ -161,7 +161,7 @@ test.describe('Settings Page', () => {
     // Click Engines tab (tabs have role="tab", not role="button")
     await page.getByRole('tab', { name: /Engines/ }).click()
     await expect(page).toHaveURL(/tab=engines/)
-    await expect(page.getByLabel('Unavailable engine behavior')).toBeVisible()
+    await expect(page.getByLabel('Action when a required engine is not running')).toBeVisible()
 
     // Click System tab
     await page.getByRole('tab', { name: /System/ }).click()
@@ -314,10 +314,10 @@ test.describe('Settings Page', () => {
     await setupRoutes(page)
     await page.goto('/console/settings?tab=engines')
 
-    await expect(page.getByLabel('Unavailable engine behavior')).toBeVisible()
+    await expect(page.getByLabel('Action when a required engine is not running')).toBeVisible()
 
     // Use getByLabel to target the settings select, not the mobile namespace selector
-    const select = page.getByLabel('Unavailable engine behavior')
+    const select = page.getByLabel('Action when a required engine is not running')
     await select.selectOption('wait')
     await expect(page.getByText('unsaved')).toBeVisible()
   })
