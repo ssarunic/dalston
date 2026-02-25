@@ -1024,16 +1024,11 @@ async def _populate_job_result_stats(job: JobModel, log) -> None:
         log: Logger instance
     """
     settings = get_settings()
-    transcript_uri = f"s3://{settings.s3_bucket}/jobs/{job.id}/transcript.json"
+    key = f"jobs/{job.id}/transcript.json"
 
     try:
-        # Parse S3 URI
-        uri_parts = transcript_uri.replace("s3://", "").split("/", 1)
-        bucket = uri_parts[0]
-        key = uri_parts[1] if len(uri_parts) > 1 else ""
-
         async with get_s3_client(settings) as s3:
-            response = await s3.get_object(Bucket=bucket, Key=key)
+            response = await s3.get_object(Bucket=settings.s3_bucket, Key=key)
             body = await response["Body"].read()
             transcript = json.loads(body.decode("utf-8"))
 
@@ -1060,7 +1055,7 @@ async def _populate_job_result_stats(job: JobModel, log) -> None:
         # Don't fail the job if stats extraction fails - just log and continue
         log.warning(
             "job_result_stats_extraction_failed",
-            transcript_uri=transcript_uri,
+            transcript_key=key,
             error=str(e),
         )
 

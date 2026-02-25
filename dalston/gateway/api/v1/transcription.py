@@ -704,20 +704,15 @@ async def get_job_audio(
             },
         )
 
-    # Parse S3 URI to extract bucket/key
-    # Format: s3://bucket/{key}
-    audio_uri = job.audio_uri
-    if not audio_uri or not audio_uri.startswith("s3://"):
-        raise HTTPException(status_code=404, detail="Original audio not found")
+    # Parse and validate S3 URI
+    storage = StorageService(settings)
+    try:
+        bucket, key = storage.parse_s3_uri(job.audio_uri or "")
+    except ValueError:
+        raise HTTPException(
+            status_code=404, detail="Original audio not found"
+        ) from None
 
-    uri_parts = audio_uri.replace("s3://", "").split("/", 1)
-    if len(uri_parts) != 2:
-        raise HTTPException(status_code=404, detail="Original audio not found")
-
-    bucket = uri_parts[0]
-    key = uri_parts[1]
-
-    # Verify bucket matches expected (security check)
     if bucket != settings.s3_bucket:
         logger.warning(
             "audio_bucket_mismatch",
@@ -728,7 +723,6 @@ async def get_job_audio(
         raise HTTPException(status_code=404, detail="Original audio not found")
 
     # Verify exact S3 object exists (handles manual deletion via DELETE /audio)
-    storage = StorageService(settings)
     if not await storage.object_exists(key):
         raise HTTPException(
             status_code=410,
@@ -849,29 +843,19 @@ async def get_job_audio_redacted(
             detail="Redacted audio not available. PII redaction may not have completed successfully.",
         )
 
-    # Parse S3 URI and generate presigned URL
-    # Format: s3://bucket/jobs/{job_id}/audio/redacted.wav
-    if not redacted_audio_uri.startswith("s3://"):
+    # Parse and validate S3 URI
+    try:
+        bucket, key = storage.parse_s3_uri(redacted_audio_uri)
+    except ValueError:
         logger.warning(
             "invalid_redacted_audio_uri",
             job_id=str(job_id),
             uri=redacted_audio_uri,
         )
-        raise HTTPException(status_code=404, detail="Redacted audio not found")
+        raise HTTPException(
+            status_code=404, detail="Redacted audio not found"
+        ) from None
 
-    uri_parts = redacted_audio_uri.replace("s3://", "").split("/", 1)
-    if len(uri_parts) != 2:
-        logger.warning(
-            "invalid_redacted_audio_uri",
-            job_id=str(job_id),
-            uri=redacted_audio_uri,
-        )
-        raise HTTPException(status_code=404, detail="Redacted audio not found")
-
-    bucket = uri_parts[0]
-    key = uri_parts[1]
-
-    # Verify bucket matches expected (security check)
     if bucket != settings.s3_bucket:
         logger.warning(
             "redacted_audio_bucket_mismatch",

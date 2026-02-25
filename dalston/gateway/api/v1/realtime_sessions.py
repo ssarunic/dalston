@@ -290,10 +290,11 @@ async def get_session_transcript(
         raise HTTPException(status_code=404, detail="Transcript not available")
 
     # Parse S3 URI and fetch transcript
-    # Format: s3://bucket/key
-    uri_parts = session.transcript_uri.replace("s3://", "").split("/", 1)
-    bucket = uri_parts[0]
-    key = uri_parts[1] if len(uri_parts) > 1 else ""
+    storage = StorageService(settings)
+    try:
+        bucket, key = storage.parse_s3_uri(session.transcript_uri)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Transcript not found") from None
 
     async with get_s3_client(settings) as s3:
         try:
@@ -391,9 +392,11 @@ async def export_session_transcript(
         raise HTTPException(status_code=404, detail="Transcript not available")
 
     # Parse S3 URI and fetch transcript
-    uri_parts = session.transcript_uri.replace("s3://", "").split("/", 1)
-    bucket = uri_parts[0]
-    key = uri_parts[1] if len(uri_parts) > 1 else ""
+    storage = StorageService(settings)
+    try:
+        bucket, key = storage.parse_s3_uri(session.transcript_uri)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Transcript not found") from None
 
     async with get_s3_client(settings) as s3:
         try:
@@ -449,25 +452,22 @@ async def get_session_audio(
     if not session.audio_uri:
         raise HTTPException(status_code=404, detail="Audio not available")
 
-    # Parse S3 URI and generate presigned URL
-    uri_parts = session.audio_uri.replace("s3://", "").split("/", 1)
-    bucket = uri_parts[0]
-    key = uri_parts[1] if len(uri_parts) > 1 else ""
-
+    # Generate presigned URL from S3 URI
     storage = StorageService(settings)
     try:
-        url = await storage.generate_presigned_url_for_bucket(
-            bucket=bucket,
-            key=key,
+        url = await storage.generate_presigned_url_from_uri(
+            session.audio_uri,
             expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
+            require_expected_bucket=False,  # Realtime sessions may use different buckets
         )
         return {"url": url, "expires_in": PRESIGNED_URL_EXPIRY_SECONDS}
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Invalid audio URI") from None
     except Exception as e:
         logger.warning(
             "audio_presigned_url_failed",
             session_id=session_id,
-            bucket=bucket,
-            key=key,
+            uri=session.audio_uri,
             error=str(e),
         )
         raise HTTPException(status_code=404, detail="Audio not found") from None

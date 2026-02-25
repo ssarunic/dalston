@@ -206,6 +206,49 @@ class StorageService:
             expires_in=expires_in,
         )
 
+    def parse_s3_uri(self, s3_uri: str) -> tuple[str, str]:
+        """Parse s3://bucket/key URI into (bucket, key) tuple.
+
+        Args:
+            s3_uri: S3 URI in format s3://bucket/key
+
+        Returns:
+            Tuple of (bucket, key)
+
+        Raises:
+            ValueError: If URI is invalid or malformed
+        """
+        if not s3_uri or not s3_uri.startswith("s3://"):
+            raise ValueError("Invalid S3 URI")
+        uri_parts = s3_uri[5:].split("/", 1)  # Skip "s3://"
+        if len(uri_parts) != 2 or not uri_parts[0] or not uri_parts[1]:
+            raise ValueError("Invalid S3 URI format")
+        return uri_parts[0], uri_parts[1]
+
+    async def generate_presigned_url_from_uri(
+        self,
+        s3_uri: str,
+        expires_in: int = 3600,
+        require_expected_bucket: bool = True,
+    ) -> str:
+        """Generate a presigned URL directly from an s3:// URI.
+
+        Args:
+            s3_uri: S3 URI in format s3://bucket/key
+            expires_in: URL expiration time in seconds (default 1 hour)
+            require_expected_bucket: If True, validates bucket matches configured bucket
+
+        Returns:
+            Presigned URL for GET request
+
+        Raises:
+            ValueError: If URI is invalid or bucket doesn't match (when required)
+        """
+        bucket, key = self.parse_s3_uri(s3_uri)
+        if require_expected_bucket and bucket != self.bucket:
+            raise ValueError(f"Bucket mismatch: expected {self.bucket}, got {bucket}")
+        return await self.generate_presigned_url_for_bucket(bucket, key, expires_in)
+
     async def generate_presigned_url_for_bucket(
         self,
         bucket: str,
