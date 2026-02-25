@@ -166,14 +166,13 @@ test.describe('Settings Page', () => {
     // Click System tab
     await page.getByRole('tab', { name: /System/ }).click()
     await expect(page).toHaveURL(/tab=system/)
-    await expect(page.getByRole('heading', { name: 'System Information' })).toBeVisible()
+    await expect(page.getByText('read-only')).toBeVisible()
   })
 
   test('system tab shows read-only info with copy buttons', async ({ page }) => {
     await setupRoutes(page)
     await page.goto('/console/settings?tab=system')
 
-    await expect(page.getByText('System Information')).toBeVisible()
     await expect(page.getByText('read-only')).toBeVisible()
     await expect(page.getByText('redis://redis:6379')).toBeVisible()
     await expect(page.getByText('dalston-artifacts')).toBeVisible()

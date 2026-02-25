@@ -209,13 +209,7 @@ function SystemInfoTab({ settings }: { settings: SettingValue[] }) {
 
   return (
     <Card className="overflow-hidden">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Monitor className="h-4 w-4" />
-          System Information
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="overflow-hidden">
+      <CardContent className="overflow-hidden pt-6">
         <div className="rounded-md border border-blue-500/20 bg-blue-500/10 p-3 mb-4">
           <p className="text-sm text-blue-400">
             System settings are read-only and controlled by environment variables.
@@ -390,32 +384,25 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
 
   if (!data) return null
 
-  const Icon = NAMESPACE_ICONS[namespace] ?? Gauge
   const hasOverrides = data.settings.some((s) => s.is_overridden)
 
   return (
     <>
       <Card>
-        <CardHeader>
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Icon className="h-4 w-4" />
-              {data.label}
-            </CardTitle>
-            {hasOverrides && (
+        <CardContent className="pt-6">
+          {hasOverrides && (
+            <div className="flex justify-end mb-4">
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setIsResetDialogOpen(true)}
-                className="text-muted-foreground h-9 px-3 self-start sm:self-auto touch-manipulation"
+                className="text-muted-foreground h-9 px-3 touch-manipulation"
               >
                 <RotateCcw className="h-4 w-4 mr-1.5" />
                 Reset to defaults
               </Button>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent>
+            </div>
+          )}
           <div className="divide-y divide-border">
             {data.settings.map((setting) => (
               <div key={setting.key} className="py-4 first:pt-0 last:pb-0">
