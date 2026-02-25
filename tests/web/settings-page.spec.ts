@@ -7,7 +7,6 @@ const NAMESPACES_RESPONSE = {
     { namespace: 'engines', label: 'Engines', description: 'Engine availability and timeout behavior', editable: true, setting_count: 2, has_overrides: false },
     { namespace: 'audio', label: 'Audio', description: 'Audio download size and timeout constraints', editable: true, setting_count: 2, has_overrides: false },
     { namespace: 'retention', label: 'Retention', description: 'Data retention cleanup intervals and limits', editable: true, setting_count: 3, has_overrides: false },
-    { namespace: 'webhooks', label: 'Webhooks', description: 'Webhook delivery behavior', editable: true, setting_count: 1, has_overrides: false },
     { namespace: 'system', label: 'System', description: 'Infrastructure configuration (read-only)', editable: false, setting_count: 0, has_overrides: false },
   ],
 }
@@ -35,18 +34,6 @@ const ENGINES_RESPONSE = {
   settings: [
     { key: 'unavailable_behavior', label: 'Unavailable engine behavior', description: 'Action when a required engine is not running', value_type: 'select', value: 'fail_fast', default_value: 'fail_fast', is_overridden: false, env_var: 'ENGINE_UNAVAILABLE_BEHAVIOR', options: ['fail_fast', 'wait'] },
     { key: 'wait_timeout_seconds', label: 'Engine wait timeout (seconds)', description: 'How long to wait for an engine before failing', value_type: 'int', value: 300, default_value: 300, is_overridden: false, env_var: 'ENGINE_WAIT_TIMEOUT_SECONDS', min_value: 10, max_value: 3600 },
-  ],
-  updated_at: null,
-}
-
-// Mock webhooks namespace with boolean type
-const WEBHOOKS_RESPONSE = {
-  namespace: 'webhooks',
-  label: 'Webhooks',
-  description: 'Webhook delivery behavior',
-  editable: true,
-  settings: [
-    { key: 'allow_per_job_webhooks', label: 'Allow per-job webhooks', description: 'Accept webhook_url parameter on job submission', value_type: 'bool', value: false, default_value: false, is_overridden: false, env_var: 'ALLOW_PER_JOB_WEBHOOKS' },
   ],
   updated_at: null,
 }
@@ -113,14 +100,6 @@ function setupRoutes(page: import('@playwright/test').Page) {
       })
     }
 
-    if (path === '/api/console/settings/webhooks') {
-      return route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify(WEBHOOKS_RESPONSE),
-      })
-    }
-
     if (path === '/api/console/settings/system') {
       return route.fulfill({
         status: 200,
@@ -161,7 +140,6 @@ test.describe('Settings Page', () => {
     await expect(page.getByText('Engines')).toBeVisible()
     await expect(page.getByText('Audio')).toBeVisible()
     await expect(page.getByText('Retention')).toBeVisible()
-    await expect(page.getByText('Webhooks')).toBeVisible()
     await expect(page.getByText('System')).toBeVisible()
   })
 
@@ -262,19 +240,6 @@ test.describe('Settings Page', () => {
 
     const settingsLink = page.getByRole('link', { name: 'Settings' })
     await expect(settingsLink).toBeVisible()
-  })
-
-  test('boolean toggle works on webhooks tab', async ({ page }) => {
-    await setupRoutes(page)
-    await page.goto('/console/settings?tab=webhooks')
-
-    await expect(page.getByText('Allow per-job webhooks')).toBeVisible()
-    await expect(page.getByText('Disabled')).toBeVisible()
-
-    // Click the toggle
-    await page.getByRole('switch').click()
-    await expect(page.getByText('Enabled')).toBeVisible()
-    await expect(page.getByText('unsaved')).toBeVisible()
   })
 
   test('select dropdown works on engines tab', async ({ page }) => {

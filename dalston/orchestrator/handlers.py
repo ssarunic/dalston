@@ -1133,7 +1133,6 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
     await _decrement_concurrent_jobs(redis, job_id, job.tenant_id)
 
     # Publish job completion event for webhook delivery
-    # This triggers both admin-registered webhooks and per-job webhook_url (legacy)
     if any_failed:
         await publish_job_failed(redis, job_id, job.error or "Unknown error")
     else:

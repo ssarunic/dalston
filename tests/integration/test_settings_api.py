@@ -5,7 +5,7 @@ and conflict detection.
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -14,10 +14,14 @@ from fastapi.testclient import TestClient
 
 from dalston.db.models import SettingModel
 from dalston.gateway.api.console import router as console_router
-from dalston.gateway.dependencies import get_db, get_redis, get_session_router, require_auth
+from dalston.gateway.dependencies import (
+    get_db,
+    get_redis,
+    get_session_router,
+    require_auth,
+)
 from dalston.gateway.services.auth import DEFAULT_EXPIRES_AT, APIKey, Scope
 from dalston.gateway.services.settings import (
-    SettingsService,
     clear_settings_cache,
 )
 
@@ -105,7 +109,9 @@ def _make_app(admin_key, mock_db, mock_redis, mock_session_router):
 class TestListNamespaces:
     """Tests for GET /api/console/settings."""
 
-    def test_lists_all_namespaces(self, admin_api_key, mock_db, mock_redis, mock_session_router):
+    def test_lists_all_namespaces(
+        self, admin_api_key, mock_db, mock_redis, mock_session_router
+    ):
         """Should return all defined namespaces."""
         app = _make_app(admin_api_key, mock_db, mock_redis, mock_session_router)
 
@@ -125,10 +131,11 @@ class TestListNamespaces:
         assert "engines" in namespaces
         assert "audio" in namespaces
         assert "retention" in namespaces
-        assert "webhooks" in namespaces
         assert "system" in namespaces
 
-    def test_system_namespace_not_editable(self, admin_api_key, mock_db, mock_redis, mock_session_router):
+    def test_system_namespace_not_editable(
+        self, admin_api_key, mock_db, mock_redis, mock_session_router
+    ):
         """System namespace should be marked as not editable."""
         app = _make_app(admin_api_key, mock_db, mock_redis, mock_session_router)
 
@@ -149,7 +156,9 @@ class TestListNamespaces:
 class TestGetNamespace:
     """Tests for GET /api/console/settings/{namespace}."""
 
-    def test_get_rate_limits_defaults(self, admin_api_key, mock_db, mock_redis, mock_session_router):
+    def test_get_rate_limits_defaults(
+        self, admin_api_key, mock_db, mock_redis, mock_session_router
+    ):
         """Should return rate limit settings with default values."""
         app = _make_app(admin_api_key, mock_db, mock_redis, mock_session_router)
 
@@ -171,7 +180,9 @@ class TestGetNamespace:
         for setting in data["settings"]:
             assert setting["is_overridden"] is False
 
-    def test_get_rate_limits_with_override(self, admin_api_key, mock_db, mock_redis, mock_session_router):
+    def test_get_rate_limits_with_override(
+        self, admin_api_key, mock_db, mock_redis, mock_session_router
+    ):
         """Should show overridden values from DB."""
         app = _make_app(admin_api_key, mock_db, mock_redis, mock_session_router)
 
@@ -192,19 +203,25 @@ class TestGetNamespace:
         assert response.status_code == 200
         data = response.json()
 
-        rpm_setting = next(s for s in data["settings"] if s["key"] == "requests_per_minute")
+        rpm_setting = next(
+            s for s in data["settings"] if s["key"] == "requests_per_minute"
+        )
         assert rpm_setting["value"] == 1200
         assert rpm_setting["is_overridden"] is True
         assert rpm_setting["default_value"] == 600  # Config default
 
-    def test_get_unknown_namespace_returns_404(self, admin_api_key, mock_db, mock_redis, mock_session_router):
+    def test_get_unknown_namespace_returns_404(
+        self, admin_api_key, mock_db, mock_redis, mock_session_router
+    ):
         """Unknown namespace should return 404."""
         app = _make_app(admin_api_key, mock_db, mock_redis, mock_session_router)
         client = TestClient(app)
         response = client.get("/api/console/settings/nonexistent")
         assert response.status_code == 404
 
-    def test_get_system_namespace_returns_readonly(self, admin_api_key, mock_db, mock_redis, mock_session_router):
+    def test_get_system_namespace_returns_readonly(
+        self, admin_api_key, mock_db, mock_redis, mock_session_router
+    ):
         """System namespace should return read-only system info."""
         app = _make_app(admin_api_key, mock_db, mock_redis, mock_session_router)
         client = TestClient(app)
@@ -221,7 +238,9 @@ class TestGetNamespace:
 class TestUpdateNamespace:
     """Tests for PATCH /api/console/settings/{namespace}."""
 
-    def test_update_rate_limit(self, admin_api_key, mock_db, mock_redis, mock_session_router):
+    def test_update_rate_limit(
+        self, admin_api_key, mock_db, mock_redis, mock_session_router
+    ):
         """Should update a setting and return new values."""
         app = _make_app(admin_api_key, mock_db, mock_redis, mock_session_router)
 
@@ -266,7 +285,9 @@ class TestUpdateNamespace:
         data = response.json()
         assert data["namespace"] == "rate_limits"
 
-    def test_update_unknown_key_returns_400(self, admin_api_key, mock_db, mock_redis, mock_session_router):
+    def test_update_unknown_key_returns_400(
+        self, admin_api_key, mock_db, mock_redis, mock_session_router
+    ):
         """Unknown key should return 400."""
         app = _make_app(admin_api_key, mock_db, mock_redis, mock_session_router)
 
@@ -286,7 +307,9 @@ class TestUpdateNamespace:
         assert response.status_code == 400
         assert "Unknown setting" in response.json()["detail"]
 
-    def test_update_invalid_value_type_returns_400(self, admin_api_key, mock_db, mock_redis, mock_session_router):
+    def test_update_invalid_value_type_returns_400(
+        self, admin_api_key, mock_db, mock_redis, mock_session_router
+    ):
         """Invalid value type should return 400."""
         app = _make_app(admin_api_key, mock_db, mock_redis, mock_session_router)
 
@@ -305,7 +328,9 @@ class TestUpdateNamespace:
         assert response.status_code == 400
         assert "expected integer" in response.json()["detail"]
 
-    def test_update_below_minimum_returns_400(self, admin_api_key, mock_db, mock_redis, mock_session_router):
+    def test_update_below_minimum_returns_400(
+        self, admin_api_key, mock_db, mock_redis, mock_session_router
+    ):
         """Value below minimum should return 400."""
         app = _make_app(admin_api_key, mock_db, mock_redis, mock_session_router)
 
@@ -328,7 +353,9 @@ class TestUpdateNamespace:
 class TestResetNamespace:
     """Tests for POST /api/console/settings/{namespace}/reset."""
 
-    def test_reset_namespace(self, admin_api_key, mock_db, mock_redis, mock_session_router):
+    def test_reset_namespace(
+        self, admin_api_key, mock_db, mock_redis, mock_session_router
+    ):
         """Should delete overrides and return default values."""
         app = _make_app(admin_api_key, mock_db, mock_redis, mock_session_router)
 
@@ -368,7 +395,9 @@ class TestResetNamespace:
         for setting in data["settings"]:
             assert setting["is_overridden"] is False
 
-    def test_reset_readonly_returns_400(self, admin_api_key, mock_db, mock_redis, mock_session_router):
+    def test_reset_readonly_returns_400(
+        self, admin_api_key, mock_db, mock_redis, mock_session_router
+    ):
         """Resetting read-only namespace should return 400."""
         app = _make_app(admin_api_key, mock_db, mock_redis, mock_session_router)
         client = TestClient(app)
@@ -379,7 +408,9 @@ class TestResetNamespace:
 class TestPermissions:
     """Tests for auth enforcement."""
 
-    def test_non_admin_gets_403(self, non_admin_api_key, mock_db, mock_redis, mock_session_router):
+    def test_non_admin_gets_403(
+        self, non_admin_api_key, mock_db, mock_redis, mock_session_router
+    ):
         """Non-admin API key should be rejected with 403."""
         app = _make_app(non_admin_api_key, mock_db, mock_redis, mock_session_router)
         client = TestClient(app)

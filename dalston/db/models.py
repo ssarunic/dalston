@@ -179,8 +179,6 @@ class JobModel(Base):
     audio_channels: Mapped[int | None] = mapped_column(nullable=True)
     audio_bit_depth: Mapped[int | None] = mapped_column(nullable=True)
     parameters: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
-    webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    webhook_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),

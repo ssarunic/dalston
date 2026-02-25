@@ -33,7 +33,7 @@ from dalston.common.models import (
     validate_retention,
 )
 from dalston.common.utils import compute_duration_ms
-from dalston.config import WEBHOOK_METADATA_MAX_SIZE, Settings
+from dalston.config import Settings
 from dalston.gateway.dependencies import (
     RequireJobsRead,
     RequireJobsWrite,
@@ -127,16 +127,6 @@ async def create_transcription(
     timestamps_granularity: Annotated[
         str, Form(description="Timestamp granularity: 'none', 'segment', 'word'")
     ] = "word",
-    webhook_url: Annotated[
-        str | None,
-        Form(
-            description="Webhook URL for completion callback (deprecated, use registered webhooks)"
-        ),
-    ] = None,
-    webhook_metadata: Annotated[
-        str | None,
-        Form(description="JSON object echoed in webhook callback (max 16KB)"),
-    ] = None,
     # PII Detection (M26)
     pii_detection: Annotated[
         bool,
@@ -191,40 +181,6 @@ async def create_transcription(
     # Ingest audio (validates input, downloads from URL if needed, probes metadata)
     ingested = await ingestion_service.ingest(file=file, url=audio_url)
 
-    # Check per-job webhook_url deprecation
-    if webhook_url:
-        if not settings.allow_per_job_webhooks:
-            raise HTTPException(
-                status_code=400,
-                detail="Per-job webhook_url is disabled. Use registered webhooks via POST /v1/webhooks instead.",
-            )
-        # Add deprecation warning header
-        response.headers["Deprecation"] = "true"
-        response.headers["X-Deprecation-Notice"] = (
-            "webhook_url parameter is deprecated. Use registered webhooks via POST /v1/webhooks."
-        )
-
-    # Parse webhook_metadata JSON string
-    parsed_webhook_metadata: dict | None = None
-    if webhook_metadata:
-        try:
-            parsed_webhook_metadata = json.loads(webhook_metadata)
-            if not isinstance(parsed_webhook_metadata, dict):
-                raise HTTPException(
-                    status_code=400,
-                    detail="webhook_metadata must be a JSON object",
-                )
-            # Validate size
-            if len(webhook_metadata) > WEBHOOK_METADATA_MAX_SIZE:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"webhook_metadata exceeds maximum size of {WEBHOOK_METADATA_MAX_SIZE // 1024}KB",
-                )
-        except json.JSONDecodeError as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid JSON in webhook_metadata: {e}",
-            ) from e
 
     # Validate per_channel mode requires stereo audio
     if speaker_detection == "per_channel" and ingested.metadata.channels < 2:
@@ -323,8 +279,6 @@ async def create_transcription(
         tenant_id=api_key.tenant_id,
         audio_uri=audio_uri,
         parameters=parameters,
-        webhook_url=webhook_url,
-        webhook_metadata=parsed_webhook_metadata,
         audio_format=ingested.metadata.format,
         audio_duration=ingested.metadata.duration,
         audio_sample_rate=ingested.metadata.sample_rate,

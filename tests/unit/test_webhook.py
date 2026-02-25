@@ -91,31 +91,15 @@ class TestBuildPayload:
             == "Transcription engine failed: CUDA out of memory"
         )
 
-    def test_payload_with_webhook_metadata(
-        self, webhook_service: WebhookService, sample_job_id: UUID
-    ):
-        """Test payload includes custom webhook_metadata."""
-        metadata = {"user_id": "123", "episode": "ep_456"}
-        payload = webhook_service.build_payload(
-            event="transcription.completed",
-            job_id=sample_job_id,
-            status="completed",
-            webhook_metadata=metadata,
-        )
-
-        assert payload["data"]["webhook_metadata"] == metadata
-
     def test_full_completed_payload(
         self, webhook_service: WebhookService, sample_job_id: UUID
     ):
         """Test complete payload with all fields."""
-        metadata = {"user_id": "123"}
         payload = webhook_service.build_payload(
             event="transcription.completed",
             job_id=sample_job_id,
             status="completed",
             duration=120.5,
-            webhook_metadata=metadata,
         )
 
         # Standard Webhooks envelope
@@ -128,7 +112,6 @@ class TestBuildPayload:
         assert payload["data"]["transcription_id"] == str(sample_job_id)
         assert payload["data"]["status"] == "completed"
         assert payload["data"]["duration"] == 120.5
-        assert payload["data"]["webhook_metadata"] == metadata
 
 
 class TestSignPayload:
@@ -357,7 +340,7 @@ class TestDeliver:
         payload = {
             "event": "transcription.completed",
             "transcription_id": "test-123",
-            "webhook_metadata": {"nested": {"data": True}},
+            "data": {"status": "completed"},
         }
         await webhook_service.deliver(
             url="https://example.com/webhook",
@@ -369,7 +352,7 @@ class TestDeliver:
         sent_payload = json.loads(request.content)
         assert sent_payload["event"] == "transcription.completed"
         assert sent_payload["transcription_id"] == "test-123"
-        assert sent_payload["webhook_metadata"]["nested"]["data"] is True
+        assert sent_payload["data"]["status"] == "completed"
 
 
 @pytest.mark.asyncio

@@ -144,7 +144,6 @@ class WebhookService:
         status: str,
         duration: float | None = None,
         error: str | None = None,
-        webhook_metadata: dict | None = None,
     ) -> dict[str, Any]:
         """Build webhook payload following Standard Webhooks specification.
 
@@ -156,7 +155,6 @@ class WebhookService:
             status: Job status
             duration: Audio duration in seconds
             error: Error message (for failed jobs)
-            webhook_metadata: Custom data to echo back
 
         Returns:
             Webhook payload dictionary in Standard Webhooks format
@@ -172,9 +170,6 @@ class WebhookService:
 
         if error is not None:
             data["error"] = error
-
-        if webhook_metadata is not None:
-            data["webhook_metadata"] = webhook_metadata
 
         # Standard Webhooks envelope
         payload: dict[str, Any] = {

@@ -17,7 +17,7 @@ import structlog
 from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dalston.config import Settings, get_settings
+from dalston.config import get_settings
 from dalston.db.models import SettingModel
 
 logger = structlog.get_logger()
@@ -77,11 +77,6 @@ NAMESPACES: list[NamespaceInfo] = [
         namespace="retention",
         label="Retention",
         description="Data retention cleanup intervals and limits",
-    ),
-    NamespaceInfo(
-        namespace="webhooks",
-        label="Webhooks",
-        description="Webhook delivery behavior",
     ),
     NamespaceInfo(
         namespace="system",
@@ -207,16 +202,6 @@ SETTING_DEFINITIONS: list[SettingDefinition] = [
         min_value=1,
         max_value=8760,
     ),
-    # --- webhooks ---
-    SettingDefinition(
-        namespace="webhooks",
-        key="allow_per_job_webhooks",
-        label="Allow per-job webhooks",
-        description="Accept webhook_url parameter on job submission (legacy behavior)",
-        value_type="bool",
-        default_value=False,
-        env_var="ALLOW_PER_JOB_WEBHOOKS",
-    ),
 ]
 
 # Lookup maps for fast access
@@ -238,7 +223,6 @@ _ENV_TO_SETTINGS_FIELD: dict[str, str] = {
     "RETENTION_CLEANUP_INTERVAL_SECONDS": "retention_cleanup_interval_seconds",
     "RETENTION_CLEANUP_BATCH_SIZE": "retention_cleanup_batch_size",
     "RETENTION_MIN_HOURS": "retention_min_hours",
-    "ALLOW_PER_JOB_WEBHOOKS": "allow_per_job_webhooks",
 }
 
 
@@ -399,7 +383,9 @@ class SettingsService:
         latest_updated: datetime | None = None
         for row in rows:
             # The value column stores {"v": <actual_value>}
-            overrides[row.key] = row.value.get("v") if isinstance(row.value, dict) else row.value
+            overrides[row.key] = (
+                row.value.get("v") if isinstance(row.value, dict) else row.value
+            )
             if latest_updated is None or row.updated_at > latest_updated:
                 latest_updated = row.updated_at
 
@@ -526,9 +512,7 @@ class SettingsService:
         for key, value in updates.items():
             defn = _DEFINITION_MAP.get((namespace, key))
             if defn is None:
-                raise ValueError(
-                    f"Unknown setting: {namespace}/{key}"
-                )
+                raise ValueError(f"Unknown setting: {namespace}/{key}")
             self._validate_value(defn, value)
 
         # Optimistic locking check
@@ -719,26 +703,18 @@ class SettingsService:
                     f"{defn.key}: expected integer, got {type(value).__name__}"
                 )
             if defn.min_value is not None and value < defn.min_value:
-                raise ValueError(
-                    f"{defn.key}: minimum value is {defn.min_value}"
-                )
+                raise ValueError(f"{defn.key}: minimum value is {defn.min_value}")
             if defn.max_value is not None and value > defn.max_value:
-                raise ValueError(
-                    f"{defn.key}: maximum value is {defn.max_value}"
-                )
+                raise ValueError(f"{defn.key}: maximum value is {defn.max_value}")
         elif defn.value_type == "float":
-            if not isinstance(value, (int, float)) or isinstance(value, bool):
+            if not isinstance(value, int | float) or isinstance(value, bool):
                 raise ValueError(
                     f"{defn.key}: expected number, got {type(value).__name__}"
                 )
             if defn.min_value is not None and value < defn.min_value:
-                raise ValueError(
-                    f"{defn.key}: minimum value is {defn.min_value}"
-                )
+                raise ValueError(f"{defn.key}: minimum value is {defn.min_value}")
             if defn.max_value is not None and value > defn.max_value:
-                raise ValueError(
-                    f"{defn.key}: maximum value is {defn.max_value}"
-                )
+                raise ValueError(f"{defn.key}: maximum value is {defn.max_value}")
         elif defn.value_type == "bool":
             if not isinstance(value, bool):
                 raise ValueError(
@@ -751,9 +727,7 @@ class SettingsService:
                 )
         elif defn.value_type == "select":
             if defn.options and value not in defn.options:
-                raise ValueError(
-                    f"{defn.key}: must be one of {defn.options}"
-                )
+                raise ValueError(f"{defn.key}: must be one of {defn.options}")
 
 
 class ConflictError(Exception):

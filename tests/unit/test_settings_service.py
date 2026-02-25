@@ -3,14 +3,12 @@
 import pytest
 
 from dalston.gateway.services.settings import (
-    NAMESPACE_MAP,
-    SETTING_DEFINITIONS,
-    ConflictError,
-    NamespaceInfo,
-    SettingDefinition,
-    SettingsService,
     _DEFINITION_MAP,
     _DEFINITIONS_BY_NS,
+    NAMESPACE_MAP,
+    SETTING_DEFINITIONS,
+    SettingDefinition,
+    SettingsService,
     clear_settings_cache,
     get_settings_cache,
 )

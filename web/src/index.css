@@ -101,3 +101,14 @@
 .plyr__tooltip::before {
   border-top-color: hsl(var(--card));
 }
+
+/* Hide scrollbar for touch-friendly horizontal scrolling */
+@layer utilities {
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}

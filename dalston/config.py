@@ -5,7 +5,6 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Webhook constants
-WEBHOOK_METADATA_MAX_SIZE = 16 * 1024  # 16KB max for webhook_metadata
 WEBHOOK_SECRET_DEFAULT = "dalston-webhook-secret-change-me"
 
 
@@ -47,18 +46,11 @@ class Settings(BaseSettings):
         default=None, alias="AWS_SECRET_ACCESS_KEY"
     )
 
-    # Webhooks (M05)
+    # Webhooks
     webhook_secret: str = Field(
         default=WEBHOOK_SECRET_DEFAULT,
         alias="WEBHOOK_SECRET",
-        description="HMAC secret for signing webhook payloads (legacy per-job webhooks)",
-    )
-
-    # Admin Webhooks (M21)
-    allow_per_job_webhooks: bool = Field(
-        default=False,
-        alias="ALLOW_PER_JOB_WEBHOOKS",
-        description="Allow webhook_url on job submission (legacy, disabled by default)",
+        description="Default HMAC secret for signing webhook payloads (used for endpoints without custom secrets)",
     )
 
     # Rate Limiting

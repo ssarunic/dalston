@@ -249,7 +249,6 @@ class Job(BaseModel):
     status: JobStatus = JobStatus.PENDING
     audio_uri: str
     parameters: dict[str, Any] = Field(default_factory=dict)
-    webhook_url: str | None = None
     error: str | None = None
     created_at: datetime
     started_at: datetime | None = None
