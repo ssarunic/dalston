@@ -3,7 +3,9 @@ import { Activity, Cpu, Radio, CheckCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/StatusBadge'
+import { MetricsPanel } from '@/components/MetricsPanel'
 import { useDashboard } from '@/hooks/useDashboard'
+import { useMetrics } from '@/hooks/useMetrics'
 import { useRealtimeSessions } from '@/hooks/useRealtimeSessions'
 import type { JobSummary, RealtimeSessionSummary, RealtimeSessionStatus, JobStatus } from '@/api/types'
 
@@ -106,6 +108,7 @@ function formatTimeAgo(dateStr: string): string {
 
 export function Dashboard() {
   const { health, jobStats, realtime, recentJobs, isLoading, error } = useDashboard()
+  const { data: metricsData, isLoading: metricsLoading } = useMetrics()
   const { data: sessionsData, isLoading: sessionsLoading } = useRealtimeSessions({ limit: 5 })
 
   // Handle error state - show basic dashboard with error indicator
@@ -150,6 +153,9 @@ export function Dashboard() {
           loading={isLoading}
         />
       </div>
+
+      {/* Key Metrics */}
+      <MetricsPanel metrics={metricsData} isLoading={metricsLoading} />
 
       {/* Recent Activity - Two Column Layout */}
       <div className="grid gap-6 grid-cols-1 lg:grid-cols-2">

@@ -478,6 +478,40 @@ export interface UpdateSettingsRequest {
   expected_updated_at?: string | null
 }
 
+// Metrics types (for dashboard charts)
+export interface ThroughputBucket {
+  hour: string
+  completed: number
+  failed: number
+}
+
+export interface SuccessRate {
+  window: string  // "1h" | "24h"
+  total: number
+  completed: number
+  failed: number
+  rate: number  // 0.0 – 1.0
+}
+
+export interface EngineMetric {
+  engine_id: string
+  stage: string
+  completed: number
+  failed: number
+  avg_duration_ms: number | null
+  p95_duration_ms: number | null
+  queue_depth: number
+}
+
+export interface MetricsResponse {
+  throughput: ThroughputBucket[]
+  success_rates: SuccessRate[]
+  total_audio_minutes: number
+  total_jobs_all_time: number
+  engines: EngineMetric[]
+  grafana_url: string | null
+}
+
 export interface AuditListParams {
   tenant_id?: string
   action?: string

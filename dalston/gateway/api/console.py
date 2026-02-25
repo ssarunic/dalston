@@ -1,6 +1,7 @@
 """Console API endpoints for the web management interface.
 
 GET /api/console/dashboard - Aggregated dashboard data
+GET /api/console/metrics - Key operational metrics for dashboard charts
 GET /api/console/jobs/{job_id}/tasks - Get task DAG for a job
 GET /api/console/engines - Get batch and realtime engine status
 DELETE /api/console/jobs/{job_id} - Delete a job and its artifacts (admin)
@@ -10,7 +11,8 @@ PATCH /api/console/settings/{namespace} - Update settings
 POST /api/console/settings/{namespace}/reset - Reset to defaults
 """
 
-from datetime import UTC, datetime
+import os
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID
 
@@ -18,7 +20,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from redis.asyncio import Redis
-from sqlalchemy import func, select
+from sqlalchemy import case, extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -26,7 +28,7 @@ from dalston.common.events import publish_job_cancel_requested
 from dalston.common.models import JobStatus
 from dalston.common.streams_types import CONSUMER_GROUP
 from dalston.config import Settings
-from dalston.db.models import JobModel
+from dalston.db.models import JobModel, TaskModel
 from dalston.db.session import DEFAULT_TENANT_ID
 from dalston.gateway.dependencies import (
     RequireAdmin,
@@ -1144,4 +1146,267 @@ async def reset_settings_namespace(
             for s in ns.settings
         ],
         updated_at=ns.updated_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Metrics endpoints
+# ---------------------------------------------------------------------------
+
+
+class ThroughputBucket(BaseModel):
+    """Hourly job count for throughput chart."""
+
+    hour: str  # ISO 8601 hour start, e.g. "2026-02-25T14:00:00+00:00"
+    completed: int
+    failed: int
+
+
+class SuccessRate(BaseModel):
+    """Job success rate over a time window."""
+
+    window: str  # e.g. "1h", "24h"
+    total: int
+    completed: int
+    failed: int
+    rate: float  # 0.0 – 1.0
+
+
+class EngineMetric(BaseModel):
+    """Per-engine performance summary."""
+
+    engine_id: str
+    stage: str
+    completed: int
+    failed: int
+    avg_duration_ms: float | None
+    p95_duration_ms: float | None
+    queue_depth: int
+
+
+class MetricsResponse(BaseModel):
+    """Key operational metrics for the dashboard."""
+
+    throughput: list[ThroughputBucket]
+    success_rates: list[SuccessRate]
+    total_audio_minutes: float
+    total_jobs_all_time: int
+    engines: list[EngineMetric]
+    grafana_url: str | None
+
+
+@router.get(
+    "/metrics",
+    response_model=MetricsResponse,
+    summary="Get operational metrics",
+    description="Key operational metrics for the web console dashboard.",
+)
+async def get_metrics(
+    api_key: RequireAdmin,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    settings: Settings = Depends(get_settings),
+) -> MetricsResponse:
+    """Return key metrics for the web console.
+
+    Queries the database for job/task statistics and Redis for queue depths.
+    Designed to be called on a polling interval (e.g. 30s) by the frontend.
+    """
+    now = datetime.now(UTC)
+
+    # -- Hourly throughput (last 24 hours) --------------------------------
+    twenty_four_hours_ago = now - timedelta(hours=24)
+
+    # Use date_trunc to bucket completed jobs by hour
+    hour_col = func.date_trunc("hour", JobModel.completed_at)
+    throughput_query = (
+        select(
+            hour_col.label("hour"),
+            func.count(JobModel.id).label("total"),
+            func.sum(
+                case(
+                    (JobModel.status == JobStatus.COMPLETED.value, 1),
+                    else_=0,
+                )
+            ).label("completed"),
+            func.sum(
+                case(
+                    (JobModel.status == JobStatus.FAILED.value, 1),
+                    else_=0,
+                )
+            ).label("failed"),
+        )
+        .where(JobModel.completed_at >= twenty_four_hours_ago)
+        .where(JobModel.status.in_([JobStatus.COMPLETED.value, JobStatus.FAILED.value]))
+        .group_by(hour_col)
+        .order_by(hour_col)
+    )
+    throughput_rows = (await db.execute(throughput_query)).all()
+
+    # Build a full 24-hour series (fill gaps with zeros)
+    bucket_map: dict[str, ThroughputBucket] = {}
+    for row in throughput_rows:
+        key = row.hour.isoformat()
+        bucket_map[key] = ThroughputBucket(
+            hour=key,
+            completed=row.completed or 0,
+            failed=row.failed or 0,
+        )
+
+    throughput: list[ThroughputBucket] = []
+    for i in range(24):
+        bucket_start = (now - timedelta(hours=23 - i)).replace(
+            minute=0, second=0, microsecond=0
+        )
+        key = bucket_start.isoformat()
+        throughput.append(
+            bucket_map.get(
+                key,
+                ThroughputBucket(hour=key, completed=0, failed=0),
+            )
+        )
+
+    # -- Success rates (1h and 24h windows) --------------------------------
+    success_rates: list[SuccessRate] = []
+    for label, window_start in [
+        ("1h", now - timedelta(hours=1)),
+        ("24h", twenty_four_hours_ago),
+    ]:
+        rate_query = (
+            select(
+                func.count(JobModel.id).label("total"),
+                func.sum(
+                    case(
+                        (JobModel.status == JobStatus.COMPLETED.value, 1),
+                        else_=0,
+                    )
+                ).label("completed"),
+                func.sum(
+                    case(
+                        (JobModel.status == JobStatus.FAILED.value, 1),
+                        else_=0,
+                    )
+                ).label("failed"),
+            )
+            .where(JobModel.completed_at >= window_start)
+            .where(
+                JobModel.status.in_(
+                    [JobStatus.COMPLETED.value, JobStatus.FAILED.value]
+                )
+            )
+        )
+        row = (await db.execute(rate_query)).one()
+        total = row.total or 0
+        completed = row.completed or 0
+        failed = row.failed or 0
+        success_rates.append(
+            SuccessRate(
+                window=label,
+                total=total,
+                completed=completed,
+                failed=failed,
+                rate=completed / total if total > 0 else 1.0,
+            )
+        )
+
+    # -- Total audio minutes (all time) ------------------------------------
+    audio_sum = await db.execute(
+        select(func.coalesce(func.sum(JobModel.audio_duration), 0.0)).where(
+            JobModel.status == JobStatus.COMPLETED.value
+        )
+    )
+    total_audio_seconds = float(audio_sum.scalar() or 0)
+    total_audio_minutes = total_audio_seconds / 60.0
+
+    # -- Total jobs all time -----------------------------------------------
+    total_jobs_row = await db.execute(select(func.count(JobModel.id)))
+    total_jobs_all_time = total_jobs_row.scalar() or 0
+
+    # -- Per-engine metrics ------------------------------------------------
+    from dalston.orchestrator.catalog import get_catalog
+
+    catalog = get_catalog()
+    engine_metrics: list[EngineMetric] = []
+
+    for entry in catalog.get_all_engines():
+        if not entry.capabilities.stages:
+            continue  # skip realtime engines
+
+        engine_id = entry.engine_id
+        stage = entry.capabilities.stages[0]
+
+        # Task stats from DB (last 24h)
+        engine_task_query = (
+            select(
+                func.count(TaskModel.id)
+                .filter(TaskModel.status == "completed")
+                .label("completed"),
+                func.count(TaskModel.id)
+                .filter(TaskModel.status == "failed")
+                .label("failed"),
+                func.avg(
+                    extract(
+                        "epoch",
+                        TaskModel.completed_at - TaskModel.started_at,
+                    )
+                )
+                .filter(
+                    TaskModel.status == "completed",
+                    TaskModel.started_at.isnot(None),
+                    TaskModel.completed_at.isnot(None),
+                )
+                .label("avg_seconds"),
+                func.percentile_cont(0.95)
+                .within_group(
+                    extract(
+                        "epoch",
+                        TaskModel.completed_at - TaskModel.started_at,
+                    )
+                )
+                .filter(
+                    TaskModel.status == "completed",
+                    TaskModel.started_at.isnot(None),
+                    TaskModel.completed_at.isnot(None),
+                )
+                .label("p95_seconds"),
+            )
+            .where(TaskModel.engine_id == engine_id)
+            .where(TaskModel.started_at >= twenty_four_hours_ago)
+        )
+        task_row = (await db.execute(engine_task_query)).one()
+
+        # Queue depth from Redis
+        stream_key = f"dalston:stream:{engine_id}"
+        queue_depth = await _get_stream_backlog(redis, stream_key)
+
+        engine_metrics.append(
+            EngineMetric(
+                engine_id=engine_id,
+                stage=stage,
+                completed=task_row.completed or 0,
+                failed=task_row.failed or 0,
+                avg_duration_ms=(
+                    round(task_row.avg_seconds * 1000, 1)
+                    if task_row.avg_seconds is not None
+                    else None
+                ),
+                p95_duration_ms=(
+                    round(task_row.p95_seconds * 1000, 1)
+                    if task_row.p95_seconds is not None
+                    else None
+                ),
+                queue_depth=queue_depth,
+            )
+        )
+
+    # Grafana URL from environment (optional)
+    grafana_url = os.environ.get("DALSTON_GRAFANA_URL")
+
+    return MetricsResponse(
+        throughput=throughput,
+        success_rates=success_rates,
+        total_audio_minutes=round(total_audio_minutes, 1),
+        total_jobs_all_time=total_jobs_all_time,
+        engines=engine_metrics,
+        grafana_url=grafana_url,
     )
