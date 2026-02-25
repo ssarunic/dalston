@@ -45,6 +45,7 @@ class JobsService:
     async def create_job(
         self,
         db: AsyncSession,
+        job_id: UUID,
         tenant_id: UUID,
         audio_uri: str,
         parameters: dict[str, Any],
@@ -68,6 +69,7 @@ class JobsService:
 
         Args:
             db: Database session
+            job_id: Pre-generated job UUID (used for S3 path consistency)
             tenant_id: Tenant UUID for isolation
             audio_uri: S3 URI to uploaded audio
             parameters: Job configuration parameters
@@ -84,6 +86,7 @@ class JobsService:
             Created JobModel instance
         """
         job = JobModel(
+            id=job_id,
             tenant_id=tenant_id,
             audio_uri=audio_uri,
             parameters=parameters,

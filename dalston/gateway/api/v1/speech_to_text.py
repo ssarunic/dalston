@@ -10,7 +10,7 @@ This is supported by the auth middleware alongside Bearer tokens.
 
 import asyncio
 from typing import Annotated, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import (
     APIRouter,
@@ -232,27 +232,26 @@ async def create_transcription(
     if num_speakers is not None:
         parameters["num_speakers"] = num_speakers
 
-    # Create job first with placeholder URI to get real job ID
-    job = await jobs_service.create_job(
-        db=db,
-        tenant_id=api_key.tenant_id,
-        audio_uri="pending",
-        parameters=parameters,
-    )
+    # Generate job ID upfront so we can upload to the correct S3 path
+    job_id = uuid4()
 
-    # Upload audio with correct job ID
+    # Upload audio to S3
     storage = StorageService(settings)
     audio_uri = await storage.upload_audio(
-        job_id=job.id,
+        job_id=job_id,
         file=file,
         file_content=file_content,
         filename=filename,
     )
 
-    # Update job with correct audio URI
-    job.audio_uri = audio_uri
-    await db.commit()
-    await db.refresh(job)
+    # Create job in database
+    job = await jobs_service.create_job(
+        db=db,
+        job_id=job_id,
+        tenant_id=api_key.tenant_id,
+        audio_uri=audio_uri,
+        parameters=parameters,
+    )
 
     # Publish job.created event for orchestrator
     await publish_job_created(redis, job.id)
@@ -265,7 +264,6 @@ async def create_transcription(
         )
 
     # For sync mode, wait for completion (with timeout)
-    job_id = job.id  # Store for polling
     max_wait_seconds = 300  # 5 minute timeout for sync
     poll_interval = 1.0
     elapsed = 0.0

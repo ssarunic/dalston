@@ -10,7 +10,7 @@ DELETE /v1/audio/transcriptions/{job_id} - Delete a completed/failed job
 import asyncio
 import json
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import structlog
 from fastapi import (
@@ -345,10 +345,13 @@ async def create_transcription(
             parameters["redact_pii_audio"] = True
             parameters["pii_redaction_mode"] = pii_redaction_mode
 
+    # Generate job ID upfront so we can upload to the correct S3 path
+    job_id = uuid4()
+
     # Upload audio to S3
     storage = StorageService(settings)
     audio_uri = await storage.upload_audio(
-        job_id=UUID("00000000-0000-0000-0000-000000000000"),  # Temporary, will update
+        job_id=job_id,
         file=file,
         file_content=file_content,
         filename=filename,
@@ -362,8 +365,9 @@ async def create_transcription(
     # Create job in database
     job = await jobs_service.create_job(
         db=db,
+        job_id=job_id,
         tenant_id=api_key.tenant_id,
-        audio_uri="pending",  # Will update after we have the job ID
+        audio_uri=audio_uri,
         parameters=parameters,
         webhook_url=webhook_url,
         webhook_metadata=parsed_webhook_metadata,
@@ -381,19 +385,6 @@ async def create_transcription(
         pii_redact_audio=redact_pii_audio,
         pii_redaction_mode=pii_redaction_mode if redact_pii_audio else None,
     )
-
-    # Re-upload with correct job ID path
-    audio_uri = await storage.upload_audio(
-        job_id=job.id,
-        file=file,
-        file_content=file_content,
-        filename=filename,
-    )
-
-    # Update job with correct audio URI
-    job.audio_uri = audio_uri
-    await db.commit()
-    await db.refresh(job)
 
     # Publish event for orchestrator (include request_id for correlation)
     request_id = getattr(request.state, "request_id", None)
