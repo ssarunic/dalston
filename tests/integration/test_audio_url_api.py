@@ -155,8 +155,8 @@ class TestAudioUrlTranscription:
         assert response.status_code == 400
         assert "not both" in response.json()["detail"]
 
-    @patch("dalston.gateway.api.v1.transcription.download_audio_from_url")
-    @patch("dalston.gateway.api.v1.transcription.probe_audio")
+    @patch("dalston.gateway.services.ingestion.download_audio_from_url")
+    @patch("dalston.gateway.services.ingestion.probe_audio")
     @patch("dalston.gateway.services.storage.get_s3_client")
     @patch("dalston.common.events.publish_job_created")
     def test_transcription_with_audio_url_success(
@@ -209,7 +209,7 @@ class TestAudioUrlTranscription:
         call_args = mock_download.call_args
         assert call_args.kwargs["url"] == "https://example.com/audio.mp3"
 
-    @patch("dalston.gateway.api.v1.transcription.download_audio_from_url")
+    @patch("dalston.gateway.services.ingestion.download_audio_from_url")
     def test_transcription_with_invalid_url(self, mock_download, client):
         """Test transcription with invalid URL returns proper error."""
         from dalston.gateway.services.audio_url import InvalidUrlError
@@ -227,7 +227,7 @@ class TestAudioUrlTranscription:
         assert response.status_code == 400
         assert "Invalid URL" in response.json()["detail"]
 
-    @patch("dalston.gateway.api.v1.transcription.download_audio_from_url")
+    @patch("dalston.gateway.services.ingestion.download_audio_from_url")
     def test_transcription_with_download_error(self, mock_download, client):
         """Test transcription with download failure returns proper error."""
         from dalston.gateway.services.audio_url import DownloadError
@@ -245,7 +245,7 @@ class TestAudioUrlTranscription:
         assert response.status_code == 400
         assert "HTTP 404" in response.json()["detail"]
 
-    @patch("dalston.gateway.api.v1.transcription.download_audio_from_url")
+    @patch("dalston.gateway.services.ingestion.download_audio_from_url")
     def test_transcription_with_file_too_large(self, mock_download, client):
         """Test transcription with oversized file returns proper error."""
         from dalston.gateway.services.audio_url import FileTooLargeError
@@ -265,7 +265,7 @@ class TestAudioUrlTranscription:
         assert response.status_code == 400
         assert "File too large" in response.json()["detail"]
 
-    @patch("dalston.gateway.api.v1.transcription.download_audio_from_url")
+    @patch("dalston.gateway.services.ingestion.download_audio_from_url")
     def test_transcription_with_unsupported_content_type(self, mock_download, client):
         """Test transcription with non-audio file returns proper error."""
         from dalston.gateway.services.audio_url import UnsupportedContentTypeError

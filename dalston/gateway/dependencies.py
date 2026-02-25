@@ -17,6 +17,7 @@ from dalston.gateway.middleware.auth import authenticate_request
 from dalston.gateway.middleware.auth import require_scope as _require_scope
 from dalston.gateway.services.auth import APIKey, AuthService, Scope
 from dalston.gateway.services.export import ExportService
+from dalston.gateway.services.ingestion import AudioIngestionService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.rate_limiter import RedisRateLimiter
 
@@ -64,6 +65,16 @@ def get_export_service() -> ExportService:
     if _export_service is None:
         _export_service = ExportService()
     return _export_service
+
+
+def get_ingestion_service(
+    settings: Settings = Depends(get_settings),
+) -> AudioIngestionService:
+    """Get AudioIngestionService instance.
+
+    Not a singleton since it depends on Settings which may vary in tests.
+    """
+    return AudioIngestionService(settings)
 
 
 def get_audit_service() -> AuditService:

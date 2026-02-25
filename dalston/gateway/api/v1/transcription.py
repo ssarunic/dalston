@@ -7,7 +7,6 @@ GET /v1/audio/transcriptions/{job_id}/export/{format} - Export transcript
 DELETE /v1/audio/transcriptions/{job_id} - Delete a completed/failed job
 """
 
-import asyncio
 import json
 from typing import Annotated
 from uuid import UUID, uuid4
@@ -42,6 +41,7 @@ from dalston.gateway.dependencies import (
     get_audit_service,
     get_db,
     get_export_service,
+    get_ingestion_service,
     get_jobs_service,
     get_rate_limiter,
     get_redis,
@@ -57,15 +57,8 @@ from dalston.gateway.models.responses import (
     RetentionInfo,
     StageResponse,
 )
-from dalston.gateway.services.audio_probe import (
-    InvalidAudioError,
-    probe_audio,
-)
-from dalston.gateway.services.audio_url import (
-    AudioUrlError,
-    download_audio_from_url,
-)
 from dalston.gateway.services.export import ExportService
+from dalston.gateway.services.ingestion import AudioIngestionService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.storage import StorageService
@@ -180,6 +173,7 @@ async def create_transcription(
     jobs_service: JobsService = Depends(get_jobs_service),
     rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
     audit_service: AuditService = Depends(get_audit_service),
+    ingestion_service: AudioIngestionService = Depends(get_ingestion_service),
 ) -> JobCreatedResponse:
     """Create a new transcription job.
 
@@ -194,40 +188,8 @@ async def create_transcription(
     4. Publish job.created event to Redis
     5. Return job ID for polling
     """
-    # Validate input: exactly one of file or audio_url required
-    if file is None and audio_url is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Either 'file' or 'audio_url' must be provided",
-        )
-    if file is not None and audio_url is not None:
-        raise HTTPException(
-            status_code=400,
-            detail="Provide either 'file' or 'audio_url', not both",
-        )
-
-    # Handle audio_url: download the file
-    file_content: bytes
-    filename: str
-
-    if audio_url is not None:
-        try:
-            max_size = int(settings.audio_url_max_size_gb * 1024 * 1024 * 1024)
-            downloaded = await download_audio_from_url(
-                url=audio_url,
-                max_size=max_size,
-                timeout=settings.audio_url_timeout_seconds,
-            )
-            file_content = downloaded.content
-            filename = downloaded.filename
-        except AudioUrlError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-    else:
-        # Validate file upload
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="File must have a filename")
-        filename = file.filename
-        file_content = await file.read()
+    # Ingest audio (validates input, downloads from URL if needed, probes metadata)
+    ingested = await ingestion_service.ingest(file=file, url=audio_url)
 
     # Check per-job webhook_url deprecation
     if webhook_url:
@@ -264,19 +226,12 @@ async def create_transcription(
                 detail=f"Invalid JSON in webhook_metadata: {e}",
             ) from e
 
-    # Probe audio to extract metadata and validate
-    # Uses to_thread() because probe_audio uses tinytag synchronously
-    try:
-        audio_metadata = await asyncio.to_thread(probe_audio, file_content, filename)
-    except InvalidAudioError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
     # Validate per_channel mode requires stereo audio
-    if speaker_detection == "per_channel" and audio_metadata.channels < 2:
+    if speaker_detection == "per_channel" and ingested.metadata.channels < 2:
         raise HTTPException(
             status_code=400,
             detail=f"per_channel speaker detection requires stereo audio, "
-            f"but file has {audio_metadata.channels} channel(s). "
+            f"but file has {ingested.metadata.channels} channel(s). "
             f"Use speaker_detection=diarize for mono audio.",
         )
 
@@ -352,9 +307,8 @@ async def create_transcription(
     storage = StorageService(settings)
     audio_uri = await storage.upload_audio(
         job_id=job_id,
-        file=file,
-        file_content=file_content,
-        filename=filename,
+        file_content=ingested.content,
+        filename=ingested.filename,
     )
 
     # Parse PII entity types for dedicated column
@@ -371,11 +325,11 @@ async def create_transcription(
         parameters=parameters,
         webhook_url=webhook_url,
         webhook_metadata=parsed_webhook_metadata,
-        audio_format=audio_metadata.format,
-        audio_duration=audio_metadata.duration,
-        audio_sample_rate=audio_metadata.sample_rate,
-        audio_channels=audio_metadata.channels,
-        audio_bit_depth=audio_metadata.bit_depth,
+        audio_format=ingested.metadata.format,
+        audio_duration=ingested.metadata.duration,
+        audio_sample_rate=ingested.metadata.sample_rate,
+        audio_channels=ingested.metadata.channels,
+        audio_bit_depth=ingested.metadata.bit_depth,
         # Retention
         retention=retention,
         # PII fields (M26)

@@ -15,7 +15,9 @@ from fastapi.testclient import TestClient
 
 from dalston.common.models import JobStatus
 from dalston.gateway.api.v1.speech_to_text import router as speech_to_text_router
+from dalston.gateway.services.audio_probe import AudioMetadata
 from dalston.gateway.services.auth import DEFAULT_EXPIRES_AT, APIKey, Scope
+from dalston.gateway.services.ingestion import AudioIngestionService, IngestedAudio
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
 
@@ -56,6 +58,23 @@ class TestCreateTranscriptionEndpoint:
         return settings
 
     @pytest.fixture
+    def mock_ingestion_service(self):
+        """Create mock ingestion service that returns valid ingested audio."""
+        service = AsyncMock(spec=AudioIngestionService)
+        service.ingest.return_value = IngestedAudio(
+            content=b"fake audio content",
+            filename="test.mp3",
+            metadata=AudioMetadata(
+                format="mp3",
+                duration=60.0,
+                sample_rate=44100,
+                channels=2,
+                bit_depth=16,
+            ),
+        )
+        return service
+
+    @pytest.fixture
     def api_key(self):
         """Create a mock API key with jobs:write scope."""
         return APIKey(
@@ -79,10 +98,12 @@ class TestCreateTranscriptionEndpoint:
         mock_storage_service,
         mock_redis,
         mock_settings,
+        mock_ingestion_service,
         api_key,
     ):
         from dalston.gateway.dependencies import (
             get_db,
+            get_ingestion_service,
             get_jobs_service,
             get_redis,
             get_settings,
@@ -96,6 +117,7 @@ class TestCreateTranscriptionEndpoint:
         app.dependency_overrides[get_jobs_service] = lambda: mock_jobs_service
         app.dependency_overrides[get_redis] = lambda: mock_redis
         app.dependency_overrides[get_settings] = lambda: mock_settings
+        app.dependency_overrides[get_ingestion_service] = lambda: mock_ingestion_service
         app.dependency_overrides[require_auth] = lambda: api_key
 
         return app
