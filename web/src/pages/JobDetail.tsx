@@ -589,10 +589,12 @@ export function JobDetail() {
           icon={Globe}
           label="Language"
           value={
-            // Don't show detected language if transcript is empty (unreliable detection)
-            job.result_word_count
-              ? job.result_language_code?.toUpperCase() || 'Auto'
-              : job.status === 'completed' ? '-' : 'Auto'
+            // Show requested language if specified, otherwise detected language after completion
+            job.language_code
+              ? job.language_code.toUpperCase()
+              : job.result_word_count
+                ? job.result_language_code?.toUpperCase() || 'Auto'
+                : job.status === 'completed' ? '-' : 'Auto'
           }
         />
         <MetadataCard
