@@ -196,14 +196,14 @@ SETTING_DEFINITIONS: list[SettingDefinition] = [
     ),
     SettingDefinition(
         namespace="retention",
-        key="min_hours",
-        label="Minimum retention hours",
-        description="Minimum retention period allowed",
+        key="default_days",
+        label="Default retention days",
+        description="Default retention when not specified by client",
         value_type="int",
-        default_value=1,
-        env_var="DALSTON_RETENTION_MIN_HOURS",
+        default_value=30,
+        env_var="DALSTON_RETENTION_DEFAULT_DAYS",
         min_value=1,
-        max_value=8760,
+        max_value=3650,
     ),
 ]
 
@@ -225,7 +225,7 @@ _ENV_TO_SETTINGS_FIELD: dict[str, str] = {
     "DALSTON_AUDIO_URL_TIMEOUT_SECONDS": "audio_url_timeout_seconds",
     "DALSTON_RETENTION_CLEANUP_INTERVAL_SECONDS": "retention_cleanup_interval_seconds",
     "DALSTON_RETENTION_CLEANUP_BATCH_SIZE": "retention_cleanup_batch_size",
-    "DALSTON_RETENTION_MIN_HOURS": "retention_min_hours",
+    "DALSTON_RETENTION_DEFAULT_DAYS": "retention_default_days",
 }
 
 

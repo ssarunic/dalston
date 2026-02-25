@@ -105,7 +105,7 @@ def parse_retention(value: str) -> int | None:
     )
 
 
-RETENTION_DEFAULT = 30  # 30 days
+RETENTION_DEFAULT = 30  # Fallback default; use settings.retention_default_days instead
 
 
 # =============================================================================

@@ -82,10 +82,10 @@ class Settings(BaseSettings):
         alias="DALSTON_RETENTION_CLEANUP_BATCH_SIZE",
         description="Maximum jobs to purge per cleanup sweep",
     )
-    retention_min_hours: int = Field(
-        default=1,
-        alias="DALSTON_RETENTION_MIN_HOURS",
-        description="Minimum retention hours allowed (1 = 1 hour minimum)",
+    retention_default_days: int = Field(
+        default=30,
+        alias="DALSTON_RETENTION_DEFAULT_DAYS",
+        description="Default retention in days when not specified (30 = 30 days)",
     )
 
     # Engine Availability Behavior

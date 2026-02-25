@@ -138,11 +138,11 @@ async def realtime_transcription(
     ] = True,
     word_timestamps: Annotated[bool, Query(description="Include word timing")] = False,
     retention: Annotated[
-        int,
+        int | None,
         Query(
-            description="Retention in days: 0 (transient), -1 (permanent), or 1-3650 (days)"
+            description="Retention in days: 0 (transient), -1 (permanent), 1-3650 (days), or omit for server default"
         ),
-    ] = 30,
+    ] = None,
     resume_session_id: Annotated[
         str | None, Query(description="Link to previous session for resume")
     ] = None,
@@ -223,9 +223,15 @@ async def realtime_transcription(
     # the session counter is always decremented on any exit path
     allocation = None
     try:
+        # Apply server default retention if not specified
+        settings = get_settings()
+        effective_retention = (
+            retention if retention is not None else settings.retention_default_days
+        )
+
         # Validate retention parameter (0=transient, -1=permanent, 1-3650=days)
         try:
-            validate_retention(retention)
+            validate_retention(effective_retention)
         except ValueError as e:
             await websocket.send_json(
                 {
@@ -239,8 +245,8 @@ async def realtime_transcription(
 
         # Derive storage flags from retention for downstream use
         # 0 = transient (no storage)
-        store_audio = retention != 0
-        store_transcript = retention != 0
+        store_audio = effective_retention != 0
+        store_transcript = effective_retention != 0
 
         # Validate: redact_pii_audio requires pii_detection and storage enabled
         if redact_pii_audio and not (pii_detection and store_audio):
@@ -336,7 +342,7 @@ async def realtime_transcription(
                     engine=allocation.engine,
                     encoding=encoding,
                     sample_rate=sample_rate,
-                    retention=retention,
+                    retention=effective_retention,
                     previous_session_id=previous_session_uuid,
                 )
             except Exception as e:

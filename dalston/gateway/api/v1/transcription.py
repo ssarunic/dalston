@@ -150,13 +150,13 @@ async def create_transcription(
         str,
         Form(description="Audio redaction mode: 'silence', 'beep'"),
     ] = "silence",
-    # Retention: 0=transient, -1=permanent, N=days
+    # Retention: 0=transient, -1=permanent, N=days, None=server default
     retention: Annotated[
-        int,
+        int | None,
         Form(
-            description="Retention in days: 0 (transient), -1 (permanent), or 1-3650 (days)"
+            description="Retention in days: 0 (transient), -1 (permanent), 1-3650 (days), or omit for server default"
         ),
-    ] = 30,
+    ] = None,
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
@@ -230,6 +230,10 @@ async def create_transcription(
                 status_code=400,
                 detail=f"Invalid JSON in vocabulary: {e}",
             ) from e
+
+    # Apply server default retention if not specified
+    if retention is None:
+        retention = settings.retention_default_days
 
     # Validate retention parameter (0=transient, -1=permanent, 1-3650=days)
     try:
