@@ -509,3 +509,75 @@ export interface AuditListParams {
   limit?: number
   cursor?: string
 }
+
+// Job creation types
+export type SpeakerDetection = 'none' | 'diarize' | 'per_channel'
+export type TimestampsGranularity = 'none' | 'segment' | 'word'
+export type PIITier = 'fast' | 'standard' | 'thorough'
+export type PIIRedactionMode = 'silence' | 'beep'
+
+export interface CreateJobRequest {
+  // Source (one of these is required)
+  file?: File
+  audio_url?: string
+  // Basic settings
+  language?: string
+  speaker_detection?: SpeakerDetection
+  num_speakers?: number
+  min_speakers?: number
+  max_speakers?: number
+  timestamps_granularity?: TimestampsGranularity
+  // Advanced settings
+  model?: string
+  vocabulary?: string[]
+  retention_policy?: string
+  // PII settings
+  pii_detection?: boolean
+  pii_detection_tier?: PIITier
+  pii_entity_types?: string[]
+  redact_pii_audio?: boolean
+  pii_redaction_mode?: PIIRedactionMode
+}
+
+export interface CreateJobResponse {
+  id: string
+  status: JobStatus
+  created_at: string
+}
+
+// Capabilities types (for /v1/engines and /v1/engines/capabilities)
+export interface EngineCapabilities {
+  languages: string[] | null
+  supports_word_timestamps: boolean
+  supports_streaming: boolean
+  max_audio_duration_s: number | null
+  max_concurrency: number | null
+}
+
+export interface Engine {
+  id: string
+  name: string | null
+  stage: string
+  version: string
+  status: 'running' | 'available' | 'unhealthy'
+  capabilities: EngineCapabilities
+}
+
+export interface EnginesListResponse {
+  engines: Engine[]
+  total: number
+}
+
+export interface StageCapabilities {
+  engines: string[]
+  languages: string[] | null
+  supports_word_timestamps: boolean
+  supports_streaming: boolean
+}
+
+export interface CapabilitiesResponse {
+  languages: string[]
+  stages: Record<string, StageCapabilities>
+  max_audio_duration_s: number | null
+  supported_formats: string[]
+}

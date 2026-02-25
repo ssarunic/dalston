@@ -7,6 +7,7 @@ import { Layout } from '@/components/Layout'
 import { Login } from '@/pages/Login'
 import { Dashboard } from '@/pages/Dashboard'
 import { BatchJobs } from '@/pages/BatchJobs'
+import { NewJob } from '@/pages/NewJob'
 import { JobDetail } from '@/pages/JobDetail'
 import { TaskDetail } from '@/pages/TaskDetail'
 import { RealtimeSessions } from '@/pages/RealtimeSessions'
@@ -52,6 +53,7 @@ const router = createBrowserRouter(
       children: [
         { path: '/', element: <Dashboard /> },
         { path: '/jobs', element: <BatchJobs /> },
+        { path: '/jobs/new', element: <NewJob /> },
         { path: '/jobs/:jobId', element: <JobDetail /> },
         { path: '/jobs/:jobId/tasks/:taskId', element: <TaskDetail /> },
         { path: '/realtime', element: <RealtimeSessions /> },

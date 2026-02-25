@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Trash2, X, RefreshCw, Filter } from 'lucide-react'
+import { Trash2, X, RefreshCw, Filter, Plus } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useJobs } from '@/hooks/useJobs'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
@@ -210,6 +210,13 @@ export function BatchJobs() {
             <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
+          <Button
+            size="sm"
+            onClick={() => navigate('/jobs/new')}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Submit Job
+          </Button>
         </div>
       </div>
 
@@ -309,9 +316,17 @@ export function BatchJobs() {
           ) : error ? (
             <p className="text-red-400 py-4">Error loading jobs</p>
           ) : visibleJobs.length === 0 ? (
-            <p className="text-muted-foreground py-8 text-center">
-              No jobs found
-            </p>
+            <div className="text-center py-12">
+              <p className="text-muted-foreground mb-4">
+                {statusFilter ? 'No jobs found matching the filter' : 'No jobs yet'}
+              </p>
+              {!statusFilter && (
+                <Button variant="outline" onClick={() => navigate('/jobs/new')}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Submit your first job
+                </Button>
+              )}
+            </div>
           ) : (
             isMobile ? (
               <div className="space-y-3">

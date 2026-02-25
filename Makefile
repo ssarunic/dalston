@@ -47,17 +47,17 @@ help:
 
 # Start full local stack with all CPU engines
 dev:
-	docker compose --profile local-infra --profile local-object-storage up -d
+	docker compose --profile local-infra --profile local-object-storage up -d --build
 
 # Start minimal stack for quick iteration
 dev-minimal:
-	docker compose --profile local-infra --profile local-object-storage up -d \
+	docker compose --profile local-infra --profile local-object-storage up -d --build \
 		gateway orchestrator \
 		stt-batch-prepare stt-batch-transcribe-faster-whisper-base stt-batch-merge
 
 # Start with GPU engines (requires NVIDIA GPU)
 dev-gpu:
-	docker compose --profile local-infra --profile local-object-storage --profile gpu up -d
+	docker compose --profile local-infra --profile local-object-storage --profile gpu up -d --build
 
 # Start with observability stack (jaeger, prometheus, grafana)
 dev-observability:
