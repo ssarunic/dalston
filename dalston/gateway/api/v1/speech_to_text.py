@@ -19,6 +19,7 @@ from fastapi import (
     Form,
     HTTPException,
     Query,
+    Request,
     Response,
     UploadFile,
 )
@@ -26,12 +27,14 @@ from pydantic import BaseModel
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_created
 from dalston.common.models import JobStatus
 from dalston.config import Settings
 from dalston.gateway.dependencies import (
     RequireJobsRead,
     RequireJobsWriteRateLimited,
+    get_audit_service,
     get_db,
     get_export_service,
     get_ingestion_service,
@@ -127,6 +130,7 @@ def map_timestamps_granularity(granularity: str) -> str:
     },
 )
 async def create_transcription(
+    request: Request,
     api_key: RequireJobsWriteRateLimited,
     file: UploadFile | None = File(
         default=None, description="Audio file to transcribe"
@@ -173,6 +177,7 @@ async def create_transcription(
     jobs_service: JobsService = Depends(get_jobs_service),
     ingestion_service: AudioIngestionService = Depends(get_ingestion_service),
     rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> ElevenLabsTranscript | ElevenLabsAsyncResponse:
     """Create a transcription using ElevenLabs-compatible API.
 
@@ -232,6 +237,18 @@ async def create_transcription(
 
     # Track concurrent job for rate limiting
     await rate_limiter.increment_concurrent_jobs(api_key.tenant_id)
+
+    # Audit log job creation
+    request_id = getattr(request.state, "request_id", None)
+    await audit_service.log_job_created(
+        job_id=job.id,
+        tenant_id=api_key.tenant_id,
+        actor_type="api_key",
+        actor_id=api_key.prefix,
+        correlation_id=request_id,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
 
     # If async/webhook mode, return immediately
     if webhook:
