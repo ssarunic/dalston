@@ -136,35 +136,37 @@ test.describe('Settings Page', () => {
     await page.goto('/console/settings')
 
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
-    await expect(page.getByText('Rate Limits')).toBeVisible()
-    await expect(page.getByText('Engines')).toBeVisible()
-    await expect(page.getByText('Audio')).toBeVisible()
-    await expect(page.getByText('Retention')).toBeVisible()
-    await expect(page.getByText('System')).toBeVisible()
+    // Use role="tab" to target desktop tabs specifically (avoids mobile dropdown)
+    await expect(page.getByRole('tab', { name: /Rate Limits/ })).toBeVisible()
+    await expect(page.getByRole('tab', { name: /Engines/ })).toBeVisible()
+    await expect(page.getByRole('tab', { name: /Audio/ })).toBeVisible()
+    await expect(page.getByRole('tab', { name: /Retention/ })).toBeVisible()
+    await expect(page.getByRole('tab', { name: /System/ })).toBeVisible()
   })
 
   test('shows rate limit settings with default values', async ({ page }) => {
     await setupRoutes(page)
     await page.goto('/console/settings')
 
-    await expect(page.getByText('Requests per minute')).toBeVisible()
-    await expect(page.getByText('Max concurrent batch jobs')).toBeVisible()
-    await expect(page.getByText('Max concurrent realtime sessions')).toBeVisible()
+    // Use getByLabel to target the setting field labels specifically
+    await expect(page.getByLabel('Requests per minute')).toBeVisible()
+    await expect(page.getByLabel('Max concurrent batch jobs')).toBeVisible()
+    await expect(page.getByLabel('Max concurrent realtime sessions')).toBeVisible()
   })
 
   test('tab switching syncs with URL', async ({ page }) => {
     await setupRoutes(page)
     await page.goto('/console/settings')
 
-    // Click Engines tab
-    await page.getByRole('button', { name: /Engines/ }).click()
+    // Click Engines tab (tabs have role="tab", not role="button")
+    await page.getByRole('tab', { name: /Engines/ }).click()
     await expect(page).toHaveURL(/tab=engines/)
-    await expect(page.getByText('Unavailable engine behavior')).toBeVisible()
+    await expect(page.getByLabel('Unavailable engine behavior')).toBeVisible()
 
     // Click System tab
-    await page.getByRole('button', { name: /System/ }).click()
+    await page.getByRole('tab', { name: /System/ }).click()
     await expect(page).toHaveURL(/tab=system/)
-    await expect(page.getByText('System Information')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'System Information' })).toBeVisible()
   })
 
   test('system tab shows read-only info with copy buttons', async ({ page }) => {
@@ -210,15 +212,82 @@ test.describe('Settings Page', () => {
   })
 
   test('save sends PATCH and shows success', async ({ page }) => {
-    await setupRoutes(page)
+    // Track if PATCH was called
+    let patchCalled = false
+    let patchBody: Record<string, unknown> = {}
+
+    await page.route('**/api/console/settings/**', (route, request) => {
+      const url = new URL(request.url())
+      const path = url.pathname
+
+      if (path === '/api/console/settings/rate_limits') {
+        if (request.method() === 'PATCH') {
+          patchCalled = true
+          patchBody = request.postDataJSON() ?? {}
+          // Return updated settings with the new value
+          const updated = {
+            ...RATE_LIMITS_RESPONSE,
+            updated_at: new Date().toISOString(),
+            settings: RATE_LIMITS_RESPONSE.settings.map((s) =>
+              s.key === 'requests_per_minute'
+                ? { ...s, value: 1200 }
+                : { ...s }
+            ),
+          }
+          return route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(updated),
+          })
+        }
+        // GET after PATCH should also return the updated value
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            ...RATE_LIMITS_RESPONSE,
+            settings: RATE_LIMITS_RESPONSE.settings.map((s) =>
+              s.key === 'requests_per_minute' && patchCalled
+                ? { ...s, value: 1200 }
+                : { ...s }
+            ),
+          }),
+        })
+      }
+
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(RATE_LIMITS_RESPONSE),
+      })
+    })
+    await page.route('**/api/console/settings', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(NAMESPACES_RESPONSE),
+      })
+    )
+
     await page.goto('/console/settings')
 
     const input = page.locator('input[type="number"]').first()
     await input.fill('1200')
 
+    // Verify unsaved indicator appears
+    await expect(page.getByText('unsaved')).toBeVisible()
+
     await page.getByRole('button', { name: 'Save' }).click()
 
-    await expect(page.getByText('saved successfully')).toBeVisible()
+    // Wait for unsaved indicator to disappear (form synced with server)
+    await expect(page.getByText('unsaved')).not.toBeVisible()
+
+    // Success message should now be visible
+    await expect(page.getByText('Settings saved successfully.')).toBeVisible()
+
+    // Verify PATCH was called with correct payload
+    expect(patchCalled).toBe(true)
+    expect(patchBody.settings).toEqual({ requests_per_minute: 1200 })
   })
 
   test('sidebar has settings link', async ({ page }) => {
@@ -246,10 +315,10 @@ test.describe('Settings Page', () => {
     await setupRoutes(page)
     await page.goto('/console/settings?tab=engines')
 
-    await expect(page.getByText('Unavailable engine behavior')).toBeVisible()
+    await expect(page.getByLabel('Unavailable engine behavior')).toBeVisible()
 
-    // Change the select value
-    const select = page.locator('select')
+    // Use getByLabel to target the settings select, not the mobile namespace selector
+    const select = page.getByLabel('Unavailable engine behavior')
     await select.selectOption('wait')
     await expect(page.getByText('unsaved')).toBeVisible()
   })
