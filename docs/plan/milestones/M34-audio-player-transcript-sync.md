@@ -20,7 +20,7 @@
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  Transcript                                                                 │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  ▶ ═══●═══ 2:34/12:45 🔊 1× ⟳ ⬇▾ │ 🛡 [Original│Redacted] │ SRT VTT TXT JSON│
+│  ▶ ═══●═══ 2:34/12:45 🔊 1× ⟳ ⬇ │ 🛡 [Original│Redacted] │ Export ▾        │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  0:00   Speaker A   Hello, how are you today?                               │
@@ -37,8 +37,9 @@ Legend:
   ═●═     Seek slider (current position)
   1×      Playback speed (Plyr settings menu: 0.5×, 0.75×, 1×, 1.25×, 1.5×, 2×)
   ⟳       Auto-scroll toggle (follow playback)
-  ⬇▾      Download dropdown (Original/Redacted audio)
+  ⬇       Download button (downloads current audio variant)
   🛡       PII toggle (Original/Redacted text AND audio)
+  Export ▾ Export dropdown (SRT, VTT, TXT, JSON formats)
   [0:12]  Active segment (highlighted, auto-scrolled to)
 ```
 
@@ -67,9 +68,9 @@ TranscriptViewer (modified)
 │   ├── AudioPlayer (Plyr-based)
 │   │   ├── Plyr controls (play, progress, time, mute, speed)
 │   │   ├── Auto-scroll toggle
-│   │   └── Download dropdown (Original/Redacted audio)
+│   │   └── Download button (downloads current audio variant)
 │   ├── PII toggle (Original/Redacted)
-│   └── Export buttons (SRT/VTT/TXT/JSON)
+│   └── Export dropdown (SRT/VTT/TXT/JSON)
 └── TranscriptSegmentRow (modified)
     ├── onClick → seek to segment.start
     └── isActive prop → highlight style
@@ -658,10 +659,8 @@ Additional improvements:
 - Error handling with retry for failed audio loads
 - Optimized segment lookup (O(1) for continuous playback, O(log n) for seeks)
 - Seek request IDs to handle repeated clicks on same segment
-- Audio download dropdown with Original/Redacted options
+- Audio download button (downloads whichever variant is currently active)
 
 Future enhancements (not yet implemented):
 
 - [ ] Waveform/stereo visualization (can be added separately)
-- [ ] A-B loop for segment repeat
-- [ ] Clip export for time range download
