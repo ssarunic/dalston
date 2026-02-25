@@ -184,9 +184,9 @@ function SettingField({
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-[24rem_auto] gap-2 sm:gap-x-6 sm:items-start">
+    <div className="grid grid-cols-1 md:grid-cols-[2fr_3fr] gap-2 md:gap-x-6 md:items-start">
       {/* Label */}
-      <div className="flex items-center gap-2 sm:py-2">
+      <div className="flex items-center gap-2 md:py-2">
         <label htmlFor={inputId} className="text-sm text-muted-foreground">
           {setting.description}
         </label>
@@ -200,7 +200,7 @@ function SettingField({
         <div className="flex items-center gap-2">
           {renderInput()}
         </div>
-        <p className="text-xs text-muted-foreground/70">
+        <p className="text-xs text-muted-foreground/70 break-all">
           {descriptionParts.join(' · ')}
         </p>
         {hasError && (
@@ -238,7 +238,7 @@ function SystemInfoTab({ settings }: { settings: SettingValue[] }) {
           {settings.map((setting) => (
             <div
               key={setting.key}
-              className="grid grid-cols-1 sm:grid-cols-[24rem_auto] gap-1 sm:gap-x-6 py-3 sm:items-center"
+              className="grid grid-cols-1 md:grid-cols-[2fr_3fr] gap-1 md:gap-x-6 py-3 md:items-center"
             >
               <span className="text-sm text-muted-foreground">
                 {setting.label}
@@ -556,8 +556,8 @@ export function Settings() {
         </p>
       </div>
 
-      {/* Mobile: Dropdown selector */}
-      <div className="sm:hidden">
+      {/* Mobile/Tablet: Dropdown selector */}
+      <div className="lg:hidden">
         {namespacesLoading ? (
           <Skeleton className="h-11 w-full" />
         ) : (
@@ -577,7 +577,7 @@ export function Settings() {
       </div>
 
       {/* Desktop: Horizontal tab bar */}
-      <nav className="hidden sm:block" aria-label="Settings sections">
+      <nav className="hidden lg:block" aria-label="Settings sections">
         <div className="flex gap-1 border-b border-border">
           {namespacesLoading
             ? [1, 2, 3, 4, 5, 6].map((i) => (
