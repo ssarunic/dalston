@@ -15,6 +15,7 @@ import { ApiKeys } from '@/pages/ApiKeys'
 import { Webhooks } from '@/pages/Webhooks'
 import { WebhookDetail } from '@/pages/WebhookDetail'
 import { AuditLog } from '@/pages/AuditLog'
+import { Settings } from '@/pages/Settings'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -56,6 +57,7 @@ const router = createBrowserRouter(
         { path: '/webhooks', element: <Webhooks /> },
         { path: '/webhooks/:endpointId', element: <WebhookDetail /> },
         { path: '/audit', element: <AuditLog /> },
+        { path: '/settings', element: <Settings /> },
       ],
     },
   ],

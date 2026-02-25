@@ -4,10 +4,14 @@ GET /api/console/dashboard - Aggregated dashboard data
 GET /api/console/jobs/{job_id}/tasks - Get task DAG for a job
 GET /api/console/engines - Get batch and realtime engine status
 DELETE /api/console/jobs/{job_id} - Delete a job and its artifacts (admin)
+GET /api/console/settings - List setting namespaces
+GET /api/console/settings/{namespace} - Get settings in a namespace
+PATCH /api/console/settings/{namespace} - Update settings
+POST /api/console/settings/{namespace}/reset - Reset to defaults
 """
 
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 import structlog
@@ -848,4 +852,290 @@ async def cancel_console_job(
         id=result.job.id,
         status=result.status,
         message=result.message,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Settings endpoints
+# ---------------------------------------------------------------------------
+
+
+class NamespaceSummaryResponse(BaseModel):
+    """Summary of a settings namespace."""
+
+    namespace: str
+    label: str
+    description: str
+    editable: bool
+    setting_count: int
+    has_overrides: bool
+
+
+class SettingsNamespaceListResponse(BaseModel):
+    """List of setting namespaces."""
+
+    namespaces: list[NamespaceSummaryResponse]
+
+
+class SettingResponse(BaseModel):
+    """A single setting with resolved value."""
+
+    key: str
+    label: str
+    description: str
+    value_type: str
+    value: Any
+    default_value: Any
+    is_overridden: bool
+    env_var: str
+    min_value: float | None = None
+    max_value: float | None = None
+    options: list[str] | None = None
+
+
+class NamespaceSettingsResponse(BaseModel):
+    """All settings in a namespace."""
+
+    namespace: str
+    label: str
+    description: str
+    editable: bool
+    settings: list[SettingResponse]
+    updated_at: datetime | None = None
+
+
+class UpdateSettingsRequest(BaseModel):
+    """Request to update settings in a namespace."""
+
+    settings: dict[str, Any]
+    expected_updated_at: datetime | None = None
+
+
+@router.get(
+    "/settings",
+    response_model=SettingsNamespaceListResponse,
+    summary="List setting namespaces",
+    description="List all setting namespaces with override status.",
+)
+async def list_settings_namespaces(
+    api_key: RequireAdmin,
+    db: AsyncSession = Depends(get_db),
+) -> SettingsNamespaceListResponse:
+    """List all settings namespaces."""
+    from dalston.gateway.services.settings import SettingsService
+
+    service = SettingsService()
+    summaries = await service.list_namespaces(db)
+    return SettingsNamespaceListResponse(
+        namespaces=[
+            NamespaceSummaryResponse(
+                namespace=s.namespace,
+                label=s.label,
+                description=s.description,
+                editable=s.editable,
+                setting_count=s.setting_count,
+                has_overrides=s.has_overrides,
+            )
+            for s in summaries
+        ]
+    )
+
+
+@router.get(
+    "/settings/{namespace}",
+    response_model=NamespaceSettingsResponse,
+    summary="Get namespace settings",
+    description="Get all settings in a namespace with current values and defaults.",
+    responses={404: {"description": "Namespace not found"}},
+)
+async def get_settings_namespace(
+    namespace: str,
+    api_key: RequireAdmin,
+    db: AsyncSession = Depends(get_db),
+) -> NamespaceSettingsResponse:
+    """Get settings for a namespace."""
+    from dalston.gateway.services.settings import SettingsService
+
+    service = SettingsService()
+    ns = await service.get_namespace(db, namespace)
+    if ns is None:
+        raise HTTPException(status_code=404, detail=f"Unknown namespace: {namespace}")
+
+    return NamespaceSettingsResponse(
+        namespace=ns.namespace,
+        label=ns.label,
+        description=ns.description,
+        editable=ns.editable,
+        settings=[
+            SettingResponse(
+                key=s.key,
+                label=s.label,
+                description=s.description,
+                value_type=s.value_type,
+                value=s.value,
+                default_value=s.default_value,
+                is_overridden=s.is_overridden,
+                env_var=s.env_var,
+                min_value=s.min_value,
+                max_value=s.max_value,
+                options=s.options,
+            )
+            for s in ns.settings
+        ],
+        updated_at=ns.updated_at,
+    )
+
+
+@router.patch(
+    "/settings/{namespace}",
+    response_model=NamespaceSettingsResponse,
+    summary="Update namespace settings",
+    description="Update one or more settings in a namespace. Requires admin scope.",
+    responses={
+        400: {"description": "Validation error"},
+        404: {"description": "Namespace not found"},
+        409: {"description": "Optimistic locking conflict"},
+    },
+)
+async def update_settings_namespace(
+    namespace: str,
+    body: UpdateSettingsRequest,
+    api_key: RequireAdmin,
+    db: AsyncSession = Depends(get_db),
+) -> NamespaceSettingsResponse:
+    """Update settings in a namespace."""
+    from dalston.gateway.services.settings import ConflictError, SettingsService
+
+    service = SettingsService()
+
+    try:
+        ns = await service.update_namespace(
+            db=db,
+            namespace=namespace,
+            updates=body.settings,
+            updated_by=api_key.id,
+            expected_updated_at=body.expected_updated_at,
+        )
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    # Audit log
+    old_values = getattr(ns, "_old_values", {})
+    if old_values:
+        try:
+            from dalston.gateway.dependencies import get_audit_service
+
+            audit = get_audit_service()
+            changes = {}
+            for key, old_val in old_values.items():
+                new_val = body.settings.get(key)
+                if old_val != new_val:
+                    changes[key] = {"old": old_val, "new": new_val}
+
+            if changes:
+                await audit.log(
+                    action="settings.updated",
+                    resource_type="settings",
+                    resource_id=namespace,
+                    tenant_id=api_key.tenant_id,
+                    actor_type="api_key",
+                    actor_id=str(api_key.id),
+                    detail={"changes": changes},
+                )
+        except Exception:
+            logger.warning("Failed to audit settings change", exc_info=True)
+
+    return NamespaceSettingsResponse(
+        namespace=ns.namespace,
+        label=ns.label,
+        description=ns.description,
+        editable=ns.editable,
+        settings=[
+            SettingResponse(
+                key=s.key,
+                label=s.label,
+                description=s.description,
+                value_type=s.value_type,
+                value=s.value,
+                default_value=s.default_value,
+                is_overridden=s.is_overridden,
+                env_var=s.env_var,
+                min_value=s.min_value,
+                max_value=s.max_value,
+                options=s.options,
+            )
+            for s in ns.settings
+        ],
+        updated_at=ns.updated_at,
+    )
+
+
+@router.post(
+    "/settings/{namespace}/reset",
+    response_model=NamespaceSettingsResponse,
+    summary="Reset namespace to defaults",
+    description="Delete all DB overrides, reverting to environment variable defaults.",
+    responses={
+        400: {"description": "Namespace is read-only"},
+        404: {"description": "Namespace not found"},
+    },
+)
+async def reset_settings_namespace(
+    namespace: str,
+    api_key: RequireAdmin,
+    db: AsyncSession = Depends(get_db),
+) -> NamespaceSettingsResponse:
+    """Reset settings namespace to defaults."""
+    from dalston.gateway.services.settings import SettingsService
+
+    service = SettingsService()
+
+    try:
+        ns = await service.reset_namespace(db, namespace)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    # Audit log
+    old_values = getattr(ns, "_old_values", {})
+    if old_values:
+        try:
+            from dalston.gateway.dependencies import get_audit_service
+
+            audit = get_audit_service()
+            await audit.log(
+                action="settings.reset",
+                resource_type="settings",
+                resource_id=namespace,
+                tenant_id=api_key.tenant_id,
+                actor_type="api_key",
+                actor_id=str(api_key.id),
+                detail={"reset_keys": list(old_values.keys())},
+            )
+        except Exception:
+            logger.warning("Failed to audit settings reset", exc_info=True)
+
+    return NamespaceSettingsResponse(
+        namespace=ns.namespace,
+        label=ns.label,
+        description=ns.description,
+        editable=ns.editable,
+        settings=[
+            SettingResponse(
+                key=s.key,
+                label=s.label,
+                description=s.description,
+                value_type=s.value_type,
+                value=s.value,
+                default_value=s.default_value,
+                is_overridden=s.is_overridden,
+                env_var=s.env_var,
+                min_value=s.min_value,
+                max_value=s.max_value,
+                options=s.options,
+            )
+            for s in ns.settings
+        ],
+        updated_at=ns.updated_at,
     )

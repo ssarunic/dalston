@@ -14,13 +14,16 @@ import type {
   HealthResponse,
   JobDetail,
   JobStatsResponse,
+  NamespaceSettings,
   RealtimeSessionDetail,
   RealtimeSessionListParams,
   RealtimeSessionListResponse,
   RealtimeStatusResponse,
   SessionTranscript,
+  SettingsNamespaceListResponse,
   TaskArtifact,
   TaskListResponse,
+  UpdateSettingsRequest,
   UpdateWebhookRequest,
   WebhookEndpointCreated,
   WebhookEndpointListResponse,
@@ -272,4 +275,17 @@ export const apiClient = {
 
   getResourceAuditTrail: (resourceType: string, resourceId: string) =>
     currentClient.get(`v1/audit/resources/${resourceType}/${resourceId}`).json<AuditListResponse>(),
+
+  // Settings management
+  getSettingsNamespaces: () =>
+    currentClient.get('api/console/settings').json<SettingsNamespaceListResponse>(),
+
+  getSettingsNamespace: (namespace: string) =>
+    currentClient.get(`api/console/settings/${namespace}`).json<NamespaceSettings>(),
+
+  updateSettingsNamespace: (namespace: string, request: UpdateSettingsRequest) =>
+    currentClient.patch(`api/console/settings/${namespace}`, { json: request }).json<NamespaceSettings>(),
+
+  resetSettingsNamespace: (namespace: string) =>
+    currentClient.post(`api/console/settings/${namespace}/reset`).json<NamespaceSettings>(),
 }

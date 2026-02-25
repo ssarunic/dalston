@@ -538,6 +538,54 @@ class ArtifactObjectModel(Base):
     tenant: Mapped["TenantModel"] = relationship()
 
 
+class SettingModel(Base):
+    """Admin-configurable setting stored in the database.
+
+    Settings are organized by namespace (e.g., rate_limits, engines).
+    Database values override environment variable defaults at runtime.
+    """
+
+    __tablename__ = "settings"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "namespace", "key", name="uq_settings_tenant_ns_key"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+    )
+    tenant_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id"),
+        nullable=True,
+        index=True,
+    )
+    namespace: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    key: Mapped[str] = mapped_column(String(100), nullable=False)
+    value: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    updated_by: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    # Relationships
+    tenant: Mapped["TenantModel | None"] = relationship()
+
+
 class RealtimeSessionModel(Base):
     """Real-time transcription session with optional persistence."""
 

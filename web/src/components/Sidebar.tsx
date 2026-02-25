@@ -9,6 +9,7 @@ import {
   Key,
   Webhook,
   ScrollText,
+  Settings,
   LogOut,
 } from 'lucide-react'
 
@@ -20,6 +21,7 @@ const navItems = [
   { to: '/keys', icon: Key, label: 'API Keys' },
   { to: '/webhooks', icon: Webhook, label: 'Webhooks' },
   { to: '/audit', icon: ScrollText, label: 'Audit Log' },
+  { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 
 interface SidebarProps {
