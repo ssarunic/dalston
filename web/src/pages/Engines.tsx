@@ -111,7 +111,7 @@ export function Engines() {
         <Card>
           <CardHeader className="flex flex-row items-center gap-2">
             <Radio className="h-5 w-5 text-muted-foreground" />
-            <CardTitle>Realtime Workers</CardTitle>
+            <CardTitle>Real-time Workers</CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -122,7 +122,7 @@ export function Engines() {
               </div>
             ) : realtimeWorkers.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4 text-center">
-                No realtime workers registered
+                No real-time workers registered
               </p>
             ) : (
               <div className="divide-y divide-border">

@@ -16,7 +16,7 @@ import {
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/jobs', icon: ListTodo, label: 'Batch Jobs' },
-  { to: '/realtime', icon: Radio, label: 'Realtime' },
+  { to: '/realtime', icon: Radio, label: 'Real-time' },
   { to: '/engines', icon: Server, label: 'Engines' },
   { to: '/keys', icon: Key, label: 'API Keys' },
   { to: '/webhooks', icon: Webhook, label: 'Webhooks' },

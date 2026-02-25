@@ -75,7 +75,7 @@ function buildStatusGuidance(statusData?: RealtimeStatusResponse): StatusGuidanc
   if (!statusData) {
     return {
       title: 'Status not available',
-      summary: 'Realtime status data has not loaded yet.',
+      summary: 'Real-time status data has not loaded yet.',
       details: 'Refresh status and check engine health if this persists.',
       level: 'warning',
       showStartWorker: false,
@@ -85,10 +85,10 @@ function buildStatusGuidance(statusData?: RealtimeStatusResponse): StatusGuidanc
   if (statusData.status === 'unavailable') {
     if (statusData.worker_count === 0) {
       return {
-        title: 'No realtime workers running',
-        summary: 'Realtime is unavailable because no workers are registered.',
+        title: 'No real-time workers running',
+        summary: 'Real-time is unavailable because no workers are registered.',
         details:
-          'Start at least one realtime worker, then refresh this page. If you run on AWS/ECS/Kubernetes, scale the worker service/deployment instead of using local Docker commands.',
+          'Start at least one real-time worker, then refresh this page. If you run on AWS/ECS/Kubernetes, scale the worker service/deployment instead of using local Docker commands.',
         level: 'error',
         showStartWorker: true,
       }
@@ -96,7 +96,7 @@ function buildStatusGuidance(statusData?: RealtimeStatusResponse): StatusGuidanc
 
     return {
       title: 'Workers unhealthy',
-      summary: `Realtime is unavailable: 0/${statusData.worker_count} workers are ready.`,
+      summary: `Real-time is unavailable: 0/${statusData.worker_count} workers are ready.`,
       details:
         'Workers are registered but not healthy. Check worker logs, model loading, and health checks.',
       level: 'error',
@@ -116,7 +116,7 @@ function buildStatusGuidance(statusData?: RealtimeStatusResponse): StatusGuidanc
   }
 
   return {
-    title: 'Realtime healthy',
+    title: 'Real-time healthy',
     summary: `Workers are ready and can accept new sessions (${statusData.ready_workers}/${statusData.worker_count} ready).`,
     details: 'No action needed unless you expect higher throughput.',
     level: 'normal',
@@ -213,7 +213,7 @@ export function RealtimeSessions() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Realtime</h1>
+          <h1 className="text-2xl font-bold">Real-time</h1>
           <p className="text-muted-foreground">
             Real-time transcription workers, capacity, and session history
           </p>

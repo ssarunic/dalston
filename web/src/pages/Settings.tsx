@@ -16,7 +16,7 @@ import {
   Gauge,
   Server,
   AudioLines,
-  Clock,
+  Archive,
   Monitor,
   RotateCcw,
   Copy,
@@ -27,7 +27,7 @@ const NAMESPACE_ICONS: Record<string, typeof Gauge> = {
   rate_limits: Gauge,
   engines: Server,
   audio: AudioLines,
-  retention: Clock,
+  retention: Archive,  // Matches JobDetail and RealtimeSessionDetail
   system: Monitor,
 }
 
