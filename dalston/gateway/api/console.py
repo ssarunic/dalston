@@ -605,11 +605,15 @@ def _get_transcribe_engine(job: JobModel) -> str | None:
 
     Returns the engine_id of the 'transcribe' stage task, or falls back
     to the explicitly requested engine in parameters.
+
+    Handles both mono audio (stage='transcribe') and multi-channel audio
+    (stage='transcribe_ch0', 'transcribe_ch1', etc.)
     """
     # First try to find the transcribe task
     if job.tasks:
         for task in job.tasks:
-            if task.stage == "transcribe":
+            # Match "transcribe" or "transcribe_ch0", "transcribe_ch1", etc.
+            if task.stage == "transcribe" or task.stage.startswith("transcribe_ch"):
                 return task.engine_id
 
     # Fallback to explicitly requested engine in parameters
