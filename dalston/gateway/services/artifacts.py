@@ -1,10 +1,10 @@
 """Artifact lifecycle management service."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from uuid import UUID
 
 import structlog
-from sqlalchemy import update
+from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.models import ArtifactOwnerType
@@ -58,18 +58,23 @@ class ArtifactService:
 
         # Now update purge_after for artifacts with ttl_seconds
         # purge_after = available_at + ttl_seconds
-        stmt_ttl = (
-            update(ArtifactObjectModel)
-            .where(ArtifactObjectModel.owner_type == owner_type.value)
-            .where(ArtifactObjectModel.owner_id == owner_id)
-            .where(ArtifactObjectModel.ttl_seconds.is_not(None))
-            .where(ArtifactObjectModel.purge_after.is_(None))
-            .values(
-                purge_after=available_at
-                + timedelta(seconds=1) * ArtifactObjectModel.ttl_seconds
-            )
+        # Use raw SQL to compute interval to avoid Python/SQL datetime mixing issues
+        # Note: Use CAST() instead of :: to avoid conflict with SQLAlchemy named params
+        await db.execute(
+            text("""
+                UPDATE artifact_objects
+                SET purge_after = CAST(:available_at AS TIMESTAMPTZ) + CAST(ttl_seconds || ' seconds' AS INTERVAL)
+                WHERE owner_type = :owner_type
+                  AND owner_id = :owner_id
+                  AND ttl_seconds IS NOT NULL
+                  AND purge_after IS NULL
+            """),
+            {
+                "available_at": available_at,
+                "owner_type": owner_type.value,
+                "owner_id": owner_id,
+            },
         )
-        await db.execute(stmt_ttl)
 
         if count > 0:
             logger.debug(
