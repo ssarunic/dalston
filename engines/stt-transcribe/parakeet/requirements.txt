@@ -15,7 +15,8 @@ transformers>=4.40.0,<4.46.0
 # torch>=2.0.0
 
 # Audio processing
-numpy>=1.24.0
+# Pin NumPy < 2.0 for NeMo compatibility (np.sctypes removed in NumPy 2.0)
+numpy>=1.24.0,<2.0.0
 librosa>=0.10.0
 
 # For audio file handling

@@ -31,9 +31,12 @@ ARG DEVICE=cuda
 ARG SKIP_MODEL_DOWNLOAD=false
 
 # Install system dependencies
+# Note: build-essential and cmake are needed on ARM64 to compile texterrors (NeMo dependency)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
+    build-essential \
+    cmake \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory for dalston package
