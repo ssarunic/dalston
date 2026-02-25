@@ -234,8 +234,8 @@ When services are later separated, only environment variables change.
 services:
   gateway:
     environment:
-      - S3_BUCKET=${S3_BUCKET}
-      - AWS_REGION=${AWS_REGION}
+      - DALSTON_S3_BUCKET=${DALSTON_S3_BUCKET}
+      - DALSTON_S3_REGION=${DALSTON_S3_REGION}
       # No S3_ENDPOINT — SDK auto-detects on EC2
       # No credentials — uses IAM role
 

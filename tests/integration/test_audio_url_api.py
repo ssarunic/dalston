@@ -41,7 +41,6 @@ class TestAudioUrlTranscription:
         settings = MagicMock()
         settings.audio_url_max_size_gb = 3.0
         settings.audio_url_timeout_seconds = 300
-        settings.allow_per_job_webhooks = False
         settings.s3_bucket = "test-bucket"
         settings.s3_region = "us-east-1"
         settings.s3_endpoint_url = None

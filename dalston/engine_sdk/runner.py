@@ -118,13 +118,13 @@ class EngineRunner:
         self._stage: str = "unknown"  # Pipeline stage from capabilities
 
         # Load configuration from environment
-        self.engine_id = os.environ.get("ENGINE_ID", "unknown")
+        self.engine_id = os.environ.get("DALSTON_ENGINE_ID", "unknown")
         # Instance-unique consumer ID for Redis Streams
         # This ensures spot instance replacements don't mask old pending tasks
         self.instance_id = f"{self.engine_id}-{uuid4().hex[:12]}"
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
-        self.s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
-        self.metrics_port = int(os.environ.get("METRICS_PORT", "9100"))
+        self.s3_bucket = os.environ.get("DALSTON_S3_BUCKET", "dalston-artifacts")
+        self.metrics_port = int(os.environ.get("DALSTON_METRICS_PORT", "9100"))
 
         # Configure structured logging (use logical engine_id for aggregation)
         dalston.logging.configure(f"engine-{self.engine_id}")

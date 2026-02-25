@@ -89,7 +89,7 @@ COPY engines/stt-transcribe/parakeet/variants/${MODEL_VARIANT}.yaml /etc/dalston
 COPY engines/stt-transcribe/parakeet/engine.py .
 
 # Set MODEL_VARIANT environment variable for the engine
-ENV MODEL_VARIANT=${MODEL_VARIANT}
+ENV DALSTON_MODEL_VARIANT=${MODEL_VARIANT}
 
 # Set CUDA visible devices
 ENV NVIDIA_VISIBLE_DEVICES=all

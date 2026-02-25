@@ -25,28 +25,28 @@
 # Common environment variables for all engines
 x-common-env: &common-env
   REDIS_URL: redis://redis:6379
-  S3_BUCKET: ${S3_BUCKET:-dalston-artifacts}
-  S3_REGION: ${S3_REGION:-eu-west-2}
-  S3_ENDPOINT_URL: http://minio:9000
-  S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-}
+  DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET:-dalston-artifacts}
+  DALSTON_S3_REGION: ${DALSTON_S3_REGION:-eu-west-2}
+  DALSTON_S3_ENDPOINT_URL: http://minio:9000
+  DALSTON_S3_PUBLIC_ENDPOINT_URL: ${DALSTON_S3_PUBLIC_ENDPOINT_URL:-}
   AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
   AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
-  LOG_LEVEL: ${LOG_LEVEL:-INFO}
-  LOG_FORMAT: ${LOG_FORMAT:-json}
+  DALSTON_LOG_LEVEL: ${DALSTON_LOG_LEVEL:-INFO}
+  DALSTON_LOG_FORMAT: ${DALSTON_LOG_FORMAT:-json}
 
 # Observability environment variables
 x-observability-env: &observability-env
   OTEL_ENABLED: ${OTEL_ENABLED:-false}
   OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
-  METRICS_ENABLED: ${METRICS_ENABLED:-true}
-  METRICS_PORT: 9100
+  DALSTON_METRICS_ENABLED: ${DALSTON_METRICS_ENABLED:-true}
+  DALSTON_METRICS_PORT: 9100
 
 # Core services environment (includes database)
 x-core-env: &core-env
   <<: *common-env
   DATABASE_URL: postgresql+asyncpg://dalston:${POSTGRES_PASSWORD:-password}@postgres:5432/dalston
-  ENGINE_UNAVAILABLE_BEHAVIOR: ${ENGINE_UNAVAILABLE_BEHAVIOR:-wait}
-  ENGINE_WAIT_TIMEOUT_SECONDS: ${ENGINE_WAIT_TIMEOUT_SECONDS:-300}
+  DALSTON_ENGINE_UNAVAILABLE_BEHAVIOR: ${DALSTON_ENGINE_UNAVAILABLE_BEHAVIOR:-wait}
+  DALSTON_ENGINE_WAIT_TIMEOUT_SECONDS: ${DALSTON_ENGINE_WAIT_TIMEOUT_SECONDS:-300}
 
 # Dependencies for batch engines
 x-batch-depends: &batch-depends
@@ -166,13 +166,13 @@ services:
     entrypoint: >
       /bin/sh -c "
       mc alias set dalston http://minio:9000 $${MINIO_ROOT_USER:-minioadmin} $${MINIO_ROOT_PASSWORD:-minioadmin};
-      mc mb dalston/$${S3_BUCKET:-dalston-artifacts} --ignore-existing;
+      mc mb dalston/$${DALSTON_S3_BUCKET:-dalston-artifacts} --ignore-existing;
       exit 0;
       "
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      S3_BUCKET: ${S3_BUCKET:-dalston-artifacts}
+      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET:-dalston-artifacts}
     profiles: [local-object-storage]
 
   # Jaeger for distributed tracing (M19)
@@ -228,7 +228,7 @@ services:
     command: python -m dalston.metrics_exporter
     environment:
       <<: *common-env
-      SCRAPE_INTERVAL: 15
+      DALSTON_SCRAPE_INTERVAL: 15
     depends_on: *realtime-depends
     profiles: [observability]
     restart: unless-stopped
@@ -261,7 +261,7 @@ services:
       dockerfile: docker/Dockerfile.orchestrator
     environment:
       <<: [*core-env, *observability-env]
-      METRICS_PORT: 8001
+      DALSTON_METRICS_PORT: 8001
     depends_on: *core-depends
     restart: unless-stopped
 
@@ -277,7 +277,7 @@ services:
       dockerfile: engines/stt-prepare/audio-prepare/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: audio-prepare
+      DALSTON_ENGINE_ID: audio-prepare
     depends_on: *batch-depends
     restart: unless-stopped
 
@@ -294,7 +294,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: parakeet-ctc-0.6b
+      DALSTON_ENGINE_ID: parakeet-ctc-0.6b
     volumes:
       - parakeet-models:/models
     depends_on: *batch-depends
@@ -313,7 +313,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: parakeet-ctc-1.1b
+      DALSTON_ENGINE_ID: parakeet-ctc-1.1b
     volumes:
       - parakeet-models:/models
     depends_on: *batch-depends
@@ -333,7 +333,7 @@ services:
         SKIP_MODEL_DOWNLOAD: "false"
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: parakeet-tdt-0.6b-v3
+      DALSTON_ENGINE_ID: parakeet-tdt-0.6b-v3
     volumes:
       - parakeet-models:/models
     depends_on: *batch-depends
@@ -353,8 +353,8 @@ services:
         SKIP_MODEL_DOWNLOAD: "true"
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: parakeet-tdt-0.6b-v3
-      DEVICE: cpu
+      DALSTON_ENGINE_ID: parakeet-tdt-0.6b-v3
+      DALSTON_DEVICE: cpu
     volumes:
       - parakeet-models:/models
     depends_on: *batch-depends
@@ -371,7 +371,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: parakeet-tdt-1.1b
+      DALSTON_ENGINE_ID: parakeet-tdt-1.1b
     volumes:
       - parakeet-models:/models
     depends_on: *batch-depends
@@ -389,7 +389,7 @@ services:
         MODEL_VARIANT: base
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: faster-whisper-base
+      DALSTON_ENGINE_ID: faster-whisper-base
     volumes:
       - whisper-models:/models
     depends_on: *batch-depends
@@ -405,7 +405,7 @@ services:
         MODEL_VARIANT: large-v3
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: faster-whisper-large-v3
+      DALSTON_ENGINE_ID: faster-whisper-large-v3
     volumes:
       - whisper-models:/models
     depends_on: *batch-depends
@@ -423,7 +423,7 @@ services:
         MODEL_VARIANT: large-v3-turbo
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: faster-whisper-large-v3-turbo
+      DALSTON_ENGINE_ID: faster-whisper-large-v3-turbo
     volumes:
       - whisper-models:/models
     depends_on: *batch-depends
@@ -442,7 +442,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: voxtral-mini-3b
+      DALSTON_ENGINE_ID: voxtral-mini-3b
     volumes:
       - voxtral-models:/models
     depends_on: *batch-depends
@@ -460,7 +460,7 @@ services:
       dockerfile: engines/stt-align/whisperx-align/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: whisperx-align
+      DALSTON_ENGINE_ID: whisperx-align
     volumes:
       - align-models:/models
     depends_on: *batch-depends
@@ -471,7 +471,7 @@ services:
     image: dalston/stt-batch-align-whisperx:latest
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: whisperx-align
+      DALSTON_ENGINE_ID: whisperx-align
     volumes:
       - align-models:/models
     depends_on: *batch-depends
@@ -489,9 +489,9 @@ services:
       dockerfile: engines/stt-diarize/pyannote-3.1/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: pyannote-3.1
+      DALSTON_ENGINE_ID: pyannote-3.1
       HF_TOKEN: ${HF_TOKEN:-}
-      DIARIZATION_DISABLED: ${DIARIZATION_DISABLED:-false}
+      DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
     volumes:
       - pyannote-models:/models
     depends_on: *batch-depends
@@ -502,7 +502,7 @@ services:
     image: dalston/stt-batch-diarize-pyannote-3.1:latest
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: pyannote-3.1
+      DALSTON_ENGINE_ID: pyannote-3.1
       HF_TOKEN: ${HF_TOKEN:-}
     volumes:
       - pyannote-models:/models
@@ -519,9 +519,9 @@ services:
       dockerfile: engines/stt-diarize/pyannote-4.0/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: pyannote-4.0
+      DALSTON_ENGINE_ID: pyannote-4.0
       HF_TOKEN: ${HF_TOKEN:-}
-      DIARIZATION_DISABLED: ${DIARIZATION_DISABLED:-false}
+      DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
     volumes:
       - pyannote-models:/models
     depends_on: *batch-depends
@@ -532,7 +532,7 @@ services:
     image: dalston/stt-batch-diarize-pyannote-4.0:latest
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: pyannote-4.0
+      DALSTON_ENGINE_ID: pyannote-4.0
       HF_TOKEN: ${HF_TOKEN:-}
     volumes:
       - pyannote-models:/models
@@ -551,9 +551,9 @@ services:
         SKIP_MODEL_DOWNLOAD: ${SKIP_MODEL_DOWNLOAD:-false}
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: nemo-msdd
-      DIARIZATION_DISABLED: ${DIARIZATION_DISABLED:-false}
-      NEMO_ALLOW_CPU: ${NEMO_ALLOW_CPU:-false}
+      DALSTON_ENGINE_ID: nemo-msdd
+      DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
+      DALSTON_NEMO_ALLOW_CPU: ${DALSTON_NEMO_ALLOW_CPU:-false}
     volumes:
       - nemo-models:/models
     depends_on: *batch-depends
@@ -570,8 +570,8 @@ services:
         DEVICE: cpu
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: pii-presidio
-      DEVICE: cpu
+      DALSTON_ENGINE_ID: pii-presidio
+      DALSTON_DEVICE: cpu
     volumes:
       - gliner-models:/models
     depends_on: *batch-depends
@@ -586,8 +586,8 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: pii-presidio
-      DEVICE: cuda
+      DALSTON_ENGINE_ID: pii-presidio
+      DALSTON_DEVICE: cuda
     volumes:
       - gliner-models:/models
     depends_on: *batch-depends
@@ -603,7 +603,7 @@ services:
       dockerfile: engines/stt-redact/audio-redactor/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: audio-redactor
+      DALSTON_ENGINE_ID: audio-redactor
     depends_on: *batch-depends
     restart: unless-stopped
 
@@ -615,7 +615,7 @@ services:
       dockerfile: engines/stt-merge/final-merger/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      ENGINE_ID: final-merger
+      DALSTON_ENGINE_ID: final-merger
     depends_on: *batch-depends
     restart: unless-stopped
 
@@ -634,10 +634,10 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      MODEL_VARIANT: 0.6b
-      DEVICE: cuda
-      WORKER_PORT: 9000
-      MAX_SESSIONS: 4
+      DALSTON_MODEL_VARIANT: 0.6b
+      DALSTON_DEVICE: cuda
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 4
     volumes:
       - parakeet-models:/models
     depends_on: *realtime-depends
@@ -657,10 +657,10 @@ services:
         DEVICE: cpu
     environment:
       <<: [*common-env, *observability-env]
-      MODEL_VARIANT: 0.6b
-      DEVICE: cpu
-      WORKER_PORT: 9000
-      MAX_SESSIONS: 4
+      DALSTON_MODEL_VARIANT: 0.6b
+      DALSTON_DEVICE: cpu
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 4
     volumes:
       - parakeet-models:/models
     depends_on: *realtime-depends
@@ -678,9 +678,9 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      MODEL_VARIANT: 1.1b
-      WORKER_PORT: 9000
-      MAX_SESSIONS: 4
+      DALSTON_MODEL_VARIANT: 1.1b
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 4
     volumes:
       - parakeet-models:/models
     depends_on: *realtime-depends
@@ -697,8 +697,8 @@ services:
       dockerfile: engines/stt-rt/faster-whisper/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      WORKER_PORT: 9000
-      MAX_SESSIONS: 4
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 4
     volumes:
       - realtime-models:/models
     depends_on: *realtime-depends
@@ -717,10 +717,10 @@ services:
         MODEL_VARIANT: mini-4b
     environment:
       <<: [*common-env, *observability-env]
-      MODEL_VARIANT: mini-4b
-      WORKER_PORT: 9000
-      MAX_SESSIONS: 4
-      TRANSCRIPTION_DELAY_MS: 480
+      DALSTON_MODEL_VARIANT: mini-4b
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 4
+      DALSTON_TRANSCRIPTION_DELAY_MS: 480
     volumes:
       - voxtral-models:/models
     depends_on: *realtime-depends

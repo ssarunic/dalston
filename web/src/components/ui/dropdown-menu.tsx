@@ -121,7 +121,7 @@ export function DropdownMenuContent({ className, align = 'start', side = 'bottom
       ref={ref}
       role="menu"
       className={cn(
-        'absolute z-50 w-max min-w-[8rem] overflow-hidden rounded-md border bg-card p-1 text-card-foreground shadow-md',
+        'absolute z-50 w-max min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md',
         'animate-in fade-in-0 zoom-in-95',
         align === 'end' ? 'right-0' : 'left-0',
         side === 'bottom' ? 'mt-1' : 'bottom-full mb-1',

@@ -1,9 +1,9 @@
 """Unified structured logging configuration for all Dalston services.
 
 Provides a single `configure()` function that sets up structlog with:
-- JSON output for production (LOG_FORMAT=json)
-- Colored console output for development (LOG_FORMAT=console)
-- Configurable log level via LOG_LEVEL environment variable
+- JSON output for production (DALSTON_LOG_FORMAT=json)
+- Colored console output for development (DALSTON_LOG_FORMAT=console)
+- Configurable log level via DALSTON_LOG_LEVEL environment variable
 - Context variable merging for correlation IDs (request_id, job_id, etc.)
 - Standard library integration so third-party libraries emit structured output
 - Log-trace correlation (M19): Injects trace_id and span_id when tracing is enabled
@@ -70,14 +70,14 @@ def configure(service_name: str) -> None:
             "orchestrator", "stt-batch-transcribe-whisper").
 
     Environment Variables:
-        LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+        DALSTON_LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
             Defaults to INFO.
-        LOG_FORMAT: Output format. "json" (default) for machine-parseable
+        DALSTON_LOG_FORMAT: Output format. "json" (default) for machine-parseable
             JSON lines, "console" for colored human-readable output.
     """
-    log_level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
+    log_level_name = os.environ.get("DALSTON_LOG_LEVEL", "INFO").upper()
     log_level = getattr(logging, log_level_name, logging.INFO)
-    log_format = os.environ.get("LOG_FORMAT", "json").lower()
+    log_format = os.environ.get("DALSTON_LOG_FORMAT", "json").lower()
 
     # Shared processors used by both structlog and stdlib integration
     shared_processors: list[structlog.types.Processor] = [

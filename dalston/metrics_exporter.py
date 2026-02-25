@@ -217,8 +217,8 @@ async def exporter_main() -> None:
 
     # Load configuration from environment
     redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
-    port = int(os.environ.get("METRICS_PORT", "9100"))
-    interval = float(os.environ.get("SCRAPE_INTERVAL", "15"))
+    port = int(os.environ.get("DALSTON_METRICS_PORT", "9100"))
+    interval = float(os.environ.get("DALSTON_SCRAPE_INTERVAL", "15"))
 
     logger.info(
         "metrics_exporter_starting",

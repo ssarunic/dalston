@@ -240,18 +240,8 @@ data = client.export(job_id, format="json")
 
 ## Webhooks
 
-Get notified when transcription jobs complete instead of polling.
-
-### Submitting with Webhook
-
-```python
-job = client.transcribe(
-    file="audio.mp3",
-    webhook_url="https://your-server.com/webhooks/dalston",
-    webhook_metadata={"user_id": "123", "request_id": "abc"},
-)
-# Job will POST to your webhook URL when complete
-```
+Get notified when transcription jobs complete by registering webhook endpoints
+via the admin console.
 
 ### Verifying Webhook Signatures
 
@@ -323,8 +313,6 @@ client = Dalston(
 | `speaker_detection` | str | `"none"` | `"none"`, `"diarize"`, or `"per_channel"` |
 | `num_speakers` | int | None | Expected number of speakers (hint for diarization) |
 | `timestamps_granularity` | str | `"word"` | `"none"`, `"segment"`, or `"word"` |
-| `webhook_url` | str | None | URL for completion callback |
-| `webhook_metadata` | dict | None | Custom data echoed in webhook |
 
 ### Real-time Session Parameters
 

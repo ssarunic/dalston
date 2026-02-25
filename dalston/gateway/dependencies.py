@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator, Callable
 from typing import TYPE_CHECKING, Annotated
 
+import structlog
 from fastapi import Depends, HTTPException, Request
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +25,8 @@ from dalston.gateway.services.rate_limiter import RedisRateLimiter
 if TYPE_CHECKING:
     from dalston.common.audit import AuditService
     from dalston.session_router import SessionRouter
+
+logger = structlog.get_logger()
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -199,10 +202,12 @@ def reset_rate_limiter() -> None:
 async def get_rate_limiter(
     redis: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
+    db: AsyncSession = Depends(get_db),
 ) -> RedisRateLimiter:
     """Get RateLimiter instance.
 
     Creates a singleton rate limiter with Redis backend.
+    On each request, limits are refreshed from DB overrides (5s TTL cache).
     """
     global _rate_limiter
     if _rate_limiter is None:
@@ -212,6 +217,25 @@ async def get_rate_limiter(
             max_concurrent_jobs=settings.rate_limit_concurrent_jobs,
             max_concurrent_sessions=settings.rate_limit_concurrent_sessions,
         )
+
+    # Refresh limits from DB settings (uses 5s TTL cache — essentially free)
+    try:
+        from dalston.gateway.services.settings import SettingsService
+
+        svc = SettingsService()
+        _rate_limiter._requests_per_minute = await svc.get_effective_value(
+            db, "rate_limits", "requests_per_minute"
+        )
+        _rate_limiter._max_concurrent_jobs = await svc.get_effective_value(
+            db, "rate_limits", "concurrent_jobs"
+        )
+        _rate_limiter._max_concurrent_sessions = await svc.get_effective_value(
+            db, "rate_limits", "concurrent_sessions"
+        )
+    except Exception:
+        # If settings service fails, keep existing limits
+        logger.warning("failed_to_refresh_rate_limits", exc_info=True)
+
     return _rate_limiter
 
 

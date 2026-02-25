@@ -295,8 +295,6 @@ class Dalston:
         min_speakers: int | None = None,
         max_speakers: int | None = None,
         timestamps_granularity: TimestampGranularity | str = TimestampGranularity.WORD,
-        webhook_url: str | None = None,
-        webhook_metadata: dict[str, Any] | None = None,
         pii_detection: bool = False,
         pii_detection_tier: PIIDetectionTier | str | None = None,
         pii_entity_types: list[str] | None = None,
@@ -319,8 +317,6 @@ class Dalston:
             min_speakers: Minimum speakers for diarization auto-detection.
             max_speakers: Maximum speakers for diarization auto-detection.
             timestamps_granularity: Level of timestamp detail.
-            webhook_url: URL for completion callback.
-            webhook_metadata: Custom data to include in webhook.
             pii_detection: Enable PII detection in transcript.
             pii_detection_tier: Detection thoroughness (fast, standard, thorough).
             pii_entity_types: Specific entity types to detect (e.g., ["ssn", "credit_card_number"]).
@@ -372,12 +368,6 @@ class Dalston:
             data["min_speakers"] = min_speakers
         if max_speakers is not None:
             data["max_speakers"] = max_speakers
-        if webhook_url is not None:
-            data["webhook_url"] = webhook_url
-        if webhook_metadata is not None:
-            import json
-
-            data["webhook_metadata"] = json.dumps(webhook_metadata)
 
         # PII detection parameters
         if pii_detection:
@@ -1162,8 +1152,6 @@ class AsyncDalston:
         min_speakers: int | None = None,
         max_speakers: int | None = None,
         timestamps_granularity: TimestampGranularity | str = TimestampGranularity.WORD,
-        webhook_url: str | None = None,
-        webhook_metadata: dict[str, Any] | None = None,
         pii_detection: bool = False,
         pii_detection_tier: PIIDetectionTier | str | None = None,
         pii_entity_types: list[str] | None = None,
@@ -1186,8 +1174,6 @@ class AsyncDalston:
             min_speakers: Minimum speakers for diarization auto-detection.
             max_speakers: Maximum speakers for diarization auto-detection.
             timestamps_granularity: Level of timestamp detail.
-            webhook_url: URL for completion callback.
-            webhook_metadata: Custom data to include in webhook.
             pii_detection: Enable PII detection in transcript.
             pii_detection_tier: Detection thoroughness (fast, standard, thorough).
             pii_entity_types: Specific entity types to detect (e.g., ["ssn", "credit_card_number"]).
@@ -1235,12 +1221,6 @@ class AsyncDalston:
             data["min_speakers"] = min_speakers
         if max_speakers is not None:
             data["max_speakers"] = max_speakers
-        if webhook_url is not None:
-            data["webhook_url"] = webhook_url
-        if webhook_metadata is not None:
-            import json
-
-            data["webhook_metadata"] = json.dumps(webhook_metadata)
 
         # PII detection parameters
         if pii_detection:

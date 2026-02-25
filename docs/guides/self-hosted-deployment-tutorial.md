@@ -86,11 +86,11 @@ MINIO_ROOT_USER=minioadmin
 MINIO_ROOT_PASSWORD=change-this-password
 
 # S3 configuration (uses MinIO)
-S3_BUCKET=dalston-artifacts
-S3_REGION=eu-west-2
+DALSTON_S3_BUCKET=dalston-artifacts
+DALSTON_S3_REGION=eu-west-2
 AWS_ACCESS_KEY_ID=minioadmin
 AWS_SECRET_ACCESS_KEY=change-this-password
-S3_ENDPOINT_URL=http://minio:9000
+DALSTON_S3_ENDPOINT_URL=http://minio:9000
 
 # Optional: LLM API keys for cleanup engine
 ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxxx

@@ -91,6 +91,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 |---|-----------|------|------|--------|
 | [M17](milestones/M17-api-key-management.md) | API Key Management | Web UI for creating/revoking API keys | 2-3 | Completed |
 | [M27](milestones/M27-console-ux-improvements.md) | Console UX Improvements | Slide-over panels, audio player, search, responsive design | 8-10 | Not Started |
+| [M35](milestones/M35-settings-page.md) | Settings Page | Admin console for viewing/editing system config without redeploying | 4-5 | Not Started |
 
 ## Observability Milestones
 
@@ -232,6 +233,8 @@ M3 + M4 + M25 ──► M26
 M28 ──► M29 ──► M30 ──► M31
                   │
                   └──► M32 (variant structure)
+
+M10 + M11 + M15 ──► M35
 ```
 
 - **M1-M5**: Core batch pipeline (sequential)
@@ -247,6 +250,7 @@ M28 ──► M29 ──► M30 ──► M31
 - **M25**: Data Retention & Audit (needs M11 auth, M21 webhooks for purge events)
 - **M26**: PII Detection & Audio Redaction (needs M3 word timestamps, M4 diarization, M25 retention)
 - **M28-M32**: Engine infrastructure (M28 registry → M29 capabilities → M30 metadata → M31 routing → M32 variants)
+- **M35**: Settings Page (needs M10 console, M11 auth, M15 console auth)
 
 ---
 
@@ -281,3 +285,4 @@ Each milestone has a verification section. Key checkpoints:
 | M29 | Job fails with capability mismatch error (e.g., unsupported language) |
 | M30 | `GET /v1/engines` returns engine list; `GET /v1/capabilities` returns aggregate capabilities |
 | M32 | Catalog shows `whisper-base`, `whisper-large-v3`, `whisper-large-v3-turbo` as separate engines |
+| M35 | Settings page shows current values; admin can change rate limits and see effect immediately |

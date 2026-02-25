@@ -492,8 +492,8 @@ engine-my-new-engine:
   environment:
     - REDIS_URL=redis://redis:6379
     - ENGINE_ID={engine-id}
-    - S3_BUCKET=${S3_BUCKET}
-    - S3_REGION=${S3_REGION}
+    - DALSTON_S3_BUCKET=${DALSTON_S3_BUCKET}
+    - DALSTON_S3_REGION=${DALSTON_S3_REGION}
     - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
     - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
   tmpfs:

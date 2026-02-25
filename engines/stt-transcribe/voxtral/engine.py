@@ -53,7 +53,9 @@ class VoxtralEngine(Engine):
         self._processor = None
         self._model_name: str | None = None
 
-        model_variant = os.environ.get("MODEL_VARIANT", self.DEFAULT_MODEL_VARIANT)
+        model_variant = os.environ.get(
+            "DALSTON_MODEL_VARIANT", self.DEFAULT_MODEL_VARIANT
+        )
         if model_variant not in self.MODEL_VARIANT_MAP:
             self.logger.warning(
                 "unknown_model_variant",
@@ -64,7 +66,7 @@ class VoxtralEngine(Engine):
         self._model_variant = model_variant
         self._hf_model_id = self.MODEL_VARIANT_MAP[model_variant]
 
-        requested_device = os.environ.get("DEVICE", "").lower()
+        requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
         cuda_available = torch.cuda.is_available()
         gpu_only_variant = model_variant in self.GPU_ONLY_VARIANTS
 

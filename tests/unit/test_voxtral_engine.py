@@ -39,7 +39,9 @@ class TestVoxtralEngine:
     @pytest.fixture
     def mock_torch(self):
         """Mock torch to avoid CUDA checks."""
-        with patch.dict(os.environ, {"DEVICE": "cpu", "MODEL_VARIANT": "mini-3b"}):
+        with patch.dict(
+            os.environ, {"DALSTON_DEVICE": "cpu", "DALSTON_MODEL_VARIANT": "mini-3b"}
+        ):
             with patch("torch.cuda.is_available", return_value=False):
                 with patch("torch.cuda.device_count", return_value=0):
                     yield
@@ -168,7 +170,9 @@ class TestVoxtralEngineEnvironment:
 
     def test_unknown_model_variant_falls_back(self):
         """Unknown MODEL_VARIANT should fall back to default."""
-        with patch.dict(os.environ, {"MODEL_VARIANT": "unknown", "DEVICE": "cpu"}):
+        with patch.dict(
+            os.environ, {"DALSTON_MODEL_VARIANT": "unknown", "DALSTON_DEVICE": "cpu"}
+        ):
             with patch("torch.cuda.is_available", return_value=False):
                 VoxtralEngine = load_voxtral_engine()
 
@@ -177,7 +181,9 @@ class TestVoxtralEngineEnvironment:
 
     def test_explicit_cpu_device(self):
         """Explicit DEVICE=cpu should use CPU."""
-        with patch.dict(os.environ, {"DEVICE": "cpu", "MODEL_VARIANT": "mini-3b"}):
+        with patch.dict(
+            os.environ, {"DALSTON_DEVICE": "cpu", "DALSTON_MODEL_VARIANT": "mini-3b"}
+        ):
             with patch("torch.cuda.is_available", return_value=True):
                 VoxtralEngine = load_voxtral_engine()
 

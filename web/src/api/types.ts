@@ -435,6 +435,48 @@ export interface AuditListResponse {
   has_more: boolean
 }
 
+// Settings types
+export interface SettingValue {
+  key: string
+  label: string
+  description: string
+  value_type: 'int' | 'float' | 'bool' | 'string' | 'select'
+  value: unknown
+  default_value: unknown
+  is_overridden: boolean
+  env_var: string
+  min_value?: number | null
+  max_value?: number | null
+  options?: string[] | null
+}
+
+export interface NamespaceSettings {
+  namespace: string
+  label: string
+  description: string
+  editable: boolean
+  settings: SettingValue[]
+  updated_at: string | null
+}
+
+export interface NamespaceSummary {
+  namespace: string
+  label: string
+  description: string
+  editable: boolean
+  setting_count: number
+  has_overrides: boolean
+}
+
+export interface SettingsNamespaceListResponse {
+  namespaces: NamespaceSummary[]
+}
+
+export interface UpdateSettingsRequest {
+  settings: Record<string, unknown>
+  expected_updated_at?: string | null
+}
+
 export interface AuditListParams {
   tenant_id?: string
   action?: string

@@ -57,16 +57,6 @@ class TranscriptionCreateParams(BaseModel):
         description="Timestamp granularity: 'none', 'segment', 'word'",
     )
 
-    # Webhook (M05)
-    webhook_url: str | None = Field(
-        default=None,
-        description="URL for completion callback",
-    )
-    webhook_metadata: dict | None = Field(
-        default=None,
-        description="Custom data echoed back in webhook callback (max 16KB)",
-    )
-
     # PII Detection (M26)
     pii_detection: bool = Field(
         default=False,

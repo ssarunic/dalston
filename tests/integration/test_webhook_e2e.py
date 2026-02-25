@@ -35,10 +35,6 @@ class TestWebhookEndToEnd:
     def webhook_url(self) -> str:
         return "https://my-app.example.com/webhooks/dalston"
 
-    @pytest.fixture
-    def webhook_metadata(self) -> dict:
-        return {"user_id": "user_123", "project": "podcast-transcription"}
-
     def verify_signature(
         self,
         payload_json: str,
@@ -65,7 +61,6 @@ class TestWebhookEndToEnd:
         webhook_secret: str,
         job_id: UUID,
         webhook_url: str,
-        webhook_metadata: dict,
         httpx_mock,
     ):
         """Test complete flow: job completes -> webhook delivered with valid signature."""
@@ -77,7 +72,6 @@ class TestWebhookEndToEnd:
             job_id=job_id,
             status="completed",
             duration=125.5,
-            webhook_metadata=webhook_metadata,
         )
 
         # Deliver webhook
@@ -117,7 +111,6 @@ class TestWebhookEndToEnd:
         assert received_payload["data"]["transcription_id"] == str(job_id)
         assert received_payload["data"]["status"] == "completed"
         assert received_payload["data"]["duration"] == 125.5
-        assert received_payload["data"]["webhook_metadata"] == webhook_metadata
 
     @pytest.mark.asyncio
     async def test_failed_webhook_e2e(
@@ -126,7 +119,6 @@ class TestWebhookEndToEnd:
         webhook_secret: str,
         job_id: UUID,
         webhook_url: str,
-        webhook_metadata: dict,
         httpx_mock,
     ):
         """Test complete flow: job fails -> webhook delivered with error."""
@@ -139,7 +131,6 @@ class TestWebhookEndToEnd:
             job_id=job_id,
             status="failed",
             error=error_message,
-            webhook_metadata=webhook_metadata,
         )
 
         success, status_code, error = await webhook_service.deliver(
@@ -154,7 +145,6 @@ class TestWebhookEndToEnd:
         assert received_payload["type"] == "transcription.failed"
         assert received_payload["data"]["status"] == "failed"
         assert received_payload["data"]["error"] == error_message
-        assert received_payload["data"]["webhook_metadata"] == webhook_metadata
 
     @pytest.mark.asyncio
     async def test_invalid_signature_rejected(
@@ -191,28 +181,21 @@ class TestWebhookEndToEnd:
         )
 
     @pytest.mark.asyncio
-    async def test_webhook_delivery_with_nested_metadata(
+    async def test_webhook_delivery_success(
         self,
         webhook_service: WebhookService,
         job_id: UUID,
         webhook_url: str,
         httpx_mock,
     ):
-        """Test webhook with complex nested metadata."""
+        """Test webhook delivery succeeds and payload is correct."""
         httpx_mock.add_response(status_code=200)
-
-        complex_metadata = {
-            "user": {"id": "u_123", "email": "test@example.com"},
-            "project": {"id": "p_456", "name": "Podcast"},
-            "tags": ["audio", "interview", "2024"],
-            "config": {"notify_slack": True, "channel": "#transcripts"},
-        }
 
         payload = webhook_service.build_payload(
             event="transcription.completed",
             job_id=job_id,
             status="completed",
-            webhook_metadata=complex_metadata,
+            duration=60.5,
         )
 
         success, status_code, error = await webhook_service.deliver(
@@ -223,7 +206,9 @@ class TestWebhookEndToEnd:
 
         request = httpx_mock.get_request()
         received_payload = json.loads(request.content.decode())
-        assert received_payload["data"]["webhook_metadata"] == complex_metadata
+        assert received_payload["data"]["transcription_id"] == str(job_id)
+        assert received_payload["data"]["status"] == "completed"
+        assert received_payload["data"]["duration"] == 60.5
 
 
 class TestWebhookEventFlow:
@@ -285,7 +270,6 @@ class TestWebhookPayloadSpec:
             job_id=job_id,
             status="completed",
             duration=45.2,
-            webhook_metadata={"user_id": "123"},
         )
 
         # Verify Standard Webhooks envelope
@@ -298,7 +282,6 @@ class TestWebhookPayloadSpec:
         assert payload["data"]["transcription_id"] == str(job_id)
         assert payload["data"]["status"] == "completed"
         assert payload["data"]["duration"] == 45.2
-        assert payload["data"]["webhook_metadata"] == {"user_id": "123"}
 
     def test_failed_payload_matches_spec(self, service: WebhookService):
         """Verify failed payload matches Standard Webhooks spec."""
@@ -308,14 +291,12 @@ class TestWebhookPayloadSpec:
             job_id=job_id,
             status="failed",
             error="Transcription failed: timeout",
-            webhook_metadata={"user_id": "123"},
         )
 
         assert payload["object"] == "event"
         assert payload["type"] == "transcription.failed"
         assert payload["data"]["status"] == "failed"
         assert payload["data"]["error"] == "Transcription failed: timeout"
-        assert payload["data"]["webhook_metadata"] == {"user_id": "123"}
 
     def test_signature_format_matches_spec(self, service: WebhookService):
         """Verify signature format matches Standard Webhooks spec."""

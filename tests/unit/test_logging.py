@@ -29,8 +29,8 @@ class TestConfigure:
         root = logging.getLogger()
         root.handlers.clear()
         # Restore env vars
-        os.environ.pop("LOG_LEVEL", None)
-        os.environ.pop("LOG_FORMAT", None)
+        os.environ.pop("DALSTON_LOG_LEVEL", None)
+        os.environ.pop("DALSTON_LOG_FORMAT", None)
 
     def test_configure_sets_json_renderer_by_default(self):
         """Default LOG_FORMAT produces JSON output."""
@@ -51,7 +51,7 @@ class TestConfigure:
 
     def test_configure_json_format_explicit(self):
         """LOG_FORMAT=json produces JSON output."""
-        os.environ["LOG_FORMAT"] = "json"
+        os.environ["DALSTON_LOG_FORMAT"] = "json"
         dalston.logging.configure("gateway")
 
         logger = structlog.get_logger()
@@ -67,7 +67,7 @@ class TestConfigure:
 
     def test_configure_console_format(self):
         """LOG_FORMAT=console produces human-readable (non-JSON) output."""
-        os.environ["LOG_FORMAT"] = "console"
+        os.environ["DALSTON_LOG_FORMAT"] = "console"
         dalston.logging.configure("dev-service")
 
         logger = structlog.get_logger()
@@ -95,7 +95,7 @@ class TestConfigure:
 
     def test_configure_log_level_debug(self):
         """LOG_LEVEL=DEBUG allows debug messages through."""
-        os.environ["LOG_LEVEL"] = "DEBUG"
+        os.environ["DALSTON_LOG_LEVEL"] = "DEBUG"
         dalston.logging.configure("test-service")
 
         logger = structlog.get_logger()
@@ -110,7 +110,7 @@ class TestConfigure:
 
     def test_configure_log_level_warning(self):
         """LOG_LEVEL=WARNING filters out INFO messages."""
-        os.environ["LOG_LEVEL"] = "WARNING"
+        os.environ["DALSTON_LOG_LEVEL"] = "WARNING"
         dalston.logging.configure("test-service")
 
         logger = structlog.get_logger()
@@ -126,7 +126,7 @@ class TestConfigure:
 
     def test_configure_log_level_case_insensitive(self):
         """LOG_LEVEL is case-insensitive."""
-        os.environ["LOG_LEVEL"] = "debug"
+        os.environ["DALSTON_LOG_LEVEL"] = "debug"
         dalston.logging.configure("test-service")
 
         logger = structlog.get_logger()
@@ -138,7 +138,7 @@ class TestConfigure:
 
     def test_configure_invalid_log_level_falls_back_to_info(self):
         """Invalid LOG_LEVEL falls back to INFO."""
-        os.environ["LOG_LEVEL"] = "NOTAVALIDLEVEL"
+        os.environ["DALSTON_LOG_LEVEL"] = "NOTAVALIDLEVEL"
         dalston.logging.configure("test-service")
 
         logger = structlog.get_logger()

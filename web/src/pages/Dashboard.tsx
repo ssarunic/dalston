@@ -136,7 +136,7 @@ export function Dashboard() {
           loading={isLoading}
         />
         <StatCard
-          title="Realtime Sessions"
+          title="Real-time Sessions"
           value={`${realtime?.active_sessions ?? 0}/${realtime?.total_capacity ?? 0}`}
           subtitle={`${realtime?.worker_count ?? 0} workers`}
           icon={Radio}

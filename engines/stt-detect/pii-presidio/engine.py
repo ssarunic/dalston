@@ -131,7 +131,7 @@ class PIIDetectionEngine(Engine):
 
     def _resolve_device(self) -> str:
         """Resolve inference device from DEVICE env with auto-detect fallback."""
-        requested_device = os.environ.get("DEVICE", "").lower()
+        requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
 
         try:
             import torch

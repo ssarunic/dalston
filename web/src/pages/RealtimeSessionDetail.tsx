@@ -110,7 +110,7 @@ export function RealtimeSessionDetail() {
   if (error || !session) {
     return (
       <div className="space-y-6">
-        <BackButton fallbackPath="/realtime" variant="link" label="Back to Realtime" />
+        <BackButton fallbackPath="/realtime" variant="link" label="Back to Real-time" />
         <div className="p-4 bg-destructive/10 text-destructive rounded-md flex items-center gap-2">
           <AlertCircle className="h-5 w-5" />
           Session not found
@@ -126,7 +126,7 @@ export function RealtimeSessionDetail() {
           <BackButton fallbackPath="/realtime" />
           <div>
             <h1 className="text-2xl font-bold font-mono">{session.id}</h1>
-            <p className="text-muted-foreground">Realtime Session</p>
+            <p className="text-muted-foreground">Real-time Session</p>
           </div>
         </div>
         <StatusBadge status={session.status} />

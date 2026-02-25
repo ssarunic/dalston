@@ -19,7 +19,7 @@ class TestEngineRunnerInstanceId:
 
     def test_generates_unique_instance_id(self):
         """Test that each EngineRunner generates a unique instance_id."""
-        with patch.dict("os.environ", {"ENGINE_ID": "whisper-cpu"}):
+        with patch.dict("os.environ", {"DALSTON_ENGINE_ID": "whisper-cpu"}):
             from dalston.engine_sdk.runner import EngineRunner
 
             mock_engine = MagicMock()
@@ -40,7 +40,7 @@ class TestEngineRunnerInstanceId:
 
     def test_instance_id_is_12_char_hex_suffix(self):
         """Test that instance_id has expected format."""
-        with patch.dict("os.environ", {"ENGINE_ID": "faster-whisper"}):
+        with patch.dict("os.environ", {"DALSTON_ENGINE_ID": "faster-whisper"}):
             from dalston.engine_sdk.runner import EngineRunner
 
             mock_engine = MagicMock()

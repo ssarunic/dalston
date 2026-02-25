@@ -57,7 +57,9 @@ class ParakeetStreamingEngine(RealtimeEngine):
         self._chunk_size_ms: int = 100  # Default chunk size
 
         # Determine model from environment variable (set at container build time)
-        model_variant = os.environ.get("MODEL_VARIANT", self.DEFAULT_MODEL_VARIANT)
+        model_variant = os.environ.get(
+            "DALSTON_MODEL_VARIANT", self.DEFAULT_MODEL_VARIANT
+        )
         if model_variant not in self.MODEL_VARIANT_MAP:
             logger.warning(
                 "unknown_model_variant",
@@ -69,7 +71,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
         self._nemo_model_id = self.MODEL_VARIANT_MAP[model_variant]
 
         # Determine device from environment or availability
-        requested_device = os.environ.get("DEVICE", "").lower()
+        requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
         cuda_available = torch.cuda.is_available()
         gpu_only_variant = model_variant in self.GPU_ONLY_VARIANTS
 

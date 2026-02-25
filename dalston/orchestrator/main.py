@@ -101,7 +101,7 @@ async def _start_metrics_server() -> None:
     _metrics_runner = web.AppRunner(_metrics_app)
     await _metrics_runner.setup()
 
-    port = int(os.environ.get("METRICS_PORT", "8001"))
+    port = int(os.environ.get("DALSTON_METRICS_PORT", "8001"))
     site = web.TCPSite(_metrics_runner, "0.0.0.0", port)
     await site.start()
 
@@ -514,10 +514,7 @@ async def _handle_job_webhook(
 ) -> None:
     """Handle webhook delivery for completed or failed jobs.
 
-    Creates delivery rows for:
-    1. All registered endpoints subscribed to the event
-    2. Per-job webhook_url if configured (legacy behavior, controlled by settings)
-
+    Creates delivery rows for all registered endpoints subscribed to the event.
     The actual delivery is handled by the DeliveryWorker.
 
     Args:
@@ -560,7 +557,6 @@ async def _handle_job_webhook(
         status=status,
         duration=duration,
         error=error,
-        webhook_metadata=job.webhook_metadata,
     )
 
     deliveries_created = 0
@@ -584,22 +580,6 @@ async def _handle_job_webhook(
             "webhook_delivery_created",
             endpoint_id=str(endpoint.id),
             endpoint_url=endpoint.url,
-        )
-
-    # Create delivery for per-job webhook_url (legacy behavior)
-    if job.webhook_url and settings.allow_per_job_webhooks:
-        await create_webhook_delivery(
-            db=db,
-            endpoint_id=None,
-            job_id=job_id,
-            event_type=event_type,
-            payload=payload,
-            url_override=job.webhook_url,
-        )
-        deliveries_created += 1
-        log.debug(
-            "webhook_delivery_created",
-            url_override=job.webhook_url,
         )
 
     await db.commit()

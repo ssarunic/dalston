@@ -156,7 +156,7 @@ dalston/orchestrator/
 
 - `DATABASE_URL` — PostgreSQL connection string
 - `REDIS_URL` — Redis connection string
-- `S3_BUCKET`, `S3_REGION` — S3 artifact storage
+- `DALSTON_S3_BUCKET`, `DALSTON_S3_REGION` — S3 artifact storage
 - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` — AWS credentials
 
 ---
