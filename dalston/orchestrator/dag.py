@@ -32,7 +32,7 @@ VALID_SPEAKER_DETECTION_MODES = {"none", "diarize", "per_channel"}
 # Default engine IDs for each stage
 DEFAULT_ENGINES = {
     "prepare": "audio-prepare",
-    "transcribe": "faster-whisper",
+    "transcribe": "faster-whisper-base",
     "align": "whisperx-align",
     "diarize": "pyannote-3.1",
     "pii_detect": "pii-presidio",

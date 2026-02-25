@@ -213,6 +213,7 @@ class TaskResponse(BaseModel):
     dependencies: list[UUID]
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    duration_ms: int | None = None
     error: str | None = None
 
     model_config = {"from_attributes": True}
@@ -265,6 +266,12 @@ async def get_job_tasks(
         key=lambda t: (stage_order.get(t.stage, 99), t.engine_id),
     )
 
+    def compute_duration(task):
+        if task.started_at and task.completed_at:
+            delta = task.completed_at - task.started_at
+            return int(delta.total_seconds() * 1000)
+        return None
+
     return TaskListResponse(
         job_id=job.id,
         tasks=[
@@ -276,6 +283,7 @@ async def get_job_tasks(
                 dependencies=task.dependencies or [],
                 started_at=task.started_at,
                 completed_at=task.completed_at,
+                duration_ms=compute_duration(task),
                 error=task.error,
             )
             for task in sorted_tasks

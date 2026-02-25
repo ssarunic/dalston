@@ -134,9 +134,12 @@ export interface Task {
   stage: string
   engine_id: string
   status: TaskStatus
+  required?: boolean
   dependencies: string[]
   started_at?: string
   completed_at?: string
+  duration_ms?: number
+  retries?: number
   error?: string
 }
 

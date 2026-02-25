@@ -144,14 +144,10 @@ test.describe('3-Zone Header Layout', () => {
     // 2. Navigate to a mocked job detail page with completed status, audio, and transcript
     await page.goto(`http://localhost:3000/jobs/${jobId}`)
 
-    // 3. Locate the Transcript section sticky header on the job detail page
-    // Wait for the transcript card to render with the "Transcript" heading
-    // There are two headings: one in the Card title and one in the TranscriptViewer sticky header
-    const transcriptHeadings = page.getByRole('heading', { name: 'Transcript' })
-    await expect(transcriptHeadings.first()).toBeVisible()
-
-    // 4. Verify both Transcript headings are visible (Card title + sticky header)
-    await expect(transcriptHeadings).toHaveCount(2)
+    // 3. Locate the Transcript section on the job detail page
+    // Wait for the transcript card to render with the "Transcript" heading (Card title only)
+    const transcriptHeading = page.getByRole('heading', { name: 'Transcript' })
+    await expect(transcriptHeading).toBeVisible()
 
     // 4. Verify the first row contains an "Export" button with download icon and chevron on the right
     await expect(page.getByRole('button', { name: /Export/ })).toBeVisible()

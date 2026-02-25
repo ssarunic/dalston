@@ -8,6 +8,17 @@ interface DAGViewerProps {
   jobId: string
   jobStatus?: string
   className?: string
+  audioDurationSeconds?: number | null
+  jobCreatedAt?: string
+  jobCompletedAt?: string | null
+}
+
+function formatDurationMs(ms: number): string {
+  if (ms < 1000) return `${ms}ms`
+  const secs = ms / 1000
+  if (secs < 60) return `${secs.toFixed(1)}s`
+  const mins = Math.floor(secs / 60)
+  return `${mins}m ${(secs % 60).toFixed(0)}s`
 }
 
 type TaskDisplayStatus = TaskStatus | 'blocked'
@@ -98,6 +109,13 @@ function TaskNode({
           {task.engine_id}
         </span>
 
+        {/* Duration - always show to prevent layout shift */}
+        <span className="text-[10px] text-muted-foreground h-[14px]">
+          {task.duration_ms != null && task.duration_ms > 0
+            ? formatDurationMs(task.duration_ms)
+            : '\u00A0'}
+        </span>
+
         {/* Error indicator */}
         {displayStatus === 'blocked' && blockedByStage ? (
           <span className="text-[10px] text-amber-300 truncate" title={`Blocked by ${blockedByStage}`}>
@@ -166,7 +184,15 @@ function StageColumn({
   )
 }
 
-export function DAGViewer({ tasks, jobId, jobStatus, className }: DAGViewerProps) {
+export function DAGViewer({
+  tasks,
+  jobId,
+  jobStatus,
+  className,
+  audioDurationSeconds,
+  jobCreatedAt,
+  jobCompletedAt,
+}: DAGViewerProps) {
   const [showWhyState, setShowWhyState] = useState(false)
   const isJobFailed = jobStatus === 'failed'
   const failedTask = useMemo(() => {
@@ -198,6 +224,21 @@ export function DAGViewer({ tasks, jobId, jobStatus, className }: DAGViewerProps
     return result
   }, [tasks, isJobFailed, failedTask, failedStageIdx])
 
+  // Calculate total processing time (wall clock) - must be before early return
+  const totalTimeMs = useMemo(() => {
+    if (!jobCreatedAt || !jobCompletedAt) return null
+    const start = new Date(jobCreatedAt).getTime()
+    const end = new Date(jobCompletedAt).getTime()
+    return end - start
+  }, [jobCreatedAt, jobCompletedAt])
+
+  // Calculate speed ratio (audio duration / wall clock time)
+  const speedRatio = useMemo(() => {
+    if (!totalTimeMs || !audioDurationSeconds || totalTimeMs <= 0) return null
+    const wallClockSeconds = totalTimeMs / 1000
+    return audioDurationSeconds / wallClockSeconds
+  }, [totalTimeMs, audioDurationSeconds])
+
   // Group tasks by stage
   const stageGroups: StageGroup[] = stageOrder
     .map((stage) => ({
@@ -226,13 +267,14 @@ export function DAGViewer({ tasks, jobId, jobStatus, className }: DAGViewerProps
   return (
     <div className={cn('space-y-4', className)}>
       {/* Progress summary */}
-      <div className="flex items-center gap-4 text-sm">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-green-400" />
-          <span className="text-muted-foreground">
-            {completedTasks}/{totalTasks} completed
-          </span>
-        </div>
+      <div className="flex items-center justify-between gap-4 text-sm">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-green-400" />
+            <span className="text-muted-foreground">
+              {completedTasks}/{totalTasks} completed
+            </span>
+          </div>
         {runningTasks > 0 && (
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
@@ -255,6 +297,19 @@ export function DAGViewer({ tasks, jobId, jobStatus, className }: DAGViewerProps
             <span className="text-amber-300">
               {blockedTasks} blocked
             </span>
+          </div>
+        )}
+        </div>
+
+        {/* Total time + speed ratio */}
+        {totalTimeMs != null && (
+          <div className="flex items-center gap-3 text-muted-foreground">
+            <span>Total: {formatDurationMs(totalTimeMs)}</span>
+            {speedRatio != null && (
+              <span className="text-primary font-medium">
+                {speedRatio >= 1 ? `${speedRatio.toFixed(1)}x` : `${(1 / speedRatio).toFixed(1)}x slower`}
+              </span>
+            )}
           </div>
         )}
       </div>
