@@ -891,6 +891,7 @@ class SettingResponse(BaseModel):
     min_value: float | None = None
     max_value: float | None = None
     options: list[str] | None = None
+    option_labels: list[str] | None = None
 
 
 class NamespaceSettingsResponse(BaseModel):
@@ -979,6 +980,7 @@ async def get_settings_namespace(
                 min_value=s.min_value,
                 max_value=s.max_value,
                 options=s.options,
+                option_labels=s.option_labels,
             )
             for s in ns.settings
         ],
@@ -1066,6 +1068,7 @@ async def update_settings_namespace(
                 min_value=s.min_value,
                 max_value=s.max_value,
                 options=s.options,
+                option_labels=s.option_labels,
             )
             for s in ns.settings
         ],
@@ -1136,6 +1139,7 @@ async def reset_settings_namespace(
                 min_value=s.min_value,
                 max_value=s.max_value,
                 options=s.options,
+                option_labels=s.option_labels,
             )
             for s in ns.settings
         ],

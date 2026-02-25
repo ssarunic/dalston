@@ -143,9 +143,9 @@ function SettingField({
           aria-describedby={hasError ? errorId : undefined}
           className={`${hasError ? errorInputClasses : normalInputClasses} w-auto min-w-[120px]`}
         >
-          {setting.options?.map((opt) => (
+          {setting.options?.map((opt, idx) => (
             <option key={opt} value={opt}>
-              {opt}
+              {setting.option_labels?.[idx] ?? opt}
             </option>
           ))}
         </select>

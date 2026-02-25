@@ -46,6 +46,7 @@ class SettingDefinition:
     min_value: int | float | None = None
     max_value: int | float | None = None
     options: list[str] | None = None
+    option_labels: list[str] | None = None  # Human-readable labels for select options
 
 
 @dataclass(frozen=True)
@@ -134,6 +135,7 @@ SETTING_DEFINITIONS: list[SettingDefinition] = [
         default_value="fail_fast",
         env_var="DALSTON_ENGINE_UNAVAILABLE_BEHAVIOR",
         options=["fail_fast", "wait"],
+        option_labels=["Fail fast", "Wait for engine"],
     ),
     SettingDefinition(
         namespace="engines",
@@ -247,6 +249,7 @@ class ResolvedSetting:
     min_value: int | float | None = None
     max_value: int | float | None = None
     options: list[str] | None = None
+    option_labels: list[str] | None = None
 
 
 @dataclass
@@ -423,6 +426,7 @@ class SettingsService:
             min_value=defn.min_value,
             max_value=defn.max_value,
             options=defn.options,
+            option_labels=defn.option_labels,
         )
 
     # ------------------------------------------------------------------

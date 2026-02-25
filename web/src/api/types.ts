@@ -448,6 +448,7 @@ export interface SettingValue {
   min_value?: number | null
   max_value?: number | null
   options?: string[] | null
+  option_labels?: string[] | null
 }
 
 export interface NamespaceSettings {

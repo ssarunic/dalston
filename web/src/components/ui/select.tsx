@@ -7,6 +7,8 @@ interface SelectContextValue {
   onValueChange: (value: string) => void
   open: boolean
   setOpen: (open: boolean) => void
+  registerItem: (value: string, label: string) => void
+  getLabel: (value: string) => string | undefined
 }
 
 const SelectContext = React.createContext<SelectContextValue | null>(null)
@@ -27,9 +29,23 @@ interface SelectProps {
 
 export function Select({ value, onValueChange, children }: SelectProps) {
   const [open, setOpen] = React.useState(false)
+  const [labels, setLabels] = React.useState<Map<string, string>>(new Map())
+
+  const registerItem = React.useCallback((itemValue: string, label: string) => {
+    setLabels(prev => {
+      if (prev.get(itemValue) === label) return prev // No change
+      const next = new Map(prev)
+      next.set(itemValue, label)
+      return next
+    })
+  }, [])
+
+  const getLabel = React.useCallback((itemValue: string) => {
+    return labels.get(itemValue)
+  }, [labels])
 
   return (
-    <SelectContext.Provider value={{ value, onValueChange, open, setOpen }}>
+    <SelectContext.Provider value={{ value, onValueChange, open, setOpen, registerItem, getLabel }}>
       <div className={cn('relative', open && 'z-50')}>{children}</div>
     </SelectContext.Provider>
   )
@@ -64,8 +80,9 @@ interface SelectValueProps {
 }
 
 export function SelectValue({ placeholder }: SelectValueProps) {
-  const { value } = useSelectContext()
-  return <span>{value || placeholder}</span>
+  const { value, getLabel } = useSelectContext()
+  const label = getLabel(value)
+  return <span>{label || value || placeholder}</span>
 }
 
 interface SelectContentProps {
@@ -95,12 +112,15 @@ export function SelectContent({ children }: SelectContentProps) {
     }
   }, [open, setOpen])
 
-  if (!open) return null
-
+  // Always render children so SelectItems can register their labels
+  // Hide visually when closed using CSS
   return (
     <div
       ref={ref}
-      className="absolute z-50 mt-1 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
+      className={cn(
+        'absolute z-50 mt-1 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md',
+        open ? 'animate-in fade-in-0 zoom-in-95' : 'invisible pointer-events-none'
+      )}
     >
       <div className="p-1">{children}</div>
     </div>
@@ -113,8 +133,16 @@ interface SelectItemProps {
 }
 
 export function SelectItem({ value, children }: SelectItemProps) {
-  const { value: selectedValue, onValueChange, setOpen } = useSelectContext()
+  const { value: selectedValue, onValueChange, setOpen, registerItem } = useSelectContext()
   const isSelected = value === selectedValue
+
+  // Extract text content from children for the label
+  const label = typeof children === 'string' ? children : String(children)
+
+  // Register this item's label on mount and when label changes
+  React.useEffect(() => {
+    registerItem(value, label)
+  }, [value, label, registerItem])
 
   return (
     <div
