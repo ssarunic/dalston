@@ -12,7 +12,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useCreateJob } from '@/hooks/useCreateJob'
-import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useCapabilities, useEnginesList } from '@/hooks/useCapabilities'
 import type {
   SpeakerDetection,
@@ -208,7 +207,6 @@ const RETENTION_OPTIONS: { value: RetentionMode; label: string }[] = [
 
 export function NewJob() {
   const navigate = useNavigate()
-  const isMobile = useMediaQuery('(max-width: 767px)')
   const createJob = useCreateJob()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -481,9 +479,9 @@ export function NewJob() {
       </div>
 
       <form onSubmit={handleSubmit}>
-        <div className={isMobile ? 'space-y-6' : 'grid grid-cols-3 gap-6'}>
+        <div className="space-y-6 lg:grid lg:grid-cols-3 lg:gap-6 lg:space-y-0">
           {/* Main Form (left column on desktop) */}
-          <div className={isMobile ? 'space-y-6' : 'col-span-2 space-y-6'}>
+          <div className="space-y-6 lg:col-span-2">
             {/* Source Card */}
             <Card>
               <CardHeader>
@@ -610,7 +608,7 @@ export function NewJob() {
                 <CardTitle className="text-base font-medium">Basic Settings</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-3">
+                <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
                   {/* Language */}
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Language</label>
@@ -672,7 +670,7 @@ export function NewJob() {
                 {/* Number of Speakers (conditional) */}
                 {showSpeakerOptions && (
                   <div className="pt-2">
-                    <div className="space-y-2 max-w-[200px]">
+                    <div className="space-y-2 w-full sm:max-w-[200px]">
                       <label htmlFor="numSpeakers" className="text-sm font-medium">
                         Number of Speakers
                       </label>
@@ -1041,111 +1039,105 @@ export function NewJob() {
               </div>
             )}
 
-            {/* Actions (desktop) */}
-            {!isMobile && (
-              <div className="flex justify-end gap-3">
-                <Button type="button" variant="outline" onClick={handleCancel}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={createJob.isPending}>
-                  {createJob.isPending ? 'Submitting...' : 'Submit Job'}
-                </Button>
-              </div>
-            )}
-          </div>
-
-          {/* Sidebar (right column on desktop) */}
-          {!isMobile && (
-            <div className="space-y-6">
-              {/* Summary Card */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base font-medium">Summary</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Source</span>
-                    <span>
-                      {sourceType === 'file'
-                        ? file
-                          ? file.name.slice(0, 20) + (file.name.length > 20 ? '...' : '')
-                          : 'No file selected'
-                        : audioUrl
-                          ? 'URL provided'
-                          : 'No URL'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Language</span>
-                    <span>{languageOptions.find((l) => l.value === language)?.label || language}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Speaker Detection</span>
-                    <span>
-                      {SPEAKER_DETECTION_OPTIONS.find((s) => s.value === speakerDetection)?.label}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Timestamps</span>
-                    <span>
-                      {TIMESTAMPS_OPTIONS.find((t) => t.value === timestampsGranularity)?.label}
-                    </span>
-                  </div>
-                  {piiDetection && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">PII Detection</span>
-                      <span>Enabled ({piiTier})</span>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Guidance Card */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base font-medium flex items-center gap-2">
-                    <Info className="h-4 w-4" />
-                    Tips
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm text-muted-foreground">
-                  <p>
-                    For best results, use high-quality audio with minimal background noise.
-                  </p>
-                  <p>
-                    Speaker diarization works best with 2-10 speakers and clear turn-taking.
-                  </p>
-                  <p>
-                    Add domain-specific terms to vocabulary for improved accuracy.
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-        </div>
-
-        {/* Mobile Sticky Bottom Bar */}
-        {isMobile && (
-          <div className="fixed bottom-0 left-0 right-0 p-4 bg-background border-t border-border">
-            <div className="flex gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                className="flex-1"
-                onClick={handleCancel}
-              >
+            {/* Actions (desktop/tablet) */}
+            <div className="hidden sm:flex justify-end gap-3">
+              <Button type="button" variant="outline" onClick={handleCancel}>
                 Cancel
               </Button>
-              <Button type="submit" className="flex-1" disabled={createJob.isPending}>
+              <Button type="submit" disabled={createJob.isPending}>
                 {createJob.isPending ? 'Submitting...' : 'Submit Job'}
               </Button>
             </div>
           </div>
-        )}
+
+          {/* Sidebar (right column on large screens) */}
+          <div className="hidden lg:block space-y-6">
+            {/* Summary Card */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base font-medium">Summary</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Source</span>
+                  <span>
+                    {sourceType === 'file'
+                      ? file
+                        ? file.name.slice(0, 20) + (file.name.length > 20 ? '...' : '')
+                        : 'No file selected'
+                      : audioUrl
+                        ? 'URL provided'
+                        : 'No URL'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Language</span>
+                  <span>{languageOptions.find((l) => l.value === language)?.label || language}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Speaker Detection</span>
+                  <span>
+                    {SPEAKER_DETECTION_OPTIONS.find((s) => s.value === speakerDetection)?.label}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Timestamps</span>
+                  <span>
+                    {TIMESTAMPS_OPTIONS.find((t) => t.value === timestampsGranularity)?.label}
+                  </span>
+                </div>
+                {piiDetection && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">PII Detection</span>
+                    <span>Enabled ({piiTier})</span>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Guidance Card */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base font-medium flex items-center gap-2">
+                  <Info className="h-4 w-4" />
+                  Tips
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm text-muted-foreground">
+                <p>
+                  For best results, use high-quality audio with minimal background noise.
+                </p>
+                <p>
+                  Speaker diarization works best with 2-10 speakers and clear turn-taking.
+                </p>
+                <p>
+                  Add domain-specific terms to vocabulary for improved accuracy.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* Mobile Sticky Bottom Bar */}
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-background border-t border-border sm:hidden">
+          <div className="flex gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              onClick={handleCancel}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" className="flex-1" disabled={createJob.isPending}>
+              {createJob.isPending ? 'Submitting...' : 'Submit Job'}
+            </Button>
+          </div>
+        </div>
       </form>
 
       {/* Mobile bottom spacing for sticky bar */}
-      {isMobile && <div className="h-20" />}
+      <div className="h-20 sm:hidden" />
     </div>
   )
 }
