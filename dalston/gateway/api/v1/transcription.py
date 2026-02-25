@@ -181,7 +181,6 @@ async def create_transcription(
     # Ingest audio (validates input, downloads from URL if needed, probes metadata)
     ingested = await ingestion_service.ingest(file=file, url=audio_url)
 
-
     # Validate per_channel mode requires stereo audio
     if speaker_detection == "per_channel" and ingested.metadata.channels < 2:
         raise HTTPException(
