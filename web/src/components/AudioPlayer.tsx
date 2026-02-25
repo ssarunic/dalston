@@ -429,13 +429,13 @@ export function AudioPlayer({
               <SkipForward className="h-4 w-4 mr-2" />
               Forward {SKIP_SECONDS}s
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={handleAutoScrollToggle}>
+            <DropdownMenuItem onSelect={handleAutoScrollToggle} disabled={!hasActiveSource}>
               <ListMusic className="h-4 w-4 mr-2" />
               {autoScroll ? 'Disable auto-scroll' : 'Enable auto-scroll'}
             </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={() => void handleDownload()}
-              disabled={isDownloading || (!activeSrc && !onResolveDownloadUrl)}
+              disabled={isDownloading || !hasActiveSource}
             >
               <Download className="h-4 w-4 mr-2" />
               Download audio
@@ -454,6 +454,7 @@ export function AudioPlayer({
             size="icon"
             className="h-10 w-10 shrink-0"
             onClick={handleAutoScrollToggle}
+            disabled={!hasActiveSource}
             aria-label={autoScroll ? 'Disable auto-scroll' : 'Enable auto-scroll'}
             aria-pressed={autoScroll}
           >
@@ -468,7 +469,7 @@ export function AudioPlayer({
             size="icon"
             className="h-10 w-10 shrink-0"
             onClick={() => void handleDownload()}
-            disabled={isDownloading || (!activeSrc && !onResolveDownloadUrl)}
+            disabled={isDownloading || !hasActiveSource}
             aria-label="Download audio"
           >
             {isDownloading ? (
