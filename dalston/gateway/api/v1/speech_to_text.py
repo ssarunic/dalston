@@ -31,17 +31,19 @@ from dalston.common.models import JobStatus
 from dalston.config import Settings
 from dalston.gateway.dependencies import (
     RequireJobsRead,
-    RequireJobsWrite,
+    RequireJobsWriteRateLimited,
     get_db,
     get_export_service,
     get_ingestion_service,
     get_jobs_service,
+    get_rate_limiter,
     get_redis,
     get_settings,
 )
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.ingestion import AudioIngestionService
 from dalston.gateway.services.jobs import JobsService
+from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.storage import StorageService
 
 router = APIRouter(prefix="/speech-to-text", tags=["speech-to-text", "elevenlabs"])
@@ -125,7 +127,7 @@ def map_timestamps_granularity(granularity: str) -> str:
     },
 )
 async def create_transcription(
-    api_key: RequireJobsWrite,
+    api_key: RequireJobsWriteRateLimited,
     file: UploadFile | None = File(
         default=None, description="Audio file to transcribe"
     ),
@@ -170,6 +172,7 @@ async def create_transcription(
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
     ingestion_service: AudioIngestionService = Depends(get_ingestion_service),
+    rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
 ) -> ElevenLabsTranscript | ElevenLabsAsyncResponse:
     """Create a transcription using ElevenLabs-compatible API.
 
@@ -226,6 +229,9 @@ async def create_transcription(
 
     # Publish job.created event for orchestrator
     await publish_job_created(redis, job.id)
+
+    # Track concurrent job for rate limiting
+    await rate_limiter.increment_concurrent_jobs(api_key.tenant_id)
 
     # If async/webhook mode, return immediately
     if webhook:

@@ -19,6 +19,7 @@ from dalston.gateway.services.audio_probe import AudioMetadata
 from dalston.gateway.services.auth import DEFAULT_EXPIRES_AT, APIKey, Scope
 from dalston.gateway.services.ingestion import AudioIngestionService, IngestedAudio
 from dalston.gateway.services.jobs import JobsService
+from dalston.gateway.services.rate_limiter import RateLimitResult, RedisRateLimiter
 from dalston.gateway.services.storage import StorageService
 
 
@@ -75,6 +76,19 @@ class TestCreateTranscriptionEndpoint:
         return service
 
     @pytest.fixture
+    def mock_rate_limiter(self):
+        """Create mock rate limiter that always allows requests."""
+        limiter = AsyncMock(spec=RedisRateLimiter)
+        limiter.check_request_rate.return_value = RateLimitResult(
+            allowed=True, limit=100, remaining=99, reset_seconds=60
+        )
+        limiter.check_concurrent_jobs.return_value = RateLimitResult(
+            allowed=True, limit=10, remaining=9, reset_seconds=0
+        )
+        limiter.increment_concurrent_jobs.return_value = None
+        return limiter
+
+    @pytest.fixture
     def api_key(self):
         """Create a mock API key with jobs:write scope."""
         return APIKey(
@@ -99,12 +113,14 @@ class TestCreateTranscriptionEndpoint:
         mock_redis,
         mock_settings,
         mock_ingestion_service,
+        mock_rate_limiter,
         api_key,
     ):
         from dalston.gateway.dependencies import (
             get_db,
             get_ingestion_service,
             get_jobs_service,
+            get_rate_limiter,
             get_redis,
             get_settings,
             require_auth,
@@ -118,6 +134,7 @@ class TestCreateTranscriptionEndpoint:
         app.dependency_overrides[get_redis] = lambda: mock_redis
         app.dependency_overrides[get_settings] = lambda: mock_settings
         app.dependency_overrides[get_ingestion_service] = lambda: mock_ingestion_service
+        app.dependency_overrides[get_rate_limiter] = lambda: mock_rate_limiter
         app.dependency_overrides[require_auth] = lambda: api_key
 
         return app
