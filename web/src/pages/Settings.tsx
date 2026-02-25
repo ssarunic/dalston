@@ -21,9 +21,7 @@ import {
   RotateCcw,
   Copy,
   Check,
-  Info,
 } from 'lucide-react'
-import { Tooltip } from '@/components/ui/tooltip'
 
 const NAMESPACE_ICONS: Record<string, typeof Gauge> = {
   rate_limits: Gauge,
@@ -107,13 +105,6 @@ function SettingField({
   const normalInputClasses = `${baseInputClasses} border-input focus:ring-ring`
   const errorInputClasses = `${baseInputClasses} border-red-500 focus:ring-red-500`
 
-  const tooltipContent = (
-    <div className="space-y-1">
-      <div>Default: {String(setting.default_value)}</div>
-      {setting.env_var && <div className="text-muted-foreground">Env: {setting.env_var}</div>}
-    </div>
-  )
-
   const renderInput = () => {
     if (setting.value_type === 'bool') {
       return (
@@ -187,38 +178,37 @@ function SettingField({
     )
   }
 
+  const descriptionParts = [`Default: ${String(setting.default_value)}`]
+  if (setting.env_var) {
+    descriptionParts.push(`Env: ${setting.env_var}`)
+  }
+
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
-      {/* Label with info icon */}
-      <div className="flex items-center gap-2 min-w-0 flex-1">
+    <div className="grid grid-cols-1 sm:grid-cols-[24rem_auto] gap-2 sm:gap-x-6 sm:items-start">
+      {/* Label */}
+      <div className="flex items-center gap-2 sm:py-2">
         <label htmlFor={inputId} className="text-sm text-muted-foreground">
           {setting.description}
         </label>
         {isOverridden && (
           <span className="inline-block h-2 w-2 rounded-full bg-primary shrink-0" title="Modified" aria-label="Setting modified" />
         )}
-        <Tooltip content={tooltipContent} side="top">
-          <button
-            type="button"
-            className="text-muted-foreground/50 hover:text-muted-foreground shrink-0 p-1 -m-1"
-            aria-label="Show default value and environment variable"
-          >
-            <Info className="h-3.5 w-3.5" />
-          </button>
-        </Tooltip>
       </div>
 
-      {/* Input aligned right */}
-      <div className="flex items-center gap-2 shrink-0">
-        {renderInput()}
-      </div>
-
-      {/* Error message - full width on new line */}
-      {hasError && (
-        <p id={errorId} className="text-xs text-red-500 w-full sm:order-last" role="alert">
-          {error}
+      {/* Input and description */}
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          {renderInput()}
+        </div>
+        <p className="text-xs text-muted-foreground/70">
+          {descriptionParts.join(' · ')}
         </p>
-      )}
+        {hasError && (
+          <p id={errorId} className="text-xs text-red-500" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
     </div>
   )
 }
@@ -248,13 +238,13 @@ function SystemInfoTab({ settings }: { settings: SettingValue[] }) {
           {settings.map((setting) => (
             <div
               key={setting.key}
-              className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 gap-1 sm:gap-2 min-w-0"
+              className="grid grid-cols-1 sm:grid-cols-[24rem_auto] gap-1 sm:gap-x-6 py-3 sm:items-center"
             >
-              <span className="text-sm text-muted-foreground sm:w-32 sm:shrink-0">
+              <span className="text-sm text-muted-foreground">
                 {setting.label}
               </span>
-              <div className="flex items-center gap-2 min-w-0 overflow-hidden sm:justify-end">
-                <span className="text-sm font-mono truncate min-w-0 sm:text-right">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-sm font-mono truncate min-w-0">
                   {String(setting.value)}
                 </span>
                 <button
