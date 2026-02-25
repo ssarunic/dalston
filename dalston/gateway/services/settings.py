@@ -7,6 +7,7 @@ setting is validated against a predefined registry of allowed definitions.
 
 from __future__ import annotations
 
+import importlib.metadata
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -261,6 +262,14 @@ class NamespaceSettings:
 
 
 @dataclass
+class NamespaceUpdateResult:
+    """Result of an update or reset operation, including old values for audit."""
+
+    namespace_settings: NamespaceSettings
+    old_values: dict[str, Any]
+
+
+@dataclass
 class NamespaceSummary:
     """Summary of a namespace for the listing endpoint."""
 
@@ -483,7 +492,7 @@ class SettingsService:
         updated_by: UUID,
         tenant_id: UUID | None = None,
         expected_updated_at: datetime | None = None,
-    ) -> NamespaceSettings:
+    ) -> NamespaceUpdateResult:
         """Update settings in a namespace.
 
         Args:
@@ -496,7 +505,7 @@ class SettingsService:
                 was modified after this timestamp, raise ValueError.
 
         Returns:
-            Updated namespace settings.
+            Update result with namespace settings and old values for audit.
 
         Raises:
             ValueError: If namespace is not editable, key is unknown,
@@ -571,23 +580,21 @@ class SettingsService:
         cache_key = f"{tenant_id}:{namespace}"
         _cache.invalidate(cache_key)
 
-        # Return updated namespace
+        # Return updated namespace with old values for audit
         ns = await self.get_namespace(db, namespace, tenant_id)
         assert ns is not None
-        # Attach old_values for audit logging
-        ns._old_values = old_values  # type: ignore[attr-defined]
-        return ns
+        return NamespaceUpdateResult(namespace_settings=ns, old_values=old_values)
 
     async def reset_namespace(
         self,
         db: AsyncSession,
         namespace: str,
         tenant_id: UUID | None = None,
-    ) -> NamespaceSettings:
+    ) -> NamespaceUpdateResult:
         """Delete all DB overrides for a namespace, reverting to defaults.
 
         Returns:
-            Namespace settings with default values.
+            Update result with namespace settings and old values for audit.
 
         Raises:
             ValueError: If namespace is not editable or unknown.
@@ -620,8 +627,7 @@ class SettingsService:
 
         ns = await self.get_namespace(db, namespace, tenant_id)
         assert ns is not None
-        ns._old_values = old_values  # type: ignore[attr-defined]
-        return ns
+        return NamespaceUpdateResult(namespace_settings=ns, old_values=old_values)
 
     async def get_effective_value(
         self,
@@ -659,12 +665,17 @@ class SettingsService:
                 scheme_user = prefix.rsplit(":", 1)[0]
                 db_url = f"{scheme_user}:****@{suffix}"
 
+        try:
+            version = importlib.metadata.version("dalston")
+        except importlib.metadata.PackageNotFoundError:
+            version = "dev"
+
         info_items = [
             ("redis_url", "Redis URL", settings.redis_url),
             ("database_url", "Database", db_url),
             ("s3_bucket", "S3 Bucket", settings.s3_bucket),
             ("s3_region", "S3 Region", settings.s3_region),
-            ("version", "Version", "0.1.0"),
+            ("version", "Version", version),
         ]
 
         resolved = [

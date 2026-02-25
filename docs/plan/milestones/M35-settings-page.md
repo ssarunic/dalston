@@ -6,7 +6,7 @@
 | **Duration** | 4-5 days |
 | **Dependencies** | M10 (Web Console), M11 (API Authentication), M15 (Console Auth) |
 | **Deliverable** | Settings page with namespaced sections, database-backed overrides, audit-logged changes |
-| **Status** | Not Started |
+| **Status** | Complete |
 
 ## User Story
 
@@ -85,7 +85,6 @@ Settings are grouped into namespaces that map to logical concerns:
 | `engines` | Yes | `unavailable_behavior`, `wait_timeout_seconds` |
 | `audio` | Yes | `url_max_size_gb`, `url_timeout_seconds` |
 | `retention` | Yes | `cleanup_interval_seconds`, `cleanup_batch_size`, `min_hours` |
-| `webhooks` | Yes | `allow_per_job_webhooks` |
 | `system` | No | `redis_url`, `database_url`, `s3_bucket`, `s3_region`, `version` |
 
 The `system` namespace is read-only — it displays infrastructure config for diagnostic purposes but cannot be changed from the console.

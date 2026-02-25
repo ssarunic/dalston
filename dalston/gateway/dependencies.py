@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator, Callable
 from typing import TYPE_CHECKING, Annotated
 
+import structlog
 from fastapi import Depends, HTTPException, Request
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +25,8 @@ from dalston.gateway.services.rate_limiter import RedisRateLimiter
 if TYPE_CHECKING:
     from dalston.common.audit import AuditService
     from dalston.session_router import SessionRouter
+
+logger = structlog.get_logger()
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -231,7 +234,7 @@ async def get_rate_limiter(
         )
     except Exception:
         # If settings service fails, keep existing limits
-        pass
+        logger.warning("failed_to_refresh_rate_limits", exc_info=True)
 
     return _rate_limiter
 

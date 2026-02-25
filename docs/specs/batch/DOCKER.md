@@ -27,7 +27,7 @@ cp .env.example .env
 
 # Edit .env with your settings
 # - DATABASE_URL (PostgreSQL connection)
-# - S3_BUCKET, S3_REGION, AWS credentials
+# - DALSTON_S3_BUCKET, DALSTON_S3_REGION, AWS credentials
 # - HF_TOKEN (HuggingFace token for pyannote)
 # - ANTHROPIC_API_KEY (for LLM cleanup)
 
@@ -66,8 +66,8 @@ services:
     environment:
       - DATABASE_URL=postgresql://dalston:${POSTGRES_PASSWORD}@postgres:5432/dalston
       - REDIS_URL=redis://redis:6379
-      - S3_BUCKET=${S3_BUCKET}
-      - S3_REGION=${S3_REGION}
+      - DALSTON_S3_BUCKET=${DALSTON_S3_BUCKET}
+      - DALSTON_S3_REGION=${DALSTON_S3_REGION}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
     depends_on:
@@ -87,8 +87,8 @@ services:
     environment:
       - DATABASE_URL=postgresql://dalston:${POSTGRES_PASSWORD}@postgres:5432/dalston
       - REDIS_URL=redis://redis:6379
-      - S3_BUCKET=${S3_BUCKET}
-      - S3_REGION=${S3_REGION}
+      - DALSTON_S3_BUCKET=${DALSTON_S3_BUCKET}
+      - DALSTON_S3_REGION=${DALSTON_S3_REGION}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
     depends_on:
@@ -135,8 +135,8 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=audio-prepare
-      - S3_BUCKET=${S3_BUCKET}
-      - S3_REGION=${S3_REGION}
+      - DALSTON_S3_BUCKET=${DALSTON_S3_BUCKET}
+      - DALSTON_S3_REGION=${DALSTON_S3_REGION}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
     tmpfs:
@@ -155,8 +155,8 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=faster-whisper
-      - S3_BUCKET=${S3_BUCKET}
-      - S3_REGION=${S3_REGION}
+      - DALSTON_S3_BUCKET=${DALSTON_S3_BUCKET}
+      - DALSTON_S3_REGION=${DALSTON_S3_REGION}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
     tmpfs:
@@ -180,8 +180,8 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=parakeet
-      - S3_BUCKET=${S3_BUCKET}
-      - S3_REGION=${S3_REGION}
+      - DALSTON_S3_BUCKET=${DALSTON_S3_BUCKET}
+      - DALSTON_S3_REGION=${DALSTON_S3_REGION}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
     tmpfs:
@@ -209,8 +209,8 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=whisperx-align
-      - S3_BUCKET=${S3_BUCKET}
-      - S3_REGION=${S3_REGION}
+      - DALSTON_S3_BUCKET=${DALSTON_S3_BUCKET}
+      - DALSTON_S3_REGION=${DALSTON_S3_REGION}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
     tmpfs:
@@ -238,8 +238,8 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=pyannote-3.1
-      - S3_BUCKET=${S3_BUCKET}
-      - S3_REGION=${S3_REGION}
+      - DALSTON_S3_BUCKET=${DALSTON_S3_BUCKET}
+      - DALSTON_S3_REGION=${DALSTON_S3_REGION}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - HF_TOKEN=${HF_TOKEN}
@@ -268,8 +268,8 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=whisperx-full
-      - S3_BUCKET=${S3_BUCKET}
-      - S3_REGION=${S3_REGION}
+      - DALSTON_S3_BUCKET=${DALSTON_S3_BUCKET}
+      - DALSTON_S3_REGION=${DALSTON_S3_REGION}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - HF_TOKEN=${HF_TOKEN}
@@ -298,8 +298,8 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - ENGINE_ID=final-merger
-      - S3_BUCKET=${S3_BUCKET}
-      - S3_REGION=${S3_REGION}
+      - DALSTON_S3_BUCKET=${DALSTON_S3_BUCKET}
+      - DALSTON_S3_REGION=${DALSTON_S3_REGION}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
     tmpfs:
@@ -326,8 +326,8 @@ volumes:
 POSTGRES_PASSWORD=your-secure-password
 
 # S3 Storage (required)
-S3_BUCKET=dalston-artifacts
-S3_REGION=eu-west-2
+DALSTON_S3_BUCKET=dalston-artifacts
+DALSTON_S3_REGION=eu-west-2
 AWS_ACCESS_KEY_ID=AKIA...
 AWS_SECRET_ACCESS_KEY=...
 
@@ -344,8 +344,8 @@ OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxx
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `POSTGRES_PASSWORD` | Yes | PostgreSQL password |
-| `S3_BUCKET` | Yes | S3 bucket for artifacts |
-| `S3_REGION` | Yes | S3 region (e.g., `eu-west-2`) |
+| `DALSTON_S3_BUCKET` | Yes | S3 bucket for artifacts |
+| `DALSTON_S3_REGION` | Yes | S3 region (e.g., `eu-west-2`) |
 | `AWS_ACCESS_KEY_ID` | Yes | AWS access key |
 | `AWS_SECRET_ACCESS_KEY` | Yes | AWS secret key |
 | `HF_TOKEN` | For diarization | HuggingFace token for pyannote |
@@ -636,7 +636,7 @@ docker compose exec postgres pg_isready -U dalston
 docker compose exec redis redis-cli ping
 
 # S3 connectivity
-aws s3 ls s3://${S3_BUCKET}/ --region ${S3_REGION}
+aws s3 ls s3://${DALSTON_S3_BUCKET}/ --region ${DALSTON_S3_REGION}
 ```
 
 ### Resource Usage
@@ -721,15 +721,15 @@ docker compose exec postgres psql -U dalston -l
 
 ```bash
 # Check credentials are set
-echo "Bucket: $S3_BUCKET, Region: $S3_REGION"
+echo "Bucket: $DALSTON_S3_BUCKET, Region: $DALSTON_S3_REGION"
 
 # Test S3 access
-aws s3 ls s3://${S3_BUCKET}/ --region ${S3_REGION}
+aws s3 ls s3://${DALSTON_S3_BUCKET}/ --region ${DALSTON_S3_REGION}
 
 # Check bucket policy allows access
-aws s3api get-bucket-policy --bucket ${S3_BUCKET}
+aws s3api get-bucket-policy --bucket ${DALSTON_S3_BUCKET}
 
 # Test write access
-echo "test" | aws s3 cp - s3://${S3_BUCKET}/test.txt
-aws s3 rm s3://${S3_BUCKET}/test.txt
+echo "test" | aws s3 cp - s3://${DALSTON_S3_BUCKET}/test.txt
+aws s3 rm s3://${DALSTON_S3_BUCKET}/test.txt
 ```

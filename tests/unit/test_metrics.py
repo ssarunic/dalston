@@ -51,7 +51,7 @@ class TestMetricsConfiguration:
         """configure_metrics() enables metrics when METRICS_ENABLED=true."""
         import dalston.metrics
 
-        with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
             dalston.metrics.configure_metrics("test-service")
             assert dalston.metrics.is_metrics_enabled()
             assert dalston.metrics.get_service_name() == "test-service"
@@ -60,7 +60,7 @@ class TestMetricsConfiguration:
         """configure_metrics() disables metrics when METRICS_ENABLED=false."""
         import dalston.metrics
 
-        with patch.dict(os.environ, {"METRICS_ENABLED": "false"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "false"}):
             dalston.metrics.configure_metrics("test-service")
             assert not dalston.metrics.is_metrics_enabled()
 
@@ -75,7 +75,7 @@ class TestGatewayMetrics:
         import dalston.metrics
 
         # Enable metrics for testing
-        with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
             dalston.metrics.configure_metrics("gateway")
 
     def test_inc_gateway_requests(self):
@@ -127,7 +127,7 @@ class TestOrchestratorMetrics:
 
         import dalston.metrics
 
-        with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
             dalston.metrics.configure_metrics("orchestrator")
 
     def test_inc_orchestrator_jobs(self):
@@ -180,7 +180,7 @@ class TestEngineMetrics:
 
         import dalston.metrics
 
-        with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
             dalston.metrics.configure_metrics("stt-batch-transcribe-whisper")
 
     def test_inc_engine_tasks(self):
@@ -226,7 +226,7 @@ class TestSessionRouterMetrics:
 
         # Note: Session router metrics are initialized when gateway starts
         # For testing, we simulate with gateway config
-        with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
             dalston.metrics.configure_metrics("gateway")
             # Manually init session router metrics for testing
             dalston.metrics._init_session_router_metrics()
@@ -272,7 +272,7 @@ class TestRealtimeMetrics:
 
         import dalston.metrics
 
-        with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
             dalston.metrics.configure_metrics("stt-rt-transcribe-whisper-1")
 
     def test_observe_realtime_session_duration(self):
@@ -341,7 +341,7 @@ class TestMetricsNoOpWhenDisabled:
 
         import dalston.metrics
 
-        with patch.dict(os.environ, {"METRICS_ENABLED": "false"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "false"}):
             dalston.metrics.configure_metrics("test-service")
 
     def test_gateway_metrics_noop_when_disabled(self):

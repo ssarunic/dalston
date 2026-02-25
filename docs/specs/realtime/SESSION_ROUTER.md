@@ -238,7 +238,7 @@ Local files are deleted after successful S3 upload.
 | Real-time Worker | — | audio.wav, transcript.json, chunks/ | — |
 | Batch Orchestrator | — | — | All objects |
 
-All S3 writes use the same bucket configured in the environment (`S3_BUCKET`).
+All S3 writes use the same bucket configured in the environment (`DALSTON_S3_BUCKET`).
 
 ### Audio Recording Strategy
 
@@ -347,8 +347,8 @@ All workers require S3 access. No shared filesystem is needed between nodes.
 **Environment Variables:**
 
 ```bash
-S3_BUCKET=dalston-artifacts
-S3_REGION=eu-west-2
+DALSTON_S3_BUCKET=dalston-artifacts
+DALSTON_S3_REGION=eu-west-2
 AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
 ```

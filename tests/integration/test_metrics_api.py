@@ -42,7 +42,7 @@ class TestMetricsEndpoint:
 
     def test_metrics_endpoint_returns_prometheus_format(self):
         """The /metrics endpoint should return Prometheus text format."""
-        with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
             dalston.metrics.configure_metrics("test-gateway")
 
             # Create minimal test app with /metrics endpoint
@@ -68,7 +68,7 @@ class TestMetricsEndpoint:
 
     def test_metrics_endpoint_disabled(self):
         """When metrics disabled, /metrics should return 404."""
-        with patch.dict(os.environ, {"METRICS_ENABLED": "false"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "false"}):
             dalston.metrics.configure_metrics("test-gateway")
 
             app = FastAPI()
@@ -102,7 +102,7 @@ class TestMetricsMiddlewareIntegration:
 
     def test_middleware_records_request_metrics(self):
         """MetricsMiddleware should record request count and duration."""
-        with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
             dalston.metrics.configure_metrics("gateway")
 
             app = FastAPI()
@@ -139,7 +139,7 @@ class TestMetricsMiddlewareIntegration:
 
     def test_middleware_normalizes_uuid_paths(self):
         """Middleware should normalize UUIDs in paths to prevent cardinality explosion."""
-        with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
             dalston.metrics.configure_metrics("gateway")
 
             app = FastAPI()
@@ -175,7 +175,7 @@ class TestMetricsMiddlewareIntegration:
 
     def test_middleware_records_error_status_codes(self):
         """Middleware should record error responses correctly."""
-        with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
             dalston.metrics.configure_metrics("gateway")
 
             app = FastAPI()
@@ -222,7 +222,7 @@ class TestMetricsMiddlewareIntegration:
 
     def test_middleware_skips_excluded_endpoints(self):
         """Middleware should not record metrics for excluded endpoints."""
-        with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
             dalston.metrics.configure_metrics("gateway")
 
             app = FastAPI()
@@ -273,7 +273,7 @@ class TestMetricsWithOtherComponents:
 
     def test_gateway_metrics_functions_with_middleware(self):
         """Gateway metric functions should work alongside middleware."""
-        with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
             dalston.metrics.configure_metrics("gateway")
 
             app = FastAPI()
@@ -312,7 +312,7 @@ class TestMetricsWithOtherComponents:
 
     def test_websocket_connection_gauges(self):
         """WebSocket connection gauge operations should work correctly."""
-        with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
             dalston.metrics.configure_metrics("gateway")
 
             # Simulate connection lifecycle
@@ -350,13 +350,13 @@ class TestServiceMetricsConfiguration:
 
     def test_service_name_recorded(self):
         """Service name should be recorded in configuration."""
-        with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
             dalston.metrics.configure_metrics("test-service")
             assert dalston.metrics.get_service_name() == "test-service"
 
     def test_configure_multiple_times_idempotent(self):
         """Calling configure_metrics multiple times should be safe."""
-        with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
             # Configure multiple times
             dalston.metrics.configure_metrics("service-1")
             dalston.metrics.configure_metrics("service-2")
@@ -366,7 +366,7 @@ class TestServiceMetricsConfiguration:
 
     def test_orchestrator_metrics_isolation(self):
         """Orchestrator metrics should work independently."""
-        with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
             dalston.metrics.configure_metrics("orchestrator")
 
             # These should all work without errors
@@ -380,7 +380,7 @@ class TestServiceMetricsConfiguration:
 
     def test_engine_metrics_isolation(self):
         """Engine metrics should work independently."""
-        with patch.dict(os.environ, {"METRICS_ENABLED": "true"}):
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
             dalston.metrics.configure_metrics("stt-batch-transcribe-whisper")
 
             # These should all work without errors

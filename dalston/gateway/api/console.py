@@ -1009,7 +1009,7 @@ async def update_settings_namespace(
     service = SettingsService()
 
     try:
-        ns = await service.update_namespace(
+        result = await service.update_namespace(
             db=db,
             namespace=namespace,
             updates=body.settings,
@@ -1021,15 +1021,16 @@ async def update_settings_namespace(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
+    ns = result.namespace_settings
+
     # Audit log
-    old_values = getattr(ns, "_old_values", {})
-    if old_values:
+    if result.old_values:
         try:
             from dalston.gateway.dependencies import get_audit_service
 
             audit = get_audit_service()
             changes = {}
-            for key, old_val in old_values.items():
+            for key, old_val in result.old_values.items():
                 new_val = body.settings.get(key)
                 if old_val != new_val:
                     changes[key] = {"old": old_val, "new": new_val}
@@ -1093,13 +1094,14 @@ async def reset_settings_namespace(
     service = SettingsService()
 
     try:
-        ns = await service.reset_namespace(db, namespace)
+        result = await service.reset_namespace(db, namespace)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
+    ns = result.namespace_settings
+
     # Audit log
-    old_values = getattr(ns, "_old_values", {})
-    if old_values:
+    if result.old_values:
         try:
             from dalston.gateway.dependencies import get_audit_service
 
@@ -1111,7 +1113,7 @@ async def reset_settings_namespace(
                 tenant_id=api_key.tenant_id,
                 actor_type="api_key",
                 actor_id=str(api_key.id),
-                detail={"reset_keys": list(old_values.keys())},
+                detail={"reset_keys": list(result.old_values.keys())},
             )
         except Exception:
             logger.warning("Failed to audit settings reset", exc_info=True)
