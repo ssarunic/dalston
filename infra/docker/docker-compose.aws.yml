@@ -4,11 +4,11 @@
 services:
   gateway:
     environment:
-      S3_BUCKET: ${S3_BUCKET}
+      DALSTON_S3_BUCKET: ${S3_BUCKET}
       # App settings read S3_REGION; keep AWS_REGION too for SDK defaults.
-      S3_REGION: ${AWS_REGION}
+      DALSTON_S3_REGION: ${AWS_REGION}
       AWS_REGION: ${AWS_REGION}
-      S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-}
+      DALSTON_S3_PUBLIC_ENDPOINT_URL: ${DALSTON_S3_PUBLIC_ENDPOINT_URL:-}
       # No S3_ENDPOINT - SDK auto-detects on EC2
       # No credentials - uses IAM instance role
     # Bind to all interfaces for Tailscale access
@@ -17,8 +17,8 @@ services:
 
   orchestrator:
     environment:
-      S3_BUCKET: ${S3_BUCKET}
-      S3_REGION: ${AWS_REGION}
+      DALSTON_S3_BUCKET: ${S3_BUCKET}
+      DALSTON_S3_REGION: ${AWS_REGION}
       AWS_REGION: ${AWS_REGION}
 
   postgres:
@@ -31,14 +31,14 @@ services:
 
   stt-batch-prepare:
     environment:
-      S3_BUCKET: ${S3_BUCKET}
-      S3_REGION: ${AWS_REGION}
+      DALSTON_S3_BUCKET: ${S3_BUCKET}
+      DALSTON_S3_REGION: ${AWS_REGION}
       AWS_REGION: ${AWS_REGION}
 
   stt-batch-transcribe-faster-whisper-base:
     environment:
-      S3_BUCKET: ${S3_BUCKET}
-      S3_REGION: ${AWS_REGION}
+      DALSTON_S3_BUCKET: ${S3_BUCKET}
+      DALSTON_S3_REGION: ${AWS_REGION}
       AWS_REGION: ${AWS_REGION}
       HF_HOME: /data/models
     volumes:
@@ -46,8 +46,8 @@ services:
 
   stt-batch-transcribe-parakeet-ctc-0.6b:
     environment:
-      S3_BUCKET: ${S3_BUCKET}
-      S3_REGION: ${AWS_REGION}
+      DALSTON_S3_BUCKET: ${S3_BUCKET}
+      DALSTON_S3_REGION: ${AWS_REGION}
       AWS_REGION: ${AWS_REGION}
       HF_HOME: /data/models
       NEMO_CACHE: /data/models
@@ -56,8 +56,8 @@ services:
 
   stt-batch-align-whisperx:
     environment:
-      S3_BUCKET: ${S3_BUCKET}
-      S3_REGION: ${AWS_REGION}
+      DALSTON_S3_BUCKET: ${S3_BUCKET}
+      DALSTON_S3_REGION: ${AWS_REGION}
       AWS_REGION: ${AWS_REGION}
       HF_HOME: /data/models
     volumes:
@@ -65,8 +65,8 @@ services:
 
   stt-batch-diarize-pyannote-3.1:
     environment:
-      S3_BUCKET: ${S3_BUCKET}
-      S3_REGION: ${AWS_REGION}
+      DALSTON_S3_BUCKET: ${S3_BUCKET}
+      DALSTON_S3_REGION: ${AWS_REGION}
       AWS_REGION: ${AWS_REGION}
       HF_HOME: /data/models
     volumes:
@@ -74,8 +74,8 @@ services:
 
   stt-batch-pii-detect-presidio-gpu:
     environment:
-      S3_BUCKET: ${S3_BUCKET}
-      S3_REGION: ${AWS_REGION}
+      DALSTON_S3_BUCKET: ${S3_BUCKET}
+      DALSTON_S3_REGION: ${AWS_REGION}
       AWS_REGION: ${AWS_REGION}
       HF_HOME: /data/models
     volumes:
@@ -83,14 +83,14 @@ services:
 
   stt-batch-merge:
     environment:
-      S3_BUCKET: ${S3_BUCKET}
-      S3_REGION: ${AWS_REGION}
+      DALSTON_S3_BUCKET: ${S3_BUCKET}
+      DALSTON_S3_REGION: ${AWS_REGION}
       AWS_REGION: ${AWS_REGION}
 
   stt-rt-transcribe-parakeet-rnnt-0.6b:
     environment:
-      S3_BUCKET: ${S3_BUCKET}
-      S3_REGION: ${AWS_REGION}
+      DALSTON_S3_BUCKET: ${S3_BUCKET}
+      DALSTON_S3_REGION: ${AWS_REGION}
       AWS_REGION: ${AWS_REGION}
       HF_HOME: /data/models
       NEMO_CACHE: /data/models

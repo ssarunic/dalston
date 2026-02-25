@@ -64,6 +64,6 @@ RUN if [ "$SKIP_MODEL_DOWNLOAD" = "false" ]; then \
     fi
 
 # Set model variant via environment
-ENV MODEL_VARIANT=${MODEL_VARIANT}
+ENV DALSTON_MODEL_VARIANT=${MODEL_VARIANT}
 
 CMD ["python", "engine.py"]

@@ -73,7 +73,9 @@ class ParakeetEngine(Engine):
         self._model_name: str | None = None
 
         # Determine model variant from environment variable (set at container build time)
-        model_variant = os.environ.get("MODEL_VARIANT", self.DEFAULT_MODEL_VARIANT)
+        model_variant = os.environ.get(
+            "DALSTON_MODEL_VARIANT", self.DEFAULT_MODEL_VARIANT
+        )
         if model_variant not in self.MODEL_VARIANT_MAP:
             self.logger.warning(
                 "unknown_model_variant",
@@ -90,7 +92,7 @@ class ParakeetEngine(Engine):
         self._model_size = parts[1] if len(parts) > 1 else "0.6b"
 
         # Determine device from environment or availability
-        requested_device = os.environ.get("DEVICE", "").lower()
+        requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
         cuda_available = torch.cuda.is_available()
         gpu_only_variant = model_variant in self.GPU_ONLY_VARIANTS
 

@@ -85,23 +85,23 @@ class RealtimeEngine(ABC):
             asyncio.run(engine.run())
 
     Environment variables:
-        WORKER_ID: Unique identifier for this worker (required)
-        WORKER_PORT: WebSocket server port (default: 9000)
-        WORKER_ENDPOINT: WebSocket endpoint URL for registration (auto-detected if not set)
-        MAX_SESSIONS: Maximum concurrent sessions (default: 4)
+        DALSTON_WORKER_ID: Unique identifier for this worker (required)
+        DALSTON_WORKER_PORT: WebSocket server port (default: 9000)
+        DALSTON_WORKER_ENDPOINT: WebSocket endpoint URL for registration (auto-detected)
+        DALSTON_MAX_SESSIONS: Maximum concurrent sessions (default: 4)
         REDIS_URL: Redis connection URL (default: redis://localhost:6379)
     """
 
     def __init__(self) -> None:
         """Initialize the engine."""
-        self.worker_id = os.environ.get("WORKER_ID", "realtime-worker")
-        self.port = int(os.environ.get("WORKER_PORT", "9000"))
-        self.max_sessions = int(os.environ.get("MAX_SESSIONS", "4"))
+        self.worker_id = os.environ.get("DALSTON_WORKER_ID", "realtime-worker")
+        self.port = int(os.environ.get("DALSTON_WORKER_PORT", "9000"))
+        self.max_sessions = int(os.environ.get("DALSTON_MAX_SESSIONS", "4"))
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
-        self.metrics_port = int(os.environ.get("METRICS_PORT", "9100"))
+        self.metrics_port = int(os.environ.get("DALSTON_METRICS_PORT", "9100"))
 
         # Worker endpoint for registration - use env var or detect hostname
-        self._worker_endpoint = os.environ.get("WORKER_ENDPOINT")
+        self._worker_endpoint = os.environ.get("DALSTON_WORKER_ENDPOINT")
         if not self._worker_endpoint:
             # Auto-detect: use hostname in Docker, localhost otherwise
             import socket

@@ -38,7 +38,7 @@ python -m dalston.orchestrator.main
 
 # Start Real-time engine (development)
 cd engines/realtime/whisper-streaming
-WORKER_ID=dev-worker REDIS_URL=redis://localhost:6379 python engine.py
+DALSTON_WORKER_ID=dev-worker REDIS_URL=redis://localhost:6379 python engine.py
 ```
 
 ### Local Docker Setup (via Makefile)
@@ -168,11 +168,16 @@ HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxx
 ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxxx
 OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxx
 
-# Redis connection
+# Redis connection (standard SDK format - not prefixed)
 REDIS_URL=redis://localhost:6379
 
-# Real-time settings
-REALTIME_MAX_SESSIONS_PER_WORKER=4
+# Dalston-specific settings (all prefixed with DALSTON_)
+DALSTON_S3_BUCKET=dalston-artifacts
+DALSTON_S3_REGION=eu-west-2
+DALSTON_LOG_LEVEL=INFO
+DALSTON_LOG_FORMAT=json
+DALSTON_METRICS_ENABLED=true
+DALSTON_MAX_SESSIONS=4
 ```
 
 ### GPU Requirements

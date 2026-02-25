@@ -101,7 +101,7 @@ async def _start_metrics_server() -> None:
     _metrics_runner = web.AppRunner(_metrics_app)
     await _metrics_runner.setup()
 
-    port = int(os.environ.get("METRICS_PORT", "8001"))
+    port = int(os.environ.get("DALSTON_METRICS_PORT", "8001"))
     site = web.TCPSite(_metrics_runner, "0.0.0.0", port)
     await site.start()
 

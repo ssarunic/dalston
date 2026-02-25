@@ -4,8 +4,8 @@ Provides a unified `configure_metrics()` function that sets up Prometheus
 metrics collection for any Dalston service.
 
 Environment Variables:
-    METRICS_ENABLED: Enable/disable metrics collection (default: true)
-    METRICS_PORT: Port for metrics endpoint when running standalone exporter
+    DALSTON_METRICS_ENABLED: Enable/disable metrics collection (default: true)
+    DALSTON_METRICS_PORT: Port for metrics endpoint when running standalone exporter
 
 Metric Naming Convention:
     dalston_{service}_{metric_name}_{unit}
@@ -55,11 +55,11 @@ def configure_metrics(service_name: str) -> None:
             "orchestrator", "stt-batch-transcribe-whisper").
 
     Environment Variables:
-        METRICS_ENABLED: Set to "false" to disable metrics (default: "true")
+        DALSTON_METRICS_ENABLED: Set to "false" to disable metrics (default: "true")
     """
     global _metrics_enabled, _service_name, _metrics_initialized
 
-    enabled = os.environ.get("METRICS_ENABLED", "true").lower() == "true"
+    enabled = os.environ.get("DALSTON_METRICS_ENABLED", "true").lower() == "true"
     _metrics_enabled = enabled
     _service_name = service_name
 

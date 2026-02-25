@@ -57,9 +57,9 @@ ENV TORCH_HOME=/models
 RUN mkdir -p /models
 
 # Default environment variables
-ENV WORKER_ID=stt-rt-transcribe-faster-whisper
-ENV WORKER_PORT=9000
-ENV MAX_SESSIONS=4
+ENV DALSTON_WORKER_ID=stt-rt-transcribe-faster-whisper
+ENV DALSTON_WORKER_PORT=9000
+ENV DALSTON_MAX_SESSIONS=4
 ENV REDIS_URL=redis://redis:6379
 
 # Expose WebSocket port

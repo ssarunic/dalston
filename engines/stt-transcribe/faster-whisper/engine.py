@@ -46,7 +46,7 @@ class WhisperEngine(Engine):
         self._model: WhisperModel | None = None
 
         # Model variant determined by container, not request config
-        self._model_variant = os.environ.get("MODEL_VARIANT", "large-v3")
+        self._model_variant = os.environ.get("DALSTON_MODEL_VARIANT", "large-v3")
 
         # Auto-detect device and compute type
         self._device, self._compute_type = self._detect_device()
@@ -64,7 +64,7 @@ class WhisperEngine(Engine):
             Tuple of (device, compute_type)
         """
         # Check for explicit device override
-        requested_device = os.environ.get("DEVICE", "").lower()
+        requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
         gpu_only_variant = self._model_variant in self.GPU_ONLY_VARIANTS
         if requested_device == "cpu":
             if gpu_only_variant:
@@ -237,7 +237,9 @@ class WhisperEngine(Engine):
         )
 
         # Get engine_id from environment or capabilities
-        engine_id = os.environ.get("ENGINE_ID", f"whisper-{self._model_variant}")
+        engine_id = os.environ.get(
+            "DALSTON_ENGINE_ID", f"whisper-{self._model_variant}"
+        )
 
         output = TranscribeOutput(
             text=full_text,

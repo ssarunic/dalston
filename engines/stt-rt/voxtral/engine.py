@@ -70,7 +70,9 @@ class VoxtralStreamingEngine(RealtimeEngine):
         self._model_name: str | None = None
         self._delay_ms: int = self.DEFAULT_DELAY_MS
 
-        model_variant = os.environ.get("MODEL_VARIANT", self.DEFAULT_MODEL_VARIANT)
+        model_variant = os.environ.get(
+            "DALSTON_MODEL_VARIANT", self.DEFAULT_MODEL_VARIANT
+        )
         if model_variant not in self.MODEL_VARIANT_MAP:
             logger.warning(
                 "unknown_model_variant",
@@ -81,7 +83,7 @@ class VoxtralStreamingEngine(RealtimeEngine):
         self._model_variant = model_variant
         self._hf_model_id = self.MODEL_VARIANT_MAP[model_variant]
 
-        requested_device = os.environ.get("DEVICE", "").lower()
+        requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
         cuda_available = torch.cuda.is_available()
         gpu_only_variant = model_variant in self.GPU_ONLY_VARIANTS
 
@@ -128,7 +130,7 @@ class VoxtralStreamingEngine(RealtimeEngine):
         Called once during engine startup.
         """
         self._delay_ms = int(
-            os.environ.get("TRANSCRIPTION_DELAY_MS", str(self.DEFAULT_DELAY_MS))
+            os.environ.get("DALSTON_TRANSCRIPTION_DELAY_MS", str(self.DEFAULT_DELAY_MS))
         )
         self._delay_ms = max(80, min(2400, self._delay_ms))
 

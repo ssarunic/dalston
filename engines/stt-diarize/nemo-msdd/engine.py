@@ -109,7 +109,9 @@ class NemoMSDDEngine(Engine):
         super().__init__()
         self._diarizer = None
         self._device = self._detect_device()
-        self._disabled = os.environ.get("DIARIZATION_DISABLED", "").lower() == "true"
+        self._disabled = (
+            os.environ.get("DALSTON_DIARIZATION_DISABLED", "").lower() == "true"
+        )
 
         if self._disabled:
             self.logger.warning("diarization_disabled")
@@ -118,8 +120,8 @@ class NemoMSDDEngine(Engine):
 
     def _detect_device(self) -> str:
         """Resolve inference device from DEVICE env with NeMo CPU guardrails."""
-        requested_device = os.environ.get("DEVICE", "").lower()
-        allow_cpu = os.environ.get("NEMO_ALLOW_CPU", "").lower() == "true"
+        requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
+        allow_cpu = os.environ.get("DALSTON_NEMO_ALLOW_CPU", "").lower() == "true"
 
         try:
             import torch

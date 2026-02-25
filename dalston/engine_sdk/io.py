@@ -19,13 +19,13 @@ def get_s3_client():
     """Create a boto3 S3 client using environment variables.
 
     Environment variables:
-        S3_ENDPOINT_URL: Custom endpoint (e.g., MinIO for local dev)
-        S3_REGION: AWS region (default: eu-west-2)
+        DALSTON_S3_ENDPOINT_URL: Custom endpoint (e.g., MinIO for local dev)
+        DALSTON_S3_REGION: AWS region (default: eu-west-2)
         AWS_ACCESS_KEY_ID: AWS access key
         AWS_SECRET_ACCESS_KEY: AWS secret key
     """
-    endpoint_url = os.environ.get("S3_ENDPOINT_URL")
-    region = os.environ.get("S3_REGION", "eu-west-2")
+    endpoint_url = os.environ.get("DALSTON_S3_ENDPOINT_URL")
+    region = os.environ.get("DALSTON_S3_REGION", "eu-west-2")
 
     config = Config(
         retries={"max_attempts": 3, "mode": "standard"},

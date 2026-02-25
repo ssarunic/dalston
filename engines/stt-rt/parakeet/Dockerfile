@@ -89,9 +89,9 @@ ENV TORCH_HOME=/models
 RUN mkdir -p /models
 
 # Default environment variables
-ENV WORKER_ID=stt-rt-transcribe-parakeet
-ENV WORKER_PORT=9000
-ENV MAX_SESSIONS=4
+ENV DALSTON_WORKER_ID=stt-rt-transcribe-parakeet
+ENV DALSTON_WORKER_PORT=9000
+ENV DALSTON_MAX_SESSIONS=4
 ENV REDIS_URL=redis://redis:6379
 
 # Set CUDA visible devices (only relevant for GPU builds)
