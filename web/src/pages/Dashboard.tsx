@@ -156,7 +156,7 @@ export function Dashboard() {
         {/* Realtime first in DOM for mobile stacking */}
         <Card className="lg:order-2">
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Recent Live Sessions</CardTitle>
+            <CardTitle>Recent Real-time Sessions</CardTitle>
             <Link
               to="/realtime"
               className="text-sm text-primary hover:underline"
