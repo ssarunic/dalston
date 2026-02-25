@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Radio, Trash2, RefreshCw, Filter, X } from 'lucide-react'
+import { Radio, Trash2, RefreshCw, Filter, X, Mic } from 'lucide-react'
 import { apiClient } from '@/api/client'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useSharedTableState } from '@/hooks/useSharedTableState'
@@ -219,6 +219,13 @@ export function RealtimeSessions() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={() => navigate('/realtime/live')}
+          >
+            <Mic className="h-4 w-4 mr-2" />
+            New Session
+          </Button>
           <Button
             variant="outline"
             size="sm"

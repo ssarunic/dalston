@@ -17,6 +17,7 @@ export default defineConfig(({ command }) => ({
       '/v1': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+        ws: true,
       },
       '/api': {
         target: 'http://localhost:8000',

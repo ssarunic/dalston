@@ -10,6 +10,7 @@ import { JobDetail } from '@/pages/JobDetail'
 import { TaskDetail } from '@/pages/TaskDetail'
 import { RealtimeSessions } from '@/pages/RealtimeSessions'
 import { RealtimeSessionDetail } from '@/pages/RealtimeSessionDetail'
+import { RealtimeLive } from '@/pages/RealtimeLive'
 import { Engines } from '@/pages/Engines'
 import { ApiKeys } from '@/pages/ApiKeys'
 import { Webhooks } from '@/pages/Webhooks'
@@ -51,6 +52,7 @@ const router = createBrowserRouter(
         { path: '/jobs/:jobId', element: <JobDetail /> },
         { path: '/jobs/:jobId/tasks/:taskId', element: <TaskDetail /> },
         { path: '/realtime', element: <RealtimeSessions /> },
+        { path: '/realtime/live', element: <RealtimeLive /> },
         { path: '/realtime/sessions/:sessionId', element: <RealtimeSessionDetail /> },
         { path: '/engines', element: <Engines /> },
         { path: '/keys', element: <ApiKeys /> },

@@ -411,6 +411,25 @@ export interface UnifiedSegment {
   confidence?: number
 }
 
+// Live transcription types (browser-side real-time session)
+export interface LiveTranscriptSegment {
+  id: string
+  text: string
+  start: number
+  end: number
+  confidence?: number
+  words?: Array<{ word: string; start: number; end: number; confidence: number }>
+}
+
+export interface LiveSessionConfig {
+  language: string
+  model: string
+  enableVad: boolean
+  interimResults: boolean
+}
+
+export type LiveSessionState = 'idle' | 'connecting' | 'recording' | 'stopping' | 'completed' | 'error'
+
 // Audit Log types
 export type AuditActorType = 'api_key' | 'system' | 'console_user' | 'webhook'
 
