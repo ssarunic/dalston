@@ -129,6 +129,74 @@ const PII_REDACTION_MODE_OPTIONS: { value: PIIRedactionMode; label: string }[] =
   { value: 'beep', label: 'Beep' },
 ]
 
+// PII Entity Types organized by category
+type PIIEntityType = {
+  id: string
+  label: string
+  category: 'pii' | 'pci' | 'phi'
+  isDefault: boolean
+}
+
+const PII_ENTITY_TYPES: PIIEntityType[] = [
+  // PII Category (Personal)
+  { id: 'name', label: 'Name', category: 'pii', isDefault: true },
+  { id: 'name_given', label: 'First Name', category: 'pii', isDefault: false },
+  { id: 'name_family', label: 'Last Name', category: 'pii', isDefault: false },
+  { id: 'email_address', label: 'Email Address', category: 'pii', isDefault: true },
+  { id: 'phone_number', label: 'Phone Number', category: 'pii', isDefault: true },
+  { id: 'ssn', label: 'SSN', category: 'pii', isDefault: true },
+  { id: 'location', label: 'Location', category: 'pii', isDefault: true },
+  { id: 'location_address', label: 'Street Address', category: 'pii', isDefault: false },
+  { id: 'date_of_birth', label: 'Date of Birth', category: 'pii', isDefault: true },
+  { id: 'age', label: 'Age', category: 'pii', isDefault: false },
+  { id: 'ip_address', label: 'IP Address', category: 'pii', isDefault: true },
+  { id: 'driver_license', label: 'Driver License', category: 'pii', isDefault: false },
+  { id: 'passport_number', label: 'Passport Number', category: 'pii', isDefault: false },
+  { id: 'organization', label: 'Organization', category: 'pii', isDefault: false },
+  // PCI Category (Payment Card Industry)
+  { id: 'credit_card_number', label: 'Credit Card Number', category: 'pci', isDefault: true },
+  { id: 'credit_card_cvv', label: 'CVV', category: 'pci', isDefault: true },
+  { id: 'credit_card_expiry', label: 'Card Expiry', category: 'pci', isDefault: true },
+  { id: 'iban', label: 'IBAN', category: 'pci', isDefault: true },
+  { id: 'bank_account', label: 'Bank Account', category: 'pci', isDefault: false },
+  // PHI Category (Protected Health Information)
+  { id: 'medical_record_number', label: 'Medical Record Number', category: 'phi', isDefault: false },
+  { id: 'medical_condition', label: 'Medical Condition', category: 'phi', isDefault: false },
+  { id: 'medication', label: 'Medication', category: 'phi', isDefault: false },
+  { id: 'health_plan_id', label: 'Health Plan ID', category: 'phi', isDefault: false },
+]
+
+const PII_CATEGORIES: { id: string; label: string }[] = [
+  { id: 'pii', label: 'Personal' },
+  { id: 'pci', label: 'Payment (PCI)' },
+  { id: 'phi', label: 'Health (HIPAA)' },
+]
+
+type PIIPreset = 'all' | 'pci' | 'hipaa' | 'personal' | 'custom'
+
+const PII_PRESETS: { value: PIIPreset; label: string }[] = [
+  { value: 'all', label: 'Default' },
+  { value: 'pci', label: 'PCI Compliance' },
+  { value: 'hipaa', label: 'HIPAA / PHI' },
+  { value: 'personal', label: 'Personal Only' },
+  { value: 'custom', label: 'Custom' },
+]
+
+function getEntityTypesForPreset(preset: PIIPreset): Set<string> {
+  switch (preset) {
+    case 'all':
+      return new Set(PII_ENTITY_TYPES.filter((e) => e.isDefault).map((e) => e.id))
+    case 'pci':
+      return new Set(PII_ENTITY_TYPES.filter((e) => e.category === 'pci').map((e) => e.id))
+    case 'hipaa':
+      return new Set(PII_ENTITY_TYPES.filter((e) => e.category === 'phi').map((e) => e.id))
+    case 'personal':
+      return new Set(PII_ENTITY_TYPES.filter((e) => e.category === 'pii' && e.isDefault).map((e) => e.id))
+    case 'custom':
+      return new Set(PII_ENTITY_TYPES.filter((e) => e.isDefault).map((e) => e.id))
+  }
+}
+
 type RetentionMode = 'default' | 'transient' | 'permanent' | 'days'
 
 const RETENTION_OPTIONS: { value: RetentionMode; label: string }[] = [
@@ -213,9 +281,46 @@ export function NewJob() {
   // PII settings
   const [piiDetection, setPiiDetection] = useState(false)
   const [piiTier, setPiiTier] = useState<PIITier>('standard')
-  const [piiEntityTypes, setPiiEntityTypes] = useState('')
+  const [piiPreset, setPiiPreset] = useState<PIIPreset>('all')
+  const [piiSelectedTypes, setPiiSelectedTypes] = useState<Set<string>>(() => getEntityTypesForPreset('all'))
+  const [piiShowCustomize, setPiiShowCustomize] = useState(false)
   const [redactPiiAudio, setRedactPiiAudio] = useState(false)
   const [piiRedactionMode, setPiiRedactionMode] = useState<PIIRedactionMode>('silence')
+
+  // Handle preset change
+  const handlePiiPresetChange = (preset: PIIPreset) => {
+    setPiiPreset(preset)
+    if (preset !== 'custom') {
+      setPiiSelectedTypes(getEntityTypesForPreset(preset))
+      setPiiShowCustomize(false)
+    } else {
+      setPiiShowCustomize(true)
+    }
+  }
+
+  // Handle individual entity type toggle
+  const handleEntityTypeToggle = (entityId: string) => {
+    setPiiSelectedTypes((prev) => {
+      const next = new Set(prev)
+      if (next.has(entityId)) {
+        next.delete(entityId)
+      } else {
+        next.add(entityId)
+      }
+      return next
+    })
+    setPiiPreset('custom')
+  }
+
+  // Remove a selected entity type (from chip)
+  const handleRemoveEntityType = (entityId: string) => {
+    setPiiSelectedTypes((prev) => {
+      const next = new Set(prev)
+      next.delete(entityId)
+      return next
+    })
+    setPiiPreset('custom')
+  }
 
   // Form state
   const [error, setError] = useState<string | null>(null)
@@ -339,8 +444,8 @@ export function NewJob() {
                 : retentionDays,
         pii_detection: piiDetection || undefined,
         pii_detection_tier: piiDetection ? piiTier : undefined,
-        pii_entity_types: piiDetection && piiEntityTypes.trim()
-          ? piiEntityTypes.split(',').map((t) => t.trim()).filter(Boolean)
+        pii_entity_types: piiDetection && piiSelectedTypes.size > 0
+          ? Array.from(piiSelectedTypes)
           : undefined,
         redact_pii_audio: piiDetection ? redactPiiAudio : undefined,
         pii_redaction_mode: piiDetection && redactPiiAudio ? piiRedactionMode : undefined,
@@ -782,19 +887,97 @@ export function NewJob() {
                           </div>
 
                           <div className="space-y-2">
-                            <label htmlFor="piiEntityTypes" className="text-sm font-medium">
-                              Entity Types
-                            </label>
-                            <input
-                              id="piiEntityTypes"
-                              type="text"
-                              value={piiEntityTypes}
-                              onChange={(e) => setPiiEntityTypes(e.target.value)}
-                              placeholder="All (default)"
-                              className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm"
-                            />
+                            <label className="text-sm font-medium">Entity Types</label>
+                            <Select
+                              value={piiPreset}
+                              onValueChange={(v) => handlePiiPresetChange(v as PIIPreset)}
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PII_PRESETS.map((opt) => (
+                                  <SelectItem key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </div>
                         </div>
+
+                        {/* Entity Types Count and Customize Toggle */}
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-muted-foreground">
+                            {piiSelectedTypes.size} type{piiSelectedTypes.size !== 1 ? 's' : ''} selected
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setPiiShowCustomize(!piiShowCustomize)}
+                            className="text-sm text-primary hover:underline"
+                          >
+                            {piiShowCustomize ? 'Hide' : 'Customize'}
+                          </button>
+                        </div>
+
+                        {/* Selected Entity Types as Chips (hidden when customize panel is open) */}
+                        {piiSelectedTypes.size > 0 && !piiShowCustomize && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {Array.from(piiSelectedTypes).map((typeId) => {
+                              const entityType = PII_ENTITY_TYPES.find((e) => e.id === typeId)
+                              if (!entityType) return null
+                              return (
+                                <span
+                                  key={typeId}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-accent border border-border"
+                                >
+                                  {entityType.label}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveEntityType(typeId)}
+                                    className="hover:text-destructive"
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </span>
+                              )
+                            })}
+                          </div>
+                        )}
+
+                        {/* Customization Panel with Checkboxes */}
+                        {piiShowCustomize && (
+                          <div className="border border-border rounded-md p-3 space-y-3">
+                            {PII_CATEGORIES.map((category) => {
+                              const categoryTypes = PII_ENTITY_TYPES.filter(
+                                (e) => e.category === category.id
+                              )
+                              return (
+                                <div key={category.id}>
+                                  <p className="text-xs font-medium text-muted-foreground mb-2">
+                                    {category.label}
+                                  </p>
+                                  <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                                    {categoryTypes.map((entityType) => (
+                                      <label
+                                        key={entityType.id}
+                                        className="flex items-center gap-2 text-sm cursor-pointer"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={piiSelectedTypes.has(entityType.id)}
+                                          onChange={() => handleEntityTypeToggle(entityType.id)}
+                                          className="rounded border-input"
+                                        />
+                                        {entityType.label}
+                                      </label>
+                                    ))}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
 
                         <div className="flex items-center justify-between">
                           <div>
