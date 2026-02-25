@@ -213,7 +213,7 @@ Submit audio for transcription using ElevenLabs-compatible parameters.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `timestamps_granularity` | string | `"word"` | `"none"`, `"word"`, `"character"` |
-| `additional_formats` | array | `[]` | Export: `"srt"`, `"webvtt"`, `"txt"`, `"docx"`, `"pdf"` |
+| `additional_formats` | array | `[]` | Export: `"srt"`, `"webvtt"`, `"txt"`, `"json"` |
 
 #### Audio Analysis
 
@@ -794,8 +794,6 @@ Export transcript in specified format.
 | `vtt` / `webvtt` | `text/vtt` | WebVTT subtitle format |
 | `txt` | `text/plain` | Plain text (no timestamps) |
 | `json` | `application/json` | Full transcript JSON |
-| `docx` | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | Word document |
-| `pdf` | `application/pdf` | PDF document |
 
 ### Query Parameters
 
