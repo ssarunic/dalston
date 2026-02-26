@@ -559,8 +559,11 @@ class TestPhonemeAlignEngineInit:
     """Tests for engine initialization."""
 
     def test_cpu_device_detection(self, engine_module):
-        """Engine detects CPU when CUDA unavailable."""
-        with patch.object(torch.cuda, "is_available", return_value=False):
+        """Engine detects CPU when neither CUDA nor MPS is available."""
+        with (
+            patch.object(torch.cuda, "is_available", return_value=False),
+            patch.object(torch.backends.mps, "is_available", return_value=False),
+        ):
             engine = engine_module.PhonemeAlignEngine()
 
         assert engine._device == "cpu"
@@ -574,12 +577,37 @@ class TestPhonemeAlignEngineInit:
         assert engine._device == "cuda"
         assert engine._compute_type == "float16"
 
+    def test_mps_device_detection(self, engine_module):
+        """Engine detects MPS when CUDA unavailable but MPS is."""
+        with (
+            patch.object(torch.cuda, "is_available", return_value=False),
+            patch.object(torch.backends.mps, "is_available", return_value=True),
+        ):
+            engine = engine_module.PhonemeAlignEngine()
+
+        assert engine._device == "mps"
+        assert engine._compute_type == "float32"
+
+    def test_cuda_preferred_over_mps(self, engine_module):
+        """CUDA takes priority even when MPS is also available."""
+        with (
+            patch.object(torch.cuda, "is_available", return_value=True),
+            patch.object(torch.backends.mps, "is_available", return_value=True),
+        ):
+            engine = engine_module.PhonemeAlignEngine()
+
+        assert engine._device == "cuda"
+        assert engine._compute_type == "float16"
+
 
 class TestPhonemeAlignEngineHealthCheck:
     """Tests for engine health check."""
 
     def test_health_check_fields(self, engine_module):
-        with patch.object(torch.cuda, "is_available", return_value=False):
+        with (
+            patch.object(torch.cuda, "is_available", return_value=False),
+            patch.object(torch.backends.mps, "is_available", return_value=False),
+        ):
             engine = engine_module.PhonemeAlignEngine()
 
         health = engine.health_check()
@@ -587,11 +615,15 @@ class TestPhonemeAlignEngineHealthCheck:
         assert health["status"] == "healthy"
         assert health["device"] == "cpu"
         assert "cuda_available" in health
+        assert "mps_available" in health
         assert "cached_languages" in health
         assert isinstance(health["cached_languages"], list)
 
     def test_health_check_no_cached_models_initially(self, engine_module):
-        with patch.object(torch.cuda, "is_available", return_value=False):
+        with (
+            patch.object(torch.cuda, "is_available", return_value=False),
+            patch.object(torch.backends.mps, "is_available", return_value=False),
+        ):
             engine = engine_module.PhonemeAlignEngine()
 
         health = engine.health_check()
@@ -604,7 +636,10 @@ class TestPhonemeAlignEngineFallback:
 
     def test_fallback_output_structure(self, engine_module):
         """Fallback output should have skipped=True and segment-level granularity."""
-        with patch.object(torch.cuda, "is_available", return_value=False):
+        with (
+            patch.object(torch.cuda, "is_available", return_value=False),
+            patch.object(torch.backends.mps, "is_available", return_value=False),
+        ):
             engine = engine_module.PhonemeAlignEngine()
 
         from align import InputSegment
@@ -626,7 +661,10 @@ class TestPhonemeAlignEngineFallback:
 
     def test_fallback_for_unsupported_language(self, engine_module):
         """Engine should fall back gracefully for unsupported languages."""
-        with patch.object(torch.cuda, "is_available", return_value=False):
+        with (
+            patch.object(torch.cuda, "is_available", return_value=False),
+            patch.object(torch.backends.mps, "is_available", return_value=False),
+        ):
             engine = engine_module.PhonemeAlignEngine()
 
         model_result = engine._get_align_model("xx")

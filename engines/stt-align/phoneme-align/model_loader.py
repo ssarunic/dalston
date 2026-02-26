@@ -106,7 +106,7 @@ def load_align_model(
 
     Args:
         language_code: ISO 639-1 language code (e.g. ``"en"``).
-        device: Torch device string (``"cpu"`` or ``"cuda"``).
+        device: Torch device string (``"cpu"``, ``"cuda"``, or ``"mps"``).
         model_name: Override the default model for this language.
         model_dir: Local directory for caching model weights.
 

@@ -45,9 +45,15 @@ class PhonemeAlignEngine(Engine):
         )
 
     def _detect_device(self) -> tuple[str, str]:
-        """Detect the best available compute device."""
+        """Detect the best available compute device.
+
+        Preference order: CUDA → MPS (Apple Silicon) → CPU.
+        """
         if torch.cuda.is_available():
             return "cuda", "float16"
+        if torch.backends.mps.is_available():
+            # MPS supports float32 reliably; float16 has limited op coverage.
+            return "mps", "float32"
         return "cpu", "float32"
 
     def _get_align_model(self, language: str) -> tuple[Any, AlignModelMetadata] | None:
@@ -275,6 +281,7 @@ class PhonemeAlignEngine(Engine):
         """Return health status including device info."""
         cuda_available = torch.cuda.is_available()
         cuda_device_count = torch.cuda.device_count() if cuda_available else 0
+        mps_available = torch.backends.mps.is_available()
 
         return {
             "status": "healthy",
@@ -282,6 +289,7 @@ class PhonemeAlignEngine(Engine):
             "compute_type": self._compute_type,
             "cuda_available": cuda_available,
             "cuda_device_count": cuda_device_count,
+            "mps_available": mps_available,
             "cached_languages": list(self._align_models.keys()),
         }
 
