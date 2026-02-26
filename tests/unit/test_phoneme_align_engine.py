@@ -296,8 +296,8 @@ class TestPreprocessSegment:
         )
 
         # Only inner characters should be present
-        assert "*" not in sd["clean_chars"]  # all chars are in dict
-        assert len(sd["clean_chars"]) == 5  # "hello"
+        assert "*" not in sd.clean_chars  # all chars are in dict
+        assert len(sd.clean_chars) == 5  # "hello"
 
     def test_spaces_become_pipe(self, align_module):
         sd = align_module._preprocess_segment(
@@ -306,7 +306,7 @@ class TestPreprocessSegment:
             "en",
         )
 
-        assert "|" in sd["clean_chars"]
+        assert "|" in sd.clean_chars
 
     def test_unknown_chars_become_wildcard(self, align_module):
         sd = align_module._preprocess_segment(
@@ -315,7 +315,7 @@ class TestPreprocessSegment:
             "en",
         )
 
-        assert "*" in sd["clean_chars"]
+        assert "*" in sd.clean_chars
 
     def test_japanese_no_pipe_substitution(self, align_module):
         """Japanese text should not substitute spaces for pipes."""
@@ -325,8 +325,8 @@ class TestPreprocessSegment:
             "ja",
         )
 
-        assert "|" not in sd["clean_chars"]
-        assert len(sd["clean_chars"]) == 5
+        assert "|" not in sd.clean_chars
+        assert len(sd.clean_chars) == 5
 
 
 class TestInterpolateNans:

@@ -130,8 +130,8 @@ def align(
         text = seg["text"]
         sd = segment_data[idx]
 
-        # Can't align if no valid characters or segment is beyond audio
-        if not sd.clean_chars:
+        # Can't align if no valid characters or all wildcards
+        if not sd.clean_chars or all(c == "*" for c in sd.clean_chars):
             logger.warning(
                 "No alignable characters in segment '%s', using original timestamps",
                 text[:60],
@@ -235,7 +235,10 @@ def align(
 # ---------------------------------------------------------------------------
 
 
-class _SegmentData(TypedDict):
+@dataclass
+class _SegmentData:
+    """Preprocessed segment data with cleaned characters and their indices."""
+
     clean_chars: list[str]
     clean_char_indices: list[int]
 
@@ -312,8 +315,8 @@ def _assign_char_timestamps(
         end: float | None = None
         score: float | None = None
 
-        if idx in sd["clean_char_indices"]:
-            pos = sd["clean_char_indices"].index(idx)
+        if idx in sd.clean_char_indices:
+            pos = sd.clean_char_indices.index(idx)
             cs = char_segments[pos]
             start = round(cs.start * ratio + t1, 3)
             end = round(cs.end * ratio + t1, 3)
