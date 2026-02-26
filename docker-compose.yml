@@ -479,6 +479,33 @@ services:
     profiles: [gpu]
     restart: unless-stopped
 
+  # Phoneme forced alignment (CPU - default for local dev)
+  stt-batch-align-phoneme-cpu:
+    image: dalston/stt-batch-align-phoneme:latest
+    build:
+      context: .
+      dockerfile: engines/stt-align/phoneme-align/Dockerfile
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_ENGINE_ID: phoneme-align
+    volumes:
+      - align-models:/models
+    depends_on: *batch-depends
+    restart: unless-stopped
+
+  # Phoneme forced alignment (GPU)
+  stt-batch-align-phoneme:
+    image: dalston/stt-batch-align-phoneme:latest
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_ENGINE_ID: phoneme-align
+    volumes:
+      - align-models:/models
+    depends_on: *batch-depends
+    deploy: *gpu-deploy
+    profiles: [gpu]
+    restart: unless-stopped
+
   # --- DIARIZE STAGE ---
 
   # Pyannote 3.1 (CPU - default for local dev)
