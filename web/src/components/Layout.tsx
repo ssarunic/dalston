@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { Menu } from 'lucide-react'
 import { Sidebar } from './Sidebar'
+import { LiveSessionIndicator } from './LiveSessionIndicator'
 import { Sheet, SheetContent, SheetTrigger } from './ui/sheet'
 import { Button } from './ui/button'
 import { useScrollRestoration } from '@/hooks/useScrollRestoration'
@@ -45,6 +46,9 @@ export function Layout({ children }: LayoutProps) {
           {children}
         </main>
       </div>
+
+      {/* Floating indicator for active live sessions */}
+      <LiveSessionIndicator />
     </div>
   )
 }

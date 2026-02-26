@@ -1,6 +1,7 @@
 import { createBrowserRouter, RouterProvider, Outlet } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider } from '@/contexts/AuthContext'
+import { LiveSessionProvider } from '@/contexts/LiveSessionContext'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { Layout } from '@/components/Layout'
 import { Login } from '@/pages/Login'
@@ -34,9 +35,11 @@ const basename = import.meta.env.BASE_URL.replace(/\/$/, '') || '/'
 function ProtectedLayout() {
   return (
     <ProtectedRoute>
-      <Layout>
-        <Outlet />
-      </Layout>
+      <LiveSessionProvider>
+        <Layout>
+          <Outlet />
+        </Layout>
+      </LiveSessionProvider>
     </ProtectedRoute>
   )
 }

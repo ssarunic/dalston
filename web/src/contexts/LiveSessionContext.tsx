@@ -1,8 +1,23 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+  type ReactNode,
+} from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import type { LiveTranscriptSegment, LiveSessionConfig, LiveSessionState } from '@/api/types'
 
-interface UseRealtimeSessionReturn {
+// Count words in a string
+function countWords(text: string): number {
+  const trimmed = text.trim()
+  if (trimmed.length === 0) return 0
+  return trimmed.split(/\s+/).length
+}
+
+interface LiveSessionContextType {
   state: LiveSessionState
   sessionId: string | null
   segments: LiveTranscriptSegment[]
@@ -16,14 +31,9 @@ interface UseRealtimeSessionReturn {
   stop: () => void
 }
 
-// Count words in a string
-function countWords(text: string): number {
-  const trimmed = text.trim()
-  if (trimmed.length === 0) return 0
-  return trimmed.split(/\s+/).length
-}
+const LiveSessionContext = createContext<LiveSessionContextType | null>(null)
 
-export function useRealtimeSession(): UseRealtimeSessionReturn {
+export function LiveSessionProvider({ children }: { children: ReactNode }) {
   const { apiKey } = useAuth()
   const [state, setState] = useState<LiveSessionState>('idle')
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -34,7 +44,7 @@ export function useRealtimeSession(): UseRealtimeSessionReturn {
   const [durationSeconds, setDurationSeconds] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
-  // Refs for cleanup
+  // Refs for resources that persist across renders
   const wsRef = useRef<WebSocket | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
@@ -65,7 +75,7 @@ export function useRealtimeSession(): UseRealtimeSessionReturn {
     setIsSpeaking(false)
   }, [])
 
-  // Cleanup on unmount
+  // Cleanup on unmount (when user logs out or app closes)
   useEffect(() => cleanup, [cleanup])
 
   const stop = useCallback(() => {
@@ -302,17 +312,32 @@ export function useRealtimeSession(): UseRealtimeSessionReturn {
     [apiKey, state, cleanup]
   )
 
-  return {
-    state,
-    sessionId,
-    segments,
-    partialText,
-    isSpeaking,
-    audioLevel,
-    durationSeconds,
-    wordCount,
-    error,
-    start,
-    stop,
+  return (
+    <LiveSessionContext.Provider
+      value={{
+        state,
+        sessionId,
+        segments,
+        partialText,
+        isSpeaking,
+        audioLevel,
+        durationSeconds,
+        wordCount,
+        error,
+        start,
+        stop,
+      }}
+    >
+      {children}
+    </LiveSessionContext.Provider>
+  )
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function useLiveSession() {
+  const context = useContext(LiveSessionContext)
+  if (!context) {
+    throw new Error('useLiveSession must be used within LiveSessionProvider')
   }
+  return context
 }

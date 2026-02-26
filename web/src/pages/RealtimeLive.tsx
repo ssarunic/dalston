@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/select'
 import { AudioLevelMeter } from '@/components/AudioLevelMeter'
 import { LiveTranscript } from '@/components/LiveTranscript'
-import { useRealtimeSession } from '@/hooks/useRealtimeSession'
+import { useLiveSession } from '@/contexts/LiveSessionContext'
 import { useEngines } from '@/hooks/useEngines'
 import { useRealtimeStatus } from '@/hooks/useRealtimeStatus'
 import { apiClient } from '@/api/client'
@@ -78,7 +78,7 @@ export function RealtimeLive() {
     error,
     start,
     stop,
-  } = useRealtimeSession()
+  } = useLiveSession()
 
   const { data: enginesData } = useEngines()
   const { data: statusData } = useRealtimeStatus()
