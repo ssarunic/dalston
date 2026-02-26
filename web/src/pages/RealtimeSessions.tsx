@@ -155,6 +155,7 @@ export function RealtimeSessions() {
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
+    refetch,
   } = useRealtimeSessions({
     status: statusFilter === 'all' ? undefined : statusFilter,
     limit,

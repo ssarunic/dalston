@@ -118,13 +118,14 @@ class WhisperStreamingEngine(RealtimeEngine):
             "word_timestamps": True,
         }
 
-        # Add vocabulary as hotwords if provided
-        # faster-whisper uses hotwords parameter to boost specific terms
+        # Add vocabulary as initial_prompt if provided
+        # initial_prompt is more effective than hotwords for biasing transcription
         if vocabulary:
-            transcribe_kwargs["hotwords"] = " ".join(vocabulary)
+            # Format as comma-separated list in the prompt
+            transcribe_kwargs["initial_prompt"] = ", ".join(vocabulary)
             logger.debug(
                 "vocabulary_enabled",
-                terms=vocabulary[:5],  # Log first 5 terms
+                terms=vocabulary[:5],
                 total_terms=len(vocabulary),
             )
 
