@@ -61,8 +61,6 @@ export function RealtimeLive() {
   const [showSettings, setShowSettings] = useState(false)
   const [language, setLanguage] = useState('auto')
   const [model, setModel] = useState('')
-  const [enableVad, setEnableVad] = useState(true)
-  const [interimResults, setInterimResults] = useState(true)
 
   const {
     state,
@@ -105,8 +103,8 @@ export function RealtimeLive() {
     const config: LiveSessionConfig = {
       language,
       model,
-      enableVad,
-      interimResults,
+      enableVad: true,
+      interimResults: true,
     }
     await start(config)
   }
@@ -145,7 +143,7 @@ export function RealtimeLive() {
       {showSettings && (
         <Card className="shrink-0">
           <CardContent className="pt-4 pb-4">
-            <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
+            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
                   Language
@@ -180,28 +178,6 @@ export function RealtimeLive() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="flex items-end">
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={enableVad}
-                    onChange={(e) => setEnableVad(e.target.checked)}
-                    className="rounded border-border"
-                  />
-                  VAD events
-                </label>
-              </div>
-              <div className="flex items-end">
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={interimResults}
-                    onChange={(e) => setInterimResults(e.target.checked)}
-                    className="rounded border-border"
-                  />
-                  Interim results
-                </label>
               </div>
             </div>
           </CardContent>
