@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Trash2, X, RefreshCw, Filter, Plus } from 'lucide-react'
+import { Trash2, X, Plus } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useJobs } from '@/hooks/useJobs'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
@@ -13,7 +13,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/StatusBadge'
 import { ListLoadMoreFooter } from '@/components/ListLoadMoreFooter'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
-import { Badge } from '@/components/ui/badge'
 import {
   Table,
   TableBody,
@@ -78,7 +77,6 @@ export function BatchJobs() {
     setStatus,
     setSort,
     setLimit,
-    resetAll,
   } = useSharedTableState({
     defaultStatus: '',
     statusOptions: STATUS_OPTIONS,
@@ -94,24 +92,16 @@ export function BatchJobs() {
   const [isCancelling, setIsCancelling] = useState(false)
   const [cancelError, setCancelError] = useState<string | null>(null)
   const [cancelSuccess, setCancelSuccess] = useState<string | null>(null)
-  const [showFilters, setShowFilters] = useState(false)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-
-  const hasActiveFilters =
-    !!statusFilter ||
-    sort !== 'created_desc' ||
-    limit !== DEFAULT_PAGE_SIZE
 
   const {
     data,
     isLoading,
-    isFetching,
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
     error,
-    refetch,
   } = useJobs({
     limit,
     status: statusFilter || undefined,
@@ -130,10 +120,6 @@ export function BatchJobs() {
 
   const handleLimitChange = (value: string) => {
     setLimit(Number(value))
-  }
-
-  const handleRefresh = async () => {
-    await refetch()
   }
 
   const loadMore = () => {
@@ -187,124 +173,59 @@ export function BatchJobs() {
             Manage and monitor transcription jobs
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowFilters(!showFilters)}
-          >
-            <Filter className="h-4 w-4 mr-2" />
-            Filters
-            {hasActiveFilters && (
-              <Badge variant="secondary" className="ml-2">
-                Active
-              </Badge>
-            )}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRefresh}
-            disabled={isFetching}
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => navigate('/jobs/new')}
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Submit Job
-          </Button>
-        </div>
+        <Button onClick={() => navigate('/jobs/new')}>
+          <Plus className="h-4 w-4 mr-2" />
+          Submit Job
+        </Button>
       </div>
-
-      {/* Filters */}
-      {showFilters && (
-        <Card>
-          <CardHeader className="py-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-muted-foreground">Filters</span>
-              {hasActiveFilters && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => resetAll()}
-                >
-                  <X className="h-4 w-4 mr-1" />
-                  Clear
-                </Button>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="grid gap-4 md:grid-cols-5">
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">
-                  Status
-                </label>
-                <Select
-                  value={statusFilter}
-                  onValueChange={handleFilterChange}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="All Statuses" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {STATUS_FILTERS.map((filter) => (
-                      <SelectItem key={filter.value} value={filter.value}>
-                        {filter.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">
-                  Sort
-                </label>
-                <Select value={sort} onValueChange={handleSortChange}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Newest first" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SORT_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">
-                  Rows per page
-                </label>
-                <Select value={String(limit)} onValueChange={handleLimitChange}>
-                  <SelectTrigger>
-                    <SelectValue placeholder={String(DEFAULT_PAGE_SIZE)} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAGE_SIZE_OPTIONS.map((size) => (
-                      <SelectItem key={size} value={String(size)}>
-                        {size}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Jobs Table */}
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base font-medium">
             Jobs
           </CardTitle>
+          <div className="flex items-center gap-2">
+            <Select
+              value={statusFilter}
+              onValueChange={handleFilterChange}
+            >
+              <SelectTrigger className="w-[130px]">
+                <SelectValue placeholder="All Statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                {STATUS_FILTERS.map((filter) => (
+                  <SelectItem key={filter.value} value={filter.value}>
+                    {filter.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={sort} onValueChange={handleSortChange}>
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="Newest first" />
+              </SelectTrigger>
+              <SelectContent>
+                {SORT_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={String(limit)} onValueChange={handleLimitChange}>
+              <SelectTrigger className="w-[100px]">
+                <SelectValue placeholder={String(DEFAULT_PAGE_SIZE)} />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </CardHeader>
         <CardContent>
           {isLoading && allJobs.length === 0 ? (

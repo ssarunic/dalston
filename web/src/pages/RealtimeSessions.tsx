@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Radio, Trash2, RefreshCw, Filter, X, Mic } from 'lucide-react'
+import { Radio, Trash2, Mic } from 'lucide-react'
 import { apiClient } from '@/api/client'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useSharedTableState } from '@/hooks/useSharedTableState'
@@ -23,7 +23,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/StatusBadge'
 import { ListLoadMoreFooter } from '@/components/ListLoadMoreFooter'
 import { useRealtimeStatus } from '@/hooks/useRealtimeStatus'
@@ -134,7 +133,6 @@ export function RealtimeSessions() {
     setStatus,
     setSort,
     setLimit,
-    resetAll,
   } = useSharedTableState({
     defaultStatus: 'all',
     statusOptions: STATUS_OPTIONS,
@@ -146,13 +144,8 @@ export function RealtimeSessions() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string } | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [showFilters, setShowFilters] = useState(false)
   const [showStatusWhy, setShowStatusWhy] = useState(false)
 
-  const hasActiveFilters =
-    statusFilter !== 'all' ||
-    sort !== 'started_desc' ||
-    limit !== DEFAULT_PAGE_SIZE
   const { data: statusData, isLoading: statusLoading, error: statusError } = useRealtimeStatus()
   const statusGuidance = useMemo(() => buildStatusGuidance(statusData), [statusData])
   const {
@@ -162,7 +155,6 @@ export function RealtimeSessions() {
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
-    refetch,
   } = useRealtimeSessions({
     status: statusFilter === 'all' ? undefined : statusFilter,
     limit,
@@ -181,10 +173,6 @@ export function RealtimeSessions() {
 
   const handleLimitChange = (value: string) => {
     setLimit(Number(value))
-  }
-
-  const handleRefresh = async () => {
-    await refetch()
   }
 
   const loadMore = () => {
@@ -218,114 +206,11 @@ export function RealtimeSessions() {
             Real-time transcription workers, capacity, and session history
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            onClick={() => navigate('/realtime/live')}
-          >
-            <Mic className="h-4 w-4 mr-2" />
-            New Session
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowFilters(!showFilters)}
-          >
-            <Filter className="h-4 w-4 mr-2" />
-            Filters
-            {hasActiveFilters && (
-              <Badge variant="secondary" className="ml-2">
-                Active
-              </Badge>
-            )}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRefresh}
-            disabled={isFetching}
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-        </div>
+        <Button onClick={() => navigate('/realtime/live')}>
+          <Mic className="h-4 w-4 mr-2" />
+          New Session
+        </Button>
       </div>
-
-      {/* Filters */}
-      {showFilters && (
-        <Card>
-          <CardHeader className="py-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-muted-foreground">Filters</span>
-              {hasActiveFilters && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => resetAll()}
-                >
-                  <X className="h-4 w-4 mr-1" />
-                  Clear
-                </Button>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="grid gap-4 md:grid-cols-6">
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">
-                  Status
-                </label>
-                <Select value={statusFilter} onValueChange={handleFilterChange}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="All Statuses" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All</SelectItem>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="error">Error</SelectItem>
-                    <SelectItem value="interrupted">Interrupted</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">
-                  Sort
-                </label>
-                <Select value={sort} onValueChange={handleSortChange}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Newest first" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SORT_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">
-                  Rows per page
-                </label>
-                <Select value={String(limit)} onValueChange={handleLimitChange}>
-                  <SelectTrigger>
-                    <SelectValue placeholder={String(DEFAULT_PAGE_SIZE)} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAGE_SIZE_OPTIONS.map((size) => (
-                      <SelectItem key={size} value={String(size)}>
-                        {size}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {statusError && (
         <div className="p-4 bg-destructive/10 text-destructive rounded-md">
@@ -486,8 +371,46 @@ export function RealtimeSessions() {
 
       {/* Session History */}
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Sessions</CardTitle>
+          <div className="flex items-center gap-2">
+            <Select value={statusFilter} onValueChange={handleFilterChange}>
+              <SelectTrigger className="w-[130px]">
+                <SelectValue placeholder="All Statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="error">Error</SelectItem>
+                <SelectItem value="interrupted">Interrupted</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={sort} onValueChange={handleSortChange}>
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="Newest first" />
+              </SelectTrigger>
+              <SelectContent>
+                {SORT_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={String(limit)} onValueChange={handleLimitChange}>
+              <SelectTrigger className="w-[100px]">
+                <SelectValue placeholder={String(DEFAULT_PAGE_SIZE)} />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </CardHeader>
         <CardContent>
           {(sessionsLoading || (isFetching && allSessions.length === 0)) ? (
