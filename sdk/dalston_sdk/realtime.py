@@ -178,6 +178,7 @@ class AsyncRealtimeSession:
         enable_vad: bool = True,
         interim_results: bool = True,
         word_timestamps: bool = False,
+        vocabulary: list[str] | None = None,
         # Storage options
         store_audio: bool = True,
         store_transcript: bool = True,
@@ -200,6 +201,7 @@ class AsyncRealtimeSession:
             enable_vad: Enable voice activity detection events.
             interim_results: Send partial transcripts.
             word_timestamps: Include word-level timing.
+            vocabulary: List of terms to boost recognition (max 100 terms).
             store_audio: Record audio to S3 during session.
             store_transcript: Save final transcript to S3.
             pii_detection: Enable PII detection.
@@ -223,6 +225,7 @@ class AsyncRealtimeSession:
         self.enable_vad = enable_vad
         self.interim_results = interim_results
         self.word_timestamps = word_timestamps
+        self.vocabulary = vocabulary
         # Storage
         self.store_audio = store_audio
         self.store_transcript = store_transcript
@@ -264,6 +267,10 @@ class AsyncRealtimeSession:
             params["store_audio"] = "true"
         if self.store_transcript:
             params["store_transcript"] = "true"
+
+        # Vocabulary for recognition boosting
+        if self.vocabulary:
+            params["vocabulary"] = json.dumps(self.vocabulary)
 
         # PII detection options (M26)
         if self.pii_detection:
@@ -497,6 +504,7 @@ class RealtimeSession:
         enable_vad: bool = True,
         interim_results: bool = True,
         word_timestamps: bool = False,
+        vocabulary: list[str] | None = None,
         # Storage options
         store_audio: bool = True,
         store_transcript: bool = True,
@@ -519,6 +527,7 @@ class RealtimeSession:
             enable_vad: Enable voice activity detection events.
             interim_results: Send partial transcripts.
             word_timestamps: Include word-level timing.
+            vocabulary: List of terms to boost recognition (max 100 terms).
             store_audio: Record audio to S3 during session.
             store_transcript: Save final transcript to S3.
             pii_detection: Enable PII detection.
@@ -537,6 +546,7 @@ class RealtimeSession:
             enable_vad=enable_vad,
             interim_results=interim_results,
             word_timestamps=word_timestamps,
+            vocabulary=vocabulary,
             store_audio=store_audio,
             store_transcript=store_transcript,
             pii_detection=pii_detection,

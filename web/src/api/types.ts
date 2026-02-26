@@ -175,6 +175,7 @@ export interface WorkerStatus {
   active_sessions: number
   models: string[]
   languages: string[]
+  supports_vocabulary?: boolean
 }
 
 export interface CapacityInfo {
@@ -426,6 +427,7 @@ export interface LiveSessionConfig {
   model: string
   enableVad: boolean
   interimResults: boolean
+  vocabulary?: string[]
 }
 
 export type LiveSessionState = 'idle' | 'connecting' | 'recording' | 'stopping' | 'completed' | 'error'

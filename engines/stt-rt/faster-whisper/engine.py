@@ -176,6 +176,10 @@ class WhisperStreamingEngine(RealtimeEngine):
         """Return engine type identifier."""
         return "whisper"
 
+    def get_supports_vocabulary(self) -> bool:
+        """Return True - faster-whisper supports vocabulary via hotwords."""
+        return True
+
     def get_gpu_memory_usage(self) -> str:
         """Return GPU memory usage string."""
         try:

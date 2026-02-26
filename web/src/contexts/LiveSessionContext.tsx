@@ -156,6 +156,9 @@ export function LiveSessionProvider({ children }: { children: ReactNode }) {
         wsUrl.searchParams.set('enable_vad', String(config.enableVad))
         wsUrl.searchParams.set('interim_results', String(config.interimResults))
         wsUrl.searchParams.set('retention', '30')
+        if (config.vocabulary && config.vocabulary.length > 0) {
+          wsUrl.searchParams.set('vocabulary', JSON.stringify(config.vocabulary))
+        }
 
         // Open WebSocket
         const ws = new WebSocket(wsUrl.toString())

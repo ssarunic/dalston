@@ -214,6 +214,18 @@ class RealtimeEngine(ABC):
         """
         return "unknown"
 
+    def get_supports_vocabulary(self) -> bool:
+        """Return whether this engine supports vocabulary boosting.
+
+        Override to return True for engines that support vocabulary/hotwords
+        (e.g., faster-whisper via hotwords parameter).
+        Used when registering with Session Router.
+
+        Returns:
+            True if vocabulary boosting is supported. Default: False
+        """
+        return False
+
     def get_gpu_memory_usage(self) -> str:
         """Return GPU memory usage string.
 
@@ -295,6 +307,7 @@ class RealtimeEngine(ABC):
                 models=self.get_models(),
                 languages=self.get_languages(),
                 engine=self.get_engine(),
+                supports_vocabulary=self.get_supports_vocabulary(),
             )
         )
 
