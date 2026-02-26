@@ -6,7 +6,6 @@ import {
   Settings2,
   ChevronDown,
   ChevronUp,
-  Download,
   ExternalLink,
   AlertCircle,
   RotateCcw,
@@ -25,7 +24,6 @@ import { LiveTranscript } from '@/components/LiveTranscript'
 import { useLiveSession } from '@/contexts/LiveSessionContext'
 import { useEngines } from '@/hooks/useEngines'
 import { useRealtimeStatus } from '@/hooks/useRealtimeStatus'
-import { apiClient } from '@/api/client'
 import type { LiveSessionConfig } from '@/api/types'
 
 const LANGUAGES = [
@@ -115,15 +113,6 @@ export function RealtimeLive() {
 
   const handleNewSession = () => {
     void handleStart()
-  }
-
-  const handleExport = async (format: 'srt' | 'vtt' | 'txt' | 'json') => {
-    if (!sessionId) return
-    try {
-      await apiClient.downloadSessionExport(sessionId, format)
-    } catch {
-      // Download errors are handled by the browser
-    }
   }
 
   return (
@@ -352,30 +341,6 @@ export function RealtimeLive() {
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleExport('txt')}
-                >
-                  <Download className="h-4 w-4 mr-1" />
-                  TXT
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleExport('srt')}
-                >
-                  <Download className="h-4 w-4 mr-1" />
-                  SRT
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleExport('json')}
-                >
-                  <Download className="h-4 w-4 mr-1" />
-                  JSON
-                </Button>
                 <Button
                   variant="outline"
                   size="sm"
