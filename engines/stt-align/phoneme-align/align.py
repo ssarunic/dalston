@@ -400,28 +400,49 @@ def _interpolate_nans(
 ) -> list[float | None]:
     """Interpolate None values in a list of floats.
 
-    Uses numpy for interpolation with forward-fill and backward-fill
-    for edge values.
+    Supports two methods:
+        - ``"nearest"``: each gap takes the value of the closest known
+          neighbour (matches WhisperX/pandas default behaviour).
+        - ``"linear"``: linearly interpolate between known neighbours.
+
+    Edge values are always forward/backward filled from the nearest
+    known point.
     """
     if not values or all(v is None for v in values):
         return values
 
     arr = np.array([float("nan") if v is None else v for v in values], dtype=np.float64)
     valid_mask = ~np.isnan(arr)
+    n_valid = int(valid_mask.sum())
 
-    if valid_mask.sum() == 0:
+    if n_valid == 0:
         return values
 
-    if valid_mask.sum() == len(arr):
+    if n_valid == len(arr):
         return [float(x) for x in arr]
 
-    # Interpolate between valid points
     valid_indices = np.where(valid_mask)[0]
-    if len(valid_indices) > 1:
-        all_indices = np.arange(len(arr))
-        arr = np.interp(all_indices, valid_indices, arr[valid_indices])
-    else:
-        # Only one valid point: fill everything with it
+
+    if n_valid == 1:
         arr[:] = arr[valid_indices[0]]
+        return [float(x) for x in arr]
+
+    all_indices = np.arange(len(arr))
+
+    if method == "nearest":
+        # For each missing index, pick the value of the closest valid index
+        # (ties broken toward the left, matching pandas .interpolate("nearest"))
+        nearest_pos = np.searchsorted(valid_indices, all_indices, side="left")
+        nearest_pos = np.clip(nearest_pos, 0, len(valid_indices) - 1)
+
+        # searchsorted gives the right neighbour; compare with left to find closest
+        left = np.clip(nearest_pos - 1, 0, len(valid_indices) - 1)
+        dist_right = np.abs(all_indices - valid_indices[nearest_pos])
+        dist_left = np.abs(all_indices - valid_indices[left])
+        use_left = dist_left <= dist_right
+        chosen = np.where(use_left, left, nearest_pos)
+        arr = arr[valid_indices[chosen]]
+    else:
+        arr = np.interp(all_indices, valid_indices, arr[valid_indices])
 
     return [float(x) for x in arr]

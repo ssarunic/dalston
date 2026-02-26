@@ -340,11 +340,29 @@ class TestInterpolateNans:
         result = align_module._interpolate_nans([None, None, None])
         assert result == [None, None, None]
 
-    def test_middle_nan_interpolated(self, align_module):
-        result = align_module._interpolate_nans([1.0, None, 3.0])
+    def test_middle_nan_nearest(self, align_module):
+        """Default 'nearest' snaps to the closest known value."""
+        result = align_module._interpolate_nans([1.0, None, 3.0], method="nearest")
         assert result[0] == pytest.approx(1.0)
-        assert result[1] == pytest.approx(2.0)  # linearly interpolated
+        assert result[1] == pytest.approx(1.0)  # equidistant, snaps left
         assert result[2] == pytest.approx(3.0)
+
+    def test_middle_nan_nearest_snaps_to_closer(self, align_module):
+        """When one neighbour is closer, nearest picks it."""
+        result = align_module._interpolate_nans(
+            [1.0, None, None, None, 5.0], method="nearest"
+        )
+        # index 1: closer to idx 0 (dist 1) than idx 4 (dist 3) → 1.0
+        assert result[1] == pytest.approx(1.0)
+        # index 2: equidistant → snaps left → 1.0
+        assert result[2] == pytest.approx(1.0)
+        # index 3: closer to idx 4 (dist 1) than idx 0 (dist 3) → 5.0
+        assert result[3] == pytest.approx(5.0)
+
+    def test_middle_nan_linear(self, align_module):
+        """Linear method interpolates between neighbours."""
+        result = align_module._interpolate_nans([1.0, None, 3.0], method="linear")
+        assert result[1] == pytest.approx(2.0)
 
     def test_leading_nan_filled(self, align_module):
         result = align_module._interpolate_nans([None, 2.0, 3.0])
