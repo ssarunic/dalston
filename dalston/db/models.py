@@ -615,6 +615,9 @@ class RealtimeSessionModel(Base):
     encoding: Mapped[str | None] = mapped_column(String(20), nullable=True)
     sample_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Enhancement option (process through batch pipeline after session ends)
+    enhance_on_end: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
     # Retention: 0=transient, -1=permanent, N=days
     retention: Mapped[int] = mapped_column(Integer, nullable=False, server_default="30")
 
