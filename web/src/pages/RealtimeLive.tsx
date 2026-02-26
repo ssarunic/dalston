@@ -8,7 +8,6 @@ import {
   ChevronUp,
   ExternalLink,
   AlertCircle,
-  RotateCcw,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -110,10 +109,6 @@ export function RealtimeLive() {
       interimResults,
     }
     await start(config)
-  }
-
-  const handleNewSession = () => {
-    void handleStart()
   }
 
   return (
@@ -344,20 +339,14 @@ export function RealtimeLive() {
                   {sessionId.slice(0, 16)}...
                 </span>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => navigate(`/realtime/sessions/${sessionId}`)}
-                >
-                  <ExternalLink className="h-4 w-4 mr-1" />
-                  View Details
-                </Button>
-                <Button size="sm" onClick={handleNewSession}>
-                  <RotateCcw className="h-4 w-4 mr-1" />
-                  New Session
-                </Button>
-              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate(`/realtime/sessions/${sessionId}`)}
+              >
+                <ExternalLink className="h-4 w-4 mr-1" />
+                View Details
+              </Button>
             </div>
           </CardContent>
         </Card>
