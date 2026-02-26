@@ -594,7 +594,12 @@ class RealtimeEngine(ABC):
             interim_results=get_bool_param("interim_results", True),
             word_timestamps=get_bool_param("word_timestamps", False),
             max_utterance_duration=get_float_param(
-                "max_utterance_duration", 60.0, min_val=0.0, max_val=300.0
+                "max_utterance_duration",
+                float(
+                    os.environ.get("DALSTON_REALTIME_MAX_UTTERANCE_DURATION", "30.0")
+                ),
+                min_val=0.0,
+                max_val=300.0,
             ),
             # VAD tuning parameters (ElevenLabs-compatible)
             vad_threshold=get_float_param(
@@ -604,7 +609,10 @@ class RealtimeEngine(ABC):
                 "min_speech_duration_ms", 250, min_val=50, max_val=2000
             ),
             min_silence_duration_ms=get_int_param(
-                "min_silence_duration_ms", 500, min_val=50, max_val=2000
+                "min_silence_duration_ms",
+                int(os.environ.get("DALSTON_REALTIME_MIN_SILENCE_DURATION_MS", "400")),
+                min_val=50,
+                max_val=2000,
             ),
             # Storage options (S3 config read from Settings)
             store_audio=get_bool_param("store_audio", True),

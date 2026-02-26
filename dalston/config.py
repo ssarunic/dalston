@@ -120,6 +120,18 @@ class Settings(BaseSettings):
         description="Timeout for downloading audio from URLs in seconds",
     )
 
+    # Realtime Transcription VAD Defaults
+    realtime_min_silence_duration_ms: int = Field(
+        default=400,
+        alias="DALSTON_REALTIME_MIN_SILENCE_DURATION_MS",
+        description="Default silence duration (ms) to trigger utterance end in realtime sessions",
+    )
+    realtime_max_utterance_duration: float = Field(
+        default=30.0,
+        alias="DALSTON_REALTIME_MAX_UTTERANCE_DURATION",
+        description="Default max utterance duration (seconds) before forcing chunk in realtime sessions",
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -77,11 +77,11 @@ class SessionConfig:
     enable_vad: bool = True
     interim_results: bool = True
     word_timestamps: bool = False
-    max_utterance_duration: float = 60.0  # Force utterance end after 60s
+    max_utterance_duration: float = 30.0  # Force utterance end after 30s
     # VAD tuning parameters (ElevenLabs-compatible naming)
     vad_threshold: float = 0.5  # Speech detection threshold (0.0-1.0)
     min_speech_duration_ms: int = 250  # Min speech duration (ms)
-    min_silence_duration_ms: int = 500  # Silence to trigger endpoint (ms)
+    min_silence_duration_ms: int = 400  # Silence to trigger endpoint (ms)
     # Storage options (S3 bucket/endpoint read from Settings env vars)
     store_audio: bool = True
     store_transcript: bool = True
