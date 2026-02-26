@@ -40,9 +40,6 @@ DEFAULT_ENGINES = {
     "merge": "final-merger",
 }
 
-# Valid PII detection tiers
-VALID_PII_DETECTION_TIERS = {"fast", "standard", "thorough"}
-
 # Valid PII redaction modes
 VALID_PII_REDACTION_MODES = {"silence", "beep"}
 
@@ -296,16 +293,7 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
             pii_dependencies.append(diarize_task.id)
 
         # Get PII detection config
-        pii_tier = parameters.get("pii_detection_tier", "standard")
-        if pii_tier not in VALID_PII_DETECTION_TIERS:
-            logger.warning(
-                f"Unknown pii_detection_tier '{pii_tier}', "
-                f"expected one of {VALID_PII_DETECTION_TIERS}. Defaulting to 'standard'."
-            )
-            pii_tier = "standard"
-
         pii_detect_config = {
-            "detection_tier": pii_tier,
             "entity_types": parameters.get("pii_entity_types"),
             "confidence_threshold": parameters.get("pii_confidence_threshold", 0.5),
         }
@@ -486,12 +474,7 @@ def _build_per_channel_dag(
 
         # PII detection task for this channel
         if pii_detection_enabled:
-            pii_tier = parameters.get("pii_detection_tier", "standard")
-            if pii_tier not in VALID_PII_DETECTION_TIERS:
-                pii_tier = "standard"
-
             pii_detect_config = {
-                "detection_tier": pii_tier,
                 "entity_types": parameters.get("pii_entity_types"),
                 "confidence_threshold": parameters.get("pii_confidence_threshold", 0.5),
                 "channel": channel,
@@ -842,12 +825,7 @@ def _build_dag_with_engines(
         if diarize_task is not None:
             pii_dependencies.append(diarize_task.id)
 
-        pii_tier = parameters.get("pii_detection_tier", "standard")
-        if pii_tier not in VALID_PII_DETECTION_TIERS:
-            pii_tier = "standard"
-
         pii_detect_config = {
-            "detection_tier": pii_tier,
             "entity_types": parameters.get("pii_entity_types"),
             "confidence_threshold": parameters.get("pii_confidence_threshold", 0.5),
         }
@@ -1020,12 +998,7 @@ def _build_per_channel_dag_with_engines(
 
         # PII detection task for this channel
         if pii_detection_enabled:
-            pii_tier = parameters.get("pii_detection_tier", "standard")
-            if pii_tier not in VALID_PII_DETECTION_TIERS:
-                pii_tier = "standard"
-
             pii_detect_config = {
-                "detection_tier": pii_tier,
                 "entity_types": parameters.get("pii_entity_types"),
                 "confidence_threshold": parameters.get("pii_confidence_threshold", 0.5),
                 "channel": channel,

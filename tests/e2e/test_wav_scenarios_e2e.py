@@ -374,34 +374,6 @@ class TestWavSuccessPiiDetection:
         # PII results should be present (even if empty)
         assert "pii_entities" in result or result["status"] == "completed"
 
-    def test_pii_detection_fast_tier(self, audio_dir):
-        """PII detection with fast tier (regex-based)."""
-        result = transcribe_json(
-            audio_dir / "test_merged.wav",
-            "--model",
-            "faster-whisper-base",
-            "--pii",
-            "--pii-tier",
-            "fast",
-        )
-
-        assert result["status"] == "completed"
-        assert result["text"]
-
-    def test_pii_detection_standard_tier(self, audio_dir):
-        """PII detection with standard tier (NER-based)."""
-        result = transcribe_json(
-            audio_dir / "test_merged.wav",
-            "--model",
-            "faster-whisper-base",
-            "--pii",
-            "--pii-tier",
-            "standard",
-        )
-
-        assert result["status"] == "completed"
-        assert result["text"]
-
     def test_pii_detection_specific_entities(self, audio_dir):
         """PII detection with specific entity types."""
         result = transcribe_json(
@@ -436,8 +408,6 @@ class TestWavSuccessPiiDetection:
             "--speakers",
             "per-channel",
             "--pii",
-            "--pii-tier",
-            "standard",
         )
 
         assert result["status"] == "completed"
@@ -449,7 +419,6 @@ class TestWavSuccessPiiDetection:
         # PII detection should complete (entities may or may not be found)
         pii = result.get("pii", {})
         assert pii.get("enabled") is True, "PII detection should be enabled"
-        assert pii.get("detection_tier") == "standard", "Expected standard tier"
 
 
 @pytest.mark.e2e

@@ -16,7 +16,6 @@ import { useCapabilities, useEnginesList } from '@/hooks/useCapabilities'
 import type {
   SpeakerDetection,
   TimestampsGranularity,
-  PIITier,
   PIIRedactionMode,
 } from '@/api/types'
 
@@ -117,11 +116,6 @@ const TIMESTAMPS_OPTIONS: { value: TimestampsGranularity; label: string }[] = [
   { value: 'word', label: 'Word' },
 ]
 
-const PII_TIER_OPTIONS: { value: PIITier; label: string }[] = [
-  { value: 'fast', label: 'Fast' },
-  { value: 'standard', label: 'Standard' },
-  { value: 'thorough', label: 'Thorough' },
-]
 
 const PII_REDACTION_MODE_OPTIONS: { value: PIIRedactionMode; label: string }[] = [
   { value: 'silence', label: 'Silence' },
@@ -278,7 +272,6 @@ export function NewJob() {
 
   // PII settings
   const [piiDetection, setPiiDetection] = useState(false)
-  const [piiTier, setPiiTier] = useState<PIITier>('standard')
   const [piiPreset, setPiiPreset] = useState<PIIPreset>('all')
   const [piiSelectedTypes, setPiiSelectedTypes] = useState<Set<string>>(() => getEntityTypesForPreset('all'))
   const [piiShowCustomize, setPiiShowCustomize] = useState(false)
@@ -441,7 +434,6 @@ export function NewJob() {
                 ? '-1'
                 : retentionDays,
         pii_detection: piiDetection || undefined,
-        pii_detection_tier: piiDetection ? piiTier : undefined,
         pii_entity_types: piiDetection && piiSelectedTypes.size > 0
           ? Array.from(piiSelectedTypes)
           : undefined,
@@ -866,25 +858,6 @@ export function NewJob() {
                       <div className="space-y-4 pl-0 md:pl-4">
                         <div className="grid gap-4 md:grid-cols-2">
                           <div className="space-y-2">
-                            <label className="text-sm font-medium">Detection Tier</label>
-                            <Select
-                              value={piiTier}
-                              onValueChange={(v) => setPiiTier(v as PIITier)}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {PII_TIER_OPTIONS.map((opt) => (
-                                  <SelectItem key={opt.value} value={opt.value}>
-                                    {opt.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          <div className="space-y-2">
                             <label className="text-sm font-medium">Entity Types</label>
                             <Select
                               value={piiPreset}
@@ -1089,7 +1062,7 @@ export function NewJob() {
                 {piiDetection && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">PII Detection</span>
-                    <span>Enabled ({piiTier})</span>
+                    <span>Enabled</span>
                   </div>
                 )}
               </CardContent>

@@ -11,7 +11,6 @@ from uuid import uuid4
 import pytest
 
 from dalston.common.models import (
-    PIIDetectionTier,
     PIIEntityCategory,
     PIIRedactionMode,
 )
@@ -24,7 +23,6 @@ from dalston.common.pipeline_types import (
 from dalston.gateway.models.requests import TranscriptionCreateParams
 from dalston.gateway.models.responses import PIIEntityResponse, PIIInfo
 from dalston.orchestrator.dag import (
-    VALID_PII_DETECTION_TIERS,
     VALID_PII_REDACTION_MODES,
     build_task_dag,
 )
@@ -32,12 +30,6 @@ from dalston.orchestrator.dag import (
 
 class TestPIIEnums:
     """Tests for PII-related enums."""
-
-    def test_pii_detection_tier_values(self):
-        """Test PIIDetectionTier enum values."""
-        assert PIIDetectionTier.FAST == "fast"
-        assert PIIDetectionTier.STANDARD == "standard"
-        assert PIIDetectionTier.THOROUGH == "thorough"
 
     def test_pii_redaction_mode_values(self):
         """Test PIIRedactionMode enum values."""
@@ -157,20 +149,8 @@ class TestPIIDAGBuilder:
         assert task_by_stage["pii_detect"].id in merge_task.dependencies
         assert task_by_stage["audio_redact"].id in merge_task.dependencies
 
-    def test_pii_detection_tier_config(self, job_id, audio_uri):
-        """Test that PII detection tier is passed to config."""
-        parameters = {
-            "pii_detection": True,
-            "pii_detection_tier": "thorough",
-        }
-
-        tasks = build_task_dag(job_id, audio_uri, parameters)
-
-        pii_task = next(t for t in tasks if t.stage == "pii_detect")
-        assert pii_task.config["detection_tier"] == "thorough"
-
-    def test_pii_detection_tier_default(self, job_id, audio_uri):
-        """Test that PII detection tier defaults to standard."""
+    def test_pii_detection_config_has_no_tier(self, job_id, audio_uri):
+        """Test that PII detection config does not include a detection tier."""
         parameters = {
             "pii_detection": True,
         }
@@ -178,7 +158,7 @@ class TestPIIDAGBuilder:
         tasks = build_task_dag(job_id, audio_uri, parameters)
 
         pii_task = next(t for t in tasks if t.stage == "pii_detect")
-        assert pii_task.config["detection_tier"] == "standard"
+        assert "detection_tier" not in pii_task.config
 
     def test_pii_entity_types_config(self, job_id, audio_uri):
         """Test that PII entity types are passed to config."""
@@ -228,12 +208,6 @@ class TestPIIDAGBuilder:
         merge_task = next(t for t in tasks if t.stage == "merge")
         assert merge_task.config.get("pii_detection") is True
 
-    def test_valid_pii_detection_tiers(self):
-        """Test that valid PII detection tiers are defined."""
-        assert "fast" in VALID_PII_DETECTION_TIERS
-        assert "standard" in VALID_PII_DETECTION_TIERS
-        assert "thorough" in VALID_PII_DETECTION_TIERS
-
     def test_valid_pii_redaction_modes(self):
         """Test that valid PII redaction modes are defined."""
         assert "silence" in VALID_PII_REDACTION_MODES
@@ -282,19 +256,16 @@ class TestPIIPipelineTypes:
             redacted_text="Call me at [PHONE_NUMBER]",
             entity_count_by_type={"phone_number": 1},
             entity_count_by_category={"pii": 1},
-            detection_tier=PIIDetectionTier.STANDARD,
             processing_time_ms=150,
             engine_id="pii-presidio",
         )
 
         assert len(output.entities) == 1
         assert output.redacted_text == "Call me at [PHONE_NUMBER]"
-        assert output.detection_tier == PIIDetectionTier.STANDARD
 
     def test_pii_metadata_creation(self):
         """Test creating PIIMetadata."""
         metadata = PIIMetadata(
-            detection_tier=PIIDetectionTier.FAST,
             entities_detected=5,
             entity_count_by_type={"credit_card_number": 2, "phone_number": 3},
             entity_count_by_category={"pci": 2, "pii": 3},
@@ -334,7 +305,6 @@ class TestPIIRequestParameters:
         params = TranscriptionCreateParams()
 
         assert params.pii_detection is False
-        assert params.pii_detection_tier == "standard"
         assert params.pii_entity_types is None
         assert params.redact_pii is False
         assert params.redact_pii_audio is False
@@ -344,7 +314,6 @@ class TestPIIRequestParameters:
         """Test that PII parameters are included in job parameters."""
         params = TranscriptionCreateParams(
             pii_detection=True,
-            pii_detection_tier="thorough",
             pii_entity_types=["credit_card_number", "ssn"],
             redact_pii=True,
             redact_pii_audio=True,
@@ -354,7 +323,7 @@ class TestPIIRequestParameters:
         job_params = params.to_job_parameters()
 
         assert job_params["pii_detection"] is True
-        assert job_params["pii_detection_tier"] == "thorough"
+        assert "pii_detection_tier" not in job_params
         assert job_params["pii_entity_types"] == ["credit_card_number", "ssn"]
         assert job_params["redact_pii"] is True
         assert job_params["redact_pii_audio"] is True
@@ -393,7 +362,6 @@ class TestPIIResponseModels:
         """Test PIIInfo model."""
         info = PIIInfo(
             enabled=True,
-            detection_tier="standard",
             entities_detected=5,
             entity_summary={"credit_card_number": 2, "phone_number": 3},
             redacted_audio_available=True,

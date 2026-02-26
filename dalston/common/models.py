@@ -161,14 +161,6 @@ class ResolvedRetention:
 # =============================================================================
 
 
-class PIIDetectionTier(str, Enum):
-    """PII detection tier controlling speed/accuracy tradeoff."""
-
-    FAST = "fast"  # Presidio regex only (<5ms)
-    STANDARD = "standard"  # Presidio + GLiNER (~100ms)
-    THOROUGH = "thorough"  # Presidio + GLiNER + LLM (1-3s)
-
-
 class PIIRedactionMode(str, Enum):
     """Audio redaction mode."""
 
@@ -207,7 +199,6 @@ class PIIDetectionResult:
     entities: list[PIIEntity]
     redacted_text: str
     entity_count_by_type: dict[str, int]
-    detection_tier: PIIDetectionTier
     processing_time_ms: int
 
 
