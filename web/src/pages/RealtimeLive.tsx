@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { AudioLevelMeter } from '@/components/AudioLevelMeter'
+import { BackButton } from '@/components/BackButton'
 import { LiveTranscript } from '@/components/LiveTranscript'
 import { useLiveSession } from '@/contexts/LiveSessionContext'
 import { useEngines } from '@/hooks/useEngines'
@@ -119,11 +120,14 @@ export function RealtimeLive() {
     <div className="flex flex-col h-[calc(100vh-4rem)] gap-4">
       {/* Header */}
       <div className="flex items-center justify-between shrink-0">
-        <div>
-          <h1 className="text-2xl font-bold">Live Transcription</h1>
-          <p className="text-muted-foreground">
-            Start a real-time transcription session using your microphone
-          </p>
+        <div className="flex items-center gap-4">
+          <BackButton fallbackPath="/realtime" />
+          <div>
+            <h1 className="text-2xl font-bold">Live Transcription</h1>
+            <p className="text-muted-foreground">
+              Start a real-time transcription session using your microphone
+            </p>
+          </div>
         </div>
         <Button
           variant="outline"
