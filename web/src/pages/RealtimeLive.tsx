@@ -114,12 +114,12 @@ export function RealtimeLive() {
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] gap-4">
       {/* Header */}
-      <div className="flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between shrink-0">
+        <div className="flex items-center gap-3 sm:gap-4">
           <BackButton fallbackPath="/realtime" />
           <div>
-            <h1 className="text-2xl font-bold">Live Transcription</h1>
-            <p className="text-muted-foreground">
+            <h1 className="text-xl sm:text-2xl font-bold">Live Transcription</h1>
+            <p className="text-sm sm:text-base text-muted-foreground hidden sm:block">
               Start a real-time transcription session using your microphone
             </p>
           </div>
@@ -129,13 +129,14 @@ export function RealtimeLive() {
           size="sm"
           onClick={() => setShowSettings(!showSettings)}
           disabled={isRecording || isConnecting || isStopping}
+          className="self-start sm:self-auto"
         >
-          <Settings2 className="h-4 w-4 mr-2" />
-          Settings
+          <Settings2 className="h-4 w-4 sm:mr-2" />
+          <span className="hidden sm:inline">Settings</span>
           {showSettings ? (
-            <ChevronUp className="h-4 w-4 ml-1" />
+            <ChevronUp className="h-4 w-4 sm:ml-1" />
           ) : (
-            <ChevronDown className="h-4 w-4 ml-1" />
+            <ChevronDown className="h-4 w-4 sm:ml-1" />
           )}
         </Button>
       </div>
@@ -144,7 +145,7 @@ export function RealtimeLive() {
       {showSettings && (
         <Card className="shrink-0">
           <CardContent className="pt-4 pb-4">
-            <div className="grid gap-4 md:grid-cols-4">
+            <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
                   Language
@@ -180,7 +181,7 @@ export function RealtimeLive() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex items-end gap-4">
+              <div className="flex items-end">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input
                     type="checkbox"
@@ -191,7 +192,7 @@ export function RealtimeLive() {
                   VAD events
                 </label>
               </div>
-              <div className="flex items-end gap-4">
+              <div className="flex items-end">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input
                     type="checkbox"
@@ -245,12 +246,12 @@ export function RealtimeLive() {
       )}
 
       {/* Central Action Area */}
-      <div className="shrink-0 flex flex-col items-center gap-3 py-4">
+      <div className="shrink-0 flex flex-col items-center gap-3 py-2 sm:py-4">
         {/* Main Button */}
         {isIdle && (
           <Button
             size="lg"
-            className="h-14 px-8 text-base gap-2"
+            className="h-12 sm:h-14 px-6 sm:px-8 text-base gap-2 w-full sm:w-auto max-w-xs"
             onClick={handleStart}
             disabled={isUnavailable}
           >
@@ -259,7 +260,7 @@ export function RealtimeLive() {
           </Button>
         )}
         {isConnecting && (
-          <Button size="lg" className="h-14 px-8 text-base gap-2" disabled>
+          <Button size="lg" className="h-12 sm:h-14 px-6 sm:px-8 text-base gap-2 w-full sm:w-auto max-w-xs" disabled>
             <div className="h-5 w-5 rounded-full border-2 border-current border-t-transparent animate-spin" />
             Connecting...
           </Button>
@@ -268,7 +269,7 @@ export function RealtimeLive() {
           <Button
             size="lg"
             variant="destructive"
-            className="h-14 px-8 text-base gap-2"
+            className="h-12 sm:h-14 px-6 sm:px-8 text-base gap-2 w-full sm:w-auto max-w-xs"
             onClick={stop}
           >
             <Square className="h-5 w-5" />
@@ -276,7 +277,7 @@ export function RealtimeLive() {
           </Button>
         )}
         {isStopping && (
-          <Button size="lg" className="h-14 px-8 text-base gap-2" disabled>
+          <Button size="lg" className="h-12 sm:h-14 px-6 sm:px-8 text-base gap-2 w-full sm:w-auto max-w-xs" disabled>
             <div className="h-5 w-5 rounded-full border-2 border-current border-t-transparent animate-spin" />
             Finishing...
           </Button>
@@ -310,12 +311,12 @@ export function RealtimeLive() {
       {/* Transcript Area */}
       <Card className="flex-1 min-h-0 flex flex-col">
         <CardHeader className="py-3 shrink-0">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
             <CardTitle className="text-sm font-medium">Transcript</CardTitle>
-            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 sm:gap-3 text-xs text-muted-foreground">
               <span>{formatDuration(durationSeconds)}</span>
               <span>{wordCount} words</span>
-              <span>{segments.length} segments</span>
+              <span className="hidden sm:inline">{segments.length} segments</span>
             </div>
           </div>
         </CardHeader>
@@ -331,11 +332,11 @@ export function RealtimeLive() {
       {/* Post-Session Actions */}
       {isCompleted && sessionId && (
         <Card className="shrink-0">
-          <CardContent className="py-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+          <CardContent className="py-3 sm:py-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3">
               <div className="text-sm">
                 <span className="text-muted-foreground">Session completed</span>
-                <span className="font-mono text-xs ml-2 text-muted-foreground">
+                <span className="font-mono text-xs ml-2 text-muted-foreground hidden sm:inline">
                   {sessionId.slice(0, 16)}...
                 </span>
               </div>
@@ -343,6 +344,7 @@ export function RealtimeLive() {
                 variant="outline"
                 size="sm"
                 onClick={() => navigate(`/realtime/sessions/${sessionId}`)}
+                className="w-full sm:w-auto"
               >
                 <ExternalLink className="h-4 w-4 mr-1" />
                 View Details
