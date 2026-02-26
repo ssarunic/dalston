@@ -187,7 +187,7 @@ export function RealtimeSessionDetail() {
             </span>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{session.model ?? '-'}</div>
+            <div className="text-2xl font-bold">{session.model || session.engine || '-'}</div>
           </CardContent>
         </Card>
 

@@ -30,31 +30,34 @@ export function LiveSessionIndicator() {
     <button
       onClick={handleClick}
       className={cn(
-        'fixed bottom-4 right-4 z-50',
-        'flex items-center gap-2 px-3 py-2 rounded-full',
-        'bg-card border border-border shadow-lg',
-        'hover:bg-accent transition-colors cursor-pointer',
-        'text-sm font-medium'
+        'fixed bottom-6 right-6 z-50',
+        'flex items-center gap-3 px-5 py-3 rounded-full',
+        'bg-card border-2 shadow-xl',
+        'hover:scale-105 transition-all cursor-pointer',
+        'text-base font-medium',
+        state === 'recording'
+          ? 'border-red-500/50 shadow-red-500/20'
+          : 'border-border'
       )}
     >
       {state === 'recording' ? (
         <>
-          <span className="relative flex h-3 w-3">
+          <span className="relative flex h-4 w-4">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
+            <span className="relative inline-flex rounded-full h-4 w-4 bg-red-500" />
           </span>
-          <Mic className="h-4 w-4 text-red-500" />
-          <span className="text-foreground">{formatDuration(durationSeconds)}</span>
+          <Mic className="h-5 w-5 text-red-500" />
+          <span className="text-foreground font-semibold">{formatDuration(durationSeconds)}</span>
           <span className="text-muted-foreground">{wordCount} words</span>
         </>
       ) : state === 'connecting' ? (
         <>
-          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           <span className="text-muted-foreground">Connecting...</span>
         </>
       ) : (
         <>
-          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           <span className="text-muted-foreground">Finishing...</span>
         </>
       )}
