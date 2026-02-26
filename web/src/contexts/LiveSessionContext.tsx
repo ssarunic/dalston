@@ -102,14 +102,15 @@ export function LiveSessionProvider({ children }: { children: ReactNode }) {
       timerRef.current = null
     }
 
-    // Timeout: if server doesn't respond within 5s, close anyway
+    // Timeout: if server doesn't respond within 10s, close anyway
+    // (matches backend's 10s wait for worker's session.end)
     setTimeout(() => {
       if (wsRef.current) {
         wsRef.current.close()
         wsRef.current = null
       }
       setState((prev) => (prev === 'stopping' ? 'completed' : prev))
-    }, 5000)
+    }, 10000)
   }, [state])
 
   const start = useCallback(

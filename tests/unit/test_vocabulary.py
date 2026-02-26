@@ -124,8 +124,10 @@ class TestWhisperEngineVocabulary:
         return mock_model
 
     @pytest.fixture
-    def engine_with_mock_model(self, mock_whisper_model):
+    def engine_with_mock_model(self, mock_whisper_model, monkeypatch):
         """Create WhisperEngine with mocked model."""
+        # Force CPU mode to avoid CUDA requirement for large-v3
+        monkeypatch.setenv("DALSTON_DEVICE", "cpu")
         with patch("faster_whisper.WhisperModel", return_value=mock_whisper_model):
             WhisperEngine = load_whisper_engine()
             engine = WhisperEngine()
