@@ -44,6 +44,7 @@ class TestAudioUrlTranscription:
         settings.s3_bucket = "test-bucket"
         settings.s3_region = "us-east-1"
         settings.s3_endpoint_url = None
+        settings.retention_default_days = 30
         return settings
 
     @pytest.fixture
