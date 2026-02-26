@@ -60,6 +60,7 @@ class SessionConfig:
         enable_vad: Whether VAD events are sent to client
         interim_results: Whether partial transcripts are sent
         word_timestamps: Whether word-level timing is included
+        vocabulary: List of terms to boost recognition (for hotwords/bias)
         max_utterance_duration: Max seconds before forcing utterance end (0=unlimited)
         vad_threshold: VAD speech probability threshold (0.0-1.0)
         min_speech_duration_ms: Min speech duration before valid utterance (ms)
@@ -77,6 +78,7 @@ class SessionConfig:
     enable_vad: bool = True
     interim_results: bool = True
     word_timestamps: bool = False
+    vocabulary: list[str] | None = None  # Terms to boost recognition
     max_utterance_duration: float = 30.0  # Force utterance end after 30s
     # VAD tuning parameters (ElevenLabs-compatible naming)
     vad_threshold: float = 0.5  # Speech detection threshold (0.0-1.0)
@@ -210,7 +212,7 @@ class AudioBuffer:
 
 # Type alias for transcribe callback
 TranscribeCallback = Callable[
-    [np.ndarray, str, str],  # audio, language, model
+    [np.ndarray, str, str, list[str] | None],  # audio, language, model, vocabulary
     TranscribeResult,
 ]
 
@@ -501,6 +503,7 @@ class SessionHandler:
                 audio,
                 self.config.language,
                 self.config.model,
+                self.config.vocabulary,
             )
 
             if not result.text:
@@ -577,6 +580,7 @@ class SessionHandler:
                 audio,
                 self.config.language,
                 self.config.model,
+                self.config.vocabulary,
             )
 
             if not result.text:

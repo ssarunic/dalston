@@ -137,6 +137,12 @@ async def realtime_transcription(
         bool, Query(description="Send partial transcripts")
     ] = True,
     word_timestamps: Annotated[bool, Query(description="Include word timing")] = False,
+    vocabulary: Annotated[
+        str | None,
+        Query(
+            description='JSON array of terms to boost recognition (e.g., \'["Dalston", "FastAPI"]\'). Max 100 terms.'
+        ),
+    ] = None,
     retention: Annotated[
         int | None,
         Query(
@@ -179,6 +185,7 @@ async def realtime_transcription(
     - enable_vad: Send vad.speech_start/end events
     - interim_results: Send transcript.partial messages
     - word_timestamps: Include word-level timing in results
+    - vocabulary: JSON array of terms to boost recognition (max 100 terms, 50 chars each)
     - retention: Retention in days - 0 (transient), -1 (permanent), 1-3650 (days)
     - resume_session_id: Link to previous session for continuity
     - pii_detection: Enable PII detection on stored/enhanced transcript
@@ -247,6 +254,46 @@ async def realtime_transcription(
         # 0 = transient (no storage)
         store_audio = effective_retention != 0
         store_transcript = effective_retention != 0
+
+        # Validate and parse vocabulary parameter
+        parsed_vocabulary: list[str] | None = None
+        if vocabulary is not None:
+            try:
+                parsed_vocabulary = json.loads(vocabulary)
+                if not isinstance(parsed_vocabulary, list):
+                    raise ValueError("vocabulary must be a JSON array of strings")
+                if len(parsed_vocabulary) > 100:
+                    raise ValueError("vocabulary cannot exceed 100 terms")
+                for term in parsed_vocabulary:
+                    if not isinstance(term, str):
+                        raise ValueError("vocabulary must contain only strings")
+                    if len(term) > 50:
+                        raise ValueError(
+                            f"Each vocabulary term must be at most 50 characters, got {len(term)}"
+                        )
+                # Set to None if empty array
+                if not parsed_vocabulary:
+                    parsed_vocabulary = None
+            except json.JSONDecodeError as e:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "code": "invalid_parameters",
+                        "message": f"Invalid JSON in vocabulary: {e}",
+                    }
+                )
+                await websocket.close(code=4400, reason="Invalid parameters")
+                return
+            except ValueError as e:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "code": "invalid_parameters",
+                        "message": str(e),
+                    }
+                )
+                await websocket.close(code=4400, reason="Invalid parameters")
+                return
 
         # Validate: redact_pii_audio requires pii_detection and storage enabled
         if redact_pii_audio and not (pii_detection and store_audio):
@@ -361,6 +408,7 @@ async def realtime_transcription(
                 enable_vad=enable_vad,
                 interim_results=interim_results,
                 word_timestamps=word_timestamps,
+                vocabulary=parsed_vocabulary,
                 store_audio=store_audio,
                 store_transcript=store_transcript,
             )
@@ -476,6 +524,13 @@ async def elevenlabs_realtime_transcription(
     include_timestamps: Annotated[
         bool, Query(description="Include word-level timestamps")
     ] = False,
+    keyterms: Annotated[
+        str | None,
+        Query(
+            description="JSON array of bias terms to boost recognition "
+            '(e.g., \'["PostgreSQL", "Kubernetes"]\'). Max 100 terms, 50 chars each.',
+        ),
+    ] = None,
 ):
     """ElevenLabs-compatible WebSocket endpoint for real-time transcription.
 
@@ -494,6 +549,7 @@ async def elevenlabs_realtime_transcription(
     - audio_format: "pcm_16000", "pcm_8000", etc.
     - commit_strategy: "vad" (auto) or "manual"
     - include_timestamps: Include word-level timing
+    - keyterms: JSON array of terms to boost recognition
     """
     # Parse audio format (e.g., "pcm_16000" -> sample_rate=16000)
     sample_rate = 16000
@@ -535,6 +591,36 @@ async def elevenlabs_realtime_transcription(
     # the session counter is always decremented on any exit path
     allocation = None
     try:
+        # Validate and parse keyterms parameter (ElevenLabs naming → vocabulary)
+        parsed_vocabulary: list[str] | None = None
+        if keyterms is not None:
+            try:
+                parsed_vocabulary = json.loads(keyterms)
+                if not isinstance(parsed_vocabulary, list):
+                    raise ValueError("keyterms must be a JSON array of strings")
+                if len(parsed_vocabulary) > 100:
+                    raise ValueError("keyterms cannot exceed 100 terms")
+                for term in parsed_vocabulary:
+                    if not isinstance(term, str):
+                        raise ValueError("keyterms must contain only strings")
+                    if len(term) > 50:
+                        raise ValueError(
+                            f"Each keyterm must be at most 50 characters, got {len(term)}"
+                        )
+                # Set to None if empty array
+                if not parsed_vocabulary:
+                    parsed_vocabulary = None
+            except json.JSONDecodeError as e:
+                await websocket.send_json(
+                    {"message_type": "error", "error": f"Invalid JSON in keyterms: {e}"}
+                )
+                await websocket.close(code=4400, reason="Invalid parameters")
+                return
+            except ValueError as e:
+                await websocket.send_json({"message_type": "error", "error": str(e)})
+                await websocket.close(code=4400, reason="Invalid parameters")
+                return
+
         # ElevenLabs model_id (scribe_v1, scribe_v2, etc.) is treated as "auto"
         # Let the session router select the best available realtime engine
         routing_model = None  # Auto-select
@@ -599,6 +685,7 @@ async def elevenlabs_realtime_transcription(
                 enable_vad=(commit_strategy == "vad"),
                 interim_results=True,
                 word_timestamps=include_timestamps,
+                vocabulary=parsed_vocabulary,
             )
         except WebSocketDisconnect:
             log.info("elevenlabs_client_disconnected")
@@ -662,6 +749,7 @@ async def _proxy_to_worker(
     enable_vad: bool,
     interim_results: bool,
     word_timestamps: bool,
+    vocabulary: list[str] | None = None,
     store_audio: bool = False,
     store_transcript: bool = False,
 ) -> dict | None:
@@ -678,6 +766,7 @@ async def _proxy_to_worker(
         enable_vad: Enable VAD events
         interim_results: Enable interim results
         word_timestamps: Enable word timestamps
+        vocabulary: List of terms to boost recognition
 
     Returns:
         Session end data with stats if received, None otherwise
@@ -687,21 +776,23 @@ async def _proxy_to_worker(
     import websockets
 
     # Build worker URL with session parameters (use urlencode for safe encoding)
-    params = urlencode(
-        {
-            "session_id": session_id,  # Pass Gateway's session_id to worker
-            "language": language,
-            "model": model,
-            "encoding": encoding,
-            "sample_rate": sample_rate,
-            "enable_vad": str(enable_vad).lower(),
-            "interim_results": str(interim_results).lower(),
-            "word_timestamps": str(word_timestamps).lower(),
-            "store_audio": str(store_audio).lower(),
-            "store_transcript": str(store_transcript).lower(),
-        }
-    )
-    worker_url = f"{worker_endpoint}/session?{params}"
+    params: dict[str, str] = {
+        "session_id": session_id,  # Pass Gateway's session_id to worker
+        "language": language,
+        "model": model,
+        "encoding": encoding,
+        "sample_rate": str(sample_rate),
+        "enable_vad": str(enable_vad).lower(),
+        "interim_results": str(interim_results).lower(),
+        "word_timestamps": str(word_timestamps).lower(),
+        "store_audio": str(store_audio).lower(),
+        "store_transcript": str(store_transcript).lower(),
+    }
+    # Add vocabulary as JSON if provided
+    if vocabulary:
+        params["vocabulary"] = json.dumps(vocabulary)
+
+    worker_url = f"{worker_endpoint}/session?{urlencode(params)}"
 
     # Connect with timeouts to prevent hanging connections
     async with websockets.connect(
@@ -906,6 +997,7 @@ async def _proxy_to_worker_elevenlabs(
     enable_vad: bool,
     interim_results: bool,
     word_timestamps: bool,
+    vocabulary: list[str] | None = None,
 ) -> None:
     """Proxy with ElevenLabs protocol translation.
 
@@ -918,19 +1010,21 @@ async def _proxy_to_worker_elevenlabs(
     import websockets
 
     # Build worker URL
-    params = urlencode(
-        {
-            "session_id": session_id,
-            "language": language,
-            "model": model,
-            "encoding": "pcm_s16le",
-            "sample_rate": sample_rate,
-            "enable_vad": str(enable_vad).lower(),
-            "interim_results": str(interim_results).lower(),
-            "word_timestamps": str(word_timestamps).lower(),
-        }
-    )
-    worker_url = f"{worker_endpoint}/session?{params}"
+    params: dict[str, str] = {
+        "session_id": session_id,
+        "language": language,
+        "model": model,
+        "encoding": "pcm_s16le",
+        "sample_rate": str(sample_rate),
+        "enable_vad": str(enable_vad).lower(),
+        "interim_results": str(interim_results).lower(),
+        "word_timestamps": str(word_timestamps).lower(),
+    }
+    # Add vocabulary as JSON if provided
+    if vocabulary:
+        params["vocabulary"] = json.dumps(vocabulary)
+
+    worker_url = f"{worker_endpoint}/session?{urlencode(params)}"
 
     async with websockets.connect(
         worker_url,

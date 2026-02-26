@@ -86,6 +86,7 @@ class WhisperStreamingEngine(RealtimeEngine):
         audio: np.ndarray,
         language: str,
         model_variant: str,
+        vocabulary: list[str] | None = None,
     ) -> TranscribeResult:
         """Transcribe an audio segment.
 
@@ -93,6 +94,7 @@ class WhisperStreamingEngine(RealtimeEngine):
             audio: Audio samples as float32 numpy array, mono, 16kHz
             language: Language code (e.g., "en") or "auto" for detection
             model_variant: Model name (e.g., "faster-whisper-large-v3")
+            vocabulary: List of terms to boost recognition (hotwords)
 
         Returns:
             TranscribeResult with text, words, language, confidence
@@ -108,13 +110,28 @@ class WhisperStreamingEngine(RealtimeEngine):
         # Handle language
         lang = None if language == "auto" else language
 
+        # Build transcription kwargs
+        transcribe_kwargs: dict = {
+            "language": lang,
+            "beam_size": 5,
+            "vad_filter": False,  # We handle VAD separately
+            "word_timestamps": True,
+        }
+
+        # Add vocabulary as hotwords if provided
+        # faster-whisper uses hotwords parameter to boost specific terms
+        if vocabulary:
+            transcribe_kwargs["hotwords"] = " ".join(vocabulary)
+            logger.debug(
+                "vocabulary_enabled",
+                terms=vocabulary[:5],  # Log first 5 terms
+                total_terms=len(vocabulary),
+            )
+
         # Transcribe
         segments, info = model.transcribe(
             audio,
-            language=lang,
-            beam_size=5,
-            vad_filter=False,  # We handle VAD separately
-            word_timestamps=True,
+            **transcribe_kwargs,
         )
 
         # Collect results
