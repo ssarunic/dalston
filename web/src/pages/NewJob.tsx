@@ -432,7 +432,7 @@ export function NewJob() {
         vocabulary: vocabulary.trim()
           ? vocabulary.split(',').map((t) => t.trim()).filter(Boolean)
           : undefined,
-        retention_policy:
+        retention:
           retentionMode === 'default'
             ? undefined
             : retentionMode === 'transient'

@@ -530,7 +530,7 @@ export interface CreateJobRequest {
   // Advanced settings
   model?: string
   vocabulary?: string[]
-  retention_policy?: string
+  retention?: string
   // PII settings
   pii_detection?: boolean
   pii_detection_tier?: PIITier

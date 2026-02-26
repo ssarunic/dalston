@@ -158,8 +158,8 @@ export const apiClient = {
     if (request.vocabulary && request.vocabulary.length > 0) {
       formData.append('vocabulary', JSON.stringify(request.vocabulary))
     }
-    if (request.retention_policy) {
-      formData.append('retention_policy', request.retention_policy)
+    if (request.retention) {
+      formData.append('retention', request.retention)
     }
 
     // PII settings
