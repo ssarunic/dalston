@@ -121,12 +121,12 @@ export function RealtimeSessionDetail() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3 sm:gap-4">
           <BackButton fallbackPath="/realtime" />
-          <div>
-            <h1 className="text-2xl font-bold font-mono">{session.id}</h1>
-            <p className="text-muted-foreground">Real-time Session</p>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-lg sm:text-2xl font-bold font-mono truncate">{session.id}</h1>
+            <p className="text-sm text-muted-foreground">Real-time Session</p>
           </div>
         </div>
         <StatusBadge status={session.status} />
@@ -140,7 +140,7 @@ export function RealtimeSessionDetail() {
       )}
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-5">
+      <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
         <Card>
           <CardHeader className="pb-2">
             <span className="text-sm font-medium text-muted-foreground flex items-center gap-2">
@@ -231,7 +231,7 @@ export function RealtimeSessionDetail() {
           <CardTitle>Session Details</CardTitle>
         </CardHeader>
         <CardContent>
-          <dl className="grid grid-cols-2 gap-4 text-sm">
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm">
             <div>
               <dt className="text-muted-foreground">Language</dt>
               <dd className="font-medium">{session.language ?? 'auto'}</dd>
