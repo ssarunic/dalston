@@ -32,7 +32,7 @@ class PyannoteEngine(Engine):
     Environment Variables:
         HF_TOKEN: HuggingFace token for accessing gated pyannote models
         DIARIZATION_DISABLED: Set to "true" to skip diarization (returns mock output)
-        DEVICE: Device to use ("cuda", "cpu", or unset for auto-detect)
+        DEVICE: Device to use ("cuda", "mps", "cpu", or unset for auto-detect)
     """
 
     # Pyannote 4.0 community-1 pipeline
@@ -52,15 +52,20 @@ class PyannoteEngine(Engine):
             self.logger.info("pyannote_4_0_engine_initialized", device=self._device)
 
     def _detect_device(self) -> str:
-        """Resolve inference device from DEVICE env with auto-detect fallback."""
+        """Resolve inference device from DEVICE env with auto-detect fallback.
+
+        Preference order for auto-detect: CUDA → MPS → CPU.
+        """
         requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
 
         try:
             import torch
 
             cuda_available = torch.cuda.is_available()
+            mps_available = torch.backends.mps.is_available()
         except ImportError:
             cuda_available = False
+            mps_available = False
 
         if requested_device == "cpu":
             self.logger.info("device_forced_cpu")
@@ -74,15 +79,28 @@ class PyannoteEngine(Engine):
             self.logger.info("cuda_available_using_gpu")
             return "cuda"
 
+        if requested_device == "mps":
+            if not mps_available:
+                raise RuntimeError(
+                    "DEVICE=mps but MPS is not available for pyannote-4.0."
+                )
+            self.logger.info("mps_available_using_gpu")
+            return "mps"
+
         if requested_device in ("", "auto"):
             if cuda_available:
                 self.logger.info("cuda_available_using_gpu")
                 return "cuda"
+            if mps_available:
+                self.logger.info("mps_available_using_gpu")
+                return "mps"
 
             self.logger.info("cuda_not_available_using_cpu")
             return "cpu"
 
-        raise ValueError(f"Unknown DEVICE value: {requested_device}. Use cuda or cpu.")
+        raise ValueError(
+            f"Unknown DEVICE value: {requested_device}. Use cuda, mps, or cpu."
+        )
 
     def _get_hf_token(self, config: dict[str, Any]) -> str:
         """Get HuggingFace token from config or environment.
@@ -91,6 +109,12 @@ class PyannoteEngine(Engine):
             RuntimeError: If no HF_TOKEN is configured
         """
         token = config.get("hf_token") or os.environ.get("HF_TOKEN")
+        self.logger.info(
+            "hf_token_lookup",
+            from_config=bool(config.get("hf_token")),
+            from_env=bool(os.environ.get("HF_TOKEN")),
+            token_present=bool(token),
+        )
         if not token:
             raise RuntimeError(
                 "HF_TOKEN environment variable is required for pyannote diarization. "
@@ -124,10 +148,10 @@ class PyannoteEngine(Engine):
         )
 
         # Move to appropriate device
-        if self._device == "cuda":
+        if self._device in ("cuda", "mps"):
             import torch
 
-            self._pipeline = self._pipeline.to(torch.device("cuda"))
+            self._pipeline = self._pipeline.to(torch.device(self._device))
 
         self.logger.info("pyannote_4_0_pipeline_loaded_successfully")
         return self._pipeline
@@ -308,11 +332,13 @@ class PyannoteEngine(Engine):
     def health_check(self) -> dict[str, Any]:
         """Return health status including device and model info."""
         cuda_available = False
+        mps_available = False
 
         try:
             import torch
 
             cuda_available = torch.cuda.is_available()
+            mps_available = torch.backends.mps.is_available()
         except ImportError:
             pass
 
@@ -320,6 +346,7 @@ class PyannoteEngine(Engine):
             "status": "healthy",
             "device": self._device,
             "cuda_available": cuda_available,
+            "mps_available": mps_available,
             "pipeline_loaded": self._pipeline is not None,
             "diarization_disabled": self._disabled,
             "model_id": self.MODEL_ID,
