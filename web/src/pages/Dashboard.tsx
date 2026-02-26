@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom'
 import { Activity, Cpu, Radio, CheckCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useDashboard } from '@/hooks/useDashboard'
 import { useRealtimeSessions } from '@/hooks/useRealtimeSessions'
@@ -12,13 +11,11 @@ function StatCard({
   value,
   subtitle,
   icon: Icon,
-  loading,
 }: {
   title: string
   value: string | number
   subtitle?: string
   icon: React.ElementType
-  loading?: boolean
 }) {
   return (
     <Card>
@@ -27,15 +24,9 @@ function StatCard({
         <Icon className="h-4 w-4 text-muted-foreground" />
       </CardHeader>
       <CardContent>
-        {loading ? (
-          <Skeleton className="h-8 w-20" />
-        ) : (
-          <>
-            <div className="text-2xl font-bold">{value}</div>
-            {subtitle && (
-              <p className="text-xs text-muted-foreground">{subtitle}</p>
-            )}
-          </>
+        <div className="text-2xl font-bold">{value}</div>
+        {subtitle && (
+          <p className="text-xs text-muted-foreground">{subtitle}</p>
         )}
       </CardContent>
     </Card>
@@ -123,31 +114,27 @@ export function Dashboard() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="System Status"
-          value={isLoading ? '...' : isHealthy ? 'Online' : 'Offline'}
+          value={isHealthy ? 'Online' : isLoading ? '-' : 'Offline'}
           subtitle={health?.version ? `v${health.version}` : undefined}
           icon={Activity}
-          loading={isLoading}
         />
         <StatCard
           title="Running Jobs"
-          value={jobStats?.running ?? 0}
-          subtitle={`${jobStats?.queued ?? 0} queued`}
+          value={jobStats?.running ?? '-'}
+          subtitle={`${jobStats?.queued ?? '-'} queued`}
           icon={Cpu}
-          loading={isLoading}
         />
         <StatCard
           title="Real-time Sessions"
-          value={`${realtime?.active_sessions ?? 0}/${realtime?.total_capacity ?? 0}`}
-          subtitle={`${realtime?.worker_count ?? 0} workers`}
+          value={`${realtime?.active_sessions ?? '-'}/${realtime?.total_capacity ?? '-'}`}
+          subtitle={`${realtime?.worker_count ?? '-'} workers`}
           icon={Radio}
-          loading={isLoading}
         />
         <StatCard
           title="Completed Today"
-          value={jobStats?.completed_today ?? 0}
+          value={jobStats?.completed_today ?? '-'}
           subtitle={jobStats?.failed_today ? `${jobStats.failed_today} failed` : 'no failures'}
           icon={CheckCircle}
-          loading={isLoading}
         />
       </div>
 
@@ -165,16 +152,12 @@ export function Dashboard() {
             </Link>
           </CardHeader>
           <CardContent>
-            {sessionsLoading ? (
-              <div className="space-y-3">
-                {[...Array(5)].map((_, i) => (
-                  <Skeleton key={i} className="h-10 w-full" />
-                ))}
-              </div>
-            ) : recentSessions.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">
-                No sessions yet
-              </p>
+            {recentSessions.length === 0 ? (
+              !sessionsLoading && (
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  No sessions yet
+                </p>
+              )
             ) : (
               <div className="divide-y divide-border">
                 {recentSessions.map((session) => (
@@ -196,16 +179,12 @@ export function Dashboard() {
             </Link>
           </CardHeader>
           <CardContent>
-            {isLoading ? (
-              <div className="space-y-3">
-                {[...Array(5)].map((_, i) => (
-                  <Skeleton key={i} className="h-10 w-full" />
-                ))}
-              </div>
-            ) : recentJobs.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">
-                No jobs yet
-              </p>
+            {recentJobs.length === 0 ? (
+              !isLoading && (
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  No jobs yet
+                </p>
+              )
             ) : (
               <div className="divide-y divide-border">
                 {recentJobs.map((job) => (

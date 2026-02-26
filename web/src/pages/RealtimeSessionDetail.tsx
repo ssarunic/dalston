@@ -10,7 +10,6 @@ import {
   Archive,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useRealtimeSession, useSessionTranscript } from '@/hooks/useRealtimeSessions'
 import { BackButton } from '@/components/BackButton'
@@ -99,12 +98,7 @@ export function RealtimeSessionDetail() {
       : null
 
   if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-64 w-full" />
-      </div>
-    )
+    return null
   }
 
   if (error || !session) {

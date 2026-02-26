@@ -12,7 +12,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -425,13 +424,7 @@ export function AuditLog() {
           </CardContent>
         )}
         <CardContent>
-          {(isLoading || (isFetching && allEvents.length === 0)) ? (
-            <div className="space-y-3">
-              {[...Array(10)].map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : error ? (
+          {error ? (
             <div className="flex items-center gap-2 text-destructive py-8 justify-center">
               <AlertCircle className="h-5 w-5" />
               <span>
@@ -440,13 +433,15 @@ export function AuditLog() {
               </span>
             </div>
           ) : visibleEvents.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <ScrollText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>No audit events found</p>
-              {hasActiveFilters && (
-                <p className="text-sm mt-1">Try adjusting your filters</p>
-              )}
-            </div>
+            !(isLoading || isFetching) && (
+              <div className="text-center py-12 text-muted-foreground">
+                <ScrollText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No audit events found</p>
+                {hasActiveFilters && (
+                  <p className="text-sm mt-1">Try adjusting your filters</p>
+                )}
+              </div>
+            )
           ) : (
             <>
               {isMobile ? (

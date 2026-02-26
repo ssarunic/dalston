@@ -14,7 +14,6 @@ import { useJobTasks } from '@/hooks/useJobTasks'
 import { useResourceAuditTrail } from '@/hooks/useAuditLog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/StatusBadge'
 import { DAGViewer } from '@/components/DAGViewer'
@@ -339,27 +338,8 @@ function getActionStyle(action: string): string {
 }
 
 function AuditTrailSection({ events, isLoading }: { events?: AuditEvent[]; isLoading: boolean }) {
-  if (isLoading) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base font-medium flex items-center gap-2">
-            <ScrollText className="h-4 w-4" />
-            Audit Trail
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            {[...Array(3)].map((_, i) => (
-              <Skeleton key={i} className="h-8 w-full" />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    )
-  }
-
   if (!events || events.length === 0) {
+    if (isLoading) return null
     return (
       <Card>
         <CardHeader>
@@ -517,20 +497,10 @@ export function JobDetail() {
       ? audioUrlData.redactedUrl
       : undefined
 
-  // Show loading state on initial fetch OR when cached data is from a different job
+  // Show nothing on initial fetch OR when cached data is from a different job
   // This prevents showing stale data from a previously viewed job
   if (isLoading || job?.id !== jobId) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-10 w-64" />
-        <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
-          {[...Array(6)].map((_, i) => (
-            <Skeleton key={i} className="h-20" />
-          ))}
-        </div>
-        <Skeleton className="h-64" />
-      </div>
-    )
+    return null
   }
 
   if (error) {

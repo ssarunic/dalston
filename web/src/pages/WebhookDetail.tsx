@@ -12,7 +12,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -98,7 +97,7 @@ export function WebhookDetail() {
   })
   const statusFilter = status || undefined
 
-  const { data: webhooksData, isLoading: webhooksLoading } = useWebhooks()
+  const { data: webhooksData } = useWebhooks()
   const {
     data: deliveriesData,
     isLoading: deliveriesLoading,
@@ -156,15 +155,6 @@ export function WebhookDetail() {
     }
   }
 
-  if (webhooksLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-64 w-full" />
-      </div>
-    )
-  }
 
   if (!webhook) {
     return (
@@ -301,25 +291,21 @@ export function WebhookDetail() {
           </div>
         </CardHeader>
         <CardContent>
-          {deliveriesLoading && allDeliveries.length === 0 ? (
-            <div className="space-y-3">
-              {[...Array(5)].map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : deliveriesError ? (
+          {deliveriesError ? (
             <div className="flex items-center gap-2 text-destructive py-4">
               <AlertCircle className="h-4 w-4" />
               <span>Failed to load deliveries</span>
             </div>
           ) : visibleDeliveries.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Clock className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>No deliveries yet</p>
-              <p className="text-sm mt-1">
-                Deliveries will appear here when events are triggered
-              </p>
-            </div>
+            !(deliveriesLoading || isFetching) && (
+              <div className="text-center py-8 text-muted-foreground">
+                <Clock className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No deliveries yet</p>
+                <p className="text-sm mt-1">
+                  Deliveries will appear here when events are triggered
+                </p>
+              </div>
+            )
           ) : (
             <>
               {isMobile ? (

@@ -16,7 +16,6 @@ import { useTaskArtifacts } from '@/hooks/useTaskArtifacts'
 import { useJobTasks } from '@/hooks/useJobTasks'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { BackButton } from '@/components/BackButton'
 import type { TaskStatus } from '@/api/types'
@@ -495,17 +494,7 @@ export function TaskDetail() {
   const { data: tasksData } = useJobTasks(jobId)
 
   if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-10 w-64" />
-        <div className="grid gap-3 sm:gap-4 grid-cols-2 lg:grid-cols-4">
-          {[...Array(4)].map((_, i) => (
-            <Skeleton key={i} className="h-20" />
-          ))}
-        </div>
-        <Skeleton className="h-64" />
-      </div>
-    )
+    return null
   }
 
   if (error || !artifact) {

@@ -12,7 +12,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -229,23 +228,19 @@ export function Webhooks() {
           </div>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
-            <div className="space-y-3">
-              {[...Array(3)].map((_, i) => (
-                <Skeleton key={i} className="h-16 w-full" />
-              ))}
-            </div>
-          ) : error ? (
+          {error ? (
             <div className="flex items-center gap-2 text-destructive py-4">
               <AlertCircle className="h-4 w-4" />
               <span>Failed to load webhooks</span>
             </div>
           ) : visibleWebhooks.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Webhook className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>No webhook endpoints found</p>
-              <p className="text-sm mt-1">Try changing filters or create a new endpoint</p>
-            </div>
+            !isLoading && (
+              <div className="text-center py-8 text-muted-foreground">
+                <Webhook className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No webhook endpoints found</p>
+                <p className="text-sm mt-1">Try changing filters or create a new endpoint</p>
+              </div>
+            )
           ) : (
             isMobile ? (
               <div className="space-y-3">
