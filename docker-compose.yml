@@ -345,33 +345,6 @@ services:
 
   # --- ALIGN STAGE ---
 
-  # WhisperX alignment (CPU - default for local dev)
-  stt-batch-align-whisperx-cpu:
-    image: dalston/stt-batch-align-whisperx:latest
-    build:
-      context: .
-      dockerfile: engines/stt-align/whisperx-align/Dockerfile
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: whisperx-align
-    volumes:
-      - align-models:/models
-    depends_on: *batch-depends
-    restart: unless-stopped
-
-  # WhisperX alignment (GPU)
-  stt-batch-align-whisperx:
-    image: dalston/stt-batch-align-whisperx:latest
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: whisperx-align
-    volumes:
-      - align-models:/models
-    depends_on: *batch-depends
-    deploy: *gpu-deploy
-    profiles: [gpu]
-    restart: unless-stopped
-
   # Phoneme forced alignment (CPU - default for local dev)
   stt-batch-align-phoneme-cpu:
     image: dalston/stt-batch-align-phoneme:latest

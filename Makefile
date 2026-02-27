@@ -90,7 +90,6 @@ build-cpu:
 		stt-batch-prepare \
 		stt-batch-transcribe-faster-whisper \
 		stt-batch-align-phoneme-cpu \
-		stt-batch-align-whisperx-cpu \
 		stt-batch-diarize-pyannote-4.0-cpu \
 		stt-batch-pii-detect-presidio \
 		stt-batch-merge \

@@ -192,7 +192,7 @@ class TestDagShapeWithNativeWordTimestamps:
                     "engine_id": "faster-whisper",
                     "capabilities": {"supports_word_timestamps": False},
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
@@ -260,7 +260,7 @@ class TestDagShapeWithNativeDiarization:
                         "includes_diarization": False,
                     },
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "diarize": {"engine_id": "pyannote-3.1"},
                 "merge": {"engine_id": "final-merger"},
             }
@@ -295,7 +295,7 @@ class TestDagShapeWithLanguageRequirements:
                     "engine_id": "faster-whisper",
                     "capabilities": {"languages": None},  # Universal
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
@@ -382,7 +382,7 @@ class TestDagWithTimestampGranularity:
                     "engine_id": "faster-whisper",
                     "capabilities": {"supports_word_timestamps": False},
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
@@ -448,7 +448,7 @@ class TestDagPerChannelWithCapabilities:
                     "engine_id": "faster-whisper",
                     "capabilities": {"supports_word_timestamps": False},
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
@@ -557,8 +557,8 @@ class TestEngineRanking:
                 caps = make_capabilities("audio-prepare", stage="prepare")
                 return [make_engine_state("audio-prepare", "prepare", caps)]
             if stage == "align":
-                caps = make_capabilities("whisperx-align", stage="align")
-                return [make_engine_state("whisperx-align", "align", caps)]
+                caps = make_capabilities("phoneme-align", stage="align")
+                return [make_engine_state("phoneme-align", "align", caps)]
             if stage == "merge":
                 caps = make_capabilities("final-merger", stage="merge")
                 return [make_engine_state("final-merger", "merge", caps)]
@@ -593,7 +593,7 @@ class TestDagDependencies:
                     "engine_id": "faster-whisper",
                     "capabilities": {"supports_word_timestamps": False},
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
@@ -623,7 +623,7 @@ class TestDagDependencies:
                     "engine_id": "faster-whisper",
                     "capabilities": {"supports_word_timestamps": False},
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
@@ -651,7 +651,7 @@ class TestDagDependencies:
                     "engine_id": "faster-whisper",
                     "capabilities": {"includes_diarization": False},
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "diarize": {"engine_id": "pyannote-3.1"},
                 "merge": {"engine_id": "final-merger"},
             }
@@ -701,7 +701,7 @@ class TestMergedWavScenarios:
                     "engine_id": "faster-whisper",
                     "capabilities": {"languages": None},  # Universal
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
@@ -794,7 +794,7 @@ class TestMergedWavScenarios:
                         "includes_diarization": False,
                     },
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "diarize": {"engine_id": "pyannote-3.1"},
                 "merge": {"engine_id": "final-merger"},
             }
@@ -824,7 +824,7 @@ class TestMergedWavScenarios:
                     "engine_id": "faster-whisper",
                     "capabilities": {"languages": None},
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
@@ -892,7 +892,7 @@ class TestPiiCombinedWavScenarios:
                     "engine_id": "faster-whisper",
                     "capabilities": {"languages": None},  # Supports all languages
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
@@ -959,7 +959,7 @@ class TestStereoSpeakersWavScenarios:
                         "supports_word_timestamps": False,
                     },
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
@@ -1030,7 +1030,7 @@ class TestStereoSpeakersWavScenarios:
                         "supports_word_timestamps": False,
                     },
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )

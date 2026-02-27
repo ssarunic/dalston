@@ -35,7 +35,7 @@ VALID_SPEAKER_DETECTION_MODES = {"none", "diarize", "per_channel"}
 DEFAULT_ENGINES = {
     "prepare": "audio-prepare",
     "transcribe": "faster-whisper-large-v3-turbo",
-    "align": "whisperx-align",
+    "align": "phoneme-align",
     "diarize": "pyannote-3.1",
     "pii_detect": "pii-presidio",
     "audio_redact": "audio-redactor",

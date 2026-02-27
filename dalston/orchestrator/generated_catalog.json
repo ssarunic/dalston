@@ -1,9 +1,9 @@
 {
   "generated_at": "2026-02-27T14:05:40.752457+00:00",
   "schema_version": "2.0",
-  "runtime_count": 11,
+  "runtime_count": 10,
   "model_count": 7,
-  "engine_count": 11,
+  "engine_count": 10,
   "runtimes": {
     "phoneme-align": {
       "id": "phoneme-align",
@@ -13,41 +13,6 @@
       "stage": "align",
       "description": "Word-level timestamp alignment using CTC forced alignment with\nwav2vec2 models. Standalone reimplementation of the phoneme alignment\nalgorithm from the WhisperX paper (Bain et al., INTERSPEECH 2023).\n\nDoes not depend on the whisperx package. Uses torchaudio pipeline\nmodels for major European languages and HuggingFace wav2vec2 models\nfor 35+ additional languages.",
       "image": "dalston/stt-batch-align-phoneme-align:1.0.0",
-      "capabilities": {
-        "stages": [
-          "align"
-        ],
-        "languages": null,
-        "supports_word_timestamps": true,
-        "supports_streaming": false,
-        "max_audio_duration": 7200,
-        "max_concurrency": 8
-      },
-      "hardware": {
-        "gpu_required": false,
-        "gpu_optional": true,
-        "min_vram_gb": 2,
-        "recommended_gpu": [
-          "t4"
-        ],
-        "supports_cpu": true,
-        "min_ram_gb": 4,
-        "memory": "4G"
-      },
-      "performance": {
-        "rtf_gpu": 0.02,
-        "rtf_cpu": 0.3,
-        "warm_start_latency_ms": 200
-      }
-    },
-    "whisperx-align": {
-      "id": "whisperx-align",
-      "engine_id": "whisperx-align",
-      "name": "WhisperX Alignment",
-      "version": "1.0.0",
-      "stage": "align",
-      "description": "Word-level timestamp alignment using WhisperX with wav2vec2-based\nforced alignment. Produces more accurate word boundaries than\ntranscription-time estimates.\n\nLoads language-specific alignment models lazily on first use.\nSupports 100+ languages via wav2vec2 models from HuggingFace.",
-      "image": "dalston/stt-batch-align-whisperx-align:1.0.0",
       "capabilities": {
         "stages": [
           "align"
@@ -596,41 +561,6 @@
       "type": null,
       "description": "Word-level timestamp alignment using CTC forced alignment with\nwav2vec2 models. Standalone reimplementation of the phoneme alignment\nalgorithm from the WhisperX paper (Bain et al., INTERSPEECH 2023).\n\nDoes not depend on the whisperx package. Uses torchaudio pipeline\nmodels for major European languages and HuggingFace wav2vec2 models\nfor 35+ additional languages.",
       "image": "dalston/stt-batch-align-phoneme-align:1.0.0",
-      "capabilities": {
-        "stages": [
-          "align"
-        ],
-        "languages": null,
-        "supports_word_timestamps": true,
-        "supports_streaming": false,
-        "max_audio_duration": 7200,
-        "max_concurrency": 8
-      },
-      "hardware": {
-        "gpu_required": false,
-        "gpu_optional": true,
-        "min_vram_gb": 2,
-        "recommended_gpu": [
-          "t4"
-        ],
-        "supports_cpu": true,
-        "min_ram_gb": 4,
-        "memory": "4G"
-      },
-      "performance": {
-        "rtf_gpu": 0.02,
-        "rtf_cpu": 0.3,
-        "warm_start_latency_ms": 200
-      }
-    },
-    "whisperx-align": {
-      "id": "whisperx-align",
-      "name": "WhisperX Alignment",
-      "version": "1.0.0",
-      "stage": "align",
-      "type": null,
-      "description": "Word-level timestamp alignment using WhisperX with wav2vec2-based\nforced alignment. Produces more accurate word boundaries than\ntranscription-time estimates.\n\nLoads language-specific alignment models lazily on first use.\nSupports 100+ languages via wav2vec2 models from HuggingFace.",
-      "image": "dalston/stt-batch-align-whisperx-align:1.0.0",
       "capabilities": {
         "stages": [
           "align"

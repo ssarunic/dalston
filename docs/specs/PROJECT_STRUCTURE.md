@@ -101,9 +101,7 @@ dalston/
 │   │       └── ...
 │   │
 │   ├── align/                          # Word alignment
-│   │   ├── whisperx-align/
-│   │   │   └── ...
-│   │   └── wav2vec-align/
+│   │   └── phoneme-align/              # Standalone CTC forced alignment
 │   │       └── ...
 │   │
 │   ├── diarize/                        # Speaker diarization
@@ -330,7 +328,7 @@ engines/realtime/{engine-id}/
 | `stt-batch-prepare` | prepare |
 | `stt-batch-transcribe-whisper-cpu` | transcribe |
 | `stt-batch-transcribe-parakeet` | transcribe |
-| `stt-batch-align-whisperx-cpu` | align |
+| `stt-batch-align-phoneme-cpu` | align |
 | `stt-batch-diarize-pyannote-v31-cpu` | diarize |
 | `stt-batch-pii-detect-presidio` | pii_detect |
 | `stt-batch-audio-redact-audio` | audio_redact |

@@ -203,12 +203,12 @@ services:
   # ALIGNMENT ENGINES
   # ============================================================
 
-  stt-batch-align-whisperx-cpu:
+  stt-batch-align-phoneme-cpu:
     build:
-      context: ./engines/align/whisperx-align
+      context: ./engines/stt-align/phoneme-align
     environment:
       - REDIS_URL=redis://redis:6379
-      - ENGINE_ID=whisperx-align
+      - ENGINE_ID=phoneme-align
       - DALSTON_S3_BUCKET=${DALSTON_S3_BUCKET}
       - DALSTON_S3_REGION=${DALSTON_S3_REGION}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}

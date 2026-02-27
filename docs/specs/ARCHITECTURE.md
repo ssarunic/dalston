@@ -77,7 +77,7 @@
 │  │                  │      │   ┌─────────────────┐  ┌─────────────────┐       │ │
 │  │  faster-whisper  │      │   │ realtime-       │  │ realtime-       │       │ │
 │  │  pyannote        │      │   │ whisper-1       │  │ whisper-2       │       │ │
-│  │  whisperx-align  │      │   │                 │  │                 │       │ │
+│  │  phoneme-align   │      │   │                 │  │                 │       │ │
 │  │  llm-cleanup     │      │   │ • WebSocket srv │  │ • WebSocket srv │       │ │
 │  │  merger          │      │   │ • Streaming ASR │  │ • Streaming ASR │       │ │
 │  │  whisperx-full   │      │   │ • VAD           │  │ • VAD           │       │ │
@@ -196,7 +196,7 @@
 | Category | Engines |
 |----------|---------|
 | TRANSCRIBE | faster-whisper, parakeet, whisper-openai |
-| ALIGN | whisperx-align, wav2vec-align |
+| ALIGN | phoneme-align |
 | DIARIZE | pyannote-3.1, pyannote-4.0 |
 | DETECT | emotion2vec, panns-events, pii-presidio |
 | REDACT | audio-redactor |
@@ -244,7 +244,7 @@ Ingest → Prepare → Transcribe → Align → Diarize → Enrich → Refine (L
 **Modular** (maximum flexibility):
 
 ```
-faster-whisper → whisperx-align → pyannote → merger
+faster-whisper → phoneme-align → pyannote → merger
 ```
 
 **Integrated** (optimized pipeline):
@@ -337,7 +337,7 @@ For detailed rationale on architectural decisions, see [Architecture Decision Re
 ### Phase 2: Batch Speaker Detection
 
 - Diarization and per-channel modes
-- Engines: whisperx-align, pyannote
+- Engines: phoneme-align, pyannote
 
 ### Phase 3: Batch Enrichment
 
