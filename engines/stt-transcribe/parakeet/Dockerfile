@@ -1,18 +1,18 @@
-# NVIDIA Parakeet Transcription Engine
+# NVIDIA Parakeet Transcription Engine (Runtime)
 #
 # FastConformer transcription with CTC or TDT decoders using NeMo toolkit.
-# Parameterized by MODEL_VARIANT to build variant-specific containers.
+# M36: Single runtime image that loads any Parakeet model variant on demand.
 #
 # Build from repo root:
-#   docker compose build stt-batch-transcribe-parakeet-ctc-0.6b
-#   docker compose build stt-batch-transcribe-parakeet-tdt-1.1b
+#   docker compose build stt-batch-transcribe-nemo
 #
 # Or directly:
-#   docker build --build-arg MODEL_VARIANT=ctc-0.6b -t dalston/stt-batch-transcribe-parakeet-ctc-0.6b:1.0.0 .
-#   docker build --build-arg MODEL_VARIANT=tdt-1.1b -t dalston/stt-batch-transcribe-parakeet-tdt-1.1b:1.0.0 .
+#   docker build -t dalston/stt-batch-transcribe-nemo:1.0.0 -f engines/stt-transcribe/parakeet/Dockerfile .
+#
+# Models are downloaded at runtime to /models/nemo volume.
+# Supported models: nvidia/parakeet-ctc-0.6b, nvidia/parakeet-ctc-1.1b,
+#                   nvidia/parakeet-tdt-0.6b-v3, nvidia/parakeet-tdt-1.1b
 
-# Build argument to select model variant (decoder-size)
-ARG MODEL_VARIANT=ctc-0.6b
 # Build argument to select device (cuda or cpu)
 ARG DEVICE=cuda
 
@@ -25,10 +25,8 @@ FROM python:3.11-slim AS base-cpu
 # Select the appropriate base image
 FROM base-${DEVICE} AS base
 
-# Re-declare ARGs after FROM (they get reset)
-ARG MODEL_VARIANT=ctc-0.6b
+# Re-declare ARG after FROM (they get reset)
 ARG DEVICE=cuda
-ARG SKIP_MODEL_DOWNLOAD=false
 
 # Install system dependencies
 # Note: build-essential and cmake are needed on ARM64 to compile texterrors (NeMo dependency)
@@ -65,34 +63,16 @@ RUN if [ "$DEVICE" = "cpu" ]; then \
 # Install NeMo and dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Create model cache directory before predownload so runtime reuses build cache
-ENV NEMO_CACHE=/models
-ENV HF_HOME=/models
-ENV TORCH_HOME=/models
-RUN mkdir -p /models
+# Model cache directory - runtime-specific subdirectory
+# Models are downloaded at runtime on first use
+ENV NEMO_CACHE=/models/nemo
+ENV HF_HOME=/models/nemo
+ENV TORCH_HOME=/models/nemo
+RUN mkdir -p /models/nemo
 
-# Pre-download the model at build time for faster container startup
-# Skip on ARM64/Apple Silicon due to QEMU emulation issues - model will download at runtime
-RUN if [ "$SKIP_MODEL_DOWNLOAD" = "false" ]; then \
-    python -c "\
-import nemo.collections.asr as nemo_asr; \
-model_map = { \
-    'ctc-0.6b': 'nvidia/parakeet-ctc-0.6b', \
-    'ctc-1.1b': 'nvidia/parakeet-ctc-1.1b', \
-    'tdt-0.6b-v3': 'nvidia/parakeet-tdt-0.6b-v3', \
-    'tdt-1.1b': 'nvidia/parakeet-tdt-1.1b', \
-}; \
-model_id = model_map['${MODEL_VARIANT}']; \
-model = nemo_asr.models.ASRModel.from_pretrained(model_id); \
-print(f'Model {model_id} downloaded successfully')"; \
-    else echo "Skipping model download (will download at runtime)"; fi
-
-# Copy engine files
-COPY engines/stt-transcribe/parakeet/variants/${MODEL_VARIANT}.yaml /etc/dalston/engine.yaml
+# Copy runtime-level engine.yaml (not variant-specific)
+COPY engines/stt-transcribe/parakeet/engine.yaml /etc/dalston/engine.yaml
 COPY engines/stt-transcribe/parakeet/engine.py .
-
-# Set MODEL_VARIANT environment variable for the engine
-ENV DALSTON_MODEL_VARIANT=${MODEL_VARIANT}
 
 # Set CUDA visible devices
 ENV NVIDIA_VISIBLE_DEVICES=all

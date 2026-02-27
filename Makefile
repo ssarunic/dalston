@@ -53,7 +53,7 @@ dev:
 dev-minimal:
 	docker compose --profile local-infra --profile local-object-storage up -d --build \
 		gateway orchestrator \
-		stt-batch-prepare stt-batch-transcribe-faster-whisper-base stt-batch-merge
+		stt-batch-prepare stt-batch-transcribe-faster-whisper stt-batch-merge
 
 # Start with GPU engines (requires NVIDIA GPU)
 dev-gpu:
@@ -84,11 +84,11 @@ ps:
 # ============================================================
 
 # Build CPU engine variants (for Mac development)
+# Note: NeMo transcription is GPU-only; faster-whisper handles CPU transcription
 build-cpu:
 	docker compose build \
 		stt-batch-prepare \
-		stt-batch-transcribe-faster-whisper-base \
-		stt-batch-transcribe-parakeet-tdt-0.6b-v3-cpu \
+		stt-batch-transcribe-faster-whisper \
 		stt-batch-align-whisperx-cpu \
 		stt-batch-diarize-pyannote-3.1-cpu \
 		stt-batch-pii-detect-presidio \
@@ -100,7 +100,7 @@ build-gpu:
 	docker compose --profile gpu build
 
 # Build a specific engine
-# Usage: make build-engine ENGINE=stt-batch-transcribe-parakeet-tdt-0.6b-v3
+# Usage: make build-engine ENGINE=stt-batch-transcribe-faster-whisper
 build-engine:
 ifndef ENGINE
 	$(error ENGINE is required. Usage: make build-engine ENGINE=<service-name>)
@@ -108,7 +108,7 @@ endif
 	docker compose build $(ENGINE)
 
 # Rebuild and restart a specific engine
-# Usage: make rebuild ENGINE=stt-batch-transcribe-faster-whisper-base
+# Usage: make rebuild ENGINE=stt-batch-transcribe-faster-whisper
 rebuild:
 ifndef ENGINE
 	$(error ENGINE is required. Usage: make rebuild ENGINE=<service-name>)

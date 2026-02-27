@@ -1,18 +1,16 @@
-# Faster Whisper Transcription Engine (Parameterized)
+# Faster Whisper Transcription Engine (Runtime)
 #
 # Whisper transcription using CTranslate2 (faster-whisper).
-# Supports multiple model variants via MODEL_VARIANT build arg.
+# M36: Single runtime image that loads any Whisper model variant on demand.
 #
-# Build specific variant:
-#   docker compose build stt-batch-transcribe-faster-whisper-base
-#   docker compose build stt-batch-transcribe-faster-whisper-large-v3
-#   docker compose build stt-batch-transcribe-faster-whisper-large-v3-turbo
+# Build from repo root:
+#   docker compose build stt-batch-transcribe-faster-whisper
 #
-# Or manually:
-#   docker build --build-arg MODEL_VARIANT=base -t dalston/faster-whisper-base .
-#   docker build --build-arg MODEL_VARIANT=large-v3 -t dalston/faster-whisper-large-v3 .
-
-ARG MODEL_VARIANT=large-v3
+# Or directly:
+#   docker build -t dalston/stt-batch-transcribe-faster-whisper:1.0.0 -f engines/stt-transcribe/faster-whisper/Dockerfile .
+#
+# Models are downloaded at runtime to /models/faster-whisper volume.
+# Supported models: tiny, base, small, medium, large-v2, large-v3, large-v3-turbo
 
 FROM python:3.11-slim
 
@@ -43,27 +41,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy engine implementation
 COPY engines/stt-transcribe/faster-whisper/engine.py .
 
-# Copy variant-specific config to standard location
-# Re-declare ARG after FROM to use it
-ARG MODEL_VARIANT
-COPY engines/stt-transcribe/faster-whisper/variants/${MODEL_VARIANT}.yaml /etc/dalston/engine.yaml
+# Copy runtime-level engine.yaml (not variant-specific)
+COPY engines/stt-transcribe/faster-whisper/engine.yaml /etc/dalston/engine.yaml
 
-# Create model cache directory before predownload so runtime reuses build cache
-ENV HF_HOME=/models
-ENV TORCH_HOME=/models
-RUN mkdir -p /models
-
-# Pre-download the model at build time for faster startup
-# This makes container startup faster at the cost of larger image size
-ARG SKIP_MODEL_DOWNLOAD=false
-RUN if [ "$SKIP_MODEL_DOWNLOAD" = "false" ]; then \
-        python -c "from faster_whisper import WhisperModel; WhisperModel('${MODEL_VARIANT}', device='cpu', compute_type='int8')" \
-        && echo "Model ${MODEL_VARIANT} downloaded successfully"; \
-    else \
-        echo "Skipping model download (SKIP_MODEL_DOWNLOAD=true)"; \
-    fi
-
-# Set model variant via environment
-ENV DALSTON_MODEL_VARIANT=${MODEL_VARIANT}
+# Model cache directory - runtime-specific subdirectory
+# Models are downloaded at runtime on first use
+ENV HF_HOME=/models/faster-whisper
+ENV TORCH_HOME=/models/faster-whisper
+RUN mkdir -p /models/faster-whisper
 
 CMD ["python", "engine.py"]
