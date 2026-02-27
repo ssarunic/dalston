@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import structlog
@@ -55,6 +56,12 @@ class Engine(ABC):
         # safe despite being created before configure() runs.
         self.logger = structlog.get_logger()
 
+        # Thread-safe runtime state for heartbeat reporting (Phase 1: Runtime Model Management)
+        # The runner's heartbeat loop reads this state each cycle to report
+        # the currently loaded model and engine status to the registry.
+        self._runtime_state_lock = Lock()
+        self._runtime_state: dict[str, Any] = {"loaded_model": None, "status": "idle"}
+
     @abstractmethod
     def process(self, input: TaskInput) -> TaskOutput:
         """Process a single task.
@@ -86,6 +93,35 @@ class Engine(ABC):
         return {
             "status": "healthy",
         }
+
+    def _set_runtime_state(
+        self, loaded_model: str | None = None, status: str = "idle"
+    ) -> None:
+        """Update the engine's runtime state in a thread-safe manner.
+
+        This method is called by engines after loading/unloading models to report
+        their current state. The runner's heartbeat loop reads this state to
+        report to the registry.
+
+        Args:
+            loaded_model: The runtime_model_id of the currently loaded model,
+                          or None if no model is loaded.
+            status: Current engine status ("idle", "loading", "downloading", "processing")
+        """
+        with self._runtime_state_lock:
+            self._runtime_state = {"loaded_model": loaded_model, "status": status}
+
+    def get_runtime_state(self) -> dict[str, Any]:
+        """Get the current runtime state in a thread-safe manner.
+
+        Called by the runner's heartbeat loop to get the current state for
+        inclusion in heartbeat payloads.
+
+        Returns:
+            Dictionary with "loaded_model" (str | None) and "status" (str) keys
+        """
+        with self._runtime_state_lock:
+            return dict(self._runtime_state)
 
     def get_capabilities(self) -> EngineCapabilities:
         """Return engine capabilities for registration and validation.
