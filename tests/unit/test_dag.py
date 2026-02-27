@@ -12,7 +12,6 @@ from dalston.orchestrator.dag import (
     DEFAULT_ENGINES,
     DEFAULT_TRANSCRIBE_CONFIG,
     MODEL_REGISTRY,
-    NATIVE_WORD_TIMESTAMP_ENGINES,
     build_task_dag,
 )
 
@@ -206,8 +205,12 @@ class TestBuildTaskDagPipeline:
         assert task_by_stage["align"].id in merge_deps
 
 
-class TestBuildTaskDagParakeet:
-    """Tests for Parakeet engine DAG behavior (M21)."""
+class TestBuildTaskDagNemo:
+    """Tests for NeMo runtime DAG behavior (M21/M36).
+
+    M36: Parakeet models now route through the 'nemo' runtime.
+    Using MODEL_REGISTRY entries like 'parakeet-tdt-1.1b' instead of raw 'parakeet'.
+    """
 
     @pytest.fixture
     def job_id(self) -> UUID:
@@ -217,31 +220,40 @@ class TestBuildTaskDagParakeet:
     def audio_uri(self) -> str:
         return "s3://test-bucket/audio/test.wav"
 
-    def test_parakeet_in_native_word_timestamp_engines(self):
-        """Test that parakeet is listed in native word timestamp engines."""
-        assert "parakeet" in NATIVE_WORD_TIMESTAMP_ENGINES
+    def test_nemo_models_support_word_timestamps(self):
+        """Test that NeMo/Parakeet models have supports_word_timestamps=True in MODEL_REGISTRY."""
+        nemo_models = [
+            model_id
+            for model_id, info in MODEL_REGISTRY.items()
+            if info.get("runtime") == "nemo"
+        ]
+        assert len(nemo_models) > 0, "Expected at least one nemo model in registry"
+        for model_id in nemo_models:
+            assert MODEL_REGISTRY[model_id].get("supports_word_timestamps") is True, (
+                f"Model {model_id} should have supports_word_timestamps=True"
+            )
 
-    def test_parakeet_skips_align_stage(self, job_id: UUID, audio_uri: str):
-        """Test that Parakeet engine skips the ALIGN stage."""
+    def test_nemo_skips_align_stage(self, job_id: UUID, audio_uri: str):
+        """Test that NeMo/Parakeet models skip the ALIGN stage (native word timestamps)."""
         parameters = {
-            "engine_transcribe": "parakeet",
+            "engine_transcribe": "parakeet-tdt-1.1b",  # MODEL_REGISTRY key
             "timestamps_granularity": "word",  # Request word timestamps
         }
 
         tasks = build_task_dag(job_id, audio_uri, parameters)
 
         stages = [t.stage for t in tasks]
-        # Parakeet should NOT have align stage
+        # NeMo models have native word timestamps, so no align stage
         assert "align" not in stages
         # But should have other stages
         assert "prepare" in stages
         assert "transcribe" in stages
         assert "merge" in stages
 
-    def test_parakeet_with_diarization(self, job_id: UUID, audio_uri: str):
-        """Test that Parakeet works with diarization (no align, but diarize)."""
+    def test_nemo_with_diarization(self, job_id: UUID, audio_uri: str):
+        """Test that NeMo/Parakeet works with diarization (no align, but diarize)."""
         parameters = {
-            "engine_transcribe": "parakeet",
+            "engine_transcribe": "parakeet-tdt-1.1b",
             "speaker_detection": "diarize",
             "timestamps_granularity": "word",
         }
@@ -249,14 +261,14 @@ class TestBuildTaskDagParakeet:
         tasks = build_task_dag(job_id, audio_uri, parameters)
 
         stages = [t.stage for t in tasks]
-        # Parakeet should have diarize but NOT align
+        # NeMo should have diarize but NOT align
         assert "diarize" in stages
         assert "align" not in stages
 
-    def test_parakeet_per_channel_skips_align(self, job_id: UUID, audio_uri: str):
-        """Test that Parakeet per-channel mode skips align stages."""
+    def test_nemo_per_channel_skips_align(self, job_id: UUID, audio_uri: str):
+        """Test that NeMo/Parakeet per-channel mode skips align stages."""
         parameters = {
-            "engine_transcribe": "parakeet",
+            "engine_transcribe": "parakeet-tdt-1.1b",
             "speaker_detection": "per_channel",
             "timestamps_granularity": "word",
             "num_channels": 2,
@@ -274,20 +286,20 @@ class TestBuildTaskDagParakeet:
     def test_whisper_still_has_align_stage(self, job_id: UUID, audio_uri: str):
         """Test that Whisper (faster-whisper) still uses the ALIGN stage."""
         parameters = {
-            "engine_transcribe": "faster-whisper",
+            "engine_transcribe": "faster-whisper-large-v3-turbo",  # MODEL_REGISTRY key
             "timestamps_granularity": "word",
         }
 
         tasks = build_task_dag(job_id, audio_uri, parameters)
 
         stages = [t.stage for t in tasks]
-        # Whisper should have align stage
+        # Whisper should have align stage (no native word timestamps)
         assert "align" in stages
 
-    def test_parakeet_merge_dependencies_correct(self, job_id: UUID, audio_uri: str):
+    def test_nemo_merge_dependencies_correct(self, job_id: UUID, audio_uri: str):
         """Test that merge dependencies are correct when align is skipped."""
         parameters = {
-            "engine_transcribe": "parakeet",
+            "engine_transcribe": "parakeet-tdt-1.1b",
             "timestamps_granularity": "word",
         }
 
@@ -301,22 +313,23 @@ class TestBuildTaskDagParakeet:
         assert task_by_stage["transcribe"].id in merge_deps
         assert len([t for t in tasks if t.stage == "align"]) == 0
 
-    def test_parakeet_transcribe_task_uses_parakeet_engine(
-        self, job_id: UUID, audio_uri: str
-    ):
-        """Test that transcribe task uses Parakeet engine when specified."""
+    def test_nemo_transcribe_task_uses_nemo_runtime(self, job_id: UUID, audio_uri: str):
+        """Test that transcribe task uses NeMo runtime when a parakeet model is specified.
+
+        M36: MODEL_REGISTRY resolves 'parakeet-tdt-1.1b' to runtime='nemo' and
+        sets runtime_model_id in the task config.
+        """
         parameters = {
-            "engine_transcribe": "parakeet",
-            "transcribe_config": {
-                "model": "nvidia/parakeet-rnnt-0.6b",
-            },
+            "engine_transcribe": "parakeet-tdt-1.1b",
         }
 
         tasks = build_task_dag(job_id, audio_uri, parameters)
 
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
-        assert transcribe_task.engine_id == "parakeet"
-        assert transcribe_task.config["model"] == "nvidia/parakeet-rnnt-0.6b"
+        # M36: engine_id is the runtime, not the model ID
+        assert transcribe_task.engine_id == "nemo"
+        # runtime_model_id tells the engine which specific model to load
+        assert transcribe_task.config["runtime_model_id"] == "nvidia/parakeet-tdt-1.1b"
 
 
 class TestBuildTaskDagPerChannelPII:

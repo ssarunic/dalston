@@ -30,9 +30,11 @@ VALID_SPEAKER_DETECTION_MODES = {"none", "diarize", "per_channel"}
 
 
 # Default engine IDs for each stage
+# M36: Default transcribe engine is now faster-whisper-large-v3-turbo
+# (multilingual, CPU-capable, good balance of speed and accuracy)
 DEFAULT_ENGINES = {
     "prepare": "audio-prepare",
-    "transcribe": "faster-whisper-base",
+    "transcribe": "faster-whisper-large-v3-turbo",
     "align": "whisperx-align",
     "diarize": "pyannote-3.1",
     "pii_detect": "pii-presidio",
@@ -50,11 +52,6 @@ DEFAULT_TRANSCRIBE_CONFIG = {
     "beam_size": 5,
     "vad_filter": True,
 }
-
-# Engines that produce native word timestamps (skip ALIGN stage)
-# DEPRECATED: Use capability-driven routing (supports_word_timestamps) instead
-NATIVE_WORD_TIMESTAMP_ENGINES = {"parakeet"}
-
 
 # =============================================================================
 # M36: Model Registry for Runtime Model Management
@@ -259,16 +256,22 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
     # M36: Resolve model ID to runtime information
     # If the engine_transcribe matches a model in MODEL_REGISTRY, use runtime routing
     model_info = resolve_model(engines["transcribe"])
+    skip_alignment_for_native_timestamps = False
     if model_info is not None:
         # Override engine_id with runtime (e.g., "faster-whisper" instead of "faster-whisper-large-v3-turbo")
         engines["transcribe"] = model_info["runtime"]
         # Add runtime_model_id to config so engine knows which model to load
         transcribe_config["runtime_model_id"] = model_info["runtime_model_id"]
+        # Check if this model has native word timestamps (skip alignment stage)
+        skip_alignment_for_native_timestamps = model_info.get(
+            "supports_word_timestamps", False
+        )
         logger.debug(
             "model_resolved",
             original_engine=engines["transcribe"],
             runtime=model_info["runtime"],
             runtime_model_id=model_info["runtime_model_id"],
+            supports_word_timestamps=skip_alignment_for_native_timestamps,
         )
 
     tasks = []
@@ -309,6 +312,7 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
             word_timestamps=word_timestamps,
             num_channels=num_channels,
             parameters=parameters,
+            skip_alignment=skip_alignment_for_native_timestamps,
         )
 
     # Task (optional): Diarization (depends only on prepare, runs parallel with transcribe/align)
@@ -350,9 +354,9 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
 
     # Task (optional): Alignment (depends on transcribe)
     # Adds precise word-level timestamps using wav2vec2 forced alignment
-    # Skip alignment for engines that produce native word timestamps (e.g., Parakeet)
+    # M36: Skip alignment for models with native word timestamps (from MODEL_REGISTRY)
     align_task = None
-    skip_alignment = engines["transcribe"] in NATIVE_WORD_TIMESTAMP_ENGINES
+    skip_alignment = skip_alignment_for_native_timestamps
     if word_timestamps and not skip_alignment:
         align_task = Task(
             id=uuid4(),
@@ -484,6 +488,7 @@ def _build_per_channel_dag(
     word_timestamps: bool,
     num_channels: int = 2,
     parameters: dict | None = None,
+    skip_alignment: bool = False,
 ) -> list[Task]:
     """Build DAG for per_channel speaker detection mode.
 
@@ -503,6 +508,7 @@ def _build_per_channel_dag(
         word_timestamps: Whether to include alignment tasks
         num_channels: Number of audio channels (default: 2)
         parameters: Original job parameters (for PII config)
+        skip_alignment: Whether to skip alignment (M36: from MODEL_REGISTRY)
 
     Returns:
         Complete task list including merge
@@ -510,9 +516,6 @@ def _build_per_channel_dag(
     parameters = parameters or {}
     all_channel_tasks: list[Task] = []
     last_channel_tasks: list[Task] = []
-
-    # Skip alignment for engines with native word timestamps (e.g., Parakeet)
-    skip_alignment = engines["transcribe"] in NATIVE_WORD_TIMESTAMP_ENGINES
 
     # Check if PII detection is enabled
     pii_detection_enabled = parameters.get("pii_detection", False)
