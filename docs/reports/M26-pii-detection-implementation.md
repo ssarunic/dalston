@@ -1,12 +1,14 @@
 # M26: PII Detection & Audio Redaction - Implementation Report
 
-**Date:** 2026-02-14
+**Date:** 2026-02-14 (Updated: 2026-02-27)
 **Status:** Implementation Complete
 **Branch:** `feature/m26-pii-detection-redaction`
 
 ## Summary
 
 This milestone implements automatic PII (Personally Identifiable Information) detection in transcripts with optional audio redaction. The feature detects sensitive data like credit card numbers, phone numbers, SSNs, and names, then can redact them from both text and audio outputs.
+
+> **Update (2026-02-27):** The detection tier architecture was simplified post-implementation. Detection tiers (fast/standard/thorough) were removed in favor of a single GLiNER-based approach with Presidio for checksum-validated entities only. Beep mode for audio redaction is now fully implemented.
 
 ## Implemented Features
 
@@ -15,28 +17,28 @@ This milestone implements automatic PII (Personally Identifiable Information) de
 **Migration 0012: PII columns on jobs table**
 
 - `pii_detection_enabled` - Boolean flag
-- `pii_detection_tier` - Detection tier (fast/standard/thorough)
 - `pii_entity_types` - Array of entity types to detect
 - `pii_redact_audio` - Boolean flag for audio redaction
 - `pii_redaction_mode` - Redaction mode (silence/beep)
 - `pii_entities_detected` - Count of detected entities
 - `pii_redacted_audio_uri` - URI to redacted audio
 
+**Migration 0023: Dropped `pii_detection_tier` column** (added post-implementation)
+
 **Migration 0013: PII entity types reference table**
 
 - Created `pii_entity_types` table with 26 default entity types
 - Categories: PII (personal), PCI (payment), PHI (health)
-- Detection methods: regex, gliner, regex+luhn, regex+checksum
+- Detection methods: gliner, presidio+luhn, presidio+checksum
 
 ### 2. Common Types & Enums (Step 26.2)
 
-**New enums in `dalston/common/models.py`:**
+**Enums in `dalston/common/models.py`:**
 
-- `PIIDetectionTier`: fast, standard, thorough
 - `PIIRedactionMode`: silence, beep
 - `PIIEntityCategory`: pii, pci, phi
 
-**New pipeline types in `dalston/common/pipeline_types.py`:**
+**Pipeline types in `dalston/common/pipeline_types.py`:**
 
 - `PIIEntity` - Detected entity with position and timing
 - `PIIMetadata` - Detection metadata
@@ -45,34 +47,33 @@ This milestone implements automatic PII (Personally Identifiable Information) de
 
 ### 3. PII Detection Engine (Step 26.3)
 
-**Location:** `engines/detect/pii-presidio/`
+**Location:** `engines/stt-detect/pii-presidio/`
 
-**Features:**
+**Architecture (v2.0.0):**
 
-- Microsoft Presidio integration for regex-based detection
-- GLiNER model support for ML-based entity recognition
-- Three detection tiers:
-  - Fast: Regex only (<5ms)
-  - Standard: Regex + GLiNER (~100ms)
-  - Thorough: Planned for LLM integration
-- Custom recognizers for:
-  - Credit card CVV
-  - Credit card expiry
-  - JMBG (Serbian/Yugoslav national ID)
-  - OIB (Croatian personal ID)
+- **GLiNER** as primary NER detector for all entity types (names, orgs, locations, phone, email, SSN, medical)
+- **Presidio** restricted to checksum-validated patterns only:
+  - Credit cards (Luhn algorithm validation)
+  - IBANs (mod-97 checksum validation)
+  - CVV (contextual regex)
+  - Card expiry (contextual regex)
+  - JMBG (Serbian/Yugoslav national ID with checksum)
+  - OIB (Croatian personal ID with ISO 7064 Mod 11,10)
 - Entity-to-timing mapping from word timestamps
 - Speaker assignment from diarization
 
+**Why this architecture:** Presidio's NER-based detection (PERSON, LOCATION, PHONE_NUMBER) produced too many false positives on ASR transcripts. GLiNER's zero-shot transformer handles speech recognition noise better.
+
 ### 4. Audio Redaction Engine (Step 26.4)
 
-**Location:** `engines/redact/audio-redactor/`
+**Location:** `engines/stt-redact/audio-redactor/`
 
 **Features:**
 
 - FFmpeg-based audio processing
-- Two redaction modes:
-  - Silence: Replace PII segments with silence
-  - Beep: Replace with tone (placeholder implementation)
+- Two redaction modes (both fully implemented):
+  - **Silence:** Replace PII segments with silence using `-af volume=0` filter
+  - **Beep:** Replace with 1kHz sine wave using `-filter_complex` with amix
 - Configurable buffer padding (default: 50ms)
 - Automatic range merging for overlapping entities
 
@@ -97,21 +98,20 @@ prepare → transcribe → align → diarize ─┬─→ pii_detect (optional)
 
 ### 6. API Surface (Step 26.6)
 
-**New request parameters in `TranscriptionCreateParams`:**
+**Request parameters in `TranscriptionCreateParams`:**
 
 - `pii_detection` - Enable PII detection
-- `pii_detection_tier` - Detection tier
 - `pii_entity_types` - Entity types to detect
 - `redact_pii` - Generate redacted text
 - `redact_pii_audio` - Generate redacted audio
-- `pii_redaction_mode` - Audio redaction mode
+- `pii_redaction_mode` - Audio redaction mode (silence/beep)
 
-**New response models:**
+**Response models:**
 
 - `PIIEntityResponse` - Detected entity details
 - `PIIInfo` - PII detection summary
 
-**New endpoint:**
+**Endpoint:**
 
 - `GET /v1/pii/entity-types` - List available entity types
 
@@ -177,8 +177,8 @@ prepare → transcribe → align → diarize ─┬─→ pii_detect (optional)
 ## Future Work (Phase 2-3)
 
 - Real-time PII detection in WebSocket streams
-- LLM-based contextual detection (Thorough tier)
-- Custom Presidio recognizer API
+- LLM-based contextual detection for indirect PII
+- Custom recognizer API
 - Compliance-specific presets (PCI-DSS, HIPAA, GDPR)
 - PII Vault with role-based access
 
