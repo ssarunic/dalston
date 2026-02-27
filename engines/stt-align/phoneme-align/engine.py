@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import soundfile as sf
 import torch
 import torchaudio
 from align import AlignedSegment, InputSegment, align
@@ -200,7 +201,13 @@ class PhonemeAlignEngine(Engine):
 
     def _load_audio(self, audio_path: Path) -> np.ndarray:
         """Load audio file as 16 kHz mono numpy array."""
-        waveform, sample_rate = torchaudio.load(str(audio_path))
+        # Use soundfile directly (torchaudio 2.10+ requires torchcodec which isn't available on ARM64)
+        data, sample_rate = sf.read(str(audio_path), dtype="float32")
+        # Convert to torch tensor for resampling (soundfile returns [samples] or [samples, channels])
+        if data.ndim == 1:
+            waveform = torch.from_numpy(data).unsqueeze(0)  # [1, samples]
+        else:
+            waveform = torch.from_numpy(data.T)  # [channels, samples]
         if sample_rate != 16_000:
             resampler = torchaudio.transforms.Resample(sample_rate, 16_000)
             waveform = resampler(waveform)
