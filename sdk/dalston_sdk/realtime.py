@@ -184,7 +184,6 @@ class AsyncRealtimeSession:
         store_transcript: bool = True,
         # PII detection options (M26)
         pii_detection: bool = False,
-        pii_detection_tier: str = "standard",
         pii_entity_types: list[str] | None = None,
         redact_pii_audio: bool = False,
         pii_redaction_mode: str = "silence",
@@ -205,7 +204,6 @@ class AsyncRealtimeSession:
             store_audio: Record audio to S3 during session.
             store_transcript: Save final transcript to S3.
             pii_detection: Enable PII detection.
-            pii_detection_tier: Detection tier (fast, standard, thorough).
             pii_entity_types: Entity types to detect (None = all).
             redact_pii_audio: Generate redacted audio file.
             pii_redaction_mode: Audio redaction mode (silence, beep).
@@ -231,7 +229,6 @@ class AsyncRealtimeSession:
         self.store_transcript = store_transcript
         # PII detection
         self.pii_detection = pii_detection
-        self.pii_detection_tier = pii_detection_tier
         self.pii_entity_types = pii_entity_types
         self.redact_pii_audio = redact_pii_audio
         self.pii_redaction_mode = pii_redaction_mode
@@ -275,7 +272,6 @@ class AsyncRealtimeSession:
         # PII detection options (M26)
         if self.pii_detection:
             params["pii_detection"] = "true"
-            params["pii_detection_tier"] = self.pii_detection_tier
             if self.pii_entity_types:
                 params["pii_entity_types"] = ",".join(self.pii_entity_types)
         if self.redact_pii_audio:
@@ -510,7 +506,6 @@ class RealtimeSession:
         store_transcript: bool = True,
         # PII detection options (M26)
         pii_detection: bool = False,
-        pii_detection_tier: str = "standard",
         pii_entity_types: list[str] | None = None,
         redact_pii_audio: bool = False,
         pii_redaction_mode: str = "silence",
@@ -531,7 +526,6 @@ class RealtimeSession:
             store_audio: Record audio to S3 during session.
             store_transcript: Save final transcript to S3.
             pii_detection: Enable PII detection.
-            pii_detection_tier: Detection tier (fast, standard, thorough).
             pii_entity_types: Entity types to detect (None = all).
             redact_pii_audio: Generate redacted audio file.
             pii_redaction_mode: Audio redaction mode (silence, beep).
@@ -550,7 +544,6 @@ class RealtimeSession:
             store_audio=store_audio,
             store_transcript=store_transcript,
             pii_detection=pii_detection,
-            pii_detection_tier=pii_detection_tier,
             pii_entity_types=pii_entity_types,
             redact_pii_audio=redact_pii_audio,
             pii_redaction_mode=pii_redaction_mode,

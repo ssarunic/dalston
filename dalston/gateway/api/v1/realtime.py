@@ -156,9 +156,6 @@ async def realtime_transcription(
     pii_detection: Annotated[
         bool, Query(description="Enable PII detection on stored transcript")
     ] = False,
-    pii_detection_tier: Annotated[
-        str, Query(description="PII detection tier: fast, standard, thorough")
-    ] = "standard",
     pii_entity_types: Annotated[
         str | None,
         Query(description="Comma-separated PII entity types to detect"),
@@ -189,7 +186,6 @@ async def realtime_transcription(
     - retention: Retention in days - 0 (transient), -1 (permanent), 1-3650 (days)
     - resume_session_id: Link to previous session for continuity
     - pii_detection: Enable PII detection on stored/enhanced transcript
-    - pii_detection_tier: Detection tier (fast, standard, thorough)
     - pii_entity_types: Comma-separated entity types to detect
     - redact_pii_audio: Generate redacted audio file (requires retention != 0)
     - pii_redaction_mode: Audio redaction mode (silence, beep)

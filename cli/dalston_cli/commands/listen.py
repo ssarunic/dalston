@@ -106,13 +106,6 @@ def listen(
             help="Enable PII detection.",
         ),
     ] = False,
-    pii_tier: Annotated[
-        str,
-        typer.Option(
-            "--pii-tier",
-            help="PII detection tier: fast, standard, thorough.",
-        ),
-    ] = "standard",
     redact_audio: Annotated[
         bool,
         typer.Option(
@@ -244,7 +237,6 @@ def listen(
         store_audio=store_audio,
         store_transcript=store_transcript,
         pii_detection=pii,
-        pii_detection_tier=pii_tier,
         redact_pii_audio=redact_audio,
     )
 

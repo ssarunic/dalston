@@ -41,7 +41,6 @@ from .types import (
     Model,
     ModelCapabilities,
     ModelList,
-    PIIDetectionTier,
     PIIEntity,
     PIIInfo,
     PIIRedactionMode,
@@ -93,7 +92,6 @@ def _parse_pii_info(data: dict[str, Any]) -> PIIInfo | None:
         return None
     return PIIInfo(
         enabled=pii_data.get("enabled", False),
-        detection_tier=pii_data.get("detection_tier"),
         entities_detected=pii_data.get("entities_detected", 0),
         entity_summary=pii_data.get("entity_summary"),
         redacted_audio_available=pii_data.get("redacted_audio_available", False),
@@ -296,7 +294,6 @@ class Dalston:
         max_speakers: int | None = None,
         timestamps_granularity: TimestampGranularity | str = TimestampGranularity.WORD,
         pii_detection: bool = False,
-        pii_detection_tier: PIIDetectionTier | str | None = None,
         pii_entity_types: list[str] | None = None,
         redact_pii_audio: bool = False,
         pii_redaction_mode: PIIRedactionMode | str | None = None,
@@ -318,7 +315,6 @@ class Dalston:
             max_speakers: Maximum speakers for diarization auto-detection.
             timestamps_granularity: Level of timestamp detail.
             pii_detection: Enable PII detection in transcript.
-            pii_detection_tier: Detection thoroughness (fast, standard, thorough).
             pii_entity_types: Specific entity types to detect (e.g., ["ssn", "credit_card_number"]).
                 If not specified, uses default entity types.
             redact_pii_audio: Generate redacted audio file with PII removed.
@@ -372,12 +368,6 @@ class Dalston:
         # PII detection parameters
         if pii_detection:
             data["pii_detection"] = True
-        if pii_detection_tier is not None:
-            data["pii_detection_tier"] = (
-                pii_detection_tier.value
-                if isinstance(pii_detection_tier, PIIDetectionTier)
-                else pii_detection_tier
-            )
         if pii_entity_types is not None:
             import json as json_mod
 
@@ -1153,7 +1143,6 @@ class AsyncDalston:
         max_speakers: int | None = None,
         timestamps_granularity: TimestampGranularity | str = TimestampGranularity.WORD,
         pii_detection: bool = False,
-        pii_detection_tier: PIIDetectionTier | str | None = None,
         pii_entity_types: list[str] | None = None,
         redact_pii_audio: bool = False,
         pii_redaction_mode: PIIRedactionMode | str | None = None,
@@ -1175,7 +1164,6 @@ class AsyncDalston:
             max_speakers: Maximum speakers for diarization auto-detection.
             timestamps_granularity: Level of timestamp detail.
             pii_detection: Enable PII detection in transcript.
-            pii_detection_tier: Detection thoroughness (fast, standard, thorough).
             pii_entity_types: Specific entity types to detect (e.g., ["ssn", "credit_card_number"]).
                 If not specified, uses default entity types.
             redact_pii_audio: Generate redacted audio file with PII removed.
@@ -1225,12 +1213,6 @@ class AsyncDalston:
         # PII detection parameters
         if pii_detection:
             data["pii_detection"] = True
-        if pii_detection_tier is not None:
-            data["pii_detection_tier"] = (
-                pii_detection_tier.value
-                if isinstance(pii_detection_tier, PIIDetectionTier)
-                else pii_detection_tier
-            )
         if pii_entity_types is not None:
             import json as json_mod
 

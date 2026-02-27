@@ -238,7 +238,6 @@ class FinalMergerEngine(Engine):
                     redacted_audio_uri = audio_redact_output.redacted_audio_uri
 
                 pii_metadata = PIIMetadata(
-                    detection_tier=pii_detect_output.detection_tier,
                     entities_detected=len(pii_detect_output.entities),
                     entity_count_by_type=pii_detect_output.entity_count_by_type,
                     entity_count_by_category=pii_detect_output.entity_count_by_category,
@@ -395,7 +394,6 @@ class FinalMergerEngine(Engine):
         # Track entity counts across channels
         total_entity_count_by_type: dict[str, int] = {}
         total_entity_count_by_category: dict[str, int] = {}
-        pii_detection_tier: str | None = None
         total_pii_processing_time_ms = 0
 
         for channel in range(channel_count):
@@ -493,7 +491,6 @@ class FinalMergerEngine(Engine):
                         all_pii_entities.append(entity_with_channel)
 
                     # Aggregate entity counts
-                    pii_detection_tier = pii_detect_output.detection_tier
                     total_pii_processing_time_ms += (
                         pii_detect_output.processing_time_ms or 0
                     )
@@ -608,9 +605,8 @@ class FinalMergerEngine(Engine):
 
         # Build PII metadata if detection was enabled
         pii_metadata: PIIMetadata | None = None
-        if pii_detection_enabled and (all_pii_entities or pii_detection_tier):
+        if pii_detection_enabled and all_pii_entities:
             pii_metadata = PIIMetadata(
-                detection_tier=pii_detection_tier or "standard",
                 entities_detected=len(all_pii_entities),
                 entity_count_by_type=total_entity_count_by_type or None,
                 entity_count_by_category=total_entity_count_by_category or None,
