@@ -180,6 +180,8 @@ class Engine(ABC):
             rtf_gpu=performance.get("rtf_gpu"),
             rtf_cpu=performance.get("rtf_cpu"),
             max_concurrency=caps.get("max_concurrency"),
+            # M36: Runtime engine identifier for model swapping
+            runtime=card.get("runtime"),
         )
 
     def _load_engine_yaml(self) -> dict[str, Any] | None:

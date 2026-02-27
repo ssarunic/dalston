@@ -1,1 +1,62 @@
-variants/base.yaml
+schema_version: "1.1"
+id: faster-whisper
+runtime: faster-whisper
+stage: transcribe
+name: Faster Whisper Runtime
+version: 1.0.0
+description: |
+  Runtime engine for faster-whisper (CTranslate2-based Whisper) transcription.
+  Can load any supported Whisper model variant at runtime via runtime_model_id.
+
+  M36: This is a runtime-level configuration. The engine loads specific model
+  variants on demand, without requiring separate Docker images per variant.
+
+  Supported models:
+    - tiny, base, small, medium (lightweight options)
+    - large-v2, large-v3 (high accuracy)
+    - large-v3-turbo (optimized balance of speed/accuracy)
+
+container:
+  gpu: optional
+  memory: 8G
+  model_cache: /models/faster-whisper
+
+capabilities:
+  languages:
+    - all  # 99 languages supported
+  max_audio_duration: 7200  # 2 hours
+  streaming: false
+  word_timestamps: false  # Attention-based timestamps are inaccurate; use alignment stage
+  max_concurrency: 4
+  model_variants:
+    - tiny
+    - base
+    - small
+    - medium
+    - large-v2
+    - large-v3
+    - large-v3-turbo
+
+input:
+  audio_formats:
+    - wav
+  sample_rate: 16000
+  channels: 1
+
+hf_compat:
+  pipeline_tag: automatic-speech-recognition
+  library_name: ctranslate2
+  license: mit
+
+hardware:
+  min_vram_gb: 2  # Minimum for smallest model; large models need more
+  recommended_gpu:
+    - t4
+    - a10g
+  supports_cpu: true
+  min_ram_gb: 4
+
+performance:
+  rtf_gpu: 0.03  # Varies by model
+  rtf_cpu: 0.4
+  warm_start_latency_ms: 30

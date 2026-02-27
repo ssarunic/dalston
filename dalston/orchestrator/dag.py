@@ -52,7 +52,84 @@ DEFAULT_TRANSCRIBE_CONFIG = {
 }
 
 # Engines that produce native word timestamps (skip ALIGN stage)
+# DEPRECATED: Use capability-driven routing (supports_word_timestamps) instead
 NATIVE_WORD_TIMESTAMP_ENGINES = {"parakeet"}
+
+
+# =============================================================================
+# M36: Model Registry for Runtime Model Management
+# =============================================================================
+# Maps public Dalston model IDs to runtime + runtime_model_id.
+# The orchestrator uses this to:
+# 1. Determine which runtime can serve a model request
+# 2. Set config["runtime_model_id"] in the task payload
+# 3. Route to any engine of the appropriate runtime
+#
+# Each entry specifies:
+#   - runtime: The engine runtime (e.g., "faster-whisper", "nemo")
+#   - runtime_model_id: The model ID passed to the underlying library
+#   - supports_word_timestamps: Whether engine produces native word timestamps
+#   - languages: Supported languages (None = all)
+
+MODEL_REGISTRY: dict[str, dict] = {
+    # Faster-Whisper models (CTranslate2-based Whisper)
+    "faster-whisper-base": {
+        "runtime": "faster-whisper",
+        "runtime_model_id": "base",
+        "supports_word_timestamps": False,
+        "languages": None,  # 99 languages
+    },
+    "faster-whisper-large-v3": {
+        "runtime": "faster-whisper",
+        "runtime_model_id": "large-v3",
+        "supports_word_timestamps": False,
+        "languages": None,
+    },
+    "faster-whisper-large-v3-turbo": {
+        "runtime": "faster-whisper",
+        "runtime_model_id": "large-v3-turbo",
+        "supports_word_timestamps": False,
+        "languages": None,
+    },
+    # Parakeet models (NVIDIA NeMo-based)
+    "parakeet-ctc-0.6b": {
+        "runtime": "nemo",
+        "runtime_model_id": "nvidia/parakeet-ctc-0.6b",
+        "supports_word_timestamps": True,
+        "languages": ["en"],
+    },
+    "parakeet-ctc-1.1b": {
+        "runtime": "nemo",
+        "runtime_model_id": "nvidia/parakeet-ctc-1.1b",
+        "supports_word_timestamps": True,
+        "languages": ["en"],
+    },
+    "parakeet-tdt-0.6b-v3": {
+        "runtime": "nemo",
+        "runtime_model_id": "nvidia/parakeet-tdt-0.6b-v3",
+        "supports_word_timestamps": True,
+        "languages": ["en"],
+    },
+    "parakeet-tdt-1.1b": {
+        "runtime": "nemo",
+        "runtime_model_id": "nvidia/parakeet-tdt-1.1b",
+        "supports_word_timestamps": True,
+        "languages": ["en"],
+    },
+}
+
+
+def resolve_model(model_id: str) -> dict | None:
+    """Resolve a public model ID to runtime information.
+
+    Args:
+        model_id: Public Dalston model ID (e.g., "faster-whisper-large-v3-turbo")
+
+    Returns:
+        Dict with runtime, runtime_model_id, supports_word_timestamps, languages
+        or None if model is not found in registry
+    """
+    return MODEL_REGISTRY.get(model_id)
 
 
 def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]:
@@ -178,6 +255,21 @@ def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]
                 "vad_filter", DEFAULT_TRANSCRIBE_CONFIG["vad_filter"]
             ),
         }
+
+    # M36: Resolve model ID to runtime information
+    # If the engine_transcribe matches a model in MODEL_REGISTRY, use runtime routing
+    model_info = resolve_model(engines["transcribe"])
+    if model_info is not None:
+        # Override engine_id with runtime (e.g., "faster-whisper" instead of "faster-whisper-large-v3-turbo")
+        engines["transcribe"] = model_info["runtime"]
+        # Add runtime_model_id to config so engine knows which model to load
+        transcribe_config["runtime_model_id"] = model_info["runtime_model_id"]
+        logger.debug(
+            "model_resolved",
+            original_engine=engines["transcribe"],
+            runtime=model_info["runtime"],
+            runtime_model_id=model_info["runtime_model_id"],
+        )
 
     tasks = []
     diarize_task = None  # Track diarize task for merge dependencies
@@ -718,6 +810,15 @@ def _build_dag_with_engines(
                 "vad_filter", DEFAULT_TRANSCRIBE_CONFIG["vad_filter"]
             ),
         }
+
+    # M36: Add runtime_model_id if engine can be resolved in MODEL_REGISTRY
+    # This allows the engine to load the specific model variant at runtime
+    transcribe_engine = engines.get("transcribe", DEFAULT_ENGINES["transcribe"])
+    model_info = resolve_model(transcribe_engine)
+    if model_info is not None:
+        # Override engine to runtime (e.g., "faster-whisper" instead of "faster-whisper-large-v3-turbo")
+        engines["transcribe"] = model_info["runtime"]
+        transcribe_config["runtime_model_id"] = model_info["runtime_model_id"]
 
     tasks: list[Task] = []
     diarize_task = None

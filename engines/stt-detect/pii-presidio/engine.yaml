@@ -1,5 +1,6 @@
 schema_version: "1.1"
 id: pii-presidio
+runtime: pii-presidio
 stage: pii_detect
 name: PII Detection (GLiNER + Presidio checksum)
 version: 2.0.0

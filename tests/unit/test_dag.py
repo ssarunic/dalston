@@ -11,6 +11,7 @@ import pytest
 from dalston.orchestrator.dag import (
     DEFAULT_ENGINES,
     DEFAULT_TRANSCRIBE_CONFIG,
+    MODEL_REGISTRY,
     NATIVE_WORD_TIMESTAMP_ENGINES,
     build_task_dag,
 )
@@ -28,13 +29,27 @@ class TestBuildTaskDagModelSelection:
         return "s3://test-bucket/audio/test.wav"
 
     def test_default_model_config(self, job_id: UUID, audio_uri: str):
-        """Test that default model config is used when no model specified."""
+        """Test that default model config is used when no model specified.
+
+        M36: With runtime model management, the default engine (faster-whisper-base)
+        is resolved to its runtime (faster-whisper) and runtime_model_id is set.
+        """
         tasks = build_task_dag(job_id, audio_uri, {})
 
         # Find transcribe task
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
 
-        assert transcribe_task.engine_id == DEFAULT_ENGINES["transcribe"]
+        # M36: engine_id should be the runtime, not the model-specific engine
+        default_engine = DEFAULT_ENGINES["transcribe"]
+        model_info = MODEL_REGISTRY.get(default_engine)
+        if model_info:
+            assert transcribe_task.engine_id == model_info["runtime"]
+            assert (
+                transcribe_task.config["runtime_model_id"]
+                == model_info["runtime_model_id"]
+            )
+        else:
+            assert transcribe_task.engine_id == default_engine
         assert transcribe_task.config["model"] == DEFAULT_TRANSCRIBE_CONFIG["model"]
 
     def test_transcribe_config_from_parameters(self, job_id: UUID, audio_uri: str):

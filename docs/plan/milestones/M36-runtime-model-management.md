@@ -6,7 +6,7 @@
 | **Duration**     | 4 phases (implementation in progress)                              |
 | **Dependencies** | M31 (Capability-Driven Routing), M32 (Engine Variant Structure)    |
 | **Deliverable**  | Model swapping in engines, two-catalog architecture, simplified Docker setup |
-| **Status**       | Phase 1 Complete                                                   |
+| **Status**       | Phase 2 Complete                                                   |
 
 ## Overview
 
@@ -66,18 +66,50 @@ ruff check dalston/engine_sdk/base.py engines/stt-transcribe/parakeet/engine.py 
 
 ---
 
-### Phase 2: Orchestrator Runtime Routing (PLANNED)
+### Phase 2: Orchestrator Runtime Routing (COMPLETE)
 
-**Goal:** Orchestrator routes jobs by runtime + model variant. Legacy sync DAG path deleted.
+**Goal:** Orchestrator routes jobs by runtime + model variant.
 
-**Key Changes:**
+**Changes:**
 
-- Add `runtime` field to `EngineCapabilities` (required for all engines)
-- Heartbeat includes `loaded_model` from engine's runtime state
-- `MODEL_REGISTRY` in dag.py maps public model IDs to runtime + runtime_model_id
-- `build_task_dag()` sets `config["runtime_model_id"]` from registry
-- Delete legacy `build_task_dag()` and `NATIVE_WORD_TIMESTAMP_ENGINES`
-- Update 9 utility engine.yaml files with `runtime:` field
+1. **`dalston/engine_sdk/types.py`**
+   - Added `runtime` field to `EngineCapabilities` for runtime identification
+
+2. **`dalston/engine_sdk/registry.py`**
+   - Heartbeat now includes `loaded_model` parameter for runtime state reporting
+
+3. **`dalston/engine_sdk/runner.py`**
+   - Heartbeat loop reads engine's `get_runtime_state()` and passes `loaded_model` to registry
+
+4. **`dalston/engine_sdk/base.py`**
+   - `get_capabilities()` now reads `runtime` field from engine.yaml
+
+5. **`dalston/orchestrator/dag.py`**
+   - Added `MODEL_REGISTRY` mapping public model IDs to runtime + runtime_model_id
+   - Added `resolve_model()` helper function
+   - Both `build_task_dag()` and `_build_dag_with_engines()` now set `config["runtime_model_id"]`
+   - `NATIVE_WORD_TIMESTAMP_ENGINES` marked as deprecated (kept for backward compatibility)
+
+6. **`dalston/orchestrator/registry.py`**
+   - Added `loaded_model` field to `BatchEngineState`
+   - Registry parser reads `loaded_model` from Redis
+
+7. **Engine YAML files (11 files updated)**
+   - Added `runtime` field to all 9 utility engine.yaml files
+   - Created runtime-level engine.yaml for faster-whisper runtime
+   - Created runtime-level engine.yaml for nemo (parakeet) runtime
+
+**Verification:**
+
+```bash
+# Tests pass
+pytest tests/unit/test_engine*.py tests/unit/test_dag.py tests/integration/test_capability_driven_dag.py -v
+# 135 tests passed
+
+# Linting
+ruff check dalston/engine_sdk/*.py dalston/orchestrator/dag.py dalston/orchestrator/registry.py
+# All checks passed
+```
 
 ---
 
@@ -148,3 +180,18 @@ API request (model="parakeet-tdt-1.1b")
 | `dalston/engine_sdk/base.py` | Added `_set_runtime_state()` and `get_runtime_state()` |
 | `engines/stt-transcribe/parakeet/engine.py` | Model swapping, runtime ID, GPU memory cleanup |
 | `engines/stt-transcribe/faster-whisper/engine.py` | Model swapping, CPU support for large-v3-turbo |
+
+## Files Changed (Phase 2)
+
+| File | Change |
+|------|--------|
+| `dalston/engine_sdk/types.py` | Added `runtime` field to `EngineCapabilities` |
+| `dalston/engine_sdk/registry.py` | Added `loaded_model` to heartbeat |
+| `dalston/engine_sdk/runner.py` | Heartbeat reads and passes runtime state |
+| `dalston/engine_sdk/base.py` | `get_capabilities()` reads `runtime` from YAML |
+| `dalston/orchestrator/dag.py` | Added `MODEL_REGISTRY`, `resolve_model()`, runtime routing |
+| `dalston/orchestrator/registry.py` | Added `loaded_model` to `BatchEngineState` |
+| `engines/stt-transcribe/faster-whisper/engine.yaml` | New runtime-level engine.yaml |
+| `engines/stt-transcribe/parakeet/engine.yaml` | New runtime-level engine.yaml for nemo |
+| `engines/*/engine.yaml` (9 files) | Added `runtime` field to all utility engines |
+| `tests/unit/test_dag.py` | Updated for M36 runtime routing behavior |

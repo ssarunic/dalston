@@ -261,18 +261,28 @@ class EngineRunner:
             self._heartbeat_thread = None
 
     def _heartbeat_loop(self) -> None:
-        """Send heartbeats to Redis periodically via registry."""
+        """Send heartbeats to Redis periodically via registry.
+
+        M36: Also reports the currently loaded model from engine's runtime state.
+        This allows the orchestrator to know which model is loaded without
+        requiring a model swap.
+        """
         while self._running:
             try:
                 # Read current task with lock for thread safety
                 with self._task_lock:
                     current_task = self._current_task_id
 
+                # M36: Get runtime state including loaded model
+                runtime_state = self.engine.get_runtime_state()
+                loaded_model = runtime_state.get("loaded_model")
+
                 if self._registry:
                     self._registry.heartbeat(
                         instance_id=self.instance_id,
                         status="processing" if current_task else "idle",
                         current_task=current_task,
+                        loaded_model=loaded_model,
                     )
             except Exception as e:
                 logger.warning("heartbeat_failed", error=str(e))

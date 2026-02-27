@@ -43,6 +43,10 @@ class EngineCapabilities(BaseModel):
         rtf_cpu: Real-time factor on CPU (M30)
         max_concurrency: Max concurrent work units - jobs (batch) or sessions (realtime)
         includes_diarization: Whether output includes speaker labels (M31)
+        runtime: Runtime engine identifier for model swapping (M36).
+                 For transcription engines: "nemo", "faster-whisper".
+                 For utility engines: same as engine_id.
+                 The orchestrator uses this to route to any engine of the same runtime.
     """
 
     engine_id: str
@@ -62,6 +66,8 @@ class EngineCapabilities(BaseModel):
     max_concurrency: int | None = None
     # M31: Capability-driven routing - output includes speaker labels (skip diarize stage)
     includes_diarization: bool = False
+    # M36: Runtime model management - identifies which runtime can load this model
+    runtime: str | None = None
 
 
 @dataclass
