@@ -1,0 +1,112 @@
+schema_version: "1.1"
+id: phoneme-align
+stage: align
+name: Phoneme Forced Alignment
+version: 1.0.0
+description: |
+  Word-level timestamp alignment using CTC forced alignment with
+  wav2vec2 models. Standalone reimplementation of the phoneme alignment
+  algorithm from the WhisperX paper (Bain et al., INTERSPEECH 2023).
+
+  Does not depend on the whisperx package. Uses torchaudio pipeline
+  models for major European languages and HuggingFace wav2vec2 models
+  for 35+ additional languages.
+
+container:
+  gpu: optional  # Recommended for performance; falls back to CPU
+  memory: 4G
+  model_cache: /models
+
+capabilities:
+  languages:
+    - all  # Supports languages with wav2vec2 models
+  max_audio_duration: 7200  # 2 hours
+  streaming: false
+  word_timestamps: true
+  max_concurrency: 8
+
+input:
+  audio_formats:
+    - wav
+  sample_rate: 16000
+  channels: 1
+
+config_schema:
+  type: object
+  properties:
+    return_char_alignments:
+      type: boolean
+      default: false
+      description: Also return character-level alignments
+  additionalProperties: false
+
+output_schema:
+  type: object
+  required:
+    - text
+    - segments
+    - language
+    - word_timestamps
+  properties:
+    text:
+      type: string
+      description: Full transcript text (passed through from transcribe)
+    segments:
+      type: array
+      description: Aligned segments with word-level timestamps
+      items:
+        type: object
+        required:
+          - start
+          - end
+          - text
+        properties:
+          start:
+            type: number
+            description: Segment start time in seconds
+          end:
+            type: number
+            description: Segment end time in seconds
+          text:
+            type: string
+            description: Segment text
+          words:
+            type: array
+            description: Word-level timestamps
+            items:
+              type: object
+              required:
+                - word
+                - start
+                - end
+              properties:
+                word:
+                  type: string
+                  description: The word
+                start:
+                  type: number
+                  description: Word start time in seconds
+                end:
+                  type: number
+                  description: Word end time in seconds
+                confidence:
+                  type: number
+                  description: Alignment confidence (0-1)
+    language:
+      type: string
+      description: Language code (passed through from transcribe)
+    word_timestamps:
+      type: boolean
+      description: Always true for this engine
+
+hardware:
+  min_vram_gb: 2
+  recommended_gpu:
+    - t4
+  supports_cpu: true
+  min_ram_gb: 4
+
+performance:
+  rtf_gpu: 0.02
+  rtf_cpu: 0.3
+  warm_start_latency_ms: 200

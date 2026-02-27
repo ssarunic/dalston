@@ -1,8 +1,50 @@
 {
-  "generated_at": "2026-02-18T18:04:26.521393+00:00",
+  "generated_at": "2026-02-26T18:22:13.910386+00:00",
   "schema_version": "1.1",
-  "engine_count": 18,
+  "engine_count": 20,
   "engines": {
+    "phoneme-align": {
+      "id": "phoneme-align",
+      "name": "Phoneme Forced Alignment",
+      "version": "1.0.0",
+      "stage": "align",
+      "type": null,
+      "description": "Word-level timestamp alignment using CTC forced alignment with\nwav2vec2 models. Standalone reimplementation of the phoneme alignment\nalgorithm from the WhisperX paper (Bain et al., INTERSPEECH 2023).\n\nDoes not depend on the whisperx package. Uses torchaudio pipeline\nmodels for major European languages and HuggingFace wav2vec2 models\nfor 35+ additional languages.",
+      "image": "dalston/stt-batch-align-phoneme-align:1.0.0",
+      "capabilities": {
+        "stages": [
+          "align"
+        ],
+        "languages": null,
+        "supports_word_timestamps": true,
+        "supports_streaming": false,
+        "max_audio_duration": 7200,
+        "max_concurrency": 8
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": true,
+        "min_vram_gb": 2,
+        "recommended_gpu": [
+          "t4"
+        ],
+        "supports_cpu": true,
+        "min_ram_gb": 4,
+        "memory": "4G"
+      },
+      "performance": {
+        "rtf_gpu": 0.02,
+        "rtf_cpu": 0.3,
+        "warm_start_latency_ms": 200
+      },
+      "input": {
+        "audio_formats": [
+          "wav"
+        ],
+        "sample_rate": 16000,
+        "channels": 1
+      }
+    },
     "whisperx-align": {
       "id": "whisperx-align",
       "name": "WhisperX Alignment",
@@ -40,7 +82,7 @@
       "hf_compat": {
         "pipeline_tag": "automatic-speech-recognition",
         "library_name": "whisperx",
-        "license": "bsd-4-clause"
+        "license": "bsd-2-clause"
       },
       "input": {
         "audio_formats": [
@@ -86,6 +128,54 @@
         "pipeline_tag": "dalston:pii-redaction",
         "library_name": "presidio",
         "license": "mit"
+      }
+    },
+    "nemo-msdd": {
+      "id": "nemo-msdd",
+      "name": "NeMo MSDD Speaker Diarization",
+      "version": "1.0.0",
+      "stage": "diarize",
+      "type": null,
+      "description": "Speaker diarization using NVIDIA NeMo Multi-scale Diarization Decoder.\nNeural end-to-end system with built-in overlap detection.\n\nNo HuggingFace token required - models are open under CC-BY-4.0 license.\nSupports optional min/max speaker count hints.\nGPU-only (CPU inference is prohibitively slow).",
+      "image": "dalston/stt-batch-diarize-nemo-msdd:1.0.0",
+      "capabilities": {
+        "stages": [
+          "diarize"
+        ],
+        "languages": null,
+        "supports_word_timestamps": false,
+        "supports_streaming": false,
+        "max_audio_duration": 7200,
+        "max_concurrency": 2
+      },
+      "hardware": {
+        "gpu_required": true,
+        "gpu_optional": false,
+        "min_vram_gb": 4,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": false,
+        "min_ram_gb": 8,
+        "memory": "8G"
+      },
+      "performance": {
+        "rtf_gpu": 0.05,
+        "rtf_cpu": null,
+        "warm_start_latency_ms": 1000
+      },
+      "hf_compat": {
+        "pipeline_tag": "speaker-diarization",
+        "library_name": "nemo",
+        "license": "cc-by-4.0"
+      },
+      "input": {
+        "audio_formats": [
+          "wav"
+        ],
+        "sample_rate": 16000,
+        "channels": 1
       }
     },
     "pyannote-3.1": {
@@ -172,7 +262,7 @@
       "hf_compat": {
         "pipeline_tag": "speaker-diarization",
         "library_name": "pyannote",
-        "license": "mit"
+        "license": "cc-by-4.0"
       },
       "input": {
         "audio_formats": [
@@ -537,7 +627,7 @@
         "pipeline_tag": "automatic-speech-recognition",
         "library_name": "ctranslate2",
         "license": "mit",
-        "source_model": "Systran/faster-whisper-large-v3-turbo"
+        "source_model": "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
       },
       "input": {
         "audio_formats": [
@@ -826,7 +916,7 @@
       "hardware": {
         "gpu_required": true,
         "gpu_optional": false,
-        "min_vram_gb": 9.5,
+        "min_vram_gb": 10,
         "recommended_gpu": [
           "a10g",
           "l4",
