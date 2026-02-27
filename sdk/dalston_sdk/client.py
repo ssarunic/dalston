@@ -31,6 +31,10 @@ from .exceptions import (
 from .types import (
     Artifact,
     ArtifactList,
+    Engine,
+    EngineCapabilities,
+    EngineList,
+    EnginePerformance,
     ExportFormat,
     HardwareRequirements,
     HealthStatus,
@@ -663,10 +667,13 @@ class Dalston:
         return HealthStatus(status=data.get("status", "unknown"))
 
     def list_models(self) -> ModelList:
-        """List available transcription models.
+        """List available transcription models from the catalog.
+
+        M36: Returns all model variants that can be used with the `model` parameter.
+        Each model maps to a runtime that can load it.
 
         Returns:
-            ModelList with available models and aliases.
+            ModelList with all available models.
 
         Raises:
             ConnectionError: If server is unreachable.
@@ -690,35 +697,43 @@ class Dalston:
             hardware = None
             if m.get("hardware"):
                 hardware = HardwareRequirements(
-                    gpu_required=m["hardware"].get("gpu_required", False),
-                    supports_cpu=m["hardware"].get("supports_cpu", True),
+                    gpu_required=False,  # Not in new schema
+                    supports_cpu=m["hardware"].get("supports_cpu", False),
                     min_vram_gb=m["hardware"].get("min_vram_gb"),
+                    min_ram_gb=m["hardware"].get("min_ram_gb"),
                 )
             models.append(
                 Model(
                     id=m["id"],
                     stage=m.get("stage", "transcribe"),
                     capabilities=ModelCapabilities(
-                        languages=m["capabilities"].get("languages"),
+                        languages=m.get("languages"),
                         streaming=m["capabilities"].get("streaming", False),
                         word_timestamps=m["capabilities"].get("word_timestamps", False),
+                        punctuation=m["capabilities"].get("punctuation", False),
+                        capitalization=m["capabilities"].get("capitalization", False),
                     ),
                     hardware=hardware,
+                    name=m.get("name"),
+                    runtime=m.get("runtime"),
+                    runtime_model_id=m.get("runtime_model_id"),
+                    source=m.get("source"),
+                    size_gb=m.get("size_gb"),
                 )
             )
         return ModelList(models=models)
 
     def get_model(self, model_id: str) -> Model:
-        """Get details for a specific model.
+        """Get details for a specific model from the catalog.
 
         Args:
-            model_id: Model identifier or alias.
+            model_id: Model identifier (e.g., 'parakeet-tdt-1.1b').
 
         Returns:
             Model with full details.
 
         Raises:
-            NotFoundError: If model doesn't exist.
+            NotFoundError: If model doesn't exist in catalog.
             ConnectionError: If server is unreachable.
         """
         try:
@@ -738,20 +753,100 @@ class Dalston:
         hardware = None
         if m.get("hardware"):
             hardware = HardwareRequirements(
-                gpu_required=m["hardware"].get("gpu_required", False),
-                supports_cpu=m["hardware"].get("supports_cpu", True),
+                gpu_required=False,
+                supports_cpu=m["hardware"].get("supports_cpu", False),
                 min_vram_gb=m["hardware"].get("min_vram_gb"),
+                min_ram_gb=m["hardware"].get("min_ram_gb"),
             )
         return Model(
             id=m["id"],
             stage=m.get("stage", "transcribe"),
             capabilities=ModelCapabilities(
-                languages=m["capabilities"].get("languages"),
+                languages=m.get("languages"),
                 streaming=m["capabilities"].get("streaming", False),
                 word_timestamps=m["capabilities"].get("word_timestamps", False),
+                punctuation=m["capabilities"].get("punctuation", False),
+                capitalization=m["capabilities"].get("capitalization", False),
             ),
             hardware=hardware,
+            name=m.get("name"),
+            runtime=m.get("runtime"),
+            runtime_model_id=m.get("runtime_model_id"),
+            source=m.get("source"),
+            size_gb=m.get("size_gb"),
         )
+
+    def list_engines(self) -> EngineList:
+        """List all engines with their current status (M36).
+
+        Returns engines from the catalog with their runtime status:
+        - "running": Engine has valid heartbeat
+        - "available": In catalog but not running
+        - "unhealthy": Heartbeat expired
+
+        Returns:
+            EngineList with all engines and their status.
+
+        Raises:
+            ConnectionError: If server is unreachable.
+        """
+        try:
+            response = self._client.get(
+                f"{self.base_url}/v1/engines",
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        data = response.json()
+        engines = []
+        for e in data.get("engines", []):
+            hardware = None
+            if e.get("hardware"):
+                hardware = HardwareRequirements(
+                    gpu_required=e["hardware"].get("gpu_required", False),
+                    supports_cpu=e["hardware"].get("supports_cpu", True),
+                    min_vram_gb=e["hardware"].get("min_vram_gb"),
+                    min_ram_gb=e["hardware"].get("min_ram_gb"),
+                )
+            performance = None
+            if e.get("performance"):
+                performance = EnginePerformance(
+                    rtf_gpu=e["performance"].get("rtf_gpu"),
+                    rtf_cpu=e["performance"].get("rtf_cpu"),
+                )
+            engines.append(
+                Engine(
+                    id=e["id"],
+                    name=e.get("name"),
+                    stage=e.get("stage", "unknown"),
+                    version=e.get("version", "unknown"),
+                    status=e.get("status", "unknown"),
+                    loaded_model=e.get("loaded_model"),
+                    available_models=e.get("available_models"),
+                    capabilities=EngineCapabilities(
+                        languages=e["capabilities"].get("languages"),
+                        supports_word_timestamps=e["capabilities"].get(
+                            "supports_word_timestamps", False
+                        ),
+                        supports_streaming=e["capabilities"].get(
+                            "supports_streaming", False
+                        ),
+                        max_audio_duration_s=e["capabilities"].get(
+                            "max_audio_duration_s"
+                        ),
+                        max_concurrency=e["capabilities"].get("max_concurrency"),
+                    ),
+                    hardware=hardware,
+                    performance=performance,
+                )
+            )
+        return EngineList(engines=engines, total=data.get("total", len(engines)))
 
     def get_realtime_status(self) -> RealtimeStatus:
         """Get real-time transcription system status.
@@ -1498,10 +1593,13 @@ class AsyncDalston:
         return HealthStatus(status=data.get("status", "unknown"))
 
     async def list_models(self) -> ModelList:
-        """List available transcription models.
+        """List available transcription models from the catalog.
+
+        M36: Returns all model variants that can be used with the `model` parameter.
+        Each model maps to a runtime that can load it.
 
         Returns:
-            ModelList with available models and aliases.
+            ModelList with all available models.
 
         Raises:
             ConnectionError: If server is unreachable.
@@ -1525,35 +1623,43 @@ class AsyncDalston:
             hardware = None
             if m.get("hardware"):
                 hardware = HardwareRequirements(
-                    gpu_required=m["hardware"].get("gpu_required", False),
-                    supports_cpu=m["hardware"].get("supports_cpu", True),
+                    gpu_required=False,
+                    supports_cpu=m["hardware"].get("supports_cpu", False),
                     min_vram_gb=m["hardware"].get("min_vram_gb"),
+                    min_ram_gb=m["hardware"].get("min_ram_gb"),
                 )
             models.append(
                 Model(
                     id=m["id"],
                     stage=m.get("stage", "transcribe"),
                     capabilities=ModelCapabilities(
-                        languages=m["capabilities"].get("languages"),
+                        languages=m.get("languages"),
                         streaming=m["capabilities"].get("streaming", False),
                         word_timestamps=m["capabilities"].get("word_timestamps", False),
+                        punctuation=m["capabilities"].get("punctuation", False),
+                        capitalization=m["capabilities"].get("capitalization", False),
                     ),
                     hardware=hardware,
+                    name=m.get("name"),
+                    runtime=m.get("runtime"),
+                    runtime_model_id=m.get("runtime_model_id"),
+                    source=m.get("source"),
+                    size_gb=m.get("size_gb"),
                 )
             )
         return ModelList(models=models)
 
     async def get_model(self, model_id: str) -> Model:
-        """Get details for a specific model.
+        """Get details for a specific model from the catalog.
 
         Args:
-            model_id: Model identifier or alias.
+            model_id: Model identifier (e.g., 'parakeet-tdt-1.1b').
 
         Returns:
             Model with full details.
 
         Raises:
-            NotFoundError: If model doesn't exist.
+            NotFoundError: If model doesn't exist in catalog.
             ConnectionError: If server is unreachable.
         """
         try:
@@ -1573,20 +1679,100 @@ class AsyncDalston:
         hardware = None
         if m.get("hardware"):
             hardware = HardwareRequirements(
-                gpu_required=m["hardware"].get("gpu_required", False),
-                supports_cpu=m["hardware"].get("supports_cpu", True),
+                gpu_required=False,
+                supports_cpu=m["hardware"].get("supports_cpu", False),
                 min_vram_gb=m["hardware"].get("min_vram_gb"),
+                min_ram_gb=m["hardware"].get("min_ram_gb"),
             )
         return Model(
             id=m["id"],
             stage=m.get("stage", "transcribe"),
             capabilities=ModelCapabilities(
-                languages=m["capabilities"].get("languages"),
+                languages=m.get("languages"),
                 streaming=m["capabilities"].get("streaming", False),
                 word_timestamps=m["capabilities"].get("word_timestamps", False),
+                punctuation=m["capabilities"].get("punctuation", False),
+                capitalization=m["capabilities"].get("capitalization", False),
             ),
             hardware=hardware,
+            name=m.get("name"),
+            runtime=m.get("runtime"),
+            runtime_model_id=m.get("runtime_model_id"),
+            source=m.get("source"),
+            size_gb=m.get("size_gb"),
         )
+
+    async def list_engines(self) -> EngineList:
+        """List all engines with their current status (M36).
+
+        Returns engines from the catalog with their runtime status:
+        - "running": Engine has valid heartbeat
+        - "available": In catalog but not running
+        - "unhealthy": Heartbeat expired
+
+        Returns:
+            EngineList with all engines and their status.
+
+        Raises:
+            ConnectionError: If server is unreachable.
+        """
+        try:
+            response = await self._client.get(
+                f"{self.base_url}/v1/engines",
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        data = response.json()
+        engines = []
+        for e in data.get("engines", []):
+            hardware = None
+            if e.get("hardware"):
+                hardware = HardwareRequirements(
+                    gpu_required=e["hardware"].get("gpu_required", False),
+                    supports_cpu=e["hardware"].get("supports_cpu", True),
+                    min_vram_gb=e["hardware"].get("min_vram_gb"),
+                    min_ram_gb=e["hardware"].get("min_ram_gb"),
+                )
+            performance = None
+            if e.get("performance"):
+                performance = EnginePerformance(
+                    rtf_gpu=e["performance"].get("rtf_gpu"),
+                    rtf_cpu=e["performance"].get("rtf_cpu"),
+                )
+            engines.append(
+                Engine(
+                    id=e["id"],
+                    name=e.get("name"),
+                    stage=e.get("stage", "unknown"),
+                    version=e.get("version", "unknown"),
+                    status=e.get("status", "unknown"),
+                    loaded_model=e.get("loaded_model"),
+                    available_models=e.get("available_models"),
+                    capabilities=EngineCapabilities(
+                        languages=e["capabilities"].get("languages"),
+                        supports_word_timestamps=e["capabilities"].get(
+                            "supports_word_timestamps", False
+                        ),
+                        supports_streaming=e["capabilities"].get(
+                            "supports_streaming", False
+                        ),
+                        max_audio_duration_s=e["capabilities"].get(
+                            "max_audio_duration_s"
+                        ),
+                        max_concurrency=e["capabilities"].get("max_concurrency"),
+                    ),
+                    hardware=hardware,
+                    performance=performance,
+                )
+            )
+        return EngineList(engines=engines, total=data.get("total", len(engines)))
 
     async def get_realtime_status(self) -> RealtimeStatus:
         """Get real-time transcription system status.

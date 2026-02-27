@@ -1,0 +1,39 @@
+# Model catalog entry for parakeet-tdt-0.6b-v3
+# This file defines the model variant metadata for runtime model management (M36)
+
+schema_version: "1.1"
+id: parakeet-tdt-0.6b-v3
+runtime: nemo
+runtime_model_id: "nvidia/parakeet-tdt-0.6b-v3"  # HuggingFace ID passed to from_pretrained()
+
+name: NVIDIA Parakeet TDT 0.6B v3
+source: nvidia/parakeet-tdt-0.6b-v3
+size_gb: 1.8
+stage: transcribe
+
+description: |
+  NVIDIA Parakeet FastConformer TDT 0.6B v3 for accurate English-only transcription.
+  TDT (Token-and-Duration Transducer) provides best-in-class accuracy.
+  64% faster than RNNT while achieving lower WER.
+  Produces native word-level timestamps without separate alignment.
+
+  NOTE: v3 includes automatic punctuation and capitalization.
+
+languages:
+  - en
+
+capabilities:
+  word_timestamps: true
+  punctuation: true
+  capitalization: true
+  streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  min_vram_gb: 4
+  supports_cpu: false
+  min_ram_gb: 8
+
+performance:
+  rtf_gpu: 0.0004
+  rtf_cpu: null

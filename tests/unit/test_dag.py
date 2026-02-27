@@ -11,8 +11,8 @@ import pytest
 from dalston.orchestrator.dag import (
     DEFAULT_ENGINES,
     DEFAULT_TRANSCRIBE_CONFIG,
-    MODEL_REGISTRY,
     build_task_dag,
+    resolve_model,
 )
 
 
@@ -40,7 +40,7 @@ class TestBuildTaskDagModelSelection:
 
         # M36: engine_id should be the runtime, not the model-specific engine
         default_engine = DEFAULT_ENGINES["transcribe"]
-        model_info = MODEL_REGISTRY.get(default_engine)
+        model_info = resolve_model(default_engine)
         if model_info:
             assert transcribe_task.engine_id == model_info["runtime"]
             assert (
@@ -209,7 +209,7 @@ class TestBuildTaskDagNemo:
     """Tests for NeMo runtime DAG behavior (M21/M36).
 
     M36: Parakeet models now route through the 'nemo' runtime.
-    Using MODEL_REGISTRY entries like 'parakeet-tdt-1.1b' instead of raw 'parakeet'.
+    Using catalog entries like 'parakeet-tdt-1.1b' instead of raw 'parakeet'.
     """
 
     @pytest.fixture
@@ -221,16 +221,15 @@ class TestBuildTaskDagNemo:
         return "s3://test-bucket/audio/test.wav"
 
     def test_nemo_models_support_word_timestamps(self):
-        """Test that NeMo/Parakeet models have supports_word_timestamps=True in MODEL_REGISTRY."""
-        nemo_models = [
-            model_id
-            for model_id, info in MODEL_REGISTRY.items()
-            if info.get("runtime") == "nemo"
-        ]
-        assert len(nemo_models) > 0, "Expected at least one nemo model in registry"
-        for model_id in nemo_models:
-            assert MODEL_REGISTRY[model_id].get("supports_word_timestamps") is True, (
-                f"Model {model_id} should have supports_word_timestamps=True"
+        """Test that NeMo/Parakeet models have word_timestamps=True in catalog."""
+        from dalston.orchestrator.catalog import get_catalog
+
+        catalog = get_catalog()
+        nemo_models = catalog.get_models_for_runtime("nemo")
+        assert len(nemo_models) > 0, "Expected at least one nemo model in catalog"
+        for model in nemo_models:
+            assert model.word_timestamps is True, (
+                f"Model {model.id} should have word_timestamps=True"
             )
 
     def test_nemo_skips_align_stage(self, job_id: UUID, audio_uri: str):

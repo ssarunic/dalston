@@ -56,6 +56,10 @@ from .realtime import AsyncRealtimeSession, RealtimeSession
 
 # Types
 from .types import (
+    Engine,
+    EngineCapabilities,
+    EngineList,
+    EnginePerformance,
     ExportFormat,
     HardwareRequirements,
     HealthStatus,
@@ -133,6 +137,11 @@ __all__ = [
     "ModelCapabilities",
     "ModelList",
     "HardwareRequirements",
+    # Engine types (M36)
+    "Engine",
+    "EngineCapabilities",
+    "EngineList",
+    "EnginePerformance",
     # Real-time types
     "SessionBegin",
     "SessionEnd",

@@ -1,0 +1,40 @@
+# Model catalog entry for parakeet-ctc-1.1b
+# This file defines the model variant metadata for runtime model management (M36)
+
+schema_version: "1.1"
+id: parakeet-ctc-1.1b
+runtime: nemo
+runtime_model_id: "nvidia/parakeet-ctc-1.1b"  # HuggingFace ID passed to from_pretrained()
+
+name: NVIDIA Parakeet CTC 1.1B
+source: nvidia/parakeet-ctc-1.1b
+size_gb: 4.2
+stage: transcribe
+
+description: |
+  NVIDIA Parakeet FastConformer CTC 1.1B for fast English-only transcription.
+  CTC decoder provides fastest inference with greedy decoding.
+  Larger model with better accuracy than 0.6B variant.
+  Best choice for high-throughput batch processing with quality.
+
+  NOTE: Outputs lowercase text without punctuation. Use refine stage or
+  parakeet-tdt-0.6b-v3 if punctuation/capitalization is required.
+
+languages:
+  - en
+
+capabilities:
+  word_timestamps: true
+  punctuation: false
+  capitalization: false
+  streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  min_vram_gb: 6
+  supports_cpu: false
+  min_ram_gb: 12
+
+performance:
+  rtf_gpu: 0.0005
+  rtf_cpu: null

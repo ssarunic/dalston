@@ -54,79 +54,55 @@ DEFAULT_TRANSCRIBE_CONFIG = {
 }
 
 # =============================================================================
-# M36: Model Registry for Runtime Model Management
+# M36: Model Resolution via Catalog
 # =============================================================================
-# Maps public Dalston model IDs to runtime + runtime_model_id.
-# The orchestrator uses this to:
+# Model metadata is now loaded from the catalog (models/*.yaml files).
+# The orchestrator uses catalog lookups to:
 # 1. Determine which runtime can serve a model request
 # 2. Set config["runtime_model_id"] in the task payload
 # 3. Route to any engine of the appropriate runtime
 #
-# Each entry specifies:
+# The resolve_model() function returns a dict-like interface for compatibility:
 #   - runtime: The engine runtime (e.g., "faster-whisper", "nemo")
 #   - runtime_model_id: The model ID passed to the underlying library
 #   - supports_word_timestamps: Whether engine produces native word timestamps
 #   - languages: Supported languages (None = all)
 
-MODEL_REGISTRY: dict[str, dict] = {
-    # Faster-Whisper models (CTranslate2-based Whisper)
-    "faster-whisper-base": {
-        "runtime": "faster-whisper",
-        "runtime_model_id": "base",
-        "supports_word_timestamps": False,
-        "languages": None,  # 99 languages
-    },
-    "faster-whisper-large-v3": {
-        "runtime": "faster-whisper",
-        "runtime_model_id": "large-v3",
-        "supports_word_timestamps": False,
-        "languages": None,
-    },
-    "faster-whisper-large-v3-turbo": {
-        "runtime": "faster-whisper",
-        "runtime_model_id": "large-v3-turbo",
-        "supports_word_timestamps": False,
-        "languages": None,
-    },
-    # Parakeet models (NVIDIA NeMo-based)
-    "parakeet-ctc-0.6b": {
-        "runtime": "nemo",
-        "runtime_model_id": "nvidia/parakeet-ctc-0.6b",
-        "supports_word_timestamps": True,
-        "languages": ["en"],
-    },
-    "parakeet-ctc-1.1b": {
-        "runtime": "nemo",
-        "runtime_model_id": "nvidia/parakeet-ctc-1.1b",
-        "supports_word_timestamps": True,
-        "languages": ["en"],
-    },
-    "parakeet-tdt-0.6b-v3": {
-        "runtime": "nemo",
-        "runtime_model_id": "nvidia/parakeet-tdt-0.6b-v3",
-        "supports_word_timestamps": True,
-        "languages": ["en"],
-    },
-    "parakeet-tdt-1.1b": {
-        "runtime": "nemo",
-        "runtime_model_id": "nvidia/parakeet-tdt-1.1b",
-        "supports_word_timestamps": True,
-        "languages": ["en"],
-    },
-}
-
 
 def resolve_model(model_id: str) -> dict | None:
     """Resolve a public model ID to runtime information.
+
+    Uses the catalog to look up model metadata. Returns a dict-like structure
+    for backward compatibility with code that expects MODEL_REGISTRY entries.
 
     Args:
         model_id: Public Dalston model ID (e.g., "faster-whisper-large-v3-turbo")
 
     Returns:
         Dict with runtime, runtime_model_id, supports_word_timestamps, languages
-        or None if model is not found in registry
+        or None if model is not found in catalog
     """
-    return MODEL_REGISTRY.get(model_id)
+    from dalston.orchestrator.catalog import get_catalog
+
+    catalog = get_catalog()
+    model = catalog.get_model(model_id)
+
+    if model is None:
+        return None
+
+    # Return dict-like structure for backward compatibility
+    return {
+        "runtime": model.runtime,
+        "runtime_model_id": model.runtime_model_id,
+        "supports_word_timestamps": model.word_timestamps,
+        "languages": model.languages,
+    }
+
+
+# Backward compatibility alias - deprecated, use resolve_model() instead
+def get_model_info(model_id: str) -> dict | None:
+    """Deprecated: Use resolve_model() instead."""
+    return resolve_model(model_id)
 
 
 def build_task_dag(job_id: UUID, audio_uri: str, parameters: dict) -> list[Task]:
