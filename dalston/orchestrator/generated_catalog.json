@@ -109,41 +109,6 @@
         "warm_start_latency_ms": 1000
       }
     },
-    "pyannote-3.1": {
-      "id": "pyannote-3.1",
-      "engine_id": "pyannote-3.1",
-      "name": "Pyannote Speaker Diarization 3.1",
-      "version": "1.0.0",
-      "stage": "diarize",
-      "description": "Speaker diarization using pyannote-audio 3.1.\nIdentifies who speaks when in an audio file.\n\nRequires HuggingFace token (HF_TOKEN) for accessing gated models.\nSupports optional min/max speaker count hints for improved accuracy.",
-      "image": "dalston/stt-batch-diarize-pyannote-3.1:1.0.0",
-      "capabilities": {
-        "stages": [
-          "diarize"
-        ],
-        "languages": null,
-        "supports_word_timestamps": false,
-        "supports_streaming": false,
-        "max_audio_duration": 7200,
-        "max_concurrency": 4
-      },
-      "hardware": {
-        "gpu_required": false,
-        "gpu_optional": true,
-        "min_vram_gb": 2,
-        "recommended_gpu": [
-          "t4"
-        ],
-        "supports_cpu": true,
-        "min_ram_gb": 6,
-        "memory": "6G"
-      },
-      "performance": {
-        "rtf_gpu": 0.1,
-        "rtf_cpu": 1.5,
-        "warm_start_latency_ms": 500
-      }
-    },
     "pyannote-4.0": {
       "id": "pyannote-4.0",
       "engine_id": "pyannote-4.0",
