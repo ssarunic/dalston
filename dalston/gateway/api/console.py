@@ -873,6 +873,7 @@ async def retry_console_job(
     api_key: RequireAdmin,
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
+    settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
 ) -> JobRetryResponse:
     """Retry a failed job (admin endpoint).
@@ -886,6 +887,17 @@ async def retry_console_job(
 
     if result is None:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # Clean up stale S3 task artifacts (best-effort)
+    try:
+        storage = StorageService(settings)
+        await storage.delete_job_task_artifacts(job_id)
+    except Exception:
+        logger.warning(
+            "retry_s3_cleanup_failed",
+            job_id=str(job_id),
+            exc_info=True,
+        )
 
     # Publish job.created event so orchestrator rebuilds the DAG
     await publish_job_created(redis, job_id)

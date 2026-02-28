@@ -150,6 +150,38 @@ class StorageService:
                         Delete={"Objects": objects},
                     )
 
+    async def delete_job_task_artifacts(self, job_id: UUID) -> None:
+        """Delete task artifacts and transcript for a job, preserving audio.
+
+        Deletes: tasks/*, transcript.json (preserves audio/*)
+
+        Used during job retry to clean up stale outputs before
+        the orchestrator rebuilds the task DAG.
+
+        Args:
+            job_id: Job UUID
+        """
+        prefixes = [
+            f"jobs/{job_id}/tasks/",
+            f"jobs/{job_id}/transcript.json",
+        ]
+
+        async with get_s3_client(self.settings) as s3:
+            for prefix in prefixes:
+                paginator = s3.get_paginator("list_objects_v2")
+                async for page in paginator.paginate(
+                    Bucket=self.bucket, Prefix=prefix
+                ):
+                    if "Contents" not in page:
+                        continue
+
+                    objects = [{"Key": obj["Key"]} for obj in page["Contents"]]
+                    if objects:
+                        await s3.delete_objects(
+                            Bucket=self.bucket,
+                            Delete={"Objects": objects},
+                        )
+
     async def delete_session_artifacts(self, session_id: UUID) -> None:
         """Delete all S3 artifacts for a realtime session.
 

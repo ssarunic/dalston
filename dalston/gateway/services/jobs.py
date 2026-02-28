@@ -9,8 +9,8 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from dalston.common.models import JobStatus, TaskStatus
-from dalston.db.models import JobModel, TaskModel
+from dalston.common.models import ArtifactOwnerType, ArtifactType, JobStatus, TaskStatus
+from dalston.db.models import ArtifactObjectModel, JobModel, TaskModel
 
 # Maximum number of times a job can be retried via the retry endpoint
 MAX_JOB_RETRIES = 3
@@ -373,6 +373,16 @@ class JobsService:
 
         # Delete existing tasks so the orchestrator rebuilds the DAG
         await db.execute(delete(TaskModel).where(TaskModel.job_id == job_id))
+
+        # Delete non-audio artifact rows so the retention system doesn't
+        # track stale outputs from the previous run.  Audio artifacts are
+        # preserved because the retry will reuse the original upload.
+        await db.execute(
+            delete(ArtifactObjectModel)
+            .where(ArtifactObjectModel.owner_type == ArtifactOwnerType.JOB.value)
+            .where(ArtifactObjectModel.owner_id == job_id)
+            .where(ArtifactObjectModel.artifact_type != ArtifactType.AUDIO_SOURCE.value)
+        )
 
         # Reset job to PENDING
         job.status = JobStatus.PENDING.value

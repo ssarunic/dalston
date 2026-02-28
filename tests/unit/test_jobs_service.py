@@ -502,7 +502,7 @@ class TestJobsServiceRetryJob:
         assert job.result_character_count is None
         assert job.pii_entities_detected is None
         assert job.pii_redacted_audio_uri is None
-        mock_db.execute.assert_awaited_once()  # DELETE tasks
+        assert mock_db.execute.await_count == 2  # DELETE tasks + DELETE artifact rows
         mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio

@@ -876,6 +876,7 @@ async def retry_transcription(
     api_key: RequireJobsWrite,
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
+    settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> JobRetryResponse:
@@ -883,8 +884,9 @@ async def retry_transcription(
 
     1. Validate job is FAILED and under the retry limit
     2. Check audio hasn't been purged
-    3. Reset job status to PENDING, delete old tasks
-    4. Publish job.created event for orchestrator to rebuild the DAG
+    3. Reset job + delete old tasks and artifact DB rows
+    4. Delete stale task artifacts from S3
+    5. Publish job.created event for orchestrator to rebuild the DAG
     """
     # Fetch the job first to check audio purge status
     job = await jobs_service.get_job_with_tasks(
@@ -909,6 +911,17 @@ async def retry_transcription(
 
     if result is None:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # Clean up stale S3 task artifacts (best-effort, don't fail the retry)
+    try:
+        storage = StorageService(settings)
+        await storage.delete_job_task_artifacts(job_id)
+    except Exception:
+        logger.warning(
+            "retry_s3_cleanup_failed",
+            job_id=str(job_id),
+            exc_info=True,
+        )
 
     # Publish job.created event so orchestrator rebuilds the DAG
     await publish_job_created(redis, job_id)

@@ -34,7 +34,6 @@ from dalston.common.models import JobStatus
 from dalston.config import Settings
 from dalston.gateway.dependencies import (
     RequireJobsRead,
-    RequireJobsWrite,
     RequireJobsWriteRateLimited,
     get_audit_service,
     get_db,
@@ -436,57 +435,6 @@ def _format_elevenlabs_response(
         text=transcript.get("text", ""),
         words=words,
         transcription_id=str(transcription_id),
-    )
-
-
-# =============================================================================
-# POST /v1/speech-to-text/transcripts/{id}/retry - Retry Failed Transcription
-# =============================================================================
-
-
-class ElevenLabsRetryResponse(BaseModel):
-    """Response for retry request in ElevenLabs format."""
-
-    transcription_id: str
-    status: str
-    message: str
-
-
-@router.post(
-    "/transcripts/{transcription_id}/retry",
-    response_model=ElevenLabsRetryResponse,
-    summary="Retry failed transcription (ElevenLabs compatible)",
-    description="Retry a failed transcription. Resets to pending and re-queues for processing.",
-    responses={
-        200: {"description": "Transcription queued for retry"},
-        404: {"description": "Transcription not found"},
-        409: {"description": "Transcription is not in a retryable state"},
-    },
-)
-async def retry_transcript(
-    transcription_id: UUID,
-    api_key: RequireJobsWrite,
-    db: AsyncSession = Depends(get_db),
-    redis: Redis = Depends(get_redis),
-    jobs_service: JobsService = Depends(get_jobs_service),
-) -> ElevenLabsRetryResponse:
-    """Retry a failed transcription (ElevenLabs compatible)."""
-    try:
-        result = await jobs_service.retry_job(
-            db, transcription_id, tenant_id=api_key.tenant_id
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from None
-
-    if result is None:
-        raise HTTPException(status_code=404, detail="Transcription not found")
-
-    await publish_job_created(redis, transcription_id)
-
-    return ElevenLabsRetryResponse(
-        transcription_id=str(result.job.id),
-        status="pending",
-        message=f"Transcription queued for retry (attempt {result.job.retry_count} of 3).",
     )
 
 
