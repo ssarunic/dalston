@@ -252,7 +252,8 @@ def _build_dag_with_engines(
             else runtime_model_id
         )
         transcribe_config["model"] = model_name
-    else:
+    elif "model" not in transcribe_config:
+        # Only set default if user didn't provide a model in transcribe_config
         transcribe_config["model"] = DEFAULT_TRANSCRIBE_CONFIG["model"]
 
     tasks: list[Task] = []

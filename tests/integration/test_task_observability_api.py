@@ -83,6 +83,8 @@ def _create_mock_job(
     job.result_segment_count = None
     job.result_speaker_count = None
     job.result_character_count = None
+    # Parameters dict
+    job.parameters = {}
     return job
 
 
