@@ -454,6 +454,7 @@ services:
       DALSTON_NEMO_ALLOW_CPU: "true"
     volumes:
       - nemo-models:/models
+    shm_size: '2gb'
     depends_on: *batch-depends
     restart: unless-stopped
 

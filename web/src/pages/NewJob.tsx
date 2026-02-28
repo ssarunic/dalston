@@ -12,7 +12,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useCreateJob } from '@/hooks/useCreateJob'
-import { useCapabilities, useEnginesList } from '@/hooks/useCapabilities'
+import { useCapabilities } from '@/hooks/useCapabilities'
+import { useTranscriptionModels } from '@/hooks/useModels'
 import type {
   SpeakerDetection,
   TimestampsGranularity,
@@ -204,9 +205,9 @@ export function NewJob() {
   const createJob = useCreateJob()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Fetch capabilities and engines for dynamic options
+  // Fetch capabilities and models for dynamic options
   const { data: capabilities } = useCapabilities()
-  const { data: enginesList } = useEnginesList()
+  const { data: modelsResponse } = useTranscriptionModels()
 
   // Source
   const [sourceType, setSourceType] = useState<SourceType>('file')
@@ -229,13 +230,15 @@ export function NewJob() {
   const [retentionMode, setRetentionMode] = useState<RetentionMode>('default')
   const [retentionDays, setRetentionDays] = useState('30')
 
-  // Compute available models (running transcribe engines)
+  // Compute available models from the model catalog
   const availableModels = useMemo(() => {
-    if (!enginesList?.engines) return []
-    return enginesList.engines
-      .filter((e) => e.stage === 'transcribe' && e.status === 'running')
-      .map((e) => ({ id: e.id, name: e.name || e.id, languages: e.capabilities.languages }))
-  }, [enginesList])
+    if (!modelsResponse?.data) return []
+    return modelsResponse.data.map((m) => ({
+      id: m.id,
+      name: m.name,
+      languages: m.languages,
+    }))
+  }, [modelsResponse])
 
   // Compute available languages based on capabilities and selected model
   const languageOptions = useMemo(() => {

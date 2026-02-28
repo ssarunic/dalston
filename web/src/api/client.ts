@@ -18,6 +18,7 @@ import type {
   HealthResponse,
   JobDetail,
   JobStatsResponse,
+  ModelListResponse,
   NamespaceSettings,
   RealtimeSessionDetail,
   RealtimeSessionListParams,
@@ -202,6 +203,14 @@ export const apiClient = {
   // Aggregate capabilities of running engines
   getCapabilities: () =>
     currentClient.get('v1/engines/capabilities').json<CapabilitiesResponse>(),
+
+  // Model catalog (M36 - list all available model variants)
+  getModels: (params: { runtime?: string; stage?: string } = {}) => {
+    const searchParams = new URLSearchParams()
+    if (params.runtime) searchParams.set('runtime', params.runtime)
+    if (params.stage) searchParams.set('stage', params.stage)
+    return currentClient.get('v1/models', { searchParams }).json<ModelListResponse>()
+  },
 
   // Delete a job (admin required, job must be in terminal state)
   deleteJob: (jobId: string) =>
