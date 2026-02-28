@@ -14,7 +14,7 @@ Design principles:
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # =============================================================================
 # Enums
@@ -346,6 +346,19 @@ class DiarizeInput(BaseModel):
         default=None, ge=1, description="Maximum for auto-detect"
     )
     detect_overlap: bool = Field(default=True, description="Detect overlapping speech")
+
+    @model_validator(mode="after")
+    def _validate_speaker_range(self) -> "DiarizeInput":
+        if (
+            self.min_speakers is not None
+            and self.max_speakers is not None
+            and self.min_speakers > self.max_speakers
+        ):
+            raise ValueError(
+                f"min_speakers ({self.min_speakers}) must not exceed "
+                f"max_speakers ({self.max_speakers})"
+            )
+        return self
 
 
 class MergeInput(BaseModel):

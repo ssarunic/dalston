@@ -178,6 +178,18 @@ async def create_transcription(
     4. Publish job.created event to Redis
     5. Return job ID for polling
     """
+    # Validate min_speakers / max_speakers consistency
+    if (
+        min_speakers is not None
+        and max_speakers is not None
+        and min_speakers > max_speakers
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"min_speakers ({min_speakers}) must not exceed "
+            f"max_speakers ({max_speakers})",
+        )
+
     # Ingest audio (validates input, downloads from URL if needed, probes metadata)
     ingested = await ingestion_service.ingest(file=file, url=audio_url)
 

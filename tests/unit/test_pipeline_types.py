@@ -12,6 +12,7 @@ from dalston.common.pipeline_types import (
     AlignOutput,
     AudioMedia,
     Character,
+    DiarizeInput,
     DiarizeOutput,
     MergedSegment,
     MergeOutput,
@@ -740,3 +741,32 @@ class TestModelValidation:
                 sample_rate=0,
                 channels=1,
             )
+
+    def test_diarize_input_rejects_min_greater_than_max(self):
+        """min_speakers > max_speakers raises ValidationError."""
+        with pytest.raises(ValidationError, match="min_speakers.*must not exceed.*max_speakers"):
+            DiarizeInput(min_speakers=5, max_speakers=2)
+
+    def test_diarize_input_accepts_min_equal_to_max(self):
+        """min_speakers == max_speakers is valid (exact speaker count)."""
+        d = DiarizeInput(min_speakers=3, max_speakers=3)
+        assert d.min_speakers == 3
+        assert d.max_speakers == 3
+
+    def test_diarize_input_accepts_min_less_than_max(self):
+        """min_speakers < max_speakers is valid."""
+        d = DiarizeInput(min_speakers=2, max_speakers=5)
+        assert d.min_speakers == 2
+        assert d.max_speakers == 5
+
+    def test_diarize_input_accepts_only_min_speakers(self):
+        """Only min_speakers set (max_speakers=None) is valid."""
+        d = DiarizeInput(min_speakers=2)
+        assert d.min_speakers == 2
+        assert d.max_speakers is None
+
+    def test_diarize_input_accepts_only_max_speakers(self):
+        """Only max_speakers set (min_speakers=None) is valid."""
+        d = DiarizeInput(max_speakers=5)
+        assert d.min_speakers is None
+        assert d.max_speakers == 5

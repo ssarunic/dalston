@@ -7,7 +7,9 @@ speaker_detection modes: none, diarize, and per_channel.
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
+from dalston.gateway.models.requests import TranscriptionCreateParams
 from dalston.orchestrator.dag import build_task_dag
 
 
@@ -426,3 +428,58 @@ class TestPerChannelParameterization:
 
         # prepare + 3 transcribe + 3 align = 7
         assert len(merge_deps) == 7
+
+
+# ---------------------------------------------------------------------------
+# Speaker count validation
+# ---------------------------------------------------------------------------
+
+
+class TestSpeakerCountValidation:
+    """Tests that min_speakers > max_speakers is rejected at the API model level."""
+
+    def test_min_speakers_greater_than_max_speakers_rejected(self):
+        """min_speakers > max_speakers raises ValidationError."""
+        with pytest.raises(
+            ValidationError, match="min_speakers.*must not exceed.*max_speakers"
+        ):
+            TranscriptionCreateParams(min_speakers=5, max_speakers=2)
+
+    def test_min_speakers_equal_to_max_speakers_accepted(self):
+        """min_speakers == max_speakers is valid (exact speaker count)."""
+        params = TranscriptionCreateParams(min_speakers=3, max_speakers=3)
+        assert params.min_speakers == 3
+        assert params.max_speakers == 3
+
+    def test_min_speakers_less_than_max_speakers_accepted(self):
+        """min_speakers < max_speakers is the normal valid range."""
+        params = TranscriptionCreateParams(min_speakers=2, max_speakers=5)
+        assert params.min_speakers == 2
+        assert params.max_speakers == 5
+
+    def test_only_min_speakers_accepted(self):
+        """Only min_speakers set is valid."""
+        params = TranscriptionCreateParams(min_speakers=2)
+        assert params.min_speakers == 2
+        assert params.max_speakers is None
+
+    def test_only_max_speakers_accepted(self):
+        """Only max_speakers set is valid."""
+        params = TranscriptionCreateParams(max_speakers=5)
+        assert params.min_speakers is None
+        assert params.max_speakers == 5
+
+    def test_neither_speakers_set_accepted(self):
+        """Neither min nor max set is valid (auto-detect)."""
+        params = TranscriptionCreateParams()
+        assert params.min_speakers is None
+        assert params.max_speakers is None
+
+    def test_to_job_parameters_preserves_valid_range(self):
+        """Valid speaker range propagates through to_job_parameters()."""
+        params = TranscriptionCreateParams(
+            min_speakers=2, max_speakers=5, speaker_detection="diarize"
+        )
+        job_params = params.to_job_parameters()
+        assert job_params["min_speakers"] == 2
+        assert job_params["max_speakers"] == 5

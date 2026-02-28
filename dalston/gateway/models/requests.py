@@ -1,6 +1,6 @@
 """Pydantic request schemas for Gateway API."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class TranscriptionCreateParams(BaseModel):
@@ -50,6 +50,19 @@ class TranscriptionCreateParams(BaseModel):
         default=False,
         description="Exclusive diarization mode (pyannote 4.0+): one speaker per segment",
     )
+
+    @model_validator(mode="after")
+    def _validate_speaker_range(self) -> "TranscriptionCreateParams":
+        if (
+            self.min_speakers is not None
+            and self.max_speakers is not None
+            and self.min_speakers > self.max_speakers
+        ):
+            raise ValueError(
+                f"min_speakers ({self.min_speakers}) must not exceed "
+                f"max_speakers ({self.max_speakers})"
+            )
+        return self
 
     # Timestamps (M03)
     timestamps_granularity: str = Field(
