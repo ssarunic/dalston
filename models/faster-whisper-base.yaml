@@ -1,0 +1,35 @@
+# Model catalog entry for faster-whisper-base
+# This file defines the model variant metadata for runtime model management (M36)
+
+schema_version: "1.1"
+id: faster-whisper-base
+runtime: faster-whisper
+runtime_model_id: "base"  # String passed to WhisperModel()
+
+name: Faster Whisper Base
+source: Systran/faster-whisper-base
+size_gb: 0.3
+stage: transcribe
+
+description: |
+  OpenAI Whisper base model via faster-whisper (CTranslate2).
+  Good balance of speed and accuracy for general transcription.
+  Supports 99 languages with automatic language detection.
+
+languages: null  # null means multilingual (99 languages)
+
+capabilities:
+  word_timestamps: false  # Has timestamps but they're inaccurate; use alignment stage
+  punctuation: false
+  capitalization: false
+  streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  min_vram_gb: 2
+  supports_cpu: true
+  min_ram_gb: 4
+
+performance:
+  rtf_gpu: 0.03
+  rtf_cpu: 0.4

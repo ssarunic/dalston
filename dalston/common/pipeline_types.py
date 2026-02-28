@@ -565,14 +565,6 @@ class PIIEntityCategory(str, Enum):
     PHI = "phi"  # Health: MRN, conditions, medications, etc.
 
 
-class PIIDetectionTier(str, Enum):
-    """PII detection tier controlling speed/accuracy tradeoff."""
-
-    FAST = "fast"  # Presidio regex only (<5ms)
-    STANDARD = "standard"  # Presidio + GLiNER (~100ms)
-    THOROUGH = "thorough"  # Presidio + GLiNER + LLM (1-3s)
-
-
 class PIIRedactionMode(str, Enum):
     """Audio redaction mode."""
 
@@ -606,7 +598,6 @@ class PIIMetadata(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    detection_tier: PIIDetectionTier = Field(..., description="Detection tier used")
     entities_detected: int = Field(..., ge=0, description="Total entities detected")
     entity_count_by_type: dict[str, int] = Field(
         default_factory=dict, description="Count per entity type"
@@ -633,7 +624,6 @@ class PIIDetectOutput(BaseModel):
     entity_count_by_category: dict[str, int] = Field(
         default_factory=dict, description="Count per category"
     )
-    detection_tier: PIIDetectionTier = Field(..., description="Detection tier used")
     processing_time_ms: int = Field(..., ge=0, description="Processing time in ms")
 
     # Standard output fields

@@ -245,6 +245,7 @@ class TestSelectEngine:
     def mock_catalog(self):
         catalog = MagicMock(spec=EngineCatalog)
         catalog.find_engines.return_value = []
+        catalog.get_model.return_value = None  # Default: not a model ID
         return catalog
 
     @pytest.mark.asyncio
@@ -456,6 +457,7 @@ class TestSelectPipelineEngines:
     def mock_catalog(self):
         catalog = MagicMock(spec=EngineCatalog)
         catalog.find_engines.return_value = []
+        catalog.get_model.return_value = None  # Default: not a model ID
         return catalog
 
     @pytest.mark.asyncio
@@ -467,7 +469,7 @@ class TestSelectPipelineEngines:
                 "transcribe": make_capabilities(
                     "faster-whisper", supports_word_timestamps=False
                 ),
-                "align": make_capabilities("whisperx-align"),
+                "align": make_capabilities("phoneme-align"),
                 "merge": make_capabilities("final-merger"),
             }
             caps = stages_caps.get(stage)
@@ -530,7 +532,7 @@ class TestSelectPipelineEngines:
             stages_caps = {
                 "prepare": make_capabilities("audio-prepare"),
                 "transcribe": make_capabilities("faster-whisper"),
-                "align": make_capabilities("whisperx-align"),
+                "align": make_capabilities("phoneme-align"),
                 "diarize": make_capabilities("pyannote-3.1"),
                 "merge": make_capabilities("final-merger"),
             }

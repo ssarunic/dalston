@@ -5,11 +5,15 @@ import type {
   AuditListParams,
   AuditListResponse,
   AudioUrlResponse,
+  CapabilitiesResponse,
   ConsoleJobListResponse,
   CreateAPIKeyRequest,
+  CreateJobRequest,
+  CreateJobResponse,
   CreateWebhookRequest,
   DashboardResponse,
   DeliveryListResponse,
+  EnginesListResponse,
   EnginesResponse,
   HealthResponse,
   JobDetail,
@@ -120,6 +124,65 @@ export const apiClient = {
   getJob: (jobId: string) =>
     currentClient.get(`v1/audio/transcriptions/${jobId}`).json<JobDetail>(),
 
+  // Create a new transcription job (multipart/form-data)
+  createJob: async (request: CreateJobRequest): Promise<CreateJobResponse> => {
+    const formData = new FormData()
+
+    // Source (one of file or audio_url)
+    if (request.file) {
+      formData.append('file', request.file)
+    } else if (request.audio_url) {
+      formData.append('audio_url', request.audio_url)
+    }
+
+    // Basic settings
+    if (request.language) {
+      formData.append('language', request.language)
+    }
+    if (request.speaker_detection) {
+      formData.append('speaker_detection', request.speaker_detection)
+    }
+    if (request.num_speakers !== undefined) {
+      formData.append('num_speakers', String(request.num_speakers))
+    }
+    if (request.min_speakers !== undefined) {
+      formData.append('min_speakers', String(request.min_speakers))
+    }
+    if (request.max_speakers !== undefined) {
+      formData.append('max_speakers', String(request.max_speakers))
+    }
+    if (request.timestamps_granularity) {
+      formData.append('timestamps_granularity', request.timestamps_granularity)
+    }
+
+    // Advanced settings
+    if (request.model) {
+      formData.append('model', request.model)
+    }
+    if (request.vocabulary && request.vocabulary.length > 0) {
+      formData.append('vocabulary', JSON.stringify(request.vocabulary))
+    }
+    if (request.retention) {
+      formData.append('retention', request.retention)
+    }
+
+    // PII settings
+    if (request.pii_detection !== undefined) {
+      formData.append('pii_detection', String(request.pii_detection))
+    }
+    if (request.pii_entity_types && request.pii_entity_types.length > 0) {
+      formData.append('pii_entity_types', JSON.stringify(request.pii_entity_types))
+    }
+    if (request.redact_pii_audio !== undefined) {
+      formData.append('redact_pii_audio', String(request.redact_pii_audio))
+    }
+    if (request.pii_redaction_mode) {
+      formData.append('pii_redaction_mode', request.pii_redaction_mode)
+    }
+
+    return currentClient.post('v1/audio/transcriptions', { body: formData }).json<CreateJobResponse>()
+  },
+
   // Tasks (admin required)
   getJobTasks: (jobId: string) =>
     currentClient.get(`api/console/jobs/${jobId}/tasks`).json<TaskListResponse>(),
@@ -132,9 +195,17 @@ export const apiClient = {
   getRealtimeStatus: () =>
     currentClient.get('v1/realtime/status').json<RealtimeStatusResponse>(),
 
-  // Engines (admin required)
+  // Engines (admin required) - console endpoint for dashboard
   getEngines: () =>
     currentClient.get('api/console/engines').json<EnginesResponse>(),
+
+  // Engine discovery API (v1/engines)
+  getEnginesList: () =>
+    currentClient.get('v1/engines').json<EnginesListResponse>(),
+
+  // Aggregate capabilities of running engines
+  getCapabilities: () =>
+    currentClient.get('v1/engines/capabilities').json<CapabilitiesResponse>(),
 
   // Delete a job (admin required, job must be in terminal state)
   deleteJob: (jobId: string) =>

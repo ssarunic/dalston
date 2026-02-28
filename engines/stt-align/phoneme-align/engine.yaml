@@ -1,15 +1,17 @@
 schema_version: "1.1"
-id: whisperx-align
+id: phoneme-align
+runtime: phoneme-align
 stage: align
-name: WhisperX Alignment
+name: Phoneme Forced Alignment
 version: 1.0.0
 description: |
-  Word-level timestamp alignment using WhisperX with wav2vec2-based
-  forced alignment. Produces more accurate word boundaries than
-  transcription-time estimates.
+  Word-level timestamp alignment using CTC forced alignment with
+  wav2vec2 models. Standalone reimplementation of the phoneme alignment
+  algorithm from the WhisperX paper (Bain et al., INTERSPEECH 2023).
 
-  Loads language-specific alignment models lazily on first use.
-  Supports 100+ languages via wav2vec2 models from HuggingFace.
+  Does not depend on the whisperx package. Uses torchaudio pipeline
+  models for major European languages and HuggingFace wav2vec2 models
+  for 35+ additional languages.
 
 container:
   gpu: optional  # Recommended for performance; falls back to CPU
@@ -97,11 +99,6 @@ output_schema:
     word_timestamps:
       type: boolean
       description: Always true for this engine
-
-hf_compat:
-  pipeline_tag: automatic-speech-recognition
-  library_name: whisperx
-  license: bsd-2-clause
 
 hardware:
   min_vram_gb: 2

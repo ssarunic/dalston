@@ -96,7 +96,7 @@ class TestFinalMergerEngineOutput:
                         "text": "Hello world",
                         "language": "en",
                         "word_timestamps": True,
-                        "engine_id": "whisperx-align",
+                        "engine_id": "phoneme-align",
                     },
                 },
                 config={"speaker_detection": "none", "word_timestamps": True},
@@ -305,7 +305,7 @@ class TestFinalMergerEngineOutput:
                         "text": "Hello",
                         "language": "xx",
                         "word_timestamps": False,
-                        "engine_id": "whisperx-align",
+                        "engine_id": "phoneme-align",
                         "skipped": True,
                         "skip_reason": "No alignment model for language 'xx'",
                         "warnings": ["No alignment model for language 'xx'"],
@@ -397,7 +397,7 @@ class TestOutputValidation:
             unaligned_words=[],
             unaligned_ratio=0.0,
             granularity_achieved=TimestampGranularity.WORD,
-            engine_id="whisperx-align",
+            engine_id="phoneme-align",
         )
 
         data = output.model_dump(mode="json")

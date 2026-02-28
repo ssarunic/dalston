@@ -30,14 +30,17 @@ class EngineSelectionResult:
     """Result of engine selection.
 
     Attributes:
-        engine_id: Selected engine identifier
+        engine_id: Selected engine identifier (runtime ID, e.g., "nemo", "faster-whisper")
         capabilities: Engine's declared capabilities
         selection_reason: Human-readable explanation of why this engine was selected
+        runtime_model_id: Model ID to pass to the engine (e.g., "nvidia/parakeet-tdt-1.1b")
+                         Only set when user requested a specific model variant.
     """
 
     engine_id: str
     capabilities: EngineCapabilities
     selection_reason: str
+    runtime_model_id: str | None = None
 
 
 class NoCapableEngineError(Exception):
@@ -269,27 +272,82 @@ async def select_engine(
     """Select best engine for a pipeline stage.
 
     Selection process:
-    1. If user specified an engine, validate it can handle requirements
-    2. Get all running engines for the stage from registry
-    3. Filter by hard requirements (language, streaming)
-    4. Rank remaining engines by capabilities
-    5. Return best match, or raise NoCapableEngineError with alternatives
+    1. If user specified a model ID, resolve it to runtime + runtime_model_id
+    2. If user specified an engine ID, validate it can handle requirements
+    3. Get all running engines for the stage from registry
+    4. Filter by hard requirements (language, streaming)
+    5. Rank remaining engines by capabilities
+    6. Return best match, or raise NoCapableEngineError with alternatives
 
     Args:
         stage: Pipeline stage (e.g., "transcribe", "diarize")
         requirements: Job requirements from extract_requirements()
         registry: Batch engine registry (running engines)
         catalog: Engine catalog (all available engines)
-        user_preference: Optional engine_id override from user
+        user_preference: Optional model ID (e.g., "parakeet-tdt-1.1b") or
+                        engine ID (e.g., "nemo") from user
 
     Returns:
-        EngineSelectionResult with selected engine
+        EngineSelectionResult with selected engine and optional runtime_model_id
 
     Raises:
         NoCapableEngineError: If no running engine can handle requirements
     """
     # 1. Validate explicit user choice if provided
     if user_preference:
+        # First, try to resolve as a model ID from the catalog
+        model = catalog.get_model(user_preference)
+        if model is not None:
+            # User specified a model ID (e.g., "parakeet-tdt-1.1b")
+            # Resolve to runtime and look up in registry
+            runtime_id = model.runtime
+            runtime_model_id = model.runtime_model_id
+
+            engine = await registry.get_engine(runtime_id)
+            if engine is None or not engine.is_available:
+                # Runtime not running
+                catalog_alts = catalog.find_engines(stage, requirements)
+                raise NoCapableEngineError(
+                    stage=stage,
+                    requirements=requirements,
+                    candidates=[],
+                    catalog_alternatives=catalog_alts,
+                )
+
+            # Check model's language requirements (from catalog)
+            if model.languages is not None:
+                lang = requirements.get("language")
+                if lang and lang.lower() not in [
+                    lng.lower() for lng in model.languages
+                ]:
+                    catalog_alts = catalog.find_engines(stage, requirements)
+                    raise NoCapableEngineError(
+                        stage=stage,
+                        requirements=requirements,
+                        candidates=[engine],
+                        catalog_alternatives=catalog_alts,
+                    )
+
+            logger.info(
+                "engine_selected",
+                stage=stage,
+                selected_engine=runtime_id,
+                runtime_model_id=runtime_model_id,
+                selection_reason="user model preference",
+                original_model_id=user_preference,
+            )
+
+            return EngineSelectionResult(
+                engine_id=runtime_id,
+                capabilities=engine.capabilities
+                or EngineCapabilities(
+                    engine_id=runtime_id, version="unknown", stages=[stage]
+                ),
+                selection_reason="user model preference",
+                runtime_model_id=runtime_model_id,
+            )
+
+        # Not a model ID, try as direct engine ID
         engine = await registry.get_engine(user_preference)
         if engine is None or not engine.is_available:
             # User-specified engine not running

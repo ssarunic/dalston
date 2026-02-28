@@ -35,6 +35,7 @@ class WorkerInfo:
         models: List of model names this worker supports (e.g., ["faster-whisper-large-v3"])
         languages: List of language codes supported (e.g., ["en", "es", "auto"])
         engine: Engine type identifier (e.g., "parakeet", "whisper")
+        supports_vocabulary: Whether this engine supports vocabulary boosting
     """
 
     worker_id: str
@@ -43,6 +44,7 @@ class WorkerInfo:
     models: list[str]
     languages: list[str]
     engine: str = "unknown"
+    supports_vocabulary: bool = False
 
 
 class WorkerRegistry:
@@ -127,6 +129,7 @@ class WorkerRegistry:
                 "models_loaded": json.dumps(info.models),
                 "languages_supported": json.dumps(info.languages),
                 "engine": info.engine,
+                "supports_vocabulary": "true" if info.supports_vocabulary else "false",
                 "last_heartbeat": datetime.now(UTC).isoformat(),
                 "started_at": datetime.now(UTC).isoformat(),
             },

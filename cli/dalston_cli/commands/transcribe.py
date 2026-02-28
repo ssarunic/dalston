@@ -7,7 +7,6 @@ from typing import Annotated, Literal
 
 import typer
 from dalston_sdk import (
-    PIIDetectionTier,
     PIIRedactionMode,
     SpeakerDetection,
     TimestampGranularity,
@@ -24,7 +23,6 @@ from dalston_cli.output import (
 FormatType = Literal["txt", "json", "srt", "vtt"]
 SpeakerMode = Literal["none", "diarize", "per-channel"]
 TimestampMode = Literal["none", "segment", "word"]
-PIITier = Literal["fast", "standard", "thorough"]
 PIIRedactMode = Literal["silence", "beep"]
 
 
@@ -156,13 +154,6 @@ def transcribe(
             help="Enable PII detection in transcript.",
         ),
     ] = False,
-    pii_tier: Annotated[
-        PIITier | None,
-        typer.Option(
-            "--pii-tier",
-            help="PII detection tier: fast (regex), standard (regex+ML), thorough (regex+ML+LLM).",
-        ),
-    ] = None,
     pii_entities: Annotated[
         str | None,
         typer.Option(
@@ -219,7 +210,7 @@ def transcribe(
 
         dalston transcribe audio.mp3 --show-words  # Display word-level timestamps
 
-        dalston transcribe call.mp3 --pii --pii-tier standard  # Detect PII entities
+        dalston transcribe call.mp3 --pii  # Detect PII entities
 
         dalston transcribe call.mp3 --pii --redact-audio --redaction-mode beep  # Detect and redact PII
 
@@ -263,16 +254,6 @@ def transcribe(
         "word": TimestampGranularity.WORD,
     }
     timestamps_granularity = timestamps_map[timestamps]
-
-    # Map PII detection tier
-    pii_detection_tier = None
-    if pii_tier:
-        pii_tier_map = {
-            "fast": PIIDetectionTier.FAST,
-            "standard": PIIDetectionTier.STANDARD,
-            "thorough": PIIDetectionTier.THOROUGH,
-        }
-        pii_detection_tier = pii_tier_map[pii_tier]
 
     # Parse PII entity types
     pii_entity_types = None
@@ -325,7 +306,6 @@ def transcribe(
                 max_speakers=max_speakers,
                 timestamps_granularity=timestamps_granularity,
                 pii_detection=pii_detection,
-                pii_detection_tier=pii_detection_tier,
                 pii_entity_types=pii_entity_types,
                 redact_pii_audio=redact_audio,
                 pii_redaction_mode=pii_redaction_mode,

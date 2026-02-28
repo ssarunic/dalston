@@ -37,6 +37,7 @@ class WorkerState:
         models_loaded: List of available model variants
         languages_supported: List of supported language codes
         engine: Engine type identifier (e.g., "parakeet", "whisper")
+        supports_vocabulary: Whether this engine supports vocabulary boosting
         gpu_memory_used: GPU memory usage string
         gpu_memory_total: Total GPU memory string
         last_heartbeat: Last heartbeat timestamp
@@ -51,6 +52,7 @@ class WorkerState:
     models_loaded: list[str]
     languages_supported: list[str]
     engine: str
+    supports_vocabulary: bool
     gpu_memory_used: str
     gpu_memory_total: str
     last_heartbeat: datetime
@@ -203,6 +205,7 @@ class WorkerRegistry:
             models_loaded=json.loads(data.get("models_loaded", "[]")),
             languages_supported=json.loads(data.get("languages_supported", "[]")),
             engine=data.get("engine", "unknown"),
+            supports_vocabulary=data.get("supports_vocabulary", "false") == "true",
             gpu_memory_used=data.get("gpu_memory_used", "0GB"),
             gpu_memory_total=data.get("gpu_memory_total", "0GB"),
             last_heartbeat=self._parse_datetime(data.get("last_heartbeat")),

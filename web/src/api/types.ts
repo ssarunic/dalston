@@ -64,7 +64,6 @@ export interface PIIEntity {
 
 export interface PIIInfo {
   enabled: boolean
-  detection_tier?: string
   entities_detected?: number
   entity_summary?: Record<string, number>
   redacted_audio_available: boolean
@@ -175,6 +174,7 @@ export interface WorkerStatus {
   active_sessions: number
   models: string[]
   languages: string[]
+  supports_vocabulary?: boolean
 }
 
 export interface CapacityInfo {
@@ -411,6 +411,26 @@ export interface UnifiedSegment {
   confidence?: number
 }
 
+// Live transcription types (browser-side real-time session)
+export interface LiveTranscriptSegment {
+  id: string
+  text: string
+  start: number
+  end: number
+  confidence?: number
+  words?: Array<{ word: string; start: number; end: number; confidence: number }>
+}
+
+export interface LiveSessionConfig {
+  language: string
+  model: string
+  enableVad: boolean
+  interimResults: boolean
+  vocabulary?: string[]
+}
+
+export type LiveSessionState = 'idle' | 'connecting' | 'recording' | 'stopping' | 'completed' | 'error'
+
 // Audit Log types
 export type AuditActorType = 'api_key' | 'system' | 'console_user' | 'webhook'
 
@@ -523,4 +543,74 @@ export interface AuditListParams {
   sort?: 'timestamp_desc' | 'timestamp_asc'
   limit?: number
   cursor?: string
+}
+
+// Job creation types
+export type SpeakerDetection = 'none' | 'diarize' | 'per_channel'
+export type TimestampsGranularity = 'none' | 'segment' | 'word'
+export type PIIRedactionMode = 'silence' | 'beep'
+
+export interface CreateJobRequest {
+  // Source (one of these is required)
+  file?: File
+  audio_url?: string
+  // Basic settings
+  language?: string
+  speaker_detection?: SpeakerDetection
+  num_speakers?: number
+  min_speakers?: number
+  max_speakers?: number
+  timestamps_granularity?: TimestampsGranularity
+  // Advanced settings
+  model?: string
+  vocabulary?: string[]
+  retention?: string
+  // PII settings
+  pii_detection?: boolean
+  pii_entity_types?: string[]
+  redact_pii_audio?: boolean
+  pii_redaction_mode?: PIIRedactionMode
+}
+
+export interface CreateJobResponse {
+  id: string
+  status: JobStatus
+  created_at: string
+}
+
+// Capabilities types (for /v1/engines and /v1/engines/capabilities)
+export interface EngineCapabilities {
+  languages: string[] | null
+  supports_word_timestamps: boolean
+  supports_streaming: boolean
+  max_audio_duration_s: number | null
+  max_concurrency: number | null
+}
+
+export interface Engine {
+  id: string
+  name: string | null
+  stage: string
+  version: string
+  status: 'running' | 'available' | 'unhealthy'
+  capabilities: EngineCapabilities
+}
+
+export interface EnginesListResponse {
+  engines: Engine[]
+  total: number
+}
+
+export interface StageCapabilities {
+  engines: string[]
+  languages: string[] | null
+  supports_word_timestamps: boolean
+  supports_streaming: boolean
+}
+
+export interface CapabilitiesResponse {
+  languages: string[]
+  stages: Record<string, StageCapabilities>
+  max_audio_duration_s: number | null
+  supported_formats: string[]
 }

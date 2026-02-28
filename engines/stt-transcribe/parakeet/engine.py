@@ -1,4 +1,4 @@
-"""NVIDIA Parakeet transcription engine.
+"""NVIDIA Parakeet transcription engine with runtime model swapping.
 
 Uses NVIDIA NeMo Parakeet FastConformer models with CTC or TDT decoders
 for fast English-only speech-to-text transcription with GPU acceleration.
@@ -16,12 +16,18 @@ audio up to 3 hours on T4/A10g GPUs.
 Vocabulary boosting: Supports GPU-PB (GPU-accelerated Phrase Boosting) for
 biasing recognition toward specific terms without retraining.
 
+Phase 1 (Runtime Model Management):
+    This engine now supports loading any Parakeet model variant at runtime.
+    The model to load is specified via config["runtime_model_id"] in the task,
+    falling back to DALSTON_DEFAULT_MODEL_ID environment variable.
+
 Environment variables:
-    MODEL_VARIANT: Model variant (ctc-0.6b, ctc-1.1b, tdt-0.6b-v3, tdt-1.1b).
-                   Defaults to ctc-0.6b.
-    DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
+    DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "nemo")
+    DALSTON_DEFAULT_MODEL_ID: Default NeMo model ID (default: "nvidia/parakeet-tdt-1.1b")
+    DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
 """
 
+import gc
 import os
 import tempfile
 from pathlib import Path
@@ -43,7 +49,7 @@ from dalston.engine_sdk import (
 
 
 class ParakeetEngine(Engine):
-    """NVIDIA Parakeet transcription engine.
+    """NVIDIA Parakeet transcription engine with runtime model swapping.
 
     Uses FastConformer encoder with CTC or TDT decoder for efficient
     English-only transcription. Automatically produces word-level
@@ -55,63 +61,50 @@ class ParakeetEngine(Engine):
 
     Supports both GPU (CUDA) and CPU inference. GPU is strongly
     recommended for production use.
+
+    Phase 1 (Runtime Model Management):
+        This engine can load any Parakeet model variant at runtime. The model
+        is specified via config["runtime_model_id"] in the task payload. If a
+        different model is requested, the current model is unloaded and the
+        new one is loaded (with GPU memory cleanup).
     """
 
-    # Model variant to NeMo model identifier mapping
-    MODEL_VARIANT_MAP = {
-        "ctc-0.6b": "nvidia/parakeet-ctc-0.6b",
-        "ctc-1.1b": "nvidia/parakeet-ctc-1.1b",
-        "tdt-0.6b-v3": "nvidia/parakeet-tdt-0.6b-v3",
-        "tdt-1.1b": "nvidia/parakeet-tdt-1.1b",
+    # Valid NeMo model identifiers that this runtime can load
+    # Keys are the runtime_model_id values that can be passed in task config
+    SUPPORTED_MODELS = {
+        "nvidia/parakeet-ctc-0.6b",
+        "nvidia/parakeet-ctc-1.1b",
+        "nvidia/parakeet-tdt-0.6b-v3",
+        "nvidia/parakeet-tdt-1.1b",
     }
-    GPU_ONLY_VARIANTS = set(MODEL_VARIANT_MAP.keys())
-    DEFAULT_MODEL_VARIANT = "ctc-0.6b"
+
+    # Default model to load if none specified (multilingual + CPU-capable not applicable
+    # for Parakeet since it's English-only, so use the highest quality model)
+    DEFAULT_MODEL_ID = "nvidia/parakeet-tdt-1.1b"
 
     def __init__(self) -> None:
         super().__init__()
         self._model = None
-        self._model_name: str | None = None
+        self._loaded_model_id: str | None = None
 
-        # Determine model variant from environment variable (set at container build time)
-        model_variant = os.environ.get(
-            "DALSTON_MODEL_VARIANT", self.DEFAULT_MODEL_VARIANT
+        # Get default model from environment, with fallback to class default
+        self._default_model_id = os.environ.get(
+            "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
         )
-        if model_variant not in self.MODEL_VARIANT_MAP:
-            self.logger.warning(
-                "unknown_model_variant",
-                requested=model_variant,
-                using=self.DEFAULT_MODEL_VARIANT,
-            )
-            model_variant = self.DEFAULT_MODEL_VARIANT
-        self._model_variant = model_variant
-        self._nemo_model_id = self.MODEL_VARIANT_MAP[model_variant]
 
-        # Extract decoder type and size from variant
-        parts = model_variant.split("-")
-        self._decoder_type = parts[0]  # ctc or tdt
-        self._model_size = parts[1] if len(parts) > 1 else "0.6b"
+        # Get engine ID from environment for registration (runtime ID, not variant ID)
+        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "nemo")
 
         # Determine device from environment or availability
         requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
         cuda_available = torch.cuda.is_available()
-        gpu_only_variant = model_variant in self.GPU_ONLY_VARIANTS
 
         if requested_device == "cpu":
             self._device = "cpu"
-            if gpu_only_variant:
-                self.logger.warning(
-                    "gpu_only_variant_forced_cpu",
-                    variant=model_variant,
-                    message=(
-                        "GPU-optimized variant forced to CPU. "
-                        "Use only for local development/testing."
-                    ),
-                )
-            else:
-                self.logger.warning(
-                    "using_cpu_device",
-                    message="Running on CPU - inference will be significantly slower",
-                )
+            self.logger.warning(
+                "using_cpu_device",
+                message="Running on CPU - Parakeet inference will be significantly slower",
+            )
         elif requested_device in ("", "auto", "cuda"):
             if cuda_available:
                 self._device = "cuda"
@@ -119,11 +112,10 @@ class ParakeetEngine(Engine):
                     "cuda_available", device_count=torch.cuda.device_count()
                 )
             else:
-                if requested_device == "cuda" or gpu_only_variant:
+                if requested_device == "cuda":
                     raise RuntimeError(
-                        f"Model variant '{model_variant}' requires CUDA, "
-                        "but CUDA is not available. Set DEVICE=cpu only for "
-                        "local development/testing."
+                        "DEVICE=cuda requested but CUDA is not available. "
+                        "Set DEVICE=cpu for CPU inference."
                     )
                 self._device = "cpu"
                 self.logger.warning(
@@ -135,35 +127,89 @@ class ParakeetEngine(Engine):
                 f"Unknown device: {requested_device}. Use 'cuda' or 'cpu'."
             )
 
-    def _load_model(self, model_name: str) -> None:
-        """Load the Parakeet model if not already loaded.
+        self.logger.info(
+            "engine_init",
+            engine_id=self._engine_id,
+            default_model=self._default_model_id,
+            device=self._device,
+        )
+
+    def _ensure_model_loaded(self, runtime_model_id: str) -> None:
+        """Ensure the requested model is loaded, swapping if necessary.
+
+        This method implements the model lifecycle management for Phase 1.
+        If the requested model is already loaded, it returns immediately.
+        Otherwise, it unloads the current model (with GPU memory cleanup)
+        and loads the requested one.
 
         Args:
-            model_name: NeMo model identifier
+            runtime_model_id: NeMo model identifier (e.g., "nvidia/parakeet-tdt-1.1b")
+
+        Raises:
+            ValueError: If the runtime_model_id is not in SUPPORTED_MODELS
+            RuntimeError: If NeMo toolkit is not installed
         """
-        # Only reload if model changed
-        if self._model is not None and self._model_name == model_name:
+        # Fast path: requested model is already loaded
+        if runtime_model_id == self._loaded_model_id:
             return
 
+        # Validate the requested model
+        if runtime_model_id not in self.SUPPORTED_MODELS:
+            raise ValueError(
+                f"Unknown model: {runtime_model_id}. "
+                f"Supported models: {sorted(self.SUPPORTED_MODELS)}"
+            )
+
+        # Unload current model if one is loaded
+        if self._model is not None:
+            self.logger.info(
+                "unloading_model",
+                current=self._loaded_model_id,
+                requested=runtime_model_id,
+            )
+            self._set_runtime_state(status="unloading")
+
+            # Delete model reference
+            del self._model
+            self._model = None
+            self._loaded_model_id = None
+
+            # GPU memory cleanup
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+            gc.collect()
+
+            self.logger.info("model_unloaded")
+
+        # Extract decoder type from model ID for logging
+        # Format: "nvidia/parakeet-{decoder}-{size}" e.g., "nvidia/parakeet-tdt-1.1b"
+        model_parts = runtime_model_id.split("/")[-1].split("-")
+        decoder_type = model_parts[1] if len(model_parts) > 1 else "unknown"
+
+        # Load the requested model
+        self._set_runtime_state(status="loading")
         self.logger.info(
             "loading_parakeet_model",
-            model_name=model_name,
-            decoder_type=self._decoder_type,
+            runtime_model_id=runtime_model_id,
+            decoder_type=decoder_type,
         )
 
         # Import NeMo ASR module
         try:
             import nemo.collections.asr as nemo_asr
         except ImportError as e:
+            self._set_runtime_state(loaded_model=None, status="error")
             raise RuntimeError(
                 "NeMo toolkit not installed. Install with: pip install nemo_toolkit[asr]"
             ) from e
 
-        # Load pre-trained model from NGC
-        self._model = nemo_asr.models.ASRModel.from_pretrained(model_name)
+        # Load pre-trained model from NGC/HuggingFace
+        # This will download to the cache dir if not already present
+        self._model = nemo_asr.models.ASRModel.from_pretrained(runtime_model_id)
         self._model = self._model.to(self._device)
         self._model.eval()
-        self._model_name = model_name
+        self._loaded_model_id = runtime_model_id
 
         # Enable local attention for long audio support (up to 3 hours)
         # This reduces memory from O(n²) to O(n), essential for T4/A10g GPUs
@@ -187,7 +233,13 @@ class ParakeetEngine(Engine):
                 message="Falling back to full attention (limited to ~24min on A100)",
             )
 
-        self.logger.info("model_loaded_successfully", model_name=model_name)
+        # Update runtime state for heartbeat reporting
+        self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
+        self.logger.info(
+            "model_loaded_successfully",
+            runtime_model_id=runtime_model_id,
+            device=self._device,
+        )
 
     def _configure_vocabulary_boosting(
         self, vocabulary: list[str], boosting_alpha: float = 0.5
@@ -240,29 +292,24 @@ class ParakeetEngine(Engine):
             )
 
             # Configure decoding strategy with boosting tree
-            # Different config paths for CTC vs TDT/RNNT models
-            if self._decoder_type == "ctc":
-                decoding_cfg = self._model.cfg.decoding
-                decoding_cfg.strategy = "greedy_batch"
-                decoding_cfg.greedy.boosting_tree.key_phrases_file = str(vocab_path)
-                decoding_cfg.greedy.boosting_tree.context_score = 1.0
-                decoding_cfg.greedy.boosting_tree.depth_scaling = 2.0
-                decoding_cfg.greedy.boosting_tree_alpha = boosting_alpha
-            else:
-                # TDT/RNNT models
-                decoding_cfg = self._model.cfg.decoding
-                decoding_cfg.strategy = "greedy_batch"
-                decoding_cfg.greedy.boosting_tree.key_phrases_file = str(vocab_path)
-                decoding_cfg.greedy.boosting_tree.context_score = 1.0
-                decoding_cfg.greedy.boosting_tree.depth_scaling = 2.0
-                decoding_cfg.greedy.boosting_tree_alpha = boosting_alpha
+            # The config path is the same for CTC and TDT models
+            decoding_cfg = self._model.cfg.decoding
+            decoding_cfg.strategy = "greedy_batch"
+            decoding_cfg.greedy.boosting_tree.key_phrases_file = str(vocab_path)
+            decoding_cfg.greedy.boosting_tree.context_score = 1.0
+            decoding_cfg.greedy.boosting_tree.depth_scaling = 2.0
+            decoding_cfg.greedy.boosting_tree_alpha = boosting_alpha
 
             # Apply the new decoding strategy
             self._model.change_decoding_strategy(decoding_cfg)
 
+            # Extract decoder type from loaded model for logging
+            model_parts = (self._loaded_model_id or "").split("/")[-1].split("-")
+            decoder_type = model_parts[1] if len(model_parts) > 1 else "unknown"
+
             self.logger.info(
                 "vocabulary_boosting_enabled",
-                decoder_type=self._decoder_type,
+                decoder_type=decoder_type,
                 boosting_alpha=boosting_alpha,
                 terms_count=len(expanded_terms),
             )
@@ -311,11 +358,16 @@ class ParakeetEngine(Engine):
         channel = config.get("channel")  # For per_channel mode
         vocabulary = config.get("vocabulary")  # Terms to boost
 
-        # Use the model configured at container build time
-        model_name = self._nemo_model_id
+        # Get model to use from task config, falling back to default
+        # Phase 1: runtime_model_id is the NeMo model identifier (e.g., "nvidia/parakeet-tdt-1.1b")
+        runtime_model_id = config.get("runtime_model_id", self._default_model_id)
 
-        # Load model (lazy loading)
-        self._load_model(model_name)
+        # Load model (with swapping if needed)
+        self._ensure_model_loaded(runtime_model_id)
+
+        # Extract decoder type from loaded model for alignment method
+        model_parts = runtime_model_id.split("/")[-1].split("-")
+        decoder_type = model_parts[1] if len(model_parts) > 1 else "ctc"
 
         # Configure vocabulary boosting if provided
         vocab_file: Path | None = None
@@ -365,7 +417,7 @@ class ParakeetEngine(Engine):
                     language="en",
                     language_confidence=1.0,
                     channel=channel,
-                    engine_id=f"parakeet-{self._model_variant}",
+                    engine_id=self._engine_id,
                     skipped=False,
                     warnings=[],
                 )
@@ -389,7 +441,7 @@ class ParakeetEngine(Engine):
         full_text = hypothesis.text
 
         # Determine alignment method based on decoder type
-        if self._decoder_type == "ctc":
+        if decoder_type == "ctc":
             alignment_method = AlignmentMethod.CTC
         else:  # tdt
             alignment_method = AlignmentMethod.TDT
@@ -522,7 +574,7 @@ class ParakeetEngine(Engine):
             timestamp_granularity_actual=timestamp_granularity_actual,
             alignment_method=alignment_method,
             channel=channel,
-            engine_id=f"parakeet-{self._model_variant}",
+            engine_id=self._engine_id,
             skipped=False,
             skip_reason=None,
             warnings=warnings,
@@ -543,9 +595,10 @@ class ParakeetEngine(Engine):
 
         return {
             "status": "healthy",
+            "engine_id": self._engine_id,
             "device": self._device,
             "model_loaded": self._model is not None,
-            "model_name": self._model_name,
+            "loaded_model_id": self._loaded_model_id,
             "cuda_available": cuda_available,
             "cuda_device_count": cuda_device_count,
             "cuda_memory_allocated_gb": round(cuda_memory_allocated, 2),
@@ -555,22 +608,28 @@ class ParakeetEngine(Engine):
     def get_capabilities(self) -> EngineCapabilities:
         """Return Parakeet engine capabilities.
 
+        Phase 1: This now returns the runtime ID (e.g., "nemo") instead of
+        a variant-specific ID. The engine can load any supported Parakeet
+        model variant at runtime.
+
         Parakeet is an English-only transcription engine with native
         word-level timestamps via CTC or TDT alignment.
         """
-        # VRAM requirements per model size
-        vram_mb = 4000 if self._model_size == "0.6b" else 6000
+        # VRAM requirements: report maximum for capability planning
+        # Individual model requirements are in the model catalog
+        vram_mb = 6000  # Maximum (tdt-1.1b)
 
         return EngineCapabilities(
-            engine_id=f"parakeet-{self._model_variant}",
+            engine_id=self._engine_id,
             version="1.0.0",
             stages=["transcribe"],
             languages=["en"],  # English only
             supports_word_timestamps=True,
             supports_streaming=False,
-            model_variants=[self._nemo_model_id],
+            model_variants=sorted(self.SUPPORTED_MODELS),
             gpu_required=True,
             gpu_vram_mb=vram_mb,
+            runtime="nemo",  # M36: Runtime ID for model routing
         )
 
 

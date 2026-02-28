@@ -1,13 +1,12 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Radio, Trash2, RefreshCw, Filter, X } from 'lucide-react'
+import { Radio, Trash2, Mic } from 'lucide-react'
 import { apiClient } from '@/api/client'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useSharedTableState } from '@/hooks/useSharedTableState'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
-import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -23,7 +22,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/StatusBadge'
 import { ListLoadMoreFooter } from '@/components/ListLoadMoreFooter'
 import { useRealtimeStatus } from '@/hooks/useRealtimeStatus'
@@ -134,7 +132,6 @@ export function RealtimeSessions() {
     setStatus,
     setSort,
     setLimit,
-    resetAll,
   } = useSharedTableState({
     defaultStatus: 'all',
     statusOptions: STATUS_OPTIONS,
@@ -146,13 +143,8 @@ export function RealtimeSessions() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string } | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [showFilters, setShowFilters] = useState(false)
   const [showStatusWhy, setShowStatusWhy] = useState(false)
 
-  const hasActiveFilters =
-    statusFilter !== 'all' ||
-    sort !== 'started_desc' ||
-    limit !== DEFAULT_PAGE_SIZE
   const { data: statusData, isLoading: statusLoading, error: statusError } = useRealtimeStatus()
   const statusGuidance = useMemo(() => buildStatusGuidance(statusData), [statusData])
   const {
@@ -181,10 +173,6 @@ export function RealtimeSessions() {
 
   const handleLimitChange = (value: string) => {
     setLimit(Number(value))
-  }
-
-  const handleRefresh = async () => {
-    await refetch()
   }
 
   const loadMore = () => {
@@ -218,107 +206,11 @@ export function RealtimeSessions() {
             Real-time transcription workers, capacity, and session history
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowFilters(!showFilters)}
-          >
-            <Filter className="h-4 w-4 mr-2" />
-            Filters
-            {hasActiveFilters && (
-              <Badge variant="secondary" className="ml-2">
-                Active
-              </Badge>
-            )}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRefresh}
-            disabled={isFetching}
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-        </div>
+        <Button onClick={() => navigate('/realtime/live')}>
+          <Mic className="h-4 w-4 mr-2" />
+          New Session
+        </Button>
       </div>
-
-      {/* Filters */}
-      {showFilters && (
-        <Card>
-          <CardHeader className="py-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-muted-foreground">Filters</span>
-              {hasActiveFilters && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => resetAll()}
-                >
-                  <X className="h-4 w-4 mr-1" />
-                  Clear
-                </Button>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="grid gap-4 md:grid-cols-6">
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">
-                  Status
-                </label>
-                <Select value={statusFilter} onValueChange={handleFilterChange}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="All Statuses" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All</SelectItem>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="error">Error</SelectItem>
-                    <SelectItem value="interrupted">Interrupted</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">
-                  Sort
-                </label>
-                <Select value={sort} onValueChange={handleSortChange}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Newest first" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SORT_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">
-                  Rows per page
-                </label>
-                <Select value={String(limit)} onValueChange={handleLimitChange}>
-                  <SelectTrigger>
-                    <SelectValue placeholder={String(DEFAULT_PAGE_SIZE)} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAGE_SIZE_OPTIONS.map((size) => (
-                      <SelectItem key={size} value={String(size)}>
-                        {size}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {statusError && (
         <div className="p-4 bg-destructive/10 text-destructive rounded-md">
@@ -334,16 +226,12 @@ export function RealtimeSessions() {
             <Radio className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {statusLoading ? (
-              <Skeleton className="h-8 w-24" />
-            ) : (
-              <div className="flex items-center gap-2">
-                <StatusDot status={statusData?.status ?? 'unavailable'} />
-                <span className="text-2xl font-bold capitalize">
-                  {statusData?.status?.replace('_', ' ') ?? 'Unknown'}
-                </span>
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              <StatusDot status={statusData?.status ?? 'unavailable'} />
+              <span className="text-2xl font-bold capitalize">
+                {statusData?.status?.replace('_', ' ') ?? '-'}
+              </span>
+            </div>
           </CardContent>
         </Card>
 
@@ -352,18 +240,12 @@ export function RealtimeSessions() {
             <span className="text-sm font-medium text-muted-foreground">Active Sessions</span>
           </CardHeader>
           <CardContent>
-            {statusLoading ? (
-              <Skeleton className="h-8 w-20" />
-            ) : (
-              <>
-                <div className="text-2xl font-bold">
-                  {statusData?.active_sessions ?? 0} / {statusData?.total_capacity ?? 0}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {statusData?.available_capacity ?? 0} available
-                </p>
-              </>
-            )}
+            <div className="text-2xl font-bold">
+              {statusData?.active_sessions ?? '-'} / {statusData?.total_capacity ?? '-'}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {statusData?.available_capacity ?? '-'} available
+            </p>
           </CardContent>
         </Card>
 
@@ -372,16 +254,10 @@ export function RealtimeSessions() {
             <span className="text-sm font-medium text-muted-foreground">Workers</span>
           </CardHeader>
           <CardContent>
-            {statusLoading ? (
-              <Skeleton className="h-8 w-16" />
-            ) : (
-              <>
-                <div className="text-2xl font-bold">
-                  {statusData?.ready_workers ?? 0} / {statusData?.worker_count ?? 0}
-                </div>
-                <p className="text-xs text-muted-foreground">ready</p>
-              </>
-            )}
+            <div className="text-2xl font-bold">
+              {statusData?.ready_workers ?? '-'} / {statusData?.worker_count ?? '-'}
+            </div>
+            <p className="text-xs text-muted-foreground">ready</p>
           </CardContent>
         </Card>
 
@@ -390,9 +266,7 @@ export function RealtimeSessions() {
             <span className="text-sm font-medium text-muted-foreground">Capacity Overview</span>
           </CardHeader>
           <CardContent>
-            {statusLoading ? (
-              <Skeleton className="h-4 w-full" />
-            ) : (
+            {statusData && (
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span>Used</span>
@@ -479,20 +353,54 @@ export function RealtimeSessions() {
 
       {/* Session History */}
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Sessions</CardTitle>
+          <div className="flex items-center gap-2">
+            <Select value={statusFilter} onValueChange={handleFilterChange}>
+              <SelectTrigger className="w-[130px]">
+                <SelectValue placeholder="All Statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="error">Error</SelectItem>
+                <SelectItem value="interrupted">Interrupted</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={sort} onValueChange={handleSortChange}>
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="Newest first" />
+              </SelectTrigger>
+              <SelectContent>
+                {SORT_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={String(limit)} onValueChange={handleLimitChange}>
+              <SelectTrigger className="w-[100px]">
+                <SelectValue placeholder={String(DEFAULT_PAGE_SIZE)} />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </CardHeader>
         <CardContent>
-          {(sessionsLoading || (isFetching && allSessions.length === 0)) ? (
-            <div className="space-y-2">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          ) : visibleSessions.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              No sessions found
-            </div>
+          {visibleSessions.length === 0 ? (
+            !(sessionsLoading || isFetching) && (
+              <div className="text-center py-8 text-muted-foreground">
+                No sessions found
+              </div>
+            )
           ) : (
             isMobile ? (
               <div className="space-y-3">

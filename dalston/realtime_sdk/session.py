@@ -7,8 +7,12 @@ audio buffering, VAD, ASR, and transcript assembly.
 from __future__ import annotations
 
 import asyncio
-import audioop
 import time
+
+try:
+    import audioop  # Python < 3.13
+except ImportError:
+    import audioop_lts as audioop  # Python >= 3.13 (PEP 594)
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -60,6 +64,7 @@ class SessionConfig:
         enable_vad: Whether VAD events are sent to client
         interim_results: Whether partial transcripts are sent
         word_timestamps: Whether word-level timing is included
+        vocabulary: List of terms to boost recognition (for hotwords/bias)
         max_utterance_duration: Max seconds before forcing utterance end (0=unlimited)
         vad_threshold: VAD speech probability threshold (0.0-1.0)
         min_speech_duration_ms: Min speech duration before valid utterance (ms)
@@ -77,11 +82,12 @@ class SessionConfig:
     enable_vad: bool = True
     interim_results: bool = True
     word_timestamps: bool = False
-    max_utterance_duration: float = 60.0  # Force utterance end after 60s
+    vocabulary: list[str] | None = None  # Terms to boost recognition
+    max_utterance_duration: float = 30.0  # Force utterance end after 30s
     # VAD tuning parameters (ElevenLabs-compatible naming)
     vad_threshold: float = 0.5  # Speech detection threshold (0.0-1.0)
     min_speech_duration_ms: int = 250  # Min speech duration (ms)
-    min_silence_duration_ms: int = 500  # Silence to trigger endpoint (ms)
+    min_silence_duration_ms: int = 400  # Silence to trigger endpoint (ms)
     # Storage options (S3 bucket/endpoint read from Settings env vars)
     store_audio: bool = True
     store_transcript: bool = True
@@ -210,7 +216,7 @@ class AudioBuffer:
 
 # Type alias for transcribe callback
 TranscribeCallback = Callable[
-    [np.ndarray, str, str],  # audio, language, model
+    [np.ndarray, str, str, list[str] | None],  # audio, language, model, vocabulary
     TranscribeResult,
 ]
 
@@ -265,14 +271,18 @@ class SessionHandler:
             sample_rate=config.sample_rate,
             encoding=config.encoding,
         )
-        self._vad = VADProcessor(
-            VADConfig(
-                sample_rate=config.sample_rate,
-                speech_threshold=config.vad_threshold,
-                min_speech_duration=config.min_speech_duration_ms / 1000.0,
-                min_silence_duration=config.min_silence_duration_ms / 1000.0,
+        # Only initialize VAD if enabled - when disabled, use time-based chunking
+        if config.enable_vad:
+            self._vad: VADProcessor | None = VADProcessor(
+                VADConfig(
+                    sample_rate=config.sample_rate,
+                    speech_threshold=config.vad_threshold,
+                    min_speech_duration=config.min_speech_duration_ms / 1000.0,
+                    min_silence_duration=config.min_silence_duration_ms / 1000.0,
+                )
             )
-        )
+        else:
+            self._vad = None
         self._assembler = TranscriptAssembler()
 
         # Session state
@@ -393,6 +403,11 @@ class SessionHandler:
         Args:
             audio: Float32 audio samples
         """
+        # When VAD is disabled, use time-based chunking only
+        if self._vad is None:
+            await self._process_chunk_no_vad(audio)
+            return
+
         # Run VAD
         vad_result = self._vad.process_chunk(audio)
 
@@ -401,16 +416,14 @@ class SessionHandler:
             self._chunks_since_partial = 0
             self._speech_audio_buffer = []
 
-            if self.config.enable_vad:
-                await self._send(
-                    VADSpeechStartMessage(timestamp=self._assembler.current_time)
-                )
+            await self._send(
+                VADSpeechStartMessage(timestamp=self._assembler.current_time)
+            )
 
         elif vad_result.event == "speech_end":
-            if self.config.enable_vad:
-                await self._send(
-                    VADSpeechEndMessage(timestamp=self._assembler.current_time)
-                )
+            await self._send(
+                VADSpeechEndMessage(timestamp=self._assembler.current_time)
+            )
 
             # Clear streaming state
             self._speech_audio_buffer = []
@@ -439,6 +452,43 @@ class SessionHandler:
         if self._vad.is_speaking and self.config.max_utterance_duration > 0:
             await self._check_max_utterance_duration()
 
+    async def _process_chunk_no_vad(self, audio: np.ndarray) -> None:
+        """Process audio chunk without VAD - pure time-based chunking.
+
+        When VAD is disabled, we accumulate all audio and transcribe
+        at fixed intervals based on max_utterance_duration.
+        """
+        # Always accumulate audio
+        self._speech_audio_buffer.append(audio.copy())
+        self._chunks_since_partial += 1
+
+        # Send partial results if streaming is enabled
+        if self._supports_streaming and self.config.interim_results:
+            if self._chunks_since_partial >= self.PARTIAL_RESULT_INTERVAL_CHUNKS:
+                await self._send_partial_result()
+                self._chunks_since_partial = 0
+
+        # Check if we've accumulated enough audio for a chunk
+        if self.config.max_utterance_duration > 0:
+            total_samples = sum(len(chunk) for chunk in self._speech_audio_buffer)
+            duration = total_samples / self.config.sample_rate
+
+            if duration >= self.config.max_utterance_duration:
+                logger.info(
+                    "time_based_chunk_triggered",
+                    duration=duration,
+                    max_duration=self.config.max_utterance_duration,
+                )
+
+                # Transcribe accumulated audio
+                if self._speech_audio_buffer:
+                    audio_to_transcribe = np.concatenate(self._speech_audio_buffer)
+                    await self._transcribe_and_send(audio_to_transcribe)
+
+                # Reset buffer for next chunk
+                self._speech_audio_buffer = []
+                self._chunks_since_partial = 0
+
     async def _send_partial_result(self) -> None:
         """Send partial transcription result during speech.
 
@@ -457,6 +507,7 @@ class SessionHandler:
                 audio,
                 self.config.language,
                 self.config.model,
+                self.config.vocabulary,
             )
 
             if not result.text:
@@ -533,6 +584,7 @@ class SessionHandler:
                 audio,
                 self.config.language,
                 self.config.model,
+                self.config.vocabulary,
             )
 
             if not result.text:
@@ -718,9 +770,15 @@ class SessionHandler:
     async def _send_session_end(self) -> None:
         """Send session.end message."""
         # Flush any remaining audio
-        remaining = self._vad.flush()
-        if remaining is not None and len(remaining) > 0:
-            await self._transcribe_and_send(remaining)
+        if self._vad is not None:
+            remaining = self._vad.flush()
+            if remaining is not None and len(remaining) > 0:
+                await self._transcribe_and_send(remaining)
+        elif self._speech_audio_buffer:
+            # No VAD mode - transcribe any remaining buffered audio
+            audio_to_transcribe = np.concatenate(self._speech_audio_buffer)
+            await self._transcribe_and_send(audio_to_transcribe)
+            self._speech_audio_buffer = []
 
         segments = [
             SegmentInfo(start=s.start, end=s.end, text=s.text)

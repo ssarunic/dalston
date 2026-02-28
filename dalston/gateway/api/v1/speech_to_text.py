@@ -9,6 +9,7 @@ This is supported by the auth middleware alongside Bearer tokens.
 """
 
 import asyncio
+import json
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
@@ -167,6 +168,13 @@ async def create_transcription(
         bool,
         Form(description="Detect audio events (laughter, etc.)"),
     ] = True,
+    keyterms: Annotated[
+        str | None,
+        Form(
+            description="JSON array of bias terms to boost recognition "
+            '(e.g., \'["PostgreSQL", "Kubernetes"]\'). Max 100 terms, 50 chars each.',
+        ),
+    ] = None,
     webhook: Annotated[
         bool,
         Form(description="Process asynchronously with webhook callback"),
@@ -206,6 +214,39 @@ async def create_transcription(
     }
     if num_speakers is not None:
         parameters["num_speakers"] = num_speakers
+
+    # Parse and validate keyterms → vocabulary mapping
+    if keyterms is not None:
+        try:
+            parsed_keyterms = json.loads(keyterms)
+            if not isinstance(parsed_keyterms, list):
+                raise HTTPException(
+                    status_code=400,
+                    detail="keyterms must be a JSON array of strings",
+                )
+            if len(parsed_keyterms) > 100:
+                raise HTTPException(
+                    status_code=400,
+                    detail="keyterms cannot exceed 100 terms",
+                )
+            for term in parsed_keyterms:
+                if not isinstance(term, str):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="keyterms must contain only strings",
+                    )
+                if len(term) > 50:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Each keyterm must be at most 50 characters, got {len(term)}",
+                    )
+            if parsed_keyterms:
+                parameters["vocabulary"] = parsed_keyterms
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid JSON in keyterms: {e}",
+            ) from e
 
     # Generate job ID upfront so we can upload to the correct S3 path
     job_id = uuid4()

@@ -1,0 +1,37 @@
+# Model catalog entry for faster-whisper-large-v3-turbo
+# This file defines the model variant metadata for runtime model management (M36)
+
+schema_version: "1.1"
+id: faster-whisper-large-v3-turbo
+runtime: faster-whisper
+runtime_model_id: "large-v3-turbo"  # String passed to WhisperModel()
+
+name: Faster Whisper Large V3 Turbo
+source: Systran/faster-whisper-large-v3-turbo
+size_gb: 1.6
+stage: transcribe
+
+description: |
+  OpenAI Whisper large-v3-turbo model via faster-whisper (CTranslate2).
+  Optimized for speed while maintaining high accuracy.
+  Distilled from large-v3 with pruned decoder for faster inference.
+  Supports 99 languages with automatic language detection.
+  Default model for Dalston - good balance of speed, accuracy, and compatibility.
+
+languages: null  # null means multilingual (99 languages)
+
+capabilities:
+  word_timestamps: false  # Has timestamps but they're inaccurate; use alignment stage
+  punctuation: false
+  capitalization: false
+  streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  min_vram_gb: 4
+  supports_cpu: true  # M36: CPU support enabled with int8 compute type
+  min_ram_gb: 8
+
+performance:
+  rtf_gpu: 0.03
+  rtf_cpu: 0.3

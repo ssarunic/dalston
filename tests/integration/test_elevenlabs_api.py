@@ -308,6 +308,204 @@ class TestCreateTranscriptionEndpoint:
                 assert params["speaker_detection"] == "diarize"
                 assert params["num_speakers"] == 2
 
+    def test_create_transcription_with_keyterms(
+        self,
+        client,
+        mock_jobs_service,
+        mock_job,
+    ):
+        """Test that keyterms are mapped to vocabulary in job parameters."""
+        mock_jobs_service.create_job.return_value = mock_job
+
+        with patch(
+            "dalston.gateway.api.v1.speech_to_text.StorageService"
+        ) as MockStorage:
+            MockStorage.return_value.upload_audio = AsyncMock(
+                return_value="s3://bucket/audio.mp3"
+            )
+
+            with patch("dalston.gateway.api.v1.speech_to_text.publish_job_created"):
+                audio_content = b"fake audio content"
+                files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+
+                response = client.post(
+                    "/v1/speech-to-text",
+                    files=files,
+                    data={
+                        "model_id": "scribe_v1",
+                        "webhook": "true",
+                        "keyterms": '["PostgreSQL", "Kubernetes", "FastAPI"]',
+                    },
+                )
+
+                assert response.status_code == 200
+
+                call_kwargs = mock_jobs_service.create_job.call_args.kwargs
+                params = call_kwargs["parameters"]
+                assert params["vocabulary"] == [
+                    "PostgreSQL",
+                    "Kubernetes",
+                    "FastAPI",
+                ]
+
+    def test_create_transcription_keyterms_not_set_when_omitted(
+        self,
+        client,
+        mock_jobs_service,
+        mock_job,
+    ):
+        """Test that vocabulary is not in parameters when keyterms is omitted."""
+        mock_jobs_service.create_job.return_value = mock_job
+
+        with patch(
+            "dalston.gateway.api.v1.speech_to_text.StorageService"
+        ) as MockStorage:
+            MockStorage.return_value.upload_audio = AsyncMock(
+                return_value="s3://bucket/audio.mp3"
+            )
+
+            with patch("dalston.gateway.api.v1.speech_to_text.publish_job_created"):
+                audio_content = b"fake audio content"
+                files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+
+                response = client.post(
+                    "/v1/speech-to-text",
+                    files=files,
+                    data={"model_id": "scribe_v1", "webhook": "true"},
+                )
+
+                assert response.status_code == 200
+
+                call_kwargs = mock_jobs_service.create_job.call_args.kwargs
+                params = call_kwargs["parameters"]
+                assert "vocabulary" not in params
+
+    def test_create_transcription_keyterms_empty_array_not_set(
+        self,
+        client,
+        mock_jobs_service,
+        mock_job,
+    ):
+        """Test that empty keyterms array does not set vocabulary."""
+        mock_jobs_service.create_job.return_value = mock_job
+
+        with patch(
+            "dalston.gateway.api.v1.speech_to_text.StorageService"
+        ) as MockStorage:
+            MockStorage.return_value.upload_audio = AsyncMock(
+                return_value="s3://bucket/audio.mp3"
+            )
+
+            with patch("dalston.gateway.api.v1.speech_to_text.publish_job_created"):
+                audio_content = b"fake audio content"
+                files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+
+                response = client.post(
+                    "/v1/speech-to-text",
+                    files=files,
+                    data={
+                        "model_id": "scribe_v1",
+                        "webhook": "true",
+                        "keyterms": "[]",
+                    },
+                )
+
+                assert response.status_code == 200
+
+                call_kwargs = mock_jobs_service.create_job.call_args.kwargs
+                params = call_kwargs["parameters"]
+                assert "vocabulary" not in params
+
+    def test_create_transcription_keyterms_invalid_json(self, client):
+        """Test that invalid JSON in keyterms returns 400."""
+        audio_content = b"fake audio content"
+        files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+
+        response = client.post(
+            "/v1/speech-to-text",
+            files=files,
+            data={
+                "model_id": "scribe_v1",
+                "keyterms": "not valid json",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "Invalid JSON" in response.json()["detail"]
+
+    def test_create_transcription_keyterms_not_array(self, client):
+        """Test that non-array keyterms returns 400."""
+        audio_content = b"fake audio content"
+        files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+
+        response = client.post(
+            "/v1/speech-to-text",
+            files=files,
+            data={
+                "model_id": "scribe_v1",
+                "keyterms": '"just a string"',
+            },
+        )
+
+        assert response.status_code == 400
+        assert "JSON array" in response.json()["detail"]
+
+    def test_create_transcription_keyterms_exceeds_max(self, client):
+        """Test that keyterms with >100 terms returns 400."""
+        import json
+
+        terms = [f"term{i}" for i in range(101)]
+        audio_content = b"fake audio content"
+        files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+
+        response = client.post(
+            "/v1/speech-to-text",
+            files=files,
+            data={
+                "model_id": "scribe_v1",
+                "keyterms": json.dumps(terms),
+            },
+        )
+
+        assert response.status_code == 400
+        assert "100" in response.json()["detail"]
+
+    def test_create_transcription_keyterms_term_too_long(self, client):
+        """Test that a keyterm exceeding 50 chars returns 400."""
+        import json
+
+        audio_content = b"fake audio content"
+        files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+
+        response = client.post(
+            "/v1/speech-to-text",
+            files=files,
+            data={
+                "model_id": "scribe_v1",
+                "keyterms": json.dumps(["a" * 51]),
+            },
+        )
+
+        assert response.status_code == 400
+        assert "50 characters" in response.json()["detail"]
+
+    def test_create_transcription_keyterms_non_string_items(self, client):
+        """Test that non-string items in keyterms returns 400."""
+        audio_content = b"fake audio content"
+        files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+
+        response = client.post(
+            "/v1/speech-to-text",
+            files=files,
+            data={
+                "model_id": "scribe_v1",
+                "keyterms": "[1, 2, 3]",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "strings" in response.json()["detail"]
+
 
 class TestGetTranscriptEndpoint:
     """Tests for GET /v1/speech-to-text/transcripts/{id} endpoint."""

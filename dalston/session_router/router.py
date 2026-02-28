@@ -36,6 +36,7 @@ class WorkerStatus:
     models: list[str]
     languages: list[str]
     engine: str = "unknown"
+    supports_vocabulary: bool = False
 
     @classmethod
     def from_worker_state(cls, state: WorkerState) -> WorkerStatus:
@@ -49,6 +50,7 @@ class WorkerStatus:
             models=state.models_loaded,
             languages=state.languages_supported,
             engine=state.engine,
+            supports_vocabulary=state.supports_vocabulary,
         )
 
 

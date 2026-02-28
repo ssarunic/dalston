@@ -56,6 +56,10 @@ from .realtime import AsyncRealtimeSession, RealtimeSession
 
 # Types
 from .types import (
+    Engine,
+    EngineCapabilities,
+    EngineList,
+    EnginePerformance,
     ExportFormat,
     HardwareRequirements,
     HealthStatus,
@@ -66,7 +70,6 @@ from .types import (
     Model,
     ModelCapabilities,
     ModelList,
-    PIIDetectionTier,
     PIIRedactionMode,
     RealtimeError,
     RealtimeMessage,
@@ -117,7 +120,6 @@ __all__ = [
     "SpeakerDetection",
     "TimestampGranularity",
     "ExportFormat",
-    "PIIDetectionTier",
     "PIIRedactionMode",
     "RealtimeMessageType",
     "WebhookEventType",
@@ -135,6 +137,11 @@ __all__ = [
     "ModelCapabilities",
     "ModelList",
     "HardwareRequirements",
+    # Engine types (M36)
+    "Engine",
+    "EngineCapabilities",
+    "EngineList",
+    "EnginePerformance",
     # Real-time types
     "SessionBegin",
     "SessionEnd",

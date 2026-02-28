@@ -404,6 +404,7 @@ class RealtimeWorker(BaseModel):
     active_sessions: int
     models: list[str]
     languages: list[str]
+    supports_vocabulary: bool = False
 
 
 class EnginesResponse(BaseModel):
@@ -536,6 +537,7 @@ async def get_engines(
                     active_sessions=worker.active_sessions,
                     models=worker.models,
                     languages=worker.languages,
+                    supports_vocabulary=worker.supports_vocabulary,
                 )
             )
     except Exception:

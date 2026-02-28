@@ -2,10 +2,13 @@
 
 | | |
 |---|---|
-| **Status** | Accepted |
+| **Status** | Accepted (Decision 2 superseded) |
 | **Date** | February 2026 |
+| **Amended** | February 2026 |
 | **Deciders** | Dalston Core Team |
 | **Related PRD** | PII Detection & Audio Redaction v1.1 |
+
+> **Amendment (February 2026):** Decision 2 (Detection Tier Architecture) has been superseded. The tiered approach (fast/standard/thorough) was removed in favor of a single detection architecture using GLiNER for all NER entities and Presidio only for checksum-validated patterns. See [Amendment to Decision 2](#amendment-to-decision-2) below.
 
 ## Context
 
@@ -261,3 +264,39 @@ Buffer padding (default 50-100ms) is applied around each entity timestamp to ens
 - [PCI DSS v4.0 Requirement 3: Protect Stored Account Data](https://www.pcisecuritystandards.org/)
 - [HIPAA Safe Harbor De-identification Method](https://www.hhs.gov/hipaa/for-professionals/privacy/special-topics/de-identification/)
 - [GDPR Article 5(1)(c): Data Minimization](https://gdpr-info.eu/art-5-gdpr/)
+
+---
+
+## Amendment to Decision 2
+
+**Date:** February 2026
+
+### Context
+
+After implementing the tiered detection architecture, we discovered that Presidio's NER-based detection (using spaCy/Stanza backends) produces excessive false positives on ASR transcripts. Speech recognition errors and informal spoken language patterns cause regex and traditional NER detectors to misfire frequently.
+
+### Revised Decision
+
+**The tiered architecture (fast/standard/thorough) has been removed.** PII detection now uses a single, optimized approach:
+
+| Layer | Engine | Purpose | Entities |
+|-------|--------|---------|----------|
+| **NER** | GLiNER | ML-based entity recognition | Names, orgs, locations, phone, email, SSN, medical |
+| **Checksum** | Presidio | Validated patterns only | Credit cards (Luhn), IBANs (mod-97), CVV, expiry, JMBG, OIB |
+
+### Rationale
+
+1. **GLiNER provides better accuracy on ASR output.** Its zero-shot transformer architecture handles the noise and informality of spoken language better than regex-based approaches.
+
+2. **Presidio is restricted to mathematically validated entities.** Credit card numbers with Luhn validation and IBANs with mod-97 checksums have near-zero false positive rates. Other Presidio recognizers (PHONE_NUMBER, EMAIL, PERSON) produced too many false positives on transcripts.
+
+3. **Simpler API.** Users no longer need to choose between tiers or understand the trade-offs. The single architecture provides the best balance of precision and recall.
+
+4. **Reduced complexity.** One detection path means simpler code, testing, and operations.
+
+### Changes
+
+- Removed `pii_detection_tier` parameter from API, SDK, CLI, and web UI
+- Removed `PIIDetectionTier` enum and related database column
+- GLiNER is now loaded for all PII detection requests
+- Presidio recognizers restricted to: credit card (Luhn), IBAN (mod-97), CVV (contextual), expiry (contextual), JMBG (checksum), OIB (checksum)

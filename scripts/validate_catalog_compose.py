@@ -57,7 +57,7 @@ def collect_batch_ids(services: dict) -> set[str]:
         if not service_name.startswith("stt-batch-"):
             continue
         env = parse_environment(service.get("environment"))
-        engine_id = env.get("ENGINE_ID")
+        engine_id = env.get("DALSTON_ENGINE_ID")
         if engine_id:
             batch_ids.add(engine_id)
     return batch_ids

@@ -82,10 +82,10 @@ class Settings(BaseSettings):
         alias="DALSTON_RETENTION_CLEANUP_BATCH_SIZE",
         description="Maximum jobs to purge per cleanup sweep",
     )
-    retention_min_hours: int = Field(
-        default=1,
-        alias="DALSTON_RETENTION_MIN_HOURS",
-        description="Minimum retention hours allowed (1 = 1 hour minimum)",
+    retention_default_days: int = Field(
+        default=30,
+        alias="DALSTON_RETENTION_DEFAULT_DAYS",
+        description="Default retention in days when not specified (30 = 30 days)",
     )
 
     # Engine Availability Behavior
@@ -118,6 +118,18 @@ class Settings(BaseSettings):
         default=300,
         alias="DALSTON_AUDIO_URL_TIMEOUT_SECONDS",
         description="Timeout for downloading audio from URLs in seconds",
+    )
+
+    # Realtime Transcription VAD Defaults
+    realtime_min_silence_duration_ms: int = Field(
+        default=400,
+        alias="DALSTON_REALTIME_MIN_SILENCE_DURATION_MS",
+        description="Default silence duration (ms) to trigger utterance end in realtime sessions",
+    )
+    realtime_max_utterance_duration: float = Field(
+        default=30.0,
+        alias="DALSTON_REALTIME_MAX_UTTERANCE_DURATION",
+        description="Default max utterance duration (seconds) before forcing chunk in realtime sessions",
     )
 
 

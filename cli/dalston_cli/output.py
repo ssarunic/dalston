@@ -179,7 +179,6 @@ def _job_to_json(job: Job) -> str:
         if job.transcript.pii_info:
             data["pii"] = {
                 "enabled": job.transcript.pii_info.enabled,
-                "detection_tier": job.transcript.pii_info.detection_tier,
                 "entities_detected": job.transcript.pii_info.entities_detected,
                 "entity_summary": job.transcript.pii_info.entity_summary,
                 "redacted_audio_available": job.transcript.pii_info.redacted_audio_available,
@@ -363,7 +362,7 @@ def output_job_detail(job: Job, as_json: bool = False) -> None:
     if job.transcript and job.transcript.pii_info and job.transcript.pii_info.enabled:
         pii = job.transcript.pii_info
         console.print(
-            f"PII:      {pii.entities_detected} entities detected ({pii.detection_tier})"
+            f"PII:      {pii.entities_detected} entities detected"
         )
         if pii.entity_summary:
             summary_str = ", ".join(f"{k}: {v}" for k, v in pii.entity_summary.items())

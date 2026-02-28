@@ -48,7 +48,6 @@ from dalston.common.pipeline_types import (
     MergedSegment,
     MergeOutput,
     Phoneme,
-    PIIDetectionTier,
     PIIDetectOutput,
     PIIEntity,
     PIIEntityCategory,
@@ -79,7 +78,6 @@ __all__ = [
     "TaskOutput",
     # Enums
     "AlignmentMethod",
-    "PIIDetectionTier",
     "PIIEntityCategory",
     "PIIRedactionMode",
     "SpeakerDetectionMode",

@@ -132,10 +132,6 @@ async def create_transcription(
         bool,
         Form(description="Enable PII detection in transcript"),
     ] = False,
-    pii_detection_tier: Annotated[
-        str,
-        Form(description="PII detection tier: 'fast', 'standard', 'thorough'"),
-    ] = "standard",
     pii_entity_types: Annotated[
         str | None,
         Form(
@@ -150,13 +146,13 @@ async def create_transcription(
         str,
         Form(description="Audio redaction mode: 'silence', 'beep'"),
     ] = "silence",
-    # Retention: 0=transient, -1=permanent, N=days
+    # Retention: 0=transient, -1=permanent, N=days, None=server default
     retention: Annotated[
-        int,
+        int | None,
         Form(
-            description="Retention in days: 0 (transient), -1 (permanent), or 1-3650 (days)"
+            description="Retention in days: 0 (transient), -1 (permanent), 1-3650 (days), or omit for server default"
         ),
-    ] = 30,
+    ] = None,
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
@@ -180,7 +176,6 @@ async def create_transcription(
     """
     # Ingest audio (validates input, downloads from URL if needed, probes metadata)
     ingested = await ingestion_service.ingest(file=file, url=audio_url)
-
 
     # Validate per_channel mode requires stereo audio
     if speaker_detection == "per_channel" and ingested.metadata.channels < 2:
@@ -232,6 +227,10 @@ async def create_transcription(
                 detail=f"Invalid JSON in vocabulary: {e}",
             ) from e
 
+    # Apply server default retention if not specified
+    if retention is None:
+        retention = settings.retention_default_days
+
     # Validate retention parameter (0=transient, -1=permanent, 1-3650=days)
     try:
         validate_retention(retention)
@@ -241,7 +240,6 @@ async def create_transcription(
     # PII detection parameters (M26)
     if pii_detection:
         parameters["pii_detection"] = True
-        parameters["pii_detection_tier"] = pii_detection_tier
         if pii_entity_types:
             try:
                 parsed_entity_types = json.loads(pii_entity_types)
@@ -288,7 +286,6 @@ async def create_transcription(
         retention=retention,
         # PII fields (M26)
         pii_detection_enabled=pii_detection,
-        pii_detection_tier=pii_detection_tier if pii_detection else None,
         pii_entity_types=pii_entity_types_list,
         pii_redact_audio=redact_pii_audio,
         pii_redaction_mode=pii_redaction_mode if redact_pii_audio else None,
@@ -425,7 +422,6 @@ async def get_transcription(
                 pii_meta = transcript["pii_metadata"]
                 response.pii = PIIInfo(
                     enabled=True,
-                    detection_tier=pii_meta.get("detection_tier"),
                     entities_detected=pii_meta.get("entities_detected", 0),
                     entity_summary=pii_meta.get("entity_count_by_type"),
                     redacted_audio_available=pii_meta.get("redacted_audio_uri")

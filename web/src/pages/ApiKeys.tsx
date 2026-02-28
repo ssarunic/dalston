@@ -3,7 +3,6 @@ import { Key, Plus, Trash2, AlertCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog } from '@/components/ui/dialog'
 import {
   Select,
@@ -202,23 +201,19 @@ export function ApiKeys() {
           </div>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
-            <div className="space-y-3">
-              {[...Array(3)].map((_, i) => (
-                <Skeleton key={i} className="h-16 w-full" />
-              ))}
-            </div>
-          ) : error ? (
+          {error ? (
             <div className="flex items-center gap-2 text-destructive py-4">
               <AlertCircle className="h-4 w-4" />
               <span>Failed to load API keys</span>
             </div>
           ) : visibleKeys.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Key className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>No API keys found</p>
-              <p className="text-sm mt-1">Try changing filters or create a key</p>
-            </div>
+            !isLoading && (
+              <div className="text-center py-8 text-muted-foreground">
+                <Key className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No API keys found</p>
+                <p className="text-sm mt-1">Try changing filters or create a key</p>
+              </div>
+            )
           ) : (
             isMobile ? (
               <div className="space-y-3">

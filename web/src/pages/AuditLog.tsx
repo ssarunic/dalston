@@ -12,7 +12,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -268,42 +267,48 @@ export function AuditLog() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Audit Log</h1>
-          <p className="text-muted-foreground">View data access and lifecycle events</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowFilters(!showFilters)}
-          >
-            <Filter className="h-4 w-4 mr-2" />
-            Filters
-            {hasActiveFilters && (
-              <Badge variant="secondary" className="ml-2">
-                Active
-              </Badge>
-            )}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRefresh}
-            disabled={isFetching}
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-        </div>
+      <div>
+        <h1 className="text-2xl font-bold">Audit Log</h1>
+        <p className="text-muted-foreground">View data access and lifecycle events</p>
       </div>
 
-      {/* Filters */}
-      {showFilters && (
-        <Card>
-          <CardHeader className="py-4">
-            <div className="flex items-center justify-between">
+      {/* Events Table */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="flex items-center gap-2">
+            <ScrollText className="h-5 w-5" />
+            Events
+          </CardTitle>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowFilters(!showFilters)}
+            >
+              <Filter className="h-4 w-4 mr-2" />
+              Filters
+              {hasActiveFilters && (
+                <Badge variant="secondary" className="ml-2">
+                  Active
+                </Badge>
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isFetching}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+        </CardHeader>
+
+        {/* Expandable Filters */}
+        {showFilters && (
+          <CardContent className="border-b pb-4">
+            <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-medium text-muted-foreground">Filters</span>
               {hasActiveFilters && (
                 <Button variant="ghost" size="sm" onClick={clearFilters}>
@@ -312,8 +317,6 @@ export function AuditLog() {
                 </Button>
               )}
             </div>
-          </CardHeader>
-          <CardContent className="pt-0">
             <div className="grid gap-4 md:grid-cols-7">
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
@@ -419,25 +422,9 @@ export function AuditLog() {
               </div>
             </div>
           </CardContent>
-        </Card>
-      )}
-
-      {/* Events Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ScrollText className="h-5 w-5" />
-            Events
-          </CardTitle>
-        </CardHeader>
+        )}
         <CardContent>
-          {(isLoading || (isFetching && allEvents.length === 0)) ? (
-            <div className="space-y-3">
-              {[...Array(10)].map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : error ? (
+          {error ? (
             <div className="flex items-center gap-2 text-destructive py-8 justify-center">
               <AlertCircle className="h-5 w-5" />
               <span>
@@ -446,13 +433,15 @@ export function AuditLog() {
               </span>
             </div>
           ) : visibleEvents.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <ScrollText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>No audit events found</p>
-              {hasActiveFilters && (
-                <p className="text-sm mt-1">Try adjusting your filters</p>
-              )}
-            </div>
+            !(isLoading || isFetching) && (
+              <div className="text-center py-12 text-muted-foreground">
+                <ScrollText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No audit events found</p>
+                {hasActiveFilters && (
+                  <p className="text-sm mt-1">Try adjusting your filters</p>
+                )}
+              </div>
+            )
           ) : (
             <>
               {isMobile ? (

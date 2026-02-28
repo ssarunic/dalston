@@ -56,6 +56,8 @@ class EngineResponse(BaseModel):
     stage: str
     version: str
     status: Literal["running", "available", "unhealthy"]
+    loaded_model: str | None = None  # M36: Currently loaded model (runtime_model_id)
+    available_models: list[str] | None = None  # M36: Models on disk, ready to load
     capabilities: EngineCapabilitiesResponse
     hardware: EngineHardwareResponse | None = None
     performance: EnginePerformanceResponse | None = None
@@ -120,15 +122,23 @@ async def list_engines(
         engine_id = entry.engine_id
         caps = entry.capabilities
 
-        # Determine status based on registry
+        # Determine status and runtime state from registry
+        loaded_model: str | None = None
+
         if engine_id in running_map:
             reg_engine = running_map[engine_id]
             if reg_engine.is_available:
                 status: Literal["running", "available", "unhealthy"] = "running"
             else:
                 status = "unhealthy"
+            # M36: Include loaded_model from registry heartbeat
+            loaded_model = reg_engine.loaded_model
         else:
             status = "available"
+
+        # M36: Get available models for this runtime from catalog
+        runtime_models = catalog.get_models_for_runtime(engine_id)
+        available_models = [m.id for m in runtime_models] if runtime_models else None
 
         engines.append(
             EngineResponse(
@@ -137,6 +147,8 @@ async def list_engines(
                 stage=caps.stages[0] if caps.stages else "unknown",
                 version=caps.version,
                 status=status,
+                loaded_model=loaded_model,
+                available_models=available_models,
                 capabilities=EngineCapabilitiesResponse(
                     languages=caps.languages,
                     supports_word_timestamps=caps.supports_word_timestamps,

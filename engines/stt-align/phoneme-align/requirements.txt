@@ -1,0 +1,14 @@
+# Phoneme Forced Alignment Engine Dependencies
+
+# PyTorch for model inference
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# Audio loading backend (soundfile is cross-platform: ARM64, x86_64, with/without CUDA)
+soundfile>=0.12.0
+
+# HuggingFace transformers for wav2vec2 model loading
+transformers>=4.30.0
+
+# Audio and numerical processing
+numpy>=1.24.0
