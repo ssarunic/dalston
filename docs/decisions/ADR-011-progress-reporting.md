@@ -62,9 +62,9 @@ The key observation: **progress granularity is engine-specific and optional**. T
 ### AWS Transcribe
 
 - **Mechanism**: Polling (`GetTranscriptionJob`) or EventBridge events
-- **Progress**: Returns `TranscriptionJob.CompletionPercentage` — an integer 0-100 that updates during processing
-- **Delivery**: EventBridge publishes `TranscribeJobStateChange` events on status transitions (not on percentage changes)
-- **Notable**: Completion percentage is coarse (often jumps from 0 to ~50 to 100) but exists. EventBridge integration enables serverless architectures
+- **Progress**: Status only (`QUEUED`, `IN_PROGRESS`, `COMPLETED`, `FAILED`). No percentage
+- **Delivery**: EventBridge publishes `TranscribeJobStateChange` events on status transitions
+- **Notable**: Uses EventBridge (a general-purpose event bus) rather than direct webhooks — more powerful but requires AWS infrastructure. The `QUEUED` state is explicitly surfaced, useful when queue depth matters. Built-in CLI waiter polls every 10s with 30-minute timeout
 
 ### Rev.ai
 
@@ -85,12 +85,13 @@ The key observation: **progress granularity is engine-specific and optional**. T
 |----------|-----------|-------------|-----|
 | AssemblyAI | No | Webhook (completion only) | No |
 | Deepgram | No (sync) | Callback (completion only) | No |
-| Google Cloud | Yes (0-100) | No (polling only) | No |
-| AWS Transcribe | Yes (0-100) | EventBridge (state changes) | No |
+| Google Cloud | **Yes (0-100)** | No (polling only) | No |
+| AWS Transcribe | No | EventBridge (state changes) | No |
 | Rev.ai | No | Webhook (completion only) | No |
 | ElevenLabs | No | Webhook (completion only) | No |
+| OpenAI Whisper | No (sync, 25MB limit) | No | No |
 
-**Takeaway**: Only Google and AWS report intra-task progress, both as coarse percentages via polling. No one provides real-time streaming of batch progress. No one provides ETA. There is an opportunity to differentiate.
+**Takeaway**: Google Cloud is the only provider that reports intra-task progress (percentage via LRO polling). Everyone else reports only discrete status transitions. No one provides real-time streaming of batch progress. No one provides ETA. No one surfaces pipeline stage information. There is a significant opportunity to differentiate.
 
 ## Design Options
 
@@ -437,7 +438,7 @@ data: {"error": "Transcription failed after 3 retries"}
 4. Extend `GET /v1/audio/transcriptions/{job_id}` to include progress on running stages
 5. Update CLI and SDK to display progress when polling
 
-This alone matches Google Cloud and AWS Transcribe, which is the industry ceiling today.
+This alone matches Google Cloud's LRO pattern, which is the industry ceiling today. Adding stage-level progress on top (which no competitor does) would be a clear differentiator.
 
 ### Phase 2: SSE Stream (for real-time UIs)
 
@@ -461,6 +462,7 @@ Roll out `report_progress` calls in engines, starting with the highest-value one
 - **Webhook progress callbacks**: Too expensive at scale for high-frequency updates. Webhooks remain for completion/failure only
 - **ETA prediction**: Tempting but unreliable. Progress percentage + audio duration lets clients estimate locally if they want
 - **Persisting progress history to PostgreSQL**: Ephemeral data — not worth the write amplification. Redis TTL is sufficient
+- **Progress on ElevenLabs-compatible endpoints**: ElevenLabs doesn't expose progress, so `/v1/speech-to-text/*` endpoints stay unchanged. Progress is a Dalston-native extension only
 
 ## Consequences
 
