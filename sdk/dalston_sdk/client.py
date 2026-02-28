@@ -540,6 +540,42 @@ class Dalston:
             created_at=_parse_datetime(None),  # Not in cancel response
         )
 
+    def retry(self, job_id: UUID | str) -> Job:
+        """Retry a failed job.
+
+        Resets the job to PENDING and re-queues it for processing.
+        The original audio must still exist (not purged).
+
+        Args:
+            job_id: Job ID to retry.
+
+        Returns:
+            Job object with updated status (pending).
+
+        Raises:
+            NotFoundError: If job doesn't exist.
+            ValidationError: If job is not in a retryable state or max retries exceeded.
+        """
+        try:
+            response = self._client.post(
+                f"{self.base_url}/v1/audio/transcriptions/{job_id}/retry",
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        data = response.json()
+        return Job(
+            id=UUID(data["id"]) if isinstance(data["id"], str) else data["id"],
+            status=JobStatus(data["status"]),
+            created_at=_parse_datetime(None),  # Not in retry response
+        )
+
     def wait_for_completion(
         self,
         job_id: UUID | str,
@@ -1470,6 +1506,42 @@ class AsyncDalston:
             id=UUID(data["id"]) if isinstance(data["id"], str) else data["id"],
             status=JobStatus(data["status"]),
             created_at=_parse_datetime(None),  # Not in cancel response
+        )
+
+    async def retry(self, job_id: UUID | str) -> Job:
+        """Retry a failed job.
+
+        Resets the job to PENDING and re-queues it for processing.
+        The original audio must still exist (not purged).
+
+        Args:
+            job_id: Job ID to retry.
+
+        Returns:
+            Job object with updated status (pending).
+
+        Raises:
+            NotFoundError: If job doesn't exist.
+            ValidationError: If job is not in a retryable state or max retries exceeded.
+        """
+        try:
+            response = await self._client.post(
+                f"{self.base_url}/v1/audio/transcriptions/{job_id}/retry",
+                headers=self._headers(),
+            )
+        except httpx.ConnectError as e:
+            raise ConnectError(f"Failed to connect: {e}") from e
+        except httpx.TimeoutException as e:
+            raise TimeoutException(f"Request timed out: {e}") from e
+
+        if response.status_code != 200:
+            _handle_error(response)
+
+        data = response.json()
+        return Job(
+            id=UUID(data["id"]) if isinstance(data["id"], str) else data["id"],
+            status=JobStatus(data["status"]),
+            created_at=_parse_datetime(None),  # Not in retry response
         )
 
     async def wait_for_completion(

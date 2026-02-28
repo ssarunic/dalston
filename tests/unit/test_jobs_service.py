@@ -6,7 +6,13 @@ from uuid import UUID
 import pytest
 
 from dalston.common.models import JobStatus, TaskStatus
-from dalston.gateway.services.jobs import CancelResult, JobsService, JobStats
+from dalston.gateway.services.jobs import (
+    MAX_JOB_RETRIES,
+    CancelResult,
+    JobsService,
+    JobStats,
+    RetryResult,
+)
 
 
 class TestJobStats:
@@ -428,3 +434,170 @@ class TestJobsServiceCancelJob:
         assert result is not None
         assert result.status == JobStatus.CANCELLED
         assert ready_task.status == TaskStatus.CANCELLED.value
+
+
+class TestJobsServiceRetryJob:
+    """Tests for JobsService.retry_job method."""
+
+    @pytest.fixture
+    def jobs_service(self) -> JobsService:
+        return JobsService()
+
+    @pytest.fixture
+    def mock_db(self):
+        """Create a mock async database session."""
+        db = AsyncMock()
+        return db
+
+    def _make_job(
+        self,
+        status: str,
+        retry_count: int = 0,
+        job_id: UUID | None = None,
+        tenant_id: UUID | None = None,
+    ):
+        """Create a mock JobModel with the given status."""
+        job = MagicMock()
+        job.id = job_id or UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        job.tenant_id = tenant_id or UUID("00000000-0000-0000-0000-000000000000")
+        job.status = status
+        job.retry_count = retry_count
+        job.error = "Some error"
+        job.started_at = MagicMock()
+        job.completed_at = MagicMock()
+        job.retried_at = None
+        job.result_language_code = "en"
+        job.result_word_count = 100
+        job.result_segment_count = 10
+        job.result_speaker_count = 2
+        job.result_character_count = 500
+        job.pii_entities_detected = 5
+        job.pii_redacted_audio_uri = "s3://bucket/redacted.wav"
+        job.tasks = []
+        return job
+
+    @pytest.mark.asyncio
+    async def test_retry_failed_job_success(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test retrying a failed job resets it to PENDING."""
+        job = self._make_job(JobStatus.FAILED.value, retry_count=0)
+
+        with patch.object(jobs_service, "get_job_with_tasks", return_value=job):
+            result = await jobs_service.retry_job(mock_db, job.id)
+
+        assert result is not None
+        assert isinstance(result, RetryResult)
+        assert result.previous_retry_count == 0
+        assert job.status == JobStatus.PENDING.value
+        assert job.error is None
+        assert job.started_at is None
+        assert job.completed_at is None
+        assert job.retry_count == 1
+        assert job.retried_at is not None
+        assert job.result_language_code is None
+        assert job.result_word_count is None
+        assert job.result_segment_count is None
+        assert job.result_speaker_count is None
+        assert job.result_character_count is None
+        assert job.pii_entities_detected is None
+        assert job.pii_redacted_audio_uri is None
+        mock_db.execute.assert_awaited_once()  # DELETE tasks
+        mock_db.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_retry_increments_retry_count(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test that retry_count is incremented on each retry."""
+        job = self._make_job(JobStatus.FAILED.value, retry_count=1)
+
+        with patch.object(jobs_service, "get_job_with_tasks", return_value=job):
+            result = await jobs_service.retry_job(mock_db, job.id)
+
+        assert result is not None
+        assert result.previous_retry_count == 1
+        assert job.retry_count == 2
+
+    @pytest.mark.asyncio
+    async def test_retry_running_job_raises(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test that retrying a running job raises ValueError."""
+        job = self._make_job(JobStatus.RUNNING.value)
+
+        with patch.object(jobs_service, "get_job_with_tasks", return_value=job):
+            with pytest.raises(ValueError, match="Cannot retry job in 'running' state"):
+                await jobs_service.retry_job(mock_db, job.id)
+
+    @pytest.mark.asyncio
+    async def test_retry_completed_job_raises(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test that retrying a completed job raises ValueError."""
+        job = self._make_job(JobStatus.COMPLETED.value)
+
+        with patch.object(jobs_service, "get_job_with_tasks", return_value=job):
+            with pytest.raises(
+                ValueError, match="Cannot retry job in 'completed' state"
+            ):
+                await jobs_service.retry_job(mock_db, job.id)
+
+    @pytest.mark.asyncio
+    async def test_retry_pending_job_raises(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test that retrying a pending job raises ValueError."""
+        job = self._make_job(JobStatus.PENDING.value)
+
+        with patch.object(jobs_service, "get_job_with_tasks", return_value=job):
+            with pytest.raises(
+                ValueError, match="Cannot retry job in 'pending' state"
+            ):
+                await jobs_service.retry_job(mock_db, job.id)
+
+    @pytest.mark.asyncio
+    async def test_retry_max_retries_exceeded_raises(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test that retrying beyond max limit raises ValueError."""
+        job = self._make_job(
+            JobStatus.FAILED.value, retry_count=MAX_JOB_RETRIES
+        )
+
+        with patch.object(jobs_service, "get_job_with_tasks", return_value=job):
+            with pytest.raises(ValueError, match="maximum retry limit"):
+                await jobs_service.retry_job(mock_db, job.id)
+
+    @pytest.mark.asyncio
+    async def test_retry_nonexistent_job_returns_none(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test that retrying a nonexistent job returns None."""
+        with patch.object(jobs_service, "get_job_with_tasks", return_value=None):
+            result = await jobs_service.retry_job(
+                mock_db, UUID("ffffffff-ffff-ffff-ffff-ffffffffffff")
+            )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_retry_with_tenant_isolation(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test that retry passes tenant_id for isolation."""
+        tenant_id = UUID("12345678-1234-1234-1234-123456789abc")
+        job_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        job = self._make_job(
+            JobStatus.FAILED.value, job_id=job_id, tenant_id=tenant_id
+        )
+
+        with patch.object(
+            jobs_service, "get_job_with_tasks", return_value=job
+        ) as mock_get:
+            result = await jobs_service.retry_job(
+                mock_db, job_id, tenant_id=tenant_id
+            )
+
+        mock_get.assert_awaited_once_with(mock_db, job_id, tenant_id=tenant_id)
+        assert result is not None

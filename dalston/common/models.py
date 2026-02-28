@@ -245,6 +245,10 @@ class Job(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
 
+    # Retry tracking
+    retry_count: int = 0
+    retried_at: datetime | None = None
+
     # Computed fields for API responses
     text: str | None = None
 

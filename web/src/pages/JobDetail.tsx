@@ -8,7 +8,9 @@ import {
   Archive,
   Mic,
   ScrollText,
+  RotateCcw,
 } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useJob } from '@/hooks/useJob'
 import { useJobTasks } from '@/hooks/useJobTasks'
 import { useResourceAuditTrail } from '@/hooks/useAuditLog'
@@ -396,10 +398,13 @@ function AuditTrailSection({ events, isLoading }: { events?: AuditEvent[]; isLoa
 
 export function JobDetail() {
   const { jobId } = useParams()
+  const queryClient = useQueryClient()
   const { data: job, isLoading, error } = useJob(jobId)
   const { data: tasksData } = useJobTasks(jobId)
   const { data: auditData, isLoading: auditLoading } = useResourceAuditTrail('job', jobId)
   const [showRedacted, setShowRedacted] = useState(false)
+  const [isRetrying, setIsRetrying] = useState(false)
+  const [retryError, setRetryError] = useState<string | null>(null)
   const [audioUrlData, setAudioUrlData] = useState<{
     forJobId: string
     originalUrl: string
@@ -412,6 +417,21 @@ export function JobDetail() {
     ? ['completed', 'failed', 'cancelled'].includes(job.status)
     : false
   const canAccessAudio = isTerminalStatus && !job?.retention?.purged_at
+
+  const handleRetry = useCallback(async () => {
+    if (!currentJobId) return
+    setIsRetrying(true)
+    setRetryError(null)
+    try {
+      await apiClient.retryJob(currentJobId)
+      await queryClient.invalidateQueries({ queryKey: ['job', jobId] })
+      await queryClient.invalidateQueries({ queryKey: ['jobTasks', jobId] })
+    } catch (err) {
+      setRetryError(err instanceof Error ? err.message : 'Failed to retry job')
+    } finally {
+      setIsRetrying(false)
+    }
+  }, [currentJobId, jobId, queryClient])
 
   const fetchAudioUrls = useCallback(async () => {
     if (!jobId || !currentJobId || !canAccessAudio) return null
@@ -539,12 +559,33 @@ export function JobDetail() {
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
               <h1 className="text-lg sm:text-2xl font-bold font-mono truncate">{job.id}</h1>
               <StatusBadge status={job.status} />
+              {(job.retry_count ?? 0) > 0 && (
+                <Badge variant="outline" className="text-xs">
+                  Retry {job.retry_count}
+                </Badge>
+              )}
             </div>
             <p className="text-xs sm:text-sm text-muted-foreground">
               Created {new Date(job.created_at).toLocaleString()}
             </p>
           </div>
         </div>
+        {job.status === 'failed' && (
+          <div className="flex items-center gap-2">
+            {retryError && (
+              <p className="text-xs text-red-400">{retryError}</p>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRetry}
+              disabled={isRetrying}
+            >
+              <RotateCcw className="h-4 w-4 mr-1" />
+              {isRetrying ? 'Retrying...' : 'Retry'}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Error details */}

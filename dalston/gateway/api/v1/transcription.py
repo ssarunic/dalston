@@ -53,6 +53,7 @@ from dalston.gateway.models.responses import (
     JobCreatedResponse,
     JobListResponse,
     JobResponse,
+    JobRetryResponse,
     JobSummary,
     RetentionInfo,
     StageResponse,
@@ -855,6 +856,86 @@ async def cancel_transcription(
         id=result.job.id,
         status=result.status,
         message=result.message,
+    )
+
+
+@router.post(
+    "/{job_id}/retry",
+    response_model=JobRetryResponse,
+    summary="Retry a failed transcription job",
+    description="Retry a failed job. Resets the job to PENDING and re-queues it for processing. Original audio must still exist.",
+    responses={
+        200: {"description": "Job queued for retry"},
+        404: {"description": "Job not found"},
+        409: {"description": "Job is not in a retryable state or max retries exceeded"},
+        410: {"description": "Audio has been purged, cannot retry"},
+    },
+)
+async def retry_transcription(
+    job_id: UUID,
+    api_key: RequireJobsWrite,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    jobs_service: JobsService = Depends(get_jobs_service),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> JobRetryResponse:
+    """Retry a failed transcription job.
+
+    1. Validate job is FAILED and under the retry limit
+    2. Check audio hasn't been purged
+    3. Reset job status to PENDING, delete old tasks
+    4. Publish job.created event for orchestrator to rebuild the DAG
+    """
+    # Fetch the job first to check audio purge status
+    job = await jobs_service.get_job_with_tasks(
+        db, job_id, tenant_id=api_key.tenant_id
+    )
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Check audio hasn't been purged
+    if job.retention_policy and job.retention_policy.purged_at is not None:
+        raise HTTPException(
+            status_code=410,
+            detail="Audio has been purged. Cannot retry this job.",
+        )
+
+    try:
+        result = await jobs_service.retry_job(
+            db, job_id, tenant_id=api_key.tenant_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from None
+
+    if result is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Publish job.created event so orchestrator rebuilds the DAG
+    await publish_job_created(redis, job_id)
+
+    # Audit
+    await audit_service.log(
+        action="job.retried",
+        resource_type="job",
+        resource_id=str(job_id),
+        tenant_id=str(api_key.tenant_id),
+        actor_type="api_key",
+        actor_id=str(api_key.id),
+        detail={"retry_count": result.job.retry_count},
+    )
+
+    logger.info(
+        "job_retried",
+        job_id=str(job_id),
+        retry_count=result.job.retry_count,
+        previous_retry_count=result.previous_retry_count,
+    )
+
+    return JobRetryResponse(
+        id=result.job.id,
+        status=JobStatus(result.job.status),
+        retry_count=result.job.retry_count,
+        message=f"Job queued for retry (attempt {result.job.retry_count} of 3).",
     )
 
 

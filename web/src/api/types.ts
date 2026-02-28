@@ -27,6 +27,13 @@ export interface Speaker {
   sample_end?: number
 }
 
+export interface JobRetryResponse {
+  id: string
+  status: JobStatus
+  retry_count: number
+  message: string
+}
+
 export interface JobSummary {
   id: string
   status: JobStatus
@@ -34,6 +41,7 @@ export interface JobSummary {
   started_at?: string
   completed_at?: string
   progress?: number
+  retry_count?: number
   // Result stats (populated on completion)
   audio_duration_seconds?: number
   result_language_code?: string

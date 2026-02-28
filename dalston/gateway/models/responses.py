@@ -85,6 +85,15 @@ class JobCancelledResponse(BaseModel):
     message: str
 
 
+class JobRetryResponse(BaseModel):
+    """Response for POST /v1/audio/transcriptions/{job_id}/retry."""
+
+    id: UUID
+    status: JobStatus
+    retry_count: int
+    message: str
+
+
 class JobResponse(BaseModel):
     """Response for GET /v1/audio/transcriptions/{id}.
 
@@ -105,6 +114,9 @@ class JobResponse(BaseModel):
     # Progress info (if running)
     progress: int | None = Field(default=None, ge=0, le=100)
     current_stage: str | None = None
+
+    # Retry tracking
+    retry_count: int = Field(default=0, description="Number of times this job has been retried")
 
     # Stage breakdown (available once job has tasks)
     stages: list["StageResponse"] | None = Field(
@@ -165,6 +177,7 @@ class JobSummary(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     progress: int | None = None
+    retry_count: int = 0
 
     # Result summary stats (for quick display without fetching transcript)
     audio_duration_seconds: float | None = Field(

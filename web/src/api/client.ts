@@ -11,6 +11,7 @@ import type {
   CreateJobRequest,
   CreateJobResponse,
   CreateWebhookRequest,
+  JobRetryResponse,
   DashboardResponse,
   DeliveryListResponse,
   EnginesListResponse,
@@ -210,6 +211,10 @@ export const apiClient = {
   // Cancel a job (admin required, job must be pending or running)
   cancelJob: (jobId: string) =>
     currentClient.post(`api/console/jobs/${jobId}/cancel`).json<{ id: string; status: string; message: string }>(),
+
+  // Retry a failed job (admin required, job must be in failed state)
+  retryJob: (jobId: string) =>
+    currentClient.post(`api/console/jobs/${jobId}/retry`).json<JobRetryResponse>(),
 
   // Download job export (uses authenticated fetch to avoid exposing API key in URLs)
   downloadJobExport: (jobId: string, format: 'srt' | 'vtt' | 'txt' | 'json') => {

@@ -22,7 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from dalston.common.events import publish_job_cancel_requested
+from dalston.common.events import publish_job_cancel_requested, publish_job_created
 from dalston.common.models import JobStatus
 from dalston.common.streams_types import CONSUMER_GROUP
 from dalston.config import Settings
@@ -36,7 +36,7 @@ from dalston.gateway.dependencies import (
     get_session_router,
     get_settings,
 )
-from dalston.gateway.models.responses import JobCancelledResponse
+from dalston.gateway.models.responses import JobCancelledResponse, JobRetryResponse
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
 from dalston.session_router import SessionRouter
@@ -854,6 +854,47 @@ async def cancel_console_job(
         id=result.job.id,
         status=result.status,
         message=result.message,
+    )
+
+
+@router.post(
+    "/jobs/{job_id}/retry",
+    response_model=JobRetryResponse,
+    summary="Retry a failed job",
+    description="Retry a failed job. Resets it to PENDING and re-queues for processing. Admin only.",
+    responses={
+        200: {"description": "Job queued for retry"},
+        404: {"description": "Job not found"},
+        409: {"description": "Job is not in a retryable state or max retries exceeded"},
+    },
+)
+async def retry_console_job(
+    job_id: UUID,
+    api_key: RequireAdmin,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    jobs_service: JobsService = Depends(get_jobs_service),
+) -> JobRetryResponse:
+    """Retry a failed job (admin endpoint).
+
+    No tenant filter — admins can retry any job.
+    """
+    try:
+        result = await jobs_service.retry_job(db, job_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from None
+
+    if result is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Publish job.created event so orchestrator rebuilds the DAG
+    await publish_job_created(redis, job_id)
+
+    return JobRetryResponse(
+        id=result.job.id,
+        status=JobStatus(result.job.status),
+        retry_count=result.job.retry_count,
+        message=f"Job queued for retry (attempt {result.job.retry_count} of 3).",
     )
 
 

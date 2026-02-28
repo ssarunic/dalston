@@ -12,6 +12,9 @@ from sqlalchemy.orm import selectinload
 from dalston.common.models import JobStatus, TaskStatus
 from dalston.db.models import JobModel, TaskModel
 
+# Maximum number of times a job can be retried via the retry endpoint
+MAX_JOB_RETRIES = 3
+
 
 class JobStats:
     """Job statistics for dashboard."""
@@ -37,6 +40,14 @@ class CancelResult:
     status: JobStatus
     message: str
     running_task_count: int
+
+
+@dataclass
+class RetryResult:
+    """Result of a job retry request."""
+
+    job: JobModel
+    previous_retry_count: int
 
 
 class JobsService:
@@ -315,6 +326,75 @@ class JobsService:
             message=message,
             running_task_count=running_count,
         )
+
+    # States that allow retry
+    RETRYABLE_STATES = {
+        JobStatus.FAILED.value,
+    }
+
+    async def retry_job(
+        self,
+        db: AsyncSession,
+        job_id: UUID,
+        tenant_id: UUID | None = None,
+    ) -> RetryResult | None:
+        """Retry a failed job by resetting it to PENDING and deleting old tasks.
+
+        The orchestrator will rebuild the task DAG from scratch when it
+        receives the job.created event.
+
+        Args:
+            db: Database session
+            job_id: Job UUID
+            tenant_id: Optional tenant UUID for isolation check
+
+        Returns:
+            RetryResult with job and previous retry count, or None if not found
+
+        Raises:
+            ValueError: If job is not in a retryable state or max retries exceeded
+        """
+        job = await self.get_job_with_tasks(db, job_id, tenant_id=tenant_id)
+        if job is None:
+            return None
+
+        if job.status not in self.RETRYABLE_STATES:
+            raise ValueError(
+                f"Cannot retry job in '{job.status}' state. "
+                f"Only failed jobs can be retried."
+            )
+
+        if job.retry_count >= MAX_JOB_RETRIES:
+            raise ValueError(
+                f"Job has reached the maximum retry limit ({MAX_JOB_RETRIES})."
+            )
+
+        previous_retry_count = job.retry_count
+
+        # Delete existing tasks so the orchestrator rebuilds the DAG
+        await db.execute(delete(TaskModel).where(TaskModel.job_id == job_id))
+
+        # Reset job to PENDING
+        job.status = JobStatus.PENDING.value
+        job.error = None
+        job.started_at = None
+        job.completed_at = None
+        job.retry_count += 1
+        job.retried_at = datetime.now(UTC)
+
+        # Clear result stats from previous run
+        job.result_language_code = None
+        job.result_word_count = None
+        job.result_segment_count = None
+        job.result_speaker_count = None
+        job.result_character_count = None
+        job.pii_entities_detected = None
+        job.pii_redacted_audio_uri = None
+
+        await db.commit()
+        await db.refresh(job)
+
+        return RetryResult(job=job, previous_retry_count=previous_retry_count)
 
     async def update_job_status(
         self,

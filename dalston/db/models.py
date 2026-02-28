@@ -239,6 +239,14 @@ class JobModel(Base):
     pii_entities_detected: Mapped[int | None] = mapped_column(Integer, nullable=True)
     pii_redacted_audio_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Retry tracking
+    retry_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    retried_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+
     # Relationships
     tenant: Mapped["TenantModel"] = relationship(back_populates="jobs")
     tasks: Mapped[list["TaskModel"]] = relationship(back_populates="job")

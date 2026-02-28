@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Trash2, X, Plus } from 'lucide-react'
+import { Trash2, X, Plus, RotateCcw } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useJobs } from '@/hooks/useJobs'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
@@ -91,6 +91,7 @@ export function BatchJobs() {
   const [isCancelling, setIsCancelling] = useState(false)
   const [cancelError, setCancelError] = useState<string | null>(null)
   const [cancelSuccess, setCancelSuccess] = useState<string | null>(null)
+  const [retryingId, setRetryingId] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
 
@@ -160,6 +161,18 @@ export function BatchJobs() {
       setCancelError(message)
     } finally {
       setIsCancelling(false)
+    }
+  }
+
+  async function handleRetry(jobId: string) {
+    setRetryingId(jobId)
+    try {
+      await apiClient.retryJob(jobId)
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] })
+    } catch {
+      // Silently fail; user can retry from the detail page for error details
+    } finally {
+      setRetryingId(null)
     }
   }
 
@@ -278,6 +291,21 @@ export function BatchJobs() {
                     {(CANCELLABLE_STATUSES.has(job.status as JobStatus) ||
                       TERMINAL_STATUSES.has(job.status as JobStatus)) && (
                       <div className="mt-3 flex justify-end gap-2">
+                        {job.status === 'failed' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-blue-400 hover:text-blue-300 hover:bg-blue-950"
+                            disabled={retryingId === job.id}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void handleRetry(job.id)
+                            }}
+                          >
+                            <RotateCcw className="h-4 w-4 mr-1" />
+                            {retryingId === job.id ? 'Retrying...' : 'Retry'}
+                          </Button>
+                        )}
                         {CANCELLABLE_STATUSES.has(job.status as JobStatus) && (
                           <Button
                             variant="outline"
@@ -351,6 +379,23 @@ export function BatchJobs() {
                       </TableCell>
                       <TableCell className="text-right sticky right-0 z-10 bg-card group-hover:bg-accent/50">
                         <div className="flex items-center justify-end gap-1">
+                          <div className="w-8">
+                            {job.status === 'failed' && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-blue-400 hover:text-blue-300 hover:bg-blue-950"
+                                disabled={retryingId === job.id}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  void handleRetry(job.id)
+                                }}
+                                title="Retry job"
+                              >
+                                <RotateCcw className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
                           <div className="w-8">
                             {CANCELLABLE_STATUSES.has(job.status as JobStatus) && (
                               <Button
