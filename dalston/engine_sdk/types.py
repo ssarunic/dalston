@@ -41,7 +41,7 @@ class EngineCapabilities(BaseModel):
         min_ram_gb: Minimum system RAM in GB (M30)
         rtf_gpu: Real-time factor on GPU (M30)
         rtf_cpu: Real-time factor on CPU (M30)
-        max_concurrency: Max concurrent work units - jobs (batch) or sessions (realtime)
+        max_concurrency: Max concurrent sessions (realtime engines only; batch engines use horizontal scaling)
         includes_diarization: Whether output includes speaker labels (M31)
         runtime: Runtime engine identifier for model swapping (M36).
                  For transcription engines: "nemo", "faster-whisper".

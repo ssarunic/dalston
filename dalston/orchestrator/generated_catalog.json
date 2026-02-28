@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-27T14:05:40.752457+00:00",
+  "generated_at": "2026-02-28T17:51:32.696945+00:00",
   "schema_version": "2.0",
   "runtime_count": 9,
   "model_count": 7,
@@ -21,7 +21,7 @@
         "supports_word_timestamps": true,
         "supports_streaming": false,
         "max_audio_duration": 7200,
-        "max_concurrency": 8
+        "max_concurrency": null
       },
       "hardware": {
         "gpu_required": false,
@@ -56,7 +56,7 @@
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": null,
-        "max_concurrency": 8
+        "max_concurrency": null
       },
       "hardware": {
         "gpu_required": false,
@@ -79,7 +79,7 @@
       "name": "NeMo MSDD Speaker Diarization",
       "version": "1.0.0",
       "stage": "diarize",
-      "description": "Speaker diarization using NVIDIA NeMo Multi-scale Diarization Decoder.\nNeural end-to-end system with built-in overlap detection.\n\nNo HuggingFace token required - models are open under CC-BY-4.0 license.\nSupports optional min/max speaker count hints.\nCPU inference supported but slow.",
+      "description": "Speaker diarization using NVIDIA NeMo Multi-scale Diarization Decoder.\nNeural end-to-end system with built-in overlap detection.\n\nNo HuggingFace token required - models are open under CC-BY-4.0 license.\nSupports optional min/max speaker count hints.\nCPU inference supported but slow (~2x realtime).",
       "image": "dalston/stt-batch-diarize-nemo-msdd:1.0.0",
       "capabilities": {
         "stages": [
@@ -89,7 +89,7 @@
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 7200,
-        "max_concurrency": 2
+        "max_concurrency": null
       },
       "hardware": {
         "gpu_required": false,
@@ -125,7 +125,7 @@
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 7200,
-        "max_concurrency": 4
+        "max_concurrency": null
       },
       "hardware": {
         "gpu_required": false,
@@ -160,7 +160,7 @@
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 86400,
-        "max_concurrency": 16
+        "max_concurrency": null
       },
       "hardware": {
         "gpu_required": false,
@@ -193,7 +193,7 @@
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 14400,
-        "max_concurrency": 8
+        "max_concurrency": null
       },
       "hardware": {
         "gpu_required": false,
@@ -226,7 +226,7 @@
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": null,
-        "max_concurrency": 8
+        "max_concurrency": null
       },
       "hardware": {
         "gpu_required": false,
@@ -259,7 +259,7 @@
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 7200,
-        "max_concurrency": 4
+        "max_concurrency": null
       },
       "hardware": {
         "gpu_required": false,
@@ -297,7 +297,7 @@
         "supports_word_timestamps": true,
         "supports_streaming": false,
         "max_audio_duration": 7200,
-        "max_concurrency": 4
+        "max_concurrency": null
       },
       "hardware": {
         "gpu_required": false,
@@ -534,7 +534,7 @@
         "supports_word_timestamps": true,
         "supports_streaming": false,
         "max_audio_duration": 7200,
-        "max_concurrency": 8
+        "max_concurrency": null
       },
       "hardware": {
         "gpu_required": false,
@@ -569,7 +569,7 @@
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": null,
-        "max_concurrency": 8
+        "max_concurrency": null
       },
       "hardware": {
         "gpu_required": false,
@@ -592,7 +592,7 @@
       "version": "1.0.0",
       "stage": "diarize",
       "type": null,
-      "description": "Speaker diarization using NVIDIA NeMo Multi-scale Diarization Decoder.\nNeural end-to-end system with built-in overlap detection.\n\nNo HuggingFace token required - models are open under CC-BY-4.0 license.\nSupports optional min/max speaker count hints.\nGPU-only (CPU inference is prohibitively slow).",
+      "description": "Speaker diarization using NVIDIA NeMo Multi-scale Diarization Decoder.\nNeural end-to-end system with built-in overlap detection.\n\nNo HuggingFace token required - models are open under CC-BY-4.0 license.\nSupports optional min/max speaker count hints.\nCPU inference supported but slow (~2x realtime).",
       "image": "dalston/stt-batch-diarize-nemo-msdd:1.0.0",
       "capabilities": {
         "stages": [
@@ -602,23 +602,23 @@
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 7200,
-        "max_concurrency": 2
+        "max_concurrency": null
       },
       "hardware": {
-        "gpu_required": true,
-        "gpu_optional": false,
+        "gpu_required": false,
+        "gpu_optional": true,
         "min_vram_gb": 4,
         "recommended_gpu": [
           "t4",
           "a10g"
         ],
-        "supports_cpu": false,
+        "supports_cpu": true,
         "min_ram_gb": 8,
         "memory": "8G"
       },
       "performance": {
         "rtf_gpu": 0.05,
-        "rtf_cpu": null,
+        "rtf_cpu": 2.0,
         "warm_start_latency_ms": 1000
       }
     },
@@ -638,7 +638,7 @@
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 7200,
-        "max_concurrency": 4
+        "max_concurrency": null
       },
       "hardware": {
         "gpu_required": false,
@@ -673,7 +673,7 @@
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 86400,
-        "max_concurrency": 16
+        "max_concurrency": null
       },
       "hardware": {
         "gpu_required": false,
@@ -706,7 +706,7 @@
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 14400,
-        "max_concurrency": 8
+        "max_concurrency": null
       },
       "hardware": {
         "gpu_required": false,
@@ -739,7 +739,7 @@
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": null,
-        "max_concurrency": 8
+        "max_concurrency": null
       },
       "hardware": {
         "gpu_required": false,
@@ -772,7 +772,7 @@
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 7200,
-        "max_concurrency": 4
+        "max_concurrency": null
       },
       "hardware": {
         "gpu_required": false,
@@ -810,23 +810,23 @@
         "supports_word_timestamps": true,
         "supports_streaming": false,
         "max_audio_duration": 7200,
-        "max_concurrency": 4
+        "max_concurrency": null
       },
       "hardware": {
-        "gpu_required": true,
-        "gpu_optional": false,
+        "gpu_required": false,
+        "gpu_optional": true,
         "min_vram_gb": 4,
         "recommended_gpu": [
           "a10g",
           "a100"
         ],
-        "supports_cpu": false,
+        "supports_cpu": true,
         "min_ram_gb": 12,
         "memory": "12G"
       },
       "performance": {
         "rtf_gpu": 0.0006,
-        "rtf_cpu": null,
+        "rtf_cpu": 0.5,
         "warm_start_latency_ms": 150
       }
     }

@@ -27,7 +27,6 @@ capabilities:
   max_audio_duration: 7200  # 2 hours
   streaming: false
   word_timestamps: false  # Attention-based timestamps are inaccurate; use alignment stage
-  max_concurrency: 4
   model_variants:
     - tiny
     - base

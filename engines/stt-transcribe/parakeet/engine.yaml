@@ -31,7 +31,6 @@ capabilities:
   max_audio_duration: 7200
   streaming: false
   word_timestamps: true  # Native word timestamps via CTC/TDT decoder
-  max_concurrency: 4
   model_variants:
     - nvidia/parakeet-ctc-0.6b
     - nvidia/parakeet-ctc-1.1b

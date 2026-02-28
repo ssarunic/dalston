@@ -88,7 +88,7 @@ class RealtimeEngine(ABC):
         DALSTON_WORKER_ID: Unique identifier for this worker (required)
         DALSTON_WORKER_PORT: WebSocket server port (default: 9000)
         DALSTON_WORKER_ENDPOINT: WebSocket endpoint URL for registration (auto-detected)
-        DALSTON_MAX_SESSIONS: Maximum concurrent sessions (default: 4)
+        DALSTON_MAX_SESSIONS: Maximum concurrent sessions (default: 2)
         REDIS_URL: Redis connection URL (default: redis://localhost:6379)
     """
 
@@ -96,7 +96,7 @@ class RealtimeEngine(ABC):
         """Initialize the engine."""
         self.worker_id = os.environ.get("DALSTON_WORKER_ID", "realtime-worker")
         self.port = int(os.environ.get("DALSTON_WORKER_PORT", "9000"))
-        self.max_sessions = int(os.environ.get("DALSTON_MAX_SESSIONS", "4"))
+        self.max_sessions = int(os.environ.get("DALSTON_MAX_SESSIONS", "2"))
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
         self.metrics_port = int(os.environ.get("DALSTON_METRICS_PORT", "9100"))
 

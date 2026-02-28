@@ -22,7 +22,6 @@ capabilities:
     - all  # Language-agnostic speaker diarization
   max_audio_duration: 7200  # 2 hours
   streaming: false
-  max_concurrency: 2
 
 input:
   audio_formats:

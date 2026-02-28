@@ -228,7 +228,6 @@ capabilities:
   languages:
 {languages_yaml}
   max_audio_duration: 7200
-  max_concurrency: 4
   streaming: false
   word_timestamps: {str(config.word_timestamps).lower()}
 
@@ -537,7 +536,6 @@ capabilities:
   languages:
 {languages_yaml}
   max_audio_duration: 7200
-  max_concurrency: 4
   streaming: false
   word_timestamps: {str(config.word_timestamps).lower()}
 

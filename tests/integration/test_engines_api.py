@@ -42,7 +42,7 @@ def mock_catalog() -> EngineCatalog:
                 min_ram_gb=8,
                 rtf_gpu=0.05,
                 rtf_cpu=0.8,
-                max_concurrency=4,
+                max_concurrency=None,
             ),
         ),
         "parakeet": CatalogEntry(
@@ -59,7 +59,7 @@ def mock_catalog() -> EngineCatalog:
                 gpu_vram_mb=6144,
                 supports_cpu=False,
                 rtf_gpu=0.02,
-                max_concurrency=8,
+                max_concurrency=None,
             ),
         ),
         "pyannote-4.0": CatalogEntry(
