@@ -128,6 +128,46 @@ make status
 make queues
 ```
 
+### Environment Management (Docker vs Local)
+
+**CRITICAL**: Never mix Docker and local Python processes for the same service. They share Redis/Postgres and will conflict, causing subtle bugs like duplicate event processing or stuck jobs.
+
+**Before testing with Docker (`make dev`):**
+
+```bash
+# Kill any local dalston processes first
+pkill -f "dalston.orchestrator" || true
+pkill -f "dalston.gateway" || true
+
+# Verify no conflicts
+ps aux | grep -E "dalston\.(orchestrator|gateway)" | grep -v grep
+```
+
+**Before testing locally (without Docker):**
+
+```bash
+# Stop Docker services that would conflict
+docker compose stop orchestrator gateway
+```
+
+**Pre-flight check for debugging stuck jobs:**
+
+```bash
+# Check for duplicate orchestrators (should be exactly 1)
+docker ps | grep orchestrator
+ps aux | grep "dalston.orchestrator" | grep -v grep
+
+# Check Redis consumer groups for unexpected consumers
+docker compose exec redis redis-cli XINFO CONSUMERS "dalston:events:stream" orchestrators
+```
+
+**Choose one mode per session:**
+
+- **Docker mode**: Use `make dev` exclusively. All services run in containers.
+- **Local mode**: Run `docker compose stop` for services you're running locally.
+
+**Why this matters**: Local processes persist across Claude Code sessions. A "zombie" orchestrator from a previous session can steal Redis events from the Docker orchestrator, causing jobs to hang indefinitely.
+
 ## Development Workflow
 
 ### Adding New Engines
