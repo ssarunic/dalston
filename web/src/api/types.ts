@@ -72,6 +72,7 @@ export interface PIIInfo {
 export interface JobDetail extends JobSummary {
   error?: string
   current_stage?: string
+  model?: string  // Transcription model ID (e.g., 'nemo-parakeet-tdt-0.6b')
   language_code?: string
   text?: string
   words?: Word[]
@@ -579,4 +580,44 @@ export interface CapabilitiesResponse {
   stages: Record<string, StageCapabilities>
   max_audio_duration_s: number | null
   supported_formats: string[]
+}
+
+// Model catalog types (M36)
+export interface ModelCapabilities {
+  word_timestamps: boolean
+  punctuation: boolean
+  capitalization: boolean
+  streaming: boolean
+  max_audio_duration_s: number | null
+}
+
+export interface ModelHardware {
+  min_vram_gb: number | null
+  supports_cpu: boolean
+  min_ram_gb: number | null
+}
+
+export interface ModelPerformance {
+  rtf_gpu: number | null
+  rtf_cpu: number | null
+}
+
+export interface Model {
+  id: string
+  object: 'model'
+  name: string
+  runtime: string
+  runtime_model_id: string
+  source: string | null
+  size_gb: number | null
+  stage: string | null
+  languages: string[] | null // null means multilingual
+  capabilities: ModelCapabilities
+  hardware: ModelHardware
+  performance: ModelPerformance
+}
+
+export interface ModelListResponse {
+  object: 'list'
+  data: Model[]
 }
