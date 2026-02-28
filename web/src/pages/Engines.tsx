@@ -6,8 +6,6 @@ import {
   Server,
   Radio,
   AlertCircle,
-  CheckCircle,
-  XCircle,
   Layers,
   Box,
 } from 'lucide-react'
@@ -24,8 +22,8 @@ const PIPELINE_STAGES = [
   { id: 'transcribe', label: 'Transcribe', description: 'Speech-to-text' },
   { id: 'align', label: 'Align', description: 'Word-level timestamps' },
   { id: 'diarize', label: 'Diarize', description: 'Speaker identification' },
-  { id: 'pii-detect', label: 'PII Detect', description: 'Sensitive data detection' },
-  { id: 'audio-redact', label: 'Audio Redact', description: 'PII audio masking' },
+  { id: 'pii_detect', label: 'PII Detect', description: 'Sensitive data detection' },
+  { id: 'audio_redact', label: 'Audio Redact', description: 'PII audio masking' },
   { id: 'merge', label: 'Merge', description: 'Final assembly' },
 ] as const
 
@@ -191,18 +189,8 @@ function EngineCard({ engine, models }: { engine: BatchEngine; models: Model[] }
           <StatusDot status={isHealthy ? 'healthy' : 'unhealthy'} />
           <div className="min-w-0">
             <div className="font-medium truncate">{engine.engine_id}</div>
-            <div className="text-sm text-muted-foreground flex items-center gap-2">
-              {isHealthy ? (
-                <span className="flex items-center gap-1">
-                  <CheckCircle className="h-3 w-3 text-green-500" />
-                  Healthy
-                </span>
-              ) : (
-                <span className="flex items-center gap-1">
-                  <XCircle className="h-3 w-3 text-red-500" />
-                  Unhealthy
-                </span>
-              )}
+            <div className="text-sm text-muted-foreground">
+              {isHealthy ? 'Healthy' : 'Unhealthy'}
             </div>
           </div>
         </div>
