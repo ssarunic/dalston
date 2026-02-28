@@ -262,6 +262,8 @@ services:
     environment:
       <<: [*core-env, *observability-env]
       DALSTON_METRICS_PORT: 8001
+      # Fail fast if another orchestrator is running (dev safety)
+      DALSTON_SINGLE_INSTANCE: "true"
     depends_on: *core-depends
     restart: unless-stopped
 
