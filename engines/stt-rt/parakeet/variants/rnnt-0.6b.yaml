@@ -19,7 +19,7 @@ container:
 capabilities:
   languages:
     - en
-  max_concurrency: 4
+  max_concurrency: 2
   streaming: true
   word_timestamps: true
   punctuation: false
@@ -58,7 +58,7 @@ environment:
     default: "9000"
   MAX_SESSIONS:
     description: Maximum concurrent sessions
-    default: "4"
+    default: "2"
   REDIS_URL:
     description: Redis connection URL
     default: redis://localhost:6379

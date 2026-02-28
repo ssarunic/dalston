@@ -83,6 +83,8 @@ def _create_mock_job(
     job.result_segment_count = None
     job.result_speaker_count = None
     job.result_character_count = None
+    # Parameters dict
+    job.parameters = {}
     return job
 
 
@@ -243,7 +245,7 @@ class TestJobStatusWithStages:
             task_id=uuid4(),
             job_id=job_id,
             stage="diarize",
-            engine_id="pyannote-3.1",
+            engine_id="pyannote-4.0",
             status="failed",
             required=False,
             started_at=now,
@@ -546,7 +548,7 @@ class TestTaskArtifactsEndpoint:
             task_id=task_id,
             job_id=job_id,
             stage="diarize",
-            engine_id="pyannote-3.1",
+            engine_id="pyannote-4.0",
             status="failed",
             error="Too many speakers",
         )

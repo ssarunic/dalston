@@ -167,8 +167,8 @@ class TestValidateEngine:
         assert any("id" in error for error in result.errors)
 
     def test_id_with_dots_passes(self, schema: dict, valid_batch_engine: dict) -> None:
-        """ID with dots should pass validation (e.g., pyannote-3.1)."""
-        valid_batch_engine["id"] = "pyannote-3.1"
+        """ID with dots should pass validation (e.g., pyannote-4.0)."""
+        valid_batch_engine["id"] = "pyannote-4.0"
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             yaml.dump(valid_batch_engine, f)
@@ -176,7 +176,7 @@ class TestValidateEngine:
             result = validate_engine(Path(f.name), schema)
 
         assert result.valid is True
-        assert result.engine_id == "pyannote-3.1"
+        assert result.engine_id == "pyannote-4.0"
 
     def test_invalid_gpu_value_fails(
         self, schema: dict, valid_batch_engine: dict

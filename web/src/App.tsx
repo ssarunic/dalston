@@ -14,6 +14,7 @@ import { RealtimeSessions } from '@/pages/RealtimeSessions'
 import { RealtimeSessionDetail } from '@/pages/RealtimeSessionDetail'
 import { RealtimeLive } from '@/pages/RealtimeLive'
 import { Engines } from '@/pages/Engines'
+import { EngineDetail } from '@/pages/EngineDetail'
 import { ApiKeys } from '@/pages/ApiKeys'
 import { Webhooks } from '@/pages/Webhooks'
 import { WebhookDetail } from '@/pages/WebhookDetail'
@@ -60,6 +61,7 @@ const router = createBrowserRouter(
         { path: '/realtime/live', element: <RealtimeLive /> },
         { path: '/realtime/sessions/:sessionId', element: <RealtimeSessionDetail /> },
         { path: '/engines', element: <Engines /> },
+        { path: '/engines/:engineId', element: <EngineDetail /> },
         { path: '/keys', element: <ApiKeys /> },
         { path: '/webhooks', element: <Webhooks /> },
         { path: '/webhooks/:endpointId', element: <WebhookDetail /> },

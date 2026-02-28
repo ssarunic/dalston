@@ -97,7 +97,7 @@ The `stages` field appears on any job that has reached `RUNNING` status (i.e., t
     {
       "stage": "diarize",
       "task_id": "550e8400-e29b-41d4-a716-446655440004",
-      "engine_id": "pyannote-3.1",
+      "engine_id": "pyannote-4.0",
       "status": "failed",
       "required": false,
       "started_at": "2025-01-28T12:00:10Z",

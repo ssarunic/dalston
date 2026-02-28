@@ -17,7 +17,6 @@ capabilities:
   redaction_modes:
     - silence
     - beep
-  max_concurrency: 8
 
 config_schema:
   type: object

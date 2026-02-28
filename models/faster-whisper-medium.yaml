@@ -1,0 +1,35 @@
+# Model catalog entry for faster-whisper-medium
+# This file defines the model variant metadata for runtime model management (M36)
+
+schema_version: "1.1"
+id: faster-whisper-medium
+runtime: faster-whisper
+runtime_model_id: "medium"  # String passed to WhisperModel()
+
+name: Faster Whisper Medium
+source: Systran/faster-whisper-medium
+size_gb: 1.5
+stage: transcribe
+
+description: |
+  OpenAI Whisper medium model via faster-whisper (CTranslate2).
+  Good accuracy with moderate resource requirements.
+  Supports 99 languages with automatic language detection.
+
+languages: null  # null means multilingual (99 languages)
+
+capabilities:
+  word_timestamps: false  # Has timestamps but they're inaccurate; use alignment stage
+  punctuation: false
+  capitalization: false
+  streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  min_vram_gb: 4
+  supports_cpu: true
+  min_ram_gb: 8
+
+performance:
+  rtf_gpu: 0.03
+  rtf_cpu: 0.3

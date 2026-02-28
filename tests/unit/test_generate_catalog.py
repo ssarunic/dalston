@@ -103,8 +103,8 @@ class TestDeriveImageName:
 
     def test_diarize_stage(self) -> None:
         """Other stages should work correctly."""
-        result = derive_image_name("pyannote-3.1", "diarize", "1.0.0")
-        assert result == "dalston/stt-batch-diarize-pyannote-3.1:1.0.0"
+        result = derive_image_name("pyannote-4.0", "diarize", "1.0.0")
+        assert result == "dalston/stt-batch-diarize-pyannote-4.0:1.0.0"
 
 
 class TestTransformRuntimeToEntry:

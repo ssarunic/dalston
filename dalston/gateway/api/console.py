@@ -608,26 +608,14 @@ def _encode_job_cursor(job: JobModel) -> str:
     return f"{job.created_at.isoformat()}:{job.id}"
 
 
-def _get_transcribe_engine(job: JobModel) -> str | None:
-    """Extract the transcribe engine from a job's tasks.
+def _get_transcribe_model(job: JobModel) -> str | None:
+    """Extract the transcription model ID from job parameters.
 
-    Returns the engine_id of the 'transcribe' stage task, or falls back
-    to the explicitly requested engine in parameters.
-
-    Handles both mono audio (stage='transcribe') and multi-channel audio
-    (stage='transcribe_ch0', 'transcribe_ch1', etc.)
+    Returns the model ID (e.g., 'parakeet-tdt-0.6b-v3') that was used for
+    transcription. This is stored in job.parameters['engine_transcribe'].
     """
-    # First try to find the transcribe task
-    if job.tasks:
-        for task in job.tasks:
-            # Match "transcribe" or "transcribe_ch0", "transcribe_ch1", etc.
-            if task.stage == "transcribe" or task.stage.startswith("transcribe_ch"):
-                return task.engine_id
-
-    # Fallback to explicitly requested engine in parameters
     if job.parameters:
         return job.parameters.get("engine_transcribe")
-
     return None
 
 
@@ -660,8 +648,7 @@ async def list_console_jobs(
 ) -> ConsoleJobListResponse:
     """List all jobs for console (admin view) with cursor-based pagination."""
     # Build base query - no tenant filter for admin
-    # Eager load tasks to extract transcribe engine
-    query = select(JobModel).options(selectinload(JobModel.tasks))
+    query = select(JobModel)
 
     # Optional status filter
     if status:
@@ -712,7 +699,7 @@ async def list_console_jobs(
             ConsoleJobSummary(
                 id=job.id,
                 status=job.status,
-                model=_get_transcribe_engine(job),
+                model=_get_transcribe_model(job),
                 audio_uri=job.audio_uri,
                 created_at=job.created_at,
                 started_at=job.started_at,
@@ -1292,9 +1279,7 @@ async def get_metrics(
             )
             .where(JobModel.completed_at >= window_start)
             .where(
-                JobModel.status.in_(
-                    [JobStatus.COMPLETED.value, JobStatus.FAILED.value]
-                )
+                JobModel.status.in_([JobStatus.COMPLETED.value, JobStatus.FAILED.value])
             )
         )
         row = (await db.execute(rate_query)).one()

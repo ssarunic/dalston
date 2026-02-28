@@ -24,7 +24,6 @@ capabilities:
   max_audio_duration: 7200  # 2 hours
   streaming: false
   word_timestamps: true
-  max_concurrency: 8
 
 input:
   audio_formats:

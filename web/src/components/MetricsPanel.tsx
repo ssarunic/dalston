@@ -24,7 +24,7 @@ function ThroughputChart({ buckets }: { buckets: ThroughputBucket[] }) {
   return (
     <div className="space-y-2">
       <div className="flex items-end gap-px h-24">
-        {buckets.map((bucket, i) => {
+        {buckets.map((bucket) => {
           const total = bucket.completed + bucket.failed
           const completedH = total > 0 ? (bucket.completed / maxVal) * 100 : 0
           const failedH = total > 0 ? (bucket.failed / maxVal) * 100 : 0

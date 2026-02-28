@@ -232,12 +232,12 @@ services:
   # DIARIZATION ENGINES
   # ============================================================
 
-  stt-batch-diarize-pyannote-v31-cpu:
+  stt-batch-diarize-pyannote-v40-cpu:
     build:
-      context: ./engines/diarize/pyannote-3.1
+      context: ./engines/diarize/pyannote-4.0
     environment:
       - REDIS_URL=redis://redis:6379
-      - ENGINE_ID=pyannote-3.1
+      - ENGINE_ID=pyannote-4.0
       - DALSTON_S3_BUCKET=${DALSTON_S3_BUCKET}
       - DALSTON_S3_REGION=${DALSTON_S3_REGION}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
@@ -467,7 +467,7 @@ docker compose up -d postgres redis gateway orchestrator \
   stt-batch-prepare \
   stt-batch-transcribe-whisper-cpu \
   stt-batch-align-whisperx-cpu \
-  stt-batch-diarize-pyannote-v31-cpu \
+  stt-batch-diarize-pyannote-v40-cpu \
   stt-batch-merge
 ```
 
@@ -480,7 +480,7 @@ docker compose up -d --scale stt-batch-transcribe-whisper-cpu=2
 # Scale multiple engines
 docker compose up -d \
   --scale stt-batch-transcribe-whisper-cpu=2 \
-  --scale stt-batch-diarize-pyannote-v31-cpu=2
+  --scale stt-batch-diarize-pyannote-v40-cpu=2
 ```
 
 ### Viewing Logs
@@ -541,7 +541,7 @@ stt-batch-transcribe-whisper-cpu:
             device_ids: ['0']      # First GPU
             capabilities: [gpu]
 
-stt-batch-diarize-pyannote-v31-cpu:
+stt-batch-diarize-pyannote-v40-cpu:
   deploy:
     resources:
       reservations:

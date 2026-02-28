@@ -63,7 +63,7 @@ class WorkerRegistry:
         await registry.register(WorkerInfo(
             worker_id="stt-rt-transcribe-whisper-1",
             endpoint="ws://localhost:9000",
-            capacity=4,
+            capacity=2,
             models=["faster-whisper-large-v3"],
             languages=["en", "auto"]
         ))

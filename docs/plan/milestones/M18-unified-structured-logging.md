@@ -177,7 +177,6 @@ All 7 engine implementations:
 - `engines/prepare/audio-prepare/engine.py`
 - `engines/transcribe/faster-whisper/engine.py`
 - `engines/align/whisperx-align/engine.py`
-- `engines/diarize/pyannote-3.1/engine.py`
 - `engines/diarize/pyannote-4.0/engine.py`
 - `engines/merge/final-merger/engine.py`
 - `engines/realtime/whisper-streaming/engine.py`

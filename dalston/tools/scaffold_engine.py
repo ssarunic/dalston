@@ -155,7 +155,7 @@ def to_class_name(engine_id: str) -> str:
 
     Examples:
         faster-whisper -> FasterWhisperEngine
-        pyannote-3.1 -> Pyannote31Engine
+        pyannote-4.0 -> Pyannote40Engine
         my-new-engine -> MyNewEngineEngine
     """
     parts = re.split(r"[-.]", engine_id)
@@ -168,7 +168,7 @@ def to_human_name(engine_id: str) -> str:
 
     Examples:
         faster-whisper -> Faster Whisper
-        pyannote-3.1 -> Pyannote 3.1
+        pyannote-4.0 -> Pyannote 4.0
     """
     parts = engine_id.split("-")
     return " ".join(part.title() for part in parts)
@@ -228,7 +228,6 @@ capabilities:
   languages:
 {languages_yaml}
   max_audio_duration: 7200
-  max_concurrency: 4
   streaming: false
   word_timestamps: {str(config.word_timestamps).lower()}
 
@@ -537,7 +536,6 @@ capabilities:
   languages:
 {languages_yaml}
   max_audio_duration: 7200
-  max_concurrency: 4
   streaming: false
   word_timestamps: {str(config.word_timestamps).lower()}
 

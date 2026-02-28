@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { Trash2, X, Plus } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useJobs } from '@/hooks/useJobs'
+import { useTranscriptionModels } from '@/hooks/useModels'
+import type { Model } from '@/api/types'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useSharedTableState } from '@/hooks/useSharedTableState'
 import { apiClient } from '@/api/client'
@@ -107,6 +109,23 @@ export function BatchJobs() {
     sort,
   })
   const allJobs = useMemo(() => data?.pages.flatMap((page) => page.jobs) ?? [], [data])
+
+  // Fetch models for name lookup
+  const { data: modelsData } = useTranscriptionModels()
+  const modelsById = useMemo(() => {
+    const map = new Map<string, Model>()
+    for (const model of modelsData?.data ?? []) {
+      map.set(model.id, model)
+    }
+    return map
+  }, [modelsData?.data])
+
+  // Get display name for a model (name if available, otherwise ID)
+  const getModelDisplayName = (modelId: string | undefined): string => {
+    if (!modelId) return '-'
+    const model = modelsById.get(modelId)
+    return model?.name ?? modelId
+  }
   const visibleJobs = allJobs
 
   const handleFilterChange = (value: string) => {
@@ -264,7 +283,7 @@ export function BatchJobs() {
                     <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
                       <div>
                         <p className="text-xs text-muted-foreground">Model</p>
-                        <p>{job.model ?? '-'}</p>
+                        <p>{getModelDisplayName(job.model)}</p>
                       </div>
                       <div>
                         <p className="text-xs text-muted-foreground">Duration</p>
@@ -338,7 +357,7 @@ export function BatchJobs() {
                         <StatusBadge status={job.status} />
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm">
-                        {job.model ?? '-'}
+                        {getModelDisplayName(job.model)}
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm">
                         {formatDuration(job.audio_duration_seconds)}

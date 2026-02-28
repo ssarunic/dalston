@@ -52,7 +52,7 @@ def build_task_dag(job: Job) -> list[Task]:
 
     # Diarization (parallel with alignment, depends on prepare)
     if params.get("speaker_detection") == "diarize":
-        diarize = create_task("diarize", "pyannote-3.1", [prepare.id])
+        diarize = create_task("diarize", "pyannote-4.0", [prepare.id])
         tasks.append(diarize)
         core_deps.append(diarize.id)
 

@@ -105,8 +105,6 @@ dalston/
 │   │       └── ...
 │   │
 │   ├── diarize/                        # Speaker diarization
-│   │   ├── pyannote-3.1/
-│   │   │   └── ...
 │   │   └── pyannote-4.0/
 │   │       └── ...
 │   │
@@ -329,7 +327,7 @@ engines/realtime/{engine-id}/
 | `stt-batch-transcribe-whisper-cpu` | transcribe |
 | `stt-batch-transcribe-parakeet` | transcribe |
 | `stt-batch-align-phoneme-cpu` | align |
-| `stt-batch-diarize-pyannote-v31-cpu` | diarize |
+| `stt-batch-diarize-pyannote-v40-cpu` | diarize |
 | `stt-batch-pii-detect-presidio` | pii_detect |
 | `stt-batch-audio-redact-audio` | audio_redact |
 | `stt-batch-merge` | merge |

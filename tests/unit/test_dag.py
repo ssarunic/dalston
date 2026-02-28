@@ -120,21 +120,6 @@ class TestBuildTaskDagModelSelection:
             == DEFAULT_TRANSCRIBE_CONFIG["vad_filter"]
         )
 
-    def test_legacy_model_parameter(self, job_id: UUID, audio_uri: str):
-        """Test legacy behavior with top-level model parameter."""
-        # Legacy: direct model parameter (without transcribe_config)
-        parameters = {
-            "model": "medium",
-            "language": "de",
-        }
-
-        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
-
-        transcribe_task = next(t for t in tasks if t.stage == "transcribe")
-        # Legacy behavior: top-level model goes to config
-        assert transcribe_task.config["model"] == "medium"
-        assert transcribe_task.config["language"] == "de"
-
 
 class TestBuildTaskDagPipeline:
     """Tests for DAG pipeline structure."""

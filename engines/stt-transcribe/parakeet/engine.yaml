@@ -6,22 +6,17 @@ name: NVIDIA NeMo Parakeet Runtime
 version: 1.0.0
 description: |
   Runtime engine for NVIDIA NeMo Parakeet transcription models.
-  Can load any supported Parakeet model variant at runtime via runtime_model_id.
+  Can load any Parakeet model at runtime via runtime_model_id.
 
   M36: This is a runtime-level configuration. The engine loads specific model
   variants on demand, without requiring separate Docker images per variant.
-
-  Supported models:
-    - nvidia/parakeet-ctc-0.6b (CTC, fastest)
-    - nvidia/parakeet-ctc-1.1b (CTC, higher accuracy)
-    - nvidia/parakeet-tdt-0.6b-v3 (TDT, with punctuation)
-    - nvidia/parakeet-tdt-1.1b (TDT, highest accuracy)
+  See models/*.yaml for pre-defined model variants.
 
   All Parakeet models produce native word-level timestamps without needing
   a separate alignment stage.
 
 container:
-  gpu: required
+  gpu: optional
   memory: 12G
   model_cache: /models/nemo
 
@@ -31,12 +26,6 @@ capabilities:
   max_audio_duration: 7200
   streaming: false
   word_timestamps: true  # Native word timestamps via CTC/TDT decoder
-  max_concurrency: 4
-  model_variants:
-    - nvidia/parakeet-ctc-0.6b
-    - nvidia/parakeet-ctc-1.1b
-    - nvidia/parakeet-tdt-0.6b-v3
-    - nvidia/parakeet-tdt-1.1b
 
 input:
   audio_formats:
@@ -54,10 +43,10 @@ hardware:
   recommended_gpu:
     - a10g
     - a100
-  supports_cpu: false  # NeMo models require GPU
+  supports_cpu: true  # Slow but works
   min_ram_gb: 12
 
 performance:
   rtf_gpu: 0.0006  # Varies by model
-  rtf_cpu: null  # GPU only
+  rtf_cpu: 0.5  # ~50x realtime on CPU
   warm_start_latency_ms: 150

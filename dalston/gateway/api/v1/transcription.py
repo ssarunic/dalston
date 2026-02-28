@@ -383,6 +383,9 @@ async def get_transcription(
         purged_at=job.purged_at,
     )
 
+    # Extract model from parameters (set when user specifies a model)
+    model = job.parameters.get("engine_transcribe") if job.parameters else None
+
     # Build response
     response = JobResponse(
         id=job.id,
@@ -390,6 +393,7 @@ async def get_transcription(
         created_at=job.created_at,
         started_at=job.started_at,
         completed_at=job.completed_at,
+        model=model,
         error=job.error,
         stages=stages,
         retention=retention_info,

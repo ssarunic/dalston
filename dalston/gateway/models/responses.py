@@ -99,6 +99,12 @@ class JobResponse(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
 
+    # Model info (transcription model used)
+    model: str | None = Field(
+        default=None,
+        description="Transcription model ID (e.g., 'nemo-parakeet-tdt-0.6b')",
+    )
+
     # Error info (if failed)
     error: str | None = None
 

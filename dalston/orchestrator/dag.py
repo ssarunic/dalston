@@ -36,7 +36,7 @@ DEFAULT_ENGINES = {
     "prepare": "audio-prepare",
     "transcribe": "faster-whisper-large-v3-turbo",
     "align": "phoneme-align",
-    "diarize": "pyannote-3.1",
+    "diarize": "pyannote-4.0",
     "pii_detect": "pii-presidio",
     "audio_redact": "audio-redactor",
     "merge": "final-merger",
@@ -227,7 +227,6 @@ def _build_dag_with_engines(
             transcribe_config["language"] = parameters["language"]
     else:
         transcribe_config = {
-            "model": parameters.get("model", DEFAULT_TRANSCRIBE_CONFIG["model"]),
             "language": parameters.get(
                 "language", DEFAULT_TRANSCRIBE_CONFIG["language"]
             ),
@@ -239,10 +238,23 @@ def _build_dag_with_engines(
             ),
         }
 
-    # M36: Add runtime_model_id if user requested a specific model variant
+    # M36: Set runtime_model_id if user requested a specific model variant
     # The selector already resolved model ID → (runtime, runtime_model_id)
+    # Also set legacy "model" field for compatibility with engines that use it
     if runtime_model_id is not None:
         transcribe_config["runtime_model_id"] = runtime_model_id
+        # Extract the model name portion for the legacy "model" field
+        # e.g., "nvidia/parakeet-tdt-0.6b-v3" -> "parakeet-tdt-0.6b-v3"
+        # e.g., "large-v3-turbo" -> "large-v3-turbo"
+        model_name = (
+            runtime_model_id.split("/")[-1]
+            if "/" in runtime_model_id
+            else runtime_model_id
+        )
+        transcribe_config["model"] = model_name
+    elif "model" not in transcribe_config:
+        # Only set default if user didn't provide a model in transcribe_config
+        transcribe_config["model"] = DEFAULT_TRANSCRIBE_CONFIG["model"]
 
     tasks: list[Task] = []
     diarize_task = None

@@ -155,7 +155,6 @@ Add `schema_version: "1.0"` to every existing `engine.yaml` file. This establish
 - `engines/transcribe/faster-whisper/engine.yaml`
 - `engines/transcribe/parakeet/engine.yaml`
 - `engines/align/whisperx-align/engine.yaml`
-- `engines/diarize/pyannote-3.1/engine.yaml`
 - `engines/diarize/pyannote-4.0/engine.yaml`
 - `engines/detect/pii-presidio/engine.yaml`
 - `engines/redact/audio-redactor/engine.yaml`

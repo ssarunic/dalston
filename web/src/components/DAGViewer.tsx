@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { cn } from '@/lib/utils'
-import type { Task, TaskStatus } from '@/api/types'
+import type { Task, TaskStatus, Model } from '@/api/types'
 
 interface DAGViewerProps {
   tasks: Task[]
@@ -11,6 +11,10 @@ interface DAGViewerProps {
   audioDurationSeconds?: number | null
   jobCreatedAt?: string
   jobCompletedAt?: string | null
+  /** The model ID used for this job (from job.model) */
+  jobModelId?: string
+  /** All models indexed by ID for looking up model names */
+  modelsById?: Map<string, Model>
 }
 
 function formatDurationMs(ms: number): string {
@@ -55,11 +59,14 @@ function TaskNode({
   jobId,
   displayStatus,
   blockedByStage,
+  jobModel,
 }: {
   task: Task
   jobId: string
   displayStatus: TaskDisplayStatus
   blockedByStage?: string | null
+  /** The resolved model for this job (for transcribe tasks) */
+  jobModel?: Model
 }) {
   const config = statusConfig[displayStatus] || statusConfig.pending
   const isActive = displayStatus === 'running' || displayStatus === 'ready'
@@ -77,6 +84,14 @@ function TaskNode({
               : displayStatus === 'cancelled'
                 ? 'bg-orange-400'
                 : 'bg-zinc-400'
+
+  // For transcribe tasks, show model name if available
+  const displayName = useMemo(() => {
+    if (normalizeStage(task.stage) === 'transcribe' && jobModel) {
+      return jobModel.name || jobModel.id
+    }
+    return task.engine_id
+  }, [task.stage, task.engine_id, jobModel])
 
   return (
     <Link to={`/jobs/${jobId}/tasks/${task.id}`}>
@@ -104,9 +119,9 @@ function TaskNode({
           </span>
         </div>
 
-        {/* Engine ID */}
-        <span className="text-[10px] text-muted-foreground truncate">
-          {task.engine_id}
+        {/* Engine/Model name */}
+        <span className="text-[10px] text-muted-foreground truncate" title={displayName}>
+          {displayName}
         </span>
 
         {/* Duration - always show to prevent layout shift */}
@@ -159,12 +174,15 @@ function StageColumn({
   isLast,
   getDisplayStatus,
   blockedByStage,
+  jobModel,
 }: {
   stageGroup: StageGroup
   jobId: string
   isLast: boolean
   getDisplayStatus: (task: Task) => TaskDisplayStatus
   blockedByStage?: string | null
+  /** The resolved model for this job (for transcribe tasks) */
+  jobModel?: Model
 }) {
   return (
     <div className="flex items-center">
@@ -176,6 +194,7 @@ function StageColumn({
             jobId={jobId}
             displayStatus={getDisplayStatus(task)}
             blockedByStage={blockedByStage}
+            jobModel={jobModel}
           />
         ))}
       </div>
@@ -192,8 +211,16 @@ export function DAGViewer({
   audioDurationSeconds,
   jobCreatedAt,
   jobCompletedAt,
+  jobModelId,
+  modelsById,
 }: DAGViewerProps) {
   const [showWhyState, setShowWhyState] = useState(false)
+
+  // Resolve the job's model from the model ID
+  const jobModel = useMemo(() => {
+    if (!jobModelId || !modelsById) return undefined
+    return modelsById.get(jobModelId)
+  }, [jobModelId, modelsById])
   const isJobFailed = jobStatus === 'failed'
   const failedTask = useMemo(() => {
     if (!isJobFailed) return null
@@ -336,6 +363,7 @@ export function DAGViewer({
               isLast={idx === stageGroups.length - 1}
               getDisplayStatus={(task) => displayStatusByTaskId[task.id]}
               blockedByStage={failedStage}
+              jobModel={jobModel}
             />
           ))}
         </div>

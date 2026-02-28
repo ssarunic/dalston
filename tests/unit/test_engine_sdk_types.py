@@ -359,7 +359,7 @@ class TestTaskInputGetDiarizeOutput:
                     "num_speakers": 2,
                     "overlap_duration": 0.0,
                     "overlap_ratio": 0.0,
-                    "engine_id": "pyannote-3.1",
+                    "engine_id": "pyannote-4.0",
                 },
             },
         )
@@ -391,7 +391,7 @@ class TestTaskInputGetDiarizeOutput:
                     "num_speakers": 2,
                     "overlap_duration": 0.5,
                     "overlap_ratio": 0.05,
-                    "engine_id": "pyannote-3.1",
+                    "engine_id": "pyannote-4.0",
                 },
             },
         )
@@ -411,7 +411,7 @@ class TestTaskInputGetDiarizeOutput:
                     "turns": [{"speaker": "SPEAKER_00", "start": 0.0, "end": 999999.0}],
                     "speakers": ["SPEAKER_00"],
                     "num_speakers": 1,
-                    "engine_id": "pyannote-3.1",
+                    "engine_id": "pyannote-4.0",
                     "skipped": True,
                     "skip_reason": "DIARIZATION_DISABLED=true",
                 },
@@ -606,7 +606,7 @@ class TestTaskInputTypedOutputIntegration:
             turns=[SpeakerTurn(speaker="SPEAKER_00", start=0.0, end=5.0)],
             speakers=["SPEAKER_00"],
             num_speakers=1,
-            engine_id="pyannote-3.1",
+            engine_id="pyannote-4.0",
         )
 
         # Create merge task input
