@@ -10,10 +10,10 @@ description: |
 
   No HuggingFace token required - models are open under CC-BY-4.0 license.
   Supports optional min/max speaker count hints.
-  GPU-only (CPU inference is prohibitively slow).
+  CPU inference supported but slow (~2x realtime).
 
 container:
-  gpu: required
+  gpu: optional
   memory: 8G
   model_cache: /models
 
@@ -108,10 +108,10 @@ hardware:
   recommended_gpu:
     - t4
     - a10g
-  supports_cpu: false
+  supports_cpu: true
   min_ram_gb: 8
 
 performance:
   rtf_gpu: 0.05
-  rtf_cpu: null  # CPU not supported
+  rtf_cpu: 2.0  # Slow but works
   warm_start_latency_ms: 1000

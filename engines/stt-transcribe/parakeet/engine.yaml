@@ -21,7 +21,7 @@ description: |
   a separate alignment stage.
 
 container:
-  gpu: required
+  gpu: optional
   memory: 12G
   model_cache: /models/nemo
 
@@ -54,10 +54,10 @@ hardware:
   recommended_gpu:
     - a10g
     - a100
-  supports_cpu: false  # NeMo models require GPU
+  supports_cpu: true  # Slow but works
   min_ram_gb: 12
 
 performance:
   rtf_gpu: 0.0006  # Varies by model
-  rtf_cpu: null  # GPU only
+  rtf_cpu: 0.5  # ~50x realtime on CPU
   warm_start_latency_ms: 150

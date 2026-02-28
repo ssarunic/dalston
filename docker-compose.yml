@@ -305,6 +305,23 @@ services:
     profiles: [gpu]
     restart: unless-stopped
 
+  # NeMo Parakeet Runtime - CPU variant (slow but works)
+  stt-batch-transcribe-nemo-cpu:
+    image: dalston/stt-batch-transcribe-nemo-cpu:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-transcribe/parakeet/Dockerfile
+      args:
+        DEVICE: cpu
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_ENGINE_ID: nemo
+      DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-ctc-0.6b"
+    volumes:
+      - model-cache:/models
+    depends_on: *batch-depends
+    restart: unless-stopped
+
   # Faster Whisper Runtime (CPU/GPU - multilingual transcription)
   # Supports: tiny, base, small, medium, large-v2, large-v3, large-v3-turbo
   # Default model (large-v3-turbo) is CPU-capable for out-of-the-box experience.
@@ -420,6 +437,24 @@ services:
       - nemo-models:/models
     depends_on: *batch-depends
     profiles: [gpu]
+    restart: unless-stopped
+
+  # NeMo MSDD Speaker Diarization - CPU variant (slow but works)
+  stt-batch-diarize-nemo-msdd-cpu:
+    image: dalston/stt-batch-diarize-nemo-msdd-cpu:latest
+    build:
+      context: .
+      dockerfile: engines/stt-diarize/nemo-msdd/Dockerfile
+      args:
+        SKIP_MODEL_DOWNLOAD: ${SKIP_MODEL_DOWNLOAD:-false}
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_ENGINE_ID: nemo-msdd
+      DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
+      DALSTON_NEMO_ALLOW_CPU: "true"
+    volumes:
+      - nemo-models:/models
+    depends_on: *batch-depends
     restart: unless-stopped
 
   # --- PII DETECT STAGE ---

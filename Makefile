@@ -94,13 +94,14 @@ ps:
 # ============================================================
 
 # Build CPU engine variants (for Mac development)
-# Note: NeMo transcription is GPU-only; faster-whisper handles CPU transcription
 build-cpu:
 	docker compose build \
 		stt-batch-prepare \
 		stt-batch-transcribe-faster-whisper \
+		stt-batch-transcribe-nemo-cpu \
 		stt-batch-align-phoneme-cpu \
 		stt-batch-diarize-pyannote-4.0-cpu \
+		stt-batch-diarize-nemo-msdd-cpu \
 		stt-batch-pii-detect-presidio \
 		stt-batch-merge \
 		stt-rt-transcribe-parakeet-rnnt-0.6b-cpu
