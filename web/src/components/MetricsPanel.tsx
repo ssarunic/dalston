@@ -21,46 +21,82 @@ function formatHour(iso: string): string {
 function ThroughputChart({ buckets }: { buckets: ThroughputBucket[] }) {
   const maxVal = Math.max(1, ...buckets.map((b) => b.completed + b.failed))
 
+  // Calculate nice Y-axis ticks
+  const tickCount = 4
+  const ticks = Array.from({ length: tickCount + 1 }, (_, i) =>
+    Math.round((maxVal * (tickCount - i)) / tickCount),
+  )
+
   return (
     <div className="space-y-2">
-      <div className="flex items-end gap-px h-24">
-        {buckets.map((bucket) => {
-          const total = bucket.completed + bucket.failed
-          const completedH = total > 0 ? (bucket.completed / maxVal) * 100 : 0
-          const failedH = total > 0 ? (bucket.failed / maxVal) * 100 : 0
+      <div className="flex h-48">
+        {/* Y-axis labels */}
+        <div className="flex flex-col justify-between text-[10px] text-muted-foreground pr-2">
+          {ticks.map((tick, i) => (
+            <span key={i} className="text-right min-w-[1.5rem]">
+              {tick}
+            </span>
+          ))}
+        </div>
 
-          return (
+        {/* Chart area */}
+        <div className="flex-1 flex items-end gap-px border-l border-b border-border relative">
+          {/* Horizontal grid lines */}
+          {ticks.slice(1, -1).map((_, i) => (
             <div
-              key={bucket.hour}
-              className="flex-1 flex flex-col justify-end group relative"
-              title={`${formatHour(bucket.hour)}: ${bucket.completed} completed, ${bucket.failed} failed`}
-            >
-              {/* Tooltip */}
-              <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground border border-border rounded px-1.5 py-0.5 text-[10px] whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                {bucket.completed + bucket.failed}
+              key={i}
+              className="absolute left-0 right-0 border-t border-border/30"
+              style={{ bottom: `${((i + 1) / tickCount) * 100}%` }}
+            />
+          ))}
+
+          {buckets.map((bucket) => {
+            const total = bucket.completed + bucket.failed
+            const completedH = total > 0 ? (bucket.completed / maxVal) * 100 : 0
+            const failedH = total > 0 ? (bucket.failed / maxVal) * 100 : 0
+
+            return (
+              <div
+                key={bucket.hour}
+                className="flex-1 h-full flex flex-col justify-end group relative z-10"
+                title={`${formatHour(bucket.hour)}: ${bucket.completed} completed, ${bucket.failed} failed`}
+              >
+                {/* Tooltip */}
+                <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground border border-border rounded px-1.5 py-0.5 text-[10px] whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                  {bucket.completed + bucket.failed}
+                </div>
+                {failedH > 0 && (
+                  <div
+                    className="bg-destructive/80 rounded-t-sm min-h-[1px]"
+                    style={{ height: `${failedH}%` }}
+                  />
+                )}
+                {completedH > 0 && (
+                  <div
+                    className={`bg-primary/70 min-h-[1px] ${failedH > 0 ? '' : 'rounded-t-sm'}`}
+                    style={{ height: `${completedH}%` }}
+                  />
+                )}
+                {total === 0 && (
+                  <div className="bg-muted/40 rounded-t-sm min-h-[2px]" style={{ height: '2%' }} />
+                )}
               </div>
-              {failedH > 0 && (
-                <div
-                  className="bg-destructive/80 rounded-t-sm min-h-[1px]"
-                  style={{ height: `${failedH}%` }}
-                />
-              )}
-              {completedH > 0 && (
-                <div
-                  className={`bg-primary/70 min-h-[1px] ${failedH > 0 ? '' : 'rounded-t-sm'}`}
-                  style={{ height: `${completedH}%` }}
-                />
-              )}
-              {total === 0 && (
-                <div className="bg-muted/40 rounded-t-sm min-h-[2px]" style={{ height: '2%' }} />
-              )}
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
-      <div className="flex justify-between text-[10px] text-muted-foreground">
-        <span>{buckets.length > 0 ? formatHour(buckets[0].hour) : ''}</span>
-        <span>Now</span>
+      <div className="flex text-[10px] text-muted-foreground">
+        <div className="min-w-[1.5rem] pr-2" /> {/* Spacer for Y-axis */}
+        <div className="flex-1 flex justify-between border-l border-transparent">
+          {buckets.length > 0 &&
+            [0, 6, 12, 18, 23].map((idx) =>
+              buckets[idx] ? (
+                <span key={idx} className="flex-1 text-center first:text-left last:text-right">
+                  {idx === 23 ? 'Now' : formatHour(buckets[idx].hour)}
+                </span>
+              ) : null,
+            )}
+        </div>
       </div>
     </div>
   )
