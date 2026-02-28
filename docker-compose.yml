@@ -15,8 +15,9 @@
 #   This saves disk space and ensures consistency.
 #
 # Usage:
-#   docker compose --profile local-infra --profile local-object-storage up -d
-#   docker compose --profile local-infra --profile local-object-storage up -d --scale stt-batch-transcribe-faster-whisper-base=2
+#   docker compose up -d                    # Start infrastructure + CPU engines
+#   docker compose --profile gpu up -d      # Include GPU engines
+#   docker compose --profile observability up -d  # Include Jaeger, Prometheus, Grafana
 
 # ============================================================
 # EXTENSION FIELDS (shared configurations)
@@ -111,7 +112,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    profiles: [local-infra]
     restart: unless-stopped
 
   redis:
@@ -136,7 +136,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    profiles: [local-infra]
     restart: unless-stopped
 
   minio:
@@ -155,7 +154,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    profiles: [local-object-storage]
     restart: unless-stopped
 
   minio-init:
@@ -173,7 +171,6 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET:-dalston-artifacts}
-    profiles: [local-object-storage]
 
   # Jaeger for distributed tracing (M19)
   jaeger:

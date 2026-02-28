@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 
-from dalston.orchestrator.dag import build_task_dag
+from tests.dag_test_helpers import build_task_dag_for_test
 
 
 @pytest.fixture
@@ -31,7 +31,7 @@ class TestDiarizeDAG:
 
     def test_diarize_dag_creates_correct_stages(self, job_id, audio_uri):
         """Diarize mode creates prepare, transcribe, align, diarize, merge."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "diarize"},
@@ -42,7 +42,7 @@ class TestDiarizeDAG:
 
     def test_diarize_dag_without_alignment(self, job_id, audio_uri):
         """Diarize without word timestamps skips align stage."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={
@@ -60,7 +60,7 @@ class TestDiarizeDAG:
 
     def test_diarize_runs_parallel_to_transcribe(self, job_id, audio_uri):
         """Diarize and transcribe both depend only on prepare (run in parallel)."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "diarize"},
@@ -74,7 +74,7 @@ class TestDiarizeDAG:
 
     def test_align_depends_on_transcribe(self, job_id, audio_uri):
         """Align stage depends on transcribe."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "diarize"},
@@ -87,7 +87,7 @@ class TestDiarizeDAG:
         self, job_id, audio_uri
     ):
         """Merge depends on prepare, transcribe, align, and diarize."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "diarize"},
@@ -106,7 +106,7 @@ class TestDiarizeDAG:
         self, job_id, audio_uri
     ):
         """Without alignment, merge depends on prepare, transcribe, diarize."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={
@@ -125,7 +125,7 @@ class TestDiarizeDAG:
 
     def test_merge_config_has_diarize_speaker_detection(self, job_id, audio_uri):
         """Merge task config records speaker_detection=diarize."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "diarize"},
@@ -136,7 +136,7 @@ class TestDiarizeDAG:
 
     def test_diarize_uses_correct_engine(self, job_id, audio_uri):
         """Diarize task uses the pyannote engine."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "diarize"},
@@ -156,7 +156,7 @@ class TestDiarizeSpeakerHints:
 
     def test_num_speakers_sets_min_and_max(self, job_id, audio_uri):
         """num_speakers sets both min_speakers and max_speakers."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "diarize", "num_speakers": 3},
@@ -169,7 +169,7 @@ class TestDiarizeSpeakerHints:
 
     def test_min_and_max_speakers_separate(self, job_id, audio_uri):
         """min_speakers and max_speakers can be set independently."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={
@@ -186,7 +186,7 @@ class TestDiarizeSpeakerHints:
 
     def test_no_speaker_hints_produces_empty_config(self, job_id, audio_uri):
         """Without speaker hints, diarize config has no min/max constraints."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "diarize"},
@@ -199,7 +199,7 @@ class TestDiarizeSpeakerHints:
 
     def test_exclusive_mode_propagates(self, job_id, audio_uri):
         """exclusive=True propagates to diarize config."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "diarize", "exclusive": True},
@@ -219,7 +219,7 @@ class TestNoSpeakerDetectionDAG:
 
     def test_default_dag_has_no_diarize(self, job_id, audio_uri):
         """Default mode (none) does not include diarize stage."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={},
@@ -232,7 +232,7 @@ class TestNoSpeakerDetectionDAG:
 
     def test_default_merge_config_has_none_speaker_detection(self, job_id, audio_uri):
         """Default merge config has speaker_detection=none."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={},
@@ -245,7 +245,7 @@ class TestNoSpeakerDetectionDAG:
         self, job_id, audio_uri
     ):
         """Default merge depends on prepare, transcribe, and align."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={},
@@ -261,7 +261,7 @@ class TestNoSpeakerDetectionDAG:
 
     def test_invalid_speaker_detection_defaults_to_none(self, job_id, audio_uri):
         """Unknown speaker_detection value falls back to 'none' mode."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "invalid_mode"},
@@ -283,7 +283,7 @@ class TestSpeakerDetectionModeComparison:
     def test_all_modes_start_with_prepare(self, job_id, audio_uri):
         """Every mode starts with a prepare task with no dependencies."""
         for mode in ("none", "diarize", "per_channel"):
-            tasks = build_task_dag(
+            tasks = build_task_dag_for_test(
                 job_id=job_id,
                 audio_uri=audio_uri,
                 parameters={"speaker_detection": mode},
@@ -295,7 +295,7 @@ class TestSpeakerDetectionModeComparison:
     def test_all_modes_end_with_merge(self, job_id, audio_uri):
         """Every mode ends with a merge task."""
         for mode in ("none", "diarize", "per_channel"):
-            tasks = build_task_dag(
+            tasks = build_task_dag_for_test(
                 job_id=job_id,
                 audio_uri=audio_uri,
                 parameters={"speaker_detection": mode},
@@ -307,7 +307,7 @@ class TestSpeakerDetectionModeComparison:
     ):
         """Merge config always records the speaker_detection mode."""
         for mode in ("none", "diarize", "per_channel"):
-            tasks = build_task_dag(
+            tasks = build_task_dag_for_test(
                 job_id=job_id,
                 audio_uri=audio_uri,
                 parameters={"speaker_detection": mode},
@@ -319,7 +319,7 @@ class TestSpeakerDetectionModeComparison:
         """per_channel mode produces the most tasks (parallel channels)."""
         counts = {}
         for mode in ("none", "diarize", "per_channel"):
-            tasks = build_task_dag(
+            tasks = build_task_dag_for_test(
                 job_id=job_id,
                 audio_uri=audio_uri,
                 parameters={"speaker_detection": mode},
@@ -333,7 +333,7 @@ class TestSpeakerDetectionModeComparison:
     def test_prepare_only_splits_channels_for_per_channel(self, job_id, audio_uri):
         """Only per_channel mode sets split_channels on prepare."""
         for mode in ("none", "diarize"):
-            tasks = build_task_dag(
+            tasks = build_task_dag_for_test(
                 job_id=job_id,
                 audio_uri=audio_uri,
                 parameters={"speaker_detection": mode},
@@ -341,7 +341,7 @@ class TestSpeakerDetectionModeComparison:
             prepare = tasks[0]
             assert prepare.config.get("split_channels") is not True, f"mode={mode}"
 
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "per_channel"},
@@ -359,7 +359,7 @@ class TestPerChannelParameterization:
 
     def test_per_channel_dag_defaults_to_two_channels(self, job_id, audio_uri):
         """Default per_channel DAG creates 2 channels."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "per_channel"},
@@ -374,7 +374,7 @@ class TestPerChannelParameterization:
 
     def test_per_channel_dag_respects_num_channels_parameter(self, job_id, audio_uri):
         """num_channels=3 creates 3 transcribe + 3 align tasks."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "per_channel", "num_channels": 3},
@@ -394,7 +394,7 @@ class TestPerChannelParameterization:
 
     def test_per_channel_single_channel_uses_ch0_naming(self, job_id, audio_uri):
         """num_channels=1 creates transcribe_ch0 (not transcribe), consistent naming."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "per_channel", "num_channels": 1},
@@ -410,7 +410,7 @@ class TestPerChannelParameterization:
 
     def test_per_channel_three_channels_merge_depends_on_all(self, job_id, audio_uri):
         """Merge depends on prepare and all 3 transcribe + 3 align tasks."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "per_channel", "num_channels": 3},

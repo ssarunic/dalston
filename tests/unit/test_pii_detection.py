@@ -22,10 +22,8 @@ from dalston.common.pipeline_types import (
 )
 from dalston.gateway.models.requests import TranscriptionCreateParams
 from dalston.gateway.models.responses import PIIEntityResponse, PIIInfo
-from dalston.orchestrator.dag import (
-    VALID_PII_REDACTION_MODES,
-    build_task_dag,
-)
+from dalston.orchestrator.dag import VALID_PII_REDACTION_MODES
+from tests.dag_test_helpers import build_task_dag_for_test
 
 
 class TestPIIEnums:
@@ -56,7 +54,7 @@ class TestPIIDAGBuilder:
 
     def test_pii_detection_disabled_by_default(self, job_id, audio_uri):
         """Test that PII detection is disabled by default."""
-        tasks = build_task_dag(job_id, audio_uri, {})
+        tasks = build_task_dag_for_test(job_id, audio_uri, {})
 
         stages = [t.stage for t in tasks]
         assert "pii_detect" not in stages
@@ -68,7 +66,7 @@ class TestPIIDAGBuilder:
             "pii_detection": True,
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         stages = [t.stage for t in tasks]
         assert "pii_detect" in stages
@@ -81,7 +79,7 @@ class TestPIIDAGBuilder:
             "redact_pii_audio": True,
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         stages = [t.stage for t in tasks]
         assert "pii_detect" in stages
@@ -94,7 +92,7 @@ class TestPIIDAGBuilder:
             "timestamps_granularity": "word",  # Enables align stage
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         task_by_stage = {t.stage: t for t in tasks}
         pii_task = task_by_stage["pii_detect"]
@@ -110,7 +108,7 @@ class TestPIIDAGBuilder:
             "speaker_detection": "diarize",
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         task_by_stage = {t.stage: t for t in tasks}
         pii_task = task_by_stage["pii_detect"]
@@ -125,7 +123,7 @@ class TestPIIDAGBuilder:
             "redact_pii_audio": True,
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         task_by_stage = {t.stage: t for t in tasks}
         redact_task = task_by_stage["audio_redact"]
@@ -140,7 +138,7 @@ class TestPIIDAGBuilder:
             "redact_pii_audio": True,
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         task_by_stage = {t.stage: t for t in tasks}
         merge_task = task_by_stage["merge"]
@@ -155,7 +153,7 @@ class TestPIIDAGBuilder:
             "pii_detection": True,
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         pii_task = next(t for t in tasks if t.stage == "pii_detect")
         assert "detection_tier" not in pii_task.config
@@ -167,7 +165,7 @@ class TestPIIDAGBuilder:
             "pii_entity_types": ["credit_card_number", "phone_number"],
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         pii_task = next(t for t in tasks if t.stage == "pii_detect")
         assert pii_task.config["entity_types"] == ["credit_card_number", "phone_number"]
@@ -180,7 +178,7 @@ class TestPIIDAGBuilder:
             "pii_redaction_mode": "beep",
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         redact_task = next(t for t in tasks if t.stage == "audio_redact")
         assert redact_task.config["redaction_mode"] == "beep"
@@ -192,7 +190,7 @@ class TestPIIDAGBuilder:
             "redact_pii_audio": True,
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         redact_task = next(t for t in tasks if t.stage == "audio_redact")
         assert redact_task.config["redaction_mode"] == "silence"
@@ -203,7 +201,7 @@ class TestPIIDAGBuilder:
             "pii_detection": True,
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         merge_task = next(t for t in tasks if t.stage == "merge")
         assert merge_task.config.get("pii_detection") is True

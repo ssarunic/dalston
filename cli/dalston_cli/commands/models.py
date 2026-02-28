@@ -1,7 +1,8 @@
-"""Models command for listing available model variants (M36).
+"""Models command for listing and managing model variants (M36).
 
-NOTE: This command was repurposed in M36. Previously it listed running engines.
-For running engine status, use `dalston engines` instead (when implemented).
+Subcommands:
+- list: List available models from the catalog
+- pull: Pre-download a model for faster cold start
 """
 
 from __future__ import annotations
@@ -14,8 +15,11 @@ import typer
 from dalston_cli.main import state
 from dalston_cli.output import console
 
+app = typer.Typer(help="Manage transcription models.")
 
-def models(
+
+@app.command("list")
+def list_models(
     model_id: Annotated[
         str | None,
         typer.Argument(
@@ -45,13 +49,13 @@ def models(
 
     Examples:
 
-        dalston models
+        dalston models list
 
-        dalston models parakeet-tdt-1.1b
+        dalston models list parakeet-tdt-1.1b
 
-        dalston models --runtime nemo
+        dalston models list --runtime nemo
 
-        dalston models --json
+        dalston models list --json
     """
     client = state.client
 
@@ -206,3 +210,106 @@ def models(
                     console.print(f"    {ts_icon} [bold]{model.id}[/bold]")
                     console.print(f"      {lang_info} | {size_info}")
                 console.print()
+
+
+@app.command("pull")
+def pull_model(
+    model_id: Annotated[
+        str,
+        typer.Argument(
+            help="Model ID to download (e.g., 'parakeet-tdt-1.1b').",
+        ),
+    ],
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Re-download even if model already exists.",
+        ),
+    ] = False,
+) -> None:
+    """Pre-download a model for faster cold start.
+
+    Downloads the model weights to the local cache so the engine
+    doesn't need to download them on first use.
+
+    Examples:
+
+        dalston models pull parakeet-tdt-1.1b
+
+        dalston models pull faster-whisper-large-v3-turbo --force
+    """
+    client = state.client
+
+    # Get model details first
+    try:
+        model = client.get_model(model_id)
+    except Exception as e:
+        console.print(f"[red]Error:[/red] Model '{model_id}' not found: {e}")
+        raise typer.Exit(code=1) from None
+
+    console.print(f"[bold]Model: {model.id}[/bold]")
+    console.print(f"  Runtime: {model.runtime}")
+    console.print(f"  Source: {model.source or 'N/A'}")
+    if model.size_gb:
+        console.print(f"  Size: ~{model.size_gb} GB")
+    console.print()
+
+    # Check if model has a HuggingFace source
+    if model.source and ("huggingface.co" in model.source or "/" in model.source):
+        hf_model_id = model.runtime_model_id or model.source
+
+        console.print("[yellow]Note:[/yellow] Model download requires huggingface_hub.")
+        console.print()
+        console.print("To download manually, run:")
+        console.print()
+        console.print("  [cyan]pip install huggingface_hub[/cyan]")
+        console.print(f"  [cyan]huggingface-cli download {hf_model_id}[/cyan]")
+        console.print()
+
+        # Try to use huggingface_hub if available
+        try:
+            from huggingface_hub import snapshot_download
+
+            console.print(f"Downloading [bold]{hf_model_id}[/bold]...")
+            console.print("[dim]This may take a while for large models.[/dim]")
+            console.print()
+
+            cache_dir = snapshot_download(
+                hf_model_id,
+                force_download=force,
+            )
+
+            console.print(f"[green]✓[/green] Model downloaded to: {cache_dir}")
+
+        except ImportError:
+            console.print(
+                "[dim]huggingface_hub not installed. "
+                "Use the commands above to download manually.[/dim]"
+            )
+            raise typer.Exit(code=0) from None
+        except Exception as e:
+            console.print(f"[red]Download failed:[/red] {e}")
+            raise typer.Exit(code=1) from None
+    else:
+        console.print(
+            f"[yellow]Warning:[/yellow] No downloadable source found for '{model_id}'."
+        )
+        console.print("This model may be bundled with the engine container.")
+        raise typer.Exit(code=0) from None
+
+
+# Keep backward compatibility - allow `dalston models` without subcommand
+# This shows the same output as `dalston models list`
+@app.callback(invoke_without_command=True)
+def models_callback(ctx: typer.Context) -> None:
+    """Manage transcription models.
+
+    Use 'dalston models list' to see available models.
+    Use 'dalston models list <model_id>' to show model details.
+    Use 'dalston models pull <model_id>' to pre-download a model.
+    """
+    if ctx.invoked_subcommand is None:
+        # No subcommand - show list
+        ctx.invoke(list_models)

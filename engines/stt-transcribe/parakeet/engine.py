@@ -629,6 +629,7 @@ class ParakeetEngine(Engine):
             model_variants=sorted(self.SUPPORTED_MODELS),
             gpu_required=True,
             gpu_vram_mb=vram_mb,
+            runtime="nemo",  # M36: Runtime ID for model routing
         )
 
 

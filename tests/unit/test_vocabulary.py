@@ -218,6 +218,10 @@ def load_parakeet_engine():
 torch = pytest.importorskip("torch")
 
 
+@pytest.mark.skipif(
+    not torch.cuda.is_available(),
+    reason="CUDA required for Parakeet engine tests",
+)
 class TestParakeetEngineVocabulary:
     """Tests for vocabulary handling in Parakeet engine."""
 

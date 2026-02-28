@@ -273,14 +273,19 @@ class EngineRunner:
                 with self._task_lock:
                     current_task = self._current_task_id
 
-                # M36: Get runtime state including loaded model
+                # M36: Get runtime state including loaded model and engine status
                 runtime_state = self.engine.get_runtime_state()
                 loaded_model = runtime_state.get("loaded_model")
+                engine_status = runtime_state.get("status", "idle")
+
+                # Use "processing" when actively working on a task,
+                # otherwise use the engine's reported status (loading/unloading/error/idle)
+                status = "processing" if current_task else engine_status
 
                 if self._registry:
                     self._registry.heartbeat(
                         instance_id=self.instance_id,
-                        status="processing" if current_task else "idle",
+                        status=status,
                         current_task=current_task,
                         loaded_model=loaded_model,
                     )

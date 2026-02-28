@@ -140,7 +140,7 @@ class TestParakeetEngineDagIntegration:
         """Test that DAG builder skips align stage for NeMo/Parakeet models."""
         from uuid import uuid4
 
-        from dalston.orchestrator.dag import build_task_dag
+        from tests.dag_test_helpers import build_task_dag_for_test
 
         job_id = uuid4()
         audio_uri = "s3://test/audio.wav"
@@ -149,7 +149,7 @@ class TestParakeetEngineDagIntegration:
             "timestamps_granularity": "word",
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
         stages = [t.stage for t in tasks]
 
         assert "align" not in stages

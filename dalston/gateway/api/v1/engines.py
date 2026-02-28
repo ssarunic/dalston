@@ -124,7 +124,6 @@ async def list_engines(
 
         # Determine status and runtime state from registry
         loaded_model: str | None = None
-        available_models: list[str] | None = None
 
         if engine_id in running_map:
             reg_engine = running_map[engine_id]
@@ -136,6 +135,10 @@ async def list_engines(
             loaded_model = reg_engine.loaded_model
         else:
             status = "available"
+
+        # M36: Get available models for this runtime from catalog
+        runtime_models = catalog.get_models_for_runtime(engine_id)
+        available_models = [m.id for m in runtime_models] if runtime_models else None
 
         engines.append(
             EngineResponse(

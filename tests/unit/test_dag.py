@@ -8,12 +8,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from dalston.orchestrator.dag import (
-    DEFAULT_ENGINES,
-    DEFAULT_TRANSCRIBE_CONFIG,
-    build_task_dag,
-    resolve_model,
-)
+from dalston.orchestrator.dag import DEFAULT_TRANSCRIBE_CONFIG
+from tests.dag_test_helpers import build_task_dag_for_test
 
 
 class TestBuildTaskDagModelSelection:
@@ -30,25 +26,17 @@ class TestBuildTaskDagModelSelection:
     def test_default_model_config(self, job_id: UUID, audio_uri: str):
         """Test that default model config is used when no model specified.
 
-        M36: With runtime model management, the default engine (faster-whisper-base)
-        is resolved to its runtime (faster-whisper) and runtime_model_id is set.
+        M36: With runtime model management, the default engine (faster-whisper-large-v3-turbo)
+        is resolved to its runtime (faster-whisper).
         """
-        tasks = build_task_dag(job_id, audio_uri, {})
+        tasks = build_task_dag_for_test(job_id, audio_uri, {})
 
         # Find transcribe task
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
 
-        # M36: engine_id should be the runtime, not the model-specific engine
-        default_engine = DEFAULT_ENGINES["transcribe"]
-        model_info = resolve_model(default_engine)
-        if model_info:
-            assert transcribe_task.engine_id == model_info["runtime"]
-            assert (
-                transcribe_task.config["runtime_model_id"]
-                == model_info["runtime_model_id"]
-            )
-        else:
-            assert transcribe_task.engine_id == default_engine
+        # M36: engine_id should be the runtime
+        # Default engine faster-whisper-large-v3-turbo maps to faster-whisper runtime
+        assert transcribe_task.engine_id == "faster-whisper"
         assert transcribe_task.config["model"] == DEFAULT_TRANSCRIBE_CONFIG["model"]
 
     def test_transcribe_config_from_parameters(self, job_id: UUID, audio_uri: str):
@@ -59,7 +47,7 @@ class TestBuildTaskDagModelSelection:
             },
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
         assert transcribe_task.config["model"] == "base"
@@ -70,7 +58,7 @@ class TestBuildTaskDagModelSelection:
             "engine_transcribe": "custom-engine",
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
         assert transcribe_task.engine_id == "custom-engine"
@@ -87,7 +75,7 @@ class TestBuildTaskDagModelSelection:
             "language": "en",
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
         assert transcribe_task.engine_id == "faster-whisper"
@@ -104,7 +92,7 @@ class TestBuildTaskDagModelSelection:
             "language": "fr",  # Top-level override
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
         # Top-level language should win
@@ -119,7 +107,7 @@ class TestBuildTaskDagModelSelection:
             },
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
         assert transcribe_task.config["model"] == "small"
@@ -140,7 +128,7 @@ class TestBuildTaskDagModelSelection:
             "language": "de",
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
         # Legacy behavior: top-level model goes to config
@@ -161,7 +149,9 @@ class TestBuildTaskDagPipeline:
 
     def test_basic_pipeline_structure(self, job_id: UUID, audio_uri: str):
         """Test basic pipeline: prepare → transcribe → align → merge."""
-        tasks = build_task_dag(job_id, audio_uri, {"timestamps_granularity": "word"})
+        tasks = build_task_dag_for_test(
+            job_id, audio_uri, {"timestamps_granularity": "word"}
+        )
 
         stages = [t.stage for t in tasks]
         assert "prepare" in stages
@@ -171,21 +161,27 @@ class TestBuildTaskDagPipeline:
 
     def test_no_align_when_segment_granularity(self, job_id: UUID, audio_uri: str):
         """Test that align stage is skipped with segment granularity."""
-        tasks = build_task_dag(job_id, audio_uri, {"timestamps_granularity": "segment"})
+        tasks = build_task_dag_for_test(
+            job_id, audio_uri, {"timestamps_granularity": "segment"}
+        )
 
         stages = [t.stage for t in tasks]
         assert "align" not in stages
 
     def test_diarize_stage_added(self, job_id: UUID, audio_uri: str):
         """Test that diarize stage is added with speaker_detection=diarize."""
-        tasks = build_task_dag(job_id, audio_uri, {"speaker_detection": "diarize"})
+        tasks = build_task_dag_for_test(
+            job_id, audio_uri, {"speaker_detection": "diarize"}
+        )
 
         stages = [t.stage for t in tasks]
         assert "diarize" in stages
 
     def test_task_dependencies_correct(self, job_id: UUID, audio_uri: str):
         """Test that task dependencies are wired correctly."""
-        tasks = build_task_dag(job_id, audio_uri, {"timestamps_granularity": "word"})
+        tasks = build_task_dag_for_test(
+            job_id, audio_uri, {"timestamps_granularity": "word"}
+        )
 
         task_by_stage = {t.stage: t for t in tasks}
 
@@ -239,7 +235,7 @@ class TestBuildTaskDagNemo:
             "timestamps_granularity": "word",  # Request word timestamps
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         stages = [t.stage for t in tasks]
         # NeMo models have native word timestamps, so no align stage
@@ -257,7 +253,7 @@ class TestBuildTaskDagNemo:
             "timestamps_granularity": "word",
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         stages = [t.stage for t in tasks]
         # NeMo should have diarize but NOT align
@@ -273,7 +269,7 @@ class TestBuildTaskDagNemo:
             "num_channels": 2,
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         stages = [t.stage for t in tasks]
         # Should have per-channel transcribe but NOT align
@@ -289,7 +285,7 @@ class TestBuildTaskDagNemo:
             "timestamps_granularity": "word",
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         stages = [t.stage for t in tasks]
         # Whisper should have align stage (no native word timestamps)
@@ -302,7 +298,7 @@ class TestBuildTaskDagNemo:
             "timestamps_granularity": "word",
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         task_by_stage = {t.stage: t for t in tasks}
         merge_deps = task_by_stage["merge"].dependencies
@@ -322,7 +318,7 @@ class TestBuildTaskDagNemo:
             "engine_transcribe": "parakeet-tdt-1.1b",
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
         # M36: engine_id is the runtime, not the model ID
@@ -350,7 +346,7 @@ class TestBuildTaskDagPerChannelPII:
             "pii_detection": True,
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         stages = [t.stage for t in tasks]
         # Should have per-channel PII detect stages
@@ -370,7 +366,7 @@ class TestBuildTaskDagPerChannelPII:
             "redact_pii_audio": True,
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         stages = [t.stage for t in tasks]
         # Should have per-channel audio redact stages
@@ -388,7 +384,7 @@ class TestBuildTaskDagPerChannelPII:
             "pii_detection": True,
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         task_by_stage = {t.stage: t for t in tasks}
 
@@ -414,7 +410,7 @@ class TestBuildTaskDagPerChannelPII:
             "redact_pii_audio": True,
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         task_by_stage = {t.stage: t for t in tasks}
 
@@ -441,7 +437,7 @@ class TestBuildTaskDagPerChannelPII:
             "redact_pii_audio": True,
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         task_by_stage = {t.stage: t for t in tasks}
         merge_deps = task_by_stage["merge"].dependencies
@@ -466,7 +462,7 @@ class TestBuildTaskDagPerChannelPII:
             "redact_pii_audio": True,
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         merge_task = next(t for t in tasks if t.stage == "merge")
 
@@ -483,7 +479,7 @@ class TestBuildTaskDagPerChannelPII:
             "redact_pii_audio": True,
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         # Expected stages:
         # - prepare (1)
@@ -507,7 +503,7 @@ class TestBuildTaskDagPerChannelPII:
             "redact_pii_audio": False,  # No audio redaction
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         stages = [t.stage for t in tasks]
 

@@ -37,7 +37,7 @@ from dalston.gateway.services.rate_limiter import (
     KEY_PREFIX_JOBS,
 )
 from dalston.orchestrator.catalog import get_catalog
-from dalston.orchestrator.dag import build_task_dag_async
+from dalston.orchestrator.dag import build_task_dag
 from dalston.orchestrator.exceptions import (
     CatalogValidationError,
     EngineCapabilityError,
@@ -176,7 +176,7 @@ async def handle_job_created(
     # 2. Build task DAG using capability-driven engine selection (M31)
     dag_start = time.perf_counter()
     catalog = get_catalog()
-    tasks = await build_task_dag_async(
+    tasks = await build_task_dag(
         job_id=job.id,
         audio_uri=job.audio_uri,
         parameters=job.parameters,
