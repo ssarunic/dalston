@@ -182,8 +182,10 @@ async def orchestrator_loop() -> None:
     # Initialize batch engine registry
     batch_registry = BatchEngineRegistry(redis)
 
-    # Generate unique consumer ID for this orchestrator instance
-    consumer_id = f"orchestrator-{uuid4().hex[:8]}"
+    # Generate consumer ID for this orchestrator instance
+    # Use HOSTNAME (set by Docker) for stable IDs across restarts, fall back to random
+    hostname = os.environ.get("HOSTNAME", uuid4().hex[:8])
+    consumer_id = f"orchestrator-{hostname[:12]}"
     logger.info("orchestrator_consumer_id", consumer_id=consumer_id)
 
     try:
@@ -311,14 +313,15 @@ async def _claim_and_replay_stale_events(
         max_iterations = 10  # Up to 1,000 events during runtime
         count = 100
 
-    # Claim messages idle for 5+ minutes from any consumer
-    # Use 5 minutes to avoid stealing from slow but healthy consumers
-    # Most handlers complete well under 5 minutes; longer handlers are rare
-    # This still provides reasonable recovery time for crashed consumers
+    # At startup, claim events idle for 30+ seconds (no other consumer can be
+    # processing if we just started). During runtime, use 5 minutes to avoid
+    # stealing from slow but healthy consumers.
+    min_idle_ms = 30000 if is_startup else 300000
+
     stale_events = await claim_stale_pending_events(
         redis,
         consumer_id,
-        min_idle_ms=300000,
+        min_idle_ms=min_idle_ms,
         count=count,
         max_iterations=max_iterations,
     )
