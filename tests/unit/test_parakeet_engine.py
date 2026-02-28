@@ -69,29 +69,21 @@ def mock_nemo_asr():
 
 
 class TestParakeetEngineModelVariants:
-    """Tests for Parakeet model variants."""
+    """Tests for Parakeet model variants (M36 runtime model management)."""
 
-    def test_default_model_variant_is_ctc_0_6b(self, mock_cuda_available):
-        """Test that default model variant is ctc-0.6b."""
+    def test_default_model_id_is_tdt_1_1b(self, mock_cuda_available):
+        """Test that default model is nvidia/parakeet-tdt-1.1b (M36)."""
         ParakeetEngine = load_parakeet_engine()
-        assert ParakeetEngine.DEFAULT_MODEL_VARIANT == "ctc-0.6b"
+        assert ParakeetEngine.DEFAULT_MODEL_ID == "nvidia/parakeet-tdt-1.1b"
 
-    def test_supported_model_variants(self, mock_cuda_available):
-        """Test that expected model variants are supported."""
+    def test_supported_models(self, mock_cuda_available):
+        """Test that expected NeMo model IDs are supported (M36)."""
         ParakeetEngine = load_parakeet_engine()
-        # CTC and TDT model variants
-        assert "ctc-0.6b" in ParakeetEngine.MODEL_VARIANT_MAP
-        assert "ctc-1.1b" in ParakeetEngine.MODEL_VARIANT_MAP
-        assert "tdt-0.6b-v3" in ParakeetEngine.MODEL_VARIANT_MAP
-        assert "tdt-1.1b" in ParakeetEngine.MODEL_VARIANT_MAP
-        # Verify NeMo model identifiers
-        assert (
-            ParakeetEngine.MODEL_VARIANT_MAP["ctc-0.6b"] == "nvidia/parakeet-ctc-0.6b"
-        )
-        assert (
-            ParakeetEngine.MODEL_VARIANT_MAP["tdt-0.6b-v3"]
-            == "nvidia/parakeet-tdt-0.6b-v3"
-        )
+        # CTC and TDT model variants using full NeMo model IDs
+        assert "nvidia/parakeet-ctc-0.6b" in ParakeetEngine.SUPPORTED_MODELS
+        assert "nvidia/parakeet-ctc-1.1b" in ParakeetEngine.SUPPORTED_MODELS
+        assert "nvidia/parakeet-tdt-0.6b-v3" in ParakeetEngine.SUPPORTED_MODELS
+        assert "nvidia/parakeet-tdt-1.1b" in ParakeetEngine.SUPPORTED_MODELS
 
 
 class TestParakeetEngineHealthCheck:
@@ -129,28 +121,35 @@ class TestParakeetEngineEnglishOnly:
 
 
 class TestParakeetEngineDagIntegration:
-    """Tests for Parakeet integration with DAG builder."""
+    """Tests for Parakeet/NeMo integration with DAG builder (M21/M36)."""
 
-    def test_parakeet_in_native_word_timestamp_engines(self):
-        """Test that parakeet is listed as native word timestamp engine."""
-        from dalston.orchestrator.dag import NATIVE_WORD_TIMESTAMP_ENGINES
+    def test_nemo_models_have_native_word_timestamps(self):
+        """Test that NeMo/Parakeet models have word_timestamps=True in catalog."""
+        from dalston.orchestrator.catalog import get_catalog
 
-        assert "parakeet" in NATIVE_WORD_TIMESTAMP_ENGINES
+        catalog = get_catalog()
+        # All parakeet/nemo models should have word_timestamps=True
+        nemo_models = catalog.get_models_for_runtime("nemo")
+        assert len(nemo_models) > 0, "Expected at least one nemo model in catalog"
+        for model in nemo_models:
+            assert model.word_timestamps is True, (
+                f"Model {model.id} should have word_timestamps=True"
+            )
 
-    def test_dag_skips_align_for_parakeet(self):
-        """Test that DAG builder skips align stage for Parakeet."""
+    def test_dag_skips_align_for_nemo(self):
+        """Test that DAG builder skips align stage for NeMo/Parakeet models."""
         from uuid import uuid4
 
-        from dalston.orchestrator.dag import build_task_dag
+        from tests.dag_test_helpers import build_task_dag_for_test
 
         job_id = uuid4()
         audio_uri = "s3://test/audio.wav"
         parameters = {
-            "engine_transcribe": "parakeet",
+            "engine_transcribe": "parakeet-tdt-1.1b",  # MODEL_REGISTRY key
             "timestamps_granularity": "word",
         }
 
-        tasks = build_task_dag(job_id, audio_uri, parameters)
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
         stages = [t.stage for t in tasks]
 
         assert "align" not in stages

@@ -166,9 +166,6 @@ export const apiClient = {
     if (request.pii_detection !== undefined) {
       formData.append('pii_detection', String(request.pii_detection))
     }
-    if (request.pii_detection_tier) {
-      formData.append('pii_detection_tier', request.pii_detection_tier)
-    }
     if (request.pii_entity_types && request.pii_entity_types.length > 0) {
       formData.append('pii_entity_types', JSON.stringify(request.pii_entity_types))
     }

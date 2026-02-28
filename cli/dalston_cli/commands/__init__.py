@@ -1,5 +1,14 @@
 """CLI commands for Dalston."""
 
-from . import export, jobs, listen, models, sessions, status, transcribe
+from . import engines, export, jobs, listen, models, sessions, status, transcribe
 
-__all__ = ["transcribe", "listen", "jobs", "sessions", "export", "status", "models"]
+__all__ = [
+    "transcribe",
+    "listen",
+    "jobs",
+    "sessions",
+    "export",
+    "status",
+    "models",
+    "engines",
+]

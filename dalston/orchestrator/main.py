@@ -24,6 +24,8 @@ import dalston.metrics
 import dalston.telemetry
 from dalston.common.audit import AuditService
 from dalston.common.durable_events import (
+    EVENTS_CONSUMER_GROUP,
+    EVENTS_STREAM,
     ack_event,
     claim_stale_pending_events,
     ensure_events_stream_group,
@@ -182,13 +184,42 @@ async def orchestrator_loop() -> None:
     # Initialize batch engine registry
     batch_registry = BatchEngineRegistry(redis)
 
-    # Generate unique consumer ID for this orchestrator instance
-    consumer_id = f"orchestrator-{uuid4().hex[:8]}"
+    # Generate consumer ID for this orchestrator instance
+    # Use HOSTNAME (set by Docker) for stable IDs across restarts, fall back to random
+    hostname = os.environ.get("HOSTNAME", uuid4().hex[:8])
+    consumer_id = f"orchestrator-{hostname[:12]}"
     logger.info("orchestrator_consumer_id", consumer_id=consumer_id)
 
     try:
         # Ensure durable events stream consumer group exists
         await ensure_events_stream_group(redis)
+
+        # In single-instance mode (local dev), fail if another orchestrator is active
+        if os.environ.get("DALSTON_SINGLE_INSTANCE", "").lower() == "true":
+            try:
+                consumers = await redis.xinfo_consumers(
+                    EVENTS_STREAM, EVENTS_CONSUMER_GROUP
+                )
+                # Consider consumers active if they've polled in the last 30 seconds
+                active = [
+                    c
+                    for c in consumers
+                    if c["name"] != consumer_id and c["idle"] < 30000
+                ]
+                if active:
+                    names = [c["name"] for c in active]
+                    logger.error(
+                        "another_orchestrator_running",
+                        active_consumers=names,
+                        this_consumer=consumer_id,
+                    )
+                    raise RuntimeError(
+                        f"Another orchestrator is already running: {names}. "
+                        "Kill it with: pkill -f 'dalston.orchestrator' or docker compose stop orchestrator"
+                    )
+            except Exception as e:
+                if "NOGROUP" not in str(e):
+                    raise
 
         # Claim pending events from crashed consumers (crash recovery)
         # Uses XAUTOCLAIM to take over messages idle for 60+ seconds from any consumer
@@ -311,14 +342,15 @@ async def _claim_and_replay_stale_events(
         max_iterations = 10  # Up to 1,000 events during runtime
         count = 100
 
-    # Claim messages idle for 5+ minutes from any consumer
-    # Use 5 minutes to avoid stealing from slow but healthy consumers
-    # Most handlers complete well under 5 minutes; longer handlers are rare
-    # This still provides reasonable recovery time for crashed consumers
+    # At startup, claim events idle for 30+ seconds (no other consumer can be
+    # processing if we just started). During runtime, use 5 minutes to avoid
+    # stealing from slow but healthy consumers.
+    min_idle_ms = 30000 if is_startup else 300000
+
     stale_events = await claim_stale_pending_events(
         redis,
         consumer_id,
-        min_idle_ms=300000,
+        min_idle_ms=min_idle_ms,
         count=count,
         max_iterations=max_iterations,
     )

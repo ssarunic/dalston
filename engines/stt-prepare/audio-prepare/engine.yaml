@@ -1,5 +1,6 @@
 schema_version: "1.1"
 id: audio-prepare
+runtime: audio-prepare
 stage: prepare
 name: Audio Prepare
 version: 1.0.0

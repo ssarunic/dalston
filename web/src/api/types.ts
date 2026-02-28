@@ -64,7 +64,6 @@ export interface PIIEntity {
 
 export interface PIIInfo {
   enabled: boolean
-  detection_tier?: string
   entities_detected?: number
   entity_summary?: Record<string, number>
   redacted_audio_available: boolean
@@ -175,6 +174,7 @@ export interface WorkerStatus {
   active_sessions: number
   models: string[]
   languages: string[]
+  supports_vocabulary?: boolean
 }
 
 export interface CapacityInfo {
@@ -426,6 +426,7 @@ export interface LiveSessionConfig {
   model: string
   enableVad: boolean
   interimResults: boolean
+  vocabulary?: string[]
 }
 
 export type LiveSessionState = 'idle' | 'connecting' | 'recording' | 'stopping' | 'completed' | 'error'
@@ -513,7 +514,6 @@ export interface AuditListParams {
 // Job creation types
 export type SpeakerDetection = 'none' | 'diarize' | 'per_channel'
 export type TimestampsGranularity = 'none' | 'segment' | 'word'
-export type PIITier = 'fast' | 'standard' | 'thorough'
 export type PIIRedactionMode = 'silence' | 'beep'
 
 export interface CreateJobRequest {
@@ -533,7 +533,6 @@ export interface CreateJobRequest {
   retention?: string
   // PII settings
   pii_detection?: boolean
-  pii_detection_tier?: PIITier
   pii_entity_types?: string[]
   redact_pii_audio?: boolean
   pii_redaction_mode?: PIIRedactionMode

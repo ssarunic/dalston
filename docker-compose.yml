@@ -15,8 +15,9 @@
 #   This saves disk space and ensures consistency.
 #
 # Usage:
-#   docker compose --profile local-infra --profile local-object-storage up -d
-#   docker compose --profile local-infra --profile local-object-storage up -d --scale stt-batch-transcribe-faster-whisper-base=2
+#   docker compose up -d                    # Start infrastructure + CPU engines
+#   docker compose --profile gpu up -d      # Include GPU engines
+#   docker compose --profile observability up -d  # Include Jaeger, Prometheus, Grafana
 
 # ============================================================
 # EXTENSION FIELDS (shared configurations)
@@ -111,7 +112,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    profiles: [local-infra]
     restart: unless-stopped
 
   redis:
@@ -136,7 +136,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    profiles: [local-infra]
     restart: unless-stopped
 
   minio:
@@ -155,7 +154,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    profiles: [local-object-storage]
     restart: unless-stopped
 
   minio-init:
@@ -173,7 +171,6 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET:-dalston-artifacts}
-    profiles: [local-object-storage]
 
   # Jaeger for distributed tracing (M19)
   jaeger:
@@ -262,6 +259,8 @@ services:
     environment:
       <<: [*core-env, *observability-env]
       DALSTON_METRICS_PORT: 8001
+      # Fail fast if another orchestrator is running (dev safety)
+      DALSTON_SINGLE_INSTANCE: "true"
     depends_on: *core-depends
     restart: unless-stopped
 
@@ -282,156 +281,49 @@ services:
     restart: unless-stopped
 
   # --- TRANSCRIBE STAGE ---
+  # M36: Runtime-based transcription engines. Each runtime can load any compatible
+  # model variant on demand via config["runtime_model_id"].
 
-  # Parakeet CTC 0.6B (GPU - fastest English transcription)
-  stt-batch-transcribe-parakeet-ctc-0.6b:
-    image: dalston/stt-batch-transcribe-parakeet-ctc-0.6b:1.0.0
+  # NeMo Parakeet Runtime (GPU - English transcription)
+  # Supports: nvidia/parakeet-ctc-0.6b, nvidia/parakeet-ctc-1.1b,
+  #           nvidia/parakeet-tdt-0.6b-v3, nvidia/parakeet-tdt-1.1b
+  stt-batch-transcribe-nemo:
+    image: dalston/stt-batch-transcribe-nemo:1.0.0
     build:
       context: .
       dockerfile: engines/stt-transcribe/parakeet/Dockerfile
       args:
-        MODEL_VARIANT: ctc-0.6b
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: parakeet-ctc-0.6b
+      DALSTON_ENGINE_ID: nemo
+      DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-tdt-1.1b"
     volumes:
-      - parakeet-models:/models
+      - model-cache:/models
     depends_on: *batch-depends
     deploy: *gpu-deploy
     profiles: [gpu]
     restart: unless-stopped
 
-  # Parakeet CTC 1.1B (GPU - fast English transcription, larger model)
-  stt-batch-transcribe-parakeet-ctc-1.1b:
-    image: dalston/stt-batch-transcribe-parakeet-ctc-1.1b:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-transcribe/parakeet/Dockerfile
-      args:
-        MODEL_VARIANT: ctc-1.1b
-        DEVICE: cuda
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: parakeet-ctc-1.1b
-    volumes:
-      - parakeet-models:/models
-    depends_on: *batch-depends
-    deploy: *gpu-deploy
-    profiles: [gpu]
-    restart: unless-stopped
-
-  # Parakeet TDT 0.6B v3 (GPU - accurate English transcription)
-  stt-batch-transcribe-parakeet-tdt-0.6b-v3:
-    image: dalston/stt-batch-transcribe-parakeet-tdt-0.6b-v3:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-transcribe/parakeet/Dockerfile
-      args:
-        MODEL_VARIANT: tdt-0.6b-v3
-        DEVICE: cuda
-        SKIP_MODEL_DOWNLOAD: "false"
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: parakeet-tdt-0.6b-v3
-    volumes:
-      - parakeet-models:/models
-    depends_on: *batch-depends
-    deploy: *gpu-deploy
-    profiles: [gpu]
-    restart: unless-stopped
-
-  # Parakeet TDT 0.6B v3 (CPU - for testing without GPU)
-  stt-batch-transcribe-parakeet-tdt-0.6b-v3-cpu:
-    image: dalston/stt-batch-transcribe-parakeet-tdt-0.6b-v3:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-transcribe/parakeet/Dockerfile
-      args:
-        MODEL_VARIANT: tdt-0.6b-v3
-        DEVICE: cpu
-        SKIP_MODEL_DOWNLOAD: "true"
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: parakeet-tdt-0.6b-v3
-      DALSTON_DEVICE: cpu
-    volumes:
-      - parakeet-models:/models
-    depends_on: *batch-depends
-    restart: unless-stopped
-
-  # Parakeet TDT 1.1B (GPU - highest accuracy English transcription)
-  stt-batch-transcribe-parakeet-tdt-1.1b:
-    image: dalston/stt-batch-transcribe-parakeet-tdt-1.1b:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-transcribe/parakeet/Dockerfile
-      args:
-        MODEL_VARIANT: tdt-1.1b
-        DEVICE: cuda
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: parakeet-tdt-1.1b
-    volumes:
-      - parakeet-models:/models
-    depends_on: *batch-depends
-    deploy: *gpu-deploy
-    profiles: [gpu]
-    restart: unless-stopped
-
-  # Faster Whisper base (CPU/GPU - balanced speed/accuracy)
-  stt-batch-transcribe-faster-whisper-base:
-    image: dalston/stt-batch-transcribe-faster-whisper-base:1.0.0
+  # Faster Whisper Runtime (CPU/GPU - multilingual transcription)
+  # Supports: tiny, base, small, medium, large-v2, large-v3, large-v3-turbo
+  # Default model (large-v3-turbo) is CPU-capable for out-of-the-box experience.
+  stt-batch-transcribe-faster-whisper:
+    image: dalston/stt-batch-transcribe-faster-whisper:1.0.0
     build:
       context: .
       dockerfile: engines/stt-transcribe/faster-whisper/Dockerfile
-      args:
-        MODEL_VARIANT: base
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: faster-whisper-base
+      DALSTON_ENGINE_ID: faster-whisper
+      DALSTON_DEFAULT_MODEL_ID: "large-v3-turbo"
     volumes:
-      - whisper-models:/models
+      - model-cache:/models
     depends_on: *batch-depends
-    restart: unless-stopped
-
-  # Faster Whisper large-v3 (GPU - highest accuracy)
-  stt-batch-transcribe-faster-whisper-large-v3:
-    image: dalston/stt-batch-transcribe-faster-whisper-large-v3:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-transcribe/faster-whisper/Dockerfile
-      args:
-        MODEL_VARIANT: large-v3
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: faster-whisper-large-v3
-    volumes:
-      - whisper-models:/models
-    depends_on: *batch-depends
-    deploy: *gpu-deploy
-    profiles: [gpu]
-    restart: unless-stopped
-
-  # Faster Whisper large-v3-turbo (GPU - fast + accurate)
-  stt-batch-transcribe-faster-whisper-large-v3-turbo:
-    image: dalston/stt-batch-transcribe-faster-whisper-large-v3-turbo:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-transcribe/faster-whisper/Dockerfile
-      args:
-        MODEL_VARIANT: large-v3-turbo
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: faster-whisper-large-v3-turbo
-    volumes:
-      - whisper-models:/models
-    depends_on: *batch-depends
-    deploy: *gpu-deploy
-    profiles: [gpu]
     restart: unless-stopped
 
   # Voxtral Mini 3B (GPU - multilingual transcription)
+  # Note: Voxtral uses different framework (HF transformers), not part of M36 consolidation.
   stt-batch-transcribe-voxtral-mini-3b:
     image: dalston/stt-batch-transcribe-voxtral-mini-3b:1.0.0
     build:
@@ -452,26 +344,26 @@ services:
 
   # --- ALIGN STAGE ---
 
-  # WhisperX alignment (CPU - default for local dev)
-  stt-batch-align-whisperx-cpu:
-    image: dalston/stt-batch-align-whisperx:latest
+  # Phoneme forced alignment (CPU - default for local dev)
+  stt-batch-align-phoneme-cpu:
+    image: dalston/stt-batch-align-phoneme:latest
     build:
       context: .
-      dockerfile: engines/stt-align/whisperx-align/Dockerfile
+      dockerfile: engines/stt-align/phoneme-align/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: whisperx-align
+      DALSTON_ENGINE_ID: phoneme-align
     volumes:
       - align-models:/models
     depends_on: *batch-depends
     restart: unless-stopped
 
-  # WhisperX alignment (GPU)
-  stt-batch-align-whisperx:
-    image: dalston/stt-batch-align-whisperx:latest
+  # Phoneme forced alignment (GPU)
+  stt-batch-align-phoneme:
+    image: dalston/stt-batch-align-phoneme:latest
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: whisperx-align
+      DALSTON_ENGINE_ID: phoneme-align
     volumes:
       - align-models:/models
     depends_on: *batch-depends
@@ -639,7 +531,7 @@ services:
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
     volumes:
-      - parakeet-models:/models
+      - model-cache:/models
     depends_on: *realtime-depends
     healthcheck: *ws-healthcheck
     deploy: *gpu-deploy
@@ -662,7 +554,7 @@ services:
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
     volumes:
-      - parakeet-models:/models
+      - model-cache:/models
     depends_on: *realtime-depends
     healthcheck: *ws-healthcheck
     restart: unless-stopped
@@ -682,7 +574,7 @@ services:
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
     volumes:
-      - parakeet-models:/models
+      - model-cache:/models
     depends_on: *realtime-depends
     healthcheck: *ws-healthcheck
     deploy: *gpu-deploy
@@ -733,12 +625,11 @@ volumes:
   postgres-data:
   redis-data:
   minio-data:
-  whisper-models:
+  model-cache:        # M36: Shared model cache for all runtime engines
   align-models:
   pyannote-models:
   nemo-models:
   realtime-models:
-  parakeet-models:
   voxtral-models:
   gliner-models:
   prometheus-data:

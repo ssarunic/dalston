@@ -1,12 +1,13 @@
 schema_version: "1.1"
 id: pii-presidio
+runtime: pii-presidio
 stage: pii_detect
-name: PII Detection (Presidio + GLiNER)
-version: 1.0.0
+name: PII Detection (GLiNER + Presidio checksum)
+version: 2.0.0
 description: |
-  Detects personally identifiable information using Microsoft Presidio
-  with GLiNER for ML-based entity recognition. Supports three detection
-  tiers: fast (regex only), standard (+ GLiNER), thorough (+ LLM).
+  Detects personally identifiable information using GLiNER (zero-shot NER)
+  as the primary detector, supplemented by Presidio for checksum-validated
+  patterns (credit cards via Luhn, IBANs via mod-97).
 
 container:
   gpu: optional  # GPU accelerates GLiNER
@@ -15,20 +16,12 @@ container:
 
 capabilities:
   languages:
-    - all  # Regex works on any language
-  detection_tiers:
-    - fast
-    - standard
-    - thorough
+    - all  # GLiNER is multilingual, Presidio regex works on any language
   max_concurrency: 8
 
 config_schema:
   type: object
   properties:
-    detection_tier:
-      type: string
-      enum: [fast, standard, thorough]
-      default: standard
     entity_types:
       type: array
       items:
@@ -46,7 +39,6 @@ output_schema:
   required:
     - entities
     - redacted_text
-    - detection_tier
   properties:
     entities:
       type: array
@@ -80,9 +72,6 @@ output_schema:
     entity_count_by_type:
       type: object
       description: Count of each entity type detected
-    detection_tier:
-      type: string
-      description: Detection tier used
     processing_time_ms:
       type: integer
       description: Processing time in milliseconds

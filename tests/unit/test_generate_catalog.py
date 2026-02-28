@@ -1,4 +1,7 @@
-"""Tests for the catalog generation script."""
+"""Tests for the catalog generation script.
+
+M36: Updated for runtime/model catalog structure.
+"""
 
 from __future__ import annotations
 
@@ -15,22 +18,23 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 from generate_catalog import (
     derive_image_name,
-    find_engine_yamls,
+    find_runtime_yamls,
     generate_catalog,
-    transform_engine_to_catalog_entry,
+    transform_runtime_to_entry,
 )
 
 
 @pytest.fixture
-def valid_batch_engine_yaml() -> dict:
-    """A valid batch engine YAML structure."""
+def valid_runtime_yaml() -> dict:
+    """A valid runtime YAML structure (engine.yaml with runtime field)."""
     return {
         "schema_version": "1.1",
         "id": "test-engine",
+        "runtime": "test-runtime",
         "stage": "transcribe",
-        "name": "Test Engine",
+        "name": "Test Runtime",
         "version": "1.2.0",
-        "description": "A test engine for unit testing catalog generation.",
+        "description": "A test runtime for unit testing catalog generation.",
         "container": {
             "gpu": "optional",
             "memory": "8G",
@@ -66,31 +70,25 @@ def valid_batch_engine_yaml() -> dict:
 
 
 @pytest.fixture
-def valid_realtime_engine_yaml() -> dict:
-    """A valid realtime engine YAML structure."""
+def valid_model_yaml() -> dict:
+    """A valid model YAML structure."""
     return {
-        "schema_version": "1.1",
-        "id": "test-streaming",
-        "type": "realtime",
-        "name": "Test Streaming",
-        "version": "1.0.0",
-        "description": "A test realtime engine.",
-        "container": {
-            "gpu": "required",
-            "memory": "12G",
-        },
+        "id": "test-model-1b",
+        "runtime": "test-runtime",
+        "runtime_model_id": "org/test-model-1b",
+        "name": "Test Model 1B",
+        "source": "https://huggingface.co/org/test-model-1b",
+        "size_gb": 2.5,
+        "stage": "transcribe",
+        "languages": ["en"],
         "capabilities": {
-            "languages": ["all"],
-            "streaming": True,
-            "max_concurrency": 4,
+            "word_timestamps": True,
+            "punctuation": True,
+            "capitalization": True,
         },
         "hardware": {
-            "min_vram_gb": 6,
+            "min_vram_gb": 4,
             "supports_cpu": False,
-        },
-        "performance": {
-            "rtf_gpu": 0.1,
-            "rtf_cpu": None,
         },
     }
 
@@ -103,31 +101,24 @@ class TestDeriveImageName:
         result = derive_image_name("faster-whisper", "transcribe", "1.0.0")
         assert result == "dalston/stt-batch-transcribe-faster-whisper:1.0.0"
 
-    def test_realtime_engine_image(self) -> None:
-        """Realtime engine should have stt-rt prefix."""
-        result = derive_image_name("whisper-streaming", "realtime", "1.0.0")
-        assert result == "dalston/stt-rt-whisper-streaming:1.0.0"
-
     def test_diarize_stage(self) -> None:
         """Other stages should work correctly."""
         result = derive_image_name("pyannote-3.1", "diarize", "1.0.0")
         assert result == "dalston/stt-batch-diarize-pyannote-3.1:1.0.0"
 
 
-class TestTransformEngineToCatalogEntry:
-    """Tests for transform_engine_to_catalog_entry function."""
+class TestTransformRuntimeToEntry:
+    """Tests for transform_runtime_to_entry function."""
 
-    def test_batch_engine_transform(self, valid_batch_engine_yaml: dict) -> None:
-        """Batch engine should be transformed correctly."""
-        entry = transform_engine_to_catalog_entry(
-            valid_batch_engine_yaml, Path("test.yaml")
-        )
+    def test_runtime_transform(self, valid_runtime_yaml: dict) -> None:
+        """Runtime should be transformed correctly."""
+        entry = transform_runtime_to_entry(valid_runtime_yaml, Path("test.yaml"))
 
-        assert entry["id"] == "test-engine"
-        assert entry["name"] == "Test Engine"
+        assert entry["id"] == "test-runtime"
+        assert entry["engine_id"] == "test-engine"
+        assert entry["name"] == "Test Runtime"
         assert entry["version"] == "1.2.0"
         assert entry["stage"] == "transcribe"
-        assert entry["type"] is None
         assert entry["capabilities"]["stages"] == ["transcribe"]
         assert entry["capabilities"]["languages"] == ["en", "es"]
         assert entry["capabilities"]["supports_word_timestamps"] is True
@@ -135,110 +126,100 @@ class TestTransformEngineToCatalogEntry:
         assert entry["hardware"]["gpu_optional"] is True
         assert entry["hardware"]["min_vram_gb"] == 4
         assert entry["performance"]["rtf_gpu"] == 0.05
-        assert "hf_compat" in entry
 
-    def test_realtime_engine_transform(self, valid_realtime_engine_yaml: dict) -> None:
-        """Realtime engine should be transformed correctly."""
-        entry = transform_engine_to_catalog_entry(
-            valid_realtime_engine_yaml, Path("test.yaml")
-        )
-
-        assert entry["id"] == "test-streaming"
-        assert entry["type"] == "realtime"
-        assert entry["stage"] is None
-        assert entry["capabilities"]["stages"] == []
-        assert entry["capabilities"]["languages"] is None  # "all" -> None
-        assert entry["hardware"]["gpu_required"] is True
-        assert entry["hardware"]["supports_cpu"] is False
-
-    def test_all_languages_converted_to_null(
-        self, valid_batch_engine_yaml: dict
-    ) -> None:
+    def test_all_languages_converted_to_null(self, valid_runtime_yaml: dict) -> None:
         """Languages ['all'] should be converted to None."""
-        valid_batch_engine_yaml["capabilities"]["languages"] = ["all"]
-        entry = transform_engine_to_catalog_entry(
-            valid_batch_engine_yaml, Path("test.yaml")
-        )
+        valid_runtime_yaml["capabilities"]["languages"] = ["all"]
+        entry = transform_runtime_to_entry(valid_runtime_yaml, Path("test.yaml"))
         assert entry["capabilities"]["languages"] is None
 
+    def test_gpu_required(self, valid_runtime_yaml: dict) -> None:
+        """GPU required should be detected correctly."""
+        valid_runtime_yaml["container"]["gpu"] = "required"
+        entry = transform_runtime_to_entry(valid_runtime_yaml, Path("test.yaml"))
+        assert entry["hardware"]["gpu_required"] is True
+        assert entry["hardware"]["gpu_optional"] is False
 
-class TestFindEngineYamls:
-    """Tests for find_engine_yamls function."""
 
-    def test_finds_engine_yamls(self) -> None:
-        """Should find engine.yaml and variant YAML files in the engines directory."""
+class TestFindRuntimeYamls:
+    """Tests for find_runtime_yamls function."""
+
+    def test_finds_runtime_yamls(self) -> None:
+        """Should find engine.yaml files in the engines directory."""
         engines_dir = Path(__file__).parent.parent.parent / "engines"
         if engines_dir.exists():
-            files = find_engine_yamls(engines_dir)
-            # Should find both engine.yaml files and variant files
-            assert len(files) >= 11
-            # All files should be YAML files (engine.yaml or variants/*.yaml)
-            assert all(f.suffix == ".yaml" for f in files)
-            # All should be either engine.yaml or in a variants/ directory
-            for f in files:
-                assert f.name == "engine.yaml" or f.parent.name == "variants"
+            files = find_runtime_yamls(engines_dir)
+            # Should find engine.yaml files
+            assert len(files) >= 5
+            # All files should be engine.yaml
+            assert all(f.name == "engine.yaml" for f in files)
 
     def test_empty_for_nonexistent_dir(self) -> None:
         """Should return empty list for non-existent directory."""
-        files = find_engine_yamls(Path("/nonexistent/path"))
+        files = find_runtime_yamls(Path("/nonexistent/path"))
         assert files == []
 
 
 class TestGenerateCatalog:
     """Tests for generate_catalog function."""
 
-    def test_generate_catalog_from_engines_dir(self) -> None:
-        """Should generate catalog from engines directory."""
+    def test_generate_catalog_from_dirs(self) -> None:
+        """Should generate catalog from engines and models directories."""
         engines_dir = Path(__file__).parent.parent.parent / "engines"
+        models_dir = Path(__file__).parent.parent.parent / "models"
         if not engines_dir.exists():
             pytest.skip("Engines directory not found")
 
-        catalog = generate_catalog(engines_dir)
+        catalog = generate_catalog(engines_dir, models_dir)
 
         assert "generated_at" in catalog
-        assert catalog["schema_version"] == "1.1"
-        assert catalog["engine_count"] >= 11
-        assert "engines" in catalog
-        assert len(catalog["engines"]) >= 11
+        assert catalog["schema_version"] == "2.0"
+        assert catalog["runtime_count"] >= 5
+        assert "runtimes" in catalog
+        assert "models" in catalog
+        assert "engines" in catalog  # Backward compatibility
 
     def test_catalog_structure(self) -> None:
         """Catalog should have correct structure."""
         engines_dir = Path(__file__).parent.parent.parent / "engines"
+        models_dir = Path(__file__).parent.parent.parent / "models"
         if not engines_dir.exists():
             pytest.skip("Engines directory not found")
 
-        catalog = generate_catalog(engines_dir)
+        catalog = generate_catalog(engines_dir, models_dir)
 
-        # Check a known engine
-        if "faster-whisper" in catalog["engines"]:
-            engine = catalog["engines"]["faster-whisper"]
-            assert engine["id"] == "faster-whisper"
-            assert engine["stage"] == "transcribe"
-            assert "capabilities" in engine
-            assert "hardware" in engine
-            assert "performance" in engine
+        # Check a known runtime
+        if "nemo" in catalog["runtimes"]:
+            runtime = catalog["runtimes"]["nemo"]
+            assert runtime["id"] == "nemo"
+            assert runtime["stage"] == "transcribe"
+            assert "capabilities" in runtime
+            assert "hardware" in runtime
+            assert "performance" in runtime
 
     def test_generate_catalog_empty_dir_raises(self) -> None:
         """Should raise error for empty directory."""
         with tempfile.TemporaryDirectory() as tmpdir:
             with pytest.raises(ValueError, match="No engine.yaml files found"):
-                generate_catalog(Path(tmpdir))
+                generate_catalog(Path(tmpdir), Path(tmpdir))
 
-    def test_generate_catalog_with_temp_engine(
-        self, valid_batch_engine_yaml: dict
-    ) -> None:
+    def test_generate_catalog_with_temp_engine(self, valid_runtime_yaml: dict) -> None:
         """Should generate catalog from temp directory with engine."""
         with tempfile.TemporaryDirectory() as tmpdir:
             engine_dir = Path(tmpdir) / "transcribe" / "test-engine"
             engine_dir.mkdir(parents=True)
             with open(engine_dir / "engine.yaml", "w") as f:
-                yaml.dump(valid_batch_engine_yaml, f)
+                yaml.dump(valid_runtime_yaml, f)
 
-            catalog = generate_catalog(Path(tmpdir))
+            # Create empty models dir
+            models_dir = Path(tmpdir) / "models"
+            models_dir.mkdir()
 
-            assert catalog["engine_count"] == 1
-            assert "test-engine" in catalog["engines"]
-            assert catalog["engines"]["test-engine"]["version"] == "1.2.0"
+            catalog = generate_catalog(Path(tmpdir), models_dir)
+
+            assert catalog["runtime_count"] == 1
+            assert "test-runtime" in catalog["runtimes"]
+            assert catalog["runtimes"]["test-runtime"]["version"] == "1.2.0"
 
 
 class TestCatalogJsonOutput:
@@ -247,10 +228,11 @@ class TestCatalogJsonOutput:
     def test_catalog_is_valid_json(self) -> None:
         """Generated catalog should be valid JSON."""
         engines_dir = Path(__file__).parent.parent.parent / "engines"
+        models_dir = Path(__file__).parent.parent.parent / "models"
         if not engines_dir.exists():
             pytest.skip("Engines directory not found")
 
-        catalog = generate_catalog(engines_dir)
+        catalog = generate_catalog(engines_dir, models_dir)
         json_str = json.dumps(catalog)
         reparsed = json.loads(json_str)
 
@@ -269,4 +251,4 @@ class TestCatalogJsonOutput:
         with open(catalog_path) as f:
             catalog = json.load(f)
 
-        assert catalog["engine_count"] >= 11
+        assert catalog["runtime_count"] >= 5

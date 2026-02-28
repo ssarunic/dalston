@@ -16,6 +16,35 @@ import type { UnifiedSegment, Speaker } from '@/api/types'
 
 const SPEAKER_COLORS = ['#60a5fa', '#34d399', '#f472b6', '#fbbf24', '#a78bfa', '#fb923c']
 
+/** Regex to match PII placeholders like [NAME], [PHONE], [CREDIT_CARD_NUMBER] */
+const PII_PLACEHOLDER_REGEX = /(\[[A-Z][A-Z0-9_]*\])/g
+
+/** Renders text with PII placeholders highlighted */
+function HighlightedText({ text }: { text: string }) {
+  const parts = text.split(PII_PLACEHOLDER_REGEX)
+
+  if (parts.length === 1) {
+    return <>{text}</>
+  }
+
+  return (
+    <>
+      {parts.map((part, i) =>
+        PII_PLACEHOLDER_REGEX.test(part) ? (
+          <span
+            key={i}
+            className="bg-amber-500/20 text-amber-700 dark:text-amber-400 px-0.5 rounded font-medium"
+          >
+            {part}
+          </span>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </>
+  )
+}
+
 /** Threshold for enabling virtualization. */
 const VIRTUALIZATION_THRESHOLD = 100
 
@@ -67,7 +96,9 @@ const TranscriptSegmentRow = forwardRef<HTMLDivElement, TranscriptSegmentRowProp
             {segment.speaker}
           </div>
         )}
-        <div className="flex-1 text-sm">{displayText}</div>
+        <div className="flex-1 text-sm">
+          {showRedacted ? <HighlightedText text={displayText} /> : displayText}
+        </div>
       </div>
     )
   }

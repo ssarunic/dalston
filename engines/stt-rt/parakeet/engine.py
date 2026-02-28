@@ -146,6 +146,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
         audio: np.ndarray,
         language: str,
         model_variant: str,
+        vocabulary: list[str] | None = None,
     ) -> TranscribeResult:
         """Transcribe an audio segment.
 
@@ -153,12 +154,22 @@ class ParakeetStreamingEngine(RealtimeEngine):
             audio: Audio samples as float32 numpy array, mono, 16kHz
             language: Language code (ignored - Parakeet is English-only)
             model_variant: Model variant (ignored - single model loaded)
+            vocabulary: List of terms to boost recognition (not yet supported)
 
         Returns:
             TranscribeResult with text, words, language, confidence
         """
         if self._model is None:
             raise RuntimeError("Model not loaded. Call load_models() first.")
+
+        # Vocabulary boosting not yet implemented for real-time Parakeet
+        # TODO: Implement GPU-PB boosting similar to batch engine
+        if vocabulary:
+            logger.debug(
+                "vocabulary_not_supported_realtime",
+                message="Vocabulary boosting not yet implemented for real-time Parakeet. Terms ignored.",
+                terms_count=len(vocabulary),
+            )
 
         # Parakeet is English-only, ignore language parameter
         if language != "auto" and language != "en":

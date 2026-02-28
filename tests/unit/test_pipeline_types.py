@@ -469,7 +469,7 @@ class TestAlignOutput:
             text="Hello",
             language="en",
             word_timestamps=True,
-            engine_id="whisperx-align",
+            engine_id="phoneme-align",
         )
         assert out.word_timestamps is True
         assert out.skipped is False
@@ -485,7 +485,7 @@ class TestAlignOutput:
             unaligned_words=["unfamiliarterm"],
             unaligned_ratio=0.05,
             granularity_achieved=TimestampGranularity.WORD,
-            engine_id="whisperx-align",
+            engine_id="phoneme-align",
         )
         assert out.alignment_confidence == 0.92
         assert out.unaligned_ratio == 0.05
@@ -498,7 +498,7 @@ class TestAlignOutput:
             text="Hello",
             language="xx",
             word_timestamps=False,
-            engine_id="whisperx-align",
+            engine_id="phoneme-align",
             skipped=True,
             skip_reason="No alignment model for language 'xx'",
             warnings=["No alignment model for language 'xx'"],

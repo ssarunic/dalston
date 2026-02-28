@@ -62,7 +62,7 @@ Tasks are atomic units of work. Each task:
 
 ┌────────────────┐  ┌────────────────┐  ┌────────────────┐
 │ dalston:stream:│  │ dalston:stream:│  │ dalston:stream:│
-│ faster-whisper │  │ pyannote-3.1   │  │ whisperx-align │
+│ faster-whisper │  │ pyannote-3.1   │  │ phoneme-align  │
 │                │  │                │  │                │
 │ [task] [task]  │  │ [task]         │  │ [task] [task]  │
 └────────────────┘  └────────────────┘  └────────────────┘
@@ -520,7 +520,7 @@ When fallbacks are activated, the final transcript includes warnings in metadata
         "stage": "align",
         "status": "skipped",
         "fallback": "transcription_timestamps",
-        "reason": "whisperx-align failed after 2 retries",
+        "reason": "phoneme-align failed after 2 retries",
         "timestamp": "2025-01-28T12:00:45Z"
       }
     ]

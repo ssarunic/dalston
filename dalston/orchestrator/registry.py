@@ -41,6 +41,7 @@ class BatchEngineState:
         last_heartbeat: Last heartbeat timestamp
         registered_at: Engine registration timestamp
         capabilities: Engine capabilities for validation (M29)
+        loaded_model: Currently loaded model ID for runtime model management (M36)
     """
 
     engine_id: str
@@ -52,6 +53,7 @@ class BatchEngineState:
     last_heartbeat: datetime
     registered_at: datetime
     capabilities: EngineCapabilities | None = None
+    loaded_model: str | None = None
 
     @property
     def is_available(self) -> bool:
@@ -263,6 +265,9 @@ class BatchEngineRegistry:
         # Use engine_id from data if available, fallback to instance_id (backward compat)
         engine_id = data.get("engine_id", instance_id)
 
+        # M36: Get loaded model for runtime model management
+        loaded_model = data.get("loaded_model")
+
         return BatchEngineState(
             engine_id=engine_id,
             instance_id=actual_instance_id,
@@ -274,6 +279,7 @@ class BatchEngineRegistry:
             last_heartbeat=self._parse_datetime(data.get("last_heartbeat")),
             registered_at=self._parse_datetime(data.get("registered_at")),
             capabilities=capabilities,
+            loaded_model=loaded_model if loaded_model else None,
         )
 
     def _parse_datetime(self, value: str | None) -> datetime:

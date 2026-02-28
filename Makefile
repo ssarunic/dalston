@@ -6,7 +6,7 @@
 .PHONY: help dev dev-minimal dev-gpu dev-observability stop logs logs-all ps \
         build-cpu build-gpu build-engine \
         aws-start aws-stop aws-logs \
-        health clean validate test lint
+        health clean clean-local validate test lint
 
 # Default target
 help:
@@ -14,7 +14,7 @@ help:
 	@echo ""
 	@echo "Local Development:"
 	@echo "  make dev             - Start full local stack (postgres, redis, minio, gateway, orchestrator, CPU engines)"
-	@echo "  make dev-minimal     - Start minimal stack (infra + gateway + faster-whisper only)"
+	@echo "  make dev-minimal     - Start minimal stack (infra + gateway + transcribe + align + merge)"
 	@echo "  make dev-gpu         - Start with GPU engines (requires NVIDIA GPU)"
 	@echo "  make dev-observability - Start with monitoring stack (jaeger, prometheus, grafana)"
 	@echo "  make stop            - Stop all services"
@@ -40,23 +40,33 @@ help:
 	@echo ""
 	@echo "Utilities:"
 	@echo "  make clean           - Remove stopped containers and unused images"
+	@echo "  make clean-local     - Kill local Python processes (orchestrator, gateway)"
 
 # ============================================================
 # LOCAL DEVELOPMENT
 # ============================================================
 
+# Kill local Python processes that would conflict with Docker services
+# This prevents zombie processes from previous sessions stealing Redis events
+clean-local:
+	@echo "Killing local dalston processes..."
+	@pkill -f "dalston\.orchestrator" 2>/dev/null || true
+	@pkill -f "dalston\.gateway" 2>/dev/null || true
+	@pkill -f "dalston\.session_router" 2>/dev/null || true
+	@echo "Done."
+
 # Start full local stack with all CPU engines
-dev:
+dev: clean-local
 	docker compose --profile local-infra --profile local-object-storage up -d --build
 
 # Start minimal stack for quick iteration
-dev-minimal:
+dev-minimal: clean-local
 	docker compose --profile local-infra --profile local-object-storage up -d --build \
 		gateway orchestrator \
-		stt-batch-prepare stt-batch-transcribe-faster-whisper-base stt-batch-merge
+		stt-batch-prepare stt-batch-transcribe-faster-whisper stt-batch-align-phoneme-cpu stt-batch-merge
 
 # Start with GPU engines (requires NVIDIA GPU)
-dev-gpu:
+dev-gpu: clean-local
 	docker compose --profile local-infra --profile local-object-storage --profile gpu up -d --build
 
 # Start with observability stack (jaeger, prometheus, grafana)
@@ -84,13 +94,13 @@ ps:
 # ============================================================
 
 # Build CPU engine variants (for Mac development)
+# Note: NeMo transcription is GPU-only; faster-whisper handles CPU transcription
 build-cpu:
 	docker compose build \
 		stt-batch-prepare \
-		stt-batch-transcribe-faster-whisper-base \
-		stt-batch-transcribe-parakeet-tdt-0.6b-v3-cpu \
-		stt-batch-align-whisperx-cpu \
-		stt-batch-diarize-pyannote-3.1-cpu \
+		stt-batch-transcribe-faster-whisper \
+		stt-batch-align-phoneme-cpu \
+		stt-batch-diarize-pyannote-4.0-cpu \
 		stt-batch-pii-detect-presidio \
 		stt-batch-merge \
 		stt-rt-transcribe-parakeet-rnnt-0.6b-cpu
@@ -100,7 +110,7 @@ build-gpu:
 	docker compose --profile gpu build
 
 # Build a specific engine
-# Usage: make build-engine ENGINE=stt-batch-transcribe-parakeet-tdt-0.6b-v3
+# Usage: make build-engine ENGINE=stt-batch-transcribe-faster-whisper
 build-engine:
 ifndef ENGINE
 	$(error ENGINE is required. Usage: make build-engine ENGINE=<service-name>)
@@ -108,7 +118,7 @@ endif
 	docker compose build $(ENGINE)
 
 # Rebuild and restart a specific engine
-# Usage: make rebuild ENGINE=stt-batch-transcribe-faster-whisper-base
+# Usage: make rebuild ENGINE=stt-batch-transcribe-faster-whisper
 rebuild:
 ifndef ENGINE
 	$(error ENGINE is required. Usage: make rebuild ENGINE=<service-name>)

@@ -1,0 +1,35 @@
+# Model catalog entry for faster-whisper-large-v3
+# This file defines the model variant metadata for runtime model management (M36)
+
+schema_version: "1.1"
+id: faster-whisper-large-v3
+runtime: faster-whisper
+runtime_model_id: "large-v3"  # String passed to WhisperModel()
+
+name: Faster Whisper Large V3
+source: Systran/faster-whisper-large-v3
+size_gb: 3.0
+stage: transcribe
+
+description: |
+  OpenAI Whisper large-v3 model via faster-whisper (CTranslate2).
+  Best accuracy for multilingual transcription.
+  Supports 99 languages with automatic language detection.
+
+languages: null  # null means multilingual (99 languages)
+
+capabilities:
+  word_timestamps: false  # Has timestamps but they're inaccurate; use alignment stage
+  punctuation: false
+  capitalization: false
+  streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  min_vram_gb: 6
+  supports_cpu: false
+  min_ram_gb: 16
+
+performance:
+  rtf_gpu: 0.05
+  rtf_cpu: null

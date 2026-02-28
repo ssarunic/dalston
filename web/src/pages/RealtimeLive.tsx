@@ -61,6 +61,7 @@ export function RealtimeLive() {
   const [showSettings, setShowSettings] = useState(false)
   const [language, setLanguage] = useState('auto')
   const [model, setModel] = useState('')
+  const [vocabularyText, setVocabularyText] = useState('')
 
   const {
     state,
@@ -91,6 +92,41 @@ export function RealtimeLive() {
     return Array.from(models).sort()
   }, [enginesData])
 
+  // Check if selected model supports vocabulary boosting based on worker capabilities
+  const vocabularyHint = useMemo(() => {
+    if (!enginesData?.realtime_engines) {
+      return { supported: null, text: null }
+    }
+
+    if (!model) {
+      // "Any available" selected - check if any worker supports vocabulary
+      const anySupportsVocab = enginesData.realtime_engines.some(
+        (w) => w.supports_vocabulary
+      )
+      if (anySupportsVocab) {
+        return { supported: null, text: 'Vocabulary support depends on the engine selected' }
+      }
+      return { supported: false, text: 'No available engines support vocabulary boosting' }
+    }
+
+    // Find workers that have the selected model
+    const workersWithModel = enginesData.realtime_engines.filter((w) =>
+      w.models.includes(model)
+    )
+
+    if (workersWithModel.length === 0) {
+      // Model not found - shouldn't happen but handle gracefully
+      return { supported: null, text: null }
+    }
+
+    // Check if any worker with this model supports vocabulary
+    const supportsVocab = workersWithModel.some((w) => w.supports_vocabulary)
+    if (supportsVocab) {
+      return { supported: true, text: null }
+    }
+    return { supported: false, text: 'This model does not support vocabulary boosting' }
+  }, [model, enginesData])
+
   const isAtCapacity = statusData?.status === 'at_capacity'
   const isUnavailable = statusData?.status === 'unavailable'
   const isIdle = state === 'idle' || state === 'completed' || state === 'error'
@@ -100,11 +136,18 @@ export function RealtimeLive() {
   const isCompleted = state === 'completed'
 
   const handleStart = async () => {
+    // Parse vocabulary from comma-separated text
+    const vocabulary = vocabularyText
+      .split(',')
+      .map((term) => term.trim())
+      .filter((term) => term.length > 0)
+
     const config: LiveSessionConfig = {
       language,
       model,
       enableVad: true,
       interimResults: true,
+      vocabulary: vocabulary.length > 0 ? vocabulary : undefined,
     }
     await start(config)
   }
@@ -178,6 +221,23 @@ export function RealtimeLive() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="sm:col-span-2">
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Vocabulary (comma-separated terms to boost recognition)
+                </label>
+                <input
+                  type="text"
+                  value={vocabularyText}
+                  onChange={(e) => setVocabularyText(e.target.value)}
+                  placeholder="e.g., Kubernetes, CrewAI, Bizzon"
+                  className="w-full px-3 py-2 text-sm border rounded-md bg-background"
+                />
+                {vocabularyHint.text && (
+                  <p className={`text-xs mt-1 ${vocabularyHint.supported === false ? 'text-amber-500' : 'text-muted-foreground'}`}>
+                    {vocabularyHint.text}
+                  </p>
+                )}
               </div>
             </div>
           </CardContent>

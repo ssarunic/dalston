@@ -7,7 +7,6 @@ import { useSharedTableState } from '@/hooks/useSharedTableState'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
-import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -155,6 +154,7 @@ export function RealtimeSessions() {
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
+    refetch,
   } = useRealtimeSessions({
     status: statusFilter === 'all' ? undefined : statusFilter,
     limit,
@@ -226,16 +226,12 @@ export function RealtimeSessions() {
             <Radio className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {statusLoading ? (
-              <Skeleton className="h-8 w-24" />
-            ) : (
-              <div className="flex items-center gap-2">
-                <StatusDot status={statusData?.status ?? 'unavailable'} />
-                <span className="text-2xl font-bold capitalize">
-                  {statusData?.status?.replace('_', ' ') ?? 'Unknown'}
-                </span>
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              <StatusDot status={statusData?.status ?? 'unavailable'} />
+              <span className="text-2xl font-bold capitalize">
+                {statusData?.status?.replace('_', ' ') ?? '-'}
+              </span>
+            </div>
           </CardContent>
         </Card>
 
@@ -244,18 +240,12 @@ export function RealtimeSessions() {
             <span className="text-sm font-medium text-muted-foreground">Active Sessions</span>
           </CardHeader>
           <CardContent>
-            {statusLoading ? (
-              <Skeleton className="h-8 w-20" />
-            ) : (
-              <>
-                <div className="text-2xl font-bold">
-                  {statusData?.active_sessions ?? 0} / {statusData?.total_capacity ?? 0}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {statusData?.available_capacity ?? 0} available
-                </p>
-              </>
-            )}
+            <div className="text-2xl font-bold">
+              {statusData?.active_sessions ?? '-'} / {statusData?.total_capacity ?? '-'}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {statusData?.available_capacity ?? '-'} available
+            </p>
           </CardContent>
         </Card>
 
@@ -264,16 +254,10 @@ export function RealtimeSessions() {
             <span className="text-sm font-medium text-muted-foreground">Workers</span>
           </CardHeader>
           <CardContent>
-            {statusLoading ? (
-              <Skeleton className="h-8 w-16" />
-            ) : (
-              <>
-                <div className="text-2xl font-bold">
-                  {statusData?.ready_workers ?? 0} / {statusData?.worker_count ?? 0}
-                </div>
-                <p className="text-xs text-muted-foreground">ready</p>
-              </>
-            )}
+            <div className="text-2xl font-bold">
+              {statusData?.ready_workers ?? '-'} / {statusData?.worker_count ?? '-'}
+            </div>
+            <p className="text-xs text-muted-foreground">ready</p>
           </CardContent>
         </Card>
 
@@ -282,9 +266,7 @@ export function RealtimeSessions() {
             <span className="text-sm font-medium text-muted-foreground">Capacity Overview</span>
           </CardHeader>
           <CardContent>
-            {statusLoading ? (
-              <Skeleton className="h-4 w-full" />
-            ) : (
+            {statusData && (
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span>Used</span>
@@ -413,16 +395,12 @@ export function RealtimeSessions() {
           </div>
         </CardHeader>
         <CardContent>
-          {(sessionsLoading || (isFetching && allSessions.length === 0)) ? (
-            <div className="space-y-2">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          ) : visibleSessions.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              No sessions found
-            </div>
+          {visibleSessions.length === 0 ? (
+            !(sessionsLoading || isFetching) && (
+              <div className="text-center py-8 text-muted-foreground">
+                No sessions found
+              </div>
+            )
           ) : (
             isMobile ? (
               <div className="space-y-3">

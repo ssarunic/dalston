@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 
 from dalston.common.models import TaskStatus
-from dalston.orchestrator.dag import build_task_dag
+from tests.dag_test_helpers import build_task_dag_for_test
 
 
 class TestPerChannelDAG:
@@ -26,7 +26,7 @@ class TestPerChannelDAG:
 
     def test_per_channel_dag_creates_correct_stages(self, job_id, audio_uri):
         """per_channel mode creates prepare, transcribe_ch0/1, align_ch0/1, merge."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "per_channel"},
@@ -43,7 +43,7 @@ class TestPerChannelDAG:
 
     def test_per_channel_dag_without_alignment(self, job_id, audio_uri):
         """per_channel without word timestamps skips align tasks."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={
@@ -62,7 +62,7 @@ class TestPerChannelDAG:
 
     def test_per_channel_transcribe_depends_on_prepare(self, job_id, audio_uri):
         """Both transcribe_ch tasks depend on prepare."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "per_channel"},
@@ -76,7 +76,7 @@ class TestPerChannelDAG:
 
     def test_per_channel_align_depends_on_its_transcribe(self, job_id, audio_uri):
         """Each align_chN depends on its corresponding transcribe_chN."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "per_channel"},
@@ -89,7 +89,7 @@ class TestPerChannelDAG:
 
     def test_merge_depends_on_all_channel_tasks(self, job_id, audio_uri):
         """Merge task depends on prepare and ALL per-channel tasks."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "per_channel"},
@@ -108,7 +108,7 @@ class TestPerChannelDAG:
 
     def test_merge_depends_on_transcribe_when_no_alignment(self, job_id, audio_uri):
         """Without alignment, merge depends on prepare + both transcribe tasks."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={
@@ -127,7 +127,7 @@ class TestPerChannelDAG:
 
     def test_merge_config_has_per_channel_metadata(self, job_id, audio_uri):
         """Merge task config contains per_channel speaker_detection and channel_count."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "per_channel"},
@@ -141,7 +141,7 @@ class TestPerChannelDAG:
 
     def test_per_channel_transcribe_config_includes_channel(self, job_id, audio_uri):
         """Each transcribe_chN has the channel index in its config."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "per_channel"},
@@ -153,7 +153,7 @@ class TestPerChannelDAG:
 
     def test_prepare_config_has_split_channels(self, job_id, audio_uri):
         """Prepare task has split_channels=True for per_channel mode."""
-        tasks = build_task_dag(
+        tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "per_channel"},

@@ -59,19 +59,6 @@ class ExportFormat(str, Enum):
     JSON = "json"
 
 
-class PIIDetectionTier(str, Enum):
-    """PII detection thoroughness level.
-
-    - FAST: Regex-only detection (fastest, lower recall)
-    - STANDARD: Regex + GLiNER ML model (balanced)
-    - THOROUGH: Regex + GLiNER + LLM verification (highest accuracy, slowest)
-    """
-
-    FAST = "fast"
-    STANDARD = "standard"
-    THOROUGH = "thorough"
-
-
 class PIIRedactionMode(str, Enum):
     """Audio redaction mode for detected PII.
 
@@ -141,7 +128,6 @@ class PIIInfo:
     """Summary of PII detection results."""
 
     enabled: bool
-    detection_tier: str | None = None  # "fast", "standard", "thorough"
     entities_detected: int = 0
     entity_summary: dict[str, int] | None = None  # e.g., {"name": 3, "ssn": 1}
     redacted_audio_available: bool = False
@@ -452,32 +438,98 @@ class ModelCapabilities:
     languages: list[str] | None  # Supported language codes, None = all languages
     streaming: bool  # Supports real-time streaming
     word_timestamps: bool  # Supports word-level timestamps
+    punctuation: bool = False  # M36: Outputs punctuation
+    capitalization: bool = False  # M36: Outputs capitalization
 
 
 @dataclass
 class HardwareRequirements:
     """Engine hardware requirements."""
 
-    gpu_required: bool
-    supports_cpu: bool
+    gpu_required: bool = False
+    supports_cpu: bool = True
     min_vram_gb: float | None = None
+    min_ram_gb: float | None = None  # M36: Minimum RAM
 
 
 @dataclass
 class Model:
-    """Transcription engine/model information."""
+    """Transcription model information (M36: repurposed from engine info).
 
-    id: str  # Engine identifier (e.g., "faster-whisper-base", "parakeet-0.6b")
+    Represents a model variant from the catalog that can be used with
+    the `model` parameter in transcription requests.
+    """
+
+    id: str  # Model identifier (e.g., "faster-whisper-large-v3-turbo", "parakeet-tdt-1.1b")
     stage: str  # Pipeline stage (e.g., "transcribe")
     capabilities: ModelCapabilities
     hardware: HardwareRequirements | None = None
+    # M36: New fields for runtime model management
+    name: str | None = None  # Human-readable name
+    runtime: str | None = (
+        None  # Runtime that loads this model (e.g., "nemo", "faster-whisper")
+    )
+    runtime_model_id: str | None = None  # Native model ID for loading
+    source: str | None = None  # Download source (e.g., HuggingFace model ID)
+    size_gb: float | None = None  # Estimated model size
 
 
 @dataclass
 class ModelList:
-    """List of available models/engines."""
+    """List of available models from the catalog."""
 
     models: list[Model]
+
+
+# -----------------------------------------------------------------------------
+# Engine Types (M36)
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class EngineCapabilities:
+    """Engine capabilities in API response format."""
+
+    languages: list[str] | None = None
+    supports_word_timestamps: bool = False
+    supports_streaming: bool = False
+    max_audio_duration_s: int | None = None
+    max_concurrency: int | None = None
+
+
+@dataclass
+class EnginePerformance:
+    """Engine performance characteristics."""
+
+    rtf_gpu: float | None = None
+    rtf_cpu: float | None = None
+
+
+@dataclass
+class Engine:
+    """Running engine information (M36).
+
+    Represents an engine runtime with its current status and loaded model.
+    """
+
+    id: str  # Engine/runtime identifier (e.g., "nemo", "faster-whisper")
+    stage: str  # Pipeline stage (e.g., "transcribe", "diarize")
+    version: str
+    status: str  # "running" | "available" | "unhealthy"
+    capabilities: EngineCapabilities
+    name: str | None = None
+    loaded_model: str | None = None  # Currently loaded runtime_model_id
+    available_models: list[str] | None = None  # Models on disk, ready to load
+    hardware: HardwareRequirements | None = None
+    performance: EnginePerformance | None = None
+
+
+@dataclass
+class EngineList:
+    """List of engines with status."""
+
+    engines: list[Engine]
+    total: int
 
 
 # -----------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 """Integration tests for M31 capability-driven DAG building.
 
-Tests that build_task_dag_async correctly adapts DAG shape based on
+Tests that build_task_dag correctly adapts DAG shape based on
 engine capabilities (native word timestamps, native diarization).
 """
 
@@ -14,7 +14,7 @@ import pytest
 
 from dalston.engine_sdk.types import EngineCapabilities
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog
-from dalston.orchestrator.dag import build_task_dag_async
+from dalston.orchestrator.dag import build_task_dag
 from dalston.orchestrator.engine_selector import NoCapableEngineError
 from dalston.orchestrator.registry import BatchEngineState
 
@@ -165,7 +165,7 @@ class TestDagShapeWithNativeWordTimestamps:
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"language": "en"},
@@ -192,12 +192,12 @@ class TestDagShapeWithNativeWordTimestamps:
                     "engine_id": "faster-whisper",
                     "capabilities": {"supports_word_timestamps": False},
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={},
@@ -232,7 +232,7 @@ class TestDagShapeWithNativeDiarization:
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "diarize"},
@@ -260,13 +260,13 @@ class TestDagShapeWithNativeDiarization:
                         "includes_diarization": False,
                     },
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "diarize": {"engine_id": "pyannote-3.1"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "diarize"},
@@ -295,12 +295,12 @@ class TestDagShapeWithLanguageRequirements:
                     "engine_id": "faster-whisper",
                     "capabilities": {"languages": None},  # Universal
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"language": "hr"},  # Croatian
@@ -328,7 +328,7 @@ class TestDagShapeWithLanguageRequirements:
         )
 
         with pytest.raises(NoCapableEngineError) as exc_info:
-            await build_task_dag_async(
+            await build_task_dag(
                 job_id=job_id,
                 audio_uri=audio_uri,
                 parameters={"language": "hr"},  # Croatian - not supported
@@ -359,7 +359,7 @@ class TestDagWithTimestampGranularity:
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"timestamps_granularity": "segment"},
@@ -382,12 +382,12 @@ class TestDagWithTimestampGranularity:
                     "engine_id": "faster-whisper",
                     "capabilities": {"supports_word_timestamps": False},
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"timestamps_granularity": "word"},
@@ -421,7 +421,7 @@ class TestDagPerChannelWithCapabilities:
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "per_channel", "language": "en"},
@@ -448,12 +448,12 @@ class TestDagPerChannelWithCapabilities:
                     "engine_id": "faster-whisper",
                     "capabilities": {"supports_word_timestamps": False},
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "per_channel"},
@@ -512,7 +512,7 @@ class TestEngineRanking:
 
         registry.get_engines_for_stage.side_effect = get_engines_for_stage
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={},
@@ -557,8 +557,8 @@ class TestEngineRanking:
                 caps = make_capabilities("audio-prepare", stage="prepare")
                 return [make_engine_state("audio-prepare", "prepare", caps)]
             if stage == "align":
-                caps = make_capabilities("whisperx-align", stage="align")
-                return [make_engine_state("whisperx-align", "align", caps)]
+                caps = make_capabilities("phoneme-align", stage="align")
+                return [make_engine_state("phoneme-align", "align", caps)]
             if stage == "merge":
                 caps = make_capabilities("final-merger", stage="merge")
                 return [make_engine_state("final-merger", "merge", caps)]
@@ -566,7 +566,7 @@ class TestEngineRanking:
 
         registry.get_engines_for_stage.side_effect = get_engines_for_stage
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"language": "en"},
@@ -593,12 +593,12 @@ class TestDagDependencies:
                     "engine_id": "faster-whisper",
                     "capabilities": {"supports_word_timestamps": False},
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={},
@@ -623,12 +623,12 @@ class TestDagDependencies:
                     "engine_id": "faster-whisper",
                     "capabilities": {"supports_word_timestamps": False},
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={},
@@ -651,13 +651,13 @@ class TestDagDependencies:
                     "engine_id": "faster-whisper",
                     "capabilities": {"includes_diarization": False},
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "diarize": {"engine_id": "pyannote-3.1"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "diarize"},
@@ -701,13 +701,13 @@ class TestMergedWavScenarios:
                     "engine_id": "faster-whisper",
                     "capabilities": {"languages": None},  # Universal
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
 
         # No language specified = auto detection
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri="s3://test-bucket/audio/test_merged.wav",
             parameters={},
@@ -765,7 +765,7 @@ class TestMergedWavScenarios:
 
         registry.get_engines_for_stage.side_effect = get_engines_for_stage
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri="s3://test-bucket/audio/test_merged.wav",
             parameters={"language": "en"},
@@ -794,13 +794,13 @@ class TestMergedWavScenarios:
                         "includes_diarization": False,
                     },
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "diarize": {"engine_id": "pyannote-3.1"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri="s3://test-bucket/audio/test_merged.wav",
             parameters={"speaker_detection": "diarize"},
@@ -824,12 +824,12 @@ class TestMergedWavScenarios:
                     "engine_id": "faster-whisper",
                     "capabilities": {"languages": None},
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri="s3://test-bucket/audio/test_merged.wav",
             parameters={},  # No speaker_detection
@@ -859,7 +859,7 @@ class TestMergedWavScenarios:
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri="s3://test-bucket/audio/test_merged.wav",
             parameters={"timestamps_granularity": "segment"},
@@ -892,12 +892,12 @@ class TestPiiCombinedWavScenarios:
                     "engine_id": "faster-whisper",
                     "capabilities": {"languages": None},  # Supports all languages
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri="s3://test-bucket/audio/test_pii_combined.wav",
             parameters={"language": "hr"},  # Croatian
@@ -924,7 +924,7 @@ class TestPiiCombinedWavScenarios:
         )
 
         with pytest.raises(NoCapableEngineError) as exc_info:
-            await build_task_dag_async(
+            await build_task_dag(
                 job_id=job_id,
                 audio_uri="s3://test-bucket/audio/test_pii_combined.wav",
                 parameters={"language": "hr"},
@@ -959,12 +959,12 @@ class TestStereoSpeakersWavScenarios:
                         "supports_word_timestamps": False,
                     },
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri="s3://test-bucket/audio/test_stereo_speakers.wav",
             parameters={"speaker_detection": "per_channel"},
@@ -1000,7 +1000,7 @@ class TestStereoSpeakersWavScenarios:
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri="s3://test-bucket/audio/test_stereo_speakers.wav",
             parameters={"speaker_detection": "per_channel", "language": "en"},
@@ -1030,12 +1030,12 @@ class TestStereoSpeakersWavScenarios:
                         "supports_word_timestamps": False,
                     },
                 },
-                "align": {"engine_id": "whisperx-align"},
+                "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
 
-        tasks = await build_task_dag_async(
+        tasks = await build_task_dag(
             job_id=job_id,
             audio_uri="s3://test-bucket/audio/test_stereo_speakers.wav",
             parameters={"speaker_detection": "per_channel"},
