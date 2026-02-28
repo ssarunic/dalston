@@ -606,7 +606,7 @@ export function JobDetail() {
           <CardTitle className="text-base font-medium">Pipeline</CardTitle>
         </CardHeader>
         <CardContent>
-          {tasksData?.tasks && jobId ? (
+          {tasksData?.tasks && tasksData.tasks.length > 0 && jobId ? (
             <DAGViewer
               tasks={tasksData.tasks}
               jobId={jobId}
@@ -618,9 +618,18 @@ export function JobDetail() {
               modelsById={modelsById}
             />
           ) : (
-            <p className="text-sm text-muted-foreground">
-              {job.current_stage ? `Current stage: ${job.current_stage}` : 'Loading pipeline...'}
-            </p>
+            <div className="flex items-center gap-3 py-4">
+              {job.status === 'pending' && (
+                <div className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+              )}
+              <p className="text-sm text-muted-foreground">
+                {job.status === 'pending'
+                  ? 'Preparing pipeline — selecting engines and building task graph...'
+                  : job.current_stage
+                    ? `Current stage: ${job.current_stage}`
+                    : 'Loading pipeline...'}
+              </p>
+            </div>
           )}
         </CardContent>
       </Card>
