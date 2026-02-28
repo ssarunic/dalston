@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-02-28T17:51:32.696945+00:00",
+  "generated_at": "2026-02-28T18:48:34.411897+00:00",
   "schema_version": "2.0",
   "runtime_count": 9,
-  "model_count": 7,
+  "model_count": 10,
   "engine_count": 9,
   "runtimes": {
     "phoneme-align": {
@@ -249,7 +249,7 @@
       "name": "Faster Whisper Runtime",
       "version": "1.0.0",
       "stage": "transcribe",
-      "description": "Runtime engine for faster-whisper (CTranslate2-based Whisper) transcription.\nCan load any supported Whisper model variant at runtime via runtime_model_id.\n\nM36: This is a runtime-level configuration. The engine loads specific model\nvariants on demand, without requiring separate Docker images per variant.\n\nSupported models:\n  - tiny, base, small, medium (lightweight options)\n  - large-v2, large-v3 (high accuracy)\n  - large-v3-turbo (optimized balance of speed/accuracy)",
+      "description": "Runtime engine for faster-whisper (CTranslate2-based Whisper) transcription.\nCan load any Whisper-compatible model at runtime via runtime_model_id.\n\nM36: This is a runtime-level configuration. The engine loads specific model\nvariants on demand, without requiring separate Docker images per variant.\nSee models/*.yaml for pre-defined model variants.",
       "image": "dalston/stt-batch-transcribe-faster-whisper:1.0.0",
       "capabilities": {
         "stages": [
@@ -285,7 +285,7 @@
       "name": "NVIDIA NeMo Parakeet Runtime",
       "version": "1.0.0",
       "stage": "transcribe",
-      "description": "Runtime engine for NVIDIA NeMo Parakeet transcription models.\nCan load any supported Parakeet model variant at runtime via runtime_model_id.\n\nM36: This is a runtime-level configuration. The engine loads specific model\nvariants on demand, without requiring separate Docker images per variant.\n\nSupported models:\n  - nvidia/parakeet-ctc-0.6b (CTC, fastest)\n  - nvidia/parakeet-ctc-1.1b (CTC, higher accuracy)\n  - nvidia/parakeet-tdt-0.6b-v3 (TDT, with punctuation)\n  - nvidia/parakeet-tdt-1.1b (TDT, highest accuracy)\n\nAll Parakeet models produce native word-level timestamps without needing\na separate alignment stage.",
+      "description": "Runtime engine for NVIDIA NeMo Parakeet transcription models.\nCan load any Parakeet model at runtime via runtime_model_id.\n\nM36: This is a runtime-level configuration. The engine loads specific model\nvariants on demand, without requiring separate Docker images per variant.\nSee models/*.yaml for pre-defined model variants.\n\nAll Parakeet models produce native word-level timestamps without needing\na separate alignment stage.",
       "image": "dalston/stt-batch-transcribe-nemo:1.0.0",
       "capabilities": {
         "stages": [
@@ -398,6 +398,87 @@
       "performance": {
         "rtf_gpu": 0.05,
         "rtf_cpu": null
+      }
+    },
+    "faster-whisper-medium": {
+      "id": "faster-whisper-medium",
+      "runtime": "faster-whisper",
+      "runtime_model_id": "medium",
+      "name": "Faster Whisper Medium",
+      "source": "Systran/faster-whisper-medium",
+      "size_gb": 1.5,
+      "stage": "transcribe",
+      "description": "OpenAI Whisper medium model via faster-whisper (CTranslate2).\nGood accuracy with moderate resource requirements.\nSupports 99 languages with automatic language detection.",
+      "languages": null,
+      "capabilities": {
+        "word_timestamps": false,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 4,
+        "supports_cpu": true,
+        "min_ram_gb": 8
+      },
+      "performance": {
+        "rtf_gpu": 0.03,
+        "rtf_cpu": 0.3
+      }
+    },
+    "faster-whisper-small": {
+      "id": "faster-whisper-small",
+      "runtime": "faster-whisper",
+      "runtime_model_id": "small",
+      "name": "Faster Whisper Small",
+      "source": "Systran/faster-whisper-small",
+      "size_gb": 0.5,
+      "stage": "transcribe",
+      "description": "OpenAI Whisper small model via faster-whisper (CTranslate2).\nGood balance of speed and accuracy for resource-constrained environments.\nSupports 99 languages with automatic language detection.",
+      "languages": null,
+      "capabilities": {
+        "word_timestamps": false,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 2,
+        "supports_cpu": true,
+        "min_ram_gb": 4
+      },
+      "performance": {
+        "rtf_gpu": 0.02,
+        "rtf_cpu": 0.2
+      }
+    },
+    "faster-whisper-tiny": {
+      "id": "faster-whisper-tiny",
+      "runtime": "faster-whisper",
+      "runtime_model_id": "tiny",
+      "name": "Faster Whisper Tiny",
+      "source": "Systran/faster-whisper-tiny",
+      "size_gb": 0.1,
+      "stage": "transcribe",
+      "description": "OpenAI Whisper tiny model via faster-whisper (CTranslate2).\nSmallest and fastest model, ideal for real-time or resource-constrained environments.\nLower accuracy than larger models. Supports 99 languages.",
+      "languages": null,
+      "capabilities": {
+        "word_timestamps": false,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 1,
+        "supports_cpu": true,
+        "min_ram_gb": 2
+      },
+      "performance": {
+        "rtf_gpu": 0.01,
+        "rtf_cpu": 0.1
       }
     },
     "parakeet-ctc-0.6b": {
@@ -762,7 +843,7 @@
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "Runtime engine for faster-whisper (CTranslate2-based Whisper) transcription.\nCan load any supported Whisper model variant at runtime via runtime_model_id.\n\nM36: This is a runtime-level configuration. The engine loads specific model\nvariants on demand, without requiring separate Docker images per variant.\n\nSupported models:\n  - tiny, base, small, medium (lightweight options)\n  - large-v2, large-v3 (high accuracy)\n  - large-v3-turbo (optimized balance of speed/accuracy)",
+      "description": "Runtime engine for faster-whisper (CTranslate2-based Whisper) transcription.\nCan load any Whisper-compatible model at runtime via runtime_model_id.\n\nM36: This is a runtime-level configuration. The engine loads specific model\nvariants on demand, without requiring separate Docker images per variant.\nSee models/*.yaml for pre-defined model variants.",
       "image": "dalston/stt-batch-transcribe-faster-whisper:1.0.0",
       "capabilities": {
         "stages": [
@@ -798,7 +879,7 @@
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "Runtime engine for NVIDIA NeMo Parakeet transcription models.\nCan load any supported Parakeet model variant at runtime via runtime_model_id.\n\nM36: This is a runtime-level configuration. The engine loads specific model\nvariants on demand, without requiring separate Docker images per variant.\n\nSupported models:\n  - nvidia/parakeet-ctc-0.6b (CTC, fastest)\n  - nvidia/parakeet-ctc-1.1b (CTC, higher accuracy)\n  - nvidia/parakeet-tdt-0.6b-v3 (TDT, with punctuation)\n  - nvidia/parakeet-tdt-1.1b (TDT, highest accuracy)\n\nAll Parakeet models produce native word-level timestamps without needing\na separate alignment stage.",
+      "description": "Runtime engine for NVIDIA NeMo Parakeet transcription models.\nCan load any Parakeet model at runtime via runtime_model_id.\n\nM36: This is a runtime-level configuration. The engine loads specific model\nvariants on demand, without requiring separate Docker images per variant.\nSee models/*.yaml for pre-defined model variants.\n\nAll Parakeet models produce native word-level timestamps without needing\na separate alignment stage.",
       "image": "dalston/stt-batch-transcribe-nemo:1.0.0",
       "capabilities": {
         "stages": [

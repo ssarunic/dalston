@@ -1,0 +1,35 @@
+# Model catalog entry for faster-whisper-tiny
+# This file defines the model variant metadata for runtime model management (M36)
+
+schema_version: "1.1"
+id: faster-whisper-tiny
+runtime: faster-whisper
+runtime_model_id: "tiny"  # String passed to WhisperModel()
+
+name: Faster Whisper Tiny
+source: Systran/faster-whisper-tiny
+size_gb: 0.1
+stage: transcribe
+
+description: |
+  OpenAI Whisper tiny model via faster-whisper (CTranslate2).
+  Smallest and fastest model, ideal for real-time or resource-constrained environments.
+  Lower accuracy than larger models. Supports 99 languages.
+
+languages: null  # null means multilingual (99 languages)
+
+capabilities:
+  word_timestamps: false  # Has timestamps but they're inaccurate; use alignment stage
+  punctuation: false
+  capitalization: false
+  streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  min_vram_gb: 1
+  supports_cpu: true
+  min_ram_gb: 2
+
+performance:
+  rtf_gpu: 0.01
+  rtf_cpu: 0.1

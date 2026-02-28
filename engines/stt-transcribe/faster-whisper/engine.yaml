@@ -6,15 +6,11 @@ name: Faster Whisper Runtime
 version: 1.0.0
 description: |
   Runtime engine for faster-whisper (CTranslate2-based Whisper) transcription.
-  Can load any supported Whisper model variant at runtime via runtime_model_id.
+  Can load any Whisper-compatible model at runtime via runtime_model_id.
 
   M36: This is a runtime-level configuration. The engine loads specific model
   variants on demand, without requiring separate Docker images per variant.
-
-  Supported models:
-    - tiny, base, small, medium (lightweight options)
-    - large-v2, large-v3 (high accuracy)
-    - large-v3-turbo (optimized balance of speed/accuracy)
+  See models/*.yaml for pre-defined model variants.
 
 container:
   gpu: optional
@@ -27,14 +23,6 @@ capabilities:
   max_audio_duration: 7200  # 2 hours
   streaming: false
   word_timestamps: false  # Attention-based timestamps are inaccurate; use alignment stage
-  model_variants:
-    - tiny
-    - base
-    - small
-    - medium
-    - large-v2
-    - large-v3
-    - large-v3-turbo
 
 input:
   audio_formats:
