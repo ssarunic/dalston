@@ -1,6 +1,5 @@
 import { Server, Radio } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
 import { useEngines } from '@/hooks/useEngines'
 import type { BatchEngine, WorkerStatus } from '@/api/types'
 
@@ -87,16 +86,12 @@ export function Engines() {
             <CardTitle>Batch Engines</CardTitle>
           </CardHeader>
           <CardContent>
-            {isLoading ? (
-              <div className="space-y-3">
-                {[...Array(4)].map((_, i) => (
-                  <Skeleton key={i} className="h-14 w-full" />
-                ))}
-              </div>
-            ) : batchEngines.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">
-                No batch engines registered
-              </p>
+            {batchEngines.length === 0 ? (
+              !isLoading && (
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  No batch engines registered
+                </p>
+              )
             ) : (
               <div className="divide-y divide-border">
                 {batchEngines.map((engine) => (
@@ -114,16 +109,12 @@ export function Engines() {
             <CardTitle>Real-time Workers</CardTitle>
           </CardHeader>
           <CardContent>
-            {isLoading ? (
-              <div className="space-y-3">
-                {[...Array(2)].map((_, i) => (
-                  <Skeleton key={i} className="h-14 w-full" />
-                ))}
-              </div>
-            ) : realtimeWorkers.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">
-                No real-time workers registered
-              </p>
+            {realtimeWorkers.length === 0 ? (
+              !isLoading && (
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  No real-time workers registered
+                </p>
+              )
             ) : (
               <div className="divide-y divide-border">
                 {realtimeWorkers.map((worker) => (

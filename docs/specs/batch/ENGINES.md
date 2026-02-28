@@ -35,9 +35,7 @@ Word-level timestamp alignment.
 
 | Engine ID | Description | GPU |
 |-----------|-------------|-----|
-| `whisperx-align` | WhisperX alignment (wav2vec2-based) | Yes |
-| `wav2vec-align` | Direct wav2vec2 CTC alignment | Yes |
-| `ctc-forced` | CTC forced alignment | No |
+| `phoneme-align` | Standalone CTC forced alignment (wav2vec2-based) | Optional |
 
 ### DIARIZE
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -105,13 +106,6 @@ def listen(
             help="Enable PII detection.",
         ),
     ] = False,
-    pii_tier: Annotated[
-        str,
-        typer.Option(
-            "--pii-tier",
-            help="PII detection tier: fast, standard, thorough.",
-        ),
-    ] = "standard",
     redact_audio: Annotated[
         bool,
         typer.Option(
@@ -119,6 +113,15 @@ def listen(
             help="Generate redacted audio file (requires --pii).",
         ),
     ] = False,
+    # Vocabulary for recognition boosting
+    vocabulary: Annotated[
+        str | None,
+        typer.Option(
+            "--vocabulary",
+            "-V",
+            help="Terms to boost recognition (comma-separated or JSON array, max 100 terms).",
+        ),
+    ] = None,
     # File input for testing
     input_file: Annotated[
         Path | None,
@@ -194,6 +197,34 @@ def listen(
         error_console.print("[red]Error:[/red] --redact-audio requires --pii")
         raise typer.Exit(code=1)
 
+    # Parse vocabulary option (comma-separated or JSON array)
+    parsed_vocabulary: list[str] | None = None
+    if vocabulary:
+        vocabulary = vocabulary.strip()
+        if vocabulary.startswith("["):
+            # JSON array format
+            try:
+                parsed_vocabulary = json.loads(vocabulary)
+                if not isinstance(parsed_vocabulary, list):
+                    error_console.print(
+                        "[red]Error:[/red] vocabulary must be a JSON array"
+                    )
+                    raise typer.Exit(code=1)
+            except json.JSONDecodeError as e:
+                error_console.print(
+                    f"[red]Error:[/red] Invalid JSON in vocabulary: {e}"
+                )
+                raise typer.Exit(code=1) from e
+        else:
+            # Comma-separated format
+            parsed_vocabulary = [
+                term.strip() for term in vocabulary.split(",") if term.strip()
+            ]
+
+        if parsed_vocabulary and len(parsed_vocabulary) > 100:
+            error_console.print("[red]Error:[/red] vocabulary cannot exceed 100 terms")
+            raise typer.Exit(code=1)
+
     # Create real-time session with storage and PII options
     session = RealtimeSession(
         base_url=ws_url,
@@ -202,10 +233,10 @@ def listen(
         model=model,
         enable_vad=not no_vad,
         interim_results=not no_interim,
+        vocabulary=parsed_vocabulary,
         store_audio=store_audio,
         store_transcript=store_transcript,
         pii_detection=pii,
-        pii_detection_tier=pii_tier,
         redact_pii_audio=redact_audio,
     )
 

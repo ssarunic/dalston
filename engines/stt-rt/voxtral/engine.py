@@ -221,6 +221,7 @@ class VoxtralStreamingEngine(RealtimeEngine):
         audio: np.ndarray,
         language: str,
         model_variant: str,
+        vocabulary: list[str] | None = None,
     ) -> TranscribeResult:
         """Transcribe an audio segment.
 
@@ -228,12 +229,21 @@ class VoxtralStreamingEngine(RealtimeEngine):
             audio: Audio samples as float32 numpy array, mono, 16kHz
             language: Language code or "auto" for detection
             model_variant: Model variant (ignored - single model loaded)
+            vocabulary: List of terms to boost recognition (not supported)
 
         Returns:
             TranscribeResult with text, words, language, confidence
         """
         if self._model is None:
             raise RuntimeError("Model not loaded. Call load_models() first.")
+
+        # Voxtral doesn't support vocabulary boosting
+        if vocabulary:
+            logger.debug(
+                "vocabulary_not_supported",
+                message="Vocabulary boosting is not supported for Voxtral. Terms ignored.",
+                terms_count=len(vocabulary),
+            )
 
         if audio.dtype != np.float32:
             audio = audio.astype(np.float32)

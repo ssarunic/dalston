@@ -1,10 +1,10 @@
-"""PII Detection Engine using Presidio with GLiNER backend.
+"""PII Detection Engine using GLiNER with Presidio checksum validation.
 
 Detects personally identifiable information in transcripts and generates
-redacted text. Supports three detection tiers:
-- fast: Regex-based detection only (<5ms)
-- standard: Regex + GLiNER NER model (~100ms)
-- thorough: Regex + GLiNER + LLM contextual (1-3s) - future
+redacted text. Uses GLiNER (zero-shot NER) as the primary detector for
+all entity types, supplemented by Presidio only for checksum-validated
+patterns (credit cards via Luhn, IBANs via mod-97, and contextual
+regex for CVV/expiry/JMBG/OIB).
 
 The engine maps detected entities to word timestamps from the transcript
 to enable audio redaction in the subsequent stage.
@@ -18,7 +18,6 @@ from typing import Any
 
 from dalston.engine_sdk import (
     Engine,
-    PIIDetectionTier,
     PIIDetectOutput,
     PIIEntity,
     PIIEntityCategory,
@@ -103,29 +102,23 @@ NAME_FALSE_POSITIVE_TOKENS = {
     "those",
 }
 
-# Presidio entity type mapping (Dalston type -> Presidio type)
+# Presidio entity type mapping — restricted to checksum-validated patterns only.
+# All NER-style detection (names, locations, phones, etc.) is handled by GLiNER
+# to avoid Presidio's high false-positive rate on ASR text.
 PRESIDIO_TYPE_MAP = {
-    "name": "PERSON",
-    "email_address": "EMAIL_ADDRESS",
-    "phone_number": "PHONE_NUMBER",
-    "ssn": "US_SSN",
-    "location": "LOCATION",
-    "ip_address": "IP_ADDRESS",
-    "credit_card_number": "CREDIT_CARD",
-    "iban": "IBAN_CODE",
-    "date_of_birth": "DATE_TIME",
+    "credit_card_number": "CREDIT_CARD",  # Luhn checksum validation
+    "iban": "IBAN_CODE",  # mod-97 checksum validation
 }
 
 
 class PIIDetectionEngine(Engine):
-    """PII detection engine using Presidio + GLiNER."""
+    """PII detection engine using GLiNER (primary) + Presidio (checksum-validated)."""
 
     def __init__(self) -> None:
         super().__init__()
         self._analyzer = None
         self._anonymizer = None
         self._gliner_model = None
-        self._tier: PIIDetectionTier | None = None
         self._device = self._resolve_device()
         self.logger.info("pii_detection_engine_initialized", device=self._device)
 
@@ -275,11 +268,6 @@ class PIIDetectionEngine(Engine):
         config = input.config
         job_id = input.job_id
 
-        # Get detection tier
-        tier_str = config.get("detection_tier", "standard")
-        tier = PIIDetectionTier(tier_str)
-        self._tier = tier
-
         # Get entity types to detect
         entity_types = config.get("entity_types") or DEFAULT_ENTITY_TYPES
         confidence_threshold = config.get("confidence_threshold", 0.5)
@@ -287,14 +275,12 @@ class PIIDetectionEngine(Engine):
         self.logger.info(
             "pii_detection_starting",
             job_id=job_id,
-            tier=tier.value,
             entity_types=entity_types,
         )
 
-        # Load models based on tier
+        # Always load both: Presidio for checksum-validated patterns, GLiNER for NER
         self._load_presidio()
-        if tier in (PIIDetectionTier.STANDARD, PIIDetectionTier.THOROUGH):
-            self._load_gliner()
+        self._load_gliner()
 
         # Get transcript data from previous stages
         align_output = input.get_align_output()
@@ -362,7 +348,6 @@ class PIIDetectionEngine(Engine):
             redacted_text=redacted_text,
             entity_count_by_type=dict(entity_count_by_type),
             entity_count_by_category=dict(entity_count_by_category),
-            detection_tier=tier,
             processing_time_ms=processing_time_ms,
             engine_id="pii-presidio",
             skipped=False,
@@ -384,10 +369,11 @@ class PIIDetectionEngine(Engine):
         speaker_turns: list,
         language: str = "en",
     ) -> list[PIIEntity]:
-        """Detect PII entities in text using Presidio and optionally GLiNER.
+        """Detect PII entities in text using GLiNER (primary) + Presidio (checksum).
 
-        For languages not supported by Presidio (en, de, es, fr, it, pt, nl, he),
-        we skip Presidio and rely solely on GLiNER which is multilingual.
+        GLiNER handles all NER-style entities (names, locations, orgs, medical,
+        phone numbers, emails, etc.). Presidio is restricted to checksum-validated
+        patterns (credit cards, IBANs) and contextual regex (CVV, expiry, JMBG, OIB).
 
         Args:
             text: Full transcript text
@@ -405,6 +391,7 @@ class PIIDetectionEngine(Engine):
         # Build word-to-time mapping from segments
         word_times = self._build_word_time_map(segments)
 
+        # --- Presidio: checksum-validated patterns only ---
         # Check if Presidio supports this language
         use_presidio = language in self.PRESIDIO_SUPPORTED_LANGUAGES
         if not use_presidio:
@@ -414,13 +401,13 @@ class PIIDetectionEngine(Engine):
                 supported=list(self.PRESIDIO_SUPPORTED_LANGUAGES),
             )
 
-        # Map entity types to Presidio entities
+        # Map entity types to Presidio entities (only checksum-validated)
         presidio_entities = []
         for et in entity_types:
             if et in PRESIDIO_TYPE_MAP:
                 presidio_entities.append(PRESIDIO_TYPE_MAP[et])
 
-        # Add custom recognizer entities
+        # Add custom recognizer entities (contextual regex patterns)
         custom_entities = ["CREDIT_CARD_CVV", "CREDIT_CARD_EXPIRY", "JMBG", "OIB"]
         for ce in custom_entities:
             dalston_type = ce.lower()
@@ -472,11 +459,8 @@ class PIIDetectionEngine(Engine):
                     )
                 )
 
-        # Run GLiNER for name/location/organization (standard/thorough tiers)
-        if self._gliner_model and self._tier in (
-            PIIDetectionTier.STANDARD,
-            PIIDetectionTier.THOROUGH,
-        ):
+        # --- GLiNER: primary NER detector for all entity types ---
+        if self._gliner_model:
             gliner_entities = self._detect_with_gliner(
                 text, entity_types, confidence_threshold, word_times, speaker_turns
             )
@@ -496,27 +480,36 @@ class PIIDetectionEngine(Engine):
         word_times: dict[int, tuple[float, float]],
         speaker_turns: list,
     ) -> list[PIIEntity]:
-        """Detect entities using GLiNER model."""
+        """Detect entities using GLiNER model (primary detector)."""
         entities: list[PIIEntity] = []
 
-        # GLiNER labels to detect
+        # GLiNER label mapping — GLiNER is the primary detector for all NER entities.
+        # Presidio only handles checksum-validated patterns (credit card, IBAN, etc.).
+        gliner_label_map: dict[str, str] = {
+            "name": "person",
+            "organization": "organization",
+            "location": "location",
+            "medical_condition": "medical condition",
+            "medication": "medication",
+            "email_address": "email address",
+            "phone_number": "phone number",
+            "date_of_birth": "date of birth",
+            "ssn": "social security number",
+            "ip_address": "IP address",
+            "driver_license": "driver license number",
+            "passport_number": "passport number",
+            "bank_account": "bank account number",
+            "medical_record_number": "medical record number",
+            "health_plan_id": "health plan ID",
+            "age": "age",
+        }
+
         gliner_labels = []
         gliner_to_dalston = {}
-        if "name" in entity_types:
-            gliner_labels.append("person")
-            gliner_to_dalston["person"] = "name"
-        if "organization" in entity_types:
-            gliner_labels.append("organization")
-            gliner_to_dalston["organization"] = "organization"
-        if "location" in entity_types:
-            gliner_labels.append("location")
-            gliner_to_dalston["location"] = "location"
-        if "medical_condition" in entity_types:
-            gliner_labels.append("medical condition")
-            gliner_to_dalston["medical condition"] = "medical_condition"
-        if "medication" in entity_types:
-            gliner_labels.append("medication")
-            gliner_to_dalston["medication"] = "medication"
+        for dalston_type, gliner_label in gliner_label_map.items():
+            if dalston_type in entity_types:
+                gliner_labels.append(gliner_label)
+                gliner_to_dalston[gliner_label] = dalston_type
 
         if not gliner_labels:
             return entities
@@ -784,7 +777,6 @@ class PIIDetectionEngine(Engine):
             "status": "healthy",
             "presidio_loaded": self._analyzer is not None,
             "gliner_loaded": self._gliner_model is not None,
-            "tier": self._tier.value if self._tier else None,
         }
 
 

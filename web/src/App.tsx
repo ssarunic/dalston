@@ -23,7 +23,7 @@ import { Settings } from '@/pages/Settings'
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 5000,
+      staleTime: 30000, // 30s - prevents skeleton flash on navigation; refetchInterval handles live updates
       refetchOnWindowFocus: true,
     },
   },

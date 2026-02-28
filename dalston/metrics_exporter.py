@@ -37,7 +37,7 @@ STREAM_KEY_PATTERN = "dalston:stream:{engine_id}"
 KNOWN_ENGINES = [
     "audio-prepare",
     "faster-whisper",
-    "whisperx-align",
+    "phoneme-align",
     "pyannote-3.1",
     "pyannote-4.0",
     "final-merger",

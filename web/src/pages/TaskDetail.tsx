@@ -16,7 +16,6 @@ import { useTaskArtifacts } from '@/hooks/useTaskArtifacts'
 import { useJobTasks } from '@/hooks/useJobTasks'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { BackButton } from '@/components/BackButton'
 import type { TaskStatus } from '@/api/types'
@@ -289,7 +288,7 @@ function PrepareOutputView({ output }: { output: Record<string, unknown> }) {
   const splitChannels = data.split_channels as boolean | undefined
 
   return (
-    <div className="grid grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
       <MetricCard
         label="Duration"
         value={duration ? `${duration.toFixed(2)}s` : undefined}
@@ -324,7 +323,7 @@ function AlignOutputView({ output }: { output: Record<string, unknown> }) {
   return (
     <div className="space-y-4">
       {/* Metrics */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
         <MetricCard
           label="Language"
           value={language?.toUpperCase()}
@@ -495,17 +494,7 @@ export function TaskDetail() {
   const { data: tasksData } = useJobTasks(jobId)
 
   if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-10 w-64" />
-        <div className="grid gap-4 md:grid-cols-4">
-          {[...Array(4)].map((_, i) => (
-            <Skeleton key={i} className="h-20" />
-          ))}
-        </div>
-        <Skeleton className="h-64" />
-      </div>
-    )
+    return null
   }
 
   if (error || !artifact) {
@@ -537,14 +526,14 @@ export function TaskDetail() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3 sm:gap-4">
         <BackButton fallbackPath={`/jobs/${jobId}`} />
-        <div className="flex-1">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold uppercase">{artifact.stage}</h1>
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+            <h1 className="text-xl sm:text-2xl font-bold uppercase">{artifact.stage}</h1>
             <div
               className={cn(
-                'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium',
+                'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium w-fit',
                 config.bg,
                 config.color
               )}
@@ -555,8 +544,9 @@ export function TaskDetail() {
               {artifact.status}
             </div>
           </div>
-          <p className="text-sm text-muted-foreground mt-1">
-            Engine: {artifact.engine_id} | Task: {artifact.task_id}
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1 truncate">
+            <span className="sm:hidden">Engine: {artifact.engine_id}</span>
+            <span className="hidden sm:inline">Engine: {artifact.engine_id} | Task: {artifact.task_id}</span>
           </p>
         </div>
       </div>
@@ -582,7 +572,7 @@ export function TaskDetail() {
       )}
 
       {/* Metrics */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-3 sm:gap-4 grid-cols-2 lg:grid-cols-4">
         <MetricCard
           label="Duration"
           value={artifact.duration_ms ? formatDuration(artifact.duration_ms) : '-'}

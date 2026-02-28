@@ -132,10 +132,6 @@ async def create_transcription(
         bool,
         Form(description="Enable PII detection in transcript"),
     ] = False,
-    pii_detection_tier: Annotated[
-        str,
-        Form(description="PII detection tier: 'fast', 'standard', 'thorough'"),
-    ] = "standard",
     pii_entity_types: Annotated[
         str | None,
         Form(
@@ -244,7 +240,6 @@ async def create_transcription(
     # PII detection parameters (M26)
     if pii_detection:
         parameters["pii_detection"] = True
-        parameters["pii_detection_tier"] = pii_detection_tier
         if pii_entity_types:
             try:
                 parsed_entity_types = json.loads(pii_entity_types)
@@ -291,7 +286,6 @@ async def create_transcription(
         retention=retention,
         # PII fields (M26)
         pii_detection_enabled=pii_detection,
-        pii_detection_tier=pii_detection_tier if pii_detection else None,
         pii_entity_types=pii_entity_types_list,
         pii_redact_audio=redact_pii_audio,
         pii_redaction_mode=pii_redaction_mode if redact_pii_audio else None,
@@ -428,7 +422,6 @@ async def get_transcription(
                 pii_meta = transcript["pii_metadata"]
                 response.pii = PIIInfo(
                     enabled=True,
-                    detection_tier=pii_meta.get("detection_tier"),
                     entities_detected=pii_meta.get("entities_detected", 0),
                     entity_summary=pii_meta.get("entity_count_by_type"),
                     redacted_audio_available=pii_meta.get("redacted_audio_uri")

@@ -44,7 +44,7 @@ def build_task_dag(job: Job) -> list[Task]:
 
     # Alignment (optional but common)
     if params.get("word_timestamps", True):
-        align = create_task("align", "whisperx-align", [transcribe.id])
+        align = create_task("align", "phoneme-align", [transcribe.id])
         tasks.append(align)
         core_deps.append(align.id)
     else:

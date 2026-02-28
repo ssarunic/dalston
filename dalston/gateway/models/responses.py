@@ -48,9 +48,6 @@ class PIIInfo(BaseModel):
     """PII detection information for a job."""
 
     enabled: bool = Field(description="Whether PII detection was enabled")
-    detection_tier: str | None = Field(
-        default=None, description="Detection tier: fast, standard, thorough"
-    )
     entities_detected: int | None = Field(
         default=None, description="Total number of PII entities detected"
     )

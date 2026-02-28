@@ -86,6 +86,7 @@ class WhisperStreamingEngine(RealtimeEngine):
         audio: np.ndarray,
         language: str,
         model_variant: str,
+        vocabulary: list[str] | None = None,
     ) -> TranscribeResult:
         """Transcribe an audio segment.
 
@@ -93,6 +94,7 @@ class WhisperStreamingEngine(RealtimeEngine):
             audio: Audio samples as float32 numpy array, mono, 16kHz
             language: Language code (e.g., "en") or "auto" for detection
             model_variant: Model name (e.g., "faster-whisper-large-v3")
+            vocabulary: List of terms to boost recognition (hotwords)
 
         Returns:
             TranscribeResult with text, words, language, confidence
@@ -108,13 +110,29 @@ class WhisperStreamingEngine(RealtimeEngine):
         # Handle language
         lang = None if language == "auto" else language
 
+        # Build transcription kwargs
+        transcribe_kwargs: dict = {
+            "language": lang,
+            "beam_size": 5,
+            "vad_filter": False,  # We handle VAD separately
+            "word_timestamps": True,
+        }
+
+        # Add vocabulary as initial_prompt if provided
+        # initial_prompt is more effective than hotwords for biasing transcription
+        if vocabulary:
+            # Format as comma-separated list in the prompt
+            transcribe_kwargs["initial_prompt"] = ", ".join(vocabulary)
+            logger.debug(
+                "vocabulary_enabled",
+                terms=vocabulary[:5],
+                total_terms=len(vocabulary),
+            )
+
         # Transcribe
         segments, info = model.transcribe(
             audio,
-            language=lang,
-            beam_size=5,
-            vad_filter=False,  # We handle VAD separately
-            word_timestamps=True,
+            **transcribe_kwargs,
         )
 
         # Collect results
@@ -158,6 +176,10 @@ class WhisperStreamingEngine(RealtimeEngine):
     def get_engine(self) -> str:
         """Return engine type identifier."""
         return "whisper"
+
+    def get_supports_vocabulary(self) -> bool:
+        """Return True - faster-whisper supports vocabulary via hotwords."""
+        return True
 
     def get_gpu_memory_usage(self) -> str:
         """Return GPU memory usage string."""

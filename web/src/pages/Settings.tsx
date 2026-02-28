@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router-dom'
 import { HTTPError } from 'ky'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog } from '@/components/ui/dialog'
 import {
   useSettingsNamespaces,
@@ -386,19 +385,7 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
   }, [resetMutation])
 
   if (isLoading) {
-    return (
-      <Card>
-        <CardContent className="pt-6 space-y-6">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="space-y-2">
-              <Skeleton className="h-4 w-40" />
-              <Skeleton className="h-3 w-64" />
-              <Skeleton className="h-10 w-64" />
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-    )
+    return null
   }
 
   if (!data) return null
@@ -557,9 +544,7 @@ export function Settings() {
 
       {/* Mobile/Tablet: Dropdown selector */}
       <div className="lg:hidden">
-        {namespacesLoading ? (
-          <Skeleton className="h-11 w-full" />
-        ) : (
+        {!namespacesLoading && (
           <select
             value={activeTab}
             onChange={(e) => handleTabChange(e.target.value)}
@@ -578,11 +563,7 @@ export function Settings() {
       {/* Desktop: Horizontal tab bar */}
       <nav className="hidden lg:block" aria-label="Settings sections">
         <div className="flex gap-1 border-b border-border">
-          {namespacesLoading
-            ? [1, 2, 3, 4, 5, 6].map((i) => (
-                <Skeleton key={i} className="h-10 w-24" />
-              ))
-            : namespaces.map((ns) => {
+          {!namespacesLoading && namespaces.map((ns) => {
                 const Icon = NAMESPACE_ICONS[ns.namespace] ?? Gauge
                 const isActive = activeTab === ns.namespace
                 return (
@@ -605,8 +586,8 @@ export function Settings() {
                       <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary" aria-label="Has overrides" />
                     )}
                   </button>
-                )
-              })}
+              )
+            })}
         </div>
       </nav>
 
@@ -623,19 +604,9 @@ export function Settings() {
 function SystemInfoTabWrapper() {
   const { data, isLoading } = useSettingsNamespace('system')
 
-  if (isLoading) {
-    return (
-      <Card>
-        <CardContent className="pt-6 space-y-4">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <Skeleton key={i} className="h-6 w-full" />
-          ))}
-        </CardContent>
-      </Card>
-    )
+  if (isLoading || !data) {
+    return null
   }
-
-  if (!data) return null
 
   return <SystemInfoTab settings={data.settings} />
 }

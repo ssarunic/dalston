@@ -64,6 +64,7 @@ realtime-sdk = [
     "torch>=2.0.0",
     "aioboto3>=13.0.0",  # S3 storage for audio/transcript persistence
     "types-aiobotocore-s3>=2.13.0",
+    "audioop-lts>=0.2.1;python_version>='3.13'",  # audioop removed in Python 3.13
 ]
 session-router = [
     "redis>=5.0.0",

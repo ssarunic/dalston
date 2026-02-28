@@ -1,5 +1,6 @@
 schema_version: "1.1"
 id: final-merger
+runtime: final-merger
 stage: merge
 name: Final Merger
 version: 1.1.0

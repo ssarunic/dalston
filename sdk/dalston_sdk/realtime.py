@@ -178,12 +178,12 @@ class AsyncRealtimeSession:
         enable_vad: bool = True,
         interim_results: bool = True,
         word_timestamps: bool = False,
+        vocabulary: list[str] | None = None,
         # Storage options
         store_audio: bool = True,
         store_transcript: bool = True,
         # PII detection options (M26)
         pii_detection: bool = False,
-        pii_detection_tier: str = "standard",
         pii_entity_types: list[str] | None = None,
         redact_pii_audio: bool = False,
         pii_redaction_mode: str = "silence",
@@ -200,10 +200,10 @@ class AsyncRealtimeSession:
             enable_vad: Enable voice activity detection events.
             interim_results: Send partial transcripts.
             word_timestamps: Include word-level timing.
+            vocabulary: List of terms to boost recognition (max 100 terms).
             store_audio: Record audio to S3 during session.
             store_transcript: Save final transcript to S3.
             pii_detection: Enable PII detection.
-            pii_detection_tier: Detection tier (fast, standard, thorough).
             pii_entity_types: Entity types to detect (None = all).
             redact_pii_audio: Generate redacted audio file.
             pii_redaction_mode: Audio redaction mode (silence, beep).
@@ -223,12 +223,12 @@ class AsyncRealtimeSession:
         self.enable_vad = enable_vad
         self.interim_results = interim_results
         self.word_timestamps = word_timestamps
+        self.vocabulary = vocabulary
         # Storage
         self.store_audio = store_audio
         self.store_transcript = store_transcript
         # PII detection
         self.pii_detection = pii_detection
-        self.pii_detection_tier = pii_detection_tier
         self.pii_entity_types = pii_entity_types
         self.redact_pii_audio = redact_pii_audio
         self.pii_redaction_mode = pii_redaction_mode
@@ -265,10 +265,13 @@ class AsyncRealtimeSession:
         if self.store_transcript:
             params["store_transcript"] = "true"
 
+        # Vocabulary for recognition boosting
+        if self.vocabulary:
+            params["vocabulary"] = json.dumps(self.vocabulary)
+
         # PII detection options (M26)
         if self.pii_detection:
             params["pii_detection"] = "true"
-            params["pii_detection_tier"] = self.pii_detection_tier
             if self.pii_entity_types:
                 params["pii_entity_types"] = ",".join(self.pii_entity_types)
         if self.redact_pii_audio:
@@ -497,12 +500,12 @@ class RealtimeSession:
         enable_vad: bool = True,
         interim_results: bool = True,
         word_timestamps: bool = False,
+        vocabulary: list[str] | None = None,
         # Storage options
         store_audio: bool = True,
         store_transcript: bool = True,
         # PII detection options (M26)
         pii_detection: bool = False,
-        pii_detection_tier: str = "standard",
         pii_entity_types: list[str] | None = None,
         redact_pii_audio: bool = False,
         pii_redaction_mode: str = "silence",
@@ -519,10 +522,10 @@ class RealtimeSession:
             enable_vad: Enable voice activity detection events.
             interim_results: Send partial transcripts.
             word_timestamps: Include word-level timing.
+            vocabulary: List of terms to boost recognition (max 100 terms).
             store_audio: Record audio to S3 during session.
             store_transcript: Save final transcript to S3.
             pii_detection: Enable PII detection.
-            pii_detection_tier: Detection tier (fast, standard, thorough).
             pii_entity_types: Entity types to detect (None = all).
             redact_pii_audio: Generate redacted audio file.
             pii_redaction_mode: Audio redaction mode (silence, beep).
@@ -537,10 +540,10 @@ class RealtimeSession:
             enable_vad=enable_vad,
             interim_results=interim_results,
             word_timestamps=word_timestamps,
+            vocabulary=vocabulary,
             store_audio=store_audio,
             store_transcript=store_transcript,
             pii_detection=pii_detection,
-            pii_detection_tier=pii_detection_tier,
             pii_entity_types=pii_entity_types,
             redact_pii_audio=redact_pii_audio,
             pii_redaction_mode=pii_redaction_mode,

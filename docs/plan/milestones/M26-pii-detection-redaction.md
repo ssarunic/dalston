@@ -8,6 +8,8 @@
 | **Deliverable** | PII detection engine, audio redaction, dual output, configurable entity types          |
 | **Status**    | Completed                                                                                 |
 
+> **Post-Implementation Update (February 2026):** The detection tier architecture (fast/standard/thorough) described in this milestone was removed after implementation. PII detection now uses GLiNER as the primary NER detector with Presidio restricted to checksum-validated patterns only. See [ADR-009 Amendment](../../decisions/ADR-009-pii-detection-architecture.md#amendment-to-decision-2) for details.
+
 ## User Story
 
 > *"As a compliance officer at a regulated organization, I want to automatically detect and redact PII from call recordings so that sensitive data never persists beyond pipeline processing, keeping our infrastructure out of PCI/HIPAA audit scope."*

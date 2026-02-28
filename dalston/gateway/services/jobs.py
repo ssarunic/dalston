@@ -58,7 +58,6 @@ class JobsService:
         retention: int = 30,
         # PII fields (M26)
         pii_detection_enabled: bool = False,
-        pii_detection_tier: str | None = None,
         pii_entity_types: list[str] | None = None,
         pii_redact_audio: bool = False,
         pii_redaction_mode: str | None = None,
@@ -94,7 +93,6 @@ class JobsService:
             audio_bit_depth=audio_bit_depth,
             retention=retention,
             pii_detection_enabled=pii_detection_enabled,
-            pii_detection_tier=pii_detection_tier,
             pii_entity_types=pii_entity_types,
             pii_redact_audio=pii_redact_audio,
             pii_redaction_mode=pii_redaction_mode,

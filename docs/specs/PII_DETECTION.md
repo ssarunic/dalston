@@ -14,7 +14,7 @@ This spec covers the PII detection and audio redaction system: entity types, det
 
 - PII detection pipeline stage (after alignment and diarization)
 - Audio redaction pipeline stage (after PII detection)
-- Three detection tiers (fast/standard/thorough)
+- GLiNER-based NER detection with Presidio checksum validation
 - Entity type configuration and categories (PII, PCI, PHI)
 - Redaction modes (silence, beep)
 - Dual output (redacted and unredacted text)
@@ -24,7 +24,7 @@ This spec covers the PII detection and audio redaction system: entity types, det
 **Out of scope:**
 
 - Real-time PII detection (Phase 2, after M6)
-- LLM-based contextual detection (Phase 3, thorough tier full implementation)
+- LLM-based contextual detection (Phase 3)
 - Custom recognizer API (Phase 3)
 - PII Vault with role-based access (Phase 3, enterprise feature)
 - PII analytics dashboard (Phase 3)
@@ -80,49 +80,41 @@ PREPARE → TRANSCRIBE → ALIGN → DIARIZE → PII_DETECT → AUDIO_REDACT →
 | PII after DIARIZE | Speaker attribution valuable for compliance (who disclosed PII?) |
 | AUDIO_REDACT last | Destructive operation; all analysis must complete first |
 
-### Detection Tiers
+### Detection Architecture
 
-Three tiers allow balancing speed, accuracy, and resource usage:
+PII detection uses a two-layer approach optimized for ASR transcript accuracy:
 
-| Tier | Engine Stack | Compute | Latency | Coverage |
-|------|--------------|---------|---------|----------|
-| `fast` | Presidio regex + checksum | CPU | < 5ms | Cards, SSNs, IBANs, emails, phones, IPs |
-| `standard` | Presidio + GLiNER | CPU | ~100ms | + Names, orgs, locations, medical |
-| `thorough` | Presidio + GLiNER + LLM | GPU/API | 1-3s | + Contextual/indirect PII |
+| Layer | Engine | Purpose | Entities |
+|-------|--------|---------|----------|
+| **NER** | GLiNER | ML-based entity recognition | Names, orgs, locations, phone, email, SSN, medical |
+| **Checksum** | Presidio | Validated patterns only | Credit cards (Luhn), IBANs (mod-97), CVV, expiry, JMBG, OIB |
 
-#### Fast Tier
+#### Why This Architecture
 
-Uses Microsoft Presidio's regex-based recognizers with validation:
+Presidio's NER-based detection (spaCy, Stanza) produces too many false positives on ASR transcripts. Speech recognition errors and informal spoken language cause pattern-based detectors to misfire frequently.
+
+**GLiNER as primary NER**: GLiNER (Generalist Model for Named Entity Recognition) uses a zero-shot bidirectional transformer that handles:
+
+- **Names**: Including non-Western names (Slavic, Asian, Indian)
+- **Organizations**: Company and institution names
+- **Locations**: Addresses, cities, countries
+- **Phone numbers**: Contextual detection beyond regex
+- **Email addresses**: Contextual detection
+- **SSN/National IDs**: Context-aware detection
+- **Medical**: Conditions, medications (for PHI detection)
+
+GLiNER's multilingual coverage works without language-specific training.
+
+**Presidio for checksum-validated patterns only**: Presidio is restricted to entities that can be mathematically validated:
 
 - **Credit cards**: Pattern matching + Luhn algorithm validation
 - **IBANs**: ISO 13616 pattern + mod-97 checksum validation
-- **SSNs**: US format with contextual validation
-- **Phone numbers**: International formats (+386, +385, +381, etc.)
-- **Email addresses**: RFC 5322 pattern
-- **IP addresses**: IPv4 and IPv6
+- **CVV**: 3-4 digits with credit card context
+- **Expiry dates**: MM/YY patterns near card numbers
+- **JMBG**: 13-digit Serbian/Yugoslav ID with checksum
+- **OIB**: 11-digit Croatian ID with ISO 7064 Mod 11,10 checksum
 
-This tier covers 80%+ of regulated PII with zero language dependency.
-
-#### Standard Tier
-
-Adds GLiNER (Generalist Model for Named Entity Recognition) as a Presidio NER backend:
-
-- **Names**: Handles non-Western names (Slavic, Asian, Indian)
-- **Organizations**: Company and institution names
-- **Locations**: Addresses, cities, countries
-- **Medical**: Conditions, medications (for PHI detection)
-
-GLiNER's zero-shot bidirectional transformer architecture provides strong multilingual coverage without language-specific training.
-
-#### Thorough Tier
-
-Adds LLM-based contextual detection for indirect PII:
-
-- "the house on the corner of 5th and Main" → location
-- "my mother's maiden name" → identity information
-- "the account I opened last Tuesday" → temporal context
-
-Implementation deferred to Phase 3.
+This approach eliminates false positives from regex-only detection while maintaining high recall for validated entity types.
 
 ### Entity Types
 
@@ -217,7 +209,6 @@ class PIIDetectionResult:
     redacted_text: str
     entity_count_by_type: dict[str, int]
     entity_count_by_category: dict[str, int]
-    detection_tier: str
     processing_time_ms: int
     warnings: list[str]
 ```
@@ -231,7 +222,7 @@ Audio redaction uses FFmpeg, already present in the preprocessing container.
 | Mode | Implementation | Use Case |
 |------|----------------|----------|
 | `silence` | FFmpeg `volume=0` filter | Default, unobtrusive |
-| `beep` | FFmpeg 1kHz tone overlay | Explicit redaction indicator |
+| `beep` | FFmpeg 1kHz sine wave + complex filter | Explicit redaction indicator |
 
 #### Processing
 
@@ -241,11 +232,22 @@ Audio redaction uses FFmpeg, already present in the preprocessing container.
 4. Generate single FFmpeg filter chain
 5. Execute single-pass processing
 
+**Silence mode**: Uses `-af` audio filter to set volume to 0 during PII segments.
+
 ```bash
-# Silence mode example
 ffmpeg -i input.wav \
   -af "volume=enable='between(t,2.3,4.1)':volume=0,volume=enable='between(t,7.8,9.2)':volume=0" \
   output.wav
+```
+
+**Beep mode**: Uses `-filter_complex` to generate a 1kHz sine wave, silence the original audio during PII segments, enable the beep only during those ranges, and mix both streams together.
+
+```bash
+ffmpeg -i input.wav -f lavfi -i "sine=frequency=1000:duration=<total_duration>" \
+  -filter_complex "[0]volume=enable='between(t,2.3,4.1)':volume=0,...[silenced]; \
+                   [1]volume=enable='between(t,2.3,4.1)':volume=1:...[beep]; \
+                   [silenced][beep]amix=inputs=2:duration=first[out]" \
+  -map "[out]" output.wav
 ```
 
 #### Buffer Configuration
@@ -263,7 +265,6 @@ Buffer accounts for alignment imprecision and natural speech patterns (PII often
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `pii_detection` | boolean | false | Enable PII detection |
-| `pii_detection_tier` | string | standard | fast/standard/thorough |
 | `pii_entity_types` | string[] | null | Entity types to detect (null = defaults) |
 | `redact_pii` | boolean | false | Generate redacted transcript |
 | `redact_pii_audio` | boolean | false | Generate redacted audio |
@@ -277,7 +278,6 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -H "Authorization: Bearer dk_xxx" \
   -F "file=@call.mp3" \
   -F "pii_detection=true" \
-  -F "pii_detection_tier=standard" \
   -F "pii_entity_types=credit_card_number,phone_number,name" \
   -F "redact_pii=true" \
   -F "redact_pii_audio=true" \
@@ -292,7 +292,6 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
   "status": "completed",
   "pii": {
     "enabled": true,
-    "detection_tier": "standard",
     "entities_detected": 5,
     "entity_summary": {
       "credit_card_number": 1,
@@ -351,9 +350,16 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
       "category": "pci",
       "display_name": "Credit Card Number",
       "description": "Payment card numbers (Visa, Mastercard, Amex, etc.)",
-      "detection_method": "regex+luhn",
-      "is_default": true,
-      "available_in_tiers": ["fast", "standard", "thorough"]
+      "detection_method": "presidio+luhn",
+      "is_default": true
+    },
+    {
+      "id": "name",
+      "category": "pii",
+      "display_name": "Person Name",
+      "description": "Full names including non-Western names",
+      "detection_method": "gliner",
+      "is_default": true
     }
   ]
 }
@@ -408,17 +414,16 @@ PII detection integrates with the M25 retention system. The default behavior is 
 ```yaml
 id: pii-presidio
 stage: pii_detect
-name: PII Detection (Presidio + GLiNER)
-version: 1.0.0
+name: PII Detection (GLiNER + Presidio checksum)
+version: 2.0.0
 
 container:
-  gpu: optional
+  gpu: optional  # GPU accelerates GLiNER
   memory: 4G
   model_cache: /models
 
 capabilities:
-  languages: [all]
-  detection_tiers: [fast, standard, thorough]
+  languages: [all]  # GLiNER is multilingual
 
 input:
   required:
@@ -516,7 +521,7 @@ After M6 (Real-Time MVP):
 
 ### Phase 3: Advanced Features
 
-1. LLM-based contextual detection (thorough tier)
+1. LLM-based contextual detection for indirect PII
 2. Custom recognizer API
 3. PII analytics dashboard
 4. Compliance presets (PCI-DSS, HIPAA, GDPR)

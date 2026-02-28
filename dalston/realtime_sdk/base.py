@@ -135,6 +135,7 @@ class RealtimeEngine(ABC):
         audio: np.ndarray,
         language: str,
         model_variant: str,
+        vocabulary: list[str] | None = None,
     ) -> TranscribeResult:
         """Transcribe an audio segment.
 
@@ -144,16 +145,23 @@ class RealtimeEngine(ABC):
             audio: Audio samples as float32 numpy array, mono, 16kHz
             language: Language code (e.g., "en") or "auto" for detection
             model_variant: Model name (e.g., "faster-whisper-large-v3")
+            vocabulary: List of terms to boost recognition (hotwords/bias)
 
         Returns:
             TranscribeResult with text, words, language, confidence
 
         Example:
-            def transcribe(self, audio, language, model_variant):
+            def transcribe(self, audio, language, model_variant, vocabulary=None):
+                # Apply vocabulary boosting if supported
+                kwargs = {}
+                if vocabulary:
+                    kwargs["hotwords"] = " ".join(vocabulary)
+
                 segments, info = self.model.transcribe(
                     audio,
                     language=None if language == "auto" else language,
                     word_timestamps=True,
+                    **kwargs,
                 )
                 # Process segments...
                 return TranscribeResult(text=text, words=words, ...)
@@ -205,6 +213,18 @@ class RealtimeEngine(ABC):
             Engine type string. Default: "unknown"
         """
         return "unknown"
+
+    def get_supports_vocabulary(self) -> bool:
+        """Return whether this engine supports vocabulary boosting.
+
+        Override to return True for engines that support vocabulary/hotwords
+        (e.g., faster-whisper via hotwords parameter).
+        Used when registering with Session Router.
+
+        Returns:
+            True if vocabulary boosting is supported. Default: False
+        """
+        return False
 
     def get_gpu_memory_usage(self) -> str:
         """Return GPU memory usage string.
@@ -287,6 +307,7 @@ class RealtimeEngine(ABC):
                 models=self.get_models(),
                 languages=self.get_languages(),
                 engine=self.get_engine(),
+                supports_vocabulary=self.get_supports_vocabulary(),
             )
         )
 
@@ -581,6 +602,18 @@ class RealtimeEngine(ABC):
         model_param = get_param("model", "")
         model_value = model_param if model_param else None
 
+        # Vocabulary parameter: JSON array of terms to boost, or None
+        vocabulary_param = get_param("vocabulary", "")
+        vocabulary_value: list[str] | None = None
+        if vocabulary_param:
+            try:
+                parsed = json.loads(vocabulary_param)
+                if isinstance(parsed, list) and all(isinstance(t, str) for t in parsed):
+                    vocabulary_value = parsed if parsed else None
+            except json.JSONDecodeError:
+                # Invalid JSON - ignore and use None
+                pass
+
         return SessionConfig(
             session_id=session_id,
             language=get_param("language", "auto"),
@@ -593,6 +626,7 @@ class RealtimeEngine(ABC):
             enable_vad=get_bool_param("enable_vad", True),
             interim_results=get_bool_param("interim_results", True),
             word_timestamps=get_bool_param("word_timestamps", False),
+            vocabulary=vocabulary_value,
             max_utterance_duration=get_float_param(
                 "max_utterance_duration",
                 float(

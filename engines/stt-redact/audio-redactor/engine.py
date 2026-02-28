@@ -227,23 +227,37 @@ class AudioRedactionEngine(Engine):
             return
 
         if mode == PIIRedactionMode.SILENCE:
+            # Simple audio filter for silence
             filter_chain = self._build_silence_filter(ranges)
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(input_path),
+                "-af",
+                filter_chain,
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                str(output_path),
+            ]
         else:
-            filter_chain = self._build_beep_filter(ranges)
-
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            str(input_path),
-            "-af",
-            filter_chain,
-            "-ar",
-            "16000",  # Ensure consistent sample rate
-            "-ac",
-            "1",  # Mono
-            str(output_path),
-        ]
+            # Complex filter graph for beep (requires -filter_complex)
+            filter_graph = self._build_beep_filter(ranges)
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(input_path),
+                "-filter_complex",
+                filter_graph,
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                str(output_path),
+            ]
 
         self.logger.debug("ffmpeg_command", cmd=" ".join(cmd))
 
@@ -277,17 +291,42 @@ class AudioRedactionEngine(Engine):
     def _build_beep_filter(self, ranges: list[tuple[float, float, list[str]]]) -> str:
         """Build FFmpeg filter for beep redaction.
 
+        Uses a complex filter graph to:
+        1. Silence original audio during PII segments
+        2. Generate a sine wave beep tone
+        3. Enable the beep only during PII segments
+        4. Mix both streams together
+
         Args:
             ranges: Time ranges to redact
 
         Returns:
             FFmpeg audio filter string with beep tone overlay
         """
-        # Complex filter:
-        # 1. Generate sine wave at beep frequency
-        # For now, use silence mode for beep (proper beep mixing requires
-        # complex FFmpeg filtering with sine wave overlay - to be added later)
-        return self._build_silence_filter(ranges)
+        # Build enable expression for all ranges
+        # Format: between(t,start1,end1)+between(t,start2,end2)+...
+        enable_parts = [f"between(t,{start:.3f},{end:.3f})" for start, end, _ in ranges]
+        enable_expr = "+".join(enable_parts)
+
+        # Build inverse expression for silencing (1 when NOT in any range)
+        # We use 1-(...) to invert the expression
+        silence_expr = f"1-({enable_expr})"
+
+        # Complex filter graph:
+        # [0:a] -> silence PII segments -> [silenced]
+        # sine wave -> enable only during PII -> [beep]
+        # [silenced][beep] -> amix -> output
+        filter_graph = (
+            # Silence the original audio during PII segments
+            f"[0:a]volume=enable='{enable_expr}':volume=0[silenced];"
+            # Generate sine wave at beep frequency, enable only during PII
+            f"sine=frequency={self.BEEP_FREQUENCY}:sample_rate=16000,"
+            f"volume=enable='{silence_expr}':volume=0[beep];"
+            # Mix silenced original with beep
+            "[silenced][beep]amix=inputs=2:duration=first:normalize=0"
+        )
+
+        return filter_graph
 
     def _build_redaction_map(
         self,

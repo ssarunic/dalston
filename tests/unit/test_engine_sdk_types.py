@@ -285,7 +285,7 @@ class TestTaskInputGetAlignOutput:
                     "unaligned_words": [],
                     "unaligned_ratio": 0.0,
                     "granularity_achieved": "word",
-                    "engine_id": "whisperx-align",
+                    "engine_id": "phoneme-align",
                 },
             },
         )
@@ -307,7 +307,7 @@ class TestTaskInputGetAlignOutput:
                     "text": "Hello",
                     "language": "xx",
                     "word_timestamps": False,
-                    "engine_id": "whisperx-align",
+                    "engine_id": "phoneme-align",
                     "skipped": True,
                     "skip_reason": "No alignment model for language 'xx'",
                     "warnings": ["No alignment model for language 'xx'"],
@@ -331,7 +331,7 @@ class TestTaskInputGetAlignOutput:
                     "text": "Ch0",
                     "language": "en",
                     "word_timestamps": True,
-                    "engine_id": "whisperx-align",
+                    "engine_id": "phoneme-align",
                 },
             },
         )
@@ -599,7 +599,7 @@ class TestTaskInputTypedOutputIntegration:
             text="Hello",
             language="en",
             word_timestamps=True,
-            engine_id="whisperx-align",
+            engine_id="phoneme-align",
         )
 
         diarize_output = DiarizeOutput(

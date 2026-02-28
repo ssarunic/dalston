@@ -1269,7 +1269,6 @@ def scenario_optional_pii_redaction(ctx: RunContext) -> tuple[str, list[str]]:
         model=model,
         extra_fields={
             "pii_detection": True,
-            "pii_detection_tier": "fast",
             "redact_pii_audio": True,
             "pii_redaction_mode": "beep",
         },

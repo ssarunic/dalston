@@ -9,7 +9,6 @@ import { apiClient } from '@/api/client'
 import type { JobStatus } from '@/api/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/StatusBadge'
 import { ListLoadMoreFooter } from '@/components/ListLoadMoreFooter'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
@@ -228,26 +227,22 @@ export function BatchJobs() {
           </div>
         </CardHeader>
         <CardContent>
-          {isLoading && allJobs.length === 0 ? (
-            <div className="space-y-3">
-              {[...Array(5)].map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : error ? (
+          {error ? (
             <p className="text-red-400 py-4">Error loading jobs</p>
           ) : visibleJobs.length === 0 ? (
-            <div className="text-center py-12">
-              <p className="text-muted-foreground mb-4">
-                {statusFilter ? 'No jobs found matching the filter' : 'No jobs yet'}
-              </p>
-              {!statusFilter && (
-                <Button variant="outline" onClick={() => navigate('/jobs/new')}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Submit your first job
-                </Button>
-              )}
-            </div>
+            !isLoading && (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground mb-4">
+                  {statusFilter ? 'No jobs found matching the filter' : 'No jobs yet'}
+                </p>
+                {!statusFilter && (
+                  <Button variant="outline" onClick={() => navigate('/jobs/new')}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Submit your first job
+                  </Button>
+                )}
+              </div>
+            )
           ) : (
             isMobile ? (
               <div className="space-y-3">

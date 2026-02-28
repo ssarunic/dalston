@@ -14,7 +14,6 @@ import { useJobTasks } from '@/hooks/useJobTasks'
 import { useResourceAuditTrail } from '@/hooks/useAuditLog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/StatusBadge'
 import { DAGViewer } from '@/components/DAGViewer'
@@ -339,27 +338,8 @@ function getActionStyle(action: string): string {
 }
 
 function AuditTrailSection({ events, isLoading }: { events?: AuditEvent[]; isLoading: boolean }) {
-  if (isLoading) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base font-medium flex items-center gap-2">
-            <ScrollText className="h-4 w-4" />
-            Audit Trail
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            {[...Array(3)].map((_, i) => (
-              <Skeleton key={i} className="h-8 w-full" />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    )
-  }
-
   if (!events || events.length === 0) {
+    if (isLoading) return null
     return (
       <Card>
         <CardHeader>
@@ -390,18 +370,22 @@ function AuditTrailSection({ events, isLoading }: { events?: AuditEvent[]; isLoa
           {events.map((event) => (
             <div
               key={event.id}
-              className="flex items-center gap-4 text-sm"
+              className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-4 text-sm py-2 sm:py-0"
             >
-              <div className="w-2 h-2 rounded-full bg-muted-foreground" />
-              <Badge variant="outline" className={getActionStyle(event.action)}>
-                {event.action}
-              </Badge>
-              <span className="text-muted-foreground">
-                {new Date(event.timestamp).toLocaleString()}
-              </span>
-              <span className="font-mono text-xs text-muted-foreground">
-                {event.actor_id}
-              </span>
+              <div className="flex items-center gap-2 sm:gap-4">
+                <div className="w-2 h-2 rounded-full bg-muted-foreground shrink-0" />
+                <Badge variant="outline" className={getActionStyle(event.action)}>
+                  {event.action}
+                </Badge>
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 ml-4 sm:ml-0">
+                <span className="text-muted-foreground text-xs sm:text-sm">
+                  {new Date(event.timestamp).toLocaleString()}
+                </span>
+                <span className="font-mono text-xs text-muted-foreground truncate">
+                  {event.actor_id}
+                </span>
+              </div>
             </div>
           ))}
         </div>
@@ -513,20 +497,10 @@ export function JobDetail() {
       ? audioUrlData.redactedUrl
       : undefined
 
-  // Show loading state on initial fetch OR when cached data is from a different job
+  // Show nothing on initial fetch OR when cached data is from a different job
   // This prevents showing stale data from a previously viewed job
   if (isLoading || job?.id !== jobId) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-10 w-64" />
-        <div className="grid gap-4 md:grid-cols-5">
-          {[...Array(5)].map((_, i) => (
-            <Skeleton key={i} className="h-20" />
-          ))}
-        </div>
-        <Skeleton className="h-64" />
-      </div>
-    )
+    return null
   }
 
   if (error) {
@@ -558,15 +532,15 @@ export function JobDetail() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3 sm:gap-4">
           <BackButton fallbackPath="/jobs" />
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold font-mono">{job.id}</h1>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+              <h1 className="text-lg sm:text-2xl font-bold font-mono truncate">{job.id}</h1>
               <StatusBadge status={job.status} />
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs sm:text-sm text-muted-foreground">
               Created {new Date(job.created_at).toLocaleString()}
             </p>
           </div>
@@ -579,7 +553,7 @@ export function JobDetail() {
       )}
 
       {/* Metadata */}
-      <div className="grid gap-4 md:grid-cols-6">
+      <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
         <MetadataCard
           icon={Mic}
           label="Audio"

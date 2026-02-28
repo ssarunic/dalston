@@ -1,8 +1,16 @@
+# Model catalog entry for parakeet-tdt-1.1b
+# This file defines the model variant metadata for runtime model management (M36)
+
 schema_version: "1.1"
 id: parakeet-tdt-1.1b
-stage: transcribe
+runtime: nemo
+runtime_model_id: "nvidia/parakeet-tdt-1.1b"  # HuggingFace ID passed to from_pretrained()
+
 name: NVIDIA Parakeet TDT 1.1B
-version: 1.0.0
+source: nvidia/parakeet-tdt-1.1b
+size_gb: 4.2
+stage: transcribe
+
 description: |
   NVIDIA Parakeet FastConformer TDT 1.1B for highest accuracy English transcription.
   TDT (Token-and-Duration Transducer) achieves state-of-the-art WER scores.
@@ -10,43 +18,23 @@ description: |
   Best choice when transcription accuracy is the priority.
 
   NOTE: Outputs lowercase text without punctuation. Use refine stage or
-  parakeet-tdt-0.6b (v3) if punctuation/capitalization is required.
+  parakeet-tdt-0.6b-v3 if punctuation/capitalization is required.
 
-container:
-  gpu: required
-  memory: 10G
-  model_cache: /models
+languages:
+  - en
 
 capabilities:
-  languages:
-    - en
-  max_audio_duration: 7200
-  streaming: false
   word_timestamps: true
-  max_concurrency: 4
   punctuation: false
   capitalization: false
-
-input:
-  audio_formats:
-    - wav
-  sample_rate: 16000
-  channels: 1
-
-hf_compat:
-  pipeline_tag: automatic-speech-recognition
-  library_name: nemo
-  license: cc-by-4.0
+  streaming: false
+  max_audio_duration: 7200
 
 hardware:
   min_vram_gb: 6
-  recommended_gpu:
-    - a10g
-    - a100
   supports_cpu: false
   min_ram_gb: 12
 
 performance:
   rtf_gpu: 0.0006
   rtf_cpu: null
-  warm_start_latency_ms: 150

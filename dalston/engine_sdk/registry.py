@@ -158,6 +158,7 @@ class BatchEngineRegistry:
         status: str,
         current_task: str | None = None,
         capabilities: EngineCapabilities | None = None,
+        loaded_model: str | None = None,
     ) -> None:
         """Send heartbeat update.
 
@@ -170,6 +171,7 @@ class BatchEngineRegistry:
             status: Engine status ("idle" or "processing")
             current_task: Current task ID if processing, None if idle
             capabilities: Engine capabilities (optional, included on first heartbeat)
+            loaded_model: Currently loaded model ID for runtime model management (M36)
         """
         r = self._get_redis()
         engine_key = f"{ENGINE_KEY_PREFIX}{instance_id}"
@@ -198,6 +200,10 @@ class BatchEngineRegistry:
             if caps is not None:
                 mapping["capabilities"] = caps.model_dump_json()
 
+            # M36: Include loaded model for runtime model management
+            if loaded_model is not None:
+                mapping["loaded_model"] = loaded_model
+
             # Re-add to sets (idempotent)
             r.sadd(ENGINE_SET_KEY, info.engine_id)
             instances_key = f"{ENGINE_INSTANCES_PREFIX}{info.engine_id}"
@@ -222,6 +228,10 @@ class BatchEngineRegistry:
             if capabilities is not None:
                 mapping["capabilities"] = capabilities.model_dump_json()
 
+            # M36: Include loaded model for runtime model management
+            if loaded_model is not None:
+                mapping["loaded_model"] = loaded_model
+
         r.hset(engine_key, mapping=mapping)
 
         # Refresh TTL
@@ -232,6 +242,7 @@ class BatchEngineRegistry:
             instance_id=instance_id,
             status=status,
             current_task=current_task,
+            loaded_model=loaded_model,
         )
 
     def unregister(self, instance_id: str) -> None:
