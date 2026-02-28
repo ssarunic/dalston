@@ -7,8 +7,12 @@ audio buffering, VAD, ASR, and transcript assembly.
 from __future__ import annotations
 
 import asyncio
-import audioop
 import time
+
+try:
+    import audioop  # Python < 3.13
+except ImportError:
+    import audioop_lts as audioop  # Python >= 3.13 (PEP 594)
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
