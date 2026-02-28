@@ -6,7 +6,7 @@
 .PHONY: help dev dev-minimal dev-gpu dev-observability stop logs logs-all ps \
         build-cpu build-gpu build-engine \
         aws-start aws-stop aws-logs \
-        health clean validate test lint
+        health clean clean-local validate test lint
 
 # Default target
 help:
@@ -40,23 +40,33 @@ help:
 	@echo ""
 	@echo "Utilities:"
 	@echo "  make clean           - Remove stopped containers and unused images"
+	@echo "  make clean-local     - Kill local Python processes (orchestrator, gateway)"
 
 # ============================================================
 # LOCAL DEVELOPMENT
 # ============================================================
 
+# Kill local Python processes that would conflict with Docker services
+# This prevents zombie processes from previous sessions stealing Redis events
+clean-local:
+	@echo "Killing local dalston processes..."
+	@pkill -f "dalston\.orchestrator" 2>/dev/null || true
+	@pkill -f "dalston\.gateway" 2>/dev/null || true
+	@pkill -f "dalston\.session_router" 2>/dev/null || true
+	@echo "Done."
+
 # Start full local stack with all CPU engines
-dev:
+dev: clean-local
 	docker compose --profile local-infra --profile local-object-storage up -d --build
 
 # Start minimal stack for quick iteration
-dev-minimal:
+dev-minimal: clean-local
 	docker compose --profile local-infra --profile local-object-storage up -d --build \
 		gateway orchestrator \
 		stt-batch-prepare stt-batch-transcribe-faster-whisper stt-batch-align-phoneme-cpu stt-batch-merge
 
 # Start with GPU engines (requires NVIDIA GPU)
-dev-gpu:
+dev-gpu: clean-local
 	docker compose --profile local-infra --profile local-object-storage --profile gpu up -d --build
 
 # Start with observability stack (jaeger, prometheus, grafana)
