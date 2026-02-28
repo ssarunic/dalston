@@ -43,7 +43,6 @@ Speaker identification and segmentation.
 
 | Engine ID | Description | GPU |
 |-----------|-------------|-----|
-| `pyannote-3.1` | Pyannote 3.1, stable release | Yes |
 | `pyannote-4.0` | Pyannote 4.0, latest features | Yes |
 | `nemo-diarizer` | NVIDIA NeMo diarization | Yes |
 | `speechbrain-diar` | SpeechBrain diarization | Yes |
@@ -548,7 +547,7 @@ Fast Whisper implementation using CTranslate2 for optimized inference.
 
 ---
 
-### pyannote-3.1
+### pyannote-4.0
 
 **Stage**: diarize
 

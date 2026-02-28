@@ -373,36 +373,6 @@ services:
 
   # --- DIARIZE STAGE ---
 
-  # Pyannote 3.1 (CPU - default for local dev)
-  stt-batch-diarize-pyannote-3.1-cpu:
-    image: dalston/stt-batch-diarize-pyannote-3.1:latest
-    build:
-      context: .
-      dockerfile: engines/stt-diarize/pyannote-3.1/Dockerfile
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: pyannote-3.1
-      HF_TOKEN: ${HF_TOKEN:-}
-      DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
-    volumes:
-      - pyannote-models:/models
-    depends_on: *batch-depends
-    restart: unless-stopped
-
-  # Pyannote 3.1 (GPU)
-  stt-batch-diarize-pyannote-3.1:
-    image: dalston/stt-batch-diarize-pyannote-3.1:latest
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: pyannote-3.1
-      HF_TOKEN: ${HF_TOKEN:-}
-    volumes:
-      - pyannote-models:/models
-    depends_on: *batch-depends
-    deploy: *gpu-deploy
-    profiles: [gpu]
-    restart: unless-stopped
-
   # Pyannote 4.0 (CPU - default for local dev)
   stt-batch-diarize-pyannote-4.0-cpu:
     image: dalston/stt-batch-diarize-pyannote-4.0:latest

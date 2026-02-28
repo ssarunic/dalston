@@ -49,7 +49,7 @@ class TestStageResponse:
         stage = StageResponse(
             stage="diarize",
             task_id=UUID("12345678-1234-1234-1234-123456789abc"),
-            engine_id="pyannote-3.1",
+            engine_id="pyannote-4.0",
             status="pending",
             required=False,
         )
@@ -65,7 +65,7 @@ class TestStageResponse:
         stage = StageResponse(
             stage="diarize",
             task_id=UUID("12345678-1234-1234-1234-123456789abc"),
-            engine_id="pyannote-3.1",
+            engine_id="pyannote-4.0",
             status="failed",
             required=False,
             error="Too many speakers detected (>20)",
@@ -178,7 +178,7 @@ class TestTaskArtifactResponse:
             task_id=UUID("11111111-1111-1111-1111-111111111111"),
             job_id=UUID("22222222-2222-2222-2222-222222222222"),
             stage="diarize",
-            engine_id="pyannote-3.1",
+            engine_id="pyannote-4.0",
             status="failed",
             input={"config": {"num_speakers": None}},
             output=None,

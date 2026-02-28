@@ -261,7 +261,7 @@ class TestDagShapeWithNativeDiarization:
                     },
                 },
                 "align": {"engine_id": "phoneme-align"},
-                "diarize": {"engine_id": "pyannote-3.1"},
+                "diarize": {"engine_id": "pyannote-4.0"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
@@ -652,7 +652,7 @@ class TestDagDependencies:
                     "capabilities": {"includes_diarization": False},
                 },
                 "align": {"engine_id": "phoneme-align"},
-                "diarize": {"engine_id": "pyannote-3.1"},
+                "diarize": {"engine_id": "pyannote-4.0"},
                 "merge": {"engine_id": "final-merger"},
             }
         )
@@ -795,7 +795,7 @@ class TestMergedWavScenarios:
                     },
                 },
                 "align": {"engine_id": "phoneme-align"},
-                "diarize": {"engine_id": "pyannote-3.1"},
+                "diarize": {"engine_id": "pyannote-4.0"},
                 "merge": {"engine_id": "final-merger"},
             }
         )

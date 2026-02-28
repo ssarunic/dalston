@@ -118,7 +118,7 @@ engines:
     gpu_required: true
     gpu_vram_mb: 5000
 
-  pyannote-3.1:
+  pyannote-4.0:
     image: dalston/pyannote:latest
     stages: [diarize]
     languages: null

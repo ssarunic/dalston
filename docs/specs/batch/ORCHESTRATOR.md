@@ -62,7 +62,7 @@ Tasks are atomic units of work. Each task:
 
 ┌────────────────┐  ┌────────────────┐  ┌────────────────┐
 │ dalston:stream:│  │ dalston:stream:│  │ dalston:stream:│
-│ faster-whisper │  │ pyannote-3.1   │  │ phoneme-align  │
+│ faster-whisper │  │ pyannote-4.0   │  │ phoneme-align  │
 │                │  │                │  │                │
 │ [task] [task]  │  │ [task]         │  │ [task] [task]  │
 └────────────────┘  └────────────────┘  └────────────────┘

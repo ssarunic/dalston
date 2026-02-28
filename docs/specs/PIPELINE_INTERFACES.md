@@ -509,7 +509,6 @@ When `vocabulary_boost` is provided to a model that only supports `initial_promp
 
 | Model | Max Speakers | Overlap Detection | Streaming | License |
 |-------|--------------|-------------------|-----------|---------|
-| pyannote 3.1 | Unlimited | ✓ | ✗ | MIT |
 | pyannote 4.0 | Unlimited | ✓ | ✓ | MIT |
 | NeMo MSDD | Unlimited | ✓ | ✗ | Apache 2.0 |
 

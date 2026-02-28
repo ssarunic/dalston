@@ -269,7 +269,7 @@ Comprehensive reference for speech-to-text model selection in Dalston's modular 
 |-------|-------|-----------|
 | **Batch Transcription** | faster-whisper large-v3 | Best multilingual accuracy + speed balance |
 | **Alignment** | WhisperX | Word-level timestamps via wav2vec2 |
-| **Diarization** | pyannote 3.1 | Industry standard, MIT license |
+| **Diarization** | pyannote 4.0 | Industry standard, MIT license |
 | **Streaming** | Parakeet FastConformer | Best streaming accuracy for English |
 
 ### Future Considerations

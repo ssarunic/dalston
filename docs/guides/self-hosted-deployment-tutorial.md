@@ -129,7 +129,7 @@ Best for: Meeting transcription, interviews, multi-speaker content.
 docker compose --profile local-infra --profile local-object-storage up -d
 ```
 
-This starts the default CPU-safe stack, including `stt-batch-diarize-pyannote-3.1-cpu` for speaker identification.
+This starts the default CPU-safe stack, including `stt-batch-diarize-pyannote-4.0-cpu` for speaker identification.
 
 ### Option D: GPU-Accelerated
 
@@ -243,7 +243,7 @@ docker compose up -d --scale stt-batch-transcribe-whisper-cpu=2
 docker compose up -d \
   --scale stt-batch-transcribe-whisper-cpu=2 \
   --scale stt-batch-align-whisperx-cpu=2 \
-  --scale stt-batch-diarize-pyannote-v31-cpu=2
+  --scale stt-batch-diarize-pyannote-v40-cpu=2
 ```
 
 ### Resource limits
@@ -274,7 +274,7 @@ services:
               device_ids: ['0']
               capabilities: [gpu]
 
-  stt-batch-diarize-pyannote-v31-cpu:
+  stt-batch-diarize-pyannote-v40-cpu:
     deploy:
       resources:
         reservations:
@@ -502,10 +502,10 @@ For diarization engines:
 
 ```bash
 # Verify token is set
-docker compose exec stt-batch-diarize-pyannote-v31-cpu printenv HF_TOKEN
+docker compose exec stt-batch-diarize-pyannote-v40-cpu printenv HF_TOKEN
 
 # Test token validity
-docker compose exec stt-batch-diarize-pyannote-v31-cpu python -c "
+docker compose exec stt-batch-diarize-pyannote-v40-cpu python -c "
 from huggingface_hub import HfApi
 api = HfApi()
 print(api.whoami())

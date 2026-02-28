@@ -24,7 +24,7 @@ M30 established engine.yaml as the single source of truth and exposed capabiliti
 
 ```python
 # Current state (dag.py)
-DEFAULT_ENGINES = {"transcribe": "faster-whisper", "diarize": "pyannote-3.1", ...}
+DEFAULT_ENGINES = {"transcribe": "faster-whisper", "diarize": "pyannote-4.0", ...}
 NATIVE_WORD_TIMESTAMP_ENGINES = {"parakeet"}
 
 # Engine selection is hardcoded
@@ -959,7 +959,7 @@ _LEGACY_DEFAULT_ENGINES = {
     "prepare": "audio-prepare",
     "transcribe": "faster-whisper",
     "align": "whisperx-align",
-    "diarize": "pyannote-3.1",
+    "diarize": "pyannote-4.0",
     "merge": "final-merger",
 }
 

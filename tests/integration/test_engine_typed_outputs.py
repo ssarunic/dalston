@@ -169,7 +169,7 @@ class TestFinalMergerEngineOutput:
                         ],
                         "speakers": ["SPEAKER_00", "SPEAKER_01"],
                         "num_speakers": 2,
-                        "engine_id": "pyannote-3.1",
+                        "engine_id": "pyannote-4.0",
                     },
                 },
                 config={"speaker_detection": "diarize"},
@@ -426,7 +426,7 @@ class TestOutputValidation:
             num_speakers=2,
             overlap_duration=0.5,
             overlap_ratio=0.05,
-            engine_id="pyannote-3.1",
+            engine_id="pyannote-4.0",
         )
 
         data = output.model_dump(mode="json")

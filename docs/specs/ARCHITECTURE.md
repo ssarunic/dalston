@@ -197,7 +197,7 @@
 |----------|---------|
 | TRANSCRIBE | faster-whisper, parakeet, whisper-openai |
 | ALIGN | phoneme-align |
-| DIARIZE | pyannote-3.1, pyannote-4.0 |
+| DIARIZE | pyannote-4.0 |
 | DETECT | emotion2vec, panns-events, pii-presidio |
 | REDACT | audio-redactor |
 | REFINE | llm-cleanup |

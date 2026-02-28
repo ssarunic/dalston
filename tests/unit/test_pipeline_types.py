@@ -520,7 +520,7 @@ class TestDiarizeOutput:
             ],
             speakers=["SPEAKER_00", "SPEAKER_01"],
             num_speakers=2,
-            engine_id="pyannote-3.1",
+            engine_id="pyannote-4.0",
         )
         assert out.num_speakers == 2
         assert len(out.turns) == 2
@@ -542,7 +542,7 @@ class TestDiarizeOutput:
             num_speakers=2,
             overlap_duration=0.5,
             overlap_ratio=0.05,
-            engine_id="pyannote-3.1",
+            engine_id="pyannote-4.0",
         )
         assert out.overlap_duration == 0.5
         assert out.overlap_ratio == 0.05

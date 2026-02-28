@@ -171,7 +171,7 @@ class NemoMSDDEngine(Engine):
         raise RuntimeError(
             "NeMo MSDD requires GPU. CUDA is not available. "
             "Set DEVICE=cpu or NEMO_ALLOW_CPU=true to allow slow CPU inference, "
-            "or use pyannote-3.1 for CPU-based diarization."
+            "or use pyannote-4.0 for CPU-based diarization."
         )
 
     def _create_diarizer(

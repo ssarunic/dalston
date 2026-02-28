@@ -32,8 +32,8 @@ class TestValidateEngineId:
         assert validate_engine_id("my-engine") is None
 
     def test_valid_id_with_dots(self) -> None:
-        """ID with dots should pass (e.g., pyannote-3.1)."""
-        assert validate_engine_id("pyannote-3.1") is None
+        """ID with dots should pass (e.g., pyannote-4.0)."""
+        assert validate_engine_id("pyannote-4.0") is None
 
     def test_valid_id_with_numbers(self) -> None:
         """ID with numbers should pass."""
@@ -76,7 +76,7 @@ class TestToClassName:
 
     def test_with_dots(self) -> None:
         """Name with dots should convert properly."""
-        assert to_class_name("pyannote-3.1") == "Pyannote31Engine"
+        assert to_class_name("pyannote-4.0") == "Pyannote40Engine"
 
     def test_single_word(self) -> None:
         """Single word should capitalize and add Engine suffix."""
@@ -96,7 +96,7 @@ class TestToHumanName:
 
     def test_with_dots(self) -> None:
         """Name with dots should preserve version numbers."""
-        assert to_human_name("pyannote-3.1") == "Pyannote 3.1"
+        assert to_human_name("pyannote-4.0") == "Pyannote 4.0"
 
     def test_single_word(self) -> None:
         """Single word should title case."""

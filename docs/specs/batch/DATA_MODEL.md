@@ -358,7 +358,7 @@ s3://{bucket}/models/
 │   ├── medium/
 │   └── small/
 ├── pyannote/
-│   └── speaker-diarization-3.1/
+│   └── speaker-diarization-4.0/
 ├── whisperx/
 │   └── wav2vec2-large-xlsr/
 └── emotion2vec/

@@ -243,7 +243,7 @@ class TestJobStatusWithStages:
             task_id=uuid4(),
             job_id=job_id,
             stage="diarize",
-            engine_id="pyannote-3.1",
+            engine_id="pyannote-4.0",
             status="failed",
             required=False,
             started_at=now,
@@ -546,7 +546,7 @@ class TestTaskArtifactsEndpoint:
             task_id=task_id,
             job_id=job_id,
             stage="diarize",
-            engine_id="pyannote-3.1",
+            engine_id="pyannote-4.0",
             status="failed",
             error="Too many speakers",
         )

@@ -19,7 +19,7 @@
 ### 4.1: Pyannote Diarization Engine
 
 ```text
-engines/diarize/pyannote-3.1/
+engines/diarize/pyannote-4.0/
 ├── Dockerfile
 ├── requirements.txt
 ├── engine.yaml
@@ -28,7 +28,7 @@ engines/diarize/pyannote-3.1/
 
 **Deliverables:**
 
-- Load pyannote speaker-diarization-3.1 pipeline (requires `HF_TOKEN`)
+- Load pyannote speaker-diarization-4.0 pipeline (requires `HF_TOKEN`)
 - Support optional min/max speaker count hints
 - Output: `diarization_segments` (speaker turns with start/end) and `speakers` list
 - GPU Dockerfile with pyannote.audio dependencies
@@ -142,10 +142,10 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 
 | File | Description |
 |------|-------------|
-| `engines/diarize/pyannote-3.1/engine.py` | Pyannote 3.1 diarization engine with lazy loading, CUDA→CPU fallback |
-| `engines/diarize/pyannote-3.1/requirements.txt` | Pinned dependencies for pyannote.audio 3.1 compatibility |
-| `engines/diarize/pyannote-3.1/engine.yaml` | Engine metadata and queue configuration |
-| `engines/diarize/pyannote-3.1/Dockerfile` | GPU-enabled container with CUDA support |
+| `engines/diarize/pyannote-4.0/engine.py` | Pyannote 4.0 diarization engine with lazy loading, CUDA→CPU fallback |
+| `engines/diarize/pyannote-4.0/requirements.txt` | Pinned dependencies for pyannote.audio 4.0 compatibility |
+| `engines/diarize/pyannote-4.0/engine.yaml` | Engine metadata and queue configuration |
+| `engines/diarize/pyannote-4.0/Dockerfile` | GPU-enabled container with CUDA support |
 
 ### Files Modified
 
@@ -154,7 +154,7 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 | `dalston/orchestrator/dag.py` | Added `speaker_detection` parameter (`none`/`diarize`/`per_channel`), parallel diarize task, per-channel DAG builder |
 | `engines/merge/final-merger/engine.py` | Added speaker assignment via overlap algorithm, `_merge_per_channel()` for stereo audio |
 | `engines/prepare/audio-prepare/engine.py` | Added `split_channels` config, `_extract_channel()` for per-channel mode, mono validation |
-| `docker-compose.yml` | Added `stt-batch-diarize-pyannote-v31-cpu` and `stt-batch-diarize-pyannote-v31` services |
+| `docker-compose.yml` | Added `stt-batch-diarize-pyannote-v40-cpu` and `stt-batch-diarize-pyannote-v40` services |
 
 ### Key Implementation Details
 

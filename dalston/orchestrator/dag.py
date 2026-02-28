@@ -36,7 +36,7 @@ DEFAULT_ENGINES = {
     "prepare": "audio-prepare",
     "transcribe": "faster-whisper-large-v3-turbo",
     "align": "phoneme-align",
-    "diarize": "pyannote-3.1",
+    "diarize": "pyannote-4.0",
     "pii_detect": "pii-presidio",
     "audio_redact": "audio-redactor",
     "merge": "final-merger",

@@ -533,7 +533,7 @@ class TestSelectPipelineEngines:
                 "prepare": make_capabilities("audio-prepare"),
                 "transcribe": make_capabilities("faster-whisper"),
                 "align": make_capabilities("phoneme-align"),
-                "diarize": make_capabilities("pyannote-3.1"),
+                "diarize": make_capabilities("pyannote-4.0"),
                 "merge": make_capabilities("final-merger"),
             }
             caps = stages_caps.get(stage)
@@ -553,4 +553,4 @@ class TestSelectPipelineEngines:
         )
 
         assert "diarize" in selections
-        assert selections["diarize"].engine_id == "pyannote-3.1"
+        assert selections["diarize"].engine_id == "pyannote-4.0"

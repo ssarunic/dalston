@@ -62,11 +62,11 @@ def mock_catalog() -> EngineCatalog:
                 max_concurrency=8,
             ),
         ),
-        "pyannote-3.1": CatalogEntry(
-            engine_id="pyannote-3.1",
-            image="dalston/stt-batch-diarize-pyannote-3.1:1.0.0",
+        "pyannote-4.0": CatalogEntry(
+            engine_id="pyannote-4.0",
+            image="dalston/stt-batch-diarize-pyannote-4.0:1.0.0",
             capabilities=EngineCapabilities(
-                engine_id="pyannote-3.1",
+                engine_id="pyannote-4.0",
                 version="1.0.0",
                 stages=["diarize"],
                 languages=None,
@@ -190,7 +190,7 @@ class TestListEngines:
             assert engines_by_id["parakeet"]["status"] == "available"
 
             # pyannote is not running (available)
-            assert engines_by_id["pyannote-3.1"]["status"] == "available"
+            assert engines_by_id["pyannote-4.0"]["status"] == "available"
 
     def test_engine_includes_capabilities(
         self, client, mock_catalog, mock_running_engines

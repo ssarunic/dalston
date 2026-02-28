@@ -24,7 +24,7 @@
 │  │                         ENGINE CONTAINERS                                    ││
 │  │                                                                              ││
 │  │   ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐          ││
-│  │   │  faster-whisper  │  │  whisperx-align  │  │   pyannote-3.1   │          ││
+│  │   │  faster-whisper  │  │  whisperx-align  │  │   pyannote-4.0   │          ││
 │  │   │                  │  │                  │  │                  │          ││
 │  │   │  EngineRunner    │  │  EngineRunner    │  │  EngineRunner    │          ││
 │  │   │  └─ register()   │  │  └─ register()   │  │  └─ register()   │          ││
@@ -39,7 +39,7 @@
 │  │                              REDIS                                           ││
 │  │                                                                              ││
 │  │   dalston:batch:engines  ─────────────────────────────────────────────────  ││
-│  │   SET { "faster-whisper", "whisperx-align", "pyannote-3.1" }                ││
+│  │   SET { "faster-whisper", "whisperx-align", "pyannote-4.0" }                ││
 │  │                                                                              ││
 │  │   dalston:batch:engine:faster-whisper  ───────────────────────────────────  ││
 │  │   HASH { engine_id, stage, queue_name, status, last_heartbeat, ... }        ││
