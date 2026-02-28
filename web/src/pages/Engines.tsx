@@ -243,7 +243,7 @@ function StageAccordion({
     <div className="border rounded-lg overflow-hidden">
       <StageHeader stageStatus={stageStatus} isExpanded={isExpanded} onToggle={onToggle} />
       {isExpanded && stageStatus.engines.length > 0 && (
-        <div className="p-4 pt-0 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="p-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {stageStatus.engines.map((engine) => (
             <EngineCard
               key={engine.engine_id}
@@ -254,7 +254,7 @@ function StageAccordion({
         </div>
       )}
       {isExpanded && stageStatus.engines.length === 0 && (
-        <div className="px-4 pb-4">
+        <div className="p-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground p-4 rounded-lg bg-muted/30 border border-dashed">
             <AlertCircle className="h-4 w-4" />
             No engines registered for this stage
