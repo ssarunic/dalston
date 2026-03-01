@@ -6,7 +6,7 @@
 | **Duration** | 3-4 days |
 | **Dependencies** | M6 complete (real-time working), M8 complete (ElevenLabs pattern established) |
 | **Deliverable** | OpenAI clients work unchanged by pointing to Dalston |
-| **Status** | In Progress (Batch complete, Real-time pending) |
+| **Status** | Complete (Batch + Real-time implemented) |
 
 ## User Story
 
@@ -169,7 +169,7 @@ OpenAI uses a specific error format:
 
 ---
 
-### 38.3: Real-time WebSocket Endpoint
+### 38.3: Real-time WebSocket Endpoint ✅
 
 **Endpoint:** `WS /v1/realtime?intent=transcription`
 
@@ -201,7 +201,7 @@ Note: Dalston will accept both header auth and query param auth for compatibilit
 
 ---
 
-### 38.4: Real-time Protocol Translation
+### 38.4: Real-time Protocol Translation ✅
 
 **Session Configuration (Client → Server):**
 
@@ -484,8 +484,8 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 - [x] **timestamp_granularities** populates word/segment timestamps
 - [x] **Model mapping** works for whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe
 - [x] **Error responses** match OpenAI format
-- [ ] **WS /v1/realtime** accepts transcription sessions
-- [ ] **Real-time protocol** translates OpenAI events bidirectionally
+- [x] **WS /v1/realtime** accepts transcription sessions
+- [x] **Real-time protocol** translates OpenAI events bidirectionally
 - [x] **OpenAI Python SDK** works unchanged
 - [x] **POST /v1/audio/translations** endpoint for audio-to-English translation
 

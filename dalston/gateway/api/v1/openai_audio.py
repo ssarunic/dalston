@@ -306,3 +306,15 @@ def validate_openai_request(
             param="timestamp_granularities",
             code="invalid_request",
         )
+
+    # Validate timestamp_granularities values
+    valid_granularities = {"word", "segment"}
+    if timestamp_granularities:
+        invalid = set(timestamp_granularities) - valid_granularities
+        if invalid:
+            raise_openai_error(
+                400,
+                f"Invalid timestamp_granularities: {invalid}. Supported: word, segment.",
+                param="timestamp_granularities",
+                code="invalid_request",
+            )

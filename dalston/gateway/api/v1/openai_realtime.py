@@ -15,6 +15,7 @@ import base64
 import binascii
 import json
 import uuid
+from dataclasses import dataclass, field
 from typing import Annotated, Any
 
 import structlog
@@ -95,6 +96,21 @@ def generate_item_id() -> str:
 def generate_session_id() -> str:
     """Generate OpenAI-style session ID."""
     return f"sess_{uuid.uuid4().hex[:12]}"
+
+
+# =============================================================================
+# Shared Session State
+# =============================================================================
+
+
+@dataclass
+class OpenAISessionState:
+    """Shared state between client-to-worker and worker-to-client tasks.
+
+    Used to correlate item_ids between committed events and transcript events.
+    """
+
+    current_item_id: str = field(default_factory=generate_item_id)
 
 
 # =============================================================================
@@ -472,6 +488,9 @@ async def _proxy_to_worker_openai(
         "vocabulary": None,
     }
 
+    # Shared state for item_id correlation between tasks
+    session_state = OpenAISessionState()
+
     # Build initial worker URL
     params = _build_worker_params(session_id, session_config)
     worker_url = f"{worker_endpoint}/session?{urlencode(params)}"
@@ -485,11 +504,13 @@ async def _proxy_to_worker_openai(
     ) as worker_ws:
         # Create translation tasks
         client_to_worker = asyncio.create_task(
-            _openai_client_to_worker(client_ws, worker_ws, session_id, session_config)
+            _openai_client_to_worker(
+                client_ws, worker_ws, session_id, session_config, session_state
+            )
         )
         worker_to_client = asyncio.create_task(
             _openai_worker_to_client(
-                worker_ws, client_ws, session_id, openai_session_id
+                worker_ws, client_ws, session_id, openai_session_id, session_state
             )
         )
 
@@ -576,6 +597,7 @@ async def _openai_client_to_worker(
     worker_ws,
     session_id: str,
     session_config: dict,
+    session_state: OpenAISessionState,
 ) -> None:
     """Translate OpenAI client messages to Dalston worker format.
 
@@ -606,9 +628,9 @@ async def _openai_client_to_worker(
                         msg_type = data.get("type")
 
                         if msg_type == "transcription_session.update":
-                            # Update session config (for future connections)
+                            # Update session config and forward to worker
                             await _handle_session_update(
-                                client_ws, data, session_config
+                                client_ws, worker_ws, data, session_config
                             )
 
                         elif msg_type == "input_audio_buffer.append":
@@ -621,18 +643,20 @@ async def _openai_client_to_worker(
                         elif msg_type == "input_audio_buffer.commit":
                             # Force processing of buffered audio
                             await worker_ws.send(json.dumps({"type": "flush"}))
-                            # Send committed acknowledgment
+                            # Generate new item_id for this commit and subsequent transcript
+                            session_state.current_item_id = generate_item_id()
+                            # Send committed acknowledgment with the item_id
                             await client_ws.send_json(
                                 {
                                     "type": "input_audio_buffer.committed",
                                     "event_id": generate_event_id(),
-                                    "item_id": generate_item_id(),
+                                    "item_id": session_state.current_item_id,
                                 }
                             )
 
                         elif msg_type == "input_audio_buffer.clear":
-                            # Clear buffer - flush triggers transcription of buffered audio
-                            await worker_ws.send(json.dumps({"type": "flush"}))
+                            # Clear buffer - discard without transcription
+                            await worker_ws.send(json.dumps({"type": "clear"}))
                             await client_ws.send_json(
                                 {
                                     "type": "input_audio_buffer.cleared",
@@ -695,12 +719,13 @@ async def _openai_client_to_worker(
 
 async def _handle_session_update(
     client_ws: WebSocket,
+    worker_ws,
     data: dict,
     session_config: dict,
 ) -> None:
     """Handle transcription_session.update event.
 
-    Updates session configuration and sends acknowledgment.
+    Updates session configuration, forwards to worker, and sends acknowledgment.
     """
     session = data.get("session", {})
 
@@ -731,6 +756,17 @@ async def _handle_session_update(
         session_config["enable_vad"] = True
         # Could extract threshold, silence_duration_ms, etc. for future use
 
+    # Forward config update to worker
+    # The worker supports language updates via ConfigUpdateMessage
+    await worker_ws.send(
+        json.dumps(
+            {
+                "type": "config",
+                "language": session_config["language"],
+            }
+        )
+    )
+
     # Send session updated acknowledgment
     await client_ws.send_json(
         {
@@ -758,6 +794,7 @@ async def _openai_worker_to_client(
     client_ws: WebSocket,
     session_id: str,
     openai_session_id: str,
+    session_state: OpenAISessionState,
 ) -> dict | None:
     """Translate Dalston worker messages to OpenAI client format.
 
@@ -780,8 +817,7 @@ async def _openai_worker_to_client(
     Returns:
         Session end data if received, None otherwise
     """
-    # Track current item for delta/completed events
-    current_item_id = generate_item_id()
+    # Use shared state for item_id correlation with committed events
     session_end_data = None
     client_closed = False
 
@@ -803,7 +839,7 @@ async def _openai_worker_to_client(
                     translated = {
                         "type": "conversation.item.input_audio_transcription.delta",
                         "event_id": generate_event_id(),
-                        "item_id": current_item_id,
+                        "item_id": session_state.current_item_id,
                         "content_index": 0,
                         "delta": data.get("text", ""),
                     }
@@ -812,12 +848,12 @@ async def _openai_worker_to_client(
                     translated = {
                         "type": "conversation.item.input_audio_transcription.completed",
                         "event_id": generate_event_id(),
-                        "item_id": current_item_id,
+                        "item_id": session_state.current_item_id,
                         "content_index": 0,
                         "transcript": data.get("text", ""),
                     }
                     # Generate new item ID for next utterance
-                    current_item_id = generate_item_id()
+                    session_state.current_item_id = generate_item_id()
 
                 elif msg_type == "vad.speech_start":
                     translated = {

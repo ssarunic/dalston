@@ -3,9 +3,11 @@
 import os
 from pathlib import Path
 
+import pytest
 from openai import OpenAI
 
 
+@pytest.mark.e2e
 def test_transcription_with_openai_sdk():
     """Test transcription using the official OpenAI Python SDK."""
     # Require API key to be set - don't use hardcoded defaults
