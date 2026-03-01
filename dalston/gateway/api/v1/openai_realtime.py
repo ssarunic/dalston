@@ -620,7 +620,7 @@ async def _openai_client_to_worker(
 
                         elif msg_type == "input_audio_buffer.commit":
                             # Force processing of buffered audio
-                            await worker_ws.send(json.dumps({"type": "commit"}))
+                            await worker_ws.send(json.dumps({"type": "flush"}))
                             # Send committed acknowledgment
                             await client_ws.send_json(
                                 {
@@ -631,8 +631,8 @@ async def _openai_client_to_worker(
                             )
 
                         elif msg_type == "input_audio_buffer.clear":
-                            # Clear buffer - send flush without commit
-                            await worker_ws.send(json.dumps({"type": "clear"}))
+                            # Clear buffer - flush triggers transcription of buffered audio
+                            await worker_ws.send(json.dumps({"type": "flush"}))
                             await client_ws.send_json(
                                 {
                                     "type": "input_audio_buffer.cleared",
