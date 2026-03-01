@@ -4,7 +4,9 @@ import os
 from pathlib import Path
 
 import pytest
-from openai import OpenAI
+
+# Import openai lazily to avoid import errors when not installed
+openai = pytest.importorskip("openai", reason="openai package not installed")
 
 
 @pytest.mark.e2e
@@ -16,7 +18,7 @@ def test_transcription_with_openai_sdk():
         raise RuntimeError("DALSTON_API_KEY environment variable must be set")
 
     # Configure client to point to Dalston
-    client = OpenAI(
+    client = openai.OpenAI(
         api_key=api_key,
         base_url="http://localhost:8000/v1",
     )

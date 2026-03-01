@@ -361,9 +361,7 @@ def output_job_detail(job: Job, as_json: bool = False) -> None:
     # Display PII detection summary
     if job.transcript and job.transcript.pii_info and job.transcript.pii_info.enabled:
         pii = job.transcript.pii_info
-        console.print(
-            f"PII:      {pii.entities_detected} entities detected"
-        )
+        console.print(f"PII:      {pii.entities_detected} entities detected")
         if pii.entity_summary:
             summary_str = ", ".join(f"{k}: {v}" for k, v in pii.entity_summary.items())
             console.print(f"          {summary_str}")

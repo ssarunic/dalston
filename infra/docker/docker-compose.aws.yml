@@ -34,7 +34,7 @@ services:
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
       AWS_REGION: ${AWS_REGION}
 
-  stt-batch-transcribe-faster-whisper-base:
+  stt-batch-transcribe-faster-whisper:
     environment:
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
@@ -43,22 +43,13 @@ services:
     volumes:
       - /data/models:/data/models
 
-  stt-batch-transcribe-parakeet-ctc-0.6b:
+  stt-batch-transcribe-nemo:
     environment:
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
       AWS_REGION: ${AWS_REGION}
       HF_HOME: /data/models
       NEMO_CACHE: /data/models
-    volumes:
-      - /data/models:/data/models
-
-  stt-batch-align-whisperx:
-    environment:
-      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
-      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
-      AWS_REGION: ${AWS_REGION}
-      HF_HOME: /data/models
     volumes:
       - /data/models:/data/models
 
