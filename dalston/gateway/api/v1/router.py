@@ -7,6 +7,7 @@ from dalston.gateway.api.v1 import (
     engines,
     jobs,
     models,
+    openai_realtime,
     openai_translation,
     pii,
     realtime,
@@ -46,6 +47,9 @@ router.include_router(realtime.stream_router)  # WS /v1/audio/transcriptions/str
 router.include_router(
     realtime.elevenlabs_router
 )  # WS /v1/speech-to-text/realtime (ElevenLabs)
+router.include_router(
+    openai_realtime.openai_realtime_router
+)  # WS /v1/realtime (OpenAI)
 router.include_router(realtime_status.router)  # GET /v1/realtime/status, /workers
 router.include_router(realtime_sessions.router)  # GET /v1/realtime/sessions/*
 

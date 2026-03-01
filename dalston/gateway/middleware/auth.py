@@ -99,7 +99,8 @@ def extract_api_key_from_websocket(websocket: WebSocket) -> str | None:
 
     Checks in order:
     1. api_key query parameter
-    2. xi-api-key header (some WebSocket clients support headers)
+    2. Authorization: Bearer header (OpenAI-compatible)
+    3. xi-api-key header (ElevenLabs-compatible)
 
     Args:
         websocket: FastAPI WebSocket object
@@ -112,7 +113,14 @@ def extract_api_key_from_websocket(websocket: WebSocket) -> str | None:
     if api_key:
         return api_key
 
-    # Check xi-api-key header (fallback)
+    # Check Authorization header (OpenAI-compatible)
+    auth_header = websocket.headers.get("authorization")
+    if auth_header:
+        parts = auth_header.split(" ", 1)
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            return parts[1]
+
+    # Check xi-api-key header (ElevenLabs-compatible)
     xi_key = websocket.headers.get("xi-api-key")
     if xi_key:
         return xi_key
