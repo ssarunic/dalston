@@ -6,7 +6,7 @@
 | **Duration** | 3-4 days |
 | **Dependencies** | M6 complete (real-time working), M8 complete (ElevenLabs pattern established) |
 | **Deliverable** | OpenAI clients work unchanged by pointing to Dalston |
-| **Status** | Not Started |
+| **Status** | In Progress (Batch complete, Real-time pending) |
 
 ## User Story
 
@@ -25,7 +25,7 @@ We implement compatibility with:
 
 ## Steps
 
-### 38.1: Batch Transcription Endpoint
+### 38.1: Batch Transcription Endpoint ✅
 
 **Endpoint:** `POST /v1/audio/transcriptions` (OpenAI-compatible route)
 
@@ -163,7 +163,7 @@ Hello, how are you today?
 
 ---
 
-### 38.2: OpenAI Error Responses
+### 38.2: OpenAI Error Responses ✅
 
 OpenAI uses a specific error format:
 
@@ -348,7 +348,7 @@ New message type - clears pending audio buffer.
 
 ---
 
-### 38.5: Translation Endpoint (Optional)
+### 38.5: Translation Endpoint ✅
 
 **Endpoint:** `POST /v1/audio/translations`
 
@@ -510,15 +510,16 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 
 ## Checkpoint
 
-- [ ] **POST /v1/audio/transcriptions** detects and handles OpenAI-style requests
-- [ ] **response_format** outputs correct format (json, text, srt, verbose_json, vtt)
-- [ ] **timestamp_granularities** populates word/segment timestamps
-- [ ] **Model mapping** works for whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe
+- [x] **POST /v1/audio/transcriptions** detects and handles OpenAI-style requests
+- [x] **response_format** outputs correct format (json, text, srt, verbose_json, vtt)
+- [x] **timestamp_granularities** populates word/segment timestamps
+- [x] **Model mapping** works for whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe
 - [ ] **Diarization model** returns speaker segments in diarized_json format
-- [ ] **Error responses** match OpenAI format
+- [x] **Error responses** match OpenAI format
 - [ ] **WS /v1/realtime** accepts transcription sessions
 - [ ] **Real-time protocol** translates OpenAI events bidirectionally
-- [ ] **OpenAI Python SDK** works unchanged
+- [x] **OpenAI Python SDK** works unchanged
+- [x] **POST /v1/audio/translations** endpoint for audio-to-English translation
 
 **Next**: [M39: Translation Endpoint](M39-translation.md) (optional) or other priorities
 
