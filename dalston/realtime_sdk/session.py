@@ -25,6 +25,7 @@ from dalston.realtime_sdk.assembler import (
     TranscriptAssembler,
 )
 from dalston.realtime_sdk.protocol import (
+    ClearMessage,
     ConfigUpdateMessage,
     EndMessage,
     ErrorCode,
@@ -175,6 +176,13 @@ class AudioBuffer:
         chunk = np.array(self._buffer, dtype=np.float32)
         self._buffer.clear()
         return chunk
+
+    def clear(self) -> None:
+        """Clear (discard) remaining buffered audio without returning it.
+
+        Used for OpenAI-compatible input_audio_buffer.clear operation.
+        """
+        self._buffer.clear()
 
     def get_total_duration(self) -> float:
         """Total audio duration received in seconds."""
@@ -660,6 +668,16 @@ class SessionHandler:
             ):
                 # Only process if > 100ms
                 await self._transcribe_and_send(remaining)
+
+        elif isinstance(parsed, ClearMessage):
+            # Clear (discard) buffered audio without processing
+            if self._vad is not None:
+                self._vad.clear()
+            self._buffer.clear()
+            # Clear streaming state
+            self._speech_audio_buffer = []
+            self._chunks_since_partial = 0
+            logger.debug("audio_buffers_cleared")
 
         elif isinstance(parsed, EndMessage):
             # Graceful end

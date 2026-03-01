@@ -5,10 +5,16 @@ GET /v1/audio/transcriptions/{job_id} - Get job status and results
 GET /v1/audio/transcriptions - List jobs
 GET /v1/audio/transcriptions/{job_id}/export/{format} - Export transcript
 DELETE /v1/audio/transcriptions/{job_id} - Delete a completed/failed job
+
+OpenAI Compatibility (M38):
+The POST endpoint also supports OpenAI-style requests. Detection is based on the
+`model` parameter - if it matches an OpenAI model ID (whisper-1, gpt-4o-transcribe, etc.),
+the request is handled in OpenAI mode with synchronous response and OpenAI response formats.
 """
 
+import asyncio
 import json
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 import structlog
@@ -34,6 +40,16 @@ from dalston.common.models import (
 )
 from dalston.common.utils import compute_duration_ms
 from dalston.config import Settings
+
+# OpenAI compatibility imports (M38)
+from dalston.gateway.api.v1.openai_audio import (
+    OPENAI_MAX_FILE_SIZE,
+    format_openai_response,
+    is_openai_model,
+    map_openai_model,
+    raise_openai_error,
+    validate_openai_request,
+)
 from dalston.gateway.dependencies import (
     RequireJobsRead,
     RequireJobsWrite,
@@ -73,10 +89,16 @@ logger = structlog.get_logger()
 
 @router.post(
     "",
-    response_model=JobCreatedResponse,
-    status_code=201,
+    response_model=None,
     summary="Create transcription job",
-    description="Upload an audio file for transcription. Returns a job ID to poll for results.",
+    description="Upload an audio file for transcription. Returns a job ID to poll for results (Dalston native) or the transcript directly (OpenAI compatible).",
+    responses={
+        200: {"description": "Transcription result (OpenAI mode)"},
+        201: {"description": "Job created (Dalston native mode)"},
+        400: {"description": "Invalid request"},
+        401: {"description": "Invalid API key"},
+        408: {"description": "Request timeout (OpenAI mode)"},
+    },
 )
 async def create_transcription(
     request: Request,
@@ -94,18 +116,43 @@ async def create_transcription(
     model: Annotated[
         str,
         Form(
-            description="Engine ID (e.g., faster-whisper-base, parakeet-0.6b) or 'auto' for automatic selection"
+            description="Engine ID (e.g., faster-whisper-base) or OpenAI model (whisper-1, gpt-4o-transcribe)"
         ),
     ] = "auto",
     language: Annotated[
-        str, Form(description="Language code or 'auto' for detection")
-    ] = "auto",
+        str | None, Form(description="Language code or 'auto' for detection")
+    ] = None,
     vocabulary: Annotated[
         str | None,
         Form(
             description='JSON array of terms to boost recognition (e.g., \'["Dalston", "FastAPI"]\'). Max 100 terms.',
         ),
     ] = None,
+    # OpenAI-compatible parameters (M38)
+    prompt: Annotated[
+        str | None,
+        Form(
+            description="OpenAI: Vocabulary hints to guide transcription (max 224 tokens)"
+        ),
+    ] = None,
+    response_format: Annotated[
+        str | None,
+        Form(
+            description="OpenAI: Output format (json, text, srt, verbose_json, vtt, diarized_json)"
+        ),
+    ] = None,
+    temperature: Annotated[
+        float | None,
+        Form(description="OpenAI: Randomness 0.0-1.0", ge=0.0, le=1.0),
+    ] = None,
+    timestamp_granularities: Annotated[
+        list[str] | None,
+        Form(
+            alias="timestamp_granularities[]",
+            description="OpenAI: Timestamp granularities (word, segment) - requires verbose_json",
+        ),
+    ] = None,
+    # Dalston native parameters
     speaker_detection: Annotated[
         str, Form(description="Speaker detection: 'none', 'diarize', 'per_channel'")
     ] = "none",
@@ -160,25 +207,65 @@ async def create_transcription(
     rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
     audit_service: AuditService = Depends(get_audit_service),
     ingestion_service: AudioIngestionService = Depends(get_ingestion_service),
-) -> JobCreatedResponse:
+    export_service: ExportService = Depends(get_export_service),
+) -> JobCreatedResponse | Response | dict[str, Any]:
     """Create a new transcription job.
 
     Accepts either:
     - file: Direct file upload
     - audio_url: URL to audio file (HTTPS, Google Drive, Dropbox, S3/GCS presigned)
 
-    Steps:
-    1. Download audio from URL (if audio_url provided)
-    2. Upload audio file to S3
-    3. Create job record in PostgreSQL
-    4. Publish job.created event to Redis
-    5. Return job ID for polling
+    **OpenAI Compatibility (M38):**
+    If `model` is an OpenAI model ID (whisper-1, gpt-4o-transcribe, etc.), the request
+    is handled in OpenAI mode: synchronous response with OpenAI response formats.
+
+    **Dalston Native Mode:**
+    Returns job ID immediately for async polling.
     """
+    # Detect OpenAI mode based on model parameter
+    openai_mode = is_openai_model(model)
+
+    # Handle OpenAI-specific validation and parameter mapping
+    if openai_mode:
+        # Default response_format to json for OpenAI mode
+        if response_format is None:
+            response_format = "json"
+
+        # Validate OpenAI request parameters
+        validate_openai_request(model, response_format, timestamp_granularities)
+
     # Ingest audio (validates input, downloads from URL if needed, probes metadata)
-    ingested = await ingestion_service.ingest(file=file, url=audio_url)
+    try:
+        ingested = await ingestion_service.ingest(file=file, url=audio_url)
+    except HTTPException as e:
+        if openai_mode:
+            raise_openai_error(
+                e.status_code,
+                str(e.detail),
+                param="file",
+                code="invalid_file_format",
+            )
+        raise
+
+    # Enforce OpenAI 25MB file size limit
+    if openai_mode and len(ingested.content) > OPENAI_MAX_FILE_SIZE:
+        raise_openai_error(
+            400,
+            f"File size exceeds 25MB limit ({len(ingested.content) / 1024 / 1024:.1f}MB)",
+            param="file",
+            code="file_too_large",
+        )
 
     # Validate per_channel mode requires stereo audio
     if speaker_detection == "per_channel" and ingested.metadata.channels < 2:
+        if openai_mode:
+            raise_openai_error(
+                400,
+                f"per_channel speaker detection requires stereo audio, "
+                f"but file has {ingested.metadata.channels} channel(s).",
+                param="file",
+                code="invalid_audio_channels",
+            )
         raise HTTPException(
             status_code=400,
             detail=f"per_channel speaker detection requires stereo audio, "
@@ -187,20 +274,37 @@ async def create_transcription(
         )
 
     # Build parameters
-    # If model is "auto", let orchestrator select engine based on capabilities
-    # Otherwise, pass the engine ID directly
-    parameters: dict = {
-        "language": language,
-        "speaker_detection": speaker_detection,
-        "num_speakers": num_speakers,
-        "min_speakers": min_speakers,
-        "max_speakers": max_speakers,
-        "timestamps_granularity": timestamps_granularity,
-    }
-    if model.lower() != "auto":
-        parameters["engine_transcribe"] = model
-    # Parse and validate vocabulary
-    if vocabulary is not None:
+    if openai_mode:
+        # OpenAI mode: map model to Dalston engine
+        engine_id = map_openai_model(model)
+        parameters: dict = {
+            "language": language or "auto",
+            "engine_transcribe": engine_id,
+            "timestamps_granularity": "word"
+            if timestamp_granularities and "word" in timestamp_granularities
+            else "segment",
+        }
+        # OpenAI uses `prompt` for vocabulary hints
+        if prompt:
+            parameters["vocabulary"] = prompt
+        if temperature is not None and temperature > 0:
+            parameters["temperature"] = temperature
+    else:
+        # Dalston native mode
+        # If model is "auto", let orchestrator select engine based on capabilities
+        # Otherwise, pass the engine ID directly
+        parameters: dict = {
+            "language": language or "auto",
+            "speaker_detection": speaker_detection,
+            "num_speakers": num_speakers,
+            "min_speakers": min_speakers,
+            "max_speakers": max_speakers,
+            "timestamps_granularity": timestamps_granularity,
+        }
+        if model.lower() != "auto":
+            parameters["engine_transcribe"] = model
+    # Parse and validate vocabulary (Dalston native mode only)
+    if not openai_mode and vocabulary is not None:
         try:
             parsed_vocabulary = json.loads(vocabulary)
             if not isinstance(parsed_vocabulary, list):
@@ -310,10 +414,55 @@ async def create_transcription(
         user_agent=request.headers.get("user-agent"),
     )
 
-    return JobCreatedResponse(
-        id=job.id,
-        status=JobStatus(job.status),
-        created_at=job.created_at,
+    # For Dalston native mode, return job ID immediately
+    if not openai_mode:
+        response.status_code = 201
+        return JobCreatedResponse(
+            id=job.id,
+            status=JobStatus(job.status),
+            created_at=job.created_at,
+        )
+
+    # OpenAI mode: wait for completion and return result
+    storage = StorageService(settings)
+    max_wait_seconds = 300
+    poll_interval = 1.0
+    elapsed = 0.0
+
+    while elapsed < max_wait_seconds:
+        await asyncio.sleep(poll_interval)
+        elapsed += poll_interval
+
+        db.expire(job)
+        await db.refresh(job)
+
+        if job.status == JobStatus.COMPLETED.value:
+            transcript = await storage.get_transcript(job.id)
+            return format_openai_response(
+                transcript, response_format, timestamp_granularities, export_service
+            )
+
+        if job.status == JobStatus.FAILED.value:
+            raise_openai_error(
+                500,
+                f"Transcription failed: {job.error or 'Unknown error'}",
+                error_type="server_error",
+                code="processing_failed",
+            )
+
+        if job.status == JobStatus.CANCELLED.value:
+            raise_openai_error(
+                400,
+                "Transcription was cancelled",
+                code="cancelled",
+            )
+
+    # Timeout
+    raise_openai_error(
+        408,
+        "Transcription timeout. The audio file may be too long.",
+        error_type="timeout_error",
+        code="timeout",
     )
 
 

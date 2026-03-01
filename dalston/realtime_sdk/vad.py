@@ -263,6 +263,22 @@ class VADProcessor:
         self._reset_speech_state()
         return None
 
+    def clear(self) -> None:
+        """Clear (discard) any buffered speech audio without processing.
+
+        Used for OpenAI-compatible input_audio_buffer.clear operation.
+        Discards accumulated audio and returns to silence state.
+        """
+        if self._speech_buffer:
+            discarded_samples = sum(len(chunk) for chunk in self._speech_buffer)
+            logger.debug(
+                "cleared_speech_buffer",
+                discarded_duration=round(
+                    discarded_samples / self.config.sample_rate, 2
+                ),
+            )
+        self._reset_speech_state()
+
     def reset(self) -> None:
         """Reset VAD state for a new session.
 

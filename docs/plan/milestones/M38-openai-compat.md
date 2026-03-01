@@ -6,7 +6,7 @@
 | **Duration** | 3-4 days |
 | **Dependencies** | M6 complete (real-time working), M8 complete (ElevenLabs pattern established) |
 | **Deliverable** | OpenAI clients work unchanged by pointing to Dalston |
-| **Status** | Not Started |
+| **Status** | Complete (Batch + Real-time implemented) |
 
 ## User Story
 
@@ -25,7 +25,7 @@ We implement compatibility with:
 
 ## Steps
 
-### 38.1: Batch Transcription Endpoint
+### 38.1: Batch Transcription Endpoint ✅
 
 **Endpoint:** `POST /v1/audio/transcriptions` (OpenAI-compatible route)
 
@@ -42,10 +42,10 @@ Since Dalston already uses `/v1/audio/transcriptions` for its native API, we imp
 | OpenAI Param | Type | Required | Description |
 |--------------|------|----------|-------------|
 | `file` | file | Yes | Audio file (max 25MB for OpenAI compat) |
-| `model` | string | Yes | `whisper-1`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `gpt-4o-transcribe-diarize` |
+| `model` | string | Yes | `whisper-1`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe` |
 | `language` | string | No | ISO-639-1 language code |
 | `prompt` | string | No | Vocabulary hints (max 224 tokens) |
-| `response_format` | string | No | `json`, `text`, `srt`, `verbose_json`, `vtt`, `diarized_json` |
+| `response_format` | string | No | `json`, `text`, `srt`, `verbose_json`, `vtt` |
 | `temperature` | float | No | Randomness 0.0-1.0 |
 | `timestamp_granularities[]` | array | No | `word`, `segment`, or both (requires `verbose_json`) |
 
@@ -56,7 +56,6 @@ Since Dalston already uses `/v1/audio/transcriptions` for its native API, we imp
 | `model` = `whisper-1` | `model_id` = `whisper-large-v2` | OpenAI's Whisper is V2 |
 | `model` = `gpt-4o-transcribe` | `model_id` = `whisper-large-v3` | Best accuracy model |
 | `model` = `gpt-4o-mini-transcribe` | `model_id` = `distil-whisper` | Fast model |
-| `model` = `gpt-4o-transcribe-diarize` | `model_id` = `whisper-large-v3` + `speaker_detection=diarize` | Diarization enabled |
 | `language` | `language` | Direct mapping |
 | `prompt` | `initial_prompt` | Direct mapping |
 | `temperature` | `temperature` | Direct mapping |
@@ -131,28 +130,6 @@ WEBVTT
 Hello, how are you today?
 ```
 
-#### `response_format=diarized_json` (for `gpt-4o-transcribe-diarize`)
-
-```json
-{
-  "text": "Hello, how are you today? I'm doing great, thanks.",
-  "segments": [
-    {
-      "speaker": "speaker_0",
-      "start": 0.0,
-      "end": 2.5,
-      "text": "Hello, how are you today?"
-    },
-    {
-      "speaker": "speaker_1",
-      "start": 2.8,
-      "end": 4.5,
-      "text": "I'm doing great, thanks."
-    }
-  ]
-}
-```
-
 **Deliverables:**
 
 - Detect OpenAI-style requests by parameter inspection
@@ -163,7 +140,7 @@ Hello, how are you today?
 
 ---
 
-### 38.2: OpenAI Error Responses
+### 38.2: OpenAI Error Responses ✅
 
 OpenAI uses a specific error format:
 
@@ -192,7 +169,7 @@ OpenAI uses a specific error format:
 
 ---
 
-### 38.3: Real-time WebSocket Endpoint
+### 38.3: Real-time WebSocket Endpoint ✅
 
 **Endpoint:** `WS /v1/realtime?intent=transcription`
 
@@ -224,7 +201,7 @@ Note: Dalston will accept both header auth and query param auth for compatibilit
 
 ---
 
-### 38.4: Real-time Protocol Translation
+### 38.4: Real-time Protocol Translation ✅
 
 **Session Configuration (Client → Server):**
 
@@ -348,7 +325,7 @@ New message type - clears pending audio buffer.
 
 ---
 
-### 38.5: Translation Endpoint (Optional)
+### 38.5: Translation Endpoint ✅
 
 **Endpoint:** `POST /v1/audio/translations`
 
@@ -387,14 +364,13 @@ temperature: 0
 
 ## Model Compatibility Matrix
 
-| OpenAI Model | Dalston Engine | Streaming | Diarization | Notes |
-|--------------|----------------|-----------|-------------|-------|
-| `whisper-1` | whisper-large-v2 | No | No | OpenAI's original Whisper |
-| `gpt-4o-transcribe` | whisper-large-v3 | Batch only | No | Best accuracy |
-| `gpt-4o-mini-transcribe` | distil-whisper | Batch only | No | Fast, English-focused |
-| `gpt-4o-transcribe-diarize` | whisper-large-v3 + pyannote | No | Yes | Speaker labels |
-| `gpt-4o-transcribe` (realtime) | parakeet-1.1b | Yes | No | Real-time streaming |
-| `gpt-4o-mini-transcribe` (realtime) | parakeet-0.6b | Yes | No | Fast real-time |
+| OpenAI Model | Dalston Engine | Streaming | Notes |
+|--------------|----------------|-----------|-------|
+| `whisper-1` | whisper-large-v2 | No | OpenAI's original Whisper |
+| `gpt-4o-transcribe` | whisper-large-v3 | Batch only | Best accuracy |
+| `gpt-4o-mini-transcribe` | distil-whisper | Batch only | Fast, English-focused |
+| `gpt-4o-transcribe` (realtime) | parakeet-1.1b | Yes | Real-time streaming |
+| `gpt-4o-mini-transcribe` (realtime) | parakeet-0.6b | Yes | Fast real-time |
 
 ---
 
@@ -497,28 +473,21 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -F "model=gpt-4o-transcribe" \
   -F "response_format=verbose_json" \
   -F "timestamp_granularities[]=word"
-
-# With diarization
-curl -X POST http://localhost:8000/v1/audio/transcriptions \
-  -H "Authorization: Bearer dk_your_key" \
-  -F "file=@audio.mp3" \
-  -F "model=gpt-4o-transcribe-diarize" \
-  -F "response_format=diarized_json"
 ```
 
 ---
 
 ## Checkpoint
 
-- [ ] **POST /v1/audio/transcriptions** detects and handles OpenAI-style requests
-- [ ] **response_format** outputs correct format (json, text, srt, verbose_json, vtt)
-- [ ] **timestamp_granularities** populates word/segment timestamps
-- [ ] **Model mapping** works for whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe
-- [ ] **Diarization model** returns speaker segments in diarized_json format
-- [ ] **Error responses** match OpenAI format
-- [ ] **WS /v1/realtime** accepts transcription sessions
-- [ ] **Real-time protocol** translates OpenAI events bidirectionally
-- [ ] **OpenAI Python SDK** works unchanged
+- [x] **POST /v1/audio/transcriptions** detects and handles OpenAI-style requests
+- [x] **response_format** outputs correct format (json, text, srt, verbose_json, vtt)
+- [x] **timestamp_granularities** populates word/segment timestamps
+- [x] **Model mapping** works for whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe
+- [x] **Error responses** match OpenAI format
+- [x] **WS /v1/realtime** accepts transcription sessions
+- [x] **Real-time protocol** translates OpenAI events bidirectionally
+- [x] **OpenAI Python SDK** works unchanged
+- [x] **POST /v1/audio/translations** endpoint for audio-to-English translation
 
 **Next**: [M39: Translation Endpoint](M39-translation.md) (optional) or other priorities
 

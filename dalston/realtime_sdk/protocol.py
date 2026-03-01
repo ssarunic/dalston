@@ -238,6 +238,13 @@ class FlushMessage:
 
 
 @dataclass
+class ClearMessage:
+    """Client request to clear (discard) buffered audio without processing."""
+
+    type: str = field(default="clear", init=False)
+
+
+@dataclass
 class EndMessage:
     """Client request to end session gracefully."""
 
@@ -245,7 +252,7 @@ class EndMessage:
 
 
 # Type alias for all client messages
-ClientMessage = ConfigUpdateMessage | FlushMessage | EndMessage
+ClientMessage = ConfigUpdateMessage | FlushMessage | ClearMessage | EndMessage
 
 # Type alias for all server messages
 ServerMessage = (
@@ -288,6 +295,8 @@ def parse_client_message(data: str | dict) -> ClientMessage:
         return ConfigUpdateMessage(language=parsed.get("language"))
     elif msg_type == "flush":
         return FlushMessage()
+    elif msg_type == "clear":
+        return ClearMessage()
     elif msg_type == "end":
         return EndMessage()
     else:
