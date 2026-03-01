@@ -44,21 +44,8 @@ OPENAI_MODEL_PATTERNS = [
 ]
 
 
-class OpenAIModel(str, Enum):
-    """Known OpenAI transcription models (non-exhaustive, for reference)."""
-
-    WHISPER_1 = "whisper-1"
-    GPT_4O_TRANSCRIBE = "gpt-4o-transcribe"
-    GPT_4O_MINI_TRANSCRIBE = "gpt-4o-mini-transcribe"
-
-
-# Explicit model mappings for specific engines (optional overrides)
-# If a model is not in this map, it falls back to DEFAULT_OPENAI_ENGINE
-OPENAI_MODEL_MAP: dict[str, str] = {
-    # Add specific mappings here if certain models need different engines
-    # "whisper-1": "whisper-large-v2",
-    # "gpt-4o-transcribe": "whisper-large-v3",
-}
+# Model-to-engine mappings (falls back to DEFAULT_OPENAI_ENGINE if not found)
+OPENAI_MODEL_MAP: dict[str, str] = {}
 
 
 class OpenAIResponseFormat(str, Enum):

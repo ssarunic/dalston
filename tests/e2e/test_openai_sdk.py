@@ -8,18 +8,19 @@ from openai import OpenAI
 
 def test_transcription_with_openai_sdk():
     """Test transcription using the official OpenAI Python SDK."""
+    # Require API key to be set - don't use hardcoded defaults
+    api_key = os.getenv("DALSTON_API_KEY")
+    if not api_key:
+        raise RuntimeError("DALSTON_API_KEY environment variable must be set")
+
     # Configure client to point to Dalston
     client = OpenAI(
-        api_key=os.getenv(
-            "DALSTON_API_KEY", "dk_ZBPh23OgSotMC2jHyzDYefh-OohR_Zpgkig0-PxpW9Y"
-        ),
+        api_key=api_key,
         base_url="http://localhost:8000/v1",
     )
 
-    # Use a test audio file
-    audio_file = Path("/Users/sasasarunic/Downloads/audio-2.wav")
-    if not audio_file.exists():
-        audio_file = Path(__file__).parent.parent / "fixtures" / "test_audio.wav"
+    # Use test fixture
+    audio_file = Path(__file__).parent.parent / "fixtures" / "test_audio.wav"
 
     print(f"Using audio file: {audio_file}")
 

@@ -27,6 +27,7 @@ from dalston.common.events import publish_job_created
 from dalston.common.models import JobStatus
 from dalston.config import Settings
 from dalston.gateway.api.v1.openai_audio import (
+    OPENAI_MAX_FILE_SIZE,
     format_openai_response,
     raise_openai_error,
 )
@@ -48,9 +49,6 @@ from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.storage import StorageService
 
 router = APIRouter(prefix="/audio", tags=["openai"])
-
-# Maximum file size for OpenAI compatibility (25MB)
-OPENAI_MAX_FILE_SIZE = 25 * 1024 * 1024
 
 
 @router.post(
@@ -236,4 +234,3 @@ async def create_translation_openai(
         error_type="timeout_error",
         code="timeout",
     )
-    return {}
