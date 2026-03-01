@@ -14,6 +14,14 @@ def setup_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
         """Handle HTTP exceptions with standard error format."""
+        # Pass through OpenAI-formatted errors directly (for API compatibility)
+        if isinstance(exc.detail, dict) and "error" in exc.detail:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content=exc.detail,
+                headers=exc.headers,
+            )
+        # Standard Dalston error format
         return JSONResponse(
             status_code=exc.status_code,
             content={

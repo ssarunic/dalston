@@ -7,6 +7,7 @@ from dalston.gateway.api.v1 import (
     engines,
     jobs,
     models,
+    openai_translation,
     pii,
     realtime,
     realtime_sessions,
@@ -25,8 +26,11 @@ router.include_router(models.router)
 # Mount engine discovery routes (M30)
 router.include_router(engines.router)
 
-# Mount transcription routes (Dalston native API)
+# Mount transcription routes (Dalston native API + OpenAI compatible via model detection)
 router.include_router(transcription.router)
+
+# Mount OpenAI translation endpoint (M38)
+router.include_router(openai_translation.router)  # POST /v1/audio/translations
 
 # Mount tasks routes (task observability - nested under transcriptions)
 router.include_router(tasks.router)
