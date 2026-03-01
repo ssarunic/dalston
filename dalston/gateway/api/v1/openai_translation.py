@@ -29,6 +29,7 @@ from dalston.config import Settings
 from dalston.gateway.api.v1.openai_audio import (
     OPENAI_MAX_FILE_SIZE,
     format_openai_response,
+    map_openai_model,
     raise_openai_error,
 )
 from dalston.gateway.dependencies import (
@@ -140,7 +141,7 @@ async def create_translation_openai(
     # Build Dalston parameters - force English output for translation
     parameters: dict[str, Any] = {
         "language": "en",  # Translation always outputs English
-        "engine_transcribe": "whisper-large-v2",
+        "engine_transcribe": map_openai_model(model),
         "timestamps_granularity": "segment",
         "task": "translate",  # Enable translation mode
     }
