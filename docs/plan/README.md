@@ -44,7 +44,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Audio/transcript S3 storage working; session resume pending |
 
-### Not Started (4)
+### Not Started (5)
 
 | # | Milestone | Goal |
 |---|-----------|------|
@@ -52,6 +52,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M14](milestones/M14-model-selection.md) | Model Selection | User-selectable transcription models |
 | [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | OpenTelemetry spans |
 | [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | Prometheus + Grafana |
+| [M38](milestones/M38-openai-compat.md) | OpenAI Compatibility | Drop-in OpenAI Audio API replacement |
 
 ---
 
@@ -214,6 +215,8 @@ M1 ──► M2 ──► M3 ──► M4 ──► M5
 M4 ──► M9
 
 M6 ──► M10
+
+M6 + M8 ──► M38 (OpenAI compatibility layer)
 
 M10 + M11 + M15 ──► M17
 

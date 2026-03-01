@@ -1,6 +1,6 @@
 # Dalston Documentation
 
-Dalston is a modular, self-hosted audio transcription server providing ElevenLabs-compatible APIs for batch and real-time transcription.
+Dalston is a modular, self-hosted audio transcription server providing OpenAI and ElevenLabs-compatible APIs for batch and real-time transcription.
 
 ## Documentation Structure
 
@@ -20,6 +20,9 @@ docs/
 │   │   ├── DATA_MODEL.md           # Database schemas, storage structures
 │   │   ├── ENGINES.md              # Engine categories, SDK reference
 │   │   └── DOCKER.md               # Container composition
+│   │
+│   ├── openai/                   # OpenAI-compatible API specs
+│   │   └── API.md                  # OpenAI Audio API compatibility
 │   │
 │   ├── PII_DETECTION.md        # PII detection & audio redaction spec
 │   ├── DATA_RETENTION.md       # Retention policies, cleanup worker
@@ -75,7 +78,8 @@ docs/
 ### Specifications (Reference)
 
 - [Architecture Overview](specs/ARCHITECTURE.md) — Start here
-- [REST API](specs/batch/API.md) — Batch transcription endpoints
+- [REST API](specs/batch/API.md) — Batch transcription endpoints (Dalston native + ElevenLabs compatible)
+- [OpenAI-Compatible API](specs/openai/API.md) — OpenAI Audio API compatibility layer
 - [WebSocket API](specs/realtime/WEBSOCKET_API.md) — Real-time streaming protocol
 - [PII Detection & Redaction](specs/PII_DETECTION.md) — PII detection and audio redaction
 - [Data Retention](specs/DATA_RETENTION.md) — Retention policies and cleanup
