@@ -66,6 +66,7 @@ from dalston.common.pipeline_types import (
     Word,
 )
 from dalston.engine_sdk.base import Engine
+from dalston.engine_sdk.model_manager import LoadedModel, ModelManager
 from dalston.engine_sdk.runner import EngineRunner
 from dalston.engine_sdk.types import EngineCapabilities, TaskInput, TaskOutput
 
@@ -76,6 +77,9 @@ __all__ = [
     "EngineRunner",
     "TaskInput",
     "TaskOutput",
+    # Model management (M39.2)
+    "LoadedModel",
+    "ModelManager",
     # Enums
     "AlignmentMethod",
     "PIIEntityCategory",

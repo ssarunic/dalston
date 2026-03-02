@@ -94,6 +94,16 @@ class Engine(ABC):
             "status": "healthy",
         }
 
+    def shutdown(self) -> None:  # noqa: B027
+        """Clean up resources on engine shutdown.
+
+        Override this method to perform cleanup when the engine is stopped
+        (e.g., via SIGTERM). Use this to unload models, close connections,
+        or release other resources.
+
+        The default implementation does nothing.
+        """
+
     def _set_runtime_state(
         self, loaded_model: str | None = None, status: str = "idle"
     ) -> None:

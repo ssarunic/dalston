@@ -34,12 +34,11 @@ VALID_TIMESTAMPS_GRANULARITIES = {"word", "segment", "none"}
 VALID_SPEAKER_DETECTION_MODES = {"none", "diarize", "per_channel"}
 
 
-# Default engine IDs for each stage
-# M36: Default transcribe engine is now faster-whisper-large-v3-turbo
-# (multilingual, CPU-capable, good balance of speed and accuracy)
+# Default engine IDs for each stage (runtime IDs, not model variant IDs)
+# The runtime_model_id is passed separately in task config
 DEFAULT_ENGINES = {
     "prepare": "audio-prepare",
-    "transcribe": "faster-whisper-large-v3-turbo",
+    "transcribe": "faster-whisper",
     "align": "phoneme-align",
     "diarize": "pyannote-4.0",
     "pii_detect": "pii-presidio",

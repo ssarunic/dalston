@@ -206,6 +206,11 @@ class EngineRunner:
             # Cleanup - ensure resources are released even on unexpected exit
             self._stop_heartbeat_thread()
             self._stop_metrics_server()
+            # Call engine shutdown hook for resource cleanup (M39.2)
+            try:
+                self.engine.shutdown()
+            except Exception as e:
+                logger.warning("engine_shutdown_error", error=str(e))
             dalston.telemetry.shutdown_tracing()
             logger.info("engine_loop_stopped")
 
