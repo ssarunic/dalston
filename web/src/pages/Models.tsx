@@ -1,14 +1,12 @@
 import { useState, useMemo } from 'react'
 import {
   RefreshCw,
-  CheckCircle,
-  Cloud,
   AlertCircle,
   Loader2,
   Package,
   Plus,
 } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -34,40 +32,26 @@ export function Models() {
 
   const models = data?.data ?? []
 
-  // Group models by status for display
-  // Note: downloading models are grouped with available (shown inline with progress)
-  const { readyModels, availableModels, failedModels } = useMemo(() => {
-    return {
-      readyModels: models.filter((m) => m.status === 'ready'),
-      // Include downloading models in available - they show progress inline
-      availableModels: models.filter((m) => m.status === 'not_downloaded' || m.status === 'downloading'),
-      failedModels: models.filter((m) => m.status === 'failed'),
-    }
-  }, [models])
-
-  // Client-side search filtering (backend handles stage/runtime/status)
+  // Client-side search filtering
   const filteredModels = useMemo(() => {
-    if (!filters.search) {
-      return { readyModels, availableModels, failedModels }
-    }
+    if (!filters.search) return models
     const search = filters.search.toLowerCase()
-    const filterFn = (m: (typeof models)[0]) =>
-      m.id.toLowerCase().includes(search) ||
-      m.name?.toLowerCase().includes(search) ||
-      m.runtime.toLowerCase().includes(search)
-
-    return {
-      readyModels: readyModels.filter(filterFn),
-      availableModels: availableModels.filter(filterFn),
-      failedModels: failedModels.filter(filterFn),
-    }
-  }, [readyModels, availableModels, failedModels, filters.search])
+    return models.filter(
+      (m) =>
+        m.id.toLowerCase().includes(search) ||
+        m.name?.toLowerCase().includes(search) ||
+        m.runtime.toLowerCase().includes(search)
+    )
+  }, [models, filters.search])
 
   const handleResolve = (modelId: string) => {
     resolveHF.mutate({ model_id: modelId, auto_register: true })
   }
 
-  const handlePull = (modelId: string, force = false) => {
+  const handlePull = (modelId: string) => {
+    // Use force=true for failed models to retry
+    const model = models.find((m) => m.id === modelId)
+    const force = model?.status === 'failed'
     pullModel.mutate({ modelId, force })
   }
 
@@ -135,58 +119,16 @@ export function Models() {
         </div>
       )}
 
-      {/* Ready Models */}
-      {filteredModels.readyModels.length > 0 && (
+      {/* All Models in One Table */}
+      {!isLoading && filteredModels.length > 0 && (
         <Card>
-          <CardHeader className="py-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <CheckCircle className="h-4 w-4 text-green-500" />
-              Ready ({filteredModels.readyModels.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
+          <CardContent className="pt-6">
             <ModelTable
-              models={filteredModels.readyModels}
+              models={filteredModels}
+              onPull={handlePull}
               onRemove={handleRemove}
+              pullingId={pullModel.isPending ? pullModel.variables?.modelId : undefined}
               removingId={removeModel.isPending ? removeModel.variables : undefined}
-            />
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Available Models */}
-      {filteredModels.availableModels.length > 0 && (
-        <Card>
-          <CardHeader className="py-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Cloud className="h-4 w-4 text-muted-foreground" />
-              Available to Download ({filteredModels.availableModels.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <ModelTable
-              models={filteredModels.availableModels}
-              onPull={(modelId) => handlePull(modelId)}
-              pullingId={pullModel.isPending ? pullModel.variables?.modelId : undefined}
-            />
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Failed Models */}
-      {filteredModels.failedModels.length > 0 && (
-        <Card>
-          <CardHeader className="py-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <AlertCircle className="h-4 w-4 text-red-500" />
-              Failed ({filteredModels.failedModels.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <ModelTable
-              models={filteredModels.failedModels}
-              onPull={(modelId) => handlePull(modelId, true)}
-              pullingId={pullModel.isPending ? pullModel.variables?.modelId : undefined}
             />
           </CardContent>
         </Card>
