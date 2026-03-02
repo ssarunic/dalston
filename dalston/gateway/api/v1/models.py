@@ -167,6 +167,16 @@ async def list_models(
 # =============================================================================
 
 
+class ModelMetadataResponse(BaseModel):
+    """Model metadata from HuggingFace or other sources."""
+
+    downloads: int | None = None
+    likes: int | None = None
+    tags: list[str] | None = None
+    pipeline_tag: str | None = None
+    error: str | None = None
+
+
 class ModelRegistryResponse(BaseModel):
     """Model registry entry with download status."""
 
@@ -179,6 +189,7 @@ class ModelRegistryResponse(BaseModel):
     status: str  # not_downloaded, downloading, ready, failed
     download_path: str | None = None
     size_bytes: int | None = None
+    download_progress: int | None = None  # Percentage (0-100) when downloading
     downloaded_at: datetime | None = None
     source: str | None = None
     library_name: str | None = None
@@ -190,6 +201,7 @@ class ModelRegistryResponse(BaseModel):
     min_vram_gb: float | None = None
     min_ram_gb: float | None = None
     supports_cpu: bool = True
+    metadata: ModelMetadataResponse = ModelMetadataResponse()
     last_used_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
@@ -228,6 +240,19 @@ class DeleteModelResponse(BaseModel):
 
     message: str
     model_id: str
+
+
+def _build_metadata_response(model_metadata: dict | None) -> ModelMetadataResponse:
+    """Convert DB model_metadata dict to API response model."""
+    if not model_metadata:
+        return ModelMetadataResponse()
+    return ModelMetadataResponse(
+        downloads=model_metadata.get("downloads"),
+        likes=model_metadata.get("likes"),
+        tags=model_metadata.get("tags"),
+        pipeline_tag=model_metadata.get("pipeline_tag"),
+        error=model_metadata.get("error"),
+    )
 
 
 @router.get(
@@ -270,6 +295,7 @@ async def list_registry_models(
             status=m.status,
             download_path=m.download_path,
             size_bytes=m.size_bytes,
+            download_progress=None,  # Progress tracking not yet implemented
             downloaded_at=m.downloaded_at,
             source=m.source,
             library_name=m.library_name,
@@ -281,6 +307,7 @@ async def list_registry_models(
             min_vram_gb=m.min_vram_gb,
             min_ram_gb=m.min_ram_gb,
             supports_cpu=m.supports_cpu,
+            metadata=_build_metadata_response(m.model_metadata),
             last_used_at=m.last_used_at,
             created_at=m.created_at,
             updated_at=m.updated_at,
@@ -321,6 +348,7 @@ async def get_registry_model(
         status=model.status,
         download_path=model.download_path,
         size_bytes=model.size_bytes,
+        download_progress=None,  # Progress tracking not yet implemented
         downloaded_at=model.downloaded_at,
         source=model.source,
         library_name=model.library_name,
@@ -332,6 +360,7 @@ async def get_registry_model(
         min_vram_gb=model.min_vram_gb,
         min_ram_gb=model.min_ram_gb,
         supports_cpu=model.supports_cpu,
+        metadata=_build_metadata_response(model.model_metadata),
         last_used_at=model.last_used_at,
         created_at=model.created_at,
         updated_at=model.updated_at,
