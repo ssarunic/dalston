@@ -25,15 +25,15 @@ export function CapabilitiesCard() {
   if (isLoading) {
     return (
       <Card>
-        <CardContent className="py-4">
-          <div className="flex flex-col lg:flex-row lg:items-start gap-4 lg:gap-8">
+        <CardContent className="py-4 space-y-3">
+          <div className="flex items-center justify-between">
             <Skeleton className="h-5 w-40" />
-            <Skeleton className="h-5 w-24" />
-            <div className="flex gap-4 flex-1">
-              <Skeleton className="h-5 w-32" />
-              <Skeleton className="h-5 w-32" />
-            </div>
             <Skeleton className="h-9 w-24" />
+          </div>
+          <div className="flex gap-6">
+            <Skeleton className="h-5 w-24" />
+            <Skeleton className="h-5 w-32" />
+            <Skeleton className="h-5 w-32" />
           </div>
         </CardContent>
       </Card>
@@ -48,47 +48,14 @@ export function CapabilitiesCard() {
 
   return (
     <Card>
-      <CardContent className="py-4">
-        <div className="flex flex-col lg:flex-row lg:items-start gap-4 lg:gap-8">
-          {/* Title */}
-          <div className="flex items-center gap-2 shrink-0">
+      <CardContent className="py-4 space-y-3">
+        {/* Header row: Title + Models + Button */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
             <Zap className="h-4 w-4" />
             <span className="font-semibold">System Capabilities</span>
           </div>
-
-          {/* Languages */}
-          <div className="flex items-center gap-2 shrink-0">
-            <Globe className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm font-medium">
-              {languageCount === 'All' ? 'Multilingual' : `${languageCount} languages`}
-            </span>
-          </div>
-
-          {/* Features */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 flex-1">
-            {FEATURES.map(({ key, label }) => {
-              const isEnabled = capabilities.features[key]
-              return (
-                <div
-                  key={key}
-                  className={cn(
-                    'flex items-center gap-1.5 text-sm',
-                    isEnabled ? 'text-foreground' : 'text-muted-foreground'
-                  )}
-                >
-                  {isEnabled ? (
-                    <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
-                  ) : (
-                    <XCircle className="h-4 w-4 text-muted-foreground shrink-0" />
-                  )}
-                  <span>{label}</span>
-                </div>
-              )
-            })}
-          </div>
-
-          {/* Models + Button */}
-          <div className="flex items-center gap-4 shrink-0">
+          <div className="flex items-center gap-4">
             <div className="text-sm">
               <span className="text-muted-foreground">Models: </span>
               <span className="font-medium">
@@ -102,6 +69,38 @@ export function CapabilitiesCard() {
               </Link>
             </Button>
           </div>
+        </div>
+
+        {/* Features row: Languages + all features */}
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          {/* Languages */}
+          <div className="flex items-center gap-2">
+            <Globe className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm">
+              {languageCount === 'All' ? 'Multilingual' : `${languageCount} languages`}
+            </span>
+          </div>
+
+          {/* Features */}
+          {FEATURES.map(({ key, label }) => {
+            const isEnabled = capabilities.features[key]
+            return (
+              <div
+                key={key}
+                className={cn(
+                  'flex items-center gap-1.5 text-sm',
+                  isEnabled ? 'text-foreground' : 'text-muted-foreground'
+                )}
+              >
+                {isEnabled ? (
+                  <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
+                ) : (
+                  <XCircle className="h-4 w-4 text-muted-foreground shrink-0" />
+                )}
+                <span>{label}</span>
+              </div>
+            )
+          })}
         </div>
       </CardContent>
     </Card>
