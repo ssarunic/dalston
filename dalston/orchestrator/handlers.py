@@ -182,6 +182,7 @@ async def handle_job_created(
         parameters=job.parameters,
         registry=registry,
         catalog=catalog,
+        db=db,
     )
     dalston.metrics.observe_orchestrator_dag_build(time.perf_counter() - dag_start)
 

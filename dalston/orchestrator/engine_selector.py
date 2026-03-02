@@ -15,12 +15,16 @@ Example:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import structlog
 
 from dalston.engine_sdk.types import EngineCapabilities
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog
 from dalston.orchestrator.registry import BatchEngineRegistry, BatchEngineState
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = structlog.get_logger()
 
@@ -268,6 +272,7 @@ async def select_engine(
     registry: BatchEngineRegistry,
     catalog: EngineCatalog,
     user_preference: str | None = None,
+    db: AsyncSession | None = None,
 ) -> EngineSelectionResult:
     """Select best engine for a pipeline stage.
 
@@ -286,6 +291,7 @@ async def select_engine(
         catalog: Engine catalog (all available engines)
         user_preference: Optional model ID (e.g., "parakeet-tdt-1.1b") or
                         engine ID (e.g., "nemo") from user
+        db: Optional database session for HF model lookup
 
     Returns:
         EngineSelectionResult with selected engine and optional runtime_model_id
@@ -297,6 +303,53 @@ async def select_engine(
     if user_preference:
         # First, try to resolve as a model ID from the catalog
         model = catalog.get_model(user_preference)
+
+        # If not in catalog, try database lookup (for HF-registered models)
+        if model is None and db is not None:
+            from sqlalchemy import select
+
+            from dalston.db.models import ModelRegistryModel
+
+            result = await db.execute(
+                select(ModelRegistryModel).where(
+                    ModelRegistryModel.id == user_preference
+                )
+            )
+            db_model = result.scalar_one_or_none()
+            if db_model is not None:
+                # Found in database - create a minimal CatalogEntry-like object
+                runtime_id = db_model.runtime
+                # Use source as runtime_model_id for HF models
+                runtime_model_id = db_model.source or db_model.runtime_model_id
+
+                engine = await registry.get_engine(runtime_id)
+                if engine is None or not engine.is_available:
+                    catalog_alts = catalog.find_engines(stage, requirements)
+                    raise NoCapableEngineError(
+                        stage=stage,
+                        requirements=requirements,
+                        candidates=[],
+                        catalog_alternatives=catalog_alts,
+                    )
+
+                logger.info(
+                    "engine_selected",
+                    stage=stage,
+                    selected_engine=runtime_id,
+                    runtime_model_id=runtime_model_id,
+                    selection_reason="database model lookup",
+                    original_model_id=user_preference,
+                )
+
+                return EngineSelectionResult(
+                    engine_id=runtime_id,
+                    capabilities=engine.capabilities
+                    or EngineCapabilities(
+                        engine_id=runtime_id, version="unknown", stages=[stage]
+                    ),
+                    selection_reason="database model lookup",
+                    runtime_model_id=runtime_model_id,
+                )
         if model is not None:
             # User specified a model ID (e.g., "parakeet-tdt-1.1b")
             # Resolve to runtime and look up in registry
@@ -496,6 +549,7 @@ async def select_pipeline_engines(
     parameters: dict,
     registry: BatchEngineRegistry,
     catalog: EngineCatalog,
+    db: AsyncSession | None = None,
 ) -> dict[str, EngineSelectionResult]:
     """Select engines for all required pipeline stages.
 
@@ -507,6 +561,7 @@ async def select_pipeline_engines(
         parameters: Job parameters from API request
         registry: Batch engine registry (running engines)
         catalog: Engine catalog (all available engines)
+        db: Optional database session for HF model lookup
 
     Returns:
         Dict mapping stage names to EngineSelectionResult
@@ -524,6 +579,7 @@ async def select_pipeline_engines(
         registry,
         catalog,
         user_preference=parameters.get("engine_prepare"),
+        db=db,
     )
 
     # Transcription (always required)
@@ -533,6 +589,7 @@ async def select_pipeline_engines(
         registry,
         catalog,
         user_preference=parameters.get("engine_transcribe"),
+        db=db,
     )
 
     # Alignment (conditional on transcriber capabilities)
@@ -549,6 +606,7 @@ async def select_pipeline_engines(
             registry,
             catalog,
             user_preference=parameters.get("engine_align"),
+            db=db,
         )
 
     # Diarization (conditional on parameters and transcriber capabilities)
@@ -559,6 +617,7 @@ async def select_pipeline_engines(
             registry,
             catalog,
             user_preference=parameters.get("engine_diarize"),
+            db=db,
         )
 
     # PII detection (conditional on parameters)
@@ -570,6 +629,7 @@ async def select_pipeline_engines(
             registry,
             catalog,
             user_preference=parameters.get("engine_pii_detect"),
+            db=db,
         )
 
         # Audio redaction (conditional on parameters, requires PII detection)
@@ -580,6 +640,7 @@ async def select_pipeline_engines(
                 registry,
                 catalog,
                 user_preference=parameters.get("engine_audio_redact"),
+                db=db,
             )
 
     # Merge (always required)
@@ -589,6 +650,7 @@ async def select_pipeline_engines(
         registry,
         catalog,
         user_preference=parameters.get("engine_merge"),
+        db=db,
     )
 
     logger.info(
