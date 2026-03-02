@@ -145,9 +145,9 @@ export function Dashboard() {
       {/* Key Metrics */}
       <MetricsPanel metrics={metricsData} isLoading={metricsLoading} />
 
-      {/* Recent Activity - Three Column Layout */}
-      <div className="grid gap-6 grid-cols-1 lg:grid-cols-3">
-        <Card className="lg:order-1">
+      {/* Recent Activity - Two Column Layout */}
+      <div className="grid gap-6 grid-cols-1 lg:grid-cols-2">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>Recent Batch Jobs</CardTitle>
             <Link
@@ -174,7 +174,7 @@ export function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card className="lg:order-2">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>Recent Real-time Sessions</CardTitle>
             <Link
@@ -200,11 +200,10 @@ export function Dashboard() {
             )}
           </CardContent>
         </Card>
-
-        <div className="lg:order-3">
-          <CapabilitiesCard />
-        </div>
       </div>
+
+      {/* System Capabilities - Full Width */}
+      <CapabilitiesCard />
     </div>
   )
 }

@@ -2,25 +2,21 @@ import { Link } from 'react-router-dom'
 import {
   Globe,
   Zap,
-  Clock,
-  Users,
-  Shield,
-  Radio,
   CheckCircle,
   XCircle,
   ArrowRight,
 } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useSystemCapabilities } from '@/hooks/useCapabilities'
 import { cn } from '@/lib/utils'
 
 const FEATURES = [
-  { key: 'word_timestamps', label: 'Word Timestamps', icon: Clock },
-  { key: 'speaker_diarization', label: 'Speaker Diarization', icon: Users },
-  { key: 'pii_detection', label: 'PII Detection', icon: Shield },
-  { key: 'streaming', label: 'Real-time Streaming', icon: Radio },
+  { key: 'word_timestamps', label: 'Word Timestamps' },
+  { key: 'speaker_diarization', label: 'Speaker Diarization' },
+  { key: 'pii_detection', label: 'PII Detection' },
+  { key: 'streaming', label: 'Streaming' },
 ] as const
 
 export function CapabilitiesCard() {
@@ -29,16 +25,16 @@ export function CapabilitiesCard() {
   if (isLoading) {
     return (
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Zap className="h-4 w-4" />
-            System Capabilities
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Skeleton className="h-6 w-32" />
-          <Skeleton className="h-20 w-full" />
-          <Skeleton className="h-4 w-24" />
+        <CardContent className="py-4">
+          <div className="flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-8">
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-5 w-24" />
+            <div className="flex gap-4 flex-1">
+              <Skeleton className="h-5 w-32" />
+              <Skeleton className="h-5 w-32" />
+            </div>
+            <Skeleton className="h-9 w-24" />
+          </div>
         </CardContent>
       </Card>
     )
@@ -52,42 +48,31 @@ export function CapabilitiesCard() {
 
   return (
     <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base flex items-center gap-2">
-          <Zap className="h-4 w-4" />
-          System Capabilities
-        </CardTitle>
-      </CardHeader>
+      <CardContent className="py-4">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-8">
+          {/* Title */}
+          <div className="flex items-center gap-2 shrink-0">
+            <Zap className="h-4 w-4" />
+            <span className="font-semibold">System Capabilities</span>
+          </div>
 
-      <CardContent className="space-y-4">
-        {/* Languages */}
-        <div>
-          <p className="text-sm text-muted-foreground mb-1">Languages</p>
-          <div className="flex items-center gap-2">
+          {/* Languages */}
+          <div className="flex items-center gap-2 shrink-0">
             <Globe className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-medium">
-              {languageCount === 'All' ? 'Multilingual' : `${languageCount} supported`}
+              {languageCount === 'All' ? 'Multilingual' : `${languageCount} languages`}
             </span>
-            {!capabilities.languages.includes('*') && capabilities.languages.length > 0 && (
-              <span className="text-xs text-muted-foreground">
-                ({capabilities.languages.slice(0, 5).join(', ')}
-                {capabilities.languages.length > 5 && '...'})
-              </span>
-            )}
           </div>
-        </div>
 
-        {/* Features */}
-        <div>
-          <p className="text-sm text-muted-foreground mb-2">Features</p>
-          <div className="grid grid-cols-2 gap-2">
+          {/* Features */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 flex-1">
             {FEATURES.map(({ key, label }) => {
               const isEnabled = capabilities.features[key]
               return (
                 <div
                   key={key}
                   className={cn(
-                    'flex items-center gap-2 text-sm',
+                    'flex items-center gap-1.5 text-sm',
                     isEnabled ? 'text-foreground' : 'text-muted-foreground'
                   )}
                 >
@@ -101,22 +86,23 @@ export function CapabilitiesCard() {
               )
             })}
           </div>
-        </div>
 
-        {/* Models */}
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Models Ready</span>
-          <span className="font-medium">
-            {capabilities.models_ready} / {capabilities.models_total}
-          </span>
+          {/* Models + Button */}
+          <div className="flex items-center gap-4 shrink-0">
+            <div className="text-sm">
+              <span className="text-muted-foreground">Models: </span>
+              <span className="font-medium">
+                {capabilities.models_ready}/{capabilities.models_total}
+              </span>
+            </div>
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/models" className="inline-flex items-center gap-2">
+                View All
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </Button>
+          </div>
         </div>
-
-        <Button variant="outline" size="sm" className="w-full" asChild>
-          <Link to="/models" className="inline-flex items-center justify-center gap-2">
-            View All Models
-            <ArrowRight className="h-4 w-4 shrink-0" />
-          </Link>
-        </Button>
       </CardContent>
     </Card>
   )
