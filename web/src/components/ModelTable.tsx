@@ -376,10 +376,10 @@ function ModelExpandedDetails({ model }: { model: ModelRegistryEntry }) {
             </div>
           )}
 
-          {/* HF Link */}
-          {model.source === 'huggingface' && model.runtime_model_id && (
+          {/* HF Link - source contains HF repo ID like "Systran/faster-whisper-base" */}
+          {model.source?.includes('/') && (
             <a
-              href={`https://huggingface.co/${model.runtime_model_id}`}
+              href={`https://huggingface.co/${model.source}`}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-primary hover:underline pt-1"
