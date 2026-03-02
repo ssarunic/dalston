@@ -452,6 +452,140 @@ async def sync_models(
 
 
 # =============================================================================
+# M40.5: HuggingFace Card Routing Endpoints
+# =============================================================================
+
+
+class HFResolveRequest(BaseModel):
+    """Request body for HuggingFace model resolution."""
+
+    model_id: str
+    auto_register: bool = False
+
+
+class HFModelMetadataResponse(BaseModel):
+    """Response for HuggingFace model metadata."""
+
+    model_id: str
+    library_name: str | None = None
+    pipeline_tag: str | None = None
+    tags: list[str] = []
+    languages: list[str] = []
+    downloads: int = 0
+    likes: int = 0
+    resolved_runtime: str | None = None
+    can_route: bool = False
+
+
+class HFRoutingMappingsResponse(BaseModel):
+    """Response for HuggingFace routing mappings."""
+
+    library_to_runtime: dict[str, str]
+    tag_to_runtime: dict[str, str]
+    supported_runtimes: list[str]
+
+
+@router.post(
+    "/hf/resolve",
+    response_model=HFModelMetadataResponse,
+    summary="Resolve HuggingFace model",
+    description=(
+        "Fetch metadata from HuggingFace Hub and determine which Dalston runtime "
+        "can load the model. Uses library_name, tags, and pipeline_tag for routing."
+    ),
+    responses={
+        200: {"description": "Model metadata with resolved runtime"},
+        404: {"description": "Model not found on HuggingFace Hub"},
+    },
+)
+async def resolve_hf_model(
+    request: HFResolveRequest,
+    db: AsyncSession = Depends(get_db),
+    service: ModelRegistryService = Depends(get_model_registry_service),
+) -> HFModelMetadataResponse:
+    """Resolve a HuggingFace model ID to determine compatible runtime.
+
+    This endpoint:
+    1. Fetches model info from HuggingFace Hub
+    2. Extracts library_name, tags, and pipeline_tag
+    3. Determines which Dalston runtime can load the model
+    4. Optionally auto-registers the model in the registry
+
+    The routing priority is:
+    1. library_name (most reliable) - e.g., "ctranslate2" -> "faster-whisper"
+    2. Model tags (fallback) - e.g., "nemo" tag -> "nemo" runtime
+    3. pipeline_tag (last resort) - "automatic-speech-recognition" -> "hf-asr"
+    """
+    from dalston.gateway.services.hf_resolver import HFResolver
+
+    resolver = HFResolver()
+    metadata = await resolver.get_model_metadata(request.model_id)
+
+    if metadata is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Model not found on HuggingFace Hub: {request.model_id}",
+        )
+
+    # Auto-register if requested and runtime was resolved
+    if request.auto_register and metadata.resolved_runtime:
+        # Check if model already exists in registry
+        existing = await service.get_model(db, request.model_id)
+        if existing is None:
+            await service.register_model(
+                db,
+                model_id=request.model_id,
+                runtime=metadata.resolved_runtime,
+                runtime_model_id=request.model_id,
+                stage="transcribe",
+                source=request.model_id,
+                library_name=metadata.library_name,
+                languages=metadata.languages if metadata.languages else None,
+                model_metadata={
+                    "pipeline_tag": metadata.pipeline_tag,
+                    "tags": metadata.tags[:50],  # Limit stored tags
+                    "downloads": metadata.downloads,
+                    "likes": metadata.likes,
+                    "auto_registered": True,
+                },
+            )
+
+    return HFModelMetadataResponse(
+        model_id=metadata.model_id,
+        library_name=metadata.library_name,
+        pipeline_tag=metadata.pipeline_tag,
+        tags=metadata.tags[:20],  # Limit response tags
+        languages=metadata.languages,
+        downloads=metadata.downloads,
+        likes=metadata.likes,
+        resolved_runtime=metadata.resolved_runtime,
+        can_route=metadata.resolved_runtime is not None,
+    )
+
+
+@router.get(
+    "/hf/mappings",
+    response_model=HFRoutingMappingsResponse,
+    summary="Get HuggingFace routing mappings",
+    description="Get the library_name and tag mappings used for HuggingFace model routing.",
+)
+async def get_hf_routing_mappings() -> HFRoutingMappingsResponse:
+    """Return the routing mappings used for HuggingFace model resolution.
+
+    Useful for understanding which HuggingFace models can be auto-routed
+    to Dalston engines.
+    """
+    from dalston.gateway.services.hf_resolver import HFResolver
+
+    resolver = HFResolver()
+    return HFRoutingMappingsResponse(
+        library_to_runtime=resolver.get_library_to_runtime_mapping(),
+        tag_to_runtime=resolver.get_tag_to_runtime_mapping(),
+        supported_runtimes=resolver.get_supported_runtimes(),
+    )
+
+
+# =============================================================================
 # Wildcard routes (must be last to avoid catching specific paths)
 # =============================================================================
 

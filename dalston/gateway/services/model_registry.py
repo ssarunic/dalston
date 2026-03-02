@@ -550,3 +550,134 @@ class ModelRegistryService:
         )
 
         return {"created": created, "updated": updated, "skipped": skipped}
+
+    async def resolve_hf_model(
+        self,
+        db: AsyncSession,
+        hf_model_id: str,
+        *,
+        auto_register: bool = True,
+    ) -> ModelRegistryModel | None:
+        """Resolve a HuggingFace model ID and optionally auto-register it.
+
+        This method enables dynamic model support by:
+        1. Checking if the model already exists in the registry
+        2. If not, fetching metadata from HuggingFace Hub
+        3. Determining the appropriate runtime based on library_name/tags
+        4. Optionally auto-registering the model in the database
+
+        Args:
+            db: Database session
+            hf_model_id: HuggingFace model ID (e.g., "nvidia/parakeet-tdt-1.1b")
+            auto_register: If True, automatically register the model if resolved
+
+        Returns:
+            ModelRegistryModel if model exists or was successfully resolved,
+            None if the model couldn't be resolved.
+        """
+        # First check if model already exists
+        existing = await self.get_model(db, hf_model_id)
+        if existing is not None:
+            return existing
+
+        # Only try HF resolution for model IDs that look like HF format (org/model)
+        if "/" not in hf_model_id:
+            logger.debug(
+                "skipping_hf_resolution_not_hf_format",
+                model_id=hf_model_id,
+            )
+            return None
+
+        # Import here to avoid circular dependency
+        from dalston.gateway.services.hf_resolver import HFResolver
+
+        resolver = HFResolver()
+        metadata = await resolver.get_model_metadata(hf_model_id)
+
+        if metadata is None:
+            logger.warning(
+                "hf_model_not_found",
+                model_id=hf_model_id,
+            )
+            return None
+
+        if metadata.resolved_runtime is None:
+            logger.warning(
+                "hf_model_runtime_not_resolved",
+                model_id=hf_model_id,
+                library_name=metadata.library_name,
+                pipeline_tag=metadata.pipeline_tag,
+            )
+            return None
+
+        logger.info(
+            "hf_model_resolved",
+            model_id=hf_model_id,
+            runtime=metadata.resolved_runtime,
+            library_name=metadata.library_name,
+        )
+
+        if not auto_register:
+            # Return a transient model object (not persisted)
+            return ModelRegistryModel(
+                id=hf_model_id,
+                runtime=metadata.resolved_runtime,
+                runtime_model_id=hf_model_id,
+                stage="transcribe",
+                status="not_downloaded",
+                source=hf_model_id,
+                library_name=metadata.library_name,
+                languages=metadata.languages if metadata.languages else None,
+            )
+
+        # Auto-register the model
+        return await self.register_model(
+            db,
+            model_id=hf_model_id,
+            runtime=metadata.resolved_runtime,
+            runtime_model_id=hf_model_id,
+            stage="transcribe",
+            source=hf_model_id,
+            library_name=metadata.library_name,
+            languages=metadata.languages if metadata.languages else None,
+            model_metadata={
+                "pipeline_tag": metadata.pipeline_tag,
+                "tags": metadata.tags[:50],  # Limit stored tags
+                "downloads": metadata.downloads,
+                "likes": metadata.likes,
+                "auto_registered": True,
+            },
+        )
+
+    async def get_or_resolve_model(
+        self,
+        db: AsyncSession,
+        model_id: str,
+        *,
+        auto_register: bool = True,
+    ) -> ModelRegistryModel | None:
+        """Get a model by ID, resolving from HuggingFace if needed.
+
+        This is the primary method for model lookup that supports both:
+        - Dalston model IDs (from catalog/registry)
+        - HuggingFace model IDs (auto-resolved and optionally registered)
+
+        Args:
+            db: Database session
+            model_id: Dalston model ID or HuggingFace model ID
+            auto_register: If True, auto-register HF models
+
+        Returns:
+            ModelRegistryModel if found/resolved, None otherwise
+        """
+        # Try direct lookup first
+        model = await self.get_model(db, model_id)
+        if model is not None:
+            return model
+
+        # Try HuggingFace resolution
+        return await self.resolve_hf_model(
+            db,
+            model_id,
+            auto_register=auto_register,
+        )
