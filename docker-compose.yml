@@ -245,6 +245,7 @@ services:
       <<: [*core-env, *observability-env]
       DALSTON_MODEL_DIR: /models
       HF_HUB_CACHE: /models/huggingface
+      HF_TOKEN: ${HF_TOKEN:-}
     volumes:
       - model-cache:/models
     depends_on: *core-depends

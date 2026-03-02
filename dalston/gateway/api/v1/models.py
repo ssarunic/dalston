@@ -385,6 +385,9 @@ async def pull_model(
             status="downloading",
         )
 
+    # Update status to downloading immediately so UI sees the change
+    await service.set_model_status(db, model_id, "downloading")
+
     # Start download in background
     # Note: We need a new session for the background task
     background_tasks.add_task(_pull_model_background, model_id, force)

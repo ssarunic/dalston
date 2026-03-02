@@ -119,6 +119,7 @@ export function HFModelInput({ onResolve, isLoading, result, error }: HFModelInp
             onChange={(e) => setModelId(e.target.value)}
             onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
             className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+            autoFocus
           />
           {isSearching && (
             <div className="absolute right-3 top-1/2 -translate-y-1/2">

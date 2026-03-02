@@ -385,19 +385,26 @@ class TestPullModel:
         mock_result.scalar_one_or_none.return_value = sample_model
         mock_db.execute.return_value = mock_result
 
-        # Patch snapshot_download where it's imported (in huggingface_hub)
+        # Patch snapshot_download and S3 upload
         with patch("huggingface_hub.snapshot_download") as mock_download:
             mock_download.return_value = "/models/test"
 
-            with patch("pathlib.Path.rglob") as mock_rglob:
-                mock_file = MagicMock()
-                mock_file.is_file.return_value = True
-                mock_file.stat.return_value.st_size = 1000
-                mock_rglob.return_value = [mock_file]
+            with patch.object(service, "_upload_model_to_s3") as mock_s3_upload:
+                mock_s3_upload.return_value = "s3://bucket/models/test"
 
-                await service.pull_model(mock_db, "faster-whisper-large-v3", force=True)
+                with patch("pathlib.Path.rglob") as mock_rglob:
+                    mock_file = MagicMock()
+                    mock_file.is_file.return_value = True
+                    mock_file.stat.return_value.st_size = 1000
+                    mock_rglob.return_value = [mock_file]
 
-                mock_download.assert_called_once()
+                    with patch("shutil.rmtree"):  # Mock temp dir cleanup
+                        await service.pull_model(
+                            mock_db, "faster-whisper-large-v3", force=True
+                        )
+
+                    mock_download.assert_called_once()
+                    mock_s3_upload.assert_called_once()
 
 
 class TestRemoveModel:
@@ -424,66 +431,62 @@ class TestRemoveModel:
         mock_db: AsyncMock,
         sample_model: ModelRegistryModel,
     ):
-        """Test removing a model deletes files and updates registry."""
+        """Test removing a model deletes files from S3 and updates registry."""
+        # Set S3 path for the model
+        sample_model.download_path = (
+            "s3://dalston-artifacts/models/faster-whisper-large-v3/"
+        )
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = sample_model
         mock_db.execute.return_value = mock_result
 
-        with patch("pathlib.Path.exists") as mock_exists:
-            mock_exists.return_value = True
-
-            with patch("shutil.rmtree") as mock_rmtree:
+        with patch.object(service, "_check_model_in_use", return_value=0):
+            with patch.object(service, "_delete_model_from_s3") as mock_s3_delete:
                 await service.remove_model(mock_db, "faster-whisper-large-v3")
 
-                mock_rmtree.assert_called_once()
-                mock_db.commit.assert_called_once()
+                mock_s3_delete.assert_called_once()
+                mock_db.commit.assert_called()
 
 
-class TestSyncFromDisk:
-    """Tests for ModelRegistryService.sync_from_disk."""
+class TestSyncFromS3:
+    """Tests for ModelRegistryService.sync_from_s3."""
 
     @pytest.mark.asyncio
-    async def test_sync_from_disk_no_changes(
+    async def test_sync_from_s3_no_changes(
         self,
         service: ModelRegistryService,
         mock_db: AsyncMock,
         sample_model: ModelRegistryModel,
     ):
-        """Test sync when registry matches disk."""
+        """Test sync when registry matches S3."""
         sample_model.status = "ready"
+        sample_model.download_path = "s3://bucket/models/faster-whisper-large-v3/"
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [sample_model]
         mock_db.execute.return_value = mock_result
 
-        with patch(
-            "dalston.gateway.services.model_registry.is_model_cached"
-        ) as mock_cached:
-            mock_cached.return_value = True
-
-            result = await service.sync_from_disk(mock_db)
+        with patch.object(service, "_is_model_in_s3", return_value=True):
+            result = await service.sync_from_s3(mock_db)
 
             assert result["unchanged"] == 1
             assert result["updated"] == 0
 
     @pytest.mark.asyncio
-    async def test_sync_from_disk_model_missing(
+    async def test_sync_from_s3_model_missing(
         self,
         service: ModelRegistryService,
         mock_db: AsyncMock,
         sample_model: ModelRegistryModel,
     ):
-        """Test sync when model files are missing."""
+        """Test sync when model files are missing from S3."""
         sample_model.status = "ready"
+        sample_model.download_path = "s3://bucket/models/faster-whisper-large-v3/"
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [sample_model]
         mock_db.execute.return_value = mock_result
 
-        with patch(
-            "dalston.gateway.services.model_registry.is_model_cached"
-        ) as mock_cached:
-            mock_cached.return_value = False
-
-            result = await service.sync_from_disk(mock_db)
+        with patch.object(service, "_is_model_in_s3", return_value=False):
+            result = await service.sync_from_s3(mock_db)
 
             assert result["updated"] == 1
             assert result["unchanged"] == 0

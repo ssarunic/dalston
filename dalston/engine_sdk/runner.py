@@ -287,12 +287,16 @@ class EngineRunner:
                 # otherwise use the engine's reported status (loading/unloading/error/idle)
                 status = "processing" if current_task else engine_status
 
+                # M41: Get local cache stats if available
+                local_cache = self.engine.get_local_cache_stats()
+
                 if self._registry:
                     self._registry.heartbeat(
                         instance_id=self.instance_id,
                         status=status,
                         current_task=current_task,
                         loaded_model=loaded_model,
+                        local_cache=local_cache,
                     )
             except Exception as e:
                 logger.warning("heartbeat_failed", error=str(e))

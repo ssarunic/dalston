@@ -1,19 +1,25 @@
 """Model registry service for managing model downloads and metadata.
 
 This service provides CRUD operations on the models table and handles
-model downloads from HuggingFace Hub. It integrates with the unified
-model cache from M39.
+model downloads from HuggingFace Hub. Models are stored in S3 as the
+canonical source; engines pull from S3 to local cache.
 
 Status flow:
     not_downloaded → downloading → ready
                          ↓
                       failed
+
+S3 structure:
+    s3://{bucket}/models/{model_id}/
+        model.bin, config.json, etc.
+        .complete  # Marker indicating upload is complete
 """
 
 from __future__ import annotations
 
 import asyncio
 import shutil
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -22,9 +28,16 @@ import structlog
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dalston.common.s3 import get_s3_client
+from dalston.config import get_settings
 from dalston.db.models import JobModel, ModelRegistryModel
-from dalston.engine_sdk.model_paths import HF_CACHE, get_hf_model_path, is_model_cached
 from dalston.gateway.dependencies import get_audit_service
+
+# Marker file indicating a complete model upload
+COMPLETE_MARKER = ".complete"
+
+# S3 prefix for models
+MODELS_PREFIX = "models"
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -144,6 +157,26 @@ class ModelRegistryService:
         result = await db.execute(query)
         return result.scalars().all()
 
+    async def set_model_status(
+        self,
+        db: AsyncSession,
+        model_id: str,
+        status: str,
+    ) -> None:
+        """Update a model's status.
+
+        Args:
+            db: Database session
+            model_id: Model ID
+            status: New status (not_downloaded, downloading, ready, failed)
+        """
+        await db.execute(
+            update(ModelRegistryModel)
+            .where(ModelRegistryModel.id == model_id)
+            .values(status=status)
+        )
+        await db.commit()
+
     async def pull_model(
         self,
         db: AsyncSession,
@@ -151,10 +184,15 @@ class ModelRegistryService:
         *,
         force: bool = False,
     ) -> ModelRegistryModel:
-        """Download a model from HuggingFace Hub.
+        """Download a model from HuggingFace Hub and upload to S3.
 
         This is a potentially long-running operation. For async usage,
         consider calling this in a background task.
+
+        Flow:
+            1. Download from HuggingFace to temp directory
+            2. Upload all files to S3
+            3. Update registry with S3 URI
 
         Args:
             db: Database session
@@ -168,18 +206,23 @@ class ModelRegistryService:
             ModelNotFoundError: If model doesn't exist in registry
         """
         model = await self.get_model_or_raise(db, model_id)
+        settings = get_settings()
 
         if model.status == "ready" and not force:
-            logger.info("model_already_downloaded", model_id=model_id)
+            logger.info("model_already_in_s3", model_id=model_id)
             return model
 
-        # Update status to downloading
-        await db.execute(
-            update(ModelRegistryModel)
-            .where(ModelRegistryModel.id == model_id)
-            .values(status="downloading")
-        )
-        await db.commit()
+        # Status should already be "downloading" (set by endpoint before background task)
+        # but set it here too for direct calls to this method
+        if model.status != "downloading":
+            await db.execute(
+                update(ModelRegistryModel)
+                .where(ModelRegistryModel.id == model_id)
+                .values(status="downloading")
+            )
+            await db.commit()
+            # Refresh model to get updated status
+            await db.refresh(model)
 
         try:
             # Use source (HuggingFace repo ID) for download, not runtime_model_id
@@ -187,7 +230,7 @@ class ModelRegistryService:
             # source is the HuggingFace repo (e.g., "Systran/faster-whisper-base")
             hf_repo_id = model.source or model.runtime_model_id
             logger.info(
-                "downloading_model",
+                "downloading_model_from_hf",
                 model_id=model_id,
                 hf_repo_id=hf_repo_id,
             )
@@ -195,17 +238,38 @@ class ModelRegistryService:
             # Import here to avoid dependency on huggingface_hub at import time
             from huggingface_hub import snapshot_download
 
-            # Download from HuggingFace (blocking call wrapped in thread)
-            local_path = await asyncio.to_thread(
-                snapshot_download,
-                hf_repo_id,
-                cache_dir=str(HF_CACHE),
-                force_download=force,
-            )
+            # Download from HuggingFace to temp directory
+            temp_dir = Path(tempfile.mkdtemp(prefix="dalston-model-"))
+            try:
+                downloaded_path_str = await asyncio.to_thread(
+                    snapshot_download,
+                    hf_repo_id,
+                    local_dir=str(temp_dir),
+                    force_download=force,
+                )
+                downloaded_path = Path(downloaded_path_str)
 
-            # Calculate size
-            path = Path(local_path)
-            size_bytes = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+                # Calculate size
+                size_bytes = sum(
+                    f.stat().st_size for f in downloaded_path.rglob("*") if f.is_file()
+                )
+
+                logger.info(
+                    "uploading_model_to_s3",
+                    model_id=model_id,
+                    size_mb=round(size_bytes / 1024 / 1024, 1),
+                )
+
+                # Upload to S3
+                s3_uri = await self._upload_model_to_s3(
+                    local_path=downloaded_path,
+                    model_id=model_id,
+                    bucket=settings.s3_bucket,
+                )
+
+            finally:
+                # Clean up temp directory
+                shutil.rmtree(temp_dir, ignore_errors=True)
 
             # Update registry with success
             now = datetime.now(UTC)
@@ -214,7 +278,7 @@ class ModelRegistryService:
                 .where(ModelRegistryModel.id == model_id)
                 .values(
                     status="ready",
-                    download_path=str(local_path),
+                    download_path=s3_uri,
                     size_bytes=size_bytes,
                     downloaded_at=now,
                 )
@@ -222,10 +286,10 @@ class ModelRegistryService:
             await db.commit()
 
             logger.info(
-                "model_downloaded",
+                "model_uploaded_to_s3",
                 model_id=model_id,
                 size_mb=round(size_bytes / 1024 / 1024, 1),
-                path=str(local_path),
+                s3_uri=s3_uri,
             )
 
             # Audit log
@@ -234,7 +298,7 @@ class ModelRegistryService:
                 model_id=model_id,
                 source=hf_repo_id,
                 size_bytes=size_bytes,
-                download_path=str(local_path),
+                download_path=s3_uri,
             )
 
         except Exception as e:
@@ -262,6 +326,101 @@ class ModelRegistryService:
         # Refresh and return
         await db.refresh(model)
         return model
+
+    async def _upload_model_to_s3(
+        self,
+        local_path: Path,
+        model_id: str,
+        bucket: str,
+    ) -> str:
+        """Upload a model directory to S3.
+
+        Args:
+            local_path: Local directory containing model files
+            model_id: Model identifier (used as S3 key prefix)
+            bucket: S3 bucket name
+
+        Returns:
+            S3 URI of the uploaded model (s3://bucket/models/model_id/)
+        """
+        s3_prefix = f"{MODELS_PREFIX}/{model_id}/"
+
+        async with get_s3_client() as s3:
+            # Upload all files
+            for file_path in local_path.rglob("*"):
+                if file_path.is_file():
+                    relative = file_path.relative_to(local_path)
+                    s3_key = f"{s3_prefix}{relative}"
+
+                    # Read file and upload
+                    content = await asyncio.to_thread(file_path.read_bytes)
+                    await s3.put_object(
+                        Bucket=bucket,
+                        Key=s3_key,
+                        Body=content,
+                    )
+
+            # Upload .complete marker
+            await s3.put_object(
+                Bucket=bucket,
+                Key=f"{s3_prefix}{COMPLETE_MARKER}",
+                Body=b"",
+            )
+
+        return f"s3://{bucket}/{s3_prefix}"
+
+    async def _is_model_in_s3(self, model_id: str, bucket: str) -> bool:
+        """Check if a model exists in S3 (has .complete marker)."""
+        s3_key = f"{MODELS_PREFIX}/{model_id}/{COMPLETE_MARKER}"
+
+        async with get_s3_client() as s3:
+            try:
+                await s3.head_object(Bucket=bucket, Key=s3_key)
+                return True
+            except Exception:
+                return False
+
+    async def _get_model_size_in_s3(self, model_id: str, bucket: str) -> int | None:
+        """Get total size of a model in S3."""
+        s3_prefix = f"{MODELS_PREFIX}/{model_id}/"
+
+        async with get_s3_client() as s3:
+            paginator = s3.get_paginator("list_objects_v2")
+            total_size = 0
+
+            async for page in paginator.paginate(Bucket=bucket, Prefix=s3_prefix):
+                for obj in page.get("Contents", []):
+                    if not obj["Key"].endswith(COMPLETE_MARKER):
+                        total_size += obj["Size"]
+
+            return total_size if total_size > 0 else None
+
+    async def _delete_model_from_s3(self, model_id: str, bucket: str) -> None:
+        """Delete all files for a model from S3."""
+        s3_prefix = f"{MODELS_PREFIX}/{model_id}/"
+
+        async with get_s3_client() as s3:
+            # List all objects with this prefix
+            paginator = s3.get_paginator("list_objects_v2")
+            objects_to_delete: list[dict] = []
+
+            async for page in paginator.paginate(Bucket=bucket, Prefix=s3_prefix):
+                for obj in page.get("Contents", []):
+                    objects_to_delete.append({"Key": obj["Key"]})
+
+            # Delete in batches of 1000 (S3 limit)
+            for i in range(0, len(objects_to_delete), 1000):
+                batch = objects_to_delete[i : i + 1000]
+                await s3.delete_objects(
+                    Bucket=bucket,
+                    Delete={"Objects": batch},
+                )
+
+            logger.info(
+                "model_deleted_from_s3",
+                model_id=model_id,
+                objects_deleted=len(objects_to_delete),
+            )
 
     async def _check_model_in_use(
         self,
@@ -317,17 +476,16 @@ class ModelRegistryService:
         if job_count > 0:
             raise ModelInUseError(model_id, job_count)
 
-        # Remove files if they exist
+        # Remove files from S3 if they exist
+        settings = get_settings()
         download_path = model.download_path
-        if download_path:
-            path = Path(download_path)
-            if path.exists():
-                await asyncio.to_thread(shutil.rmtree, path, ignore_errors=True)
-                logger.info(
-                    "model_files_removed",
-                    model_id=model_id,
-                    path=str(path),
-                )
+        if download_path and download_path.startswith("s3://"):
+            await self._delete_model_from_s3(model_id, settings.s3_bucket)
+            logger.info(
+                "model_files_removed_from_s3",
+                model_id=model_id,
+                s3_uri=download_path,
+            )
 
         audit = get_audit_service()
 
@@ -361,43 +519,39 @@ class ModelRegistryService:
                 download_path=str(download_path) if download_path else None,
             )
 
-    async def sync_from_disk(
+    async def sync_from_s3(
         self,
         db: AsyncSession,
     ) -> dict[str, int]:
-        """Sync registry status with actual disk state.
+        """Sync registry status with S3 state.
 
-        Checks each model's runtime_model_id against the HuggingFace cache
-        to determine if files are present on disk.
+        Checks each model against S3 to determine if files are present.
+        Models in S3 (with .complete marker) are marked "ready".
+        Models missing from S3 are marked "not_downloaded".
 
         Returns:
             Dict with counts: {"updated": N, "unchanged": N}
         """
+        settings = get_settings()
         models = await self.list_models(db)
         synced = {"updated": 0, "unchanged": 0}
 
         for model in models:
-            # Use same logic as pull_model: source (HF repo) takes precedence
-            hf_repo_id = model.source or model.runtime_model_id
-            on_disk = is_model_cached(hf_repo_id)
+            in_s3 = await self._is_model_in_s3(model.id, settings.s3_bucket)
 
-            if on_disk and model.status != "ready":
-                # Model is on disk but registry says not downloaded
-                download_path = get_hf_model_path(hf_repo_id)
-                size_bytes = None
-                if download_path.exists():
-                    size_bytes = sum(
-                        f.stat().st_size
-                        for f in download_path.rglob("*")
-                        if f.is_file()
-                    )
+            if in_s3 and model.status != "ready":
+                # Model is in S3 but registry says not downloaded
+                size_bytes = await self._get_model_size_in_s3(
+                    model.id, settings.s3_bucket
+                )
+                s3_uri = f"s3://{settings.s3_bucket}/{MODELS_PREFIX}/{model.id}/"
 
                 await db.execute(
                     update(ModelRegistryModel)
                     .where(ModelRegistryModel.id == model.id)
                     .values(
                         status="ready",
-                        download_path=str(download_path),
+                        download_path=s3_uri,
                         size_bytes=size_bytes,
                     )
                 )
@@ -405,17 +559,18 @@ class ModelRegistryService:
                 logger.info(
                     "model_synced_to_ready",
                     model_id=model.id,
-                    path=str(download_path),
+                    s3_uri=s3_uri,
                 )
 
-            elif not on_disk and model.status == "ready":
-                # Registry says ready but files are missing
+            elif not in_s3 and model.status == "ready":
+                # Registry says ready but files are missing from S3
                 await db.execute(
                     update(ModelRegistryModel)
                     .where(ModelRegistryModel.id == model.id)
                     .values(
                         status="not_downloaded",
                         download_path=None,
+                        size_bytes=None,
                     )
                 )
                 synced["updated"] += 1
@@ -426,6 +581,9 @@ class ModelRegistryService:
 
         await db.commit()
         return synced
+
+    # Keep old name as alias for backward compatibility
+    sync_from_disk = sync_from_s3
 
     async def touch_model(
         self,
