@@ -30,11 +30,22 @@ KEY_ID = UUID("12345678-1234-1234-1234-123456789abc")
 
 
 @pytest.fixture(autouse=True)
-def _clear_cache():
-    """Clear settings cache before each test."""
+def _clear_cache_and_mock_audit():
+    """Clear settings cache and mock audit service singleton before each test.
+
+    The audit service singleton uses its own DB session factory. Without mocking it,
+    tests would write audit logs to the real database.
+    """
+    from dalston.gateway import dependencies
+
     clear_settings_cache()
+    original_audit_service = dependencies._audit_service
+    mock_audit = AsyncMock()
+    mock_audit.log = AsyncMock()
+    dependencies._audit_service = mock_audit
     yield
     clear_settings_cache()
+    dependencies._audit_service = original_audit_service
 
 
 @pytest.fixture
