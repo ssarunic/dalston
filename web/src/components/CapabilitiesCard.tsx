@@ -112,9 +112,9 @@ export function CapabilitiesCard() {
         </div>
 
         <Button variant="outline" size="sm" className="w-full" asChild>
-          <Link to="/models">
+          <Link to="/models" className="inline-flex items-center justify-center gap-2">
             View All Models
-            <ArrowRight className="h-4 w-4 ml-2" />
+            <ArrowRight className="h-4 w-4 shrink-0" />
           </Link>
         </Button>
       </CardContent>
