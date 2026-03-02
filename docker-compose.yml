@@ -359,6 +359,25 @@ services:
     profiles: [gpu]
     restart: unless-stopped
 
+  # HuggingFace Transformers ASR (GPU - generic ASR for community models)
+  # Supports: Whisper, Wav2Vec2, HuBERT, MMS, and 10,000+ HF ASR models
+  # Default model (whisper-large-v3) supports GPU and CPU inference.
+  stt-batch-transcribe-hf-asr:
+    image: dalston/stt-batch-transcribe-hf-asr:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-transcribe/hf-asr/Dockerfile
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_ENGINE_ID: hf-asr
+      DALSTON_DEFAULT_MODEL_ID: "openai/whisper-large-v3"
+    volumes:
+      - model-cache:/models
+    depends_on: *batch-depends
+    profiles: [gpu]
+    deploy: *gpu-deploy
+    restart: unless-stopped
+
   # --- ALIGN STAGE ---
 
   # Phoneme forced alignment (CPU - default for local dev)

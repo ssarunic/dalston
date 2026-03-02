@@ -1,9 +1,9 @@
 {
   "generated_at": "2026-02-28T18:48:34.411897+00:00",
   "schema_version": "2.0",
-  "runtime_count": 9,
-  "model_count": 10,
-  "engine_count": 9,
+  "runtime_count": 10,
+  "model_count": 13,
+  "engine_count": 10,
   "runtimes": {
     "phoneme-align": {
       "id": "phoneme-align",
@@ -316,6 +316,42 @@
         "rtf_cpu": 0.5,
         "warm_start_latency_ms": 150
       }
+    },
+    "hf-asr": {
+      "id": "hf-asr",
+      "engine_id": "hf-asr",
+      "name": "HuggingFace Transformers ASR",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "description": "Generic ASR engine for HuggingFace Transformers models.\nSupports Whisper, Wav2Vec2, HuBERT, MMS, and other ASR architectures\nwith pipeline_tag=automatic-speech-recognition.\n\nUse for community fine-tunes and research models. Any of the 10,000+\nASR models on HuggingFace Hub can be loaded at runtime via runtime_model_id.",
+      "image": "dalston/stt-batch-transcribe-hf-asr:1.0.0",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": null,
+        "supports_word_timestamps": true,
+        "supports_streaming": false,
+        "max_audio_duration": 3600,
+        "max_concurrency": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": true,
+        "min_vram_gb": 4,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": true,
+        "min_ram_gb": 8,
+        "memory": "8G"
+      },
+      "performance": {
+        "rtf_gpu": 0.1,
+        "rtf_cpu": 1.0,
+        "warm_start_latency_ms": 500
+      }
     }
   },
   "models": {
@@ -595,6 +631,89 @@
       "performance": {
         "rtf_gpu": 0.0006,
         "rtf_cpu": null
+      }
+    },
+    "hf-wav2vec2-large-960h": {
+      "id": "hf-wav2vec2-large-960h",
+      "runtime": "hf-asr",
+      "runtime_model_id": "facebook/wav2vec2-large-960h",
+      "name": "Wav2Vec2 Large 960h",
+      "source": "facebook/wav2vec2-large-960h",
+      "size_gb": 1.2,
+      "stage": "transcribe",
+      "description": "Facebook Wav2Vec2 Large model fine-tuned on 960h of LibriSpeech.\nStrong English ASR with CTC decoding. No word timestamps from pipeline;\nuse alignment stage if needed.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": false,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 3600
+      },
+      "hardware": {
+        "min_vram_gb": 4,
+        "supports_cpu": true,
+        "min_ram_gb": 8
+      },
+      "performance": {
+        "rtf_gpu": 0.05,
+        "rtf_cpu": 0.8
+      }
+    },
+    "hf-whisper-large-v3": {
+      "id": "hf-whisper-large-v3",
+      "runtime": "hf-asr",
+      "runtime_model_id": "openai/whisper-large-v3",
+      "name": "Whisper Large V3 (HF Transformers)",
+      "source": "openai/whisper-large-v3",
+      "size_gb": 3.0,
+      "stage": "transcribe",
+      "description": "OpenAI Whisper large-v3 loaded via HuggingFace Transformers pipeline.\nUse this runtime for HuggingFace-format Whisper models and community\nfine-tunes. Supports 99 languages with word-level timestamps.",
+      "languages": null,
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": true,
+        "capitalization": true,
+        "streaming": false,
+        "max_audio_duration": 3600
+      },
+      "hardware": {
+        "min_vram_gb": 6,
+        "supports_cpu": true,
+        "min_ram_gb": 16
+      },
+      "performance": {
+        "rtf_gpu": 0.1,
+        "rtf_cpu": 1.0
+      }
+    },
+    "hf-mms-1b-all": {
+      "id": "hf-mms-1b-all",
+      "runtime": "hf-asr",
+      "runtime_model_id": "facebook/mms-1b-all",
+      "name": "MMS 1B All Languages",
+      "source": "facebook/mms-1b-all",
+      "size_gb": 3.8,
+      "stage": "transcribe",
+      "description": "Meta Massively Multilingual Speech model supporting 1,100+ languages.\nCTC-based model ideal for low-resource and underrepresented languages.\nNo word timestamps from pipeline; use alignment stage if needed.",
+      "languages": null,
+      "capabilities": {
+        "word_timestamps": false,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 3600
+      },
+      "hardware": {
+        "min_vram_gb": 6,
+        "supports_cpu": true,
+        "min_ram_gb": 16
+      },
+      "performance": {
+        "rtf_gpu": 0.08,
+        "rtf_cpu": 1.2
       }
     }
   },
@@ -909,6 +1028,42 @@
         "rtf_gpu": 0.0006,
         "rtf_cpu": 0.5,
         "warm_start_latency_ms": 150
+      }
+    },
+    "hf-asr": {
+      "id": "hf-asr",
+      "name": "HuggingFace Transformers ASR",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "type": null,
+      "description": "Generic ASR engine for HuggingFace Transformers models.\nSupports Whisper, Wav2Vec2, HuBERT, MMS, and other ASR architectures\nwith pipeline_tag=automatic-speech-recognition.\n\nUse for community fine-tunes and research models. Any of the 10,000+\nASR models on HuggingFace Hub can be loaded at runtime via runtime_model_id.",
+      "image": "dalston/stt-batch-transcribe-hf-asr:1.0.0",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": null,
+        "supports_word_timestamps": true,
+        "supports_streaming": false,
+        "max_audio_duration": 3600,
+        "max_concurrency": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": true,
+        "min_vram_gb": 4,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": true,
+        "min_ram_gb": 8,
+        "memory": "8G"
+      },
+      "performance": {
+        "rtf_gpu": 0.1,
+        "rtf_cpu": 1.0,
+        "warm_start_latency_ms": 500
       }
     }
   }
