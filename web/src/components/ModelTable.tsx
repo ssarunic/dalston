@@ -9,6 +9,7 @@ import {
   Heart,
   Loader2,
   Cpu,
+  Trash2,
 } from 'lucide-react'
 import {
   Table,
@@ -220,35 +221,34 @@ function ModelTableRow({
           </div>
         </TableCell>
         <TableCell className="text-right">
-          <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
             {model.status === 'ready' && onRemove && (
               <Button
-                variant="outline"
-                size="sm"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
                 onClick={() => onRemove(model.id)}
                 disabled={isRemoving}
+                title="Remove downloaded files"
               >
-                {isRemoving ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Remove'}
+                {isRemoving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
               </Button>
             )}
             {model.status === 'downloading' && (
-              <Button size="sm" disabled variant="outline">
-                <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                Downloading
+              <Button variant="ghost" size="icon" className="h-8 w-8" disabled title="Downloading...">
+                <Loader2 className="h-4 w-4 animate-spin" />
               </Button>
             )}
             {(model.status === 'not_downloaded' || model.status === 'failed') && onPull && (
               <Button
-                size="sm"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
                 onClick={() => onPull(model.id)}
                 disabled={isPulling}
+                title="Download model"
               >
-                {isPulling ? (
-                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                ) : (
-                  <Download className="h-3 w-3 mr-1" />
-                )}
-                Pull
+                {isPulling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
               </Button>
             )}
           </div>
