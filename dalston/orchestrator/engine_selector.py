@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from dalston.db.models import ModelRegistryModel
 from dalston.engine_sdk.types import EngineCapabilities
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog
 from dalston.orchestrator.registry import BatchEngineRegistry, BatchEngineState
@@ -27,6 +28,22 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = structlog.get_logger()
+
+
+class NoDownloadedModelError(Exception):
+    """No downloaded model available for the selected runtime.
+
+    Raised when auto model selection is used but no models are downloaded
+    for the selected transcription runtime.
+    """
+
+    def __init__(self, runtime: str, stage: str = "transcribe") -> None:
+        self.runtime = runtime
+        self.stage = stage
+        super().__init__(
+            f"No downloaded models available for runtime '{runtime}'. "
+            f"Please download a model from the Models page or specify a model explicitly."
+        )
 
 
 @dataclass
@@ -141,6 +158,89 @@ class NoCapableEngineError(Exception):
                 for a in self.catalog_alternatives
             ],
         }
+
+
+async def _find_best_downloaded_model(
+    runtime: str,
+    requirements: dict,
+    db: AsyncSession,
+) -> str | None:
+    """Find the best downloaded model for a runtime.
+
+    Queries the model registry for models with status='ready' for the given
+    runtime, then ranks them by suitability for the job requirements.
+
+    Ranking criteria:
+    1. Language compatibility (if language specified)
+    2. Model size (larger models generally better quality)
+
+    Args:
+        runtime: The runtime/engine ID (e.g., "faster-whisper", "nemo")
+        requirements: Job requirements from extract_requirements()
+        db: Database session for model registry lookup
+
+    Returns:
+        The runtime_model_id of the best model, or None if no models downloaded
+    """
+    from sqlalchemy import select
+
+    # Query downloaded models for this runtime
+    result = await db.execute(
+        select(ModelRegistryModel).where(
+            ModelRegistryModel.runtime == runtime,
+            ModelRegistryModel.status == "ready",
+            ModelRegistryModel.stage == "transcribe",
+        )
+    )
+    models = list(result.scalars().all())
+
+    if not models:
+        return None
+
+    requested_language = requirements.get("language")
+
+    def score_model(model: ModelRegistryModel) -> tuple:
+        """Score a model for ranking. Higher is better."""
+        # Language compatibility
+        if requested_language and requested_language.lower() != "auto":
+            if model.languages:
+                lang_match = (
+                    1
+                    if requested_language.lower()
+                    in [lng.lower() for lng in model.languages]
+                    else 0
+                )
+            else:
+                # Unknown languages = assume universal
+                lang_match = 1
+        else:
+            # Auto language detection - prefer multilingual models
+            if model.languages is None:
+                lang_match = 2  # Universal
+            elif len(model.languages) > 10:
+                lang_match = 2  # Multilingual
+            else:
+                lang_match = 1  # Limited languages
+
+        # Model size as proxy for quality (larger = better, but penalize missing)
+        size_score = model.size_bytes or 0
+
+        return (lang_match, size_score)
+
+    # Sort by score descending
+    ranked = sorted(models, key=score_model, reverse=True)
+    best = ranked[0]
+
+    logger.info(
+        "auto_model_selected",
+        runtime=runtime,
+        selected_model=best.runtime_model_id,
+        model_id=best.id,
+        candidates=len(models),
+        language_requirement=requested_language,
+    )
+
+    return best.runtime_model_id
 
 
 def extract_requirements(parameters: dict) -> dict:
@@ -456,41 +556,47 @@ async def select_engine(
             catalog_alternatives=catalog_alts,
         )
 
-    # 5. Single match - return directly
+    # 5. Select engine (single match or rank multiple)
     if len(capable) == 1:
         engine = capable[0]
-        logger.info(
-            "engine_selected",
-            stage=stage,
-            selected_engine=engine.engine_id,
-            selection_reason="only capable engine",
-            candidates_evaluated=len(candidates),
-            capable_count=1,
-            requirements=requirements,
-        )
-        return EngineSelectionResult(
-            engine_id=engine.engine_id,
-            capabilities=engine.capabilities
-            or EngineCapabilities(
-                engine_id=engine.engine_id, version="unknown", stages=[stage]
-            ),
-            selection_reason="only capable engine",
-        )
+        selection_reason = "only capable engine"
+    else:
+        ranked_result = _rank_and_select(capable, requirements)
+        engine = next(e for e in capable if e.engine_id == ranked_result.engine_id)
+        selection_reason = ranked_result.selection_reason
 
-    # 6. Multiple matches - rank and select
-    result = _rank_and_select(capable, requirements)
+    # 6. For transcribe stage with no user model preference, find best downloaded model
+    auto_model_id: str | None = None
+    if stage == "transcribe" and db is not None:
+        auto_model_id = await _find_best_downloaded_model(
+            runtime=engine.engine_id,
+            requirements=requirements,
+            db=db,
+        )
+        if auto_model_id is None:
+            # No downloaded models for this runtime
+            raise NoDownloadedModelError(runtime=engine.engine_id, stage=stage)
 
     logger.info(
         "engine_selected",
         stage=stage,
-        selected_engine=result.engine_id,
-        selection_reason=result.selection_reason,
+        selected_engine=engine.engine_id,
+        runtime_model_id=auto_model_id,
+        selection_reason=selection_reason,
         candidates_evaluated=len(candidates),
         capable_count=len(capable),
         requirements=requirements,
     )
 
-    return result
+    return EngineSelectionResult(
+        engine_id=engine.engine_id,
+        capabilities=engine.capabilities
+        or EngineCapabilities(
+            engine_id=engine.engine_id, version="unknown", stages=[stage]
+        ),
+        selection_reason=selection_reason,
+        runtime_model_id=auto_model_id,
+    )
 
 
 def _should_add_alignment(

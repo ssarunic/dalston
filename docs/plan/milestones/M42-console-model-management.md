@@ -6,7 +6,7 @@
 | **Duration** | 5-7 days |
 | **Dependencies** | M40 (Model Registry & Aliases), M10 (Web Console) |
 | **Deliverable** | Model Registry page, enhanced NewJob model selector, engine model visibility, download progress UI |
-| **Status** | Planned |
+| **Status** | In Progress (42.1 + 42.2 + 42.3 complete, 42.4 + 42.5 pending) |
 
 ## User Story
 
@@ -732,15 +732,15 @@ export function HFModelInput({ onResolve, isLoading, result, error }: HFModelInp
 
 ### Deliverables
 
-- [ ] Route `/models` added to App.tsx
-- [ ] Models nav item in Sidebar
-- [ ] `useModelRegistry` hook with CRUD operations
-- [ ] `Models` page with filtering and grouping by status
-- [ ] `ModelCard` component showing all model metadata
-- [ ] `ModelFiltersBar` component with search and dropdowns
-- [ ] `HFModelInput` component for adding HF models
-- [ ] Pull/Remove actions working
-- [ ] Sync with disk button
+- [x] Route `/models` added to App.tsx
+- [x] Models nav item in Sidebar
+- [x] `useModelRegistry` hook with CRUD operations
+- [x] `Models` page with filtering and grouping by status
+- [x] `ModelCard` component showing all model metadata
+- [x] `ModelFiltersBar` component with search and dropdowns
+- [x] `HFModelInput` component for adding HF models (implemented as AddModelDialog)
+- [x] Pull/Remove actions working
+- [x] Sync with disk button
 
 ---
 
@@ -1006,13 +1006,13 @@ export function ModelCompatibilityWarning({ modelId, language }: ModelCompatibil
 
 ### Deliverables
 
-- [ ] `ModelSelector` component with search and grouping
-- [ ] Auto option with explanation
-- [ ] Custom HuggingFace model input
-- [ ] Language-aware filtering
-- [ ] `ModelCompatibilityWarning` component
-- [ ] Integration in NewJob.tsx
-- [ ] Show model capabilities inline
+- [x] `ModelSelector` component with search and grouping (enhanced with keyboard navigation + autocomplete)
+- [x] Auto option with explanation
+- [x] Custom HuggingFace model input (via link to Models page)
+- [x] Language-aware filtering
+- [x] `ModelCompatibilityWarning` component
+- [x] Integration in NewJob.tsx
+- [x] Show model capabilities inline (languages, timestamps, size)
 
 ---
 
@@ -1094,9 +1094,9 @@ Ensure `/v1/engines` returns `loaded_model` and `available_models`:
 
 ### Deliverables
 
-- [ ] Engine cards show currently loaded model
-- [ ] Engine cards show available models (collapsed view)
-- [ ] Click to expand full model list
+- [x] Engine cards show currently loaded model
+- [x] Engine cards show available models (collapsed view with +N more)
+- [x] Click to expand full model list (badge overflow)
 - [ ] Link to model detail from engine card
 
 ---
@@ -1510,9 +1510,9 @@ open http://localhost:5173/
 
 ## Checkpoint
 
-- [ ] **42.1**: Model Registry page with filtering and actions
-- [ ] **42.2**: Enhanced NewJob model selector with search
-- [ ] **42.3**: Engine cards show model information
+- [x] **42.1**: Model Registry page with filtering and actions
+- [x] **42.2**: Enhanced NewJob model selector with search (keyboard nav + autocomplete)
+- [x] **42.3**: Engine cards show model information
 - [ ] **42.4**: Download progress indicator and notifications
 - [ ] **42.5**: Dashboard capabilities card
 
