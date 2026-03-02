@@ -26,7 +26,7 @@ export function CapabilitiesCard() {
     return (
       <Card>
         <CardContent className="py-4">
-          <div className="flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-8">
+          <div className="flex flex-col lg:flex-row lg:items-start gap-4 lg:gap-8">
             <Skeleton className="h-5 w-40" />
             <Skeleton className="h-5 w-24" />
             <div className="flex gap-4 flex-1">
@@ -49,7 +49,7 @@ export function CapabilitiesCard() {
   return (
     <Card>
       <CardContent className="py-4">
-        <div className="flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-8">
+        <div className="flex flex-col lg:flex-row lg:items-start gap-4 lg:gap-8">
           {/* Title */}
           <div className="flex items-center gap-2 shrink-0">
             <Zap className="h-4 w-4" />
