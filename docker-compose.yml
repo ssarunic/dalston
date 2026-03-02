@@ -359,6 +359,31 @@ services:
     profiles: [gpu]
     restart: unless-stopped
 
+  # vLLM Audio ASR (GPU - audio LLMs via vLLM)
+  # Supports Voxtral and Qwen2-Audio model families
+  stt-batch-transcribe-vllm-asr:
+    image: dalston/stt-batch-transcribe-vllm-asr:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-transcribe/vllm-asr/Dockerfile
+      args:
+        SKIP_MODEL_DOWNLOAD: "true"
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_ENGINE_ID: vllm-asr
+      DALSTON_DEFAULT_MODEL_ID: "mistralai/Voxtral-Mini-3B-2507"
+      DALSTON_MODEL_TTL_SECONDS: 7200
+      DALSTON_MAX_LOADED_MODELS: 1
+      DALSTON_VLLM_GPU_MEMORY_UTILIZATION: "0.9"
+      DALSTON_VLLM_MAX_MODEL_LEN: "4096"
+    volumes:
+      - model-cache:/models
+    depends_on: *batch-depends
+    deploy: *gpu-deploy
+    profiles: [gpu]
+    shm_size: '8gb'
+    restart: unless-stopped
+
   # --- ALIGN STAGE ---
 
   # Phoneme forced alignment (CPU - default for local dev)

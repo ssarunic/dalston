@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-02-28T18:48:34.411897+00:00",
+  "generated_at": "2026-03-02T22:30:23.207157+00:00",
   "schema_version": "2.0",
-  "runtime_count": 9,
-  "model_count": 10,
-  "engine_count": 9,
+  "runtime_count": 10,
+  "model_count": 13,
+  "engine_count": 10,
   "runtimes": {
     "phoneme-align": {
       "id": "phoneme-align",
@@ -316,6 +316,43 @@
         "rtf_cpu": 0.5,
         "warm_start_latency_ms": 150
       }
+    },
+    "vllm-asr": {
+      "id": "vllm-asr",
+      "engine_id": "vllm-asr",
+      "name": "vLLM Audio ASR",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "description": "Audio-capable LLMs via vLLM for high-accuracy transcription.\nSupports Voxtral (Mistral) and Qwen2-Audio model families.\n\nUses model-specific adapters for prompt building and output parsing.\nLoads models at runtime via runtime_model_id without requiring\nseparate Docker images per variant.\n\nNote: Audio LLMs produce text only - no word timestamps.\nUse the alignment stage (phoneme-align) if word-level timing is needed.",
+      "image": "dalston/stt-batch-transcribe-vllm-asr:1.0.0",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": null,
+        "supports_word_timestamps": false,
+        "supports_streaming": false,
+        "max_audio_duration": 600,
+        "max_concurrency": null
+      },
+      "hardware": {
+        "gpu_required": true,
+        "gpu_optional": false,
+        "min_vram_gb": 8,
+        "recommended_gpu": [
+          "a10g",
+          "l4",
+          "a100"
+        ],
+        "supports_cpu": false,
+        "min_ram_gb": 16,
+        "memory": "16G"
+      },
+      "performance": {
+        "rtf_gpu": 0.15,
+        "rtf_cpu": null,
+        "warm_start_latency_ms": 5000
+      }
     }
   },
   "models": {
@@ -594,6 +631,118 @@
       },
       "performance": {
         "rtf_gpu": 0.0006,
+        "rtf_cpu": null
+      }
+    },
+    "vllm-asr-qwen2-audio-7b": {
+      "id": "vllm-asr-qwen2-audio-7b",
+      "runtime": "vllm-asr",
+      "runtime_model_id": "Qwen/Qwen2-Audio-7B-Instruct",
+      "name": "Qwen2-Audio 7B Instruct (vLLM)",
+      "source": "Qwen/Qwen2-Audio-7B-Instruct",
+      "size_gb": 15.0,
+      "stage": "transcribe",
+      "description": "Alibaba Qwen2-Audio 7B served via vLLM for multilingual transcription.\nSupports a wide range of languages with strong multilingual capabilities.\n\nQwen2-Audio is a multimodal audio-language model capable of both\ntranscription and audio understanding tasks. When used with Dalston,\nit operates as a high-accuracy transcription engine.\n\nNote: Produces text only without word-level timestamps.\nChain with phoneme-align stage if timestamps are needed.",
+      "languages": [
+        "en",
+        "zh",
+        "ja",
+        "ko",
+        "fr",
+        "de",
+        "es",
+        "pt",
+        "it",
+        "nl",
+        "ru",
+        "ar"
+      ],
+      "capabilities": {
+        "word_timestamps": false,
+        "punctuation": true,
+        "capitalization": true,
+        "streaming": false,
+        "max_audio_duration": 600
+      },
+      "hardware": {
+        "min_vram_gb": 16,
+        "supports_cpu": false,
+        "min_ram_gb": 32
+      },
+      "performance": {
+        "rtf_gpu": 0.18,
+        "rtf_cpu": null
+      }
+    },
+    "vllm-asr-voxtral-mini-3b": {
+      "id": "vllm-asr-voxtral-mini-3b",
+      "runtime": "vllm-asr",
+      "runtime_model_id": "mistralai/Voxtral-Mini-3B-2507",
+      "name": "Voxtral Mini 3B (vLLM)",
+      "source": "mistralai/Voxtral-Mini-3B-2507",
+      "size_gb": 6.0,
+      "stage": "transcribe",
+      "description": "Mistral Voxtral Mini 3B served via vLLM for multilingual transcription.\nSupports 8 languages with high accuracy. Uses vLLM's optimized serving\nfor efficient GPU utilization and batched inference.\n\nNote: Produces text only without word-level timestamps.\nChain with phoneme-align stage if timestamps are needed.",
+      "languages": [
+        "en",
+        "es",
+        "fr",
+        "pt",
+        "hi",
+        "de",
+        "nl",
+        "it"
+      ],
+      "capabilities": {
+        "word_timestamps": false,
+        "punctuation": true,
+        "capitalization": true,
+        "streaming": false,
+        "max_audio_duration": 600
+      },
+      "hardware": {
+        "min_vram_gb": 8,
+        "supports_cpu": false,
+        "min_ram_gb": 16
+      },
+      "performance": {
+        "rtf_gpu": 0.12,
+        "rtf_cpu": null
+      }
+    },
+    "vllm-asr-voxtral-small-24b": {
+      "id": "vllm-asr-voxtral-small-24b",
+      "runtime": "vllm-asr",
+      "runtime_model_id": "mistralai/Voxtral-Small-24B-2507",
+      "name": "Voxtral Small 24B (vLLM)",
+      "source": "mistralai/Voxtral-Small-24B-2507",
+      "size_gb": 48.0,
+      "stage": "transcribe",
+      "description": "Mistral Voxtral Small 24B served via vLLM for highest accuracy\nmultilingual transcription. Larger model with better accuracy than\nMini 3B but requires significantly more GPU memory.\n\nSupports 8 languages. Use for production workloads where accuracy\nis the primary concern and large GPU instances are available.\n\nNote: Produces text only without word-level timestamps.\nChain with phoneme-align stage if timestamps are needed.",
+      "languages": [
+        "en",
+        "es",
+        "fr",
+        "pt",
+        "hi",
+        "de",
+        "nl",
+        "it"
+      ],
+      "capabilities": {
+        "word_timestamps": false,
+        "punctuation": true,
+        "capitalization": true,
+        "streaming": false,
+        "max_audio_duration": 600
+      },
+      "hardware": {
+        "min_vram_gb": 55,
+        "supports_cpu": false,
+        "min_ram_gb": 64
+      },
+      "performance": {
+        "rtf_gpu": 0.2,
         "rtf_cpu": null
       }
     }
@@ -909,6 +1058,43 @@
         "rtf_gpu": 0.0006,
         "rtf_cpu": 0.5,
         "warm_start_latency_ms": 150
+      }
+    },
+    "vllm-asr": {
+      "id": "vllm-asr",
+      "name": "vLLM Audio ASR",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "type": null,
+      "description": "Audio-capable LLMs via vLLM for high-accuracy transcription.\nSupports Voxtral (Mistral) and Qwen2-Audio model families.\n\nUses model-specific adapters for prompt building and output parsing.\nLoads models at runtime via runtime_model_id without requiring\nseparate Docker images per variant.\n\nNote: Audio LLMs produce text only - no word timestamps.\nUse the alignment stage (phoneme-align) if word-level timing is needed.",
+      "image": "dalston/stt-batch-transcribe-vllm-asr:1.0.0",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": null,
+        "supports_word_timestamps": false,
+        "supports_streaming": false,
+        "max_audio_duration": 600,
+        "max_concurrency": null
+      },
+      "hardware": {
+        "gpu_required": true,
+        "gpu_optional": false,
+        "min_vram_gb": 8,
+        "recommended_gpu": [
+          "a10g",
+          "l4",
+          "a100"
+        ],
+        "supports_cpu": false,
+        "min_ram_gb": 16,
+        "memory": "16G"
+      },
+      "performance": {
+        "rtf_gpu": 0.15,
+        "rtf_cpu": null,
+        "warm_start_latency_ms": 5000
       }
     }
   }

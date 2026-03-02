@@ -1,0 +1,46 @@
+# Model catalog entry for vllm-asr-voxtral-mini-3b
+# This file defines the model variant metadata for runtime model management (M36)
+
+schema_version: "1.1"
+id: vllm-asr-voxtral-mini-3b
+runtime: vllm-asr
+runtime_model_id: "mistralai/Voxtral-Mini-3B-2507"
+
+name: Voxtral Mini 3B (vLLM)
+source: mistralai/Voxtral-Mini-3B-2507
+size_gb: 6.0
+stage: transcribe
+
+description: |
+  Mistral Voxtral Mini 3B served via vLLM for multilingual transcription.
+  Supports 8 languages with high accuracy. Uses vLLM's optimized serving
+  for efficient GPU utilization and batched inference.
+
+  Note: Produces text only without word-level timestamps.
+  Chain with phoneme-align stage if timestamps are needed.
+
+languages:
+  - en
+  - es
+  - fr
+  - pt
+  - hi
+  - de
+  - nl
+  - it
+
+capabilities:
+  word_timestamps: false
+  punctuation: true
+  capitalization: true
+  streaming: false
+  max_audio_duration: 600
+
+hardware:
+  min_vram_gb: 8
+  supports_cpu: false
+  min_ram_gb: 16
+
+performance:
+  rtf_gpu: 0.12
+  rtf_cpu: null
