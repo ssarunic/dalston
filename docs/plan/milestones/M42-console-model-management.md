@@ -6,7 +6,7 @@
 | **Duration** | 5-7 days |
 | **Dependencies** | M40 (Model Registry & Aliases), M10 (Web Console) |
 | **Deliverable** | Model Registry page, enhanced NewJob model selector, engine model visibility, download progress UI |
-| **Status** | In Progress (42.1 + 42.2 + 42.3 complete with Auto model selection backend, 42.4 + 42.5 pending) |
+| **Status** | In Progress (42.1 + 42.2 + 42.3 + 42.4 complete, 42.5 pending) |
 
 ## User Story
 
@@ -1239,11 +1239,11 @@ export function useDownloadNotifications() {
 
 ### Deliverables
 
-- [ ] `DownloadContext` for tracking active downloads
-- [ ] `DownloadIndicator` component in header
-- [ ] Progress popover showing all active downloads
-- [ ] Toast notifications for download completion/failure
-- [ ] Auto-refresh while downloads are active
+- [x] `DownloadIndicator` floating component (like `LiveSessionIndicator`)
+- [x] Shows active download count and overall progress
+- [x] Toast notifications for download completion/failure
+- [x] Auto-refresh polling (3s active, 30s idle)
+- [x] Click to navigate to Models page
 
 ---
 
@@ -1516,7 +1516,7 @@ open http://localhost:5173/
   - [x] Orchestrator Auto model selection: queries registry for best downloaded model
   - [x] Graceful error handling: `NoDownloadedModelError` when no models available
 - [x] **42.3**: Engine cards show model information
-- [ ] **42.4**: Download progress indicator and notifications
+- [x] **42.4**: Download progress indicator and notifications
 - [ ] **42.5**: Dashboard capabilities card
 
 ---
