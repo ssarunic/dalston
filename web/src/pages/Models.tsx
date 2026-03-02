@@ -32,7 +32,7 @@ export function Models() {
   const resolveHF = useResolveHFModel()
   const syncModels = useSyncModels()
 
-  const models = data?.data ?? []
+  const models = useMemo(() => data?.data ?? [], [data?.data])
 
   // Client-side search filtering
   const filteredModels = useMemo(() => {
