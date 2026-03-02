@@ -231,16 +231,20 @@ async def _find_best_downloaded_model(
     ranked = sorted(models, key=score_model, reverse=True)
     best = ranked[0]
 
+    # Use source (HuggingFace repo ID) for S3 lookup, matching upload key
+    # best.id is the namespaced model ID used for S3 storage
+    model_key = best.source or best.id
+
     logger.info(
         "auto_model_selected",
         runtime=runtime,
-        selected_model=best.runtime_model_id,
+        selected_model=model_key,
         model_id=best.id,
         candidates=len(models),
         language_requirement=requested_language,
     )
 
-    return best.runtime_model_id
+    return model_key
 
 
 def extract_requirements(parameters: dict) -> dict:
@@ -454,7 +458,10 @@ async def select_engine(
             # User specified a model ID (e.g., "parakeet-tdt-1.1b")
             # Resolve to runtime and look up in registry
             runtime_id = model.runtime
-            runtime_model_id = model.runtime_model_id
+            # Use source (HuggingFace repo ID) for S3 lookup, matching upload key
+            # runtime_model_id is what the library expects internally (e.g., "large-v3-turbo")
+            # but uploads use model.id (e.g., "Systran/faster-whisper-large-v3-turbo")
+            runtime_model_id = model.source or model.id
 
             engine = await registry.get_engine(runtime_id)
             if engine is None or not engine.is_available:
