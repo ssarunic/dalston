@@ -600,6 +600,39 @@ def model_sync() -> None:
     )
 
 
+async def _seed_models() -> dict:
+    """Seed registry from catalog."""
+    from dalston.db.session import async_session
+    from dalston.gateway.services.model_registry import ModelRegistryService
+
+    async with async_session() as db:
+        service = ModelRegistryService()
+        return await service.seed_from_catalog(db)
+
+
+@model_app.command("seed")
+def model_seed() -> None:
+    """Seed registry from the model catalog.
+
+    Populates the database with all models defined in the static catalog.
+    This allows browsing available models and downloading them.
+
+    Examples:
+        python -m dalston.gateway.cli model seed
+    """
+    typer.echo("Seeding model registry from catalog...")
+
+    try:
+        result = asyncio.run(_seed_models())
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    typer.echo(
+        f"Seed complete: {result['created']} created, {result['skipped']} skipped"
+    )
+
+
 # Register model subcommand
 app.add_typer(model_app, name="model")
 

@@ -161,55 +161,6 @@ async def list_models(
     return ModelListResponse(data=data)
 
 
-@router.get(
-    "/{model_id}",
-    response_model=ModelResponse,
-    summary="Get model details",
-    description="Get detailed information about a specific model variant.",
-    responses={404: {"description": "Model not found in catalog"}},
-)
-async def get_model(model_id: str) -> ModelResponse:
-    """Get details for a specific model variant.
-
-    Args:
-        model_id: Model identifier (e.g., 'parakeet-tdt-1.1b', 'faster-whisper-large-v3-turbo')
-    """
-    catalog = get_catalog()
-    model = catalog.get_model(model_id)
-
-    if model is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Model not found: {model_id}. Use GET /v1/models to see available models.",
-        )
-
-    return ModelResponse(
-        id=model.id,
-        name=model.name,
-        runtime=model.runtime,
-        runtime_model_id=model.runtime_model_id,
-        source=model.source,
-        size_gb=model.size_gb,
-        stage=model.stage,
-        languages=model.languages,
-        capabilities=ModelCapabilitiesResponse(
-            word_timestamps=model.word_timestamps,
-            punctuation=model.punctuation,
-            capitalization=model.capitalization,
-            streaming=False,
-        ),
-        hardware=ModelHardwareResponse(
-            min_vram_gb=model.min_vram_gb,
-            supports_cpu=model.supports_cpu,
-            min_ram_gb=model.min_ram_gb,
-        ),
-        performance=ModelPerformanceResponse(
-            rtf_gpu=model.rtf_gpu,
-            rtf_cpu=model.rtf_cpu,
-        ),
-    )
-
-
 # =============================================================================
 # M40: Model Registry Endpoints
 # =============================================================================
@@ -494,4 +445,58 @@ async def sync_models(
     return SyncModelsResponse(
         updated=result["updated"],
         unchanged=result["unchanged"],
+    )
+
+
+# =============================================================================
+# Wildcard routes (must be last to avoid catching specific paths)
+# =============================================================================
+
+
+@router.get(
+    "/{model_id}",
+    response_model=ModelResponse,
+    summary="Get model details",
+    description="Get detailed information about a specific model variant.",
+    responses={404: {"description": "Model not found in catalog"}},
+)
+async def get_model(model_id: str) -> ModelResponse:
+    """Get details for a specific model variant.
+
+    Args:
+        model_id: Model identifier (e.g., 'parakeet-tdt-1.1b', 'faster-whisper-large-v3-turbo')
+    """
+    catalog = get_catalog()
+    model = catalog.get_model(model_id)
+
+    if model is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Model not found: {model_id}. Use GET /v1/models to see available models.",
+        )
+
+    return ModelResponse(
+        id=model.id,
+        name=model.name,
+        runtime=model.runtime,
+        runtime_model_id=model.runtime_model_id,
+        source=model.source,
+        size_gb=model.size_gb,
+        stage=model.stage,
+        languages=model.languages,
+        capabilities=ModelCapabilitiesResponse(
+            word_timestamps=model.word_timestamps,
+            punctuation=model.punctuation,
+            capitalization=model.capitalization,
+            streaming=False,
+        ),
+        hardware=ModelHardwareResponse(
+            min_vram_gb=model.min_vram_gb,
+            supports_cpu=model.supports_cpu,
+            min_ram_gb=model.min_ram_gb,
+        ),
+        performance=ModelPerformanceResponse(
+            rtf_gpu=model.rtf_gpu,
+            rtf_cpu=model.rtf_cpu,
+        ),
     )

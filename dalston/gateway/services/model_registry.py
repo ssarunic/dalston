@@ -454,3 +454,59 @@ class ModelRegistryService:
             raise ModelNotDownloadedError(model_id)
 
         return model
+
+    async def seed_from_catalog(self, db: AsyncSession) -> dict[str, int]:
+        """Seed the registry with models from the static catalog.
+
+        This populates the database with all models defined in the catalog,
+        allowing users to browse available models and download them.
+
+        Args:
+            db: Database session
+
+        Returns:
+            Dict with counts: {"created": N, "skipped": N}
+        """
+        from dalston.orchestrator.catalog import get_catalog
+
+        catalog = get_catalog()
+        models = catalog.get_all_models()
+
+        created = 0
+        skipped = 0
+
+        for m in models:
+            # Check if model already exists
+            existing = await self.get_model(db, m.id)
+            if existing is not None:
+                skipped += 1
+                continue
+
+            # Create new registry entry
+            model = ModelRegistryModel(
+                id=m.id,
+                name=m.name,
+                runtime=m.runtime,
+                runtime_model_id=m.runtime_model_id,
+                stage=m.stage or "transcribe",
+                status="not_downloaded",
+                source=m.source,
+                languages=m.languages,
+                word_timestamps=m.word_timestamps,
+                punctuation=m.punctuation,
+                min_vram_gb=m.min_vram_gb,
+                min_ram_gb=m.min_ram_gb,
+                supports_cpu=m.supports_cpu,
+            )
+            db.add(model)
+            created += 1
+
+        await db.commit()
+
+        logger.info(
+            "catalog_seeded",
+            created=created,
+            skipped=skipped,
+        )
+
+        return {"created": created, "skipped": skipped}
