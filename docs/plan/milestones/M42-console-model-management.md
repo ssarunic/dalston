@@ -6,7 +6,7 @@
 | **Duration** | 5-7 days |
 | **Dependencies** | M40 (Model Registry & Aliases), M10 (Web Console) |
 | **Deliverable** | Model Registry page, enhanced NewJob model selector, engine model visibility, download progress UI |
-| **Status** | In Progress (42.1 + 42.2 + 42.3 complete, 42.4 + 42.5 pending) |
+| **Status** | In Progress (42.1 + 42.2 + 42.3 complete with Auto model selection backend, 42.4 + 42.5 pending) |
 
 ## User Story
 
@@ -1008,6 +1008,7 @@ export function ModelCompatibilityWarning({ modelId, language }: ModelCompatibil
 
 - [x] `ModelSelector` component with search and grouping (enhanced with keyboard navigation + autocomplete)
 - [x] Auto option with explanation
+- [x] **Orchestrator Auto model selection**: When "Auto" is selected, orchestrator queries registry for downloaded models and picks the best one based on language compatibility and model size (instead of hardcoded fallback)
 - [x] Custom HuggingFace model input (via link to Models page)
 - [x] Language-aware filtering
 - [x] `ModelCompatibilityWarning` component
@@ -1512,6 +1513,8 @@ open http://localhost:5173/
 
 - [x] **42.1**: Model Registry page with filtering and actions
 - [x] **42.2**: Enhanced NewJob model selector with search (keyboard nav + autocomplete)
+  - [x] Orchestrator Auto model selection: queries registry for best downloaded model
+  - [x] Graceful error handling: `NoDownloadedModelError` when no models available
 - [x] **42.3**: Engine cards show model information
 - [ ] **42.4**: Download progress indicator and notifications
 - [ ] **42.5**: Dashboard capabilities card
@@ -1527,6 +1530,7 @@ open http://localhost:5173/
 | HF resolution timeout | 10s timeout with clear error message |
 | Model selector popover too tall | Max height with scroll |
 | Custom HF model fails silently | Show resolution result before using |
+| Auto model selection fails with missing model | ✅ **Fixed**: Orchestrator queries registry for downloaded models instead of hardcoded fallback; raises `NoDownloadedModelError` with clear message if none available |
 
 ---
 
