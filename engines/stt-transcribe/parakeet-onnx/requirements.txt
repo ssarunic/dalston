@@ -1,9 +1,9 @@
 # Parakeet ONNX Engine Dependencies
 # Lightweight: no NeMo, no PyTorch required for CPU inference
 
-# ONNX ASR library - handles model loading, preprocessing, and CTC/TDT decoding
+# ONNX ASR library - handles model loading, preprocessing, and CTC/TDT/RNNT decoding
 # for NVIDIA NeMo Parakeet models via ONNX Runtime
-onnx-asr[cpu,hub]>=0.3.3
+onnx-asr[cpu,hub]>=0.5.0
 
 # Audio processing
 soundfile>=0.12.0

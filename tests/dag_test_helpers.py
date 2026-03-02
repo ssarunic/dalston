@@ -54,6 +54,9 @@ def build_task_dag_for_test(
         "parakeet-tdt-1.1b": ("nemo", "nvidia/parakeet-tdt-1.1b"),
         "parakeet-onnx-ctc-0.6b": ("nemo-onnx", "nvidia/parakeet-ctc-0.6b"),
         "parakeet-onnx-ctc-1.1b": ("nemo-onnx", "nvidia/parakeet-ctc-1.1b"),
+        "parakeet-onnx-tdt-0.6b-v2": ("nemo-onnx", "nvidia/parakeet-tdt-0.6b-v2"),
+        "parakeet-onnx-tdt-0.6b-v3": ("nemo-onnx", "nvidia/parakeet-tdt-0.6b-v3"),
+        "parakeet-onnx-rnnt-0.6b": ("nemo-onnx", "nvidia/parakeet-rnnt-0.6b"),
         "faster-whisper-large-v3-turbo": ("faster-whisper", None),
         "faster-whisper-base": ("faster-whisper", None),
     }

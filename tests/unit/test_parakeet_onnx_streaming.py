@@ -51,6 +51,24 @@ class TestParakeetOnnxStreamingGetModels:
 
             assert models == ["parakeet-onnx-ctc-1.1b"]
 
+    def test_get_models_with_tdt_variant(self):
+        """Test that get_models returns correct name for TDT variant."""
+        with patch.dict("os.environ", {"DALSTON_MODEL_VARIANT": "tdt-0.6b-v3"}):
+            Engine = load_parakeet_onnx_streaming_engine()
+            engine = Engine()
+            models = engine.get_models()
+
+            assert models == ["parakeet-onnx-tdt-0.6b-v3"]
+
+    def test_get_models_with_rnnt_variant(self):
+        """Test that get_models returns correct name for RNNT variant."""
+        with patch.dict("os.environ", {"DALSTON_MODEL_VARIANT": "rnnt-0.6b"}):
+            Engine = load_parakeet_onnx_streaming_engine()
+            engine = Engine()
+            models = engine.get_models()
+
+            assert models == ["parakeet-onnx-rnnt-0.6b"]
+
 
 class TestParakeetOnnxStreamingGetLanguages:
     """Tests for get_languages() English-only restriction."""
@@ -67,14 +85,22 @@ class TestParakeetOnnxStreamingGetLanguages:
 
 
 class TestParakeetOnnxStreamingNoStreaming:
-    """Tests for CTC-based engine (no native streaming)."""
+    """Tests for ONNX engine (no native streaming)."""
 
     def test_supports_streaming_returns_false(self):
-        """Test that CTC engine does not claim streaming support."""
+        """Test that ONNX engine does not claim streaming support."""
         Engine = load_parakeet_onnx_streaming_engine()
         engine = Engine()
 
         assert engine.supports_streaming() is False
+
+    def test_tdt_variant_no_streaming(self):
+        """Test that TDT variant also does not claim streaming support."""
+        with patch.dict("os.environ", {"DALSTON_MODEL_VARIANT": "tdt-0.6b-v3"}):
+            Engine = load_parakeet_onnx_streaming_engine()
+            engine = Engine()
+
+            assert engine.supports_streaming() is False
 
 
 class TestParakeetOnnxStreamingEngineType:
@@ -94,6 +120,22 @@ class TestParakeetOnnxStreamingEngineType:
             engine = Engine()
 
             assert engine.get_engine() == "parakeet-onnx-ctc-1.1b"
+
+    def test_get_engine_with_tdt_variant(self):
+        """Test that engine type reflects TDT variant."""
+        with patch.dict("os.environ", {"DALSTON_MODEL_VARIANT": "tdt-0.6b-v3"}):
+            Engine = load_parakeet_onnx_streaming_engine()
+            engine = Engine()
+
+            assert engine.get_engine() == "parakeet-onnx-tdt-0.6b-v3"
+
+    def test_get_engine_with_rnnt_variant(self):
+        """Test that engine type reflects RNNT variant."""
+        with patch.dict("os.environ", {"DALSTON_MODEL_VARIANT": "rnnt-0.6b"}):
+            Engine = load_parakeet_onnx_streaming_engine()
+            engine = Engine()
+
+            assert engine.get_engine() == "parakeet-onnx-rnnt-0.6b"
 
 
 class TestParakeetOnnxStreamingHealthCheck:
@@ -146,8 +188,8 @@ class TestParakeetOnnxStreamingVariantValidation:
             assert engine._model_variant == "ctc-0.6b"
 
     def test_valid_variants(self):
-        """Test that valid variants are accepted."""
-        for variant in ("ctc-0.6b", "ctc-1.1b"):
+        """Test that all valid variants are accepted."""
+        for variant in ("ctc-0.6b", "ctc-1.1b", "tdt-0.6b-v2", "tdt-0.6b-v3", "rnnt-0.6b"):
             with patch.dict("os.environ", {"DALSTON_MODEL_VARIANT": variant}):
                 Engine = load_parakeet_onnx_streaming_engine()
                 engine = Engine()

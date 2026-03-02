@@ -1,6 +1,6 @@
 # NVIDIA Parakeet ONNX Transcription Engine
 #
-# Lightweight engine using ONNX Runtime for Parakeet CTC inference.
+# Lightweight engine using ONNX Runtime for Parakeet CTC/TDT/RNNT inference.
 # M41: ~1GB image vs ~12GB for the NeMo-based engine.
 #
 # Build from repo root:
@@ -11,7 +11,7 @@
 #   GPU:  docker build --build-arg DEVICE=cuda -t dalston/stt-batch-transcribe-nemo-onnx:1.0.0 -f engines/stt-transcribe/parakeet-onnx/Dockerfile .
 #
 # Models are downloaded at runtime to /models/onnx volume by onnx-asr (via HuggingFace Hub).
-# Supported models: nvidia/parakeet-ctc-0.6b, nvidia/parakeet-ctc-1.1b
+# Supported models: nvidia/parakeet-ctc-{0.6b,1.1b}, nvidia/parakeet-tdt-0.6b-{v2,v3}, nvidia/parakeet-rnnt-0.6b
 
 # Build argument to select device (cuda or cpu)
 ARG DEVICE=cpu

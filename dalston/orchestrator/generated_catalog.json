@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-03-02T22:30:02.647302+00:00",
+  "generated_at": "2026-03-02T23:28:58.324833+00:00",
   "schema_version": "2.0",
   "runtime_count": 10,
-  "model_count": 12,
+  "model_count": 15,
   "engine_count": 10,
   "runtimes": {
     "phoneme-align": {
@@ -323,7 +323,7 @@
       "name": "NVIDIA Parakeet ONNX Runtime",
       "version": "1.0.0",
       "stage": "transcribe",
-      "description": "Lightweight ONNX Runtime engine for NVIDIA Parakeet CTC transcription models.\nUses the onnx-asr library for fast inference without the full NeMo toolkit.\n\nM41: This is a new runtime that provides the same Parakeet CTC model accuracy\nwith significantly smaller container images (~1GB vs ~12GB) and faster startup.\nUses ONNX Runtime for inference and supports both CPU and GPU execution.\n\nSupported models:\n  - nvidia/parakeet-ctc-0.6b (fast, 600M params)\n  - nvidia/parakeet-ctc-1.1b (accurate, 1.1B params)\n\nAll Parakeet CTC models produce native word-level timestamps without needing\na separate alignment stage.",
+      "description": "Lightweight ONNX Runtime engine for NVIDIA Parakeet transcription models.\nUses the onnx-asr library for fast inference without the full NeMo toolkit.\nSupports CTC, TDT, and RNNT decoders.\n\nM41: This runtime provides the same Parakeet model accuracy with significantly\nsmaller container images (~1GB vs ~12GB) and faster startup. Uses ONNX Runtime\nfor inference and supports both CPU and GPU execution.\n\nSupported models:\n  - nvidia/parakeet-ctc-0.6b (CTC, fast, 600M params)\n  - nvidia/parakeet-ctc-1.1b (CTC, accurate, 1.1B params)\n  - nvidia/parakeet-tdt-0.6b-v2 (TDT, English-only, 600M params)\n  - nvidia/parakeet-tdt-0.6b-v3 (TDT, punctuation + capitalization, 600M params)\n  - nvidia/parakeet-rnnt-0.6b (RNNT, English-only, 600M params)\n\nAll models produce native word-level timestamps without needing a separate\nalignment stage.",
       "image": "dalston/stt-batch-transcribe-nemo-onnx:1.0.0",
       "capabilities": {
         "stages": [
@@ -633,6 +633,93 @@
       "performance": {
         "rtf_gpu": 0.0005,
         "rtf_cpu": 0.2
+      }
+    },
+    "parakeet-onnx-rnnt-0.6b": {
+      "id": "parakeet-onnx-rnnt-0.6b",
+      "runtime": "nemo-onnx",
+      "runtime_model_id": "nvidia/parakeet-rnnt-0.6b",
+      "name": "NVIDIA Parakeet ONNX RNNT 0.6B",
+      "source": "nvidia/parakeet-rnnt-0.6b",
+      "size_gb": 0.6,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet RNNT 0.6B via ONNX Runtime for accurate English-only\ntranscription. RNN-Transducer decoder provides streaming-quality accuracy\nin a lightweight ONNX package.\n\nSame model accuracy as the NeMo variant but runs on ONNX Runtime for\nlighter deployment and better CPU performance.\n\nNOTE: Outputs lowercase text without punctuation.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 2,
+        "supports_cpu": true,
+        "min_ram_gb": 4
+      },
+      "performance": {
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": 0.12
+      }
+    },
+    "parakeet-onnx-tdt-0.6b-v2": {
+      "id": "parakeet-onnx-tdt-0.6b-v2",
+      "runtime": "nemo-onnx",
+      "runtime_model_id": "nvidia/parakeet-tdt-0.6b-v2",
+      "name": "NVIDIA Parakeet ONNX TDT 0.6B v2",
+      "source": "nvidia/parakeet-tdt-0.6b-v2",
+      "size_gb": 0.6,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet TDT 0.6B v2 via ONNX Runtime for accurate English-only\ntranscription. TDT (Token-and-Duration Transducer) provides better accuracy\nthan CTC while maintaining fast inference.\n\nSame model accuracy as the NeMo variant but runs on ONNX Runtime for\nlighter deployment and better CPU performance.\n\nNOTE: Outputs lowercase text without punctuation.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 2,
+        "supports_cpu": true,
+        "min_ram_gb": 4
+      },
+      "performance": {
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": 0.12
+      }
+    },
+    "parakeet-onnx-tdt-0.6b-v3": {
+      "id": "parakeet-onnx-tdt-0.6b-v3",
+      "runtime": "nemo-onnx",
+      "runtime_model_id": "nvidia/parakeet-tdt-0.6b-v3",
+      "name": "NVIDIA Parakeet ONNX TDT 0.6B v3",
+      "source": "nvidia/parakeet-tdt-0.6b-v3",
+      "size_gb": 0.6,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet TDT 0.6B v3 via ONNX Runtime for accurate English-only\ntranscription with automatic punctuation and capitalization.\nTDT (Token-and-Duration Transducer) provides best accuracy among 0.6B models.\n64% faster than RNNT while achieving lower WER.\n\nSame model accuracy as the NeMo variant but runs on ONNX Runtime for\nlighter deployment and better CPU performance.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": true,
+        "capitalization": true,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 2,
+        "supports_cpu": true,
+        "min_ram_gb": 4
+      },
+      "performance": {
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": 0.12
       }
     },
     "parakeet-tdt-0.6b-v3": {
@@ -1013,7 +1100,7 @@
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "Lightweight ONNX Runtime engine for NVIDIA Parakeet CTC transcription models.\nUses the onnx-asr library for fast inference without the full NeMo toolkit.\n\nM41: This is a new runtime that provides the same Parakeet CTC model accuracy\nwith significantly smaller container images (~1GB vs ~12GB) and faster startup.\nUses ONNX Runtime for inference and supports both CPU and GPU execution.\n\nSupported models:\n  - nvidia/parakeet-ctc-0.6b (fast, 600M params)\n  - nvidia/parakeet-ctc-1.1b (accurate, 1.1B params)\n\nAll Parakeet CTC models produce native word-level timestamps without needing\na separate alignment stage.",
+      "description": "Lightweight ONNX Runtime engine for NVIDIA Parakeet transcription models.\nUses the onnx-asr library for fast inference without the full NeMo toolkit.\nSupports CTC, TDT, and RNNT decoders.\n\nM41: This runtime provides the same Parakeet model accuracy with significantly\nsmaller container images (~1GB vs ~12GB) and faster startup. Uses ONNX Runtime\nfor inference and supports both CPU and GPU execution.\n\nSupported models:\n  - nvidia/parakeet-ctc-0.6b (CTC, fast, 600M params)\n  - nvidia/parakeet-ctc-1.1b (CTC, accurate, 1.1B params)\n  - nvidia/parakeet-tdt-0.6b-v2 (TDT, English-only, 600M params)\n  - nvidia/parakeet-tdt-0.6b-v3 (TDT, punctuation + capitalization, 600M params)\n  - nvidia/parakeet-rnnt-0.6b (RNNT, English-only, 600M params)\n\nAll models produce native word-level timestamps without needing a separate\nalignment stage.",
       "image": "dalston/stt-batch-transcribe-nemo-onnx:1.0.0",
       "capabilities": {
         "stages": [

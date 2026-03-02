@@ -42,16 +42,27 @@ class TestParakeetOnnxEngineModelVariants:
         assert "nvidia/parakeet-ctc-0.6b" in ParakeetOnnxEngine.SUPPORTED_MODELS
         assert "nvidia/parakeet-ctc-1.1b" in ParakeetOnnxEngine.SUPPORTED_MODELS
 
-    def test_supported_models_excludes_tdt(self):
-        """Test that TDT models are NOT supported (CTC-only for ONNX)."""
+    def test_supported_models_include_tdt_variants(self):
+        """Test that TDT model variants are supported."""
         ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        assert "nvidia/parakeet-tdt-0.6b-v2" in ParakeetOnnxEngine.SUPPORTED_MODELS
+        assert "nvidia/parakeet-tdt-0.6b-v3" in ParakeetOnnxEngine.SUPPORTED_MODELS
+
+    def test_supported_models_include_rnnt_variant(self):
+        """Test that RNNT model variant is supported."""
+        ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        assert "nvidia/parakeet-rnnt-0.6b" in ParakeetOnnxEngine.SUPPORTED_MODELS
+
+    def test_supported_models_excludes_unavailable(self):
+        """Test that models without ONNX conversions are not supported."""
+        ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        # TDT 1.1b has no ONNX conversion available
         assert "nvidia/parakeet-tdt-1.1b" not in ParakeetOnnxEngine.SUPPORTED_MODELS
-        assert "nvidia/parakeet-tdt-0.6b-v3" not in ParakeetOnnxEngine.SUPPORTED_MODELS
 
     def test_supported_models_count(self):
-        """Test that exactly 2 CTC models are supported."""
+        """Test that all 5 ONNX models are supported."""
         ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        assert len(ParakeetOnnxEngine.SUPPORTED_MODELS) == 2
+        assert len(ParakeetOnnxEngine.SUPPORTED_MODELS) == 5
 
 
 class TestParakeetOnnxEngineHealthCheck:
@@ -144,7 +155,7 @@ class TestParakeetOnnxEngineModelLoading:
     """Tests for model loading and validation."""
 
     def test_ensure_model_loaded_rejects_unsupported(self):
-        """Test that loading an unsupported model raises ValueError."""
+        """Test that loading a model without ONNX conversion raises ValueError."""
         ParakeetOnnxEngine = load_parakeet_onnx_engine()
         engine = ParakeetOnnxEngine()
 
@@ -160,11 +171,53 @@ class TestParakeetOnnxEngineModelLoading:
             engine._ensure_model_loaded("some-random-model")
 
 
+class TestParakeetOnnxDecoderTypeDetection:
+    """Tests for decoder type extraction and alignment method mapping."""
+
+    def test_ctc_decoder_type(self):
+        """Test that CTC model IDs produce ctc decoder type."""
+        ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        assert ParakeetOnnxEngine._get_decoder_type("nvidia/parakeet-ctc-0.6b") == "ctc"
+        assert ParakeetOnnxEngine._get_decoder_type("nvidia/parakeet-ctc-1.1b") == "ctc"
+
+    def test_tdt_decoder_type(self):
+        """Test that TDT model IDs produce tdt decoder type."""
+        ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        assert ParakeetOnnxEngine._get_decoder_type("nvidia/parakeet-tdt-0.6b-v2") == "tdt"
+        assert ParakeetOnnxEngine._get_decoder_type("nvidia/parakeet-tdt-0.6b-v3") == "tdt"
+
+    def test_rnnt_decoder_type(self):
+        """Test that RNNT model IDs produce rnnt decoder type."""
+        ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        assert ParakeetOnnxEngine._get_decoder_type("nvidia/parakeet-rnnt-0.6b") == "rnnt"
+
+    def test_alignment_method_ctc(self):
+        """Test that CTC maps to AlignmentMethod.CTC."""
+        from dalston.common.pipeline_types import AlignmentMethod
+
+        ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        assert ParakeetOnnxEngine._alignment_method_for("ctc") == AlignmentMethod.CTC
+
+    def test_alignment_method_tdt(self):
+        """Test that TDT maps to AlignmentMethod.TDT."""
+        from dalston.common.pipeline_types import AlignmentMethod
+
+        ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        assert ParakeetOnnxEngine._alignment_method_for("tdt") == AlignmentMethod.TDT
+
+    def test_alignment_method_rnnt(self):
+        """Test that RNNT maps to AlignmentMethod.RNNT."""
+        from dalston.common.pipeline_types import AlignmentMethod
+
+        ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        assert ParakeetOnnxEngine._alignment_method_for("rnnt") == AlignmentMethod.RNNT
+
+
 class TestParakeetOnnxCatalogIntegration:
     """Tests for Parakeet ONNX integration with the model catalog (M41)."""
 
-    def test_onnx_models_exist_in_catalog(self):
-        """Test that ONNX model entries exist in the catalog."""
+    def test_onnx_ctc_models_exist_in_catalog(self):
+        """Test that CTC ONNX model entries exist in the catalog."""
         from dalston.orchestrator.catalog import get_catalog
 
         catalog = get_catalog()
@@ -174,17 +227,41 @@ class TestParakeetOnnxCatalogIntegration:
         assert model_06 is not None, "parakeet-onnx-ctc-0.6b not found in catalog"
         assert model_11 is not None, "parakeet-onnx-ctc-1.1b not found in catalog"
 
+    def test_onnx_tdt_models_exist_in_catalog(self):
+        """Test that TDT ONNX model entries exist in the catalog."""
+        from dalston.orchestrator.catalog import get_catalog
+
+        catalog = get_catalog()
+        model_v2 = catalog.get_model("parakeet-onnx-tdt-0.6b-v2")
+        model_v3 = catalog.get_model("parakeet-onnx-tdt-0.6b-v3")
+
+        assert model_v2 is not None, "parakeet-onnx-tdt-0.6b-v2 not found in catalog"
+        assert model_v3 is not None, "parakeet-onnx-tdt-0.6b-v3 not found in catalog"
+
+    def test_onnx_rnnt_model_exists_in_catalog(self):
+        """Test that RNNT ONNX model entry exists in the catalog."""
+        from dalston.orchestrator.catalog import get_catalog
+
+        catalog = get_catalog()
+        model = catalog.get_model("parakeet-onnx-rnnt-0.6b")
+
+        assert model is not None, "parakeet-onnx-rnnt-0.6b not found in catalog"
+
     def test_onnx_models_use_nemo_onnx_runtime(self):
-        """Test that ONNX models map to nemo-onnx runtime."""
+        """Test that all ONNX models map to nemo-onnx runtime."""
         from dalston.orchestrator.catalog import get_catalog
 
         catalog = get_catalog()
 
-        runtime_06 = catalog.get_runtime_for_model("parakeet-onnx-ctc-0.6b")
-        runtime_11 = catalog.get_runtime_for_model("parakeet-onnx-ctc-1.1b")
-
-        assert runtime_06 == "nemo-onnx"
-        assert runtime_11 == "nemo-onnx"
+        for model_id in [
+            "parakeet-onnx-ctc-0.6b",
+            "parakeet-onnx-ctc-1.1b",
+            "parakeet-onnx-tdt-0.6b-v2",
+            "parakeet-onnx-tdt-0.6b-v3",
+            "parakeet-onnx-rnnt-0.6b",
+        ]:
+            runtime = catalog.get_runtime_for_model(model_id)
+            assert runtime == "nemo-onnx", f"{model_id} should use nemo-onnx runtime"
 
     def test_onnx_models_have_correct_runtime_model_ids(self):
         """Test that ONNX models map to correct HuggingFace model IDs."""
@@ -192,11 +269,19 @@ class TestParakeetOnnxCatalogIntegration:
 
         catalog = get_catalog()
 
-        id_06 = catalog.get_runtime_model_id("parakeet-onnx-ctc-0.6b")
-        id_11 = catalog.get_runtime_model_id("parakeet-onnx-ctc-1.1b")
+        expected = {
+            "parakeet-onnx-ctc-0.6b": "nvidia/parakeet-ctc-0.6b",
+            "parakeet-onnx-ctc-1.1b": "nvidia/parakeet-ctc-1.1b",
+            "parakeet-onnx-tdt-0.6b-v2": "nvidia/parakeet-tdt-0.6b-v2",
+            "parakeet-onnx-tdt-0.6b-v3": "nvidia/parakeet-tdt-0.6b-v3",
+            "parakeet-onnx-rnnt-0.6b": "nvidia/parakeet-rnnt-0.6b",
+        }
 
-        assert id_06 == "nvidia/parakeet-ctc-0.6b"
-        assert id_11 == "nvidia/parakeet-ctc-1.1b"
+        for model_id, expected_runtime_id in expected.items():
+            actual = catalog.get_runtime_model_id(model_id)
+            assert actual == expected_runtime_id, (
+                f"{model_id}: expected {expected_runtime_id}, got {actual}"
+            )
 
     def test_onnx_models_support_cpu(self):
         """Test that ONNX models support CPU (unlike NeMo variants)."""
@@ -205,7 +290,7 @@ class TestParakeetOnnxCatalogIntegration:
         catalog = get_catalog()
         onnx_models = catalog.get_models_for_runtime("nemo-onnx")
 
-        assert len(onnx_models) >= 2
+        assert len(onnx_models) >= 5
         for model in onnx_models:
             assert model.supports_cpu is True, (
                 f"ONNX model {model.id} should support CPU"
@@ -243,7 +328,7 @@ class TestParakeetOnnxCatalogIntegration:
         assert engine is not None
         assert engine.capabilities.languages == ["en"]
 
-    def test_dag_skips_align_for_onnx(self):
+    def test_dag_skips_align_for_onnx_ctc(self):
         """Test that DAG builder skips align stage for ONNX CTC models."""
         from uuid import uuid4
 
@@ -259,10 +344,47 @@ class TestParakeetOnnxCatalogIntegration:
         tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
         stages = [t.stage for t in tasks]
 
-        # CTC has native word timestamps, so align should be skipped
         assert "align" not in stages
         assert "transcribe" in stages
         assert "merge" in stages
+
+    def test_dag_skips_align_for_onnx_tdt(self):
+        """Test that DAG builder skips align stage for ONNX TDT models."""
+        from uuid import uuid4
+
+        from tests.dag_test_helpers import build_task_dag_for_test
+
+        job_id = uuid4()
+        audio_uri = "s3://test/audio.wav"
+        parameters = {
+            "engine_transcribe": "parakeet-onnx-tdt-0.6b-v3",
+            "timestamps_granularity": "word",
+        }
+
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
+        stages = [t.stage for t in tasks]
+
+        assert "align" not in stages
+        assert "transcribe" in stages
+
+    def test_dag_skips_align_for_onnx_rnnt(self):
+        """Test that DAG builder skips align stage for ONNX RNNT models."""
+        from uuid import uuid4
+
+        from tests.dag_test_helpers import build_task_dag_for_test
+
+        job_id = uuid4()
+        audio_uri = "s3://test/audio.wav"
+        parameters = {
+            "engine_transcribe": "parakeet-onnx-rnnt-0.6b",
+            "timestamps_granularity": "word",
+        }
+
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
+        stages = [t.stage for t in tasks]
+
+        assert "align" not in stages
+        assert "transcribe" in stages
 
 
 class TestParakeetOnnxTokensToWords:

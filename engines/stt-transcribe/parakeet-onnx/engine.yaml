@@ -5,19 +5,23 @@ stage: transcribe
 name: NVIDIA Parakeet ONNX Runtime
 version: 1.0.0
 description: |
-  Lightweight ONNX Runtime engine for NVIDIA Parakeet CTC transcription models.
+  Lightweight ONNX Runtime engine for NVIDIA Parakeet transcription models.
   Uses the onnx-asr library for fast inference without the full NeMo toolkit.
+  Supports CTC, TDT, and RNNT decoders.
 
-  M41: This is a new runtime that provides the same Parakeet CTC model accuracy
-  with significantly smaller container images (~1GB vs ~12GB) and faster startup.
-  Uses ONNX Runtime for inference and supports both CPU and GPU execution.
+  M41: This runtime provides the same Parakeet model accuracy with significantly
+  smaller container images (~1GB vs ~12GB) and faster startup. Uses ONNX Runtime
+  for inference and supports both CPU and GPU execution.
 
   Supported models:
-    - nvidia/parakeet-ctc-0.6b (fast, 600M params)
-    - nvidia/parakeet-ctc-1.1b (accurate, 1.1B params)
+    - nvidia/parakeet-ctc-0.6b (CTC, fast, 600M params)
+    - nvidia/parakeet-ctc-1.1b (CTC, accurate, 1.1B params)
+    - nvidia/parakeet-tdt-0.6b-v2 (TDT, English-only, 600M params)
+    - nvidia/parakeet-tdt-0.6b-v3 (TDT, punctuation + capitalization, 600M params)
+    - nvidia/parakeet-rnnt-0.6b (RNNT, English-only, 600M params)
 
-  All Parakeet CTC models produce native word-level timestamps without needing
-  a separate alignment stage.
+  All models produce native word-level timestamps without needing a separate
+  alignment stage.
 
 container:
   gpu: optional

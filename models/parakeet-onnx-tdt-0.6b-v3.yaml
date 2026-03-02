@@ -1,0 +1,40 @@
+# Model catalog entry for parakeet-onnx-tdt-0.6b-v3
+# M41: ONNX Runtime variant of Parakeet TDT 0.6B v3
+
+schema_version: "1.1"
+id: parakeet-onnx-tdt-0.6b-v3
+runtime: nemo-onnx
+runtime_model_id: "nvidia/parakeet-tdt-0.6b-v3"  # HuggingFace model, ONNX runtime
+
+name: NVIDIA Parakeet ONNX TDT 0.6B v3
+source: nvidia/parakeet-tdt-0.6b-v3
+size_gb: 0.6
+stage: transcribe
+
+description: |
+  NVIDIA Parakeet TDT 0.6B v3 via ONNX Runtime for accurate English-only
+  transcription with automatic punctuation and capitalization.
+  TDT (Token-and-Duration Transducer) provides best accuracy among 0.6B models.
+  64% faster than RNNT while achieving lower WER.
+
+  Same model accuracy as the NeMo variant but runs on ONNX Runtime for
+  lighter deployment and better CPU performance.
+
+languages:
+  - en
+
+capabilities:
+  word_timestamps: true
+  punctuation: true
+  capitalization: true
+  streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  min_vram_gb: 2
+  supports_cpu: true
+  min_ram_gb: 4
+
+performance:
+  rtf_gpu: 0.0003
+  rtf_cpu: 0.12

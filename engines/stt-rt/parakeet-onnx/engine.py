@@ -2,15 +2,16 @@
 
 Uses ONNX Runtime via the onnx-asr library for low-latency transcription
 of VAD-segmented utterances. The SessionHandler provides VAD-based chunking,
-and this engine transcribes each utterance using Parakeet CTC via ONNX.
+and this engine transcribes each utterance using Parakeet CTC/TDT/RNNT via ONNX.
 
-Unlike the NeMo RNNT-based real-time engine, this uses CTC models which
-don't support native streaming but work well with VAD-chunked audio.
+Unlike the NeMo-based real-time engine, this uses ONNX Runtime which
+doesn't support native streaming but works well with VAD-chunked audio.
 The tradeoff is simpler deployment (no NeMo/PyTorch) at the cost of
 slightly higher per-utterance latency.
 
 Environment variables:
-    DALSTON_MODEL_VARIANT: Model variant (ctc-0.6b, ctc-1.1b). Defaults to ctc-0.6b.
+    DALSTON_MODEL_VARIANT: Model variant (ctc-0.6b, ctc-1.1b, tdt-0.6b-v2,
+        tdt-0.6b-v3, rnnt-0.6b). Defaults to ctc-0.6b.
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cpu.
     DALSTON_QUANTIZATION: ONNX quantization level (none, int8). Defaults to none.
 """
@@ -29,22 +30,28 @@ logger = structlog.get_logger()
 _VARIANT_TO_ONNX_ASR = {
     "ctc-0.6b": "nemo-parakeet-ctc-0.6b",
     "ctc-1.1b": "nemo-parakeet-ctc-1.1b",
+    "tdt-0.6b-v2": "nemo-parakeet-tdt-0.6b-v2",
+    "tdt-0.6b-v3": "nemo-parakeet-tdt-0.6b-v3",
+    "rnnt-0.6b": "nemo-parakeet-rnnt-0.6b",
 }
 
 
 class ParakeetOnnxStreamingEngine(RealtimeEngine):
-    """Real-time transcription using Parakeet CTC via ONNX Runtime.
+    """Real-time transcription using Parakeet via ONNX Runtime.
 
     Uses VAD-chunked transcription (not native streaming). The SDK's
     SessionHandler accumulates audio until a speech endpoint, then
     calls transcribe() on the accumulated chunk.
+
+    Supports CTC, TDT, and RNNT decoder variants.
 
     Environment variables:
         DALSTON_WORKER_ID: Unique identifier for this worker (required)
         DALSTON_WORKER_PORT: WebSocket server port (default: 9000)
         DALSTON_MAX_SESSIONS: Maximum concurrent sessions (default: 4)
         REDIS_URL: Redis connection URL (default: redis://localhost:6379)
-        DALSTON_MODEL_VARIANT: Model variant (ctc-0.6b, ctc-1.1b). Defaults to ctc-0.6b.
+        DALSTON_MODEL_VARIANT: Model variant (ctc-0.6b, ctc-1.1b, tdt-0.6b-v2,
+            tdt-0.6b-v3, rnnt-0.6b). Defaults to ctc-0.6b.
         DALSTON_DEVICE: Device to use (cuda, cpu). Defaults to cpu.
         DALSTON_QUANTIZATION: ONNX quantization level (none, int8). Defaults to none.
     """
@@ -220,7 +227,7 @@ class ParakeetOnnxStreamingEngine(RealtimeEngine):
         )
 
     def supports_streaming(self) -> bool:
-        """CTC models don't support native streaming."""
+        """ONNX models don't support native streaming (use VAD-chunked mode)."""
         return False
 
     def get_models(self) -> list[str]:

@@ -1,8 +1,8 @@
 """NVIDIA Parakeet ONNX transcription engine.
 
 Uses ONNX Runtime via the onnx-asr library for fast, lightweight inference
-of Parakeet CTC models without the full NeMo toolkit. Produces native
-word-level timestamps without requiring a separate alignment stage.
+of Parakeet CTC, TDT, and RNNT models without the full NeMo toolkit. Produces
+native word-level timestamps without requiring a separate alignment stage.
 
 Advantages over the NeMo runtime:
   - ~12x smaller container image (~1GB vs ~12GB)
@@ -13,6 +13,9 @@ Advantages over the NeMo runtime:
 Supported models:
   - nvidia/parakeet-ctc-0.6b: Fastest inference, 600M params
   - nvidia/parakeet-ctc-1.1b: Higher accuracy, 1.1B params
+  - nvidia/parakeet-tdt-0.6b-v2: TDT decoder, 600M params, English-only
+  - nvidia/parakeet-tdt-0.6b-v3: TDT decoder, 600M params, punctuation + capitalization
+  - nvidia/parakeet-rnnt-0.6b: RNNT decoder, 600M params, English-only
 
 Environment variables:
     DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "nemo-onnx")
@@ -41,15 +44,21 @@ from dalston.engine_sdk import (
 _ONNX_ASR_MODEL_MAP = {
     "nvidia/parakeet-ctc-0.6b": "nemo-parakeet-ctc-0.6b",
     "nvidia/parakeet-ctc-1.1b": "nemo-parakeet-ctc-1.1b",
+    "nvidia/parakeet-tdt-0.6b-v2": "nemo-parakeet-tdt-0.6b-v2",
+    "nvidia/parakeet-tdt-0.6b-v3": "nemo-parakeet-tdt-0.6b-v3",
+    "nvidia/parakeet-rnnt-0.6b": "nemo-parakeet-rnnt-0.6b",
 }
+
+# Decoder type extracted from model ID for alignment method reporting
+_DECODER_TYPES = {"ctc", "tdt", "rnnt"}
 
 
 class ParakeetOnnxEngine(Engine):
     """NVIDIA Parakeet transcription engine using ONNX Runtime.
 
-    Uses the onnx-asr library for efficient inference of Parakeet CTC models.
-    Automatically handles audio preprocessing, ONNX inference, and CTC decoding
-    with word-level timestamp extraction.
+    Uses the onnx-asr library for efficient inference of Parakeet CTC, TDT,
+    and RNNT models. Automatically handles audio preprocessing, ONNX inference,
+    and decoding with word-level timestamp extraction.
 
     Supports both GPU (CUDA/TensorRT) and CPU inference. CPU inference with
     INT8 quantization achieves competitive performance for batch processing.
@@ -58,6 +67,9 @@ class ParakeetOnnxEngine(Engine):
     SUPPORTED_MODELS = {
         "nvidia/parakeet-ctc-0.6b",
         "nvidia/parakeet-ctc-1.1b",
+        "nvidia/parakeet-tdt-0.6b-v2",
+        "nvidia/parakeet-tdt-0.6b-v3",
+        "nvidia/parakeet-rnnt-0.6b",
     }
 
     DEFAULT_MODEL_ID = "nvidia/parakeet-ctc-0.6b"
@@ -225,13 +237,17 @@ class ParakeetOnnxEngine(Engine):
         runtime_model_id = config.get("runtime_model_id", self._default_model_id)
         self._ensure_model_loaded(runtime_model_id)
 
+        # Determine decoder type from model ID for alignment method
+        decoder_type = self._get_decoder_type(runtime_model_id)
+
         self.logger.info("transcribing", audio_path=str(audio_path))
 
         # Run transcription via onnx-asr (handles preprocessing + inference + decoding)
         result = self._model.recognize(str(audio_path))
 
         # Parse the onnx-asr result into Dalston output format
-        text, segments, all_words = self._parse_result(result)
+        alignment_method = self._alignment_method_for(decoder_type)
+        text, segments, all_words = self._parse_result(result, alignment_method)
 
         self.logger.info(
             "transcription_complete",
@@ -254,7 +270,7 @@ class ParakeetOnnxEngine(Engine):
             language_confidence=1.0,
             timestamp_granularity_requested=TimestampGranularity.WORD,
             timestamp_granularity_actual=timestamp_granularity_actual,
-            alignment_method=AlignmentMethod.CTC,
+            alignment_method=alignment_method,
             channel=channel,
             engine_id=self._engine_id,
             skipped=False,
@@ -264,8 +280,34 @@ class ParakeetOnnxEngine(Engine):
 
         return TaskOutput(data=output)
 
+    @staticmethod
+    def _get_decoder_type(runtime_model_id: str) -> str:
+        """Extract decoder type (ctc, tdt, rnnt) from a model ID.
+
+        Args:
+            runtime_model_id: Model ID like "nvidia/parakeet-ctc-0.6b"
+
+        Returns:
+            Decoder type string ("ctc", "tdt", or "rnnt")
+        """
+        model_name = runtime_model_id.split("/")[-1]  # "parakeet-ctc-0.6b"
+        parts = model_name.split("-")
+        for part in parts:
+            if part in _DECODER_TYPES:
+                return part
+        return "ctc"
+
+    @staticmethod
+    def _alignment_method_for(decoder_type: str) -> AlignmentMethod:
+        """Map decoder type to AlignmentMethod enum."""
+        if decoder_type == "tdt":
+            return AlignmentMethod.TDT
+        if decoder_type == "rnnt":
+            return AlignmentMethod.RNNT
+        return AlignmentMethod.CTC
+
     def _parse_result(
-        self, result: Any
+        self, result: Any, alignment_method: AlignmentMethod = AlignmentMethod.CTC
     ) -> tuple[str, list[Segment], list[Word]]:
         """Parse onnx-asr recognition result into Dalston types.
 
@@ -274,6 +316,7 @@ class ParakeetOnnxEngine(Engine):
 
         Args:
             result: onnx-asr recognition result
+            alignment_method: Alignment method to tag words with
 
         Returns:
             Tuple of (full_text, segments, all_words)
@@ -298,13 +341,13 @@ class ParakeetOnnxEngine(Engine):
                     start=round(float(w.start), 3),
                     end=round(float(w.end), 3),
                     confidence=None,
-                    alignment_method=AlignmentMethod.CTC,
+                    alignment_method=alignment_method,
                 )
                 if word.text:
                     all_words.append(word)
         elif hasattr(result, "tokens") and result.tokens:
             # Fall back to token-level timestamps and group into words
-            all_words = self._tokens_to_words(result.tokens)
+            all_words = self._tokens_to_words(result.tokens, alignment_method)
 
         segments: list[Segment] = []
         if all_words:
@@ -327,7 +370,9 @@ class ParakeetOnnxEngine(Engine):
 
         return text, segments, all_words
 
-    def _tokens_to_words(self, tokens: Any) -> list[Word]:
+    def _tokens_to_words(
+        self, tokens: Any, alignment_method: AlignmentMethod = AlignmentMethod.CTC
+    ) -> list[Word]:
         """Group subword tokens into words using SentencePiece boundaries.
 
         SentencePiece uses the \u2581 (LOWER ONE EIGHTH BLOCK) character to mark
@@ -335,6 +380,7 @@ class ParakeetOnnxEngine(Engine):
 
         Args:
             tokens: List of token objects with text, start, end attributes
+            alignment_method: Alignment method to tag words with
 
         Returns:
             List of Word objects grouped at word level
@@ -360,7 +406,7 @@ class ParakeetOnnxEngine(Engine):
                             start=round(current_start, 3),
                             end=round(current_end, 3),
                             confidence=None,
-                            alignment_method=AlignmentMethod.CTC,
+                            alignment_method=alignment_method,
                         )
                     )
                 current_text_parts = [token_text]
@@ -403,7 +449,7 @@ class ParakeetOnnxEngine(Engine):
         """Return ONNX engine capabilities."""
         return EngineCapabilities(
             engine_id=self._engine_id,
-            version="1.0.0",
+            version="1.1.0",
             stages=["transcribe"],
             languages=["en"],
             supports_word_timestamps=True,
