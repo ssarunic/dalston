@@ -680,3 +680,80 @@ class RealtimeSessionModel(Base):
         remote_side="RealtimeSessionModel.id"
     )
     retention_policy: Mapped["RetentionPolicyModel | None"] = relationship()
+
+
+# =============================================================================
+# Model Registry (M40)
+# =============================================================================
+
+
+class ModelRegistryModel(Base):
+    """Model registry entry tracking available models and their status.
+
+    This table tracks ML models available to Dalston engines:
+    - Download status (not_downloaded, downloading, ready, failed)
+    - Runtime mapping (which engine can load this model)
+    - Capabilities (word timestamps, punctuation, streaming)
+    - Hardware requirements (VRAM, RAM, CPU support)
+    - HuggingFace metadata cache
+
+    Models are identified by a Dalston model ID (e.g., "parakeet-tdt-1.1b")
+    which maps to a runtime_model_id (e.g., "nvidia/parakeet-tdt-1.1b").
+    """
+
+    __tablename__ = "models"
+
+    # Identity - Dalston model ID (e.g., "parakeet-tdt-1.1b", "faster-whisper-large-v3")
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    # Runtime mapping - which engine runtime loads this model
+    runtime: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    runtime_model_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    stage: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+
+    # Download status
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="not_downloaded", index=True
+    )
+    download_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    downloaded_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+
+    # Source and library info (for HuggingFace card routing)
+    source: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    library_name: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    languages: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
+    # Capabilities
+    word_timestamps: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    punctuation: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    streaming: Mapped[bool] = mapped_column(Boolean, server_default="false")
+
+    # Hardware requirements
+    min_vram_gb: Mapped[float | None] = mapped_column(Float, nullable=True)
+    min_ram_gb: Mapped[float | None] = mapped_column(Float, nullable=True)
+    supports_cpu: Mapped[bool] = mapped_column(Boolean, server_default="true")
+
+    # Metadata cache (HuggingFace card data, download stats, etc.)
+    model_metadata: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+
+    # Usage tracking
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
