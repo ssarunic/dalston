@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from dalston.common.models import JobStatus, TaskStatus
+from dalston.common.retention import RETENTION_DEFAULT_DAYS
 from dalston.db.models import JobModel, TaskModel
 
 
@@ -54,8 +55,7 @@ class JobsService:
         audio_sample_rate: int | None = None,
         audio_channels: int | None = None,
         audio_bit_depth: int | None = None,
-        # Retention: 0=transient, -1=permanent, N=days
-        retention: int = 30,
+        retention: int = RETENTION_DEFAULT_DAYS,
         # PII fields (M26)
         pii_detection_enabled: bool = False,
         pii_entity_types: list[str] | None = None,

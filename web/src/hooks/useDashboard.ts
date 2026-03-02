@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import { useAuth } from '@/contexts/AuthContext'
+import { POLL_INTERVAL_STANDARD_MS, QUERY_RETRY_COUNT } from '@/lib/queryTimings'
 
 export function useDashboard() {
   const { isAuthenticated, isLoading: authLoading } = useAuth()
@@ -8,8 +9,8 @@ export function useDashboard() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['dashboard'],
     queryFn: () => apiClient.getDashboard(),
-    refetchInterval: 5000,
-    retry: 1,
+    refetchInterval: POLL_INTERVAL_STANDARD_MS,
+    retry: QUERY_RETRY_COUNT,
     enabled: isAuthenticated && !authLoading,
   })
 

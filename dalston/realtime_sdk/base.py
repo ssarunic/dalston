@@ -32,6 +32,11 @@ from dalston.common.audio_defaults import (
     MIN_SAMPLE_RATE,
 )
 from dalston.common.timeouts import WS_PING_INTERVAL, WS_PING_TIMEOUT
+from dalston.common.ws_close_codes import (
+    WS_CLOSE_POLICY_VIOLATION,
+    WS_CLOSE_PROTOCOL_ERROR,
+    WS_CLOSE_TRY_AGAIN_LATER,
+)
 from dalston.realtime_sdk.assembler import TranscribeResult
 from dalston.realtime_sdk.registry import WorkerInfo, WorkerRegistry
 from dalston.realtime_sdk.session import SessionConfig, SessionHandler
@@ -470,19 +475,19 @@ class RealtimeEngine(ABC):
 
         # Only accept /session path
         if not path.startswith("/session"):
-            await websocket.close(1008, "Invalid path")
+            await websocket.close(WS_CLOSE_POLICY_VIOLATION, "Invalid path")
             return
 
         # Check capacity
         if len(self._sessions) >= self.max_sessions:
-            await websocket.close(1013, "Server at capacity")
+            await websocket.close(WS_CLOSE_TRY_AGAIN_LATER, "Server at capacity")
             return
 
         # Parse query parameters
         try:
             config = self._parse_connection_params(path)
         except ValueError as e:
-            await websocket.close(1002, f"Invalid parameter: {e}")
+            await websocket.close(WS_CLOSE_PROTOCOL_ERROR, f"Invalid parameter: {e}")
             return
 
         # Create session handler

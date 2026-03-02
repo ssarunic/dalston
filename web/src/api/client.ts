@@ -1,4 +1,5 @@
 import ky, { type KyInstance } from 'ky'
+import { QUERY_RETRY_COUNT, REQUEST_TIMEOUT_MS } from '@/lib/queryTimings'
 import type {
   APIKeyCreatedResponse,
   APIKeyListResponse,
@@ -44,8 +45,8 @@ function createClient(apiKey?: string | null): KyInstance {
 
   return ky.create({
     prefixUrl: '/',
-    timeout: 30000,
-    retry: 1,
+    timeout: REQUEST_TIMEOUT_MS,
+    retry: QUERY_RETRY_COUNT,
     headers,
   })
 }

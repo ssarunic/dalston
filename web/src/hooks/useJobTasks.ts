@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
+import { POLL_INTERVAL_ACTIVE_MS, QUERY_RETRY_NONE } from '@/lib/queryTimings'
 import type { TaskStatus } from '@/api/types'
 
 const TERMINAL_STATUSES: TaskStatus[] = ['completed', 'failed', 'skipped', 'cancelled']
@@ -14,10 +15,10 @@ export function useJobTasks(jobId: string | undefined) {
     queryKey: ['job-tasks', jobId],
     queryFn: () => apiClient.getJobTasks(jobId!),
     enabled: !!jobId,
-    retry: false,
+    retry: QUERY_RETRY_NONE,
     refetchInterval: (query) => {
       // Only poll if there are non-terminal tasks
-      return hasNonTerminalTasks(query.state.data?.tasks) ? 2000 : false
+      return hasNonTerminalTasks(query.state.data?.tasks) ? POLL_INTERVAL_ACTIVE_MS : false
     },
   })
 }

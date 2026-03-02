@@ -29,6 +29,11 @@ from dalston.common.timeouts import (
     WS_PING_INTERVAL,
     WS_PING_TIMEOUT,
 )
+from dalston.common.ws_close_codes import (
+    WS_CLOSE_INVALID_REQUEST,
+    WS_CLOSE_RATE_LIMITED,
+    WS_CLOSE_SERVICE_UNAVAILABLE,
+)
 from dalston.config import get_settings
 from dalston.db.session import get_db as _get_db
 from dalston.gateway.dependencies import get_session_router
@@ -163,7 +168,7 @@ async def _check_realtime_rate_limits(
                 },
             }
         )
-        await websocket.close(code=4429, reason="Rate limit exceeded")
+        await websocket.close(code=WS_CLOSE_RATE_LIMITED, reason="Rate limit exceeded")
         return False
 
     await rate_limiter.increment_concurrent_sessions(tenant_id)
@@ -248,13 +253,15 @@ async def openai_realtime_transcription(
     """
     # Validate intent
     if intent != "transcription":
-        await websocket.close(code=4400, reason=f"Unsupported intent: {intent}")
+        await websocket.close(
+            code=WS_CLOSE_INVALID_REQUEST, reason=f"Unsupported intent: {intent}"
+        )
         return
 
     # Validate model
     if not is_openai_realtime_model(model):
         await websocket.close(
-            code=4400,
+            code=WS_CLOSE_INVALID_REQUEST,
             reason=f"Invalid model: {model}. Supported: gpt-4o-transcribe, gpt-4o-mini-transcribe, whisper-1",
         )
         return
@@ -263,7 +270,9 @@ async def openai_realtime_transcription(
     try:
         session_router = get_session_router()
     except Exception:
-        await websocket.close(code=4503, reason="Service unavailable")
+        await websocket.close(
+            code=WS_CLOSE_SERVICE_UNAVAILABLE, reason="Service unavailable"
+        )
         return
 
     # Authenticate BEFORE accepting the connection
@@ -311,7 +320,9 @@ async def openai_realtime_transcription(
                     },
                 }
             )
-            await websocket.close(code=4503, reason="No capacity")
+            await websocket.close(
+                code=WS_CLOSE_SERVICE_UNAVAILABLE, reason="No capacity"
+            )
             return
 
         log = logger.bind(

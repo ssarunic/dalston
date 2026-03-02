@@ -6,6 +6,15 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from dalston.common.retention import (
+    RETENTION_DEFAULT_DAYS,
+    RETENTION_MAX_DAYS,
+    RETENTION_MIN_DAYS,
+    RETENTION_PERMANENT,
+    RETENTION_TRANSIENT,
+    SECONDS_PER_DAY,
+)
+
 # =============================================================================
 # Retention Policy Types (M25)
 # =============================================================================
@@ -37,13 +46,13 @@ def retention_to_ttl_seconds(retention_days: int) -> int | None:
     Returns:
         0 for transient (immediate purge after completion)
         None for permanent (never auto-delete)
-        N*86400 for N days retention
+        N*SECONDS_PER_DAY for N days retention
     """
-    if retention_days == 0:
+    if retention_days == RETENTION_TRANSIENT:
         return 0
-    if retention_days == -1:
+    if retention_days == RETENTION_PERMANENT:
         return None
-    return retention_days * 86400
+    return retention_days * SECONDS_PER_DAY
 
 
 def validate_retention(retention_days: int) -> None:
@@ -55,11 +64,12 @@ def validate_retention(retention_days: int) -> None:
     Raises:
         ValueError: Invalid retention value
     """
-    if retention_days == 0 or retention_days == -1:
+    if retention_days == RETENTION_TRANSIENT or retention_days == RETENTION_PERMANENT:
         return
-    if retention_days < 1 or retention_days > 3650:
+    if retention_days < RETENTION_MIN_DAYS or retention_days > RETENTION_MAX_DAYS:
         raise ValueError(
-            "Retention days must be 0 (transient), -1 (permanent), or 1-3650"
+            f"Retention days must be {RETENTION_TRANSIENT} (transient), "
+            f"{RETENTION_PERMANENT} (permanent), or {RETENTION_MIN_DAYS}-{RETENTION_MAX_DAYS}"
         )
 
 
@@ -72,9 +82,9 @@ def format_retention_display(retention_days: int) -> str:
     Returns:
         Human-readable string: "Transient", "Permanent", "1 day", "30 days"
     """
-    if retention_days == 0:
+    if retention_days == RETENTION_TRANSIENT:
         return "Transient"
-    if retention_days == -1:
+    if retention_days == RETENTION_PERMANENT:
         return "Permanent"
     if retention_days == 1:
         return "1 day"
@@ -96,16 +106,19 @@ def parse_retention(value: str) -> int | None:
             days = int(value[:-1])
         except ValueError as err:
             raise ValueError(f"Invalid retention format: {value}") from err
-        if days < 1 or days > 3650:
-            raise ValueError("Retention days must be between 1 and 3650")
-        return days * 86400
+        if days < RETENTION_MIN_DAYS or days > RETENTION_MAX_DAYS:
+            raise ValueError(
+                f"Retention days must be between {RETENTION_MIN_DAYS} and {RETENTION_MAX_DAYS}"
+            )
+        return days * SECONDS_PER_DAY
     raise ValueError(
         f"Invalid retention format: {value}. "
         "Use 'none', 'forever', or '{N}d' (e.g., '30d')"
     )
 
 
-RETENTION_DEFAULT = 30  # Fallback default; use settings.retention_default_days instead
+# Re-export for backwards compatibility
+RETENTION_DEFAULT = RETENTION_DEFAULT_DAYS
 
 
 # =============================================================================

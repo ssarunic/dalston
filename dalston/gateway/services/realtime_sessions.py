@@ -14,6 +14,7 @@ from dalston.common.models import (
     ArtifactOwnerType,
     retention_to_ttl_seconds,
 )
+from dalston.common.retention import RETENTION_DEFAULT_DAYS
 from dalston.common.utils import parse_session_id
 from dalston.db.models import RealtimeSessionModel
 from dalston.gateway.services.artifacts import ArtifactService
@@ -49,7 +50,7 @@ class RealtimeSessionService:
         engine: str | None = None,
         encoding: str | None = None,
         sample_rate: int | None = None,
-        retention: int = 30,
+        retention: int = RETENTION_DEFAULT_DAYS,
         previous_session_id: UUID | None = None,
     ) -> RealtimeSessionModel:
         """Create a new session record in PostgreSQL.
@@ -251,7 +252,11 @@ class RealtimeSessionService:
             purge_after datetime, or None if should never be purged
         """
         # Use the integer retention field: 0=transient, -1=permanent, N=days
-        retention_days = session.retention if session.retention is not None else 30
+        retention_days = (
+            session.retention
+            if session.retention is not None
+            else RETENTION_DEFAULT_DAYS
+        )
         ttl_seconds = retention_to_ttl_seconds(retention_days)
 
         if ttl_seconds == 0:

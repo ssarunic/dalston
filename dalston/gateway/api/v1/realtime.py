@@ -26,6 +26,11 @@ from dalston.common.timeouts import (
     WS_PING_TIMEOUT,
 )
 from dalston.common.utils import parse_session_id
+from dalston.common.ws_close_codes import (
+    WS_CLOSE_INVALID_REQUEST,
+    WS_CLOSE_RATE_LIMITED,
+    WS_CLOSE_SERVICE_UNAVAILABLE,
+)
 from dalston.config import get_settings
 from dalston.db.session import get_db as _get_db
 from dalston.gateway.dependencies import get_session_router
@@ -86,7 +91,7 @@ async def _check_realtime_rate_limits(
                 "message": f"Concurrent session limit exceeded ({sessions_result.limit} max)",
             }
         )
-        await websocket.close(code=4429, reason="Rate limit exceeded")
+        await websocket.close(code=WS_CLOSE_RATE_LIMITED, reason="Rate limit exceeded")
         return False
 
     # Increment concurrent sessions counter (will be decremented on disconnect)
@@ -204,7 +209,9 @@ async def realtime_transcription(
     try:
         session_router = get_session_router()
     except Exception:
-        await websocket.close(code=4503, reason="Service unavailable")
+        await websocket.close(
+            code=WS_CLOSE_SERVICE_UNAVAILABLE, reason="Service unavailable"
+        )
         return
 
     # Authenticate BEFORE accepting the connection
@@ -252,7 +259,9 @@ async def realtime_transcription(
                     "message": str(e),
                 }
             )
-            await websocket.close(code=4400, reason="Invalid parameters")
+            await websocket.close(
+                code=WS_CLOSE_INVALID_REQUEST, reason="Invalid parameters"
+            )
             return
 
         # Derive storage flags from retention for downstream use
@@ -287,7 +296,9 @@ async def realtime_transcription(
                         "message": f"Invalid JSON in vocabulary: {e}",
                     }
                 )
-                await websocket.close(code=4400, reason="Invalid parameters")
+                await websocket.close(
+                    code=WS_CLOSE_INVALID_REQUEST, reason="Invalid parameters"
+                )
                 return
             except ValueError as e:
                 await websocket.send_json(
@@ -297,7 +308,9 @@ async def realtime_transcription(
                         "message": str(e),
                     }
                 )
-                await websocket.close(code=4400, reason="Invalid parameters")
+                await websocket.close(
+                    code=WS_CLOSE_INVALID_REQUEST, reason="Invalid parameters"
+                )
                 return
 
         # Validate: redact_pii_audio requires pii_detection and storage enabled
@@ -309,7 +322,9 @@ async def realtime_transcription(
                     "message": "redact_pii_audio=true requires pii_detection=true and retention != 0.",
                 }
             )
-            await websocket.close(code=4400, reason="Invalid parameters")
+            await websocket.close(
+                code=WS_CLOSE_INVALID_REQUEST, reason="Invalid parameters"
+            )
             return
 
         # Model parameter: use engine ID directly or None for any available worker
@@ -336,7 +351,9 @@ async def realtime_transcription(
                     "message": "No realtime workers available. Try again later.",
                 }
             )
-            await websocket.close(code=4503, reason="No capacity")
+            await websocket.close(
+                code=WS_CLOSE_SERVICE_UNAVAILABLE, reason="No capacity"
+            )
             return
 
         log = logger.bind(
@@ -568,7 +585,9 @@ async def elevenlabs_realtime_transcription(
     try:
         session_router = get_session_router()
     except Exception:
-        await websocket.close(code=4503, reason="Service unavailable")
+        await websocket.close(
+            code=WS_CLOSE_SERVICE_UNAVAILABLE, reason="Service unavailable"
+        )
         return
 
     # Authenticate BEFORE accepting the connection
@@ -619,11 +638,15 @@ async def elevenlabs_realtime_transcription(
                 await websocket.send_json(
                     {"message_type": "error", "error": f"Invalid JSON in keyterms: {e}"}
                 )
-                await websocket.close(code=4400, reason="Invalid parameters")
+                await websocket.close(
+                    code=WS_CLOSE_INVALID_REQUEST, reason="Invalid parameters"
+                )
                 return
             except ValueError as e:
                 await websocket.send_json({"message_type": "error", "error": str(e)})
-                await websocket.close(code=4400, reason="Invalid parameters")
+                await websocket.close(
+                    code=WS_CLOSE_INVALID_REQUEST, reason="Invalid parameters"
+                )
                 return
 
         # ElevenLabs model_id (scribe_v1, scribe_v2, etc.) is treated as "auto"
@@ -645,7 +668,9 @@ async def elevenlabs_realtime_transcription(
             await websocket.send_json(
                 {"message_type": "error", "error": "No capacity available"}
             )
-            await websocket.close(code=4503, reason="No capacity")
+            await websocket.close(
+                code=WS_CLOSE_SERVICE_UNAVAILABLE, reason="No capacity"
+            )
             return
 
         log = logger.bind(
