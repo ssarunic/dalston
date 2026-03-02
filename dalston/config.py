@@ -122,7 +122,7 @@ class Settings(BaseSettings):
 
     # Default Model
     default_model: str = Field(
-        default="faster-whisper-large-v3-turbo",
+        default="Systran/faster-whisper-base",
         alias="DALSTON_DEFAULT_MODEL",
         description="Default transcription model for OpenAI/ElevenLabs compatible APIs",
     )
