@@ -100,7 +100,7 @@ class TestSessionBeginMessage:
             encoding="pcm_s16le",
             channels=1,
             language="en",
-            model="faster-whisper-large-v3",
+            model="Systran/faster-whisper-large-v3",
         )
         msg = SessionBeginMessage(session_id="sess_123", config=config)
 

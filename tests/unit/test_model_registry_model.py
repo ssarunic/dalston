@@ -128,7 +128,7 @@ class TestModelRegistryModelInstantiation:
         now = datetime.now(UTC)
 
         model = ModelRegistryModel(
-            id="parakeet-tdt-1.1b",
+            id="nvidia/parakeet-tdt-1.1b",
             name="Parakeet TDT 1.1B",
             runtime="nemo",
             runtime_model_id="nvidia/parakeet-tdt-1.1b",
@@ -152,7 +152,7 @@ class TestModelRegistryModelInstantiation:
             updated_at=now,
         )
 
-        assert model.id == "parakeet-tdt-1.1b"
+        assert model.id == "nvidia/parakeet-tdt-1.1b"
         assert model.name == "Parakeet TDT 1.1B"
         assert model.status == "ready"
         assert model.size_bytes == 4_500_000_000

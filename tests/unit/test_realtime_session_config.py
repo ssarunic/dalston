@@ -98,7 +98,7 @@ class TestSessionConfigParsing:
             {
                 "session_id": "sess_test123",
                 "language": "en",
-                "model": "faster-whisper-large-v3",
+                "model": "Systran/faster-whisper-large-v3",
                 "sample_rate": "16000",
                 "enable_vad": "true",
                 "interim_results": "true",
@@ -111,7 +111,7 @@ class TestSessionConfigParsing:
 
         assert config.session_id == "sess_test123"
         assert config.language == "en"
-        assert config.model == "faster-whisper-large-v3"
+        assert config.model == "Systran/faster-whisper-large-v3"
         assert config.sample_rate == 16000
         assert config.enable_vad is True
         assert config.interim_results is True

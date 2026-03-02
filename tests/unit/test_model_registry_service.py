@@ -307,7 +307,7 @@ class TestRegisterModel:
         """Test registering a model with all fields."""
         await service.register_model(
             mock_db,
-            model_id="parakeet-tdt-1.1b",
+            model_id="nvidia/parakeet-tdt-1.1b",
             name="Parakeet TDT 1.1B",
             runtime="nemo",
             runtime_model_id="nvidia/parakeet-tdt-1.1b",
@@ -328,7 +328,7 @@ class TestRegisterModel:
 
         # Verify the model was created with correct attributes
         added_model = mock_db.add.call_args[0][0]
-        assert added_model.id == "parakeet-tdt-1.1b"
+        assert added_model.id == "nvidia/parakeet-tdt-1.1b"
         assert added_model.name == "Parakeet TDT 1.1B"
         assert added_model.runtime == "nemo"
         assert added_model.status == "not_downloaded"

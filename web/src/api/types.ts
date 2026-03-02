@@ -655,3 +655,94 @@ export interface ModelListResponse {
   object: 'list'
   data: Model[]
 }
+
+// Model Registry types (M42)
+export type ModelStatus = 'not_downloaded' | 'downloading' | 'ready' | 'failed'
+
+export interface ModelRegistryEntry {
+  id: string
+  name: string | null
+  runtime: string
+  runtime_model_id: string
+  stage: string
+  status: ModelStatus
+  download_path: string | null
+  size_bytes: number | null
+  download_progress?: number
+  downloaded_at: string | null
+
+  // Capabilities
+  word_timestamps: boolean
+  punctuation: boolean
+  capitalization: boolean
+  streaming: boolean
+
+  // Hardware
+  min_vram_gb: number | null
+  min_ram_gb: number | null
+  supports_cpu: boolean
+
+  // Source metadata
+  source: string | null
+  library_name: string | null
+  languages: string[] | null
+  metadata: {
+    downloads?: number
+    likes?: number
+    tags?: string[]
+    pipeline_tag?: string
+    error?: string
+  }
+
+  last_used_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ModelRegistryListResponse {
+  object: 'list'
+  data: ModelRegistryEntry[]
+}
+
+export interface ModelFilters {
+  stage?: string
+  runtime?: string
+  status?: ModelStatus
+  search?: string
+}
+
+export interface HFResolveRequest {
+  model_id: string
+  auto_register?: boolean
+}
+
+export interface HFResolveResponse {
+  model_id: string
+  can_route: boolean
+  resolved_runtime: string | null
+  library_name: string | null
+  pipeline_tag: string | null
+  languages: string[]
+  downloads: number
+  likes: number
+  error?: string
+}
+
+export interface HFMappingsResponse {
+  library_to_runtime: Record<string, string>
+  tag_to_runtime: Record<string, string>
+}
+
+export interface PullModelResponse {
+  message: string
+  model_id: string
+}
+
+export interface DeleteModelResponse {
+  message: string
+}
+
+export interface SyncModelsResponse {
+  updated: number
+  unchanged: number
+}

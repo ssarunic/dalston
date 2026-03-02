@@ -13,21 +13,30 @@ import type {
   CreateJobResponse,
   CreateWebhookRequest,
   DashboardResponse,
+  DeleteModelResponse,
   DeliveryListResponse,
   EnginesListResponse,
   EnginesResponse,
   HealthResponse,
+  HFMappingsResponse,
+  HFResolveRequest,
+  HFResolveResponse,
   JobDetail,
   JobStatsResponse,
   MetricsResponse,
+  ModelFilters,
   ModelListResponse,
+  ModelRegistryEntry,
+  ModelRegistryListResponse,
   NamespaceSettings,
+  PullModelResponse,
   RealtimeSessionDetail,
   RealtimeSessionListParams,
   RealtimeSessionListResponse,
   RealtimeStatusResponse,
   SessionTranscript,
   SettingsNamespaceListResponse,
+  SyncModelsResponse,
   TaskArtifact,
   TaskListResponse,
   UpdateSettingsRequest,
@@ -373,4 +382,31 @@ export const apiClient = {
 
   resetSettingsNamespace: (namespace: string) =>
     currentClient.post(`api/console/settings/${namespace}/reset`).json<NamespaceSettings>(),
+
+  // Model Registry (M42)
+  getModelRegistry: (filters?: ModelFilters) => {
+    const searchParams = new URLSearchParams()
+    if (filters?.stage) searchParams.set('stage', filters.stage)
+    if (filters?.runtime) searchParams.set('runtime', filters.runtime)
+    if (filters?.status) searchParams.set('status', filters.status)
+    return currentClient.get('v1/models/registry', { searchParams }).json<ModelRegistryListResponse>()
+  },
+
+  getModelRegistryEntry: (modelId: string) =>
+    currentClient.get(`v1/models/registry/${encodeURIComponent(modelId)}`).json<ModelRegistryEntry>(),
+
+  pullModel: (modelId: string, force?: boolean) =>
+    currentClient.post(`v1/models/${encodeURIComponent(modelId)}/pull`, { json: { force } }).json<PullModelResponse>(),
+
+  deleteModel: (modelId: string) =>
+    currentClient.delete(`v1/models/${encodeURIComponent(modelId)}`).json<DeleteModelResponse>(),
+
+  resolveHFModel: (request: HFResolveRequest) =>
+    currentClient.post('v1/models/hf/resolve', { json: request }).json<HFResolveResponse>(),
+
+  getHFMappings: () =>
+    currentClient.get('v1/models/hf/mappings').json<HFMappingsResponse>(),
+
+  syncModels: () =>
+    currentClient.post('v1/models/sync').json<SyncModelsResponse>(),
 }

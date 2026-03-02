@@ -2,7 +2,7 @@
 # This file defines the model variant metadata for runtime model management (M36)
 
 schema_version: "1.1"
-id: faster-whisper-small
+id: Systran/faster-whisper-small
 runtime: faster-whisper
 runtime_model_id: "small"  # String passed to WhisperModel()
 

@@ -697,14 +697,14 @@ class ModelRegistryModel(Base):
     - Hardware requirements (VRAM, RAM, CPU support)
     - HuggingFace metadata cache
 
-    Models are identified by a Dalston model ID (e.g., "parakeet-tdt-1.1b")
-    which maps to a runtime_model_id (e.g., "nvidia/parakeet-tdt-1.1b").
+    Models are identified by a namespaced model ID (e.g., "nvidia/parakeet-tdt-1.1b")
+    matching the HuggingFace model ID.
     """
 
     __tablename__ = "models"
 
-    # Identity - Dalston model ID (e.g., "parakeet-tdt-1.1b", "faster-whisper-large-v3")
-    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    # Identity - namespaced model ID (e.g., "nvidia/parakeet-tdt-1.1b")
+    id: Mapped[str] = mapped_column(String(200), primary_key=True)
     name: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     # Runtime mapping - which engine runtime loads this model

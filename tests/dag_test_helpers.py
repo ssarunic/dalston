@@ -51,9 +51,9 @@ def build_task_dag_for_test(
     # For testing: map known model IDs to their runtime + runtime_model_id
     # This simulates what the engine_selector does with the catalog
     MODEL_TO_RUNTIME = {
-        "parakeet-tdt-1.1b": ("nemo", "nvidia/parakeet-tdt-1.1b"),
-        "faster-whisper-large-v3-turbo": ("faster-whisper", None),
-        "faster-whisper-base": ("faster-whisper", None),
+        "nvidia/parakeet-tdt-1.1b": ("nemo", "nvidia/parakeet-tdt-1.1b"),
+        "Systran/faster-whisper-large-v3-turbo": ("faster-whisper", "large-v3-turbo"),
+        "Systran/faster-whisper-base": ("faster-whisper", "base"),
     }
 
     if transcribe_engine in MODEL_TO_RUNTIME:

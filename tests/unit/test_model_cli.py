@@ -28,7 +28,7 @@ class TestModelList:
         """Test listing models with data."""
         mock_list.return_value = [
             {
-                "id": "parakeet-tdt-1.1b",
+                "id": "nvidia/parakeet-tdt-1.1b",
                 "name": "Parakeet TDT",
                 "runtime": "nemo",
                 "stage": "transcribe",
@@ -37,7 +37,7 @@ class TestModelList:
                 "downloaded_at": datetime.now(UTC),
             },
             {
-                "id": "faster-whisper-large-v3",
+                "id": "Systran/faster-whisper-large-v3",
                 "name": "Whisper Large V3",
                 "runtime": "faster-whisper",
                 "stage": "transcribe",
@@ -51,8 +51,8 @@ class TestModelList:
 
         assert result.exit_code == 0
         assert "Found 2 model(s)" in result.output
-        assert "parakeet-tdt-1.1b" in result.output
-        assert "faster-whisper-large-v3" in result.output
+        assert "nvidia/parakeet-tdt-1.1b" in result.output
+        assert "Systran/faster-whisper-large-v3" in result.output
         assert "nemo" in result.output
         assert "ready" in result.output
         assert "not_downloaded" in result.output
@@ -96,17 +96,17 @@ class TestModelPull:
     def test_pull_model_success(self, mock_pull: MagicMock):
         """Test successful model pull."""
         mock_pull.return_value = {
-            "id": "parakeet-tdt-1.1b",
+            "id": "nvidia/parakeet-tdt-1.1b",
             "status": "ready",
             "size_bytes": 4_500_000_000,
             "download_path": "/models/hub/models--nvidia--parakeet-tdt-1.1b",
         }
 
-        result = runner.invoke(app, ["model", "pull", "parakeet-tdt-1.1b"])
+        result = runner.invoke(app, ["model", "pull", "nvidia/parakeet-tdt-1.1b"])
 
         assert result.exit_code == 0
         assert "downloaded successfully" in result.output
-        assert "parakeet-tdt-1.1b" in result.output
+        assert "nvidia/parakeet-tdt-1.1b" in result.output
 
     @patch("dalston.gateway.cli._pull_model")
     def test_pull_model_not_found(self, mock_pull: MagicMock):
@@ -122,13 +122,15 @@ class TestModelPull:
     def test_pull_model_with_force(self, mock_pull: MagicMock):
         """Test pulling with --force flag."""
         mock_pull.return_value = {
-            "id": "parakeet-tdt-1.1b",
+            "id": "nvidia/parakeet-tdt-1.1b",
             "status": "ready",
             "size_bytes": 4_500_000_000,
             "download_path": "/models/hub/models--nvidia--parakeet-tdt-1.1b",
         }
 
-        result = runner.invoke(app, ["model", "pull", "parakeet-tdt-1.1b", "--force"])
+        result = runner.invoke(
+            app, ["model", "pull", "nvidia/parakeet-tdt-1.1b", "--force"]
+        )
 
         assert result.exit_code == 0
 
@@ -136,13 +138,13 @@ class TestModelPull:
     def test_pull_model_failed_status(self, mock_pull: MagicMock):
         """Test when download fails."""
         mock_pull.return_value = {
-            "id": "parakeet-tdt-1.1b",
+            "id": "nvidia/parakeet-tdt-1.1b",
             "status": "failed",
             "size_bytes": None,
             "download_path": None,
         }
 
-        result = runner.invoke(app, ["model", "pull", "parakeet-tdt-1.1b"])
+        result = runner.invoke(app, ["model", "pull", "nvidia/parakeet-tdt-1.1b"])
 
         assert result.exit_code == 1
         assert "Download status: failed" in result.output
@@ -156,7 +158,7 @@ class TestModelStatus:
         """Test status for downloaded model."""
         now = datetime.now(UTC)
         mock_status.return_value = {
-            "id": "parakeet-tdt-1.1b",
+            "id": "nvidia/parakeet-tdt-1.1b",
             "name": "Parakeet TDT 1.1B",
             "runtime": "nemo",
             "runtime_model_id": "nvidia/parakeet-tdt-1.1b",
@@ -176,10 +178,10 @@ class TestModelStatus:
             "created_at": now,
         }
 
-        result = runner.invoke(app, ["model", "status", "parakeet-tdt-1.1b"])
+        result = runner.invoke(app, ["model", "status", "nvidia/parakeet-tdt-1.1b"])
 
         assert result.exit_code == 0
-        assert "parakeet-tdt-1.1b" in result.output
+        assert "nvidia/parakeet-tdt-1.1b" in result.output
         assert "nemo" in result.output
         assert "ready" in result.output
         assert "Word Timestamps: True" in result.output
@@ -190,7 +192,7 @@ class TestModelStatus:
     def test_status_not_downloaded(self, mock_status: MagicMock):
         """Test status for model that is not downloaded."""
         mock_status.return_value = {
-            "id": "faster-whisper-large-v3",
+            "id": "Systran/faster-whisper-large-v3",
             "name": None,
             "runtime": "faster-whisper",
             "runtime_model_id": "Systran/faster-whisper-large-v3",
@@ -210,7 +212,9 @@ class TestModelStatus:
             "created_at": datetime.now(UTC),
         }
 
-        result = runner.invoke(app, ["model", "status", "faster-whisper-large-v3"])
+        result = runner.invoke(
+            app, ["model", "status", "Systran/faster-whisper-large-v3"]
+        )
 
         assert result.exit_code == 0
         assert "not_downloaded" in result.output
@@ -235,25 +239,31 @@ class TestModelRemove:
         """Test removing model with confirmation."""
         mock_remove.return_value = None
 
-        result = runner.invoke(app, ["model", "rm", "parakeet-tdt-1.1b"], input="y\n")
+        result = runner.invoke(
+            app, ["model", "rm", "nvidia/parakeet-tdt-1.1b"], input="y\n"
+        )
 
         assert result.exit_code == 0
-        assert "Model parakeet-tdt-1.1b removed" in result.output
+        assert "Model nvidia/parakeet-tdt-1.1b removed" in result.output
 
     @patch("dalston.gateway.cli._remove_model")
     def test_remove_model_with_yes_flag(self, mock_remove: MagicMock):
         """Test removing model with --yes flag (skip confirmation)."""
         mock_remove.return_value = None
 
-        result = runner.invoke(app, ["model", "rm", "parakeet-tdt-1.1b", "--yes"])
+        result = runner.invoke(
+            app, ["model", "rm", "nvidia/parakeet-tdt-1.1b", "--yes"]
+        )
 
         assert result.exit_code == 0
-        assert "Model parakeet-tdt-1.1b removed" in result.output
+        assert "Model nvidia/parakeet-tdt-1.1b removed" in result.output
 
     @patch("dalston.gateway.cli._remove_model")
     def test_remove_model_declined(self, mock_remove: MagicMock):
         """Test removing model when user declines confirmation."""
-        result = runner.invoke(app, ["model", "rm", "parakeet-tdt-1.1b"], input="n\n")
+        result = runner.invoke(
+            app, ["model", "rm", "nvidia/parakeet-tdt-1.1b"], input="n\n"
+        )
 
         assert result.exit_code == 1  # Aborted
         mock_remove.assert_not_called()

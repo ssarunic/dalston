@@ -529,8 +529,21 @@ async def resolve_hf_model(
 
     # Auto-register if requested and runtime was resolved
     if request.auto_register and metadata.resolved_runtime:
-        # Check if model already exists in registry
+        # Check if model already exists in registry (by ID or by runtime_model_id)
         existing = await service.get_model(db, request.model_id)
+        if existing is None:
+            # Also check if a model with this runtime_model_id already exists
+            # (catalog models may have different IDs but same runtime_model_id)
+            from sqlalchemy import select
+
+            from dalston.gateway.models import ModelRegistryModel
+
+            stmt = select(ModelRegistryModel).where(
+                ModelRegistryModel.runtime_model_id == request.model_id
+            )
+            result = await db.execute(stmt)
+            existing = result.scalar_one_or_none()
+
         if existing is None:
             await service.register_model(
                 db,
