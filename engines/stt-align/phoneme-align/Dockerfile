@@ -42,8 +42,10 @@ COPY engines/stt-align/phoneme-align/align.py .
 COPY engines/stt-align/phoneme-align/ctc_forced_align.py .
 COPY engines/stt-align/phoneme-align/model_loader.py .
 
-# Create model cache directory
-ENV HF_HOME=/models
-RUN mkdir -p /models
+# M39: Standardized model cache directories
+ENV HF_HUB_CACHE=/models/huggingface
+ENV HF_HOME=/models/huggingface
+ENV TORCH_HOME=/models/torch
+RUN mkdir -p /models/huggingface /models/torch
 
 CMD ["python", "engine.py"]

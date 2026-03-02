@@ -63,12 +63,12 @@ RUN if [ "$DEVICE" = "cpu" ]; then \
 # Install NeMo and dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Model cache directory - runtime-specific subdirectory
-# Models are downloaded at runtime on first use
+# M39: Standardized model cache directories
+ENV HF_HUB_CACHE=/models/huggingface
+ENV HF_HOME=/models/huggingface
+ENV TORCH_HOME=/models/torch
 ENV NEMO_CACHE=/models/nemo
-ENV HF_HOME=/models/nemo
-ENV TORCH_HOME=/models/nemo
-RUN mkdir -p /models/nemo
+RUN mkdir -p /models/huggingface /models/torch /models/nemo
 
 # Copy runtime-level engine.yaml (not variant-specific)
 COPY engines/stt-transcribe/parakeet/engine.yaml /etc/dalston/engine.yaml

@@ -75,16 +75,17 @@ COPY engines/stt-transcribe/voxtral/requirements.txt .
 # Install dependencies
 RUN python -m pip install --no-cache-dir -r requirements.txt
 
-# Create model cache directory before predownload so runtime reuses build cache
-ENV HF_HOME=/models
-ENV TORCH_HOME=/models
-RUN mkdir -p /models
+# M39: Standardized model cache directories
+ENV HF_HUB_CACHE=/models/huggingface
+ENV HF_HOME=/models/huggingface
+ENV TORCH_HOME=/models/torch
+RUN mkdir -p /models/huggingface /models/torch
 
 # Pre-download the model at build time for faster container startup
 RUN if [ "$SKIP_MODEL_DOWNLOAD" = "false" ]; then \
     python -c "\
 import os; \
-os.environ['HF_HOME'] = '/models'; \
+os.environ['HF_HOME'] = '/models/huggingface'; \
 from transformers import VoxtralForConditionalGeneration, AutoProcessor; \
 model_map = {'mini-3b': 'mistralai/Voxtral-Mini-3B-2507', 'small-24b': 'mistralai/Voxtral-Small-24B-2507'}; \
 model_id = model_map['${MODEL_VARIANT}']; \

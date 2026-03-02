@@ -44,10 +44,11 @@ COPY engines/stt-transcribe/faster-whisper/engine.py .
 # Copy runtime-level engine.yaml (not variant-specific)
 COPY engines/stt-transcribe/faster-whisper/engine.yaml /etc/dalston/engine.yaml
 
-# Model cache directory - runtime-specific subdirectory
-# Models are downloaded at runtime on first use
-ENV HF_HOME=/models/faster-whisper
-ENV TORCH_HOME=/models/faster-whisper
-RUN mkdir -p /models/faster-whisper
+# M39: Standardized model cache directories
+ENV HF_HUB_CACHE=/models/huggingface
+ENV HF_HOME=/models/huggingface
+ENV TORCH_HOME=/models/torch
+ENV WHISPER_MODELS_DIR=/models/ctranslate2/faster-whisper
+RUN mkdir -p /models/huggingface /models/torch /models/ctranslate2/faster-whisper
 
 CMD ["python", "engine.py"]

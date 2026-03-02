@@ -353,7 +353,7 @@ services:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: voxtral-mini-3b
     volumes:
-      - voxtral-models:/models
+      - model-cache:/models
     depends_on: *batch-depends
     deploy: *gpu-deploy
     profiles: [gpu]
@@ -371,7 +371,7 @@ services:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: phoneme-align
     volumes:
-      - align-models:/models
+      - model-cache:/models
     depends_on: *batch-depends
     restart: unless-stopped
 
@@ -382,7 +382,7 @@ services:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: phoneme-align
     volumes:
-      - align-models:/models
+      - model-cache:/models
     depends_on: *batch-depends
     deploy: *gpu-deploy
     profiles: [gpu]
@@ -402,7 +402,7 @@ services:
       HF_TOKEN: ${HF_TOKEN:-}
       DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
     volumes:
-      - pyannote-models:/models
+      - model-cache:/models
     depends_on: *batch-depends
     restart: unless-stopped
 
@@ -414,7 +414,7 @@ services:
       DALSTON_ENGINE_ID: pyannote-4.0
       HF_TOKEN: ${HF_TOKEN:-}
     volumes:
-      - pyannote-models:/models
+      - model-cache:/models
     depends_on: *batch-depends
     deploy: *gpu-deploy
     profiles: [gpu]
@@ -434,7 +434,7 @@ services:
       DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
       DALSTON_NEMO_ALLOW_CPU: ${DALSTON_NEMO_ALLOW_CPU:-false}
     volumes:
-      - nemo-models:/models
+      - model-cache:/models
     depends_on: *batch-depends
     profiles: [gpu]
     restart: unless-stopped
@@ -453,7 +453,7 @@ services:
       DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
       DALSTON_NEMO_ALLOW_CPU: "true"
     volumes:
-      - nemo-models:/models
+      - model-cache:/models
     shm_size: '2gb'
     depends_on: *batch-depends
     restart: unless-stopped
@@ -471,7 +471,7 @@ services:
       DALSTON_ENGINE_ID: pii-presidio
       DALSTON_DEVICE: cpu
     volumes:
-      - gliner-models:/models
+      - model-cache:/models
     depends_on: *batch-depends
     restart: unless-stopped
 
@@ -487,7 +487,7 @@ services:
       DALSTON_ENGINE_ID: pii-presidio
       DALSTON_DEVICE: cuda
     volumes:
-      - gliner-models:/models
+      - model-cache:/models
     depends_on: *batch-depends
     deploy: *gpu-deploy
     profiles: [gpu]
@@ -598,7 +598,7 @@ services:
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
     volumes:
-      - realtime-models:/models
+      - model-cache:/models
     depends_on: *realtime-depends
     healthcheck: *ws-healthcheck
     deploy: *gpu-deploy
@@ -620,7 +620,7 @@ services:
       DALSTON_MAX_SESSIONS: 4
       DALSTON_TRANSCRIPTION_DELAY_MS: 480
     volumes:
-      - voxtral-models:/models
+      - model-cache:/models
     depends_on: *realtime-depends
     healthcheck: *ws-healthcheck
     deploy: *gpu-deploy
@@ -631,12 +631,6 @@ volumes:
   postgres-data:
   redis-data:
   minio-data:
-  model-cache:        # M36: Shared model cache for all runtime engines
-  align-models:
-  pyannote-models:
-  nemo-models:
-  realtime-models:
-  voxtral-models:
-  gliner-models:
+  model-cache:        # M39: Unified model cache for all engines
   prometheus-data:
   grafana-data:

@@ -51,10 +51,12 @@ RUN python -c "import torch; torch.hub.load('snakers4/silero-vad', 'silero_vad',
 COPY engines/stt-rt/faster-whisper/variants/base.yaml /etc/dalston/engine.yaml
 COPY engines/stt-rt/faster-whisper/engine.py .
 
-# Create model cache directory
-ENV HF_HOME=/models
-ENV TORCH_HOME=/models
-RUN mkdir -p /models
+# M39: Standardized model cache directories
+ENV HF_HUB_CACHE=/models/huggingface
+ENV HF_HOME=/models/huggingface
+ENV TORCH_HOME=/models/torch
+ENV WHISPER_MODELS_DIR=/models/ctranslate2/faster-whisper
+RUN mkdir -p /models/huggingface /models/torch /models/ctranslate2/faster-whisper
 
 # Default environment variables
 ENV DALSTON_WORKER_ID=stt-rt-transcribe-faster-whisper

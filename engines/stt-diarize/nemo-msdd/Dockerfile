@@ -57,9 +57,11 @@ print('Models downloaded successfully')"; \
 COPY engines/stt-diarize/nemo-msdd/engine.yaml /etc/dalston/engine.yaml
 COPY engines/stt-diarize/nemo-msdd/engine.py .
 
-# Create model cache directory
-ENV NEMO_CACHE=/models
-ENV HF_HOME=/models
-RUN mkdir -p /models
+# M39: Standardized model cache directories
+ENV HF_HUB_CACHE=/models/huggingface
+ENV HF_HOME=/models/huggingface
+ENV TORCH_HOME=/models/torch
+ENV NEMO_CACHE=/models/nemo
+RUN mkdir -p /models/huggingface /models/torch /models/nemo
 
 CMD ["python", "engine.py"]

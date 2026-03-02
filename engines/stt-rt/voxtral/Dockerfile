@@ -77,10 +77,11 @@ RUN python -c "import torch; torch.hub.load('snakers4/silero-vad', 'silero_vad',
 COPY engines/stt-rt/voxtral/variants/${MODEL_VARIANT}.yaml /etc/dalston/engine.yaml
 COPY engines/stt-rt/voxtral/engine.py .
 
-# Create model cache directory
-ENV HF_HOME=/models
-ENV TORCH_HOME=/models
-RUN mkdir -p /models
+# M39: Standardized model cache directories
+ENV HF_HUB_CACHE=/models/huggingface
+ENV HF_HOME=/models/huggingface
+ENV TORCH_HOME=/models/torch
+RUN mkdir -p /models/huggingface /models/torch
 
 # Default environment variables
 ENV DALSTON_WORKER_ID=stt-rt-transcribe-voxtral

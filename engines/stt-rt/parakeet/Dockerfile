@@ -82,11 +82,12 @@ ARG MODEL_VARIANT=0.6b
 COPY engines/stt-rt/parakeet/variants/rnnt-${MODEL_VARIANT}.yaml ./engine.yaml
 COPY engines/stt-rt/parakeet/engine.py .
 
-# Create model cache directory
-ENV NEMO_CACHE=/models
-ENV HF_HOME=/models
-ENV TORCH_HOME=/models
-RUN mkdir -p /models
+# M39: Standardized model cache directories
+ENV HF_HUB_CACHE=/models/huggingface
+ENV HF_HOME=/models/huggingface
+ENV TORCH_HOME=/models/torch
+ENV NEMO_CACHE=/models/nemo
+RUN mkdir -p /models/huggingface /models/torch /models/nemo
 
 # Default environment variables
 ENV DALSTON_WORKER_ID=stt-rt-transcribe-parakeet
