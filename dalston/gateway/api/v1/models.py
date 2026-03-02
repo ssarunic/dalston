@@ -285,7 +285,7 @@ async def list_registry_models(
 
 
 @router.get(
-    "/registry/{model_id}",
+    "/registry/{model_id:path}",
     response_model=ModelRegistryResponse,
     summary="Get model registry entry",
     description="Get detailed registry information for a specific model.",
@@ -332,7 +332,7 @@ async def get_registry_model(
 
 
 @router.post(
-    "/{model_id}/pull",
+    "/{model_id:path}/pull",
     response_model=PullModelResponse,
     summary="Download a model",
     description=(
@@ -404,7 +404,7 @@ async def _pull_model_background(model_id: str, force: bool) -> None:
 
 
 @router.delete(
-    "/{model_id}",
+    "/{model_id:path}",
     response_model=DeleteModelResponse,
     summary="Remove downloaded model",
     description="Remove a downloaded model's files from disk.",
@@ -604,7 +604,7 @@ async def get_hf_routing_mappings() -> HFRoutingMappingsResponse:
 
 
 @router.get(
-    "/{model_id}",
+    "/{model_id:path}",
     response_model=ModelResponse,
     summary="Get model details",
     description="Get detailed information about a specific model variant.",
