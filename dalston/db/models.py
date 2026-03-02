@@ -723,7 +723,7 @@ class ModelRegistryModel(Base):
     )
 
     # Source and library info (for HuggingFace card routing)
-    source: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(200), nullable=True)
     library_name: Mapped[str | None] = mapped_column(String(50), nullable=True)
     languages: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
