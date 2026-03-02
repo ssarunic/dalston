@@ -5,12 +5,18 @@ import type { ModelFilters, HFResolveRequest } from '@/api/types'
 /**
  * Fetch the model registry with optional filters.
  * Used for the Models page to show downloaded/available models.
+ * Automatically polls every 2s when any model is downloading.
  */
 export function useModelRegistry(filters?: ModelFilters) {
   return useQuery({
     queryKey: ['modelRegistry', filters],
     queryFn: () => apiClient.getModelRegistry(filters),
-    staleTime: 30_000, // Cache for 30 seconds
+    staleTime: 30_000,
+    // Poll every 2s while any model is downloading
+    refetchInterval: (query) => {
+      const hasDownloading = query.state.data?.data?.some(m => m.status === 'downloading')
+      return hasDownloading ? 2000 : false
+    },
   })
 }
 
