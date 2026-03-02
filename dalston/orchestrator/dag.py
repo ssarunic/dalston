@@ -15,6 +15,11 @@ from uuid import UUID, uuid4
 import structlog
 
 from dalston.common.models import Task, TaskStatus
+from dalston.orchestrator.defaults import (
+    DEFAULT_PII_BUFFER_MS,
+    DEFAULT_PII_CONFIDENCE_THRESHOLD,
+    DEFAULT_TASK_MAX_RETRIES,
+)
 
 if TYPE_CHECKING:
     from dalston.orchestrator.catalog import EngineCatalog
@@ -276,7 +281,7 @@ def _build_dag_with_engines(
         input_uri=audio_uri,
         output_uri=None,
         retries=0,
-        max_retries=2,
+        max_retries=DEFAULT_TASK_MAX_RETRIES,
         required=True,
     )
     tasks.append(prepare_task)
@@ -309,7 +314,7 @@ def _build_dag_with_engines(
             input_uri=None,
             output_uri=None,
             retries=0,
-            max_retries=2,
+            max_retries=DEFAULT_TASK_MAX_RETRIES,
             required=True,
         )
         tasks.append(diarize_task)
@@ -326,7 +331,7 @@ def _build_dag_with_engines(
         input_uri=None,
         output_uri=None,
         retries=0,
-        max_retries=2,
+        max_retries=DEFAULT_TASK_MAX_RETRIES,
         required=True,
     )
     tasks.append(transcribe_task)
@@ -345,7 +350,7 @@ def _build_dag_with_engines(
             input_uri=None,
             output_uri=None,
             retries=0,
-            max_retries=2,
+            max_retries=DEFAULT_TASK_MAX_RETRIES,
             required=True,
         )
         tasks.append(align_task)
@@ -364,7 +369,9 @@ def _build_dag_with_engines(
 
         pii_detect_config = {
             "entity_types": parameters.get("pii_entity_types"),
-            "confidence_threshold": parameters.get("pii_confidence_threshold", 0.5),
+            "confidence_threshold": parameters.get(
+                "pii_confidence_threshold", DEFAULT_PII_CONFIDENCE_THRESHOLD
+            ),
         }
 
         pii_detect_task = Task(
@@ -378,7 +385,7 @@ def _build_dag_with_engines(
             input_uri=None,
             output_uri=None,
             retries=0,
-            max_retries=2,
+            max_retries=DEFAULT_TASK_MAX_RETRIES,
             required=True,
         )
         tasks.append(pii_detect_task)
@@ -390,7 +397,7 @@ def _build_dag_with_engines(
 
             audio_redact_config = {
                 "redaction_mode": redaction_mode,
-                "buffer_ms": parameters.get("pii_buffer_ms", 50),
+                "buffer_ms": parameters.get("pii_buffer_ms", DEFAULT_PII_BUFFER_MS),
             }
 
             audio_redact_task = Task(
@@ -404,7 +411,7 @@ def _build_dag_with_engines(
                 input_uri=None,
                 output_uri=None,
                 retries=0,
-                max_retries=2,
+                max_retries=DEFAULT_TASK_MAX_RETRIES,
                 required=True,
             )
             tasks.append(audio_redact_task)
@@ -438,7 +445,7 @@ def _build_dag_with_engines(
         input_uri=None,
         output_uri=None,
         retries=0,
-        max_retries=2,
+        max_retries=DEFAULT_TASK_MAX_RETRIES,
         required=True,
     )
     tasks.append(merge_task)
@@ -505,7 +512,7 @@ def _build_per_channel_dag_with_engines(
             input_uri=None,
             output_uri=None,
             retries=0,
-            max_retries=2,
+            max_retries=DEFAULT_TASK_MAX_RETRIES,
             required=True,
         )
         tasks.append(transcribe_task)
@@ -526,7 +533,7 @@ def _build_per_channel_dag_with_engines(
                 input_uri=None,
                 output_uri=None,
                 retries=0,
-                max_retries=2,
+                max_retries=DEFAULT_TASK_MAX_RETRIES,
                 required=True,
             )
             tasks.append(align_task)
@@ -537,7 +544,9 @@ def _build_per_channel_dag_with_engines(
         if pii_detection_enabled:
             pii_detect_config = {
                 "entity_types": parameters.get("pii_entity_types"),
-                "confidence_threshold": parameters.get("pii_confidence_threshold", 0.5),
+                "confidence_threshold": parameters.get(
+                    "pii_confidence_threshold", DEFAULT_PII_CONFIDENCE_THRESHOLD
+                ),
                 "channel": channel,
             }
 
@@ -552,7 +561,7 @@ def _build_per_channel_dag_with_engines(
                 input_uri=None,
                 output_uri=None,
                 retries=0,
-                max_retries=2,
+                max_retries=DEFAULT_TASK_MAX_RETRIES,
                 required=True,
             )
             tasks.append(pii_detect_task)
@@ -567,7 +576,7 @@ def _build_per_channel_dag_with_engines(
 
                 audio_redact_config = {
                     "redaction_mode": redaction_mode,
-                    "buffer_ms": parameters.get("pii_buffer_ms", 50),
+                    "buffer_ms": parameters.get("pii_buffer_ms", DEFAULT_PII_BUFFER_MS),
                     "channel": channel,
                 }
 
@@ -584,7 +593,7 @@ def _build_per_channel_dag_with_engines(
                     input_uri=None,
                     output_uri=None,
                     retries=0,
-                    max_retries=2,
+                    max_retries=DEFAULT_TASK_MAX_RETRIES,
                     required=True,
                 )
                 tasks.append(audio_redact_task)
@@ -617,7 +626,7 @@ def _build_per_channel_dag_with_engines(
         input_uri=None,
         output_uri=None,
         retries=0,
-        max_retries=2,
+        max_retries=DEFAULT_TASK_MAX_RETRIES,
         required=True,
     )
     tasks.append(merge_task)

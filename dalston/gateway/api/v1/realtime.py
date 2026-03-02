@@ -16,8 +16,15 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
+from dalston.common.audio_defaults import DEFAULT_SAMPLE_RATE
 from dalston.common.models import validate_retention
 from dalston.common.redis import get_redis as _get_redis
+from dalston.common.timeouts import (
+    WS_CLOSE_TIMEOUT,
+    WS_OPEN_TIMEOUT,
+    WS_PING_INTERVAL,
+    WS_PING_TIMEOUT,
+)
 from dalston.common.utils import parse_session_id
 from dalston.config import get_settings
 from dalston.db.session import get_db as _get_db
@@ -131,7 +138,9 @@ async def realtime_transcription(
         ),
     ] = "",
     encoding: Annotated[str, Query(description="Audio encoding")] = "pcm_s16le",
-    sample_rate: Annotated[int, Query(description="Sample rate in Hz")] = 16000,
+    sample_rate: Annotated[
+        int, Query(description="Sample rate in Hz")
+    ] = DEFAULT_SAMPLE_RATE,
     enable_vad: Annotated[bool, Query(description="Enable VAD events")] = True,
     interim_results: Annotated[
         bool, Query(description="Send partial transcripts")
@@ -548,7 +557,7 @@ async def elevenlabs_realtime_transcription(
     - keyterms: JSON array of terms to boost recognition
     """
     # Parse audio format (e.g., "pcm_16000" -> sample_rate=16000)
-    sample_rate = 16000
+    sample_rate = DEFAULT_SAMPLE_RATE
     if audio_format.startswith("pcm_"):
         try:
             sample_rate = int(audio_format.split("_")[1])
@@ -793,10 +802,10 @@ async def _proxy_to_worker(
     # Connect with timeouts to prevent hanging connections
     async with websockets.connect(
         worker_url,
-        open_timeout=10,
-        close_timeout=10,
-        ping_interval=20,
-        ping_timeout=20,
+        open_timeout=WS_OPEN_TIMEOUT,
+        close_timeout=WS_CLOSE_TIMEOUT,
+        ping_interval=WS_PING_INTERVAL,
+        ping_timeout=WS_PING_TIMEOUT,
     ) as worker_ws:
         # Create tasks for bidirectional proxying
         client_to_worker = asyncio.create_task(
@@ -1024,10 +1033,10 @@ async def _proxy_to_worker_elevenlabs(
 
     async with websockets.connect(
         worker_url,
-        open_timeout=10,
-        close_timeout=5,
-        ping_interval=20,
-        ping_timeout=20,
+        open_timeout=WS_OPEN_TIMEOUT,
+        close_timeout=WS_CLOSE_TIMEOUT,
+        ping_interval=WS_PING_INTERVAL,
+        ping_timeout=WS_PING_TIMEOUT,
     ) as worker_ws:
         # Create translation tasks
         client_to_worker = asyncio.create_task(

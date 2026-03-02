@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.s3 import get_s3_client
+from dalston.common.timeouts import S3_PRESIGNED_URL_EXPIRY_SECONDS
 from dalston.config import get_settings
 from dalston.db.models import RealtimeSessionModel
 from dalston.db.session import get_db
@@ -31,9 +32,6 @@ from dalston.gateway.services.storage import StorageService
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/realtime", tags=["realtime"])
-
-# Presigned URL expiry time in seconds (1 hour)
-PRESIGNED_URL_EXPIRY_SECONDS = 3600
 
 
 # -----------------------------------------------------------------------------
@@ -457,10 +455,10 @@ async def get_session_audio(
     try:
         url = await storage.generate_presigned_url_from_uri(
             session.audio_uri,
-            expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
+            expires_in=S3_PRESIGNED_URL_EXPIRY_SECONDS,
             require_expected_bucket=False,  # Realtime sessions may use different buckets
         )
-        return {"url": url, "expires_in": PRESIGNED_URL_EXPIRY_SECONDS}
+        return {"url": url, "expires_in": S3_PRESIGNED_URL_EXPIRY_SECONDS}
     except ValueError:
         raise HTTPException(status_code=404, detail="Invalid audio URI") from None
     except Exception as e:

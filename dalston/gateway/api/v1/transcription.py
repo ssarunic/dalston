@@ -38,6 +38,10 @@ from dalston.common.models import (
     JobStatus,
     validate_retention,
 )
+from dalston.common.timeouts import (
+    S3_PRESIGNED_URL_EXPIRY_SECONDS,
+    SYNC_OPERATION_TIMEOUT_SECONDS,
+)
 from dalston.common.utils import compute_duration_ms
 from dalston.config import Settings
 
@@ -80,9 +84,6 @@ from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.storage import StorageService
 
 router = APIRouter(prefix="/audio/transcriptions", tags=["transcriptions"])
-
-# Presigned URL expiry time in seconds (1 hour) - matches realtime endpoint
-PRESIGNED_URL_EXPIRY_SECONDS = 3600
 
 logger = structlog.get_logger()
 
@@ -425,7 +426,7 @@ async def create_transcription(
 
     # OpenAI mode: wait for completion and return result
     storage = StorageService(settings)
-    max_wait_seconds = 300
+    max_wait_seconds = SYNC_OPERATION_TIMEOUT_SECONDS
     poll_interval = 1.0
     elapsed = 0.0
 
@@ -793,11 +794,11 @@ async def get_job_audio(
     try:
         url = await storage.generate_presigned_url(
             key,
-            expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
+            expires_in=S3_PRESIGNED_URL_EXPIRY_SECONDS,
         )
         return AudioUrlResponse(
             url=url,
-            expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
+            expires_in=S3_PRESIGNED_URL_EXPIRY_SECONDS,
             type="original",
         )
     except Exception as e:
@@ -936,11 +937,11 @@ async def get_job_audio_redacted(
     try:
         url = await storage.generate_presigned_url(
             key,
-            expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
+            expires_in=S3_PRESIGNED_URL_EXPIRY_SECONDS,
         )
         return AudioUrlResponse(
             url=url,
-            expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
+            expires_in=S3_PRESIGNED_URL_EXPIRY_SECONDS,
             type="redacted",
         )
     except Exception as e:

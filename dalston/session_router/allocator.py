@@ -16,6 +16,7 @@ import structlog
 
 import dalston.metrics
 import dalston.telemetry
+from dalston.common.timeouts import REALTIME_SESSION_TTL_SECONDS
 from dalston.session_router.registry import (
     ACTIVE_SESSIONS_KEY,
     SESSION_KEY_PREFIX,
@@ -284,7 +285,7 @@ class SessionAllocator:
         )
 
         # Set TTL for session cleanup (extended on activity)
-        await self._redis.expire(session_key, 300)  # 5 minutes
+        await self._redis.expire(session_key, REALTIME_SESSION_TTL_SECONDS)
 
     async def release_worker(self, session_id: str) -> SessionState | None:
         """Release capacity when session ends.
@@ -365,7 +366,9 @@ class SessionAllocator:
             started_at=self._parse_datetime(data.get("started_at")),
         )
 
-    async def extend_session_ttl(self, session_id: str, ttl: int = 300) -> None:
+    async def extend_session_ttl(
+        self, session_id: str, ttl: int = REALTIME_SESSION_TTL_SECONDS
+    ) -> None:
         """Extend session TTL (call periodically for long sessions).
 
         Args:

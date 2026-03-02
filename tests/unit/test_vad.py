@@ -5,6 +5,12 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
+from dalston.common.audio_defaults import (
+    DEFAULT_MIN_SILENCE_MS,
+    DEFAULT_MIN_SPEECH_MS,
+    DEFAULT_SAMPLE_RATE,
+    DEFAULT_VAD_THRESHOLD,
+)
 from dalston.realtime_sdk.vad import VADConfig, VADProcessor, VADResult, VADState
 
 
@@ -14,10 +20,10 @@ class TestVADConfig:
     def test_default_values(self):
         config = VADConfig()
 
-        assert config.speech_threshold == 0.5
-        assert config.min_speech_duration == 0.25
-        assert config.min_silence_duration == 0.5
-        assert config.sample_rate == 16000
+        assert config.speech_threshold == DEFAULT_VAD_THRESHOLD
+        assert config.min_speech_duration == DEFAULT_MIN_SPEECH_MS / 1000.0
+        assert config.min_silence_duration == DEFAULT_MIN_SILENCE_MS / 1000.0
+        assert config.sample_rate == DEFAULT_SAMPLE_RATE
         assert config.lookback_chunks == 3
 
     def test_custom_values(self):

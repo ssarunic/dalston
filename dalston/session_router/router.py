@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import redis.asyncio as redis
 import structlog
 
+from dalston.common.timeouts import REALTIME_SESSION_TTL_SECONDS
 from dalston.session_router.allocator import (
     SessionAllocator,
     SessionState,
@@ -216,14 +217,16 @@ class SessionRouter:
 
         return await self._allocator.get_session(session_id)
 
-    async def extend_session_ttl(self, session_id: str, ttl: int = 300) -> None:
+    async def extend_session_ttl(
+        self, session_id: str, ttl: int = REALTIME_SESSION_TTL_SECONDS
+    ) -> None:
         """Extend session TTL to prevent expiration during long sessions.
 
         Call this periodically for sessions that may exceed the default 5-minute TTL.
 
         Args:
             session_id: Session identifier
-            ttl: New TTL in seconds (default: 300 = 5 minutes)
+            ttl: New TTL in seconds
         """
         if not self._allocator:
             raise RuntimeError("Session router not started")

@@ -20,6 +20,13 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import structlog
 
+from dalston.common.audio_defaults import (
+    DEFAULT_MAX_UTTERANCE_SECONDS,
+    DEFAULT_MIN_SILENCE_MS,
+    DEFAULT_MIN_SPEECH_MS,
+    DEFAULT_SAMPLE_RATE,
+    DEFAULT_VAD_THRESHOLD,
+)
 from dalston.realtime_sdk.assembler import (
     TranscribeResult,
     TranscriptAssembler,
@@ -78,17 +85,19 @@ class SessionConfig:
     language: str = "auto"
     model: str | None = None
     encoding: str = "pcm_s16le"
-    sample_rate: int = 16000
+    sample_rate: int = DEFAULT_SAMPLE_RATE
     channels: int = 1
     enable_vad: bool = True
     interim_results: bool = True
     word_timestamps: bool = False
     vocabulary: list[str] | None = None  # Terms to boost recognition
-    max_utterance_duration: float = 30.0  # Force utterance end after 30s
+    max_utterance_duration: float = DEFAULT_MAX_UTTERANCE_SECONDS  # Force utterance end
     # VAD tuning parameters (ElevenLabs-compatible naming)
-    vad_threshold: float = 0.5  # Speech detection threshold (0.0-1.0)
-    min_speech_duration_ms: int = 250  # Min speech duration (ms)
-    min_silence_duration_ms: int = 400  # Silence to trigger endpoint (ms)
+    vad_threshold: float = DEFAULT_VAD_THRESHOLD  # Speech detection threshold (0.0-1.0)
+    min_speech_duration_ms: int = DEFAULT_MIN_SPEECH_MS  # Min speech duration (ms)
+    min_silence_duration_ms: int = (
+        DEFAULT_MIN_SILENCE_MS  # Silence to trigger endpoint (ms)
+    )
     # Storage options (S3 bucket/endpoint read from Settings env vars)
     store_audio: bool = True
     store_transcript: bool = True

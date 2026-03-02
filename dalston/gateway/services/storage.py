@@ -11,6 +11,7 @@ from botocore.exceptions import ClientError
 from fastapi import UploadFile
 
 from dalston.common.s3 import get_s3_client
+from dalston.common.timeouts import S3_PRESIGNED_URL_EXPIRY_SECONDS
 from dalston.config import Settings
 
 
@@ -190,7 +191,9 @@ class StorageService:
             )
             return response.get("KeyCount", 0) > 0
 
-    async def generate_presigned_url(self, key: str, expires_in: int = 3600) -> str:
+    async def generate_presigned_url(
+        self, key: str, expires_in: int = S3_PRESIGNED_URL_EXPIRY_SECONDS
+    ) -> str:
         """Generate a presigned URL for downloading an S3 object.
 
         Args:
@@ -228,7 +231,7 @@ class StorageService:
     async def generate_presigned_url_from_uri(
         self,
         s3_uri: str,
-        expires_in: int = 3600,
+        expires_in: int = S3_PRESIGNED_URL_EXPIRY_SECONDS,
         require_expected_bucket: bool = True,
     ) -> str:
         """Generate a presigned URL directly from an s3:// URI.
@@ -253,7 +256,7 @@ class StorageService:
         self,
         bucket: str,
         key: str,
-        expires_in: int = 3600,
+        expires_in: int = S3_PRESIGNED_URL_EXPIRY_SECONDS,
         endpoint_url_override: str | None = None,
     ) -> str:
         """Generate a presigned URL for downloading an S3 object in a bucket.

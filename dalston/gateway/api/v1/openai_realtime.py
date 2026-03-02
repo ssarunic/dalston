@@ -21,7 +21,14 @@ from typing import Annotated, Any
 import structlog
 from fastapi import APIRouter, Header, Query, WebSocket, WebSocketDisconnect
 
+from dalston.common.audio_defaults import DEFAULT_SAMPLE_RATE
 from dalston.common.redis import get_redis as _get_redis
+from dalston.common.timeouts import (
+    WS_CLOSE_TIMEOUT,
+    WS_OPEN_TIMEOUT,
+    WS_PING_INTERVAL,
+    WS_PING_TIMEOUT,
+)
 from dalston.config import get_settings
 from dalston.db.session import get_db as _get_db
 from dalston.gateway.dependencies import get_session_router
@@ -67,7 +74,10 @@ def map_openai_realtime_model(model: str) -> str | None:
 OPENAI_AUDIO_FORMAT_MAP = {
     # Note: OpenAI spec uses 24kHz but our Silero VAD only supports 8kHz/16kHz
     # Default to 16kHz for compatibility with our realtime workers
-    "pcm16": ("pcm_s16le", 16000),  # 16-bit PCM, 16kHz (Silero VAD compatible)
+    "pcm16": (
+        "pcm_s16le",
+        DEFAULT_SAMPLE_RATE,
+    ),  # 16-bit PCM, 16kHz (Silero VAD compatible)
     "g711_ulaw": ("mulaw", 8000),
     "g711_alaw": ("alaw", 8000),
 }
@@ -481,7 +491,7 @@ async def _proxy_to_worker_openai(
     session_config = {
         "language": "auto",
         "encoding": "pcm_s16le",
-        "sample_rate": 16000,
+        "sample_rate": DEFAULT_SAMPLE_RATE,
         "enable_vad": True,
         "interim_results": True,
         "word_timestamps": False,
@@ -497,10 +507,10 @@ async def _proxy_to_worker_openai(
 
     async with websockets.connect(
         worker_url,
-        open_timeout=10,
-        close_timeout=5,
-        ping_interval=20,
-        ping_timeout=20,
+        open_timeout=WS_OPEN_TIMEOUT,
+        close_timeout=WS_CLOSE_TIMEOUT,
+        ping_interval=WS_PING_INTERVAL,
+        ping_timeout=WS_PING_TIMEOUT,
     ) as worker_ws:
         # Create translation tasks
         client_to_worker = asyncio.create_task(

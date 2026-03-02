@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from dalston.common.audio_defaults import DEFAULT_SAMPLE_RATE
+
 if TYPE_CHECKING:
     from types_aiobotocore_s3 import S3Client
 
@@ -54,7 +56,7 @@ class AudioRecorder:
         session_id: str,
         s3_client: S3Client,
         bucket: str,
-        sample_rate: int = 16000,
+        sample_rate: int = DEFAULT_SAMPLE_RATE,
         channels: int = 1,
         bits_per_sample: int = 16,
     ) -> None:

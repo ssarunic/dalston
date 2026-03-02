@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_created
 from dalston.common.models import JobStatus
+from dalston.common.timeouts import SYNC_OPERATION_TIMEOUT_SECONDS
 from dalston.config import Settings
 from dalston.gateway.dependencies import (
     RequireJobsRead,
@@ -299,7 +300,7 @@ async def create_transcription(
         )
 
     # For sync mode, wait for completion (with timeout)
-    max_wait_seconds = 300  # 5 minute timeout for sync
+    max_wait_seconds = SYNC_OPERATION_TIMEOUT_SECONDS
     poll_interval = 1.0
     elapsed = 0.0
 

@@ -13,6 +13,13 @@ from typing import Literal
 import numpy as np
 import structlog
 
+from dalston.common.audio_defaults import (
+    DEFAULT_MIN_SILENCE_MS,
+    DEFAULT_MIN_SPEECH_MS,
+    DEFAULT_SAMPLE_RATE,
+    DEFAULT_VAD_THRESHOLD,
+)
+
 logger = structlog.get_logger()
 
 
@@ -26,16 +33,16 @@ class VADConfig:
         min_speech_duration: Minimum speech duration in seconds before
             considering it valid speech. Default: 0.25
         min_silence_duration: Silence duration in seconds to trigger
-            endpoint (end of utterance). Default: 0.5
+            endpoint (end of utterance). Default: 0.4
         sample_rate: Expected audio sample rate. Default: 16000
         lookback_chunks: Number of chunks to buffer for capturing speech onset.
             At 100ms chunks, 3 = ~300ms lookback. Default: 3
     """
 
-    speech_threshold: float = 0.5
-    min_speech_duration: float = 0.25
-    min_silence_duration: float = 0.5
-    sample_rate: int = 16000
+    speech_threshold: float = DEFAULT_VAD_THRESHOLD
+    min_speech_duration: float = DEFAULT_MIN_SPEECH_MS / 1000.0
+    min_silence_duration: float = DEFAULT_MIN_SILENCE_MS / 1000.0
+    sample_rate: int = DEFAULT_SAMPLE_RATE
     lookback_chunks: int = 3
 
 

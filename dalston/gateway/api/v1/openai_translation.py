@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_created
 from dalston.common.models import JobStatus
+from dalston.common.timeouts import SYNC_OPERATION_TIMEOUT_SECONDS
 from dalston.config import Settings
 from dalston.gateway.api.v1.openai_audio import (
     OPENAI_MAX_FILE_SIZE,
@@ -196,7 +197,7 @@ async def create_translation_openai(
     )
 
     # Wait for completion (synchronous)
-    max_wait_seconds = 300
+    max_wait_seconds = SYNC_OPERATION_TIMEOUT_SECONDS
     poll_interval = 1.0
     elapsed = 0.0
 

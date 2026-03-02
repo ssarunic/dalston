@@ -16,6 +16,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from dalston.common.audio_defaults import DEFAULT_SAMPLE_RATE
+
 # =============================================================================
 # Enums
 # =============================================================================
@@ -262,7 +264,9 @@ class PrepareInput(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    target_sample_rate: int = Field(default=16000, description="Target sample rate")
+    target_sample_rate: int = Field(
+        default=DEFAULT_SAMPLE_RATE, description="Target sample rate"
+    )
     target_channels: int = Field(default=1, description="1=mono, 2=stereo")
     target_encoding: str = Field(default="pcm_s16le", description="Audio encoding")
     normalize_volume: bool = Field(

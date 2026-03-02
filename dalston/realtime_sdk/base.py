@@ -22,6 +22,16 @@ from websockets.asyncio.server import ServerConnection, serve
 import dalston.logging
 import dalston.metrics
 import dalston.telemetry
+from dalston.common.audio_defaults import (
+    DEFAULT_MAX_UTTERANCE_SECONDS,
+    DEFAULT_MIN_SILENCE_MS,
+    DEFAULT_MIN_SPEECH_MS,
+    DEFAULT_SAMPLE_RATE,
+    DEFAULT_VAD_THRESHOLD,
+    MAX_SAMPLE_RATE,
+    MIN_SAMPLE_RATE,
+)
+from dalston.common.timeouts import WS_PING_INTERVAL, WS_PING_TIMEOUT
 from dalston.realtime_sdk.assembler import TranscribeResult
 from dalston.realtime_sdk.registry import WorkerInfo, WorkerRegistry
 from dalston.realtime_sdk.session import SessionConfig, SessionHandler
@@ -336,8 +346,8 @@ class RealtimeEngine(ABC):
             self._handle_connection,
             "0.0.0.0",
             self.port,
-            ping_interval=20,
-            ping_timeout=20,
+            ping_interval=WS_PING_INTERVAL,
+            ping_timeout=WS_PING_TIMEOUT,
             process_request=capture_request_path,
         ) as server:
             self._server = server
@@ -620,7 +630,10 @@ class RealtimeEngine(ABC):
             model=model_value,
             encoding=get_param("encoding", "pcm_s16le"),
             sample_rate=get_int_param(
-                "sample_rate", 16000, min_val=8000, max_val=48000
+                "sample_rate",
+                DEFAULT_SAMPLE_RATE,
+                min_val=MIN_SAMPLE_RATE,
+                max_val=MAX_SAMPLE_RATE,
             ),
             channels=get_int_param("channels", 1, min_val=1, max_val=2),
             enable_vad=get_bool_param("enable_vad", True),
@@ -630,21 +643,32 @@ class RealtimeEngine(ABC):
             max_utterance_duration=get_float_param(
                 "max_utterance_duration",
                 float(
-                    os.environ.get("DALSTON_REALTIME_MAX_UTTERANCE_DURATION", "30.0")
+                    os.environ.get(
+                        "DALSTON_REALTIME_MAX_UTTERANCE_DURATION",
+                        str(DEFAULT_MAX_UTTERANCE_SECONDS),
+                    )
                 ),
                 min_val=0.0,
                 max_val=300.0,
             ),
             # VAD tuning parameters (ElevenLabs-compatible)
             vad_threshold=get_float_param(
-                "vad_threshold", 0.5, min_val=0.0, max_val=1.0
+                "vad_threshold", DEFAULT_VAD_THRESHOLD, min_val=0.0, max_val=1.0
             ),
             min_speech_duration_ms=get_int_param(
-                "min_speech_duration_ms", 250, min_val=50, max_val=2000
+                "min_speech_duration_ms",
+                DEFAULT_MIN_SPEECH_MS,
+                min_val=50,
+                max_val=2000,
             ),
             min_silence_duration_ms=get_int_param(
                 "min_silence_duration_ms",
-                int(os.environ.get("DALSTON_REALTIME_MIN_SILENCE_DURATION_MS", "400")),
+                int(
+                    os.environ.get(
+                        "DALSTON_REALTIME_MIN_SILENCE_DURATION_MS",
+                        str(DEFAULT_MIN_SILENCE_MS),
+                    )
+                ),
                 min_val=50,
                 max_val=2000,
             ),
