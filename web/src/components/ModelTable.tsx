@@ -231,6 +231,12 @@ function ModelTableRow({
                 {isRemoving ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Remove'}
               </Button>
             )}
+            {model.status === 'downloading' && (
+              <Button size="sm" disabled variant="outline">
+                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                Downloading
+              </Button>
+            )}
             {(model.status === 'not_downloaded' || model.status === 'failed') && onPull && (
               <Button
                 size="sm"

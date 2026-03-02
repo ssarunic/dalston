@@ -35,11 +35,12 @@ export function Models() {
   const models = data?.data ?? []
 
   // Group models by status for display
-  const { readyModels, downloadingModels, availableModels, failedModels } = useMemo(() => {
+  // Note: downloading models are grouped with available (shown inline with progress)
+  const { readyModels, availableModels, failedModels } = useMemo(() => {
     return {
       readyModels: models.filter((m) => m.status === 'ready'),
-      downloadingModels: models.filter((m) => m.status === 'downloading'),
-      availableModels: models.filter((m) => m.status === 'not_downloaded'),
+      // Include downloading models in available - they show progress inline
+      availableModels: models.filter((m) => m.status === 'not_downloaded' || m.status === 'downloading'),
       failedModels: models.filter((m) => m.status === 'failed'),
     }
   }, [models])
@@ -47,7 +48,7 @@ export function Models() {
   // Client-side search filtering (backend handles stage/runtime/status)
   const filteredModels = useMemo(() => {
     if (!filters.search) {
-      return { readyModels, downloadingModels, availableModels, failedModels }
+      return { readyModels, availableModels, failedModels }
     }
     const search = filters.search.toLowerCase()
     const filterFn = (m: (typeof models)[0]) =>
@@ -57,11 +58,10 @@ export function Models() {
 
     return {
       readyModels: readyModels.filter(filterFn),
-      downloadingModels: downloadingModels.filter(filterFn),
       availableModels: availableModels.filter(filterFn),
       failedModels: failedModels.filter(filterFn),
     }
-  }, [readyModels, downloadingModels, availableModels, failedModels, filters.search])
+  }, [readyModels, availableModels, failedModels, filters.search])
 
   const handleResolve = (modelId: string) => {
     resolveHF.mutate({ model_id: modelId, auto_register: true })
@@ -133,21 +133,6 @@ export function Models() {
             Add a model from HuggingFace or sync with disk
           </p>
         </div>
-      )}
-
-      {/* Downloading Models */}
-      {filteredModels.downloadingModels.length > 0 && (
-        <Card>
-          <CardHeader className="py-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Downloading ({filteredModels.downloadingModels.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <ModelTable models={filteredModels.downloadingModels} />
-          </CardContent>
-        </Card>
       )}
 
       {/* Ready Models */}
