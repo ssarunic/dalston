@@ -104,17 +104,6 @@ export function DownloadIndicator() {
     navigate('/models')
   }, [navigate])
 
-  // Calculate overall progress
-  const overallProgress = useMemo(
-    () =>
-      downloads.length > 0
-        ? Math.round(
-            downloads.reduce((sum, d) => sum + (d.download_progress ?? 0), 0) / downloads.length
-          )
-        : 0,
-    [downloads]
-  )
-
   // Don't show floating indicator if on models page (they can see status there)
   // But still show notifications
   const showFloatingIndicator = activeCount > 0 && !isOnModelsPage
@@ -137,9 +126,8 @@ export function DownloadIndicator() {
           <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
           <Download className="h-5 w-5 text-blue-500" />
           <span className="text-foreground font-semibold">
-            {activeCount} model{activeCount > 1 ? 's' : ''}
+            Downloading {activeCount} model{activeCount > 1 ? 's' : ''}...
           </span>
-          <span className="text-muted-foreground">{overallProgress}%</span>
         </button>
       )}
 
