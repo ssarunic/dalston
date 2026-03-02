@@ -170,10 +170,14 @@ class ModelRegistryService:
         await db.commit()
 
         try:
+            # Use source (HuggingFace repo ID) for download, not runtime_model_id
+            # runtime_model_id is what the engine uses internally (e.g., "base")
+            # source is the HuggingFace repo (e.g., "Systran/faster-whisper-base")
+            hf_repo_id = model.source or model.runtime_model_id
             logger.info(
                 "downloading_model",
                 model_id=model_id,
-                runtime_model_id=model.runtime_model_id,
+                hf_repo_id=hf_repo_id,
             )
 
             # Import here to avoid dependency on huggingface_hub at import time
@@ -182,7 +186,7 @@ class ModelRegistryService:
             # Download from HuggingFace (blocking call wrapped in thread)
             local_path = await asyncio.to_thread(
                 snapshot_download,
-                model.runtime_model_id,
+                hf_repo_id,
                 cache_dir=str(HF_CACHE),
                 force_download=force,
             )
