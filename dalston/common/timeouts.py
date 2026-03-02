@@ -10,6 +10,7 @@ consistency and make configuration changes easier.
 # Used for blocking API calls that wait for job completion
 
 SYNC_OPERATION_TIMEOUT_SECONDS = 300  # 5 minutes - max wait for sync transcription
+SYNC_POLL_INTERVAL_SECONDS = 1.0  # interval between DB polls during sync wait
 
 # =============================================================================
 # WebSocket Connection Timeouts

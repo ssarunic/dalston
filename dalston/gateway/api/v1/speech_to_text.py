@@ -8,7 +8,6 @@ Note: ElevenLabs uses xi-api-key header for authentication.
 This is supported by the auth middleware alongside Bearer tokens.
 """
 
-import asyncio
 import json
 from typing import Annotated, Any
 from uuid import UUID, uuid4
@@ -31,7 +30,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_created
 from dalston.common.models import JobStatus
-from dalston.common.timeouts import SYNC_OPERATION_TIMEOUT_SECONDS
 from dalston.config import Settings
 from dalston.gateway.dependencies import (
     RequireJobsRead,
@@ -48,6 +46,7 @@ from dalston.gateway.dependencies import (
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.ingestion import AudioIngestionService
 from dalston.gateway.services.jobs import JobsService
+from dalston.gateway.services.polling import wait_for_job_completion
 from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.storage import StorageService
 
@@ -300,33 +299,23 @@ async def create_transcription(
         )
 
     # For sync mode, wait for completion (with timeout)
-    max_wait_seconds = SYNC_OPERATION_TIMEOUT_SECONDS
-    poll_interval = 1.0
-    elapsed = 0.0
+    result = await wait_for_job_completion(db, job)
 
-    while elapsed < max_wait_seconds:
-        await asyncio.sleep(poll_interval)
-        elapsed += poll_interval
+    if result.completed:
+        # Fetch transcript and return ElevenLabs format
+        transcript = await storage.get_transcript(job_id)
+        return _format_elevenlabs_response(job_id, transcript)
 
-        # Expire cached job object and refresh from database
-        db.expire(job)
-        await db.refresh(job)
+    if result.failed:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Transcription failed: {job.error or 'Unknown error'}",
+        )
 
-        if job.status == JobStatus.COMPLETED.value:
-            # Fetch transcript and return ElevenLabs format
-            transcript = await storage.get_transcript(job_id)
-            return _format_elevenlabs_response(job_id, transcript)
+    if result.cancelled:
+        raise HTTPException(status_code=400, detail="Transcription was cancelled")
 
-        if job.status == JobStatus.FAILED.value:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Transcription failed: {job.error or 'Unknown error'}",
-            )
-
-        if job.status == JobStatus.CANCELLED.value:
-            raise HTTPException(status_code=400, detail="Transcription was cancelled")
-
-    # Timeout - return async response
+    # Timeout
     raise HTTPException(
         status_code=408,
         detail="Transcription timeout. Use webhook=true for long files.",

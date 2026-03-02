@@ -5,7 +5,6 @@ POST /v1/audio/translations - Translate audio to English
 This is a standalone endpoint since Dalston native doesn't have a translation endpoint.
 """
 
-import asyncio
 from typing import Annotated, Any
 from uuid import uuid4
 
@@ -24,8 +23,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_created
-from dalston.common.models import JobStatus
-from dalston.common.timeouts import SYNC_OPERATION_TIMEOUT_SECONDS
 from dalston.config import Settings
 from dalston.gateway.api.v1.openai_audio import (
     OPENAI_MAX_FILE_SIZE,
@@ -47,6 +44,7 @@ from dalston.gateway.dependencies import (
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.ingestion import AudioIngestionService
 from dalston.gateway.services.jobs import JobsService
+from dalston.gateway.services.polling import wait_for_job_completion
 from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.storage import StorageService
 
@@ -197,37 +195,26 @@ async def create_translation_openai(
     )
 
     # Wait for completion (synchronous)
-    max_wait_seconds = SYNC_OPERATION_TIMEOUT_SECONDS
-    poll_interval = 1.0
-    elapsed = 0.0
+    result = await wait_for_job_completion(db, job)
 
-    while elapsed < max_wait_seconds:
-        await asyncio.sleep(poll_interval)
-        elapsed += poll_interval
+    if result.completed:
+        transcript = await storage.get_transcript(job_id)
+        return format_openai_response(transcript, response_format, None, export_service)
 
-        db.expire(job)
-        await db.refresh(job)
+    if result.failed:
+        raise_openai_error(
+            500,
+            f"Translation failed: {job.error or 'Unknown error'}",
+            error_type="server_error",
+            code="processing_failed",
+        )
 
-        if job.status == JobStatus.COMPLETED.value:
-            transcript = await storage.get_transcript(job_id)
-            return format_openai_response(
-                transcript, response_format, None, export_service
-            )
-
-        if job.status == JobStatus.FAILED.value:
-            raise_openai_error(
-                500,
-                f"Translation failed: {job.error or 'Unknown error'}",
-                error_type="server_error",
-                code="processing_failed",
-            )
-
-        if job.status == JobStatus.CANCELLED.value:
-            raise_openai_error(
-                400,
-                "Translation was cancelled",
-                code="cancelled",
-            )
+    if result.cancelled:
+        raise_openai_error(
+            400,
+            "Translation was cancelled",
+            code="cancelled",
+        )
 
     # Timeout
     raise_openai_error(

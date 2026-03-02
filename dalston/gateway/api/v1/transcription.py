@@ -12,7 +12,6 @@ The POST endpoint also supports OpenAI-style requests. Detection is based on the
 the request is handled in OpenAI mode with synchronous response and OpenAI response formats.
 """
 
-import asyncio
 import json
 from typing import Annotated, Any
 from uuid import UUID, uuid4
@@ -38,10 +37,7 @@ from dalston.common.models import (
     JobStatus,
     validate_retention,
 )
-from dalston.common.timeouts import (
-    S3_PRESIGNED_URL_EXPIRY_SECONDS,
-    SYNC_OPERATION_TIMEOUT_SECONDS,
-)
+from dalston.common.timeouts import S3_PRESIGNED_URL_EXPIRY_SECONDS
 from dalston.common.utils import compute_duration_ms
 from dalston.config import Settings
 
@@ -80,6 +76,7 @@ from dalston.gateway.models.responses import (
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.ingestion import AudioIngestionService
 from dalston.gateway.services.jobs import JobsService
+from dalston.gateway.services.polling import wait_for_job_completion
 from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.storage import StorageService
 
@@ -426,37 +423,28 @@ async def create_transcription(
 
     # OpenAI mode: wait for completion and return result
     storage = StorageService(settings)
-    max_wait_seconds = SYNC_OPERATION_TIMEOUT_SECONDS
-    poll_interval = 1.0
-    elapsed = 0.0
+    result = await wait_for_job_completion(db, job)
 
-    while elapsed < max_wait_seconds:
-        await asyncio.sleep(poll_interval)
-        elapsed += poll_interval
+    if result.completed:
+        transcript = await storage.get_transcript(job.id)
+        return format_openai_response(
+            transcript, response_format, timestamp_granularities, export_service
+        )
 
-        db.expire(job)
-        await db.refresh(job)
+    if result.failed:
+        raise_openai_error(
+            500,
+            f"Transcription failed: {job.error or 'Unknown error'}",
+            error_type="server_error",
+            code="processing_failed",
+        )
 
-        if job.status == JobStatus.COMPLETED.value:
-            transcript = await storage.get_transcript(job.id)
-            return format_openai_response(
-                transcript, response_format, timestamp_granularities, export_service
-            )
-
-        if job.status == JobStatus.FAILED.value:
-            raise_openai_error(
-                500,
-                f"Transcription failed: {job.error or 'Unknown error'}",
-                error_type="server_error",
-                code="processing_failed",
-            )
-
-        if job.status == JobStatus.CANCELLED.value:
-            raise_openai_error(
-                400,
-                "Transcription was cancelled",
-                code="cancelled",
-            )
+    if result.cancelled:
+        raise_openai_error(
+            400,
+            "Transcription was cancelled",
+            code="cancelled",
+        )
 
     # Timeout
     raise_openai_error(
