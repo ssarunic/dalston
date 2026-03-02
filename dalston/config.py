@@ -120,6 +120,13 @@ class Settings(BaseSettings):
         description="Timeout for downloading audio from URLs in seconds",
     )
 
+    # Default Model
+    default_model: str = Field(
+        default="faster-whisper-large-v3-turbo",
+        alias="DALSTON_DEFAULT_MODEL",
+        description="Default transcription model for OpenAI/ElevenLabs compatible APIs",
+    )
+
     # Realtime Transcription VAD Defaults
     realtime_min_silence_duration_ms: int = Field(
         default=400,

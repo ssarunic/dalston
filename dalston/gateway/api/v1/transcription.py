@@ -46,7 +46,6 @@ from dalston.gateway.api.v1.openai_audio import (
     OPENAI_MAX_FILE_SIZE,
     format_openai_response,
     is_openai_model,
-    map_openai_model,
     raise_openai_error,
     validate_openai_request,
 )
@@ -273,11 +272,10 @@ async def create_transcription(
 
     # Build parameters
     if openai_mode:
-        # OpenAI mode: map model to Dalston engine
-        engine_id = map_openai_model(model)
+        # OpenAI mode: use default model (ignore OpenAI model parameter)
         parameters: dict = {
             "language": language or "auto",
-            "engine_transcribe": engine_id,
+            "engine_transcribe": settings.default_model,
             "timestamps_granularity": "word"
             if timestamp_granularities and "word" in timestamp_granularities
             else "segment",
