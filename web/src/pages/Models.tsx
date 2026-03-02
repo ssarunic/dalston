@@ -6,7 +6,7 @@ import {
   Package,
   Plus,
 } from 'lucide-react'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -67,7 +67,15 @@ export function Models() {
 
   if (error) {
     return (
-      <div>
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Models</h1>
+            <p className="text-muted-foreground">
+              Manage transcription models and download from HuggingFace
+            </p>
+          </div>
+        </div>
         <div className="text-center py-12">
           <AlertCircle className="h-12 w-12 mx-auto mb-4 text-red-500" />
           <p className="text-red-500">Failed to load model registry</p>
@@ -80,7 +88,7 @@ export function Models() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Models</h1>
           <p className="text-muted-foreground">
@@ -106,32 +114,36 @@ export function Models() {
         </div>
       </div>
 
-      {/* Filters */}
-      <ModelFiltersBar filters={filters} onChange={setFilters} />
+      {/* Models Card */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+          <CardTitle className="text-base font-medium">Model Registry</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Filters */}
+          <ModelFiltersBar filters={filters} onChange={setFilters} />
 
-      {/* Loading State */}
-      {isLoading && (
-        <div className="text-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-muted-foreground" />
-          <p className="text-muted-foreground">Loading models...</p>
-        </div>
-      )}
+          {/* Loading State */}
+          {isLoading && (
+            <div className="text-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-muted-foreground" />
+              <p className="text-muted-foreground">Loading models...</p>
+            </div>
+          )}
 
-      {/* Empty State */}
-      {!isLoading && models.length === 0 && (
-        <div className="text-center py-12">
-          <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
-          <p className="text-muted-foreground">No models found</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            Add a model from HuggingFace or sync with disk
-          </p>
-        </div>
-      )}
+          {/* Empty State */}
+          {!isLoading && models.length === 0 && (
+            <div className="text-center py-12">
+              <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p className="text-muted-foreground">No models found</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Add a model from HuggingFace or sync with disk
+              </p>
+            </div>
+          )}
 
-      {/* All Models in One Table */}
-      {!isLoading && filteredModels.length > 0 && (
-        <Card>
-          <CardContent className="pt-6">
+          {/* Models Table */}
+          {!isLoading && filteredModels.length > 0 && (
             <ModelTable
               models={filteredModels}
               onPull={handlePull}
@@ -141,9 +153,9 @@ export function Models() {
               removingId={removeModel.isPending ? removeModel.variables : undefined}
               purgingId={purgeModel.isPending ? purgeModel.variables : undefined}
             />
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
 
       {/* Add Model Dialog */}
       <AddModelDialog

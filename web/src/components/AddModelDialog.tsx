@@ -1,7 +1,6 @@
 import { useEffect } from 'react'
 import { X } from 'lucide-react'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { HFModelInput } from '@/components/HFModelInput'
 import type { HFResolveResponse } from '@/api/types'
@@ -32,10 +31,10 @@ export function AddModelDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-base">Add Model from HuggingFace</CardTitle>
+      <DialogContent className="max-w-2xl">
+        <div className="bg-card rounded-lg border shadow-lg">
+          <div className="flex items-center justify-between p-4 border-b">
+            <h3 className="text-base font-semibold">Add Model from HuggingFace</h3>
             <Button
               variant="ghost"
               size="icon"
@@ -45,16 +44,16 @@ export function AddModelDialog({
               <X className="h-4 w-4" />
               <span className="sr-only">Close</span>
             </Button>
-          </CardHeader>
-          <CardContent>
+          </div>
+          <div className="p-4">
             <HFModelInput
               onResolve={onResolve}
               isLoading={isLoading}
               result={result}
               error={error}
             />
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   )

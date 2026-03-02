@@ -96,8 +96,11 @@ interface DialogContentProps {
 }
 
 export function DialogContent({ children, className = '' }: DialogContentProps) {
+  // Default to max-w-md if no max-w class is provided
+  const hasMaxWidth = /\bmax-w-/.test(className)
+  const baseClasses = hasMaxWidth ? 'w-full mx-4' : 'w-full max-w-md mx-4'
   return (
-    <div className={`w-full max-w-md mx-4 ${className}`}>
+    <div className={`${baseClasses} ${className}`}>
       {children}
     </div>
   )
