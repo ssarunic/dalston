@@ -6,6 +6,7 @@ import {
   AlertCircle,
   Loader2,
   Package,
+  Plus,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -17,13 +18,14 @@ import {
   useResolveHFModel,
   useSyncModels,
 } from '@/hooks/useModelRegistry'
-import { ModelCard } from '@/components/ModelCard'
+import { ModelTable } from '@/components/ModelTable'
 import { ModelFiltersBar } from '@/components/ModelFiltersBar'
-import { HFModelInput } from '@/components/HFModelInput'
+import { AddModelDialog } from '@/components/AddModelDialog'
 import type { ModelFilters } from '@/api/types'
 
 export function Models() {
   const [filters, setFilters] = useState<ModelFilters>({})
+  const [addDialogOpen, setAddDialogOpen] = useState(false)
   const { data, isLoading, error } = useModelRegistry(filters)
   const pullModel = usePullModel()
   const removeModel = useRemoveModel()
@@ -65,9 +67,17 @@ export function Models() {
     resolveHF.mutate({ model_id: modelId, auto_register: true })
   }
 
+  const handlePull = (modelId: string, force = false) => {
+    pullModel.mutate({ modelId, force })
+  }
+
+  const handleRemove = (modelId: string) => {
+    removeModel.mutate(modelId)
+  }
+
   if (error) {
     return (
-      <div className="p-6">
+      <div>
         <div className="text-center py-12">
           <AlertCircle className="h-12 w-12 mx-auto mb-4 text-red-500" />
           <p className="text-red-500">Failed to load model registry</p>
@@ -78,7 +88,7 @@ export function Models() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -87,33 +97,24 @@ export function Models() {
             Manage transcription models and download from HuggingFace
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={() => syncModels.mutate()}
-          disabled={syncModels.isPending}
-        >
-          <RefreshCw className={cn('h-4 w-4 mr-2', syncModels.isPending && 'animate-spin')} />
-          Sync with Disk
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => syncModels.mutate()}
+            disabled={syncModels.isPending}
+          >
+            <RefreshCw className={cn('h-4 w-4 mr-2', syncModels.isPending && 'animate-spin')} />
+            Sync with Disk
+          </Button>
+          <Button onClick={() => setAddDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add from HF
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}
       <ModelFiltersBar filters={filters} onChange={setFilters} />
-
-      {/* Add from HuggingFace */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Add Model from HuggingFace</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <HFModelInput
-            onResolve={handleResolve}
-            isLoading={resolveHF.isPending}
-            result={resolveHF.data}
-            error={resolveHF.error}
-          />
-        </CardContent>
-      </Card>
 
       {/* Loading State */}
       {isLoading && (
@@ -136,78 +137,85 @@ export function Models() {
 
       {/* Downloading Models */}
       {filteredModels.downloadingModels.length > 0 && (
-        <section>
-          <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Downloading ({filteredModels.downloadingModels.length})
-          </h2>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {filteredModels.downloadingModels.map((model) => (
-              <ModelCard key={model.id} model={model} />
-            ))}
-          </div>
-        </section>
+        <Card>
+          <CardHeader className="py-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Downloading ({filteredModels.downloadingModels.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <ModelTable models={filteredModels.downloadingModels} />
+          </CardContent>
+        </Card>
       )}
 
       {/* Ready Models */}
       {filteredModels.readyModels.length > 0 && (
-        <section>
-          <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-            <CheckCircle className="h-4 w-4 text-green-500" />
-            Ready ({filteredModels.readyModels.length})
-          </h2>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {filteredModels.readyModels.map((model) => (
-              <ModelCard
-                key={model.id}
-                model={model}
-                onRemove={() => removeModel.mutate(model.id)}
-                isRemoving={removeModel.isPending && removeModel.variables === model.id}
-              />
-            ))}
-          </div>
-        </section>
+        <Card>
+          <CardHeader className="py-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <CheckCircle className="h-4 w-4 text-green-500" />
+              Ready ({filteredModels.readyModels.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <ModelTable
+              models={filteredModels.readyModels}
+              onRemove={handleRemove}
+              removingId={removeModel.isPending ? removeModel.variables : undefined}
+            />
+          </CardContent>
+        </Card>
       )}
 
       {/* Available Models */}
       {filteredModels.availableModels.length > 0 && (
-        <section>
-          <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-            <Cloud className="h-4 w-4 text-muted-foreground" />
-            Available to Download ({filteredModels.availableModels.length})
-          </h2>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {filteredModels.availableModels.map((model) => (
-              <ModelCard
-                key={model.id}
-                model={model}
-                onPull={() => pullModel.mutate({ modelId: model.id })}
-                isPulling={pullModel.isPending && pullModel.variables?.modelId === model.id}
-              />
-            ))}
-          </div>
-        </section>
+        <Card>
+          <CardHeader className="py-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Cloud className="h-4 w-4 text-muted-foreground" />
+              Available to Download ({filteredModels.availableModels.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <ModelTable
+              models={filteredModels.availableModels}
+              onPull={(modelId) => handlePull(modelId)}
+              pullingId={pullModel.isPending ? pullModel.variables?.modelId : undefined}
+            />
+          </CardContent>
+        </Card>
       )}
 
       {/* Failed Models */}
       {filteredModels.failedModels.length > 0 && (
-        <section>
-          <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-            <AlertCircle className="h-4 w-4 text-red-500" />
-            Failed ({filteredModels.failedModels.length})
-          </h2>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {filteredModels.failedModels.map((model) => (
-              <ModelCard
-                key={model.id}
-                model={model}
-                onPull={() => pullModel.mutate({ modelId: model.id, force: true })}
-                isPulling={pullModel.isPending && pullModel.variables?.modelId === model.id}
-              />
-            ))}
-          </div>
-        </section>
+        <Card>
+          <CardHeader className="py-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 text-red-500" />
+              Failed ({filteredModels.failedModels.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <ModelTable
+              models={filteredModels.failedModels}
+              onPull={(modelId) => handlePull(modelId, true)}
+              pullingId={pullModel.isPending ? pullModel.variables?.modelId : undefined}
+            />
+          </CardContent>
+        </Card>
       )}
+
+      {/* Add Model Dialog */}
+      <AddModelDialog
+        open={addDialogOpen}
+        onOpenChange={setAddDialogOpen}
+        onResolve={handleResolve}
+        isLoading={resolveHF.isPending}
+        result={resolveHF.data}
+        error={resolveHF.error}
+      />
     </div>
   )
 }
