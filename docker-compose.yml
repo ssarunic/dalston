@@ -339,6 +339,46 @@ services:
     depends_on: *batch-depends
     restart: unless-stopped
 
+  # M41: Parakeet ONNX Runtime (CPU - lightweight English transcription)
+  # Uses ONNX Runtime instead of NeMo for ~12x smaller container image.
+  # Supports: nvidia/parakeet-ctc-0.6b, nvidia/parakeet-ctc-1.1b
+  stt-batch-transcribe-nemo-onnx:
+    image: dalston/stt-batch-transcribe-nemo-onnx:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-transcribe/parakeet-onnx/Dockerfile
+      args:
+        DEVICE: cpu
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_ENGINE_ID: nemo-onnx
+      DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-ctc-0.6b"
+      DALSTON_QUANTIZATION: "none"
+    volumes:
+      - model-cache:/models
+    depends_on: *batch-depends
+    restart: unless-stopped
+
+  # M41: Parakeet ONNX Runtime (GPU - faster English transcription)
+  stt-batch-transcribe-nemo-onnx-gpu:
+    image: dalston/stt-batch-transcribe-nemo-onnx-gpu:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-transcribe/parakeet-onnx/Dockerfile
+      args:
+        DEVICE: cuda
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_ENGINE_ID: nemo-onnx
+      DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-ctc-0.6b"
+      DALSTON_DEVICE: cuda
+    volumes:
+      - model-cache:/models
+    depends_on: *batch-depends
+    deploy: *gpu-deploy
+    profiles: [gpu]
+    restart: unless-stopped
+
   # Voxtral Mini 3B (GPU - multilingual transcription)
   # Note: Voxtral uses different framework (HF transformers), not part of M36 consolidation.
   stt-batch-transcribe-voxtral-mini-3b:
@@ -595,6 +635,50 @@ services:
       dockerfile: engines/stt-rt/faster-whisper/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 4
+    volumes:
+      - model-cache:/models
+    depends_on: *realtime-depends
+    healthcheck: *ws-healthcheck
+    deploy: *gpu-deploy
+    profiles: [gpu]
+    restart: unless-stopped
+
+  # M41: Parakeet ONNX CTC 0.6B (CPU - lightweight realtime English)
+  stt-rt-transcribe-parakeet-onnx-ctc-0.6b:
+    image: dalston/stt-rt-transcribe-parakeet-onnx-ctc-0.6b:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-rt/parakeet-onnx/Dockerfile
+      args:
+        MODEL_VARIANT: ctc-0.6b
+        DEVICE: cpu
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_MODEL_VARIANT: ctc-0.6b
+      DALSTON_DEVICE: cpu
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 4
+    volumes:
+      - model-cache:/models
+    depends_on: *realtime-depends
+    healthcheck: *ws-healthcheck
+    restart: unless-stopped
+
+  # M41: Parakeet ONNX CTC 0.6B (GPU)
+  stt-rt-transcribe-parakeet-onnx-ctc-0.6b-gpu:
+    image: dalston/stt-rt-transcribe-parakeet-onnx-ctc-0.6b-gpu:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-rt/parakeet-onnx/Dockerfile
+      args:
+        MODEL_VARIANT: ctc-0.6b
+        DEVICE: cuda
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_MODEL_VARIANT: ctc-0.6b
+      DALSTON_DEVICE: cuda
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
     volumes:

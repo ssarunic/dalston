@@ -52,6 +52,8 @@ def build_task_dag_for_test(
     # This simulates what the engine_selector does with the catalog
     MODEL_TO_RUNTIME = {
         "parakeet-tdt-1.1b": ("nemo", "nvidia/parakeet-tdt-1.1b"),
+        "parakeet-onnx-ctc-0.6b": ("nemo-onnx", "nvidia/parakeet-ctc-0.6b"),
+        "parakeet-onnx-ctc-1.1b": ("nemo-onnx", "nvidia/parakeet-ctc-1.1b"),
         "faster-whisper-large-v3-turbo": ("faster-whisper", None),
         "faster-whisper-base": ("faster-whisper", None),
     }
@@ -61,9 +63,9 @@ def build_task_dag_for_test(
         engines["transcribe"] = runtime
 
     # Determine skip flags based on parameters and engine capabilities
-    # NeMo models have native word timestamps, so skip alignment
+    # NeMo and NeMo-ONNX models have native word timestamps, so skip alignment
     skip_alignment = False
-    if engines.get("transcribe") == "nemo":
+    if engines.get("transcribe") in ("nemo", "nemo-onnx"):
         skip_alignment = True
     elif parameters.get("timestamps_granularity") == "segment":
         skip_alignment = True

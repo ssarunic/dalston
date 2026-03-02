@@ -1,0 +1,44 @@
+# Model catalog entry for parakeet-onnx-ctc-0.6b
+# M41: ONNX Runtime variant of Parakeet CTC 0.6B
+
+schema_version: "1.1"
+id: parakeet-onnx-ctc-0.6b
+runtime: nemo-onnx
+runtime_model_id: "nvidia/parakeet-ctc-0.6b"  # Same HuggingFace model, different runtime
+
+name: NVIDIA Parakeet ONNX CTC 0.6B
+source: nvidia/parakeet-ctc-0.6b
+size_gb: 0.6  # ONNX model is smaller than NeMo checkpoint
+stage: transcribe
+
+description: |
+  NVIDIA Parakeet CTC 0.6B via ONNX Runtime for fast English-only transcription.
+  Same model accuracy as the NeMo variant (parakeet-ctc-0.6b) but runs on
+  ONNX Runtime for lighter deployment and better CPU performance.
+
+  Advantages over NeMo variant:
+    - ~12x smaller container image (~1GB vs ~12GB)
+    - ~3x faster cold start
+    - Better CPU inference (ONNX optimizations + INT8 quantization)
+    - No PyTorch dependency for CPU inference
+
+  NOTE: Outputs lowercase text without punctuation.
+
+languages:
+  - en
+
+capabilities:
+  word_timestamps: true
+  punctuation: false
+  capitalization: false
+  streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  min_vram_gb: 2
+  supports_cpu: true
+  min_ram_gb: 4
+
+performance:
+  rtf_gpu: 0.0003
+  rtf_cpu: 0.15

@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-02-28T18:48:34.411897+00:00",
+  "generated_at": "2026-03-02T22:30:02.647302+00:00",
   "schema_version": "2.0",
-  "runtime_count": 9,
-  "model_count": 10,
-  "engine_count": 9,
+  "runtime_count": 10,
+  "model_count": 12,
+  "engine_count": 10,
   "runtimes": {
     "phoneme-align": {
       "id": "phoneme-align",
@@ -316,6 +316,44 @@
         "rtf_cpu": 0.5,
         "warm_start_latency_ms": 150
       }
+    },
+    "nemo-onnx": {
+      "id": "nemo-onnx",
+      "engine_id": "nemo-onnx",
+      "name": "NVIDIA Parakeet ONNX Runtime",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "description": "Lightweight ONNX Runtime engine for NVIDIA Parakeet CTC transcription models.\nUses the onnx-asr library for fast inference without the full NeMo toolkit.\n\nM41: This is a new runtime that provides the same Parakeet CTC model accuracy\nwith significantly smaller container images (~1GB vs ~12GB) and faster startup.\nUses ONNX Runtime for inference and supports both CPU and GPU execution.\n\nSupported models:\n  - nvidia/parakeet-ctc-0.6b (fast, 600M params)\n  - nvidia/parakeet-ctc-1.1b (accurate, 1.1B params)\n\nAll Parakeet CTC models produce native word-level timestamps without needing\na separate alignment stage.",
+      "image": "dalston/stt-batch-transcribe-nemo-onnx:1.0.0",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": [
+          "en"
+        ],
+        "supports_word_timestamps": true,
+        "supports_streaming": false,
+        "max_audio_duration": 7200,
+        "max_concurrency": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": true,
+        "min_vram_gb": 2,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": true,
+        "min_ram_gb": 4,
+        "memory": "4G"
+      },
+      "performance": {
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": 0.15,
+        "warm_start_latency_ms": 50
+      }
     }
   },
   "models": {
@@ -537,6 +575,64 @@
       "performance": {
         "rtf_gpu": 0.0005,
         "rtf_cpu": null
+      }
+    },
+    "parakeet-onnx-ctc-0.6b": {
+      "id": "parakeet-onnx-ctc-0.6b",
+      "runtime": "nemo-onnx",
+      "runtime_model_id": "nvidia/parakeet-ctc-0.6b",
+      "name": "NVIDIA Parakeet ONNX CTC 0.6B",
+      "source": "nvidia/parakeet-ctc-0.6b",
+      "size_gb": 0.6,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet CTC 0.6B via ONNX Runtime for fast English-only transcription.\nSame model accuracy as the NeMo variant (parakeet-ctc-0.6b) but runs on\nONNX Runtime for lighter deployment and better CPU performance.\n\nAdvantages over NeMo variant:\n  - ~12x smaller container image (~1GB vs ~12GB)\n  - ~3x faster cold start\n  - Better CPU inference (ONNX optimizations + INT8 quantization)\n  - No PyTorch dependency for CPU inference\n\nNOTE: Outputs lowercase text without punctuation.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 2,
+        "supports_cpu": true,
+        "min_ram_gb": 4
+      },
+      "performance": {
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": 0.15
+      }
+    },
+    "parakeet-onnx-ctc-1.1b": {
+      "id": "parakeet-onnx-ctc-1.1b",
+      "runtime": "nemo-onnx",
+      "runtime_model_id": "nvidia/parakeet-ctc-1.1b",
+      "name": "NVIDIA Parakeet ONNX CTC 1.1B",
+      "source": "nvidia/parakeet-ctc-1.1b",
+      "size_gb": 1.2,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet CTC 1.1B via ONNX Runtime for accurate English-only transcription.\nLarger model with better accuracy than the 0.6B variant.\nSame accuracy as the NeMo variant (parakeet-ctc-1.1b) but runs on ONNX Runtime.\n\nAdvantages over NeMo variant:\n  - ~12x smaller container image (~1GB vs ~12GB)\n  - ~3x faster cold start\n  - Better CPU inference (ONNX optimizations + INT8 quantization)\n  - No PyTorch dependency for CPU inference\n\nNOTE: Outputs lowercase text without punctuation.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 4,
+        "supports_cpu": true,
+        "min_ram_gb": 8
+      },
+      "performance": {
+        "rtf_gpu": 0.0005,
+        "rtf_cpu": 0.2
       }
     },
     "parakeet-tdt-0.6b-v3": {
@@ -909,6 +1005,44 @@
         "rtf_gpu": 0.0006,
         "rtf_cpu": 0.5,
         "warm_start_latency_ms": 150
+      }
+    },
+    "nemo-onnx": {
+      "id": "nemo-onnx",
+      "name": "NVIDIA Parakeet ONNX Runtime",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "type": null,
+      "description": "Lightweight ONNX Runtime engine for NVIDIA Parakeet CTC transcription models.\nUses the onnx-asr library for fast inference without the full NeMo toolkit.\n\nM41: This is a new runtime that provides the same Parakeet CTC model accuracy\nwith significantly smaller container images (~1GB vs ~12GB) and faster startup.\nUses ONNX Runtime for inference and supports both CPU and GPU execution.\n\nSupported models:\n  - nvidia/parakeet-ctc-0.6b (fast, 600M params)\n  - nvidia/parakeet-ctc-1.1b (accurate, 1.1B params)\n\nAll Parakeet CTC models produce native word-level timestamps without needing\na separate alignment stage.",
+      "image": "dalston/stt-batch-transcribe-nemo-onnx:1.0.0",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": [
+          "en"
+        ],
+        "supports_word_timestamps": true,
+        "supports_streaming": false,
+        "max_audio_duration": 7200,
+        "max_concurrency": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": true,
+        "min_vram_gb": 2,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": true,
+        "min_ram_gb": 4,
+        "memory": "4G"
+      },
+      "performance": {
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": 0.15,
+        "warm_start_latency_ms": 50
       }
     }
   }

@@ -1,0 +1,11 @@
+# Parakeet ONNX Streaming Real-time Engine Dependencies
+
+# ONNX ASR library for Parakeet CTC inference
+onnx-asr[cpu,hub]>=0.3.3
+
+# Audio processing
+numpy>=1.24.0,<3.0.0
+soundfile>=0.12.0
+torchaudio  # Required by Silero VAD
+
+# Note: websockets and redis are installed via dalston[realtime-sdk]
