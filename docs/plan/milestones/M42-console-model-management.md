@@ -6,7 +6,7 @@
 | **Duration** | 5-7 days |
 | **Dependencies** | M40 (Model Registry & Aliases), M10 (Web Console) |
 | **Deliverable** | Model Registry page, enhanced NewJob model selector, engine model visibility, download progress UI |
-| **Status** | In Progress (42.1 + 42.2 + 42.3 + 42.4 complete, 42.5 pending) |
+| **Status** | Complete |
 
 ## User Story
 
@@ -1388,12 +1388,12 @@ export function CapabilitiesCard() {
 
 ### Deliverables
 
-- [ ] `useSystemCapabilities` hook
-- [ ] `CapabilitiesCard` component
-- [ ] Languages count with preview
-- [ ] Feature availability indicators
-- [ ] Models ready count
-- [ ] Link to Models page
+- [x] `useSystemCapabilities` hook
+- [x] `CapabilitiesCard` component
+- [x] Languages count with preview
+- [x] Feature availability indicators
+- [x] Models ready count
+- [x] Link to Models page
 
 ---
 
@@ -1517,7 +1517,7 @@ open http://localhost:5173/
   - [x] Graceful error handling: `NoDownloadedModelError` when no models available
 - [x] **42.3**: Engine cards show model information
 - [x] **42.4**: Download progress indicator and notifications
-- [ ] **42.5**: Dashboard capabilities card
+- [x] **42.5**: Dashboard capabilities card
 
 ---
 

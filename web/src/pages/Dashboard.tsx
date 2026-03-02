@@ -3,6 +3,7 @@ import { Activity, Cpu, Radio, CheckCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { StatusBadge } from '@/components/StatusBadge'
 import { MetricsPanel } from '@/components/MetricsPanel'
+import { CapabilitiesCard } from '@/components/CapabilitiesCard'
 import { useDashboard } from '@/hooks/useDashboard'
 import { useMetrics } from '@/hooks/useMetrics'
 import { useRealtimeSessions } from '@/hooks/useRealtimeSessions'
@@ -144,9 +145,35 @@ export function Dashboard() {
       {/* Key Metrics */}
       <MetricsPanel metrics={metricsData} isLoading={metricsLoading} />
 
-      {/* Recent Activity - Two Column Layout */}
-      <div className="grid gap-6 grid-cols-1 lg:grid-cols-2">
-        {/* Realtime first in DOM for mobile stacking */}
+      {/* Recent Activity - Three Column Layout */}
+      <div className="grid gap-6 grid-cols-1 lg:grid-cols-3">
+        <Card className="lg:order-1">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>Recent Batch Jobs</CardTitle>
+            <Link
+              to="/jobs"
+              className="text-sm text-primary hover:underline"
+            >
+              View all
+            </Link>
+          </CardHeader>
+          <CardContent>
+            {recentJobs.length === 0 ? (
+              !isLoading && (
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  No jobs yet
+                </p>
+              )
+            ) : (
+              <div className="divide-y divide-border">
+                {recentJobs.map((job) => (
+                  <RecentJobRow key={job.id} job={job} />
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         <Card className="lg:order-2">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>Recent Real-time Sessions</CardTitle>
@@ -174,32 +201,9 @@ export function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card className="lg:order-1">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Recent Batch Jobs</CardTitle>
-            <Link
-              to="/jobs"
-              className="text-sm text-primary hover:underline"
-            >
-              View all
-            </Link>
-          </CardHeader>
-          <CardContent>
-            {recentJobs.length === 0 ? (
-              !isLoading && (
-                <p className="text-sm text-muted-foreground py-4 text-center">
-                  No jobs yet
-                </p>
-              )
-            ) : (
-              <div className="divide-y divide-border">
-                {recentJobs.map((job) => (
-                  <RecentJobRow key={job.id} job={job} />
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <div className="lg:order-3">
+          <CapabilitiesCard />
+        </div>
       </div>
     </div>
   )
