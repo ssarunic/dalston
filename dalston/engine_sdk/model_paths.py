@@ -4,13 +4,15 @@ This module provides centralized path utilities for managing model weights
 across different frameworks (HuggingFace, CTranslate2, NeMo, etc.).
 
 All engines should use these utilities to ensure consistent cache structure:
-- /models/huggingface/  - HuggingFace Hub cache (transformers, diffusers)
-- /models/ctranslate2/  - CTranslate2 converted models (faster-whisper)
-- /models/nemo/         - NVIDIA NeMo checkpoints
-- /models/torch/        - PyTorch hub cache
+- {base}/huggingface/  - HuggingFace Hub cache (transformers, diffusers)
+- {base}/ctranslate2/  - CTranslate2 converted models (faster-whisper)
+- {base}/nemo/         - NVIDIA NeMo checkpoints
+- {base}/torch/        - PyTorch hub cache
 
 Environment Variables:
-- DALSTON_MODEL_DIR: Base model directory (default: /models)
+- DALSTON_MODEL_DIR: Base model directory
+  - Docker: defaults to /models (mounted volume)
+  - Local: defaults to ~/.cache/dalston/models
 - HF_HUB_CACHE: Overrides HuggingFace cache location
 """
 
@@ -19,8 +21,25 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# Base model directory (mounted Docker volume)
-MODEL_BASE = Path(os.environ.get("DALSTON_MODEL_DIR", "/models"))
+
+def _get_default_model_dir() -> Path:
+    """Get the default model directory based on environment.
+
+    Returns:
+        - /models if it exists (Docker with mounted volume)
+        - ~/.cache/dalston/models otherwise (local development)
+    """
+    docker_path = Path("/models")
+    if docker_path.exists() and docker_path.is_dir():
+        return docker_path
+
+    # Local development: use XDG cache directory
+    xdg_cache = os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))
+    return Path(xdg_cache) / "dalston" / "models"
+
+
+# Base model directory
+MODEL_BASE = Path(os.environ.get("DALSTON_MODEL_DIR", str(_get_default_model_dir())))
 
 # Per-framework subdirectories
 HF_CACHE = Path(os.environ.get("HF_HUB_CACHE", str(MODEL_BASE / "huggingface")))
