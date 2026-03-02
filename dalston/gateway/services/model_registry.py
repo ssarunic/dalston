@@ -371,6 +371,7 @@ class ModelRegistryService:
         languages: list[str] | None = None,
         word_timestamps: bool = False,
         punctuation: bool = False,
+        capitalization: bool = False,
         streaming: bool = False,
         min_vram_gb: float | None = None,
         min_ram_gb: float | None = None,
@@ -391,6 +392,7 @@ class ModelRegistryService:
             languages: Supported language codes
             word_timestamps: Whether model provides word timestamps
             punctuation: Whether model provides punctuation
+            capitalization: Whether model provides proper capitalization
             streaming: Whether model supports streaming
             min_vram_gb: Minimum GPU VRAM required
             min_ram_gb: Minimum RAM required
@@ -411,6 +413,7 @@ class ModelRegistryService:
             languages=languages,
             word_timestamps=word_timestamps,
             punctuation=punctuation,
+            capitalization=capitalization,
             streaming=streaming,
             min_vram_gb=min_vram_gb,
             min_ram_gb=min_ram_gb,
@@ -455,7 +458,12 @@ class ModelRegistryService:
 
         return model
 
-    async def seed_from_catalog(self, db: AsyncSession) -> dict[str, int]:
+    async def seed_from_catalog(
+        self,
+        db: AsyncSession,
+        *,
+        update_existing: bool = False,
+    ) -> dict[str, int]:
         """Seed the registry with models from the static catalog.
 
         This populates the database with all models defined in the catalog,
@@ -463,23 +471,49 @@ class ModelRegistryService:
 
         Args:
             db: Database session
+            update_existing: If True, update existing models with catalog data
 
         Returns:
-            Dict with counts: {"created": N, "skipped": N}
+            Dict with counts: {"created": N, "updated": N, "skipped": N}
         """
-        from dalston.orchestrator.catalog import get_catalog
+        from dalston.orchestrator.catalog import get_catalog, reload_catalog
 
+        # Force reload to get fresh data
+        reload_catalog()
         catalog = get_catalog()
         models = catalog.get_all_models()
 
         created = 0
+        updated = 0
         skipped = 0
 
         for m in models:
             # Check if model already exists
             existing = await self.get_model(db, m.id)
             if existing is not None:
-                skipped += 1
+                if update_existing:
+                    # Update existing model with catalog data
+                    await db.execute(
+                        update(ModelRegistryModel)
+                        .where(ModelRegistryModel.id == m.id)
+                        .values(
+                            name=m.name,
+                            runtime=m.runtime,
+                            runtime_model_id=m.runtime_model_id,
+                            stage=m.stage or "transcribe",
+                            source=m.source,
+                            languages=m.languages,
+                            word_timestamps=m.word_timestamps,
+                            punctuation=m.punctuation,
+                            capitalization=m.capitalization,
+                            min_vram_gb=m.min_vram_gb,
+                            min_ram_gb=m.min_ram_gb,
+                            supports_cpu=m.supports_cpu,
+                        )
+                    )
+                    updated += 1
+                else:
+                    skipped += 1
                 continue
 
             # Create new registry entry
@@ -494,6 +528,7 @@ class ModelRegistryService:
                 languages=m.languages,
                 word_timestamps=m.word_timestamps,
                 punctuation=m.punctuation,
+                capitalization=m.capitalization,
                 min_vram_gb=m.min_vram_gb,
                 min_ram_gb=m.min_ram_gb,
                 supports_cpu=m.supports_cpu,
@@ -506,7 +541,8 @@ class ModelRegistryService:
         logger.info(
             "catalog_seeded",
             created=created,
+            updated=updated,
             skipped=skipped,
         )
 
-        return {"created": created, "skipped": skipped}
+        return {"created": created, "updated": updated, "skipped": skipped}

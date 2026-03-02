@@ -730,6 +730,7 @@ class ModelRegistryModel(Base):
     # Capabilities
     word_timestamps: Mapped[bool] = mapped_column(Boolean, server_default="false")
     punctuation: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    capitalization: Mapped[bool] = mapped_column(Boolean, server_default="false")
     streaming: Mapped[bool] = mapped_column(Boolean, server_default="false")
 
     # Hardware requirements

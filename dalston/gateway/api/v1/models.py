@@ -184,6 +184,7 @@ class ModelRegistryResponse(BaseModel):
     languages: list[str] | None = None
     word_timestamps: bool = False
     punctuation: bool = False
+    capitalization: bool = False
     streaming: bool = False
     min_vram_gb: float | None = None
     min_ram_gb: float | None = None
@@ -268,6 +269,7 @@ async def list_registry_models(
             languages=m.languages,
             word_timestamps=m.word_timestamps,
             punctuation=m.punctuation,
+            capitalization=m.capitalization,
             streaming=m.streaming,
             min_vram_gb=m.min_vram_gb,
             min_ram_gb=m.min_ram_gb,
@@ -318,6 +320,7 @@ async def get_registry_model(
         languages=model.languages,
         word_timestamps=model.word_timestamps,
         punctuation=model.punctuation,
+        capitalization=model.capitalization,
         streaming=model.streaming,
         min_vram_gb=model.min_vram_gb,
         min_ram_gb=model.min_ram_gb,

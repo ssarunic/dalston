@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-28T18:48:34.411897+00:00",
+  "generated_at": "2026-03-02T11:16:31.471389+00:00",
   "schema_version": "2.0",
   "runtime_count": 9,
   "model_count": 10,
@@ -331,8 +331,8 @@
       "languages": null,
       "capabilities": {
         "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
+        "punctuation": true,
+        "capitalization": true,
         "streaming": false,
         "max_audio_duration": 7200
       },
@@ -358,8 +358,8 @@
       "languages": null,
       "capabilities": {
         "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
+        "punctuation": true,
+        "capitalization": true,
         "streaming": false,
         "max_audio_duration": 7200
       },
@@ -385,8 +385,8 @@
       "languages": null,
       "capabilities": {
         "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
+        "punctuation": true,
+        "capitalization": true,
         "streaming": false,
         "max_audio_duration": 7200
       },
@@ -412,8 +412,8 @@
       "languages": null,
       "capabilities": {
         "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
+        "punctuation": true,
+        "capitalization": true,
         "streaming": false,
         "max_audio_duration": 7200
       },
@@ -439,8 +439,8 @@
       "languages": null,
       "capabilities": {
         "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
+        "punctuation": true,
+        "capitalization": true,
         "streaming": false,
         "max_audio_duration": 7200
       },
@@ -466,8 +466,8 @@
       "languages": null,
       "capabilities": {
         "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
+        "punctuation": true,
+        "capitalization": true,
         "streaming": false,
         "max_audio_duration": 7200
       },

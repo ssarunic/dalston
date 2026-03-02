@@ -451,6 +451,7 @@ async def _model_status(model_id: str) -> dict | None:
             "languages": model.languages,
             "word_timestamps": model.word_timestamps,
             "punctuation": model.punctuation,
+            "capitalization": model.capitalization,
             "streaming": model.streaming,
             "supports_cpu": model.supports_cpu,
             "min_vram_gb": model.min_vram_gb,
@@ -503,6 +504,7 @@ def model_status(
         typer.echo("  Languages:       multilingual")
     typer.echo(f"  Word Timestamps: {model.get('word_timestamps', False)}")
     typer.echo(f"  Punctuation:     {model.get('punctuation', False)}")
+    typer.echo(f"  Capitalization:  {model.get('capitalization', False)}")
     typer.echo(f"  Streaming:       {model.get('streaming', False)}")
 
     typer.echo()
@@ -600,18 +602,23 @@ def model_sync() -> None:
     )
 
 
-async def _seed_models() -> dict:
+async def _seed_models(*, update: bool = False) -> dict:
     """Seed registry from catalog."""
     from dalston.db.session import async_session
     from dalston.gateway.services.model_registry import ModelRegistryService
 
     async with async_session() as db:
         service = ModelRegistryService()
-        return await service.seed_from_catalog(db)
+        return await service.seed_from_catalog(db, update_existing=update)
 
 
 @model_app.command("seed")
-def model_seed() -> None:
+def model_seed(
+    update: Annotated[
+        bool,
+        typer.Option("--update", "-u", help="Update existing models with catalog data"),
+    ] = False,
+) -> None:
     """Seed registry from the model catalog.
 
     Populates the database with all models defined in the static catalog.
@@ -619,18 +626,24 @@ def model_seed() -> None:
 
     Examples:
         python -m dalston.gateway.cli model seed
+        python -m dalston.gateway.cli model seed --update  # Update existing models
     """
-    typer.echo("Seeding model registry from catalog...")
+    if update:
+        typer.echo("Updating model registry from catalog...")
+    else:
+        typer.echo("Seeding model registry from catalog...")
 
     try:
-        result = asyncio.run(_seed_models())
+        result = asyncio.run(_seed_models(update=update))
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
-    typer.echo(
-        f"Seed complete: {result['created']} created, {result['skipped']} skipped"
-    )
+    parts = [f"{result['created']} created"]
+    if result.get("updated", 0) > 0:
+        parts.append(f"{result['updated']} updated")
+    parts.append(f"{result['skipped']} skipped")
+    typer.echo(f"Seed complete: {', '.join(parts)}")
 
 
 # Register model subcommand
