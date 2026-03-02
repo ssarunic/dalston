@@ -10,6 +10,7 @@ import {
   Loader2,
   Cpu,
   Trash2,
+  X,
 } from 'lucide-react'
 import {
   Table,
@@ -58,16 +59,20 @@ interface ModelTableProps {
   models: ModelRegistryEntry[]
   onPull?: (modelId: string) => void
   onRemove?: (modelId: string) => void
+  onPurge?: (modelId: string) => void
   pullingId?: string
   removingId?: string
+  purgingId?: string
 }
 
 export function ModelTable({
   models,
   onPull,
   onRemove,
+  onPurge,
   pullingId,
   removingId,
+  purgingId,
 }: ModelTableProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
 
@@ -105,6 +110,7 @@ export function ModelTable({
           const isExpanded = expandedIds.has(model.id)
           const isPulling = pullingId === model.id
           const isRemoving = removingId === model.id
+          const isPurging = purgingId === model.id
 
           return (
             <ModelTableRow
@@ -114,8 +120,10 @@ export function ModelTable({
               onToggle={() => toggleExpanded(model.id)}
               onPull={onPull}
               onRemove={onRemove}
+              onPurge={onPurge}
               isPulling={isPulling}
               isRemoving={isRemoving}
+              isPurging={isPurging}
             />
           )
         })}
@@ -130,8 +138,10 @@ interface ModelTableRowProps {
   onToggle: () => void
   onPull?: (modelId: string) => void
   onRemove?: (modelId: string) => void
+  onPurge?: (modelId: string) => void
   isPulling: boolean
   isRemoving: boolean
+  isPurging: boolean
 }
 
 function ModelTableRow({
@@ -140,8 +150,10 @@ function ModelTableRow({
   onToggle,
   onPull,
   onRemove,
+  onPurge,
   isPulling,
   isRemoving,
+  isPurging,
 }: ModelTableRowProps) {
   return (
     <>
@@ -222,33 +234,53 @@ function ModelTableRow({
         </TableCell>
         <TableCell className="text-right">
           <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+            {/* Ready models: remove files button */}
             {model.status === 'ready' && onRemove && (
               <Button
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8"
                 onClick={() => onRemove(model.id)}
-                disabled={isRemoving}
+                disabled={isRemoving || isPurging}
                 title="Remove downloaded files"
               >
                 {isRemoving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
               </Button>
             )}
+            {/* Downloading: show spinner */}
             {model.status === 'downloading' && (
               <Button variant="ghost" size="icon" className="h-8 w-8" disabled title="Downloading...">
                 <Loader2 className="h-4 w-4 animate-spin" />
               </Button>
             )}
+            {/* Not downloaded/failed: download button */}
             {(model.status === 'not_downloaded' || model.status === 'failed') && onPull && (
               <Button
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8"
                 onClick={() => onPull(model.id)}
-                disabled={isPulling}
+                disabled={isPulling || isPurging}
                 title="Download model"
               >
                 {isPulling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              </Button>
+            )}
+            {/* Delete from registry (all non-downloading states) */}
+            {model.status !== 'downloading' && onPurge && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-destructive hover:text-destructive"
+                onClick={() => {
+                  if (confirm(`Delete "${model.id}" from registry? This cannot be undone.`)) {
+                    onPurge(model.id)
+                  }
+                }}
+                disabled={isPurging || isRemoving}
+                title="Delete from registry"
+              >
+                {isPurging ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
               </Button>
             )}
           </div>

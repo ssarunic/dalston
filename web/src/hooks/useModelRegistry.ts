@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import type { ModelFilters, HFResolveRequest } from '@/api/types'
@@ -5,12 +6,21 @@ import type { ModelFilters, HFResolveRequest } from '@/api/types'
 /**
  * Fetch the model registry with optional filters.
  * Used for the Models page to show downloaded/available models.
+ * Syncs with disk on first load to detect engine-downloaded models.
  * Automatically polls every 2s when any model is downloading.
  */
 export function useModelRegistry(filters?: ModelFilters) {
+  // Track if we've done the initial sync
+  const hasSynced = useRef(false)
+
   return useQuery({
     queryKey: ['modelRegistry', filters],
-    queryFn: () => apiClient.getModelRegistry(filters),
+    queryFn: () => {
+      // Sync on first fetch to detect engine-downloaded models
+      const shouldSync = !hasSynced.current
+      hasSynced.current = true
+      return apiClient.getModelRegistry(filters, { sync: shouldSync })
+    },
     staleTime: 30_000,
     // Poll every 2s while any model is downloading
     refetchInterval: (query) => {
@@ -48,7 +58,7 @@ export function usePullModel() {
 }
 
 /**
- * Remove a downloaded model.
+ * Remove a downloaded model's files (keeps registry entry).
  * Invalidates the model registry query on success.
  */
 export function useRemoveModel() {
@@ -56,6 +66,22 @@ export function useRemoveModel() {
 
   return useMutation({
     mutationFn: (modelId: string) => apiClient.deleteModel(modelId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['modelRegistry'] })
+    },
+  })
+}
+
+/**
+ * Delete a model from the registry entirely.
+ * Also removes downloaded files if present.
+ * Invalidates the model registry query on success.
+ */
+export function usePurgeModel() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (modelId: string) => apiClient.purgeModel(modelId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['modelRegistry'] })
     },

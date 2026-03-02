@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 import {
   useModelRegistry,
   usePullModel,
+  usePurgeModel,
   useRemoveModel,
   useResolveHFModel,
   useSyncModels,
@@ -27,6 +28,7 @@ export function Models() {
   const { data, isLoading, error } = useModelRegistry(filters)
   const pullModel = usePullModel()
   const removeModel = useRemoveModel()
+  const purgeModel = usePurgeModel()
   const resolveHF = useResolveHFModel()
   const syncModels = useSyncModels()
 
@@ -57,6 +59,10 @@ export function Models() {
 
   const handleRemove = (modelId: string) => {
     removeModel.mutate(modelId)
+  }
+
+  const handlePurge = (modelId: string) => {
+    purgeModel.mutate(modelId)
   }
 
   if (error) {
@@ -90,7 +96,10 @@ export function Models() {
             <RefreshCw className={cn('h-4 w-4 mr-2', syncModels.isPending && 'animate-spin')} />
             Sync with Disk
           </Button>
-          <Button onClick={() => setAddDialogOpen(true)}>
+          <Button onClick={() => {
+            resolveHF.reset()
+            setAddDialogOpen(true)
+          }}>
             <Plus className="h-4 w-4 mr-2" />
             Add from HF
           </Button>
@@ -127,8 +136,10 @@ export function Models() {
               models={filteredModels}
               onPull={handlePull}
               onRemove={handleRemove}
+              onPurge={handlePurge}
               pullingId={pullModel.isPending ? pullModel.variables?.modelId : undefined}
               removingId={removeModel.isPending ? removeModel.variables : undefined}
+              purgingId={purgeModel.isPending ? purgeModel.variables : undefined}
             />
           </CardContent>
         </Card>

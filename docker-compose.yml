@@ -243,6 +243,10 @@ services:
       - "8000:8000"
     environment:
       <<: [*core-env, *observability-env]
+      DALSTON_MODEL_DIR: /models
+      HF_HUB_CACHE: /models/huggingface
+    volumes:
+      - model-cache:/models
     depends_on: *core-depends
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]

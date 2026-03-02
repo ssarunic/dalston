@@ -19,11 +19,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dalston.db.models import ModelRegistryModel
+from dalston.db.models import JobModel, ModelRegistryModel
 from dalston.engine_sdk.model_paths import HF_CACHE, get_hf_model_path, is_model_cached
+from dalston.gateway.dependencies import get_audit_service
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -46,6 +47,17 @@ class ModelNotDownloadedError(Exception):
         self.model_id = model_id
         super().__init__(
             f"Model {model_id} not downloaded. Run: dalston model pull {model_id}"
+        )
+
+
+class ModelInUseError(Exception):
+    """Raised when trying to delete a model that has pending jobs."""
+
+    def __init__(self, model_id: str, job_count: int) -> None:
+        self.model_id = model_id
+        self.job_count = job_count
+        super().__init__(
+            f"Cannot delete model {model_id}: {job_count} pending/processing job(s) using it"
         )
 
 
@@ -216,6 +228,15 @@ class ModelRegistryService:
                 path=str(local_path),
             )
 
+            # Audit log
+            audit = get_audit_service()
+            await audit.log_model_downloaded(
+                model_id=model_id,
+                source=hf_repo_id,
+                size_bytes=size_bytes,
+                download_path=str(local_path),
+            )
+
         except Exception as e:
             # Update status to failed
             logger.exception("model_download_failed", model_id=model_id)
@@ -228,31 +249,78 @@ class ModelRegistryService:
                 )
             )
             await db.commit()
+
+            # Audit log
+            audit = get_audit_service()
+            await audit.log_model_download_failed(
+                model_id=model_id,
+                error=str(e),
+            )
+
             raise
 
         # Refresh and return
         await db.refresh(model)
         return model
 
-    async def remove_model(
+    async def _check_model_in_use(
         self,
         db: AsyncSession,
         model_id: str,
-    ) -> None:
-        """Remove a downloaded model from disk and update registry.
+    ) -> int:
+        """Check if a model is being used by pending or processing jobs.
 
         Args:
             db: Database session
             model_id: Dalston model ID
 
+        Returns:
+            Number of pending/processing jobs using this model
+        """
+        # Query jobs where status is pending/processing and model matches
+        # Model is stored in parameters->>'engine_transcribe'
+        from sqlalchemy import func
+
+        result = await db.execute(
+            select(func.count())
+            .select_from(JobModel)
+            .where(
+                JobModel.status.in_(["pending", "processing"]),
+                JobModel.parameters["engine_transcribe"].astext == model_id,
+            )
+        )
+        return result.scalar() or 0
+
+    async def remove_model(
+        self,
+        db: AsyncSession,
+        model_id: str,
+        *,
+        purge: bool = False,
+    ) -> None:
+        """Remove a downloaded model from disk and optionally from registry.
+
+        Args:
+            db: Database session
+            model_id: Dalston model ID
+            purge: If True, delete the model from registry entirely.
+                   If False (default), only remove files and reset status.
+
         Raises:
             ModelNotFoundError: If model doesn't exist in registry
+            ModelInUseError: If model has pending/processing jobs
         """
         model = await self.get_model_or_raise(db, model_id)
 
+        # Check if model is in use by pending jobs
+        job_count = await self._check_model_in_use(db, model_id)
+        if job_count > 0:
+            raise ModelInUseError(model_id, job_count)
+
         # Remove files if they exist
-        if model.download_path:
-            path = Path(model.download_path)
+        download_path = model.download_path
+        if download_path:
+            path = Path(download_path)
             if path.exists():
                 await asyncio.to_thread(shutil.rmtree, path, ignore_errors=True)
                 logger.info(
@@ -261,20 +329,37 @@ class ModelRegistryService:
                     path=str(path),
                 )
 
-        # Update registry
-        await db.execute(
-            update(ModelRegistryModel)
-            .where(ModelRegistryModel.id == model_id)
-            .values(
-                status="not_downloaded",
-                download_path=None,
-                size_bytes=None,
-                downloaded_at=None,
-            )
-        )
-        await db.commit()
+        audit = get_audit_service()
 
-        logger.info("model_removed", model_id=model_id)
+        if purge:
+            # Delete from registry entirely
+            await db.execute(
+                delete(ModelRegistryModel).where(ModelRegistryModel.id == model_id)
+            )
+            await db.commit()
+            logger.info("model_deleted_from_registry", model_id=model_id)
+            await audit.log_model_deleted_from_registry(
+                model_id=model_id,
+                download_path=str(download_path) if download_path else None,
+            )
+        else:
+            # Update registry status (keep entry)
+            await db.execute(
+                update(ModelRegistryModel)
+                .where(ModelRegistryModel.id == model_id)
+                .values(
+                    status="not_downloaded",
+                    download_path=None,
+                    size_bytes=None,
+                    downloaded_at=None,
+                )
+            )
+            await db.commit()
+            logger.info("model_removed", model_id=model_id)
+            await audit.log_model_removed(
+                model_id=model_id,
+                download_path=str(download_path) if download_path else None,
+            )
 
     async def sync_from_disk(
         self,
@@ -292,11 +377,13 @@ class ModelRegistryService:
         synced = {"updated": 0, "unchanged": 0}
 
         for model in models:
-            on_disk = is_model_cached(model.runtime_model_id)
+            # Use same logic as pull_model: source (HF repo) takes precedence
+            hf_repo_id = model.source or model.runtime_model_id
+            on_disk = is_model_cached(hf_repo_id)
 
             if on_disk and model.status != "ready":
                 # Model is on disk but registry says not downloaded
-                download_path = get_hf_model_path(model.runtime_model_id)
+                download_path = get_hf_model_path(hf_repo_id)
                 size_bytes = None
                 if download_path.exists():
                     size_bytes = sum(

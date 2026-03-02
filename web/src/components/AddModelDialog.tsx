@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { X } from 'lucide-react'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -22,6 +23,13 @@ export function AddModelDialog({
   result,
   error,
 }: AddModelDialogProps) {
+  // Close dialog automatically when model is successfully added
+  useEffect(() => {
+    if (result?.can_route) {
+      onOpenChange(false)
+    }
+  }, [result?.can_route, onOpenChange])
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">

@@ -384,11 +384,12 @@ export const apiClient = {
     currentClient.post(`api/console/settings/${namespace}/reset`).json<NamespaceSettings>(),
 
   // Model Registry (M42)
-  getModelRegistry: (filters?: ModelFilters) => {
+  getModelRegistry: (filters?: ModelFilters, options?: { sync?: boolean }) => {
     const searchParams = new URLSearchParams()
     if (filters?.stage) searchParams.set('stage', filters.stage)
     if (filters?.runtime) searchParams.set('runtime', filters.runtime)
     if (filters?.status) searchParams.set('status', filters.status)
+    if (options?.sync) searchParams.set('sync', 'true')
     return currentClient.get('v1/models/registry', { searchParams }).json<ModelRegistryListResponse>()
   },
 
@@ -400,6 +401,11 @@ export const apiClient = {
 
   deleteModel: (modelId: string) =>
     currentClient.delete(`v1/models/${encodeURIComponent(modelId)}`).json<DeleteModelResponse>(),
+
+  purgeModel: (modelId: string) =>
+    currentClient.delete(`v1/models/${encodeURIComponent(modelId)}`, {
+      searchParams: { purge: 'true' },
+    }).json<DeleteModelResponse>(),
 
   resolveHFModel: (request: HFResolveRequest) =>
     currentClient.post('v1/models/hf/resolve', { json: request }).json<HFResolveResponse>(),

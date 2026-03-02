@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.config import get_settings
 from dalston.db.models import SettingModel
+from dalston.engine_sdk.model_paths import MODEL_BASE
 
 logger = structlog.get_logger()
 
@@ -679,6 +680,7 @@ class SettingsService:
             ("database_url", "Database", db_url),
             ("s3_bucket", "S3 Bucket", settings.s3_bucket),
             ("s3_region", "S3 Region", settings.s3_region),
+            ("models_cache_path", "Models Cache", str(MODEL_BASE)),
             ("version", "Version", version),
         ]
 

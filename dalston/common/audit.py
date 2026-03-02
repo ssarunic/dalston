@@ -378,3 +378,97 @@ class AuditService:
             correlation_id=correlation_id,
             ip_address=ip_address,
         )
+
+    async def log_model_downloaded(
+        self,
+        model_id: str,
+        *,
+        source: str | None = None,
+        size_bytes: int | None = None,
+        download_path: str | None = None,
+        correlation_id: str | None = None,
+    ) -> None:
+        """Log model download event."""
+        detail: dict[str, Any] = {}
+        if source:
+            detail["source"] = source
+        if size_bytes is not None:
+            detail["size_bytes"] = size_bytes
+        if download_path:
+            detail["download_path"] = download_path
+
+        await self.log(
+            action="model.downloaded",
+            resource_type="model",
+            resource_id=model_id,
+            actor_type="system",
+            actor_id="model_registry",
+            detail=detail if detail else None,
+            correlation_id=correlation_id,
+        )
+
+    async def log_model_removed(
+        self,
+        model_id: str,
+        *,
+        download_path: str | None = None,
+        correlation_id: str | None = None,
+    ) -> None:
+        """Log model removal event."""
+        detail: dict[str, Any] = {}
+        if download_path:
+            detail["download_path"] = download_path
+
+        await self.log(
+            action="model.removed",
+            resource_type="model",
+            resource_id=model_id,
+            actor_type="system",
+            actor_id="model_registry",
+            detail=detail if detail else None,
+            correlation_id=correlation_id,
+        )
+
+    async def log_model_download_failed(
+        self,
+        model_id: str,
+        *,
+        error: str | None = None,
+        correlation_id: str | None = None,
+    ) -> None:
+        """Log model download failure event."""
+        detail: dict[str, Any] = {}
+        if error:
+            detail["error"] = error
+
+        await self.log(
+            action="model.download_failed",
+            resource_type="model",
+            resource_id=model_id,
+            actor_type="system",
+            actor_id="model_registry",
+            detail=detail if detail else None,
+            correlation_id=correlation_id,
+        )
+
+    async def log_model_deleted_from_registry(
+        self,
+        model_id: str,
+        *,
+        download_path: str | None = None,
+        correlation_id: str | None = None,
+    ) -> None:
+        """Log model deletion from registry event."""
+        detail: dict[str, Any] = {}
+        if download_path:
+            detail["download_path"] = download_path
+
+        await self.log(
+            action="model.deleted_from_registry",
+            resource_type="model",
+            resource_id=model_id,
+            actor_type="system",
+            actor_id="model_registry",
+            detail=detail if detail else None,
+            correlation_id=correlation_id,
+        )

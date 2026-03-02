@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Loader2, Check, AlertTriangle, Search } from 'lucide-react'
+import { Loader2, Check, AlertTriangle, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { HFResolveResponse } from '@/api/types'
@@ -149,7 +149,7 @@ export function HFModelInput({ onResolve, isLoading, result, error }: HFModelInp
           )}
         </div>
         <Button type="submit" disabled={isLoading || !modelId.trim()}>
-          {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+          {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Plus className="h-4 w-4 mr-1" />Add</>}
         </Button>
       </div>
 

@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.gateway.dependencies import get_db
 from dalston.gateway.services.model_registry import (
+    ModelInUseError,
     ModelNotFoundError,
     ModelRegistryService,
 )
@@ -235,7 +236,8 @@ class DeleteModelResponse(BaseModel):
     summary="List model registry",
     description=(
         "List all models from the database registry with download status. "
-        "Use status filter to find downloaded models (status=ready)."
+        "Use status filter to find downloaded models (status=ready). "
+        "Pass sync=true to sync with disk before returning results."
     ),
 )
 async def list_registry_models(
@@ -243,9 +245,14 @@ async def list_registry_models(
     stage: str | None = Query(default=None, description="Filter by stage"),
     runtime: str | None = Query(default=None, description="Filter by runtime"),
     status: str | None = Query(default=None, description="Filter by status"),
+    sync: bool = Query(default=False, description="Sync with disk before listing"),
     service: ModelRegistryService = Depends(get_model_registry_service),
 ) -> ModelRegistryListResponse:
     """List all models from the registry with download status."""
+    # Optionally sync with disk first to detect engine-downloaded models
+    if sync:
+        await service.sync_from_disk(db)
+
     models = await service.list_models(
         db,
         stage=stage,
@@ -406,26 +413,42 @@ async def _pull_model_background(model_id: str, force: bool) -> None:
 @router.delete(
     "/{model_id:path}",
     response_model=DeleteModelResponse,
-    summary="Remove downloaded model",
-    description="Remove a downloaded model's files from disk.",
-    responses={404: {"description": "Model not found in registry"}},
+    summary="Remove or delete model",
+    description=(
+        "Remove a model's downloaded files from disk. "
+        "Pass purge=true to also delete the model from the registry entirely."
+    ),
+    responses={
+        404: {"description": "Model not found in registry"},
+        409: {"description": "Model is in use by pending jobs"},
+    },
 )
 async def remove_model(
     model_id: str,
+    purge: bool = Query(
+        default=False,
+        description="If true, delete model from registry entirely. If false, only remove files.",
+    ),
     db: AsyncSession = Depends(get_db),
     service: ModelRegistryService = Depends(get_model_registry_service),
 ) -> DeleteModelResponse:
-    """Remove a downloaded model from disk."""
+    """Remove a downloaded model from disk, optionally deleting from registry."""
     try:
-        await service.remove_model(db, model_id)
+        await service.remove_model(db, model_id, purge=purge)
     except ModelNotFoundError:
         raise HTTPException(
             status_code=404,
             detail=f"Model not found in registry: {model_id}",
         ) from None
+    except ModelInUseError as e:
+        raise HTTPException(
+            status_code=409,
+            detail=str(e),
+        ) from None
 
+    message = "Model deleted from registry" if purge else "Model files removed"
     return DeleteModelResponse(
-        message="Model removed",
+        message=message,
         model_id=model_id,
     )
 
@@ -536,7 +559,7 @@ async def resolve_hf_model(
             # (catalog models may have different IDs but same runtime_model_id)
             from sqlalchemy import select
 
-            from dalston.gateway.models import ModelRegistryModel
+            from dalston.db.models import ModelRegistryModel
 
             stmt = select(ModelRegistryModel).where(
                 ModelRegistryModel.runtime_model_id == request.model_id
