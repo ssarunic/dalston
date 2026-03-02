@@ -96,7 +96,7 @@ export function CapabilitiesCard() {
                   ) : (
                     <XCircle className="h-4 w-4 text-muted-foreground shrink-0" />
                   )}
-                  <span className="truncate">{label}</span>
+                  <span>{label}</span>
                 </div>
               )
             })}
