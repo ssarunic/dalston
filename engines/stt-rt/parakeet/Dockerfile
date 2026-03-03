@@ -78,8 +78,8 @@ print('Model nvidia/parakeet-rnnt-${MODEL_VARIANT} downloaded successfully')" &&
     fi
 
 # Copy engine files
-ARG MODEL_VARIANT=0.6b
-COPY engines/stt-rt/parakeet/variants/rnnt-${MODEL_VARIANT}.yaml ./engine.yaml
+# M50: Use main engine.yaml for structured capabilities
+COPY engines/stt-rt/parakeet/engine.yaml /etc/dalston/engine.yaml
 COPY engines/stt-rt/parakeet/engine.py .
 
 # M39: Standardized model cache directories

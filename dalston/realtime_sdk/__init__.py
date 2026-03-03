@@ -107,6 +107,10 @@ def __getattr__(name: str):
         from dalston.realtime_sdk.vad import VADState
 
         return VADState
+    elif name == "AsyncModelManager":
+        from dalston.realtime_sdk.model_manager import AsyncModelManager
+
+        return AsyncModelManager
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -114,6 +118,7 @@ def __getattr__(name: str):
 __all__ = [
     # Core engine (lazy)
     "RealtimeEngine",
+    "AsyncModelManager",
     "TranscribeResult",
     # Session handling (lazy)
     "SessionHandler",

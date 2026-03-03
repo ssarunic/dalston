@@ -70,16 +70,24 @@ def mock_nemo_asr():
 
 
 class TestParakeetStreamingEngineGetModels:
-    """Tests for get_models() compatibility aliases."""
+    """Tests for get_models() - M44 dynamic model loading."""
 
-    def test_get_models_returns_exact_model_name(self, mock_cuda_available):
-        """Test that get_models returns the exact model identifier."""
+    def test_get_models_returns_all_supported_models(self, mock_cuda_available):
+        """Test that get_models returns all dynamically loadable models.
+
+        M44: NeMo runtime container can load any supported Parakeet model on-demand.
+        """
         ParakeetStreamingEngine = load_parakeet_streaming_engine()
         engine = ParakeetStreamingEngine()
         models = engine.get_models()
 
-        # Default variant is 0.6b
-        assert models == ["parakeet-rnnt-0.6b"]
+        # M44: Returns all models the NeMoModelManager can load
+        assert "parakeet-rnnt-0.6b" in models
+        assert "parakeet-rnnt-1.1b" in models
+        assert "parakeet-ctc-0.6b" in models
+        assert "parakeet-ctc-1.1b" in models
+        assert "parakeet-tdt-1.1b" in models
+        assert len(models) == 5
 
 
 class TestParakeetStreamingEngineGetLanguages:
@@ -97,17 +105,23 @@ class TestParakeetStreamingEngineGetLanguages:
 
 
 class TestParakeetStreamingEngineHealthCheck:
-    """Tests for streaming engine health check."""
+    """Tests for streaming engine health check - M44 dynamic model loading."""
 
     def test_health_check_includes_required_fields(self, mock_cuda_available):
-        """Test that health check includes GPU and model info."""
+        """Test that health check includes GPU and model manager info.
+
+        M44: Health check reports model manager state instead of static model.
+        """
         ParakeetStreamingEngine = load_parakeet_streaming_engine()
         engine = ParakeetStreamingEngine()
         health = engine.health_check()
 
+        # M44: Dynamic model manager fields
         assert "cuda_available" in health
-        assert "chunk_size_ms" in health
-        assert "model_loaded" in health
+        assert "models_loaded" in health
+        assert "model_count" in health
+        assert "max_loaded" in health
+        assert "device" in health
 
 
 class TestParakeetStreamingEngineGPUMemory:

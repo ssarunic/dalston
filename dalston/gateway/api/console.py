@@ -406,8 +406,9 @@ class RealtimeWorker(BaseModel):
     status: str
     capacity: int
     active_sessions: int
-    models: list[str]
+    models: list[str]  # M43: Currently loaded models (dynamic)
     languages: list[str]
+    runtime: str | None = None  # M43: Model runtime (e.g., "faster-whisper")
     supports_vocabulary: bool = False
 
 
@@ -539,8 +540,9 @@ async def get_engines(
                     status=worker.status,
                     capacity=worker.capacity,
                     active_sessions=worker.active_sessions,
-                    models=worker.models,
+                    models=worker.models,  # M43: Dynamically loaded models
                     languages=worker.languages,
+                    runtime=worker.runtime,  # M43: Model runtime
                     supports_vocabulary=worker.supports_vocabulary,
                 )
             )
@@ -569,6 +571,7 @@ async def get_engines(
                     active_sessions=0,
                     models=[],
                     languages=entry.capabilities.languages or [],
+                    runtime=entry.capabilities.runtime,  # M43: Model runtime
                 )
             )
 

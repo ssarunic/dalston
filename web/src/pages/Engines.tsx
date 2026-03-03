@@ -342,7 +342,14 @@ function RealtimeWorkerCard({ worker }: { worker: WorkerStatus }) {
         <div className="flex items-center gap-3 min-w-0">
           <StatusDot status={isReady ? 'healthy' : 'unhealthy'} />
           <div className="min-w-0">
-            <div className="font-medium truncate">{worker.worker_id}</div>
+            <div className="flex items-center gap-2">
+              <span className="font-medium truncate">{worker.worker_id}</span>
+              {worker.runtime && (
+                <Badge variant="outline" className="text-xs shrink-0">
+                  {worker.runtime}
+                </Badge>
+              )}
+            </div>
             <div className="text-xs text-muted-foreground truncate">{worker.endpoint}</div>
           </div>
         </div>
@@ -365,13 +372,17 @@ function RealtimeWorkerCard({ worker }: { worker: WorkerStatus }) {
           )}
         </div>
       </div>
+      {/* M43: Show dynamically loaded models */}
       {worker.models.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-1">
-          {worker.models.map((model) => (
-            <Badge key={model} variant="secondary" className="text-xs">
-              {model}
-            </Badge>
-          ))}
+        <div className="mt-3">
+          <div className="text-xs text-muted-foreground mb-1">Loaded models</div>
+          <div className="flex flex-wrap gap-1">
+            {worker.models.map((model) => (
+              <Badge key={model} variant="secondary" className="text-xs">
+                {model}
+              </Badge>
+            ))}
+          </div>
         </div>
       )}
     </div>

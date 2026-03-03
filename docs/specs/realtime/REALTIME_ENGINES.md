@@ -136,33 +136,54 @@ Real-time engines are WebSocket servers that handle streaming audio transcriptio
 
 ### Model Manager
 
-Loads and manages ASR models in GPU memory.
+Manages ASR models with dynamic loading and TTL-based eviction (M43).
+
+**Static vs Dynamic Model Loading:**
+
+| Mode | Use Case | Behavior |
+|------|----------|----------|
+| **Static** | NeMo/Parakeet engines | Load model on startup via `DALSTON_MODEL_VARIANT` |
+| **Dynamic** | Faster-whisper engines | Load on-demand via `ModelManager.acquire()/release()` |
 
 ```python
-class ModelManager:
-    def __init__(self, models_config: dict):
-        self.models = {}
+# Dynamic model loading (faster-whisper runtime) - M43
+from dalston.engine_sdk.managers import FasterWhisperModelManager
+from dalston.realtime_sdk import AsyncModelManager
 
-    async def load_models(self):
-        """Load configured models into GPU memory."""
-        # Load fast model (Parakeet 0.6B - native streaming)
-        self.models["fast"] = nemo_asr.models.ASRModel.from_pretrained(
-            "nvidia/parakeet-rnnt-0.6b"
+class WhisperStreamingEngine(RealtimeEngine):
+    def load_models(self):
+        """Initialize model manager with optional preloading."""
+        sync_manager = FasterWhisperModelManager(
+            device=self._device,
+            compute_type=self._compute_type,
+            ttl_seconds=int(os.environ.get("DALSTON_MODEL_TTL_SECONDS", "3600")),
+            max_loaded=int(os.environ.get("DALSTON_MAX_LOADED_MODELS", "2")),
+            preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
         )
+        self._model_manager = AsyncModelManager(sync_manager)
 
-        # Load accurate model (Parakeet 1.1B - native streaming)
-        self.models["accurate"] = nemo_asr.models.ASRModel.from_pretrained(
-            "nvidia/parakeet-rnnt-1.1b"
-        )
+    def transcribe(self, audio, language, model_variant, vocabulary=None):
+        """Acquire model, transcribe, release."""
+        model_id = self._normalize_model_id(model_variant)
+        model = self._model_manager.manager.acquire(model_id)
+        try:
+            return self._transcribe_with_model(model, audio, language, vocabulary)
+        finally:
+            self._model_manager.manager.release(model_id)
 
-    def get_model(self, variant: str) -> WhisperModel:
-        """Get model by variant name."""
-        return self.models.get(variant, self.models["fast"])
-
-    def get_gpu_memory_usage(self) -> str:
-        """Report GPU memory usage."""
-        return f"{torch.cuda.memory_allocated() / 1e9:.1f}GB"
+    def get_loaded_models(self) -> list[str]:
+        """Return currently loaded models for heartbeat."""
+        return self._model_manager.loaded_models()
 ```
+
+**Environment Variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DALSTON_MODEL_TTL_SECONDS` | 3600 | Idle model eviction time |
+| `DALSTON_MAX_LOADED_MODELS` | 2 | Max models in memory |
+| `DALSTON_MODEL_PRELOAD` | - | Model to preload on startup |
+| `DALSTON_MODEL_VARIANT` | - | Static model selection (Parakeet) |
 
 ### VAD Engine
 

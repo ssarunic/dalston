@@ -1,52 +1,58 @@
 """Real-time Whisper streaming transcription engine.
 
 Uses faster-whisper for transcription with Silero VAD for speech detection.
-Loads both distil-whisper and large-v3 model variants.
+Supports dynamic model loading via ModelManager (M43).
 """
 
+import os
 from typing import Any
 
 import numpy as np
 import structlog
 from faster_whisper import WhisperModel
 
-from dalston.realtime_sdk import RealtimeEngine, TranscribeResult, Word
+from dalston.engine_sdk.managers import FasterWhisperModelManager
+from dalston.realtime_sdk import (
+    AsyncModelManager,
+    RealtimeEngine,
+    TranscribeResult,
+    Word,
+)
 
 logger = structlog.get_logger()
 
 
 class WhisperStreamingEngine(RealtimeEngine):
-    """Real-time streaming transcription using Whisper.
+    """Real-time streaming transcription using Whisper with dynamic model loading.
 
-    Loads models on startup and handles concurrent sessions for
-    low-latency streaming transcription.
+    Models are loaded on-demand using ModelManager with TTL-based eviction.
+    This allows a single container to serve any model variant without restart.
 
     Environment variables:
-        WORKER_ID: Unique identifier for this worker (required)
-        WORKER_PORT: WebSocket server port (default: 9000)
-        MAX_SESSIONS: Maximum concurrent sessions (default: 4)
+        DALSTON_WORKER_ID: Unique identifier for this worker (required)
+        DALSTON_WORKER_PORT: WebSocket server port (default: 9000)
+        DALSTON_MAX_SESSIONS: Maximum concurrent sessions (default: 2)
         REDIS_URL: Redis connection URL (default: redis://localhost:6379)
+        DALSTON_MODEL_TTL_SECONDS: Idle model TTL in seconds (default: 3600)
+        DALSTON_MAX_LOADED_MODELS: Max models in memory (default: 2)
+        DALSTON_MODEL_PRELOAD: Model to preload on startup (optional)
+        DALSTON_S3_BUCKET: S3 bucket for model storage (optional)
     """
 
-    # Model configurations - use Systran CTranslate2-converted models for faster-whisper
-    # Keys are canonical model names exposed to clients, values are HuggingFace model IDs
-    MODELS = {
-        "faster-whisper-distil-large-v3": "Systran/faster-distil-whisper-large-v3",
-        "faster-whisper-large-v3": "Systran/faster-whisper-large-v3",
-    }
-    DEFAULT_MODEL = "faster-whisper-distil-large-v3"
+    # Default model when client doesn't specify
+    DEFAULT_MODEL = "large-v3-turbo"
 
     def __init__(self) -> None:
         """Initialize the engine."""
         super().__init__()
-        self._models: dict[str, WhisperModel] = {}
         self._device: str = "cpu"
         self._compute_type: str = "int8"
 
     def load_models(self) -> None:
-        """Load Whisper models.
+        """Initialize model manager with optional preloading.
 
-        Automatically detects GPU availability and adjusts compute type.
+        Models are loaded on-demand, not all at once. This method sets up
+        the ModelManager and optionally preloads a default model.
         """
         # Detect device
         self._device, self._compute_type = self._detect_device()
@@ -54,15 +60,24 @@ class WhisperStreamingEngine(RealtimeEngine):
             "using_device", device=self._device, compute_type=self._compute_type
         )
 
-        # Load all configured models
-        for model_name, hf_model_id in self.MODELS.items():
-            logger.info("loading_model", model_name=model_name, hf_model_id=hf_model_id)
-            self._models[model_name] = WhisperModel(
-                hf_model_id,
-                device=self._device,
-                compute_type=self._compute_type,
-            )
-            logger.info("model_loaded", model_name=model_name)
+        # Create sync model manager
+        sync_manager = FasterWhisperModelManager(
+            device=self._device,
+            compute_type=self._compute_type,
+            ttl_seconds=int(os.environ.get("DALSTON_MODEL_TTL_SECONDS", "3600")),
+            max_loaded=int(os.environ.get("DALSTON_MAX_LOADED_MODELS", "2")),
+            preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
+        )
+
+        # Wrap in async manager
+        self._model_manager = AsyncModelManager(sync_manager)
+
+        logger.info(
+            "model_manager_initialized",
+            max_loaded=sync_manager.max_loaded,
+            ttl_seconds=sync_manager.ttl_seconds,
+            preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
+        )
 
     def _detect_device(self) -> tuple[str, str]:
         """Detect the best available device and compute type.
@@ -90,23 +105,74 @@ class WhisperStreamingEngine(RealtimeEngine):
     ) -> TranscribeResult:
         """Transcribe an audio segment.
 
+        Acquires the requested model (loading if needed), transcribes,
+        then releases the model reference.
+
         Args:
             audio: Audio samples as float32 numpy array, mono, 16kHz
             language: Language code (e.g., "en") or "auto" for detection
-            model_variant: Model name (e.g., "faster-whisper-large-v3")
+            model_variant: Model name (e.g., "large-v3-turbo")
             vocabulary: List of terms to boost recognition (hotwords)
 
         Returns:
             TranscribeResult with text, words, language, confidence
         """
-        # Select model
-        model = self._models.get(model_variant)
-        if model is None:
-            # Fallback to default model
-            model = self._models.get(self.DEFAULT_MODEL)
-            if model is None:
-                raise RuntimeError("No models loaded")
+        # Use default if no model specified
+        model_id = model_variant or self.DEFAULT_MODEL
 
+        # Map common names to faster-whisper supported names
+        model_id = self._normalize_model_id(model_id)
+
+        if self._model_manager is None:
+            raise RuntimeError("Model manager not initialized")
+
+        # Note: transcribe is called from sync context in SessionHandler
+        # We need to use the sync manager directly since we're in a sync method
+        sync_manager = self._model_manager.manager
+
+        model = sync_manager.acquire(model_id)
+        try:
+            return self._transcribe_with_model(model, audio, language, vocabulary)
+        finally:
+            sync_manager.release(model_id)
+
+    def _normalize_model_id(self, model_id: str) -> str:
+        """Normalize model ID to faster-whisper supported format.
+
+        Args:
+            model_id: Model identifier from client
+
+        Returns:
+            Normalized model ID
+        """
+        # Map legacy/alternative names to standard names
+        mappings = {
+            "faster-whisper-large-v3": "large-v3",
+            "faster-whisper-large-v3-turbo": "large-v3-turbo",
+            "faster-whisper-distil-large-v3": "distil-large-v3",
+            "whisper-large-v3": "large-v3",
+            "whisper-large-v3-turbo": "large-v3-turbo",
+        }
+        return mappings.get(model_id, model_id)
+
+    def _transcribe_with_model(
+        self,
+        model: WhisperModel,
+        audio: np.ndarray,
+        language: str,
+        vocabulary: list[str] | None,
+    ) -> TranscribeResult:
+        """Perform transcription with the given model.
+
+        Args:
+            model: The WhisperModel to use
+            audio: Audio samples as float32 numpy array
+            language: Language code or "auto"
+            vocabulary: Optional vocabulary terms
+
+        Returns:
+            TranscribeResult
+        """
         # Handle language
         lang = None if language == "auto" else language
 
@@ -119,9 +185,7 @@ class WhisperStreamingEngine(RealtimeEngine):
         }
 
         # Add vocabulary as initial_prompt if provided
-        # initial_prompt is more effective than hotwords for biasing transcription
         if vocabulary:
-            # Format as comma-separated list in the prompt
             transcribe_kwargs["initial_prompt"] = ", ".join(vocabulary)
             logger.debug(
                 "vocabulary_enabled",
@@ -162,8 +226,20 @@ class WhisperStreamingEngine(RealtimeEngine):
         )
 
     def get_models(self) -> list[str]:
-        """Return list of loaded model variants."""
-        return list(self._models.keys())
+        """Return list of supported model variants.
+
+        These are the canonical names clients can request.
+        """
+        return [
+            "large-v3-turbo",
+            "large-v3",
+            "distil-large-v3",
+            "large-v2",
+            "medium",
+            "small",
+            "base",
+            "tiny",
+        ]
 
     def get_languages(self) -> list[str]:
         """Return list of supported languages.
@@ -175,10 +251,10 @@ class WhisperStreamingEngine(RealtimeEngine):
 
     def get_engine(self) -> str:
         """Return engine type identifier."""
-        return "whisper"
+        return "faster-whisper"
 
     def get_supports_vocabulary(self) -> bool:
-        """Return True - faster-whisper supports vocabulary via hotwords."""
+        """Return True - faster-whisper supports vocabulary via initial_prompt."""
         return True
 
     def get_gpu_memory_usage(self) -> str:
@@ -209,9 +285,16 @@ class WhisperStreamingEngine(RealtimeEngine):
         except ImportError:
             pass
 
+        # Get model manager stats
+        model_stats = {}
+        if self._model_manager is not None:
+            model_stats = self._model_manager.get_stats()
+
         return {
             **base_health,
-            "models_loaded": list(self._models.keys()),
+            "models_loaded": model_stats.get("loaded_models", []),
+            "model_count": model_stats.get("model_count", 0),
+            "max_loaded": model_stats.get("max_loaded", 0),
             "device": self._device,
             "compute_type": self._compute_type,
             "cuda_available": cuda_available,
