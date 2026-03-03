@@ -154,7 +154,7 @@ export function ModelTable({
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Are you sure you want to delete this model from the registry? This action cannot be undone.
+              This will remove the model from the registry and delete any downloaded files. You can re-add it from HuggingFace later if needed.
             </p>
             {purgeConfirm && (
               <div className="bg-muted p-3 rounded-md">
