@@ -3,8 +3,8 @@
 This package provides ModelManager implementations for different ML frameworks:
 
 - FasterWhisperModelManager: CTranslate2/faster-whisper models
+- HFTransformersModelManager: HuggingFace Transformers ASR pipelines
 - (Future) NeMoModelManager: NVIDIA NeMo checkpoints
-- (Future) HFTransformersModelManager: HuggingFace Transformers pipelines
 
 Example usage:
     from dalston.engine_sdk.managers import FasterWhisperModelManager
@@ -24,7 +24,9 @@ Example usage:
 """
 
 from dalston.engine_sdk.managers.faster_whisper import FasterWhisperModelManager
+from dalston.engine_sdk.managers.hf_transformers import HFTransformersModelManager
 
 __all__ = [
     "FasterWhisperModelManager",
+    "HFTransformersModelManager",
 ]

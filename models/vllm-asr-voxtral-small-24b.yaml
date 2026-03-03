@@ -1,0 +1,49 @@
+# Model catalog entry for vllm-asr-voxtral-small-24b
+# This file defines the model variant metadata for runtime model management (M36)
+
+schema_version: "1.1"
+id: vllm-asr-voxtral-small-24b
+runtime: vllm-asr
+runtime_model_id: "mistralai/Voxtral-Small-24B-2507"
+
+name: Voxtral Small 24B (vLLM)
+source: mistralai/Voxtral-Small-24B-2507
+size_gb: 48.0
+stage: transcribe
+
+description: |
+  Mistral Voxtral Small 24B served via vLLM for highest accuracy
+  multilingual transcription. Larger model with better accuracy than
+  Mini 3B but requires significantly more GPU memory.
+
+  Supports 8 languages. Use for production workloads where accuracy
+  is the primary concern and large GPU instances are available.
+
+  Note: Produces text only without word-level timestamps.
+  Chain with phoneme-align stage if timestamps are needed.
+
+languages:
+  - en
+  - es
+  - fr
+  - pt
+  - hi
+  - de
+  - nl
+  - it
+
+capabilities:
+  word_timestamps: false
+  punctuation: true
+  capitalization: true
+  streaming: false
+  max_audio_duration: 600
+
+hardware:
+  min_vram_gb: 55
+  supports_cpu: false
+  min_ram_gb: 64
+
+performance:
+  rtf_gpu: 0.20
+  rtf_cpu: null

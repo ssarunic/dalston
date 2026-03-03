@@ -1,0 +1,53 @@
+# Model catalog entry for vllm-asr-qwen2-audio-7b
+# This file defines the model variant metadata for runtime model management (M36)
+
+schema_version: "1.1"
+id: vllm-asr-qwen2-audio-7b
+runtime: vllm-asr
+runtime_model_id: "Qwen/Qwen2-Audio-7B-Instruct"
+
+name: Qwen2-Audio 7B Instruct (vLLM)
+source: Qwen/Qwen2-Audio-7B-Instruct
+size_gb: 15.0
+stage: transcribe
+
+description: |
+  Alibaba Qwen2-Audio 7B served via vLLM for multilingual transcription.
+  Supports a wide range of languages with strong multilingual capabilities.
+
+  Qwen2-Audio is a multimodal audio-language model capable of both
+  transcription and audio understanding tasks. When used with Dalston,
+  it operates as a high-accuracy transcription engine.
+
+  Note: Produces text only without word-level timestamps.
+  Chain with phoneme-align stage if timestamps are needed.
+
+languages:
+  - en
+  - zh
+  - ja
+  - ko
+  - fr
+  - de
+  - es
+  - pt
+  - it
+  - nl
+  - ru
+  - ar
+
+capabilities:
+  word_timestamps: false
+  punctuation: true
+  capitalization: true
+  streaming: false
+  max_audio_duration: 600
+
+hardware:
+  min_vram_gb: 16
+  supports_cpu: false
+  min_ram_gb: 32
+
+performance:
+  rtf_gpu: 0.18
+  rtf_cpu: null

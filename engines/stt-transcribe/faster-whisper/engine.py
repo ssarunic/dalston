@@ -251,6 +251,9 @@ class WhisperEngine(Engine):
                 duration=info.duration,
                 timestamp_granularity_requested=TimestampGranularity.WORD,
                 timestamp_granularity_actual=timestamp_granularity_actual,
+                alignment_method=(
+                    AlignmentMethod.ATTENTION if has_word_timestamps else None
+                ),
                 channel=channel,
                 engine_id=self._engine_id,
                 skipped=False,
