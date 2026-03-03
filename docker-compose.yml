@@ -406,13 +406,12 @@ services:
 
   # vLLM Audio ASR (GPU - audio LLMs via vLLM)
   # Supports Voxtral and Qwen2-Audio model families
+  # Models are downloaded from S3 at runtime via S3ModelStorage
   stt-batch-transcribe-vllm-asr:
     image: dalston/stt-batch-transcribe-vllm-asr:1.0.0
     build:
       context: .
       dockerfile: engines/stt-transcribe/vllm-asr/Dockerfile
-      args:
-        SKIP_MODEL_DOWNLOAD: "true"
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: vllm-asr

@@ -22,6 +22,7 @@ Environment variables:
     DALSTON_MODEL_PRELOAD: Model to preload on startup (optional)
     DALSTON_VLLM_GPU_MEMORY_UTILIZATION: GPU memory fraction for vLLM (default: 0.9)
     DALSTON_VLLM_MAX_MODEL_LEN: Maximum model context length (default: 4096)
+    DALSTON_S3_BUCKET: S3 bucket for model storage (enables S3-backed model loading)
 """
 
 from __future__ import annotations
@@ -29,10 +30,13 @@ from __future__ import annotations
 import gc
 import os
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 import torch
+
+if TYPE_CHECKING:
+    from dalston.engine_sdk.model_storage import S3ModelStorage
 
 from dalston.engine_sdk import (
     Engine,
@@ -69,7 +73,9 @@ class VLLMASREngine(Engine):
 
         self._llm = None
         self._loaded_model_id: str | None = None
+        self._loaded_model_path: str | None = None
         self._tokenizer = None
+        self._model_storage: S3ModelStorage | None = None
 
         self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "vllm-asr")
         self._default_model_id = os.environ.get(
@@ -80,9 +86,15 @@ class VLLMASREngine(Engine):
         self._gpu_memory_utilization = float(
             os.environ.get("DALSTON_VLLM_GPU_MEMORY_UTILIZATION", "0.9")
         )
-        self._max_model_len = int(
-            os.environ.get("DALSTON_VLLM_MAX_MODEL_LEN", "4096")
-        )
+        self._max_model_len = int(os.environ.get("DALSTON_VLLM_MAX_MODEL_LEN", "4096"))
+
+        # Configure S3 model storage if bucket is set
+        s3_bucket = os.environ.get("DALSTON_S3_BUCKET")
+        if s3_bucket:
+            from dalston.engine_sdk.model_storage import S3ModelStorage
+
+            self._model_storage = S3ModelStorage.from_env()
+            self.logger.info("s3_model_storage_enabled", bucket=s3_bucket)
 
         # Verify CUDA is available
         if not torch.cuda.is_available():
@@ -97,10 +109,14 @@ class VLLMASREngine(Engine):
             gpu_memory_utilization=self._gpu_memory_utilization,
             max_model_len=self._max_model_len,
             cuda_device_count=torch.cuda.device_count(),
+            s3_storage_enabled=self._model_storage is not None,
         )
 
     def _ensure_model_loaded(self, runtime_model_id: str) -> None:
         """Ensure the requested model is loaded, swapping if necessary.
+
+        If S3ModelStorage is configured, models are downloaded from S3 to
+        local cache first. Otherwise, vLLM downloads directly from HuggingFace.
 
         Args:
             runtime_model_id: HuggingFace model identifier
@@ -108,6 +124,7 @@ class VLLMASREngine(Engine):
         Raises:
             ValueError: If no adapter exists for the model
             RuntimeError: If vLLM is not installed or model loading fails
+            ModelNotInS3Error: If S3 storage is enabled but model is not in S3
         """
         if runtime_model_id == self._loaded_model_id:
             return
@@ -131,6 +148,7 @@ class VLLMASREngine(Engine):
             del self._llm
             self._llm = None
             self._loaded_model_id = None
+            self._loaded_model_path = None
             self._tokenizer = None
 
             torch.cuda.synchronize()
@@ -139,11 +157,27 @@ class VLLMASREngine(Engine):
 
             self.logger.info("model_unloaded")
 
+        # Determine model path - either from S3 cache or HuggingFace ID
+        model_path: str = runtime_model_id
+        if self._model_storage is not None:
+            self.logger.info(
+                "ensuring_model_from_s3",
+                runtime_model_id=runtime_model_id,
+            )
+            local_path = self._model_storage.ensure_local(runtime_model_id)
+            model_path = str(local_path)
+            self.logger.info(
+                "model_ready_from_s3",
+                runtime_model_id=runtime_model_id,
+                local_path=model_path,
+            )
+
         # Load the requested model
         self._set_runtime_state(status="loading")
         self.logger.info(
             "loading_vllm_model",
             runtime_model_id=runtime_model_id,
+            model_path=model_path,
         )
 
         try:
@@ -155,7 +189,7 @@ class VLLMASREngine(Engine):
             ) from e
 
         self._llm = LLM(
-            model=runtime_model_id,
+            model=model_path,
             trust_remote_code=True,
             gpu_memory_utilization=self._gpu_memory_utilization,
             max_model_len=self._max_model_len,
@@ -163,11 +197,13 @@ class VLLMASREngine(Engine):
         )
 
         self._loaded_model_id = runtime_model_id
+        self._loaded_model_path = model_path
         self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
 
         self.logger.info(
             "model_loaded_successfully",
             runtime_model_id=runtime_model_id,
+            model_path=model_path,
         )
 
     def process(self, input: TaskInput) -> TaskOutput:
@@ -273,7 +309,9 @@ class VLLMASREngine(Engine):
             "engine_id": self._engine_id,
             "model_loaded": self._llm is not None,
             "loaded_model_id": self._loaded_model_id,
+            "loaded_model_path": self._loaded_model_path,
             "supported_models": sorted(ADAPTER_REGISTRY.keys()),
+            "s3_storage_enabled": self._model_storage is not None,
             "cuda_available": cuda_available,
             "cuda_device_count": cuda_device_count,
             "cuda_memory_allocated_gb": round(cuda_memory_allocated, 2),
@@ -306,6 +344,7 @@ class VLLMASREngine(Engine):
             del self._llm
             self._llm = None
             self._loaded_model_id = None
+            self._loaded_model_path = None
 
             torch.cuda.synchronize()
             torch.cuda.empty_cache()

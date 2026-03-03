@@ -11,14 +11,8 @@
 #   docker build -t dalston/stt-batch-transcribe-vllm-asr:1.0.0 \
 #     -f engines/stt-transcribe/vllm-asr/Dockerfile .
 
-# Build argument to skip model download during build
-ARG SKIP_MODEL_DOWNLOAD=false
-
 # Use vLLM official base image (includes CUDA, PyTorch, vLLM)
 FROM vllm/vllm-openai:v0.8.4 AS base
-
-# Re-declare ARGs after FROM
-ARG SKIP_MODEL_DOWNLOAD=false
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -46,22 +40,11 @@ COPY engines/stt-transcribe/vllm-asr/requirements.txt .
 RUN pip install --no-cache-dir soundfile librosa numpy
 
 # M39: Standardized model cache directories
+# Models are downloaded from S3 at runtime via S3ModelStorage
 ENV HF_HUB_CACHE=/models/huggingface
 ENV HF_HOME=/models/huggingface
 ENV TORCH_HOME=/models/torch
 RUN mkdir -p /models/huggingface /models/torch
-
-# Pre-download the default model at build time
-RUN if [ "$SKIP_MODEL_DOWNLOAD" = "false" ]; then \
-    python -c "\
-import os; \
-os.environ['HF_HOME'] = '/models/huggingface'; \
-from huggingface_hub import snapshot_download; \
-model_id = 'mistralai/Voxtral-Mini-3B-2507'; \
-print(f'Downloading model {model_id}...'); \
-snapshot_download(model_id); \
-print(f'Model {model_id} downloaded successfully')"; \
-    else echo "Skipping model download (SKIP_MODEL_DOWNLOAD=true)"; fi
 
 # Copy engine files
 COPY engines/stt-transcribe/vllm-asr/engine.yaml /etc/dalston/engine.yaml
