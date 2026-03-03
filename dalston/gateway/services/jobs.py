@@ -57,6 +57,7 @@ class JobsService:
         audio_channels: int | None = None,
         audio_bit_depth: int | None = None,
         retention: int = RETENTION_DEFAULT_DAYS,
+        display_name: str = "",
         # PII fields (M26)
         pii_detection_enabled: bool = False,
         pii_entity_types: list[str] | None = None,
@@ -77,6 +78,7 @@ class JobsService:
             audio_channels: Number of audio channels
             audio_bit_depth: Bits per sample (e.g., 16, 24)
             retention: Retention in days (0=transient, -1=permanent, N=days)
+            display_name: Human-readable job label
 
         Returns:
             Created JobModel instance
@@ -84,6 +86,7 @@ class JobsService:
         job = JobModel(
             id=job_id,
             tenant_id=tenant_id,
+            display_name=display_name,
             audio_uri=audio_uri,
             parameters=parameters,
             status=JobStatus.PENDING.value,
@@ -342,6 +345,33 @@ class JobsService:
             message=message,
             running_task_count=running_count,
         )
+
+    async def update_display_name(
+        self,
+        db: AsyncSession,
+        job_id: UUID,
+        display_name: str,
+        tenant_id: UUID | None = None,
+    ) -> JobModel | None:
+        """Update a job's display name.
+
+        Args:
+            db: Database session
+            job_id: Job UUID
+            display_name: New display name
+            tenant_id: Optional tenant UUID for isolation check
+
+        Returns:
+            Updated JobModel or None if not found
+        """
+        job = await self.get_job(db, job_id, tenant_id=tenant_id)
+        if job is None:
+            return None
+
+        job.display_name = display_name
+        await db.commit()
+        await db.refresh(job)
+        return job
 
     async def update_job_status(
         self,

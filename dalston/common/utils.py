@@ -1,6 +1,7 @@
 """Common utility functions."""
 
-from datetime import datetime
+from datetime import UTC, datetime
+from urllib.parse import unquote, urlparse
 from uuid import UUID
 
 
@@ -20,6 +21,48 @@ def compute_duration_ms(
         return None
     delta = completed_at - started_at
     return int(delta.total_seconds() * 1000)
+
+
+MAX_DISPLAY_NAME_LENGTH = 255
+
+
+def generate_display_name(
+    filename: str | None = None,
+    url: str | None = None,
+) -> str:
+    """Generate a human-readable display name for a job.
+
+    Priority:
+    1. Original filename (from file upload)
+    2. Last path segment of URL (without query parameters)
+    3. "Untitled — <date>" fallback
+
+    Args:
+        filename: Original filename from file upload
+        url: Source URL for the audio
+
+    Returns:
+        A display name string, truncated to MAX_DISPLAY_NAME_LENGTH
+    """
+    name: str | None = None
+
+    if filename:
+        name = filename.strip()
+
+    if not name and url:
+        parsed = urlparse(url)
+        # Get last non-empty path segment
+        path = unquote(parsed.path).rstrip("/")
+        if path:
+            segment = path.rsplit("/", 1)[-1].strip()
+            if segment:
+                name = segment
+
+    if not name:
+        now = datetime.now(UTC)
+        name = now.strftime("Untitled \u2014 %b %-d, %Y %H:%M")
+
+    return name[:MAX_DISPLAY_NAME_LENGTH]
 
 
 def parse_session_id(session_id: str) -> UUID:

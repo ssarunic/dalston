@@ -38,7 +38,7 @@ from dalston.common.models import (
     validate_retention,
 )
 from dalston.common.timeouts import S3_PRESIGNED_URL_EXPIRY_SECONDS
-from dalston.common.utils import compute_duration_ms
+from dalston.common.utils import compute_duration_ms, generate_display_name
 from dalston.config import Settings
 
 # OpenAI compatibility imports (M38)
@@ -67,6 +67,7 @@ from dalston.gateway.models.responses import (
     JobCancelledResponse,
     JobCreatedResponse,
     JobListResponse,
+    JobRenameRequest,
     JobResponse,
     JobSummary,
     RetentionInfo,
@@ -108,6 +109,12 @@ async def create_transcription(
         str | None,
         Form(
             description="URL to audio file (HTTPS, S3/GCS presigned URL, Google Drive, Dropbox)"
+        ),
+    ] = None,
+    name: Annotated[
+        str | None,
+        Form(
+            description="Optional display name for the job. Auto-generated from filename/URL if omitted."
         ),
     ] = None,
     model: Annotated[
@@ -370,6 +377,16 @@ async def create_transcription(
     if pii_detection and pii_entity_types:
         pii_entity_types_list = parameters.get("pii_entity_types")
 
+    # Generate display name: user-provided name > filename > URL segment > "Untitled"
+    display_name = (
+        name.strip()[:255]
+        if name and name.strip()
+        else generate_display_name(
+            filename=ingested.filename,
+            url=audio_url,
+        )
+    )
+
     # Create job in database
     job = await jobs_service.create_job(
         db=db,
@@ -384,6 +401,7 @@ async def create_transcription(
         audio_bit_depth=ingested.metadata.bit_depth,
         # Retention
         retention=retention,
+        display_name=display_name,
         # PII fields (M26)
         pii_detection_enabled=pii_detection,
         pii_entity_types=pii_entity_types_list,
@@ -416,6 +434,7 @@ async def create_transcription(
         return JobCreatedResponse(
             id=job.id,
             status=JobStatus(job.status),
+            display_name=job.display_name,
             created_at=job.created_at,
         )
 
@@ -526,6 +545,7 @@ async def get_transcription(
     response = JobResponse(
         id=job.id,
         status=JobStatus(job.status),
+        display_name=job.display_name,
         created_at=job.created_at,
         started_at=job.started_at,
         completed_at=job.completed_at,
@@ -606,6 +626,7 @@ async def list_transcriptions(
             JobSummary(
                 id=job.id,
                 status=JobStatus(job.status),
+                display_name=job.display_name,
                 created_at=job.created_at,
                 started_at=job.started_at,
                 completed_at=job.completed_at,
@@ -619,6 +640,57 @@ async def list_transcriptions(
         ],
         cursor=next_cursor,
         has_more=has_more,
+    )
+
+
+@router.patch(
+    "/{job_id}",
+    response_model=JobResponse,
+    summary="Update transcription job",
+    description="Update a job's display name.",
+    responses={
+        200: {"description": "Job updated"},
+        404: {"description": "Job not found"},
+        422: {"description": "Invalid request body"},
+    },
+)
+async def update_transcription(
+    job_id: UUID,
+    body: JobRenameRequest,
+    api_key: RequireJobsWrite,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    jobs_service: JobsService = Depends(get_jobs_service),
+) -> JobResponse:
+    """Update a job's display name.
+
+    Allows renaming a job to a more meaningful label at any time.
+    """
+    job = await jobs_service.update_display_name(
+        db, job_id, body.display_name, tenant_id=api_key.tenant_id
+    )
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Extract model from parameters
+    model = job.parameters.get("engine_transcribe") if job.parameters else None
+
+    return JobResponse(
+        id=job.id,
+        status=JobStatus(job.status),
+        display_name=job.display_name,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        model=model,
+        error=job.error,
+        audio_duration_seconds=job.audio_duration,
+        result_language_code=job.result_language_code,
+        result_word_count=job.result_word_count,
+        result_segment_count=job.result_segment_count,
+        result_speaker_count=job.result_speaker_count,
+        result_character_count=job.result_character_count,
     )
 
 

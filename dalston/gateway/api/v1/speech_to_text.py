@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_created
 from dalston.common.models import JobStatus
+from dalston.common.utils import generate_display_name
 from dalston.config import Settings
 from dalston.gateway.dependencies import (
     RequireJobsRead,
@@ -140,6 +141,12 @@ async def create_transcription(
         str | None,
         Form(
             description="HTTPS URL to audio file (S3/GCS presigned URL, Google Drive, Dropbox)"
+        ),
+    ] = None,
+    name: Annotated[
+        str | None,
+        Form(
+            description="Optional display name for the job. Auto-generated from filename/URL if omitted."
         ),
     ] = None,
     model_id: Annotated[
@@ -259,6 +266,16 @@ async def create_transcription(
         filename=ingested.filename,
     )
 
+    # Generate display name: user-provided name > filename > URL segment > "Untitled"
+    display_name = (
+        name.strip()[:255]
+        if name and name.strip()
+        else generate_display_name(
+            filename=ingested.filename,
+            url=cloud_storage_url,
+        )
+    )
+
     # Create job in database (now includes audio metadata from probing)
     job = await jobs_service.create_job(
         db=db,
@@ -271,6 +288,7 @@ async def create_transcription(
         audio_sample_rate=ingested.metadata.sample_rate,
         audio_channels=ingested.metadata.channels,
         audio_bit_depth=ingested.metadata.bit_depth,
+        display_name=display_name,
     )
 
     # Publish job.created event for orchestrator

@@ -473,3 +473,82 @@ class TestJobsServiceCancelJob:
         assert result is not None
         assert result.status == JobStatus.CANCELLED
         assert ready_task.status == TaskStatus.CANCELLED.value
+
+
+class TestJobsServiceUpdateDisplayName:
+    """Tests for JobsService.update_display_name method."""
+
+    @pytest.fixture
+    def jobs_service(self) -> JobsService:
+        return JobsService()
+
+    @pytest.fixture
+    def mock_db(self):
+        """Create a mock async database session."""
+        db = AsyncMock()
+        return db
+
+    def _make_job(
+        self,
+        status: str,
+        display_name: str = "",
+        job_id: UUID | None = None,
+        tenant_id: UUID | None = None,
+    ):
+        """Create a mock JobModel with the given status."""
+        job = MagicMock()
+        job.id = job_id or UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        job.tenant_id = tenant_id or UUID("00000000-0000-0000-0000-000000000000")
+        job.status = status
+        job.display_name = display_name
+        return job
+
+    @pytest.mark.asyncio
+    async def test_update_display_name_success(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test updating display name on an existing job."""
+        job = self._make_job(JobStatus.COMPLETED.value, display_name="old-name.wav")
+
+        with patch.object(jobs_service, "get_job", return_value=job):
+            result = await jobs_service.update_display_name(
+                mock_db, job.id, "Q1 Board Review"
+            )
+
+        assert result is job
+        assert job.display_name == "Q1 Board Review"
+        mock_db.commit.assert_awaited_once()
+        mock_db.refresh.assert_awaited_once_with(job)
+
+    @pytest.mark.asyncio
+    async def test_update_display_name_nonexistent_returns_none(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test that updating display name for nonexistent job returns None."""
+        with patch.object(jobs_service, "get_job", return_value=None):
+            result = await jobs_service.update_display_name(
+                mock_db, UUID("ffffffff-ffff-ffff-ffff-ffffffffffff"), "new name"
+            )
+
+        assert result is None
+        mock_db.commit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_update_display_name_with_tenant_isolation(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test that update passes tenant_id for isolation."""
+        tenant_id = UUID("12345678-1234-1234-1234-123456789abc")
+        job_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        job = self._make_job(
+            JobStatus.RUNNING.value, job_id=job_id, tenant_id=tenant_id
+        )
+
+        with patch.object(jobs_service, "get_job", return_value=job) as mock_get:
+            result = await jobs_service.update_display_name(
+                mock_db, job_id, "Renamed Job", tenant_id=tenant_id
+            )
+
+        mock_get.assert_awaited_once_with(mock_db, job_id, tenant_id=tenant_id)
+        assert result is job
+        assert job.display_name == "Renamed Job"

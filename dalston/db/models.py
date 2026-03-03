@@ -171,6 +171,7 @@ class JobModel(Base):
         default="pending",
         index=True,
     )
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False, server_default="")
     audio_uri: Mapped[str] = mapped_column(Text, nullable=False)
     # Audio metadata (extracted at upload time)
     audio_format: Mapped[str | None] = mapped_column(String(20), nullable=True)

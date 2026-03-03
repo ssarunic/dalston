@@ -74,6 +74,7 @@ class JobCreatedResponse(BaseModel):
 
     id: UUID
     status: JobStatus = JobStatus.PENDING
+    display_name: str = Field(default="", description="Human-readable job label")
     created_at: datetime
 
 
@@ -83,6 +84,16 @@ class JobCancelledResponse(BaseModel):
     id: UUID
     status: JobStatus
     message: str
+
+
+class JobRenameRequest(BaseModel):
+    """Request body for PATCH /v1/audio/transcriptions/{job_id}."""
+
+    display_name: str = Field(
+        min_length=1,
+        max_length=255,
+        description="New human-readable label for the job",
+    )
 
 
 class JobResponse(BaseModel):
@@ -95,6 +106,7 @@ class JobResponse(BaseModel):
 
     id: UUID
     status: JobStatus
+    display_name: str = Field(default="", description="Human-readable job label")
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -167,6 +179,7 @@ class JobSummary(BaseModel):
 
     id: UUID
     status: JobStatus
+    display_name: str = Field(default="", description="Human-readable job label")
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
