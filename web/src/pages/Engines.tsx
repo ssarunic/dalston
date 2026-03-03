@@ -191,8 +191,8 @@ const modelStatusLabels: Record<ModelStatus, string> = {
 
 // Stage-specific info to show in engine cards
 function getStageSpecificInfo(stage: string, models: ModelRegistryEntry[]): React.ReactNode {
-  // Only show models for transcribe and diarize stages
-  if (stage !== 'transcribe' && stage !== 'diarize') return null
+  // Only show models for transcribe stage (diarize doesn't use model registry)
+  if (stage !== 'transcribe') return null
 
   // No models in registry for this runtime
   if (models.length === 0) {
@@ -208,7 +208,7 @@ function getStageSpecificInfo(stage: string, models: ModelRegistryEntry[]): Reac
   const statusOrder: Record<ModelStatus, number> = { ready: 0, downloading: 1, not_downloaded: 2, failed: 3 }
   const sortedModels = [...models].sort((a, b) => statusOrder[a.status] - statusOrder[b.status])
   const readyCount = models.filter((m) => m.status === 'ready').length
-  const maxToShow = stage === 'transcribe' ? 3 : 2
+  const maxToShow = 3
 
   return (
     <div className="mt-3 flex items-center gap-2">

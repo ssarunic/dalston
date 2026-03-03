@@ -345,8 +345,8 @@ export function EngineDetail() {
         </Card>
       )}
 
-      {/* Models - for transcribe and diarize stages */}
-      {engineModels.length > 0 && (stage === 'transcribe' || stage === 'diarize') && (
+      {/* Models - only for transcribe stage (diarize doesn't use model registry) */}
+      {stage === 'transcribe' && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base font-medium flex items-center gap-2">
@@ -355,59 +355,63 @@ export function EngineDetail() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {engineModels.map((model) => {
-                const statusColors: Record<ModelStatus, string> = {
-                  ready: 'bg-green-500',
-                  downloading: 'bg-yellow-500 animate-pulse',
-                  not_downloaded: 'bg-zinc-400',
-                  failed: 'bg-red-500',
-                }
-                const statusLabels: Record<ModelStatus, string> = {
-                  ready: 'Ready',
-                  downloading: 'Downloading',
-                  not_downloaded: 'Not Downloaded',
-                  failed: 'Failed',
-                }
-                const sizeGb = model.size_bytes ? (model.size_bytes / 1e9).toFixed(1) : null
+            {engineModels.length === 0 ? (
+              <p className="text-sm text-muted-foreground italic">
+                No models in registry for this engine
+              </p>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {engineModels.map((model) => {
+                  const statusColors: Record<ModelStatus, string> = {
+                    ready: 'bg-green-500',
+                    downloading: 'bg-yellow-500 animate-pulse',
+                    not_downloaded: 'bg-zinc-400',
+                    failed: 'bg-red-500',
+                  }
+                  const statusLabels: Record<ModelStatus, string> = {
+                    ready: 'Ready',
+                    downloading: 'Downloading',
+                    not_downloaded: 'Not Downloaded',
+                    failed: 'Failed',
+                  }
+                  const sizeGb = model.size_bytes ? (model.size_bytes / 1e9).toFixed(1) : null
 
-                return (
-                  <div
-                    key={model.id}
-                    className={cn(
-                      'p-3 rounded-lg border bg-muted/30',
-                      model.status === 'ready' && 'border-green-500/30',
-                      model.status === 'failed' && 'border-red-500/30'
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="font-medium text-sm truncate">{model.name || model.id}</div>
-                        <div className="text-xs text-muted-foreground mt-1 truncate">
-                          {model.runtime_model_id}
+                  return (
+                    <div
+                      key={model.id}
+                      className={cn(
+                        'p-3 rounded-lg border bg-muted/30',
+                        model.status === 'ready' && 'border-green-500/30',
+                        model.status === 'failed' && 'border-red-500/30'
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-sm truncate">{model.name || model.id}</div>
+                          <div className="text-xs text-muted-foreground mt-1 truncate">
+                            {model.runtime_model_id}
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <span
-                          className={cn('w-2 h-2 rounded-full', statusColors[model.status])}
-                          title={statusLabels[model.status]}
-                        />
-                        <span className="text-xs text-muted-foreground">
-                          {statusLabels[model.status]}
-                        </span>
-                      </div>
-                    </div>
-                    {model.status === 'downloading' && model.download_progress !== undefined && (
-                      <div className="mt-2">
-                        <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-primary transition-all duration-300"
-                            style={{ width: `${model.download_progress}%` }}
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span
+                            className={cn('w-2 h-2 rounded-full', statusColors[model.status])}
+                            title={statusLabels[model.status]}
                           />
+                          <span className="text-xs text-muted-foreground">
+                            {statusLabels[model.status]}
+                          </span>
                         </div>
                       </div>
-                    )}
-                    {stage === 'transcribe' && (
+                      {model.status === 'downloading' && model.download_progress !== undefined && (
+                        <div className="mt-2">
+                          <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-primary transition-all duration-300"
+                              style={{ width: `${model.download_progress}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
                       <div className="flex flex-wrap gap-1 mt-2">
                         {model.word_timestamps && (
                           <Badge variant="outline" className="text-xs">word timestamps</Badge>
@@ -419,11 +423,11 @@ export function EngineDetail() {
                           <Badge variant="secondary" className="text-xs">{sizeGb}GB</Badge>
                         )}
                       </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
