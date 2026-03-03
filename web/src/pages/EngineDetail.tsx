@@ -131,9 +131,9 @@ export function EngineDetail() {
     return (modelsData?.data ?? []).filter((m) => m.runtime === decodedEngineId)
   }, [modelsData?.data, decodedEngineId])
 
-  // Determine status from either source
+  // Determine status - prefer console API (heartbeat-based) over discovery API
+  // batchEngineInfo.status is EngineStatus (from console API heartbeats) - more accurate
   // engineInfo.status is 'running' | 'available' | 'unhealthy' (from discovery API)
-  // batchEngineInfo.status is EngineStatus (from console API heartbeats)
   function batchStatusToDiscovery(s: EngineStatus): 'running' | 'available' | 'unhealthy' {
     switch (s) {
       case 'idle':
@@ -147,7 +147,32 @@ export function EngineDetail() {
         return 'unhealthy'
     }
   }
-  const status: 'running' | 'available' | 'unhealthy' = engineInfo?.status ?? (batchEngineInfo ? batchStatusToDiscovery(batchEngineInfo.status) : 'unhealthy')
+
+  // Human-readable label for granular status
+  function engineStatusLabel(s: EngineStatus): string {
+    switch (s) {
+      case 'idle':
+        return 'Idle'
+      case 'processing':
+        return 'Processing'
+      case 'loading':
+        return 'Loading model'
+      case 'downloading':
+        return 'Downloading model'
+      case 'stale':
+        return 'Stale'
+      case 'error':
+        return 'Error'
+      case 'offline':
+        return 'Offline'
+    }
+  }
+
+  // Prefer batch status (from heartbeats) as it's more accurate than discovery API
+  const status: 'running' | 'available' | 'unhealthy' = batchEngineInfo
+    ? batchStatusToDiscovery(batchEngineInfo.status)
+    : (engineInfo?.status ?? 'unhealthy')
+  const statusLabel = batchEngineInfo ? engineStatusLabel(batchEngineInfo.status) : status
   const stage = engineInfo?.stage ?? batchEngineInfo?.stage ?? 'unknown'
 
   if (isLoading) {
@@ -204,7 +229,7 @@ export function EngineDetail() {
                 <Badge
                   variant={status === 'running' || status === 'available' ? 'success' : 'destructive'}
                 >
-                  {status}
+                  {statusLabel}
                 </Badge>
               </div>
             </div>
@@ -371,7 +396,7 @@ export function EngineDetail() {
             {engineInfo.name && <CapabilityRow label="Name" value={engineInfo.name} />}
             <CapabilityRow label="Version" value={engineInfo.version} />
             <CapabilityRow label="Stage" value={engineInfo.stage} />
-            <CapabilityRow label="Status" value={engineInfo.status} />
+            <CapabilityRow label="Status" value={statusLabel} />
           </CardContent>
         </Card>
       )}
