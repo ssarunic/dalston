@@ -352,6 +352,7 @@ async def openai_realtime_transcription(
                 engine=allocation.worker_id.rsplit("-", 1)[0]
                 if allocation.worker_id
                 else None,
+                created_by_key_id=api_key.id,
             )
             log.debug("openai_session_persisted")
         except Exception as e:

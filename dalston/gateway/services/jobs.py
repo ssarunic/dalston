@@ -63,6 +63,8 @@ class JobsService:
         pii_entity_types: list[str] | None = None,
         pii_redact_audio: bool = False,
         pii_redaction_mode: str | None = None,
+        # Ownership tracking (M45)
+        created_by_key_id: UUID | None = None,
     ) -> JobModel:
         """Create a new transcription job.
 
@@ -79,6 +81,7 @@ class JobsService:
             audio_bit_depth: Bits per sample (e.g., 16, 24)
             retention: Retention in days (0=transient, -1=permanent, N=days)
             display_name: Human-readable job label
+            created_by_key_id: API key ID that created this job (for ownership)
 
         Returns:
             Created JobModel instance
@@ -100,6 +103,7 @@ class JobsService:
             pii_entity_types=pii_entity_types,
             pii_redact_audio=pii_redact_audio,
             pii_redaction_mode=pii_redaction_mode,
+            created_by_key_id=created_by_key_id,
         )
         db.add(job)
         await db.commit()

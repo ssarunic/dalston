@@ -407,6 +407,8 @@ async def create_transcription(
         pii_entity_types=pii_entity_types_list,
         pii_redact_audio=redact_pii_audio,
         pii_redaction_mode=pii_redaction_mode if redact_pii_audio else None,
+        # Ownership tracking (M45)
+        created_by_key_id=api_key.id,
     )
 
     # Publish event for orchestrator (include request_id for correlation)

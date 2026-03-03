@@ -161,6 +161,7 @@ async def create_webhook_endpoint(
             url=str(request.url),
             events=request.events,
             description=request.description,
+            created_by_key_id=api_key.id,
         )
     except WebhookValidationError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

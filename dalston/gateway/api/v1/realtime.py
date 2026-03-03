@@ -413,6 +413,7 @@ async def realtime_transcription(
                     sample_rate=sample_rate,
                     retention=effective_retention,
                     previous_session_id=previous_session_uuid,
+                    created_by_key_id=api_key.id,
                 )
             except Exception as e:
                 log.warning("session_db_create_failed", error=str(e))

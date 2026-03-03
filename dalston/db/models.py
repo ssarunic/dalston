@@ -242,6 +242,14 @@ class JobModel(Base):
     pii_entities_detected: Mapped[int | None] = mapped_column(Integer, nullable=True)
     pii_redacted_audio_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Ownership tracking (M45)
+    created_by_key_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("api_keys.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # Relationships
     tenant: Mapped["TenantModel"] = relationship(back_populates="jobs")
     tasks: Mapped[list["TaskModel"]] = relationship(back_populates="job")
@@ -344,6 +352,14 @@ class APIKeyModel(Base):
         nullable=True,
     )
 
+    # Ownership tracking (M45) - which API key created this key
+    created_by_key_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("api_keys.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # Relationships
     tenant: Mapped["TenantModel"] = relationship(back_populates="api_keys")
 
@@ -389,6 +405,14 @@ class WebhookEndpointModel(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+    # Ownership tracking (M45)
+    created_by_key_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("api_keys.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
 
     # Relationships
@@ -676,6 +700,14 @@ class RealtimeSessionModel(Base):
         String(20), nullable=False, server_default="auto_delete"
     )
     retention_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Ownership tracking (M45)
+    created_by_key_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("api_keys.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     # Relationships
     tenant: Mapped["TenantModel"] = relationship()

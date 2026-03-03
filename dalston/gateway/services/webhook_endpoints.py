@@ -39,6 +39,8 @@ class WebhookEndpointService:
         url: str,
         events: list[str],
         description: str | None = None,
+        # Ownership tracking (M45)
+        created_by_key_id: UUID | None = None,
     ) -> tuple[WebhookEndpointModel, str]:
         """Create a new webhook endpoint.
 
@@ -48,6 +50,7 @@ class WebhookEndpointService:
             url: Webhook callback URL
             events: List of event types to subscribe to
             description: Optional human-readable description
+            created_by_key_id: API key ID that created this endpoint (for ownership)
 
         Returns:
             Tuple of (created endpoint, raw signing secret)
@@ -71,6 +74,7 @@ class WebhookEndpointService:
             events=events,
             signing_secret=raw_secret,
             is_active=True,
+            created_by_key_id=created_by_key_id,
         )
         db.add(endpoint)
         await db.commit()

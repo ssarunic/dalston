@@ -52,6 +52,8 @@ class RealtimeSessionService:
         sample_rate: int | None = None,
         retention: int = RETENTION_DEFAULT_DAYS,
         previous_session_id: UUID | None = None,
+        # Ownership tracking (M45)
+        created_by_key_id: UUID | None = None,
     ) -> RealtimeSessionModel:
         """Create a new session record in PostgreSQL.
 
@@ -67,6 +69,7 @@ class RealtimeSessionService:
             sample_rate: Audio sample rate
             retention: Retention in days (0=transient, -1=permanent, N=days)
             previous_session_id: Previous session for resume linking
+            created_by_key_id: API key ID that created this session (for ownership)
 
         Returns:
             Created RealtimeSessionModel
@@ -88,6 +91,7 @@ class RealtimeSessionService:
             client_ip=client_ip,
             previous_session_id=previous_session_id,
             started_at=datetime.now(UTC),
+            created_by_key_id=created_by_key_id,
         )
 
         self.db.add(session)
