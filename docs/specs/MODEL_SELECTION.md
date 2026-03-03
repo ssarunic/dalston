@@ -1,36 +1,305 @@
-# Model Selection Specification
+# Model Selection & Registry Specification
 
 ## Overview
 
-This specification defines how users select transcription engines in Dalston's API. The system uses a direct engine ID approach - users either specify an exact engine ID or use `auto` for capability-driven selection.
+Dalston uses a two-level architecture for model management:
+
+1. **Model Catalog** (`/v1/models`): Static YAML definitions of known models, generated at build time
+2. **Model Registry** (`/v1/models/registry`): PostgreSQL-backed tracking of download status, with S3 as canonical storage
+
+This separation enables:
+
+- Browse all available models (catalog) vs. see what's downloaded (registry)
+- Dynamic model support via HuggingFace auto-routing
+- Explicit model lifecycle management (pull, remove, sync)
 
 ---
 
-## Design Principles
+## Architecture
 
-1. **Direct mapping**: Model parameter maps directly to engine IDs
-2. **Auto-selection**: Use `auto` to let the orchestrator select the best available engine
-3. **Runtime discovery**: `/v1/models` shows only currently running engines
-4. **No aliases**: Clean break - use exact engine IDs for explicit selection
+### Two-Catalog Design
+
+```
+┌─────────────────┐     ┌─────────────────┐
+│  Model Catalog  │     │ Model Registry  │
+│ (models/*.yaml) │     │  (PostgreSQL)   │
+├─────────────────┤     ├─────────────────┤
+│ What CAN run    │     │ What IS ready   │
+│ Static metadata │     │ Download status │
+│ Build-time      │     │ Runtime state   │
+└────────┬────────┘     └────────┬────────┘
+         │                       │
+         └───────────┬───────────┘
+                     │
+              ┌──────▼──────┐
+              │   S3/MinIO  │
+              │  (storage)  │
+              └─────────────┘
+```
+
+### Model ID Format
+
+Models use namespaced HuggingFace-style IDs:
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| `org/model` | `nvidia/parakeet-tdt-1.1b` | HuggingFace repo ID |
+| `org/model` | `Systran/faster-whisper-large-v3` | HuggingFace repo ID |
+
+This allows direct use of HuggingFace model IDs and unambiguous identification.
+
+### Runtime Architecture
+
+Models are served by **runtimes** - containerized engines that can load any compatible model:
+
+| Runtime | Library | Description |
+|---------|---------|-------------|
+| `faster-whisper` | CTranslate2 | Whisper models in CTranslate2 format |
+| `nemo` | NeMo | NVIDIA Parakeet/Canary models |
+| `parakeet-onnx` | ONNX Runtime | NVIDIA Parakeet models in ONNX format |
+| `hf-asr` | Transformers | Generic HuggingFace ASR pipeline |
+| `vllm-asr` | vLLM | Audio LLMs (Voxtral, Qwen2-Audio) |
 
 ---
 
-## Engine Selection
+## Model Catalog
 
-### Specifying an Engine
+### YAML Schema (v1.1)
 
-Users can specify an exact engine ID:
+Models are defined in `models/*.yaml`:
+
+```yaml
+schema_version: "1.1"
+id: nvidia/parakeet-tdt-1.1b              # Namespaced model ID
+runtime: nemo                              # Engine runtime
+runtime_model_id: "nvidia/parakeet-tdt-1.1b"  # HF ID for from_pretrained()
+
+name: NVIDIA Parakeet TDT 1.1B
+source: nvidia/parakeet-tdt-1.1b           # HuggingFace repo
+size_gb: 4.2
+stage: transcribe
+
+description: |
+  NVIDIA Parakeet FastConformer TDT 1.1B...
+
+languages:
+  - en                                     # null for multilingual
+
+capabilities:
+  word_timestamps: true
+  punctuation: false
+  capitalization: false
+  streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  min_vram_gb: 6
+  supports_cpu: true
+  min_ram_gb: 12
+
+performance:
+  rtf_gpu: 0.0006                         # 0.0006 = 1666x faster than realtime
+  rtf_cpu: null                           # null if unsupported
+```
+
+### Catalog API
+
+```
+GET /v1/models
+GET /v1/models/{model_id}
+```
+
+Returns static catalog entries. Use for discovering available models.
+
+**Response:**
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "nvidia/parakeet-tdt-1.1b",
+      "object": "model",
+      "name": "NVIDIA Parakeet TDT 1.1B",
+      "runtime": "nemo",
+      "runtime_model_id": "nvidia/parakeet-tdt-1.1b",
+      "source": "nvidia/parakeet-tdt-1.1b",
+      "size_gb": 4.2,
+      "stage": "transcribe",
+      "languages": ["en"],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false
+      },
+      "hardware": {
+        "min_vram_gb": 6,
+        "supports_cpu": true,
+        "min_ram_gb": 12
+      },
+      "performance": {
+        "rtf_gpu": 0.0006,
+        "rtf_cpu": null
+      }
+    }
+  ]
+}
+```
+
+---
+
+## Model Registry
+
+### Database Schema
+
+The `models` table tracks download status:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | String(200) | Namespaced model ID (PK) |
+| `name` | String(200) | Human-readable name |
+| `runtime` | String(50) | Engine runtime |
+| `runtime_model_id` | String(200) | HF model ID for engine |
+| `stage` | String(50) | Pipeline stage |
+| `status` | String(20) | `not_downloaded`, `downloading`, `ready`, `failed` |
+| `download_path` | Text | S3 URI |
+| `size_bytes` | BigInteger | Downloaded size |
+| `downloaded_at` | Timestamp | When downloaded |
+| `source` | String(200) | HuggingFace repo ID |
+| `library_name` | String(50) | ML library |
+| `languages` | JSONB | Language codes |
+| `word_timestamps` | Boolean | Capability |
+| `punctuation` | Boolean | Capability |
+| `capitalization` | Boolean | Capability |
+| `streaming` | Boolean | Capability |
+| `min_vram_gb` | Float | Hardware requirement |
+| `min_ram_gb` | Float | Hardware requirement |
+| `supports_cpu` | Boolean | Hardware capability |
+| `model_metadata` | JSONB | HF card data |
+| `last_used_at` | Timestamp | Usage tracking |
+
+### Status Flow
+
+```
+not_downloaded → downloading → ready
+                     ↓
+                  failed
+```
+
+### Registry API
+
+```
+GET    /v1/models/registry                 # List with download status
+GET    /v1/models/registry/{model_id}      # Get single entry
+POST   /v1/models/{model_id}/pull          # Download from HuggingFace
+DELETE /v1/models/{model_id}               # Remove files (purge=true deletes entry)
+POST   /v1/models/sync                     # Sync registry with S3
+```
+
+**List Registry Response:**
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "nvidia/parakeet-tdt-1.1b",
+      "object": "model",
+      "name": "NVIDIA Parakeet TDT 1.1B",
+      "runtime": "nemo",
+      "runtime_model_id": "nvidia/parakeet-tdt-1.1b",
+      "stage": "transcribe",
+      "status": "ready",
+      "download_path": "s3://dalston-artifacts/models/nvidia/parakeet-tdt-1.1b/",
+      "size_bytes": 4509715968,
+      "downloaded_at": "2026-03-02T15:30:00Z",
+      "source": "nvidia/parakeet-tdt-1.1b",
+      "languages": ["en"],
+      "word_timestamps": true,
+      "punctuation": false,
+      "capitalization": false,
+      "supports_cpu": true,
+      "metadata": {
+        "downloads": 125000,
+        "likes": 450,
+        "pipeline_tag": "automatic-speech-recognition"
+      }
+    }
+  ]
+}
+```
+
+---
+
+## HuggingFace Auto-Routing
+
+Dalston can automatically route arbitrary HuggingFace models to the appropriate runtime.
+
+### Routing Priority
+
+1. **`library_name`** (most reliable):
+   - `ctranslate2` → `faster-whisper`
+   - `nemo` → `nemo`
+   - `transformers` + ASR pipeline → `hf-asr`
+   - `vllm` → `vllm-asr`
+
+2. **Tags** (fallback):
+   - `faster-whisper`, `ctranslate2` → `faster-whisper`
+   - `nemo` → `nemo`
+   - `whisper` → `faster-whisper`
+
+3. **`pipeline_tag`** (last resort):
+   - `automatic-speech-recognition` → `hf-asr`
+
+### Resolution API
+
+```
+POST /v1/models/hf/resolve
+GET  /v1/models/hf/mappings
+```
+
+**Resolve Request:**
+
+```json
+{
+  "model_id": "openai/whisper-large-v3",
+  "auto_register": true
+}
+```
+
+**Resolve Response:**
+
+```json
+{
+  "model_id": "openai/whisper-large-v3",
+  "library_name": "ctranslate2",
+  "pipeline_tag": "automatic-speech-recognition",
+  "tags": ["whisper", "ctranslate2"],
+  "languages": [],
+  "downloads": 1500000,
+  "likes": 3200,
+  "resolved_runtime": "faster-whisper",
+  "can_route": true
+}
+```
+
+---
+
+## Model Selection in Jobs
+
+### Specifying a Model
 
 ```bash
 curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -H "Authorization: Bearer $API_KEY" \
   -F "file=@audio.wav" \
-  -F "model=faster-whisper-base"
+  -F "model=nvidia/parakeet-tdt-1.1b"
 ```
 
 ### Auto-Selection
 
-Use `auto` (or omit the parameter) for capability-driven selection:
+Omit the model parameter or use `auto` for capability-driven selection:
 
 ```bash
 curl -X POST http://localhost:8000/v1/audio/transcriptions \
@@ -39,268 +308,229 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -F "model=auto"
 ```
 
-The orchestrator selects the best engine based on:
+The orchestrator selects the best downloaded model based on:
 
-- Required capabilities (language, streaming, word timestamps)
-- Engine availability (running and healthy)
-- Priority/performance characteristics from catalog
+1. Language compatibility
+2. Required capabilities (word timestamps, streaming)
+3. Engine availability
+4. Performance characteristics (RTF)
+
+### Selection Algorithm
+
+When `model=auto`:
+
+1. Query registry for `status=ready` models matching requirements
+2. Filter by language support (if specified)
+3. Rank by: word timestamps → diarization → language specificity → RTF
+4. Select best match and route to appropriate runtime
 
 ---
 
-## Available Engines
+## Engine Types
 
 ### Batch Transcription Engines
 
-| Engine ID | Languages | Word Timestamps | GPU Required |
-|-----------|-----------|-----------------|--------------|
-| `faster-whisper-base` | 99 | Via alignment | No (CPU supported) |
-| `faster-whisper-large-v3` | 99 | Via alignment | Yes |
-| `faster-whisper-large-v3-turbo` | 99 | Via alignment | Yes |
-| `parakeet-0.6b` | 1 (en) | Native | No (CPU supported) |
-| `parakeet-1.1b` | 1 (en) | Native | Yes |
+| Runtime | Models | Languages | Word Timestamps | GPU Required |
+|---------|--------|-----------|-----------------|--------------|
+| `faster-whisper` | Whisper variants | 99 | Via alignment | No (CPU supported) |
+| `nemo` | Parakeet CTC/TDT/RNNT | 1 (en) | Native | Yes (CPU supported) |
+| `parakeet-onnx` | Parakeet ONNX | 1 (en) | Native | No (ONNX Runtime) |
+| `hf-asr` | Any HF ASR model | Varies | Depends on model | Varies |
+| `vllm-asr` | Voxtral, Qwen2-Audio | 13+ | Yes | Yes |
 
-### Realtime Streaming Engines
+### Real-time Streaming Engines
 
-| Engine ID | Languages | Use Case |
-|-----------|-----------|----------|
-| `whisper-streaming-base` | 99 | Low-latency multilingual |
-| `parakeet-streaming-0.6b` | 1 (en) | Fast English streaming |
-| `parakeet-streaming-1.1b` | 1 (en) | Accurate English streaming |
+| Runtime | Models | Languages | Use Case |
+|---------|--------|-----------|----------|
+| `faster-whisper-rt` | Whisper streaming | 99 | Low-latency multilingual |
+| `parakeet-rt` | Parakeet streaming | 1 (en) | Fast English streaming |
+| `parakeet-onnx-rt` | Parakeet ONNX streaming | 1 (en) | Edge deployment |
+| `voxtral-rt` | Voxtral Mini Realtime | 13 | Multilingual streaming |
 
 ---
 
-## API Endpoints
+## Web Console
 
-### Batch Transcription
+The Models page (`/models`) provides:
 
-```
-POST /v1/audio/transcriptions
-```
+### Model Registry Table
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `model` | string | `auto` | Engine ID or `auto` for auto-selection |
+- **Columns**: Model ID, Runtime, Status, Size, Capabilities, Actions
+- **Status indicators**:
+  - Green: `ready` (downloaded)
+  - Yellow pulse: `downloading`
+  - Gray: `not_downloaded` (available)
+  - Red: `failed`
+- **Expandable rows**: Show hardware requirements, languages, HF metadata
 
-### Real-time Transcription
+### Actions
 
-```
-GET /v1/audio/transcriptions/stream?model=parakeet-streaming-0.6b
-```
+| Action | Status | Behavior |
+|--------|--------|----------|
+| Download | `not_downloaded`, `failed` | Start HuggingFace download |
+| Remove | `ready` | Delete S3 files, keep registry entry |
+| Delete | Any (not downloading) | Remove files and registry entry |
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `model` | string | `auto` | Engine ID or `auto` for auto-selection |
+### Filters
 
-### List Running Engines
+- Search: Text search across ID, name, runtime
+- Stage: transcribe, diarize, align, etc.
+- Runtime: faster-whisper, nemo, etc.
+- Status: ready, not_downloaded, downloading, failed
 
-```
-GET /v1/models
-```
+### Add from HuggingFace
 
-Returns only engines that are currently running and healthy:
-
-```json
-{
-  "object": "list",
-  "data": [
-    {
-      "id": "faster-whisper-base",
-      "object": "model",
-      "stage": "transcribe",
-      "status": "running",
-      "capabilities": {
-        "languages": ["en", "es", "fr", ...],
-        "streaming": false,
-        "word_timestamps": false
-      }
-    },
-    {
-      "id": "parakeet-0.6b",
-      "object": "model",
-      "stage": "transcribe",
-      "status": "running",
-      "capabilities": {
-        "languages": ["en"],
-        "streaming": false,
-        "word_timestamps": true
-      }
-    }
-  ]
-}
-```
-
-### List All Engines (with status)
-
-```
-GET /v1/engines
-```
-
-Returns all engines from catalog with their current status:
-
-```json
-{
-  "engines": [
-    {
-      "id": "faster-whisper-base",
-      "stage": "transcribe",
-      "version": "1.0.0",
-      "status": "running",
-      "capabilities": { ... },
-      "hardware": { ... },
-      "performance": { ... }
-    },
-    {
-      "id": "faster-whisper-large-v3",
-      "stage": "transcribe",
-      "version": "1.0.0",
-      "status": "available",
-      "capabilities": { ... },
-      "hardware": { ... },
-      "performance": { ... }
-    }
-  ],
-  "total": 2
-}
-```
-
-Status values:
-
-- `running`: Engine has valid heartbeat
-- `available`: In catalog but not running
-- `unhealthy`: Heartbeat expired
+1. Click "Add from HF" button
+2. Search HuggingFace Hub (live autocomplete)
+3. Select model → auto-resolve runtime
+4. Model added to registry with `not_downloaded` status
 
 ---
 
 ## Error Handling
 
-### Engine Not Found
-
-When a specified engine doesn't exist in the catalog:
+### Model Not Found
 
 ```json
 {
   "error": {
     "type": "invalid_request_error",
-    "message": "Engine 'unknown-engine' not found",
+    "message": "Model 'unknown/model' not found in catalog or registry",
     "param": "model"
   }
 }
 ```
 
-### Engine Not Running
+### Model Not Downloaded
 
-When a specified engine exists but isn't currently running:
+```json
+{
+  "error": {
+    "type": "invalid_request_error",
+    "message": "Model 'nvidia/parakeet-tdt-1.1b' not downloaded. Run: dalston model pull nvidia/parakeet-tdt-1.1b"
+  }
+}
+```
+
+### No Compatible Engine Running
 
 ```json
 {
   "error": {
     "type": "service_unavailable",
-    "message": "Engine 'faster-whisper-large-v3' is not currently running"
+    "message": "No engine available for runtime 'nemo'. Start an engine with: docker compose up -d stt-batch-transcribe-nemo"
   }
 }
 ```
 
-### Capability Mismatch
-
-When auto-selection can't find an engine matching requirements:
+### Model In Use
 
 ```json
 {
   "error": {
-    "type": "service_unavailable",
-    "message": "No engine available for stage 'transcribe' with language 'hr'"
+    "type": "conflict",
+    "message": "Cannot delete model nvidia/parakeet-tdt-1.1b: 3 pending/processing job(s) using it"
   }
 }
 ```
 
 ---
 
-## ElevenLabs Compatibility
+## S3 Storage Structure
 
-The `/v1/speech-to-text` endpoint accepts ElevenLabs `model_id` parameter values:
+Models are stored in S3 with a completion marker:
 
-| ElevenLabs model_id | Behavior |
-|---------------------|----------|
-| `scribe_v1` | Auto-select (treated as `auto`) |
-| `scribe_v2` | Auto-select (treated as `auto`) |
-| Any other value | Auto-select (treated as `auto`) |
-
-ElevenLabs model names are treated as auto-selection since they don't map to Dalston engines.
-
----
-
-## Adding New Engines
-
-When adding a new transcription engine:
-
-1. Implement engine in `engines/{stage}/{engine-id}/`
-2. Create variant YAML files in `engines/{stage}/{engine-id}/variants/`
-3. Add docker-compose service definition
-4. Engine auto-registers via heartbeat when started
-5. Appears in `/v1/models` when running
-
-See [M32: Engine Variant Structure](../plan/milestones/M32-engine-variant-structure.md) for the variant pattern.
-
----
-
-## Future Enhancements
-
-### Capability-Based Auto-Selection
-
-Future: richer auto-selection based on requirements:
-
-```json
-{
-  "model": "auto",
-  "language": "hr",
-  "streaming": true
-}
+```
+s3://dalston-artifacts/
+└── models/
+    └── nvidia/parakeet-tdt-1.1b/
+        ├── model.nemo
+        ├── config.yaml
+        └── .complete           # Atomic completion marker
 ```
 
-Would route to the best engine supporting Croatian with streaming.
-
-### Quality Tiers
-
-Future: tier-based selection as convenience:
-
-```json
-{
-  "model": "auto",
-  "tier": "fast"
-}
-```
-
-Would route to the fastest available engine.
+The `.complete` marker ensures atomic uploads - a model is only considered ready when this file exists.
 
 ---
 
-## Models of Interest
+## Runtime Model Management
 
-Future models being evaluated for integration into Dalston.
+Engines load models on demand:
 
-### Voxtral Mini 4B Realtime (Mistral AI)
+1. **Job arrives** with `runtime_model_id` in config
+2. **Engine checks** if model is loaded in memory
+3. **If different model**: Unload current, free GPU memory, load new
+4. **If model not on disk**: Download from S3 to local cache
+5. **Process audio** and return results
 
-**Released:** February 2026 as open weights (Apache 2.0)
-**HuggingFace:** [mistralai/Voxtral-Mini-4B-Realtime-2602](https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602)
+### Model Manager
 
-Voxtral Mini 4B Realtime 2602 is a multilingual, natively-streaming speech transcription model - among the first open-source solutions to achieve accuracy comparable to offline systems with sub-500ms latency.
+Each engine has a `ModelManager` that handles:
 
-| Attribute | Value |
-|-----------|-------|
-| **Architecture** | ~3.4B LLM + ~0.6B causal audio encoder |
-| **Parameters** | ~4B total |
-| **Languages** | 13: English, Chinese, Hindi, Spanish, Arabic, French, Portuguese, Russian, German, Japanese, Korean, Italian, Dutch |
-| **Latency** | Configurable 80ms-2400ms (sweet spot: 480ms) |
-| **Streaming** | Native (causal encoder, sliding window attention) |
-| **Word timestamps** | Yes |
-| **VRAM** | >=16GB minimum (~35GB practical) |
-| **Throughput** | >12.5 tokens/second |
+- **TTL-based eviction**: Unload idle models after `DALSTON_MODEL_TTL_SECONDS` (default: 3600)
+- **LRU eviction**: When at `DALSTON_MAX_LOADED_MODELS`, evict least-recently-used
+- **Reference counting**: Models in use are never evicted
+- **Preloading**: `DALSTON_MODEL_PRELOAD` loads a model at startup
 
-**Why it matters for Dalston:**
+### S3-to-Local Caching
 
-- First viable **multilingual streaming** model (Parakeet is English-only)
-- True streaming architecture (not VAD-chunked like Whisper)
-- Competitive accuracy with offline models at <500ms latency
-- Open weights under Apache 2.0 license
+```
+S3: s3://bucket/models/{model_id}/
+      ↓ download on first use
+Local: /models/s3-cache/{safe_model_id}/
+```
 
-**Proposed engine ID:** `voxtral-streaming-4b`
+The `s3-cache` directory persists across container restarts via Docker volume.
+
+---
+
+## Audit Logging
+
+Model operations are audit-logged:
+
+| Event | Data |
+|-------|------|
+| `model.downloaded` | model_id, source, size_bytes, download_path |
+| `model.removed` | model_id, download_path |
+| `model.download_failed` | model_id, error |
+| `model.deleted_from_registry` | model_id, download_path |
+
+---
+
+## CLI Commands
+
+```bash
+# List models (catalog)
+dalston model ls
+
+# List registry with download status
+dalston model ls --registry
+
+# Download a model
+dalston model pull nvidia/parakeet-tdt-1.1b
+
+# Check model status
+dalston model status nvidia/parakeet-tdt-1.1b
+
+# Remove downloaded files
+dalston model rm nvidia/parakeet-tdt-1.1b
+
+# Delete from registry entirely
+dalston model rm --purge nvidia/parakeet-tdt-1.1b
+
+# Sync registry with S3
+dalston model sync
+```
+
+---
+
+## Migration from Legacy
+
+The system migrated from short IDs to namespaced IDs:
+
+| Old Format | New Format |
+|------------|------------|
+| `parakeet-tdt-1.1b` | `nvidia/parakeet-tdt-1.1b` |
+| `faster-whisper-large-v3` | `Systran/faster-whisper-large-v3` |
+
+Migration `0026` handled the conversion automatically.

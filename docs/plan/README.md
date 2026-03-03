@@ -14,7 +14,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 
 ## Status Overview
 
-### Completed (12)
+### Completed (16)
 
 | # | Milestone | Completed |
 |---|-----------|-----------|
@@ -30,6 +30,10 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M21](milestones/M21-admin-webhooks.md) | Admin Webhooks | February 2026 |
 | [M25](milestones/M25-data-retention.md) | Data Retention & Audit | February 2026 |
 | [M26](milestones/M26-pii-detection-redaction.md) | PII Detection & Audio Redaction | February 2026 |
+| [M36](milestones/M36-runtime-model-management.md) | Runtime Model Management | March 2026 |
+| [M39](milestones/M39-model-cache-ttl.md) | Model Cache & TTL | March 2026 |
+| [M40](milestones/M40-model-registry.md) | Model Registry & HF Integration | March 2026 |
+| [M42](milestones/M42-console-model-management.md) | Console Model Management | March 2026 |
 
 ### In Progress (8)
 
@@ -44,12 +48,11 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Audio/transcript S3 storage working; session resume pending |
 
-### Not Started (5)
+### Not Started (4)
 
 | # | Milestone | Goal |
 |---|-----------|------|
 | [M9](milestones/M09-enrichment.md) | Enrichment | Emotions, events, LLM cleanup |
-| [M14](milestones/M14-model-selection.md) | Model Selection | User-selectable transcription models |
 | [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | OpenTelemetry spans |
 | [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | Prometheus + Grafana |
 | [M38](milestones/M38-openai-compat.md) | OpenAI Compatibility | Drop-in OpenAI Audio API replacement |
@@ -73,7 +76,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M11](milestones/M11-api-authentication.md) | API Authentication | Secure endpoints with API keys | 2-3 | Completed |
 | [M12](milestones/M12-python-sdk.md) | Python SDK | Native SDK for Dalston features | 3-4 | In Progress |
 | [M13](milestones/M13-cli.md) | CLI | Command-line interface | 2-3 | In Progress |
-| [M14](milestones/M14-model-selection.md) | Model Selection | User-selectable transcription models | 2-3 | Not Started |
+| [M14](milestones/M14-model-selection.md) | Model Selection | User-selectable transcription models | 2-3 | Superseded by M36/M40 |
 | [M15](milestones/M15-console-authentication.md) | Console Auth | Secure web console access | 2-3 | Completed |
 
 **Total: ~42-55 days (~8-11 weeks)**
@@ -140,16 +143,17 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M29](milestones/M29-engine-catalog-capabilities.md) | Engine Catalog & Capabilities | Validate job requirements against engine capabilities | 2-3 | Complete |
 | [M30](milestones/M30-engine-metadata-evolution.md) | Engine Metadata Evolution | Single source of truth for engine metadata; discovery API | 8-10 | Complete |
 | [M31](milestones/M31-capability-driven-routing.md) | Capability-Driven Routing | Route jobs based on engine capabilities | 2-3 | Complete |
-| [M32](milestones/M32-engine-variant-structure.md) | Engine Variant Structure | Model sizes as separate deployable engines | 1.5-2 | Planned |
+| [M32](milestones/M32-engine-variant-structure.md) | Engine Variant Structure | Model sizes as separate deployable engines | 1.5-2 | Superseded by M36 |
 
 ## Model Management Milestones
 
 | # | Milestone | Goal | Days | Status |
 |---|-----------|------|------|--------|
+| [M36](milestones/M36-runtime-model-management.md) | Runtime Model Management | Engines load any model at runtime; two-catalog architecture | 4-5 | Complete |
 | [M39](milestones/M39-model-cache-ttl.md) | Model Cache & TTL | Unified model cache with TTL-based eviction | 2-3 | Complete |
-| [M40](milestones/M40-model-registry.md) | Model Registry & Aliases | PostgreSQL model registry, CLI commands, HF card routing | 3-4 | Complete |
-| [M41](milestones/M41-new-engine-types.md) | New Engine Types | Support for additional ASR engines (NeMo, HF ASR, etc.) | 3-4 | Planned |
-| [M42](milestones/M42-console-model-management.md) | Console Model Management | Web UI for model discovery, download, and selection | 5-7 | Planned |
+| [M40](milestones/M40-model-registry.md) | Model Registry & HF Integration | PostgreSQL model registry, HF auto-routing, download workflow | 3-4 | Complete |
+| [M41](milestones/M41-new-engine-types.md) | New Engine Types | Parakeet ONNX, HF-ASR, vLLM-ASR engine containers | 5-7 | Planned |
+| [M42](milestones/M42-console-model-management.md) | Console Model Management | Web UI for model registry, download, and selection | 5-7 | Complete |
 
 ---
 
@@ -242,13 +246,11 @@ M6 ──► M24 (realtime session persistence, prerequisite for M7)
 
 M3 + M4 + M25 ──► M26
 
-M28 ──► M29 ──► M30 ──► M31
-                  │
-                  └──► M32 (variant structure)
-
-M31 ──► M39 ──► M40 ──► M41
-                  │
-                  └──► M42 (console model management, also needs M10)
+M28 ──► M29 ──► M30 ──► M31 ──► M36 (runtime model management)
+                  │                │
+                  └──► M32         └──► M39 ──► M40 ──► M41
+                                             │
+                                             └──► M42 (console model management, also needs M10)
 
 M10 + M11 + M15 ──► M35
 ```
@@ -267,7 +269,8 @@ M10 + M11 + M15 ──► M35
 - **M26**: PII Detection & Audio Redaction (needs M3 word timestamps, M4 diarization, M25 retention)
 - **M28-M32**: Engine infrastructure (M28 registry → M29 capabilities → M30 metadata → M31 routing → M32 variants)
 - **M35**: Settings Page (needs M10 console, M11 auth, M15 console auth)
-- **M39-M41**: Model management (M39 cache TTL → M40 registry → M41 new engines)
+- **M36**: Runtime Model Management (needs M31 routing; enables dynamic model loading)
+- **M39-M42**: Model management (M36 → M39 cache TTL → M40 registry → M41 new engines, M42 console)
 - **M42**: Console Model Management (needs M40 registry APIs, M10 console)
 
 ---
@@ -304,6 +307,7 @@ Each milestone has a verification section. Key checkpoints:
 | M30 | `GET /v1/engines` returns engine list; `GET /v1/capabilities` returns aggregate capabilities |
 | M32 | Catalog shows `whisper-base`, `whisper-large-v3`, `whisper-large-v3-turbo` as separate engines |
 | M35 | Settings page shows current values; admin can change rate limits and see effect immediately |
+| M36 | Engines load models on-demand; `GET /v1/engines` shows `loaded_model` per engine |
 | M39 | Model files evicted after TTL; cache stays within size limits |
-| M40 | `dalston model pull/ls/rm` works; HF model IDs auto-resolve to runtime |
-| M42 | Models page shows registry; NewJob has searchable model selector; download progress in header |
+| M40 | `POST /v1/models/{id}/pull` downloads to S3; HF models auto-resolve to runtime |
+| M42 | Models page shows registry with download/remove actions; Add from HF dialog works |

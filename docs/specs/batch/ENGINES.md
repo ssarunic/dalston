@@ -2,7 +2,54 @@
 
 ## Overview
 
-Engines are containerized processors that implement one or more pipeline stages. Each engine runs in its own Docker container with isolated dependencies.
+Engines are containerized processors that implement one or more pipeline stages. Each engine runs in its own Docker container with isolated dependencies and can load multiple model variants at runtime.
+
+---
+
+## Engine Architecture
+
+### Runtime-Based Design (M36)
+
+Dalston uses a **runtime-based architecture** where a small number of engine runtimes can load any compatible model on demand:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Engine Runtime                        │
+│  (e.g., faster-whisper, nemo, parakeet-onnx)           │
+├─────────────────────────────────────────────────────────┤
+│  ModelManager                                            │
+│  ├── TTL-based eviction (default: 1 hour)               │
+│  ├── LRU eviction when at capacity                      │
+│  ├── Reference counting (no eviction during use)        │
+│  └── GPU memory cleanup on model swap                   │
+├─────────────────────────────────────────────────────────┤
+│  S3ModelStorage                                          │
+│  ├── Download from S3 to local cache                    │
+│  ├── .complete marker for atomic availability           │
+│  └── Runtime-specific cache directories                 │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Model Loading Flow
+
+```
+Job arrives with runtime_model_id
+      ↓
+Check if model loaded in memory
+      ↓
+┌─────────────────────────────────────┐
+│ Model loaded?                        │
+│   YES → Use immediately              │
+│   NO  → Check local cache            │
+│         ├── Cached? → Load to GPU    │
+│         └── No? → Download from S3   │
+│                   → Load to GPU      │
+└─────────────────────────────────────┘
+      ↓
+Process audio
+      ↓
+Release model reference (available for eviction)
+```
 
 ---
 
@@ -20,14 +67,15 @@ Audio preprocessing and analysis.
 
 ### TRANSCRIBE
 
-Speech-to-text conversion.
+Speech-to-text conversion. These are **runtime-based engines** that load models dynamically.
 
-| Engine ID | Description | GPU | Languages |
-|-----------|-------------|-----|-----------|
-| `faster-whisper` | Fast Whisper (CTranslate2), multilingual | Yes | All |
-| `parakeet` | NVIDIA Parakeet, English-optimized, very fast | Yes | English |
-| `whisper-openai` | Original OpenAI Whisper | Yes | All |
-| `distil-whisper` | Distilled Whisper, faster but slightly less accurate | Yes | English |
+| Runtime | Library | Models | Languages | GPU |
+|---------|---------|--------|-----------|-----|
+| `faster-whisper` | CTranslate2 | Whisper variants | 99 | Optional |
+| `nemo` | NeMo | Parakeet CTC/TDT/RNNT | English | Optional |
+| `parakeet-onnx` | ONNX Runtime | Parakeet ONNX | English | Optional |
+| `hf-asr` | Transformers | Any HF ASR model | Varies | Varies |
+| `vllm-asr` | vLLM | Voxtral, Qwen2-Audio | 13+ | Yes |
 
 ### ALIGN
 
@@ -56,6 +104,15 @@ Audio analysis and classification.
 | `emotion2vec` | Emotion detection from speech | Yes |
 | `panns-events` | Audio event detection (laughter, music, etc.) | No |
 | `topic-classifier` | Topic/category classification | No |
+| `pii-detect` | PII detection in transcripts | No |
+
+### REDACT
+
+Audio redaction based on detected PII.
+
+| Engine ID | Description | GPU |
+|-----------|-------------|-----|
+| `audio-redact` | Replace PII segments with silence/beep | No |
 
 ### REFINE
 
@@ -87,105 +144,129 @@ Integrated engines covering multiple stages.
 
 ## Engine Metadata Format
 
-Each engine has an `engine.yaml` file (schema version 1.1) describing its capabilities. This file is the single source of truth for engine metadata.
+Each engine has an `engine.yaml` file (schema version 1.1) describing its capabilities.
+
+### Runtime Engine Schema
+
+For transcription runtimes that load models dynamically:
 
 ```yaml
-# === REQUIRED FIELDS ===
-schema_version: "1.1"                # Schema version for validation
-id: faster-whisper                   # Unique engine identifier
-stage: transcribe                    # Pipeline stage (or type: realtime)
-name: Faster Whisper
-version: 1.2.0
+# Runtime-level engine.yaml (e.g., engines/stt-transcribe/faster-whisper/engine.yaml)
+schema_version: "1.1"
+id: faster-whisper                      # Runtime ID
+runtime: faster-whisper                 # Runtime family
+stage: transcribe
+name: Faster Whisper Runtime
+version: 1.0.0
 description: |
   CTranslate2-optimized Whisper implementation.
-  Supports all Whisper model sizes, multiple languages.
+  Loads any Whisper model variant at runtime.
 
 container:
-  gpu: required                      # required | optional | none
-  memory: 8G                         # Recommended minimum
-  model_cache: /models               # Where to cache models
+  gpu: optional                         # required | optional | none
+  memory: 8G
+  model_cache: /models                  # Model cache directory
 
 capabilities:
-  languages:
-    - all                            # Or explicit list: [en, es, fr, ...]
-  max_audio_duration: 7200           # Seconds
-  streaming: false                   # Supports streaming?
-  word_timestamps: true              # Produces accurate word-level timestamps?
-  includes_diarization: false        # Output includes speaker labels?
-
-# === OPTIONAL FIELDS ===
-input:
-  audio_formats: [wav]               # Expected input format
-  sample_rate: 16000                 # Expected sample rate
-  channels: 1                        # Expected channels (mono)
-
-config_schema:
-  type: object
-  properties:
-    model:
-      type: string
-      enum: [tiny, base, small, medium, large-v2, large-v3]
-      default: large-v3
-    language:
-      type: string
-      default: auto
-
-output_schema:
-  type: object
-  required: [text, segments, language]
-  properties:
-    text:
-      type: string
-    segments:
-      type: array
-    language:
-      type: string
-
-# === NEW IN SCHEMA 1.1 ===
+  languages: null                       # null = multilingual (all)
+  max_audio_duration: 7200
+  streaming: false
+  word_timestamps: false                # Via alignment stage
+  includes_diarization: false
 
 # HuggingFace ecosystem compatibility
 hf_compat:
-  pipeline_tag: automatic-speech-recognition  # HF task taxonomy
-  library_name: ctranslate2                   # Underlying ML framework
-  license: mit                                # SPDX license identifier
+  pipeline_tag: automatic-speech-recognition
+  library_name: ctranslate2
+  license: mit
 
-# Hardware requirements
+# Hardware requirements (minimum for any model)
 hardware:
-  min_vram_gb: 4                     # Minimum GPU VRAM in GB
-  recommended_gpu:                   # Recommended GPU types
+  min_vram_gb: 4
+  recommended_gpu:
     - t4
     - a10g
-  supports_cpu: true                 # Whether CPU inference works
-  min_ram_gb: 8                      # Minimum system RAM in GB
+  supports_cpu: true
+  min_ram_gb: 8
 
-# Performance characteristics
+# Performance (varies by model)
 performance:
-  rtf_gpu: 0.05                      # Real-time factor on GPU (0.05 = 20x faster)
-  rtf_cpu: 0.8                       # Real-time factor on CPU
-  max_concurrent_jobs: 4             # Concurrent job limit
-  warm_start_latency_ms: 50          # Latency after model loaded
+  rtf_gpu: 0.05
+  rtf_cpu: 0.8
+  warm_start_latency_ms: 50
 ```
 
-### Schema 1.1 New Sections
+### Utility Engine Schema
 
-#### hf_compat (optional)
+For single-purpose utility engines:
 
-HuggingFace ecosystem compatibility metadata.
+```yaml
+# Utility engine.yaml (e.g., engines/stt-merge/final-merger/engine.yaml)
+schema_version: "1.1"
+id: final-merger
+runtime: final-merger                   # Same as ID for utilities
+stage: merge
+name: Final Merger
+version: 1.0.0
+description: Merges all pipeline stage outputs into final transcript.
+
+container:
+  gpu: none
+  memory: 2G
+
+capabilities:
+  streaming: false
+
+hardware:
+  supports_cpu: true
+  min_ram_gb: 2
+```
+
+### Schema Field Reference
+
+#### Core Fields (Required)
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `pipeline_tag` | string | HF task taxonomy or Dalston extension |
+| `schema_version` | string | Always `"1.1"` |
+| `id` | string | Unique engine identifier |
+| `runtime` | string | Runtime family (for model routing) |
+| `stage` | string | Pipeline stage |
+| `name` | string | Human-readable name |
+| `version` | string | Semantic version |
+
+#### container (Required)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `gpu` | string | `required`, `optional`, or `none` |
+| `memory` | string | Recommended minimum (e.g., `8G`) |
+| `model_cache` | string | Where to cache models |
+
+#### capabilities (Required)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `languages` | list/null | Language codes, or `null` for all |
+| `max_audio_duration` | int | Max seconds |
+| `streaming` | bool | Supports streaming? |
+| `word_timestamps` | bool | Produces accurate word-level timestamps? |
+| `includes_diarization` | bool | Output includes speaker labels? |
+
+#### hf_compat (Optional)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `pipeline_tag` | string | HF task taxonomy |
 | `library_name` | string | Underlying ML framework |
 | `license` | string | SPDX license identifier |
 
-**Valid pipeline_tag values:**
+Valid `pipeline_tag` values:
 
 - HF standard: `automatic-speech-recognition`, `speaker-diarization`, `voice-activity-detection`, `audio-classification`
 - Dalston extensions: `dalston:audio-preparation`, `dalston:merge`, `dalston:pii-redaction`, `dalston:audio-redaction`
 
-#### hardware (optional)
-
-Hardware requirements for deployment planning and auto-scaling.
+#### hardware (Optional)
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -194,31 +275,31 @@ Hardware requirements for deployment planning and auto-scaling.
 | `supports_cpu` | bool | Whether CPU inference works |
 | `min_ram_gb` | int | Minimum system RAM in GB |
 
-#### performance (optional)
-
-Performance characteristics for timeout calculation and capacity planning.
+#### performance (Optional)
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `rtf_gpu` | float | Real-time factor on GPU (0.05 = 20x faster than real-time) |
+| `rtf_gpu` | float | Real-time factor on GPU (0.05 = 20x faster) |
 | `rtf_cpu` | float | Real-time factor on CPU, null if unsupported |
 | `max_concurrent_jobs` | int | Concurrent job limit |
 | `warm_start_latency_ms` | int | Latency after model loaded |
 
-### Capabilities and Routing
+---
 
-Engine capabilities directly affect how the orchestrator selects engines and builds task DAGs.
+## Capabilities and Routing
 
-#### Routing Capabilities
+Engine capabilities affect orchestrator routing and DAG construction.
 
-| Field | Type | Effect on Routing |
-| --- | --- | --- |
-| `languages` | list or null | Filters engines by language support. `null` = universal (all languages). |
-| `streaming` | bool | Required for real-time transcription jobs. |
-| `word_timestamps` | bool | If `true`, alignment stage is skipped (engine produces accurate word timing). |
-| `includes_diarization` | bool | If `true`, diarize stage is skipped (output includes speaker labels). |
+### Routing Capabilities
 
-#### DAG Shape Examples
+| Field | Effect on Routing |
+|-------|-------------------|
+| `languages` | Filters engines by language support. `null` = all languages. |
+| `streaming` | Required for real-time transcription jobs. |
+| `word_timestamps` | If `true`, alignment stage is skipped. |
+| `includes_diarization` | If `true`, diarize stage is skipped. |
+
+### DAG Shape Examples
 
 The orchestrator adapts DAG shape based on selected engine capabilities:
 
@@ -226,14 +307,14 @@ The orchestrator adapts DAG shape based on selected engine capabilities:
 # faster-whisper (word_timestamps: false, includes_diarization: false)
 prepare → transcribe → align → diarize → merge
 
-# parakeet (word_timestamps: true, includes_diarization: false)
+# nemo/parakeet (word_timestamps: true, includes_diarization: false)
 prepare → transcribe → diarize → merge  (no align - native timestamps)
 
 # whisperx-full (word_timestamps: true, includes_diarization: true)
 prepare → transcribe → merge  (no align, no diarize - all native)
 ```
 
-#### Ranking Criteria
+### Ranking Criteria
 
 When multiple engines match requirements, the selector prefers:
 
@@ -241,26 +322,6 @@ When multiple engines match requirements, the selector prefers:
 2. Native diarization (skips diarize stage)
 3. Language-specific over universal
 4. Faster RTF (real-time factor)
-
-### Validation
-
-All engine.yaml files are validated against the JSON Schema at `dalston/schemas/engine.schema.json`:
-
-```bash
-# Validate single file
-python -m dalston.tools.validate_engine engines/transcribe/faster-whisper/engine.yaml
-
-# Validate all engines
-python -m dalston.tools.validate_engine --all
-```
-
-### Catalog Generation
-
-The engine catalog is generated from engine.yaml files at build time:
-
-```bash
-python scripts/generate_catalog.py --engines-dir engines/ --output dalston/orchestrator/generated_catalog.json
-```
 
 ---
 
@@ -271,32 +332,82 @@ All engines use the `dalston-engine-sdk` package for communication with the orch
 ### Base Engine Class
 
 ```python
-from dalston_engine_sdk import Engine, TaskInput, TaskOutput
+from dalston.engine_sdk import Engine, TaskInput
+from dalston.engine_sdk.model_manager import ModelManager
 
-class MyEngine(Engine):
-    """Custom engine implementation."""
+class MyTranscribeEngine(Engine):
+    """Runtime-based transcription engine."""
 
     def __init__(self):
         super().__init__()
-        self.model = None
+        self.model_manager = MyModelManager(
+            max_loaded=int(os.environ.get("DALSTON_MAX_LOADED_MODELS", "2")),
+            ttl_seconds=int(os.environ.get("DALSTON_MODEL_TTL_SECONDS", "3600")),
+        )
 
-    def load_model(self, config: dict):
-        """Load model (called once, cached)."""
-        if self.model is None:
-            self.model = load_my_model(config)
-
-    def process(self, input: TaskInput) -> TaskOutput:
+    def process(self, task: TaskInput) -> dict:
         """Process a single task."""
-        self.load_model(input.config)
+        # Get model ID from task config
+        model_id = task.config.get("runtime_model_id")
+        if not model_id:
+            model_id = os.environ.get("DALSTON_DEFAULT_MODEL_ID")
 
-        result = self.model.process(input.audio_path)
+        # Acquire model (loads if needed)
+        with self.model_manager.acquire(model_id) as model:
+            result = model.transcribe(task.audio_path)
 
-        return TaskOutput(data=result)
+        return {"segments": result.segments, "language": result.language}
 
 
 if __name__ == "__main__":
-    engine = MyEngine()
-    engine.run()  # SDK handles stream polling
+    engine = MyTranscribeEngine()
+    engine.run()
+```
+
+### ModelManager
+
+The `ModelManager` base class provides TTL-based, LRU-evicting model management:
+
+```python
+from dalston.engine_sdk.model_manager import ModelManager, LoadedModel
+
+class MyModelManager(ModelManager[WhisperModel]):
+    """Model manager for Whisper models."""
+
+    def _load_model(self, model_id: str) -> WhisperModel:
+        """Load a model from disk or S3."""
+        # Check local cache first
+        local_path = self.storage.get_local_path(model_id)
+        if not local_path.exists():
+            # Download from S3
+            self.storage.download(model_id)
+
+        return WhisperModel(str(local_path))
+
+    def _unload_model(self, model: WhisperModel) -> None:
+        """Unload a model and free GPU memory."""
+        del model
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        gc.collect()
+```
+
+### S3ModelStorage
+
+```python
+from dalston.engine_sdk.model_storage import S3ModelStorage
+
+storage = S3ModelStorage(
+    bucket=os.environ["DALSTON_S3_BUCKET"],
+    cache_dir=Path("/models/s3-cache"),
+)
+
+# Download model from S3 to local cache
+local_path = storage.download("nvidia/parakeet-tdt-1.1b")
+
+# Check if model is cached locally
+if storage.is_cached("nvidia/parakeet-tdt-1.1b"):
+    path = storage.get_local_path("nvidia/parakeet-tdt-1.1b")
 ```
 
 ### TaskInput
@@ -311,87 +422,33 @@ class TaskInput:
     config: dict[str, Any]              # Engine-specific config
 ```
 
-### TaskOutput
+The `config` dict includes:
+
+| Key | Description |
+|-----|-------------|
+| `runtime_model_id` | HuggingFace model ID to load |
+| `language` | Language code or "auto" |
+| `beam_size` | Beam search width |
+| Other | Model-specific parameters |
+
+### Engine Registration and Heartbeat
+
+Engines register with Redis and publish heartbeats:
 
 ```python
-@dataclass
-class TaskOutput:
-    data: dict[str, Any]                # Structured result
-    artifacts: dict[str, Path] = None   # Additional files produced
+# Heartbeat data includes:
+{
+    "engine_id": "faster-whisper",
+    "instance_id": "fw-abc123",
+    "stage": "transcribe",
+    "status": "idle",              # idle, processing, offline
+    "loaded_model": "Systran/faster-whisper-large-v3",
+    "last_heartbeat": 1709395200,
+    "capabilities": { ... }
+}
 ```
 
-### SDK Runner Loop
-
-The SDK handles:
-
-1. Connecting to Redis (for stream polling)
-2. Polling the engine's stream via consumer group (`dalston:stream:{engine_id}`)
-3. Downloading task input from S3 to local temp
-4. Calling `engine.process()`
-5. Uploading task output to S3
-6. Acknowledging the stream message (`XACK`) and publishing completion event
-7. Cleaning up local temp files
-8. Error handling and reporting
-
-```python
-class Engine:
-    def run(self):
-        """Main loop - SDK implementation."""
-        redis = Redis.from_url(os.environ["REDIS_URL"])
-        engine_id = os.environ["ENGINE_ID"]
-        stream_key = f"dalston:stream:{engine_id}"
-
-        while True:
-            # Blocking read from stream via consumer group
-            results = redis.xreadgroup(
-                groupname="engines",
-                consumername=engine_id,
-                streams={stream_key: ">"},
-                count=1,
-                block=30000,
-            )
-
-            if not results:
-                continue  # Timeout, check again
-
-            _stream, entries = results[0]
-            message_id, fields = entries[0]
-            task_id = fields["task_id"]
-
-            try:
-                # Load task
-                task = self.load_task(task_id)
-                self.update_status(task, "running")
-
-                # Load input
-                input = self.load_input(task)
-
-                # Process
-                output = self.process(input)
-
-                # Save output
-                self.save_output(task, output)
-                self.update_status(task, "completed")
-
-                # Acknowledge stream message
-                redis.xack(stream_key, "engines", message_id)
-
-                # Publish event
-                redis.publish("dalston:events", json.dumps({
-                    "type": "task.completed",
-                    "task_id": task_id,
-                    "job_id": task.job_id
-                }))
-
-            except Exception as e:
-                self.update_status(task, "failed", error=str(e))
-                redis.publish("dalston:events", json.dumps({
-                    "type": "task.failed",
-                    "task_id": task_id,
-                    "job_id": task.job_id,
-                    "error": str(e)
-                }))
-```
+The `loaded_model` field enables the console to show which model each engine instance has loaded.
 
 ---
 
@@ -399,23 +456,18 @@ class Engine:
 
 ### Quick Start with Scaffold Command
 
-The easiest way to create a new engine is using the scaffold command:
-
 ```bash
-# Scaffold a new transcription engine
-python -m dalston.tools.scaffold_engine my-transcriber --stage transcribe --no-dry-run
+# Scaffold a new transcription runtime
+python -m dalston.tools.scaffold_engine my-runtime --stage transcribe --gpu optional --no-dry-run
 
-# Scaffold a diarization engine with GPU required
-python -m dalston.tools.scaffold_engine my-diarizer --stage diarize --gpu required --no-dry-run
-
-# Scaffold a CPU-only merge engine
+# Scaffold a utility engine
 python -m dalston.tools.scaffold_engine my-merger --stage merge --gpu none --no-dry-run
 
 # List all valid stages
 python -m dalston.tools.scaffold_engine --list-stages
 ```
 
-This creates a complete engine skeleton:
+This creates:
 
 ```
 engines/{stage}/{engine-id}/
@@ -426,42 +478,7 @@ engines/{stage}/{engine-id}/
 └── README.md            # Engine documentation
 ```
 
-### Manual Setup
-
-Alternatively, create the structure manually:
-
-### 1. Create Directory Structure
-
-```
-engines/
-└── {stage}/
-    └── {engine-id}/
-        ├── Dockerfile
-        ├── requirements.txt
-        ├── engine.yaml
-        └── engine.py
-```
-
-### 2. Write engine.yaml
-
-Define metadata, capabilities, and configuration schema (see Engine Metadata Format above).
-
-### 3. Implement engine.py
-
-```python
-from dalston_engine_sdk import Engine, TaskInput, TaskOutput
-
-class MyNewEngine(Engine):
-    def process(self, input: TaskInput) -> TaskOutput:
-        # Your implementation here
-        result = do_processing(input.audio_path, **input.config)
-        return TaskOutput(data=result)
-
-if __name__ == "__main__":
-    MyNewEngine().run()
-```
-
-### 4. Create Dockerfile
+### Dockerfile Pattern
 
 ```dockerfile
 FROM dalston/engine-base:latest
@@ -474,25 +491,26 @@ RUN pip install -r requirements.txt
 COPY engine.yaml /app/
 COPY engine.py /app/
 
-# Pre-download models (optional, for faster startup)
-RUN python -c "import my_model; my_model.download()"
+# Pre-download default model (optional)
+ARG DEFAULT_MODEL=Systran/faster-whisper-base
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('$DEFAULT_MODEL')"
 
 CMD ["python", "/app/engine.py"]
 ```
 
-### 5. Add to docker-compose.yml
+### docker-compose.yml Service
 
 ```yaml
-engine-my-new-engine:
+stt-batch-transcribe-faster-whisper:
   build:
-    context: ./engines/{stage}/{engine-id}
+    context: ./engines/stt-transcribe/faster-whisper
   environment:
     - REDIS_URL=redis://redis:6379
-    - ENGINE_ID={engine-id}
+    - DALSTON_ENGINE_ID=faster-whisper
     - DALSTON_S3_BUCKET=${DALSTON_S3_BUCKET}
-    - DALSTON_S3_REGION=${DALSTON_S3_REGION}
-    - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-    - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    - DALSTON_DEFAULT_MODEL_ID=Systran/faster-whisper-large-v3-turbo
+    - DALSTON_MAX_LOADED_MODELS=2
+    - DALSTON_MODEL_TTL_SECONDS=3600
   tmpfs:
     - /tmp/dalston:size=10G
   volumes:
@@ -505,8 +523,31 @@ engine-my-new-engine:
         devices:
           - driver: nvidia
             count: 1
-            capabilities: [gpu]  # If GPU required
+            capabilities: [gpu]
 ```
+
+---
+
+## Environment Variables
+
+### Required
+
+| Variable | Description |
+|----------|-------------|
+| `REDIS_URL` | Redis connection URL |
+| `DALSTON_ENGINE_ID` | Engine/runtime identifier |
+| `DALSTON_S3_BUCKET` | S3 bucket for models and artifacts |
+
+### Optional
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DALSTON_DEFAULT_MODEL_ID` | (none) | Default model if not specified in task |
+| `DALSTON_MODEL_PRELOAD` | (none) | Model to load at startup |
+| `DALSTON_MAX_LOADED_MODELS` | 2 | Max models in memory |
+| `DALSTON_MODEL_TTL_SECONDS` | 3600 | Idle timeout before eviction |
+| `DALSTON_LOG_LEVEL` | INFO | Logging level |
+| `DALSTON_LOG_FORMAT` | json | Log format (json or text) |
 
 ---
 
@@ -514,36 +555,78 @@ engine-my-new-engine:
 
 ### faster-whisper
 
+**Runtime**: `faster-whisper`
 **Stage**: transcribe
 
-Fast Whisper implementation using CTranslate2 for optimized inference.
+CTranslate2-optimized Whisper for fast multilingual transcription.
 
-**Config**:
+**Supported Models**:
+
+| Model | Size | Languages | CPU Support |
+|-------|------|-----------|-------------|
+| `Systran/faster-whisper-tiny` | 39M | 99 | Yes |
+| `Systran/faster-whisper-base` | 74M | 99 | Yes |
+| `Systran/faster-whisper-small` | 244M | 99 | Yes |
+| `Systran/faster-whisper-medium` | 769M | 99 | Yes |
+| `Systran/faster-whisper-large-v3` | 1.5G | 99 | Yes |
+| `Systran/faster-whisper-large-v3-turbo` | 809M | 99 | Yes |
+
+**Config Parameters**:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `model` | string | `large-v3` | Model size |
+| `runtime_model_id` | string | env default | HuggingFace model ID |
 | `language` | string | `auto` | Language code or "auto" |
 | `beam_size` | int | `5` | Beam search width |
 | `vad_filter` | bool | `true` | Filter silence with VAD |
 
-**Output**:
+---
 
-```json
-{
-  "text": "Full transcript...",
-  "segments": [
-    {
-      "start": 0.0,
-      "end": 3.5,
-      "text": "Segment text",
-      "words": [{"text": "...", "start": 0.0, "end": 0.4, "confidence": 0.98}]
-    }
-  ],
-  "language": "en",
-  "language_confidence": 0.98
-}
-```
+### nemo (Parakeet)
+
+**Runtime**: `nemo`
+**Stage**: transcribe
+
+NVIDIA NeMo Parakeet models for high-accuracy English transcription.
+
+**Supported Models**:
+
+| Model | Size | Architecture | Word Timestamps |
+|-------|------|--------------|-----------------|
+| `nvidia/parakeet-ctc-0.6b` | 0.6B | CTC | Yes |
+| `nvidia/parakeet-ctc-1.1b` | 1.1B | CTC | Yes |
+| `nvidia/parakeet-tdt-0.6b-v3` | 0.6B | TDT | Yes |
+| `nvidia/parakeet-tdt-1.1b` | 1.1B | TDT | Yes |
+
+**Config Parameters**:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `runtime_model_id` | string | env default | HuggingFace model ID |
+
+---
+
+### vllm-asr
+
+**Runtime**: `vllm-asr`
+**Stage**: transcribe
+
+Audio LLMs via vLLM for multilingual transcription with reasoning capabilities.
+
+**Supported Models**:
+
+| Model | Size | Languages |
+|-------|------|-----------|
+| `mistralai/Voxtral-Mini-3B-2507` | 3B | 13 |
+| `mistralai/Voxtral-Small-24B-2507` | 24B | 13 |
+| `Qwen/Qwen2-Audio-7B` | 7B | 8+ |
+
+**Config Parameters**:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `runtime_model_id` | string | env default | HuggingFace model ID |
+| `max_tokens` | int | `4096` | Max output tokens |
 
 ---
 
@@ -560,18 +643,6 @@ State-of-the-art speaker diarization.
 | `min_speakers` | int | `null` | Minimum speakers |
 | `max_speakers` | int | `null` | Maximum speakers |
 | `hf_token` | string | env | HuggingFace token |
-
-**Output**:
-
-```json
-{
-  "speakers": ["SPEAKER_00", "SPEAKER_01"],
-  "segments": [
-    {"start": 0.0, "end": 3.5, "speaker": "SPEAKER_00"},
-    {"start": 3.5, "end": 7.2, "speaker": "SPEAKER_01"}
-  ]
-}
-```
 
 ---
 
@@ -591,78 +662,53 @@ LLM-based transcript refinement.
 
 **Available Tasks**:
 
-- `fix_transcription_errors` — Correct obvious mistakes
-- `identify_speakers` — Name speakers from context
-- `improve_punctuation` — Fix punctuation and capitalization
-- `add_paragraphs` — Add paragraph breaks
-- `generate_summary` — Create content summary
-
-**Output**:
-
-```json
-{
-  "segments": [...],          // Corrected segments
-  "speakers": [
-    {"id": "SPEAKER_00", "label": "John Smith"}
-  ],
-  "paragraphs": [...],
-  "summary": "..."
-}
-```
-
----
-
-### whisperx-full
-
-**Stages**: transcribe, align, diarize
-
-Integrated WhisperX pipeline in a single engine.
-
-**Config**:
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `model` | string | `large-v3` | Whisper model |
-| `language` | string | `auto` | Language code |
-| `min_speakers` | int | `null` | Min speakers for diarization |
-| `max_speakers` | int | `null` | Max speakers |
-| `hf_token` | string | env | HuggingFace token |
-
-**Output**:
-Combined output with transcription, alignment, and diarization already merged:
-
-```json
-{
-  "text": "...",
-  "language": "en",
-  "segments": [
-    {
-      "start": 0.0,
-      "end": 3.5,
-      "text": "...",
-      "speaker": "SPEAKER_00",
-      "words": [...]
-    }
-  ],
-  "speakers": ["SPEAKER_00", "SPEAKER_01"]
-}
-```
+- `fix_transcription_errors` - Correct obvious mistakes
+- `identify_speakers` - Name speakers from context
+- `improve_punctuation` - Fix punctuation and capitalization
+- `add_paragraphs` - Add paragraph breaks
+- `generate_summary` - Create content summary
 
 ---
 
 ## Engine Health Monitoring
 
-Engines should respond to health checks:
+Engines report health via heartbeat:
 
 ```python
 class Engine:
-    def health_check(self) -> dict:
+    def get_runtime_state(self) -> dict:
         return {
-            "status": "healthy",
-            "model_loaded": self.model is not None,
-            "gpu_available": torch.cuda.is_available(),
-            "memory_used": get_memory_usage()
+            "status": "idle",  # idle, processing
+            "loaded_model": self.current_model_id,
+            "memory_used_mb": get_memory_usage(),
+            "gpu_memory_used_mb": get_gpu_memory_usage(),
         }
 ```
 
-The orchestrator periodically checks engine health and marks unhealthy engines as unavailable.
+The orchestrator marks engines as unavailable if heartbeat expires (60s TTL).
+
+---
+
+## Validation and Catalog Generation
+
+### Validate engine.yaml
+
+```bash
+# Validate single file
+python -m dalston.tools.validate_engine engines/stt-transcribe/faster-whisper/engine.yaml
+
+# Validate all engines
+python -m dalston.tools.validate_engine --all
+```
+
+### Generate Catalog
+
+The engine and model catalogs are generated from YAML files at build time:
+
+```bash
+# Generate from models/*.yaml and engines/*/engine.yaml
+python scripts/generate_catalog.py \
+  --models-dir models/ \
+  --engines-dir engines/ \
+  --output dalston/orchestrator/generated_catalog.json
+```

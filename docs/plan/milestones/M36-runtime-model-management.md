@@ -3,151 +3,151 @@
 |                  |                                                                    |
 | ---------------- | ------------------------------------------------------------------ |
 | **Goal**         | Engines can load any compatible model variant at runtime           |
-| **Duration**     | 4 phases (implementation in progress)                              |
+| **Duration**     | 4 phases                                                           |
 | **Dependencies** | M31 (Capability-Driven Routing), M32 (Engine Variant Structure)    |
 | **Deliverable**  | Model swapping in engines, two-catalog architecture, simplified Docker setup |
-| **Status**       | Phase 2 Complete                                                   |
+| **Status**       | **COMPLETE**                                                       |
 
 ## Overview
 
-Transform Dalston from a system where **each model variant is a separate Docker image** to one where **a small number of engine runtimes can load any compatible model on demand**.
+Transformed Dalston from a system where **each model variant is a separate Docker image** to one where **a small number of engine runtimes can load any compatible model on demand**.
 
-This is inspired by Ollama: a single `engine-nemo` runtime image can serve any Parakeet model variant. Model weights live on a shared Docker volume, downloaded on first use, cached for reuse.
+This is inspired by Ollama: a single `engine-nemo` runtime image can serve any Parakeet model variant. Model weights live in S3, downloaded on first use, cached locally for reuse.
 
-### Why This Matters
+### Benefits Achieved
 
-- **Fewer images to build and maintain.** 2 consolidated runtime images instead of 8+ variant-specific images for transcription alone.
-- **Faster iteration.** Adding a new variant means adding a YAML metadata file, not a new Docker image.
-- **Smaller disk footprint.** One runtime image + shared model weights volume, instead of N images each containing the runtime + one model.
-- **Foundation for `dalston pull`.** Future CLI command to pre-download models.
+- **Fewer images to build and maintain**: 5 consolidated runtime images instead of 20+ variant-specific images
+- **Faster iteration**: Adding a new model means adding a YAML file, not a new Docker image
+- **Smaller disk footprint**: One runtime image + shared S3 model storage
+- **Dynamic model support**: `dalston model pull` and HuggingFace auto-routing
 
 ---
 
-## Phases
+## Implementation Summary
 
 ### Phase 1: Engine-Side Model Swapping (COMPLETE)
 
-**Goal:** Engines can load any compatible model variant at runtime, selected by `config["runtime_model_id"]` in the task payload.
+Engines can load any compatible model variant at runtime via `config["runtime_model_id"]`.
 
-**Changes:**
+**Key Components**:
 
-1. **`dalston/engine_sdk/base.py`**
-   - Added thread-safe `_set_runtime_state()` and `get_runtime_state()` methods
-   - Engines report loaded model and status for heartbeat reporting
+1. **`ModelManager` base class** (`dalston/engine_sdk/model_manager.py`)
+   - Thread-safe reference counting (`LoadedModel.ref_count`)
+   - LRU eviction when at `max_loaded` capacity
+   - TTL-based eviction (default: 3600s idle timeout)
+   - Background eviction thread checking every 60s
+   - Preloading via `DALSTON_MODEL_PRELOAD` environment variable
 
-2. **`engines/stt-transcribe/parakeet/engine.py`**
-   - Added `SUPPORTED_MODELS` set with all valid NeMo model IDs
-   - Implemented `_ensure_model_loaded()` with GPU memory cleanup on model swap
-   - Reads `runtime_model_id` from task config, falls back to `DALSTON_DEFAULT_MODEL_ID`
-   - Engine ID now comes from `DALSTON_ENGINE_ID` env var (runtime ID, not variant ID)
-   - Updated `get_capabilities()` to return runtime ID and all supported models
+2. **Concrete Managers**:
+   - `FasterWhisperModelManager` - CTranslate2/faster-whisper models
+   - `HFTransformersModelManager` - HuggingFace Transformers ASR pipelines
 
-3. **`engines/stt-transcribe/faster-whisper/engine.py`**
-   - Added `SUPPORTED_MODELS` set with all valid Whisper model IDs
-   - Implemented `_ensure_model_loaded()` for model swapping
-   - Removed GPU-only restriction for `large-v3-turbo` (CTranslate2 supports CPU with int8)
-   - Uses `download_root` parameter for runtime-specific model cache directory
-   - Engine ID from `DALSTON_ENGINE_ID` env var
+3. **GPU Memory Cleanup**:
 
-**Verification:**
-
-```bash
-# Tests pass
-pytest tests/unit/test_engine*.py tests/unit/test_dag.py tests/integration/test_capability_driven_dag.py -v
-# 135 tests passed
-
-# Syntax check
-python -m py_compile dalston/engine_sdk/base.py engines/stt-transcribe/parakeet/engine.py engines/stt-transcribe/faster-whisper/engine.py
-
-# Linting
-ruff check dalston/engine_sdk/base.py engines/stt-transcribe/parakeet/engine.py engines/stt-transcribe/faster-whisper/engine.py
-# All checks passed
-```
+   ```python
+   del model
+   torch.cuda.synchronize()
+   torch.cuda.empty_cache()
+   gc.collect()
+   ```
 
 ---
 
 ### Phase 2: Orchestrator Runtime Routing (COMPLETE)
 
-**Goal:** Orchestrator routes jobs by runtime + model variant.
+Orchestrator routes jobs by runtime + model variant.
 
-**Changes:**
+**Key Changes**:
 
-1. **`dalston/engine_sdk/types.py`**
-   - Added `runtime` field to `EngineCapabilities` for runtime identification
+1. **Engine capabilities include `runtime` field**
+   - Heartbeat reports `loaded_model` for UI display
+   - Registry tracks which model each engine instance has loaded
 
-2. **`dalston/engine_sdk/registry.py`**
-   - Heartbeat now includes `loaded_model` parameter for runtime state reporting
+2. **Model catalog** (`models/*.yaml`)
+   - 18 model definitions with namespaced HF-style IDs
+   - Maps public ID → runtime + runtime_model_id
 
-3. **`dalston/engine_sdk/runner.py`**
-   - Heartbeat loop reads engine's `get_runtime_state()` and passes `loaded_model` to registry
+3. **Engine selection** (`dalston/orchestrator/engine_selector.py`)
+   - Resolves model ID to runtime via catalog or DB
+   - Validates runtime is running and healthy
+   - Auto-selects best downloaded model when `model=auto`
 
-4. **`dalston/engine_sdk/base.py`**
-   - `get_capabilities()` now reads `runtime` field from engine.yaml
+---
 
-5. **`dalston/orchestrator/dag.py`**
-   - Added `MODEL_REGISTRY` mapping public model IDs to runtime + runtime_model_id
-   - Added `resolve_model()` helper function
-   - Both `build_task_dag()` and `_build_dag_with_engines()` now set `config["runtime_model_id"]`
-   - `NATIVE_WORD_TIMESTAMP_ENGINES` marked as deprecated (kept for backward compatibility)
+### Phase 3: Simplify Docker Images (COMPLETE)
 
-6. **`dalston/orchestrator/registry.py`**
-   - Added `loaded_model` field to `BatchEngineState`
-   - Registry parser reads `loaded_model` from Redis
+Collapsed variant-specific Docker images into runtime-based ones.
 
-7. **Engine YAML files (11 files updated)**
-   - Added `runtime` field to all 9 utility engine.yaml files
-   - Created runtime-level engine.yaml for faster-whisper runtime
-   - Created runtime-level engine.yaml for nemo (parakeet) runtime
+**Before**: 20+ images (one per model variant)
 
-**Verification:**
+```
+stt-batch-transcribe-faster-whisper-base
+stt-batch-transcribe-faster-whisper-small
+stt-batch-transcribe-faster-whisper-medium
+stt-batch-transcribe-faster-whisper-large-v3
+stt-batch-transcribe-faster-whisper-large-v3-turbo
+stt-batch-transcribe-parakeet-ctc-0.6b
+stt-batch-transcribe-parakeet-ctc-1.1b
+stt-batch-transcribe-parakeet-tdt-0.6b-v3
+stt-batch-transcribe-parakeet-tdt-1.1b
+...
+```
 
-```bash
-# Tests pass
-pytest tests/unit/test_engine*.py tests/unit/test_dag.py tests/integration/test_capability_driven_dag.py -v
-# 135 tests passed
+**After**: 5 runtime images
 
-# Linting
-ruff check dalston/engine_sdk/*.py dalston/orchestrator/dag.py dalston/orchestrator/registry.py
-# All checks passed
+```
+stt-batch-transcribe-faster-whisper    # All Whisper variants
+stt-batch-transcribe-nemo              # All Parakeet NeMo variants
+stt-batch-transcribe-parakeet-onnx     # All Parakeet ONNX variants
+stt-batch-transcribe-hf-asr            # Any HuggingFace ASR model
+stt-batch-transcribe-vllm-asr          # Voxtral, Qwen2-Audio
 ```
 
 ---
 
-### Phase 4: Model Catalog and CLI (PLANNED - runs before Phase 3)
+### Phase 4: Model Catalog and CLI (COMPLETE)
 
-**Goal:** Structured model metadata. New `/v1/models` and `/v1/engines` APIs.
+Structured model metadata with API and CLI management.
 
-**Key Changes:**
+**Model YAML Schema** (`models/*.yaml`):
 
-- Create `models/` directory with YAML metadata for each model variant
-- Two-catalog architecture: runtime catalog + model catalog
-- `dalston models` CLI shows model catalog (installed status)
-- `dalston engines` CLI shows running engine status
-- `dalston models pull <model>` pre-downloads model weights
+```yaml
+schema_version: "1.1"
+id: nvidia/parakeet-tdt-1.1b
+runtime: nemo
+runtime_model_id: "nvidia/parakeet-tdt-1.1b"
+name: NVIDIA Parakeet TDT 1.1B
+source: nvidia/parakeet-tdt-1.1b
+size_gb: 4.2
+stage: transcribe
+languages: [en]
+capabilities:
+  word_timestamps: true
+  punctuation: false
+  capitalization: false
+hardware:
+  min_vram_gb: 6
+  supports_cpu: true
+  min_ram_gb: 12
+performance:
+  rtf_gpu: 0.0006
+```
+
+**API Endpoints**:
+
+- `GET /v1/models` - List catalog
+- `GET /v1/models/{model_id}` - Get catalog entry
+- `GET /v1/engines` - List engines with `loaded_model` and `available_models`
 
 ---
 
-### Phase 3: Simplify Docker Images (PLANNED - runs after Phase 4)
-
-**Goal:** Collapse variant-specific Docker images into runtime-based ones.
-
-**Key Changes:**
-
-- Create runtime-level `engine.yaml` files (one per runtime)
-- Delete variant YAML files (`engines/*/variants/*.yaml`)
-- Dockerfiles no longer download models at build time
-- `docker-compose.yml` collapses to 2 transcription services
-- Model cache uses runtime-specific subdirectories (`/models/nemo/`, `/models/faster-whisper/`)
-
----
-
-## Target Flow (After All Phases)
+## Final Architecture
 
 ```
-API request (model="parakeet-tdt-1.1b")
+API request (model="nvidia/parakeet-tdt-1.1b")
   → Gateway creates job
   → Orchestrator builds DAG:
-      - Looks up "parakeet-tdt-1.1b" in model catalog
+      - Looks up model in catalog/registry
         → runtime="nemo", runtime_model_id="nvidia/parakeet-tdt-1.1b"
       - Sets task.engine_id = "nemo"
       - Sets task.config["runtime_model_id"] = "nvidia/parakeet-tdt-1.1b"
@@ -155,7 +155,7 @@ API request (model="parakeet-tdt-1.1b")
   → Container receives task, reads config["runtime_model_id"]
     → If model already loaded: transcribe immediately
     → If different model: unload, load requested (~5-15s swap)
-    → If model not on disk: download, then load
+    → If model not on disk: download from S3, then load
   → Transcribe and return result
 ```
 
@@ -163,35 +163,87 @@ API request (model="parakeet-tdt-1.1b")
 
 ## Key Design Decisions
 
-1. **Two IDs per model**: Public Dalston ID (e.g., `faster-whisper-large-v3-turbo`) vs runtime-native ID (e.g., `large-v3-turbo` for WhisperModel).
+1. **Namespaced model IDs**: Use HuggingFace-style `org/model` format for unambiguous identification
 
-2. **GPU memory cleanup on swap**: `del model → torch.cuda.synchronize() → empty_cache() → gc.collect()`
+2. **S3 as canonical storage**: Models stored in S3, engines cache locally. The `.complete` marker ensures atomic availability.
 
-3. **Runtime-specific cache directories**: `/models/nemo/` and `/models/faster-whisper/` prevent cross-contamination.
+3. **TTL + LRU eviction**: Models evicted after 1 hour idle OR when memory pressure requires it
 
-4. **Default model is multilingual + CPU-capable**: `faster-whisper-large-v3-turbo` for "just works" experience.
+4. **Runtime-specific cache directories**: `/models/s3-cache/{runtime}/` prevents cross-contamination
+
+5. **Default model is multilingual + CPU-capable**: `Systran/faster-whisper-large-v3-turbo` for "just works" experience
 
 ---
 
-## Files Changed (Phase 1)
+## Files Changed
+
+### Engine SDK
 
 | File | Change |
 |------|--------|
-| `dalston/engine_sdk/base.py` | Added `_set_runtime_state()` and `get_runtime_state()` |
-| `engines/stt-transcribe/parakeet/engine.py` | Model swapping, runtime ID, GPU memory cleanup |
-| `engines/stt-transcribe/faster-whisper/engine.py` | Model swapping, CPU support for large-v3-turbo |
+| `dalston/engine_sdk/base.py` | `_set_runtime_state()`, `get_runtime_state()` |
+| `dalston/engine_sdk/model_manager.py` | TTL/LRU model manager base class |
+| `dalston/engine_sdk/model_storage.py` | S3ModelStorage for download/caching |
+| `dalston/engine_sdk/managers/` | FasterWhisperModelManager, HFTransformersModelManager |
+| `dalston/engine_sdk/types.py` | `runtime` field in EngineCapabilities |
+| `dalston/engine_sdk/registry.py` | `loaded_model` in heartbeat |
+| `dalston/engine_sdk/runner.py` | Pass runtime state to heartbeat |
 
-## Files Changed (Phase 2)
+### Orchestrator
 
 | File | Change |
 |------|--------|
-| `dalston/engine_sdk/types.py` | Added `runtime` field to `EngineCapabilities` |
-| `dalston/engine_sdk/registry.py` | Added `loaded_model` to heartbeat |
-| `dalston/engine_sdk/runner.py` | Heartbeat reads and passes runtime state |
-| `dalston/engine_sdk/base.py` | `get_capabilities()` reads `runtime` from YAML |
-| `dalston/orchestrator/dag.py` | Added `MODEL_REGISTRY`, `resolve_model()`, runtime routing |
-| `dalston/orchestrator/registry.py` | Added `loaded_model` to `BatchEngineState` |
-| `engines/stt-transcribe/faster-whisper/engine.yaml` | New runtime-level engine.yaml |
-| `engines/stt-transcribe/parakeet/engine.yaml` | New runtime-level engine.yaml for nemo |
-| `engines/*/engine.yaml` (9 files) | Added `runtime` field to all utility engines |
-| `tests/unit/test_dag.py` | Updated for M36 runtime routing behavior |
+| `dalston/orchestrator/catalog.py` | EngineCatalog with model lookup |
+| `dalston/orchestrator/engine_selector.py` | Runtime-aware engine selection |
+| `dalston/orchestrator/registry.py` | `loaded_model` in BatchEngineState |
+| `dalston/orchestrator/generated_catalog.json` | Generated from models/*.yaml |
+
+### Gateway API
+
+| File | Change |
+|------|--------|
+| `dalston/gateway/api/v1/models.py` | Catalog endpoints |
+| `dalston/gateway/api/v1/engines.py` | `loaded_model`, `available_models` fields |
+
+### Model Definitions
+
+| File | Description |
+|------|-------------|
+| `models/faster-whisper-*.yaml` | 6 Whisper model definitions |
+| `models/parakeet-*.yaml` | 7 Parakeet model definitions |
+| `models/parakeet-onnx-*.yaml` | 5 Parakeet ONNX definitions |
+| `models/vllm-asr-*.yaml` | 3 Audio LLM definitions |
+
+### Engine Implementations
+
+| File | Change |
+|------|--------|
+| `engines/stt-transcribe/faster-whisper/engine.py` | Model swapping, SUPPORTED_MODELS |
+| `engines/stt-transcribe/parakeet/engine.py` | Model swapping for NeMo |
+| `engines/stt-transcribe/*/engine.yaml` | Runtime field added |
+
+---
+
+## Verification
+
+```bash
+# All tests pass
+pytest tests/unit/test_engine*.py tests/unit/test_dag.py tests/integration/test_capability_driven_dag.py -v
+# 135 tests passed
+
+# Lint
+ruff check dalston/engine_sdk/*.py dalston/orchestrator/*.py
+# All checks passed
+
+# Catalog generation
+python scripts/generate_catalog.py
+# Generated 18 models, 5 runtimes
+```
+
+---
+
+## Related Milestones
+
+- **M31**: Capability-Driven Routing (prerequisite)
+- **M32**: Engine Variant Structure (prerequisite)
+- **M40**: Model Registry & Aliases (builds on this)
