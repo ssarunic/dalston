@@ -716,6 +716,105 @@ services:
     healthcheck: *ws-healthcheck
     restart: unless-stopped
 
+  # M44: NeMo RT (consolidated runtime - serves any Parakeet RNNT/CTC/TDT model dynamically)
+  stt-rt-nemo:
+    image: dalston/stt-rt-nemo:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-rt/parakeet/Dockerfile
+      args:
+        DEVICE: cuda
+        SKIP_MODEL_DOWNLOAD: "true"  # Download models on-demand
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_WORKER_ID: stt-rt-nemo
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 4
+      # M44: Dynamic model loading configuration
+      DALSTON_MODEL_TTL_SECONDS: 3600  # Unload models idle for 1 hour
+      DALSTON_MAX_LOADED_MODELS: 2     # Keep at most 2 models loaded
+      DALSTON_MODEL_PRELOAD: parakeet-rnnt-1.1b  # Preload default model on startup
+    volumes:
+      - model-cache:/models
+    depends_on: *realtime-depends
+    healthcheck: *ws-healthcheck
+    deploy: *gpu-deploy
+    profiles: [gpu]
+    restart: unless-stopped
+
+  # M44: NeMo RT CPU (for local development without GPU)
+  stt-rt-nemo-cpu:
+    image: dalston/stt-rt-nemo:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-rt/parakeet/Dockerfile
+      args:
+        DEVICE: cpu
+        SKIP_MODEL_DOWNLOAD: "true"
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_WORKER_ID: stt-rt-nemo-cpu
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 2
+      DALSTON_DEVICE: cpu
+      DALSTON_MODEL_TTL_SECONDS: 3600
+      DALSTON_MAX_LOADED_MODELS: 1
+      DALSTON_MODEL_PRELOAD: parakeet-rnnt-0.6b  # Lighter model for CPU
+    volumes:
+      - model-cache:/models
+    depends_on: *realtime-depends
+    healthcheck: *ws-healthcheck
+    restart: unless-stopped
+
+  # M44: NeMo ONNX RT (consolidated runtime - serves any Parakeet ONNX model dynamically)
+  stt-rt-nemo-onnx:
+    image: dalston/stt-rt-nemo-onnx:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-rt/parakeet-onnx/Dockerfile
+      args:
+        DEVICE: cuda
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_WORKER_ID: stt-rt-nemo-onnx
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 4
+      DALSTON_DEVICE: cuda
+      # M44: Dynamic model loading configuration
+      DALSTON_MODEL_TTL_SECONDS: 3600
+      DALSTON_MAX_LOADED_MODELS: 2
+      DALSTON_MODEL_PRELOAD: parakeet-onnx-tdt-0.6b-v3  # Best accuracy model
+    volumes:
+      - model-cache:/models
+    depends_on: *realtime-depends
+    healthcheck: *ws-healthcheck
+    deploy: *gpu-deploy
+    profiles: [gpu]
+    restart: unless-stopped
+
+  # M44: NeMo ONNX RT CPU (lightweight CPU deployment)
+  stt-rt-nemo-onnx-cpu:
+    image: dalston/stt-rt-nemo-onnx:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-rt/parakeet-onnx/Dockerfile
+      args:
+        DEVICE: cpu
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_WORKER_ID: stt-rt-nemo-onnx-cpu
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 4
+      DALSTON_DEVICE: cpu
+      DALSTON_MODEL_TTL_SECONDS: 3600
+      DALSTON_MAX_LOADED_MODELS: 1
+      DALSTON_MODEL_PRELOAD: parakeet-onnx-ctc-0.6b  # Lightweight for CPU
+    volumes:
+      - model-cache:/models
+    depends_on: *realtime-depends
+    healthcheck: *ws-healthcheck
+    restart: unless-stopped
+
   # M41: Parakeet ONNX CTC 0.6B (CPU - lightweight realtime English)
   stt-rt-transcribe-parakeet-onnx-ctc-0.6b:
     image: dalston/stt-rt-transcribe-parakeet-onnx-ctc-0.6b:1.0.0

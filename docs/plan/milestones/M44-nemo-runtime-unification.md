@@ -6,7 +6,7 @@
 | **Duration** | 3-4 days |
 | **Dependencies** | M43 (Real-Time Engine Unification) |
 | **Deliverable** | Two consolidated RT containers: `stt-rt-nemo` and `stt-rt-nemo-onnx` |
-| **Status** | Draft |
+| **Status** | Implemented |
 
 ## User Story
 
@@ -57,10 +57,10 @@ After:  2 RT images (stt-rt-nemo, stt-rt-nemo-onnx)
 
 **Deliverables:**
 
-- [ ] `NeMoModelManager` in `dalston/engine_sdk/managers/`
-- [ ] Support for RNNT, CTC, and TDT architectures
-- [ ] Model download from HuggingFace on first request
-- [ ] TTL-based eviction (same pattern as `FasterWhisperModelManager`)
+- [x] `NeMoModelManager` in `dalston/engine_sdk/managers/nemo.py`
+- [x] Support for RNNT, CTC, and TDT architectures
+- [x] Model download from HuggingFace on first request
+- [x] TTL-based eviction (same pattern as `FasterWhisperModelManager`)
 
 **Key challenge:** NeMo models have different architectures requiring different loading code:
 
@@ -95,9 +95,9 @@ class NeMoModelManager(ModelManager[ASRModel]):
 
 **Deliverables:**
 
-- [ ] `NeMoOnnxModelManager` for ONNX-optimized models
-- [ ] Support for ONNX Runtime inference
-- [ ] Separate from PyTorch NeMo for lighter container
+- [x] `NeMoOnnxModelManager` in `dalston/engine_sdk/managers/nemo_onnx.py`
+- [x] Support for ONNX Runtime inference via onnx-asr library
+- [x] Separate from PyTorch NeMo for lighter container
 
 **Key difference:** ONNX models use `onnxruntime` instead of full NeMo:
 
@@ -119,10 +119,10 @@ class NeMoOnnxModelManager(ModelManager[OnnxASRModel]):
 
 **Deliverables:**
 
-- [ ] `engines/stt-rt/nemo/engine.py` - Consolidated NeMo RT engine
-- [ ] `engines/stt-rt/nemo-onnx/engine.py` - Consolidated ONNX RT engine
-- [ ] Updated `docker-compose.yml` with new service definitions
-- [ ] Remove obsolete per-model RT engine directories
+- [x] `engines/stt-rt/parakeet/engine.py` - Consolidated NeMo RT engine (updated to use NeMoModelManager)
+- [x] `engines/stt-rt/parakeet-onnx/engine.py` - Consolidated ONNX RT engine (updated to use NeMoOnnxModelManager)
+- [x] Updated `docker-compose.yml` with new consolidated service definitions (`stt-rt-nemo`, `stt-rt-nemo-onnx`)
+- [ ] Remove obsolete per-model RT engine directories (optional - kept for backward compatibility)
 
 **Files to delete:**
 
@@ -216,11 +216,11 @@ stt-rt-nemo-onnx:
 
 ## Success Criteria
 
-- [ ] NeMo RT engines serve any model variant without image rebuild
-- [ ] Models downloaded on-demand from HuggingFace
-- [ ] Number of NeMo RT images reduced from N to 2 (nemo, nemo-onnx)
-- [ ] Session Router routes to warm workers when available
-- [ ] Cold-start latency < 90s for largest model (1.1B)
+- [x] NeMo RT engines serve any model variant without image rebuild
+- [x] Models downloaded on-demand from HuggingFace
+- [x] Number of NeMo RT images reduced from N to 2 (nemo, nemo-onnx)
+- [x] Session Router routes to warm workers when available (via `loaded_models` in heartbeat)
+- [ ] Cold-start latency < 90s for largest model (1.1B) (requires testing)
 
 ---
 
