@@ -7,7 +7,6 @@ Run with: uv run --extra dev pytest tests/unit/test_parakeet_onnx_engine.py
 import importlib.util
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -183,13 +182,19 @@ class TestParakeetOnnxDecoderTypeDetection:
     def test_tdt_decoder_type(self):
         """Test that TDT model IDs produce tdt decoder type."""
         ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        assert ParakeetOnnxEngine._get_decoder_type("nvidia/parakeet-tdt-0.6b-v2") == "tdt"
-        assert ParakeetOnnxEngine._get_decoder_type("nvidia/parakeet-tdt-0.6b-v3") == "tdt"
+        assert (
+            ParakeetOnnxEngine._get_decoder_type("nvidia/parakeet-tdt-0.6b-v2") == "tdt"
+        )
+        assert (
+            ParakeetOnnxEngine._get_decoder_type("nvidia/parakeet-tdt-0.6b-v3") == "tdt"
+        )
 
     def test_rnnt_decoder_type(self):
         """Test that RNNT model IDs produce rnnt decoder type."""
         ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        assert ParakeetOnnxEngine._get_decoder_type("nvidia/parakeet-rnnt-0.6b") == "rnnt"
+        assert (
+            ParakeetOnnxEngine._get_decoder_type("nvidia/parakeet-rnnt-0.6b") == "rnnt"
+        )
 
     def test_alignment_method_ctc(self):
         """Test that CTC maps to AlignmentMethod.CTC."""
@@ -390,18 +395,31 @@ class TestParakeetOnnxCatalogIntegration:
 class TestParakeetOnnxTokensToWords:
     """Tests for SentencePiece token-to-word grouping."""
 
-    def test_tokens_to_words_basic(self):
-        """Test basic subword token grouping into words."""
+    def test_tokens_to_words_basic_unicode(self):
+        """Test basic subword token grouping with Unicode word boundaries."""
         ParakeetOnnxEngine = load_parakeet_onnx_engine()
         engine = ParakeetOnnxEngine()
 
-        # Simulate SentencePiece tokens with \u2581 word boundaries
-        mock_tokens = [
-            MagicMock(text="\u2581Hello", start=0.0, end=0.3),
-            MagicMock(text="\u2581world", start=0.3, end=0.6),
-        ]
+        # SentencePiece tokens with \u2581 word boundaries
+        tokens = ["\u2581Hello", "\u2581world"]
+        timestamps = [0.0, 0.3]
 
-        words = engine._tokens_to_words(mock_tokens)
+        words = engine._tokens_to_words(tokens, timestamps)
+
+        assert len(words) == 2
+        assert words[0].text == "Hello"
+        assert words[1].text == "world"
+
+    def test_tokens_to_words_basic_space(self):
+        """Test basic subword token grouping with space word boundaries (onnx-asr style)."""
+        ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        engine = ParakeetOnnxEngine()
+
+        # onnx-asr style tokens with space prefix
+        tokens = [" Hello", " world"]
+        timestamps = [0.0, 0.3]
+
+        words = engine._tokens_to_words(tokens, timestamps)
 
         assert len(words) == 2
         assert words[0].text == "Hello"
@@ -412,20 +430,16 @@ class TestParakeetOnnxTokensToWords:
         ParakeetOnnxEngine = load_parakeet_onnx_engine()
         engine = ParakeetOnnxEngine()
 
-        # "transcription" split into subwords
-        mock_tokens = [
-            MagicMock(text="\u2581trans", start=0.0, end=0.2),
-            MagicMock(text="crip", start=0.2, end=0.4),
-            MagicMock(text="tion", start=0.4, end=0.6),
-            MagicMock(text="\u2581is", start=0.6, end=0.8),
-        ]
+        # "transcription" split into subwords, then "is"
+        tokens = [" trans", "crip", "tion", " is"]
+        timestamps = [0.0, 0.2, 0.4, 0.6]
 
-        words = engine._tokens_to_words(mock_tokens)
+        words = engine._tokens_to_words(tokens, timestamps)
 
         assert len(words) == 2
         assert words[0].text == "transcription"
         assert words[0].start == 0.0
-        assert words[0].end == 0.6
+        assert words[0].end == 0.6  # End is start of next word
         assert words[1].text == "is"
 
     def test_tokens_to_words_empty(self):
@@ -433,7 +447,7 @@ class TestParakeetOnnxTokensToWords:
         ParakeetOnnxEngine = load_parakeet_onnx_engine()
         engine = ParakeetOnnxEngine()
 
-        words = engine._tokens_to_words([])
+        words = engine._tokens_to_words([], [])
         assert words == []
 
     def test_tokens_to_words_timestamps_preserved(self):
@@ -441,16 +455,122 @@ class TestParakeetOnnxTokensToWords:
         ParakeetOnnxEngine = load_parakeet_onnx_engine()
         engine = ParakeetOnnxEngine()
 
-        mock_tokens = [
-            MagicMock(text="\u2581good", start=1.0, end=1.3),
-            MagicMock(text="\u2581morn", start=1.3, end=1.5),
-            MagicMock(text="ing", start=1.5, end=1.8),
-        ]
+        # "good" then "morning" split into subwords
+        tokens = [" good", " morn", "ing"]
+        timestamps = [1.0, 1.3, 1.5]
 
-        words = engine._tokens_to_words(mock_tokens)
+        words = engine._tokens_to_words(tokens, timestamps)
 
         assert len(words) == 2
         assert words[0].start == 1.0
-        assert words[0].end == 1.3
+        assert words[0].end == 1.3  # End is start of "morn"
         assert words[1].start == 1.3
-        assert words[1].end == 1.8
+        assert words[1].end == 1.5  # Last token, end equals start
+
+
+class TestParakeetOnnxWordsToSegments:
+    """Tests for sentence-boundary based segment splitting."""
+
+    def test_words_to_segments_single_sentence(self):
+        """Test that a single sentence creates one segment."""
+        ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        engine = ParakeetOnnxEngine()
+
+        from dalston.engine_sdk import Word
+
+        words = [
+            Word(text="Hello", start=0.0, end=0.3, confidence=None),
+            Word(text="world.", start=0.3, end=0.6, confidence=None),
+        ]
+
+        segments = engine._words_to_segments(words, "Hello world.")
+
+        assert len(segments) == 1
+        assert segments[0].text == "Hello world."
+        assert len(segments[0].words) == 2
+
+    def test_words_to_segments_multiple_sentences(self):
+        """Test that multiple sentences create multiple segments."""
+        ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        engine = ParakeetOnnxEngine()
+
+        from dalston.engine_sdk import Word
+
+        words = [
+            Word(text="Hello.", start=0.0, end=0.3, confidence=None),
+            Word(text="How", start=0.5, end=0.7, confidence=None),
+            Word(text="are", start=0.7, end=0.9, confidence=None),
+            Word(text="you?", start=0.9, end=1.2, confidence=None),
+        ]
+
+        segments = engine._words_to_segments(words, "Hello. How are you?")
+
+        assert len(segments) == 2
+        assert segments[0].text == "Hello."
+        assert segments[1].text == "How are you?"
+
+    def test_words_to_segments_question_mark(self):
+        """Test that question marks create segment boundaries."""
+        ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        engine = ParakeetOnnxEngine()
+
+        from dalston.engine_sdk import Word
+
+        words = [
+            Word(text="What?", start=0.0, end=0.3, confidence=None),
+            Word(text="Really!", start=0.5, end=0.8, confidence=None),
+        ]
+
+        segments = engine._words_to_segments(words, "What? Really!")
+
+        assert len(segments) == 2
+        assert segments[0].text == "What?"
+        assert segments[1].text == "Really!"
+
+    def test_words_to_segments_no_punctuation(self):
+        """Test that text without sentence-ending punctuation stays as one segment."""
+        ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        engine = ParakeetOnnxEngine()
+
+        from dalston.engine_sdk import Word
+
+        words = [
+            Word(text="hello", start=0.0, end=0.2, confidence=None),
+            Word(text="world", start=0.2, end=0.4, confidence=None),
+        ]
+
+        segments = engine._words_to_segments(words, "hello world")
+
+        assert len(segments) == 1
+        assert segments[0].text == "hello world"
+
+    def test_words_to_segments_empty(self):
+        """Test that empty words list creates fallback segment from full_text."""
+        ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        engine = ParakeetOnnxEngine()
+
+        segments = engine._words_to_segments([], "Some text")
+
+        assert len(segments) == 1
+        assert segments[0].text == "Some text"
+        assert segments[0].words is None
+
+    def test_words_to_segments_timestamps_preserved(self):
+        """Test that segment timestamps match first/last word times."""
+        ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        engine = ParakeetOnnxEngine()
+
+        from dalston.engine_sdk import Word
+
+        words = [
+            Word(text="First.", start=1.0, end=1.5, confidence=None),
+            Word(text="Second.", start=2.0, end=2.5, confidence=None),
+        ]
+
+        segments = engine._words_to_segments(words, "First. Second.")
+
+        assert len(segments) == 2
+        assert segments[0].start == 1.0
+        assert segments[0].end == 1.5
+        assert segments[1].start == 2.0
+        assert segments[1].end == 2.5

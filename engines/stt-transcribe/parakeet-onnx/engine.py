@@ -164,9 +164,7 @@ class ParakeetOnnxEngine(Engine):
 
         onnx_asr_name = _ONNX_ASR_MODEL_MAP.get(runtime_model_id)
         if onnx_asr_name is None:
-            raise ValueError(
-                f"No onnx-asr mapping for model: {runtime_model_id}"
-            )
+            raise ValueError(f"No onnx-asr mapping for model: {runtime_model_id}")
 
         # Unload current model if one is loaded
         if self._model is not None:
@@ -311,18 +309,23 @@ class ParakeetOnnxEngine(Engine):
     ) -> tuple[str, list[Segment], list[Word]]:
         """Parse onnx-asr recognition result into Dalston types.
 
-        The onnx-asr library returns a result object with text and timestamps.
-        This method converts it into Dalston's Segment/Word format.
+        The onnx-asr library returns a TimestampedResult with:
+          - text: the full transcription
+          - tokens: list of token strings (subwords)
+          - timestamps: list of floats (start time for each token)
+
+        This method groups tokens into words and creates segments based on
+        sentence boundaries (punctuation).
 
         Args:
-            result: onnx-asr recognition result
+            result: onnx-asr recognition result (TimestampedResult or string)
             alignment_method: Alignment method to tag words with
 
         Returns:
             Tuple of (full_text, segments, all_words)
         """
-        # onnx-asr with_timestamps() returns a result with .text and .words
-        # or a TimestampedResult with token-level timing
+        # onnx-asr with_timestamps() returns a TimestampedResult with
+        # .text, .tokens (list[str]), and .timestamps (list[float])
         if hasattr(result, "text"):
             text = str(result.text).strip()
         else:
@@ -334,71 +337,140 @@ class ParakeetOnnxEngine(Engine):
         all_words: list[Word] = []
 
         # Extract word timestamps from onnx-asr result
-        if hasattr(result, "words") and result.words:
-            for w in result.words:
-                word = Word(
-                    text=str(w.word if hasattr(w, "word") else w.text).strip(),
-                    start=round(float(w.start), 3),
-                    end=round(float(w.end), 3),
-                    confidence=None,
-                    alignment_method=alignment_method,
-                )
-                if word.text:
-                    all_words.append(word)
-        elif hasattr(result, "tokens") and result.tokens:
-            # Fall back to token-level timestamps and group into words
-            all_words = self._tokens_to_words(result.tokens, alignment_method)
+        # onnx-asr returns tokens as strings and timestamps as a separate list
+        if hasattr(result, "tokens") and hasattr(result, "timestamps"):
+            tokens = result.tokens
+            timestamps = result.timestamps
+            if tokens and timestamps and len(tokens) == len(timestamps):
+                all_words = self._tokens_to_words(tokens, timestamps, alignment_method)
 
-        segments: list[Segment] = []
-        if all_words:
-            segments.append(
-                Segment(
-                    start=all_words[0].start,
-                    end=all_words[-1].end,
-                    text=text,
-                    words=all_words,
-                )
-            )
-        elif text:
-            segments.append(
-                Segment(
-                    start=0.0,
-                    end=0.0,
-                    text=text,
-                )
-            )
+        # Create segments from words, splitting on sentence boundaries
+        segments = self._words_to_segments(all_words, text)
 
         return text, segments, all_words
 
+    @staticmethod
+    def _is_sentence_ending(word_text: str) -> bool:
+        """Check if a word ends with sentence-ending punctuation."""
+        return word_text.rstrip().endswith((".", "?", "!", "。", "？", "！"))
+
+    def _words_to_segments(
+        self, all_words: list[Word], full_text: str
+    ) -> list[Segment]:
+        """Group words into segments based on sentence boundaries.
+
+        Splits on sentence-ending punctuation (. ? !) to create natural
+        segment breaks that correspond to sentences.
+
+        Args:
+            all_words: List of all words with timestamps
+            full_text: Full transcription text (for fallback)
+
+        Returns:
+            List of Segment objects
+        """
+        if not all_words:
+            if full_text:
+                return [
+                    Segment(
+                        start=0.0,
+                        end=0.0,
+                        text=full_text,
+                    )
+                ]
+            return []
+
+        segments: list[Segment] = []
+        current_words: list[Word] = []
+
+        for word in all_words:
+            current_words.append(word)
+
+            # Check if this word ends a sentence
+            if self._is_sentence_ending(word.text):
+                # Create segment from accumulated words
+                seg_text = " ".join(w.text for w in current_words)
+                segments.append(
+                    Segment(
+                        start=current_words[0].start,
+                        end=current_words[-1].end,
+                        text=seg_text,
+                        words=current_words.copy(),
+                    )
+                )
+                current_words = []
+
+        # Handle remaining words (no sentence-ending punctuation at end)
+        if current_words:
+            seg_text = " ".join(w.text for w in current_words)
+            segments.append(
+                Segment(
+                    start=current_words[0].start,
+                    end=current_words[-1].end,
+                    text=seg_text,
+                    words=current_words,
+                )
+            )
+
+        return segments
+
+    @staticmethod
+    def _is_word_boundary(token_text: str) -> bool:
+        """Check if a token marks a word boundary.
+
+        SentencePiece can use either:
+          - \\u2581 (LOWER ONE EIGHTH BLOCK, ▁) - the standard marker
+          - Regular space ' ' - used by some tokenizers including onnx-asr
+
+        Args:
+            token_text: The token string to check
+
+        Returns:
+            True if this token starts a new word
+        """
+        return token_text.startswith("\u2581") or token_text.startswith(" ")
+
     def _tokens_to_words(
-        self, tokens: Any, alignment_method: AlignmentMethod = AlignmentMethod.CTC
+        self,
+        tokens: list[str],
+        timestamps: list[float],
+        alignment_method: AlignmentMethod = AlignmentMethod.CTC,
     ) -> list[Word]:
         """Group subword tokens into words using SentencePiece boundaries.
 
-        SentencePiece uses the \u2581 (LOWER ONE EIGHTH BLOCK) character to mark
-        word boundaries. Tokens starting with this character begin a new word.
+        SentencePiece marks word boundaries with either \\u2581 or space prefix.
+        Tokens starting with these characters begin a new word.
 
         Args:
-            tokens: List of token objects with text, start, end attributes
+            tokens: List of token strings from onnx-asr
+            timestamps: List of start times (one per token)
             alignment_method: Alignment method to tag words with
 
         Returns:
             List of Word objects grouped at word level
         """
+        if not tokens or not timestamps:
+            return []
+
         words: list[Word] = []
         current_text_parts: list[str] = []
         current_start: float | None = None
         current_end: float = 0.0
 
-        for token in tokens:
-            token_text = str(token.text if hasattr(token, "text") else token.token)
-            token_start = float(token.start)
-            token_end = float(token.end)
+        for i, token_text in enumerate(tokens):
+            token_start = timestamps[i]
+            # End time is the start of next token, or same as start for last token
+            token_end = timestamps[i + 1] if i + 1 < len(timestamps) else token_start
 
-            # SentencePiece word boundary marker
-            if token_text.startswith("\u2581") and current_text_parts:
+            # Check for word boundary
+            if self._is_word_boundary(token_text) and current_text_parts:
                 # Flush current word
-                word_text = "".join(current_text_parts).replace("\u2581", "").strip()
+                word_text = (
+                    "".join(current_text_parts)
+                    .replace("\u2581", "")
+                    .replace(" ", " ")  # Normalize spaces
+                    .strip()
+                )
                 if word_text and current_start is not None:
                     words.append(
                         Word(
@@ -420,7 +492,12 @@ class ParakeetOnnxEngine(Engine):
 
         # Flush last word
         if current_text_parts:
-            word_text = "".join(current_text_parts).replace("\u2581", "").strip()
+            word_text = (
+                "".join(current_text_parts)
+                .replace("\u2581", "")
+                .replace(" ", " ")
+                .strip()
+            )
             if word_text and current_start is not None:
                 words.append(
                     Word(
@@ -428,7 +505,7 @@ class ParakeetOnnxEngine(Engine):
                         start=round(current_start, 3),
                         end=round(current_end, 3),
                         confidence=None,
-                        alignment_method=AlignmentMethod.CTC,
+                        alignment_method=alignment_method,
                     )
                 )
 
