@@ -404,9 +404,9 @@ services:
     profiles: [gpu]
     restart: unless-stopped
 
-  # HuggingFace Transformers ASR (GPU - generic ASR for community models)
+  # HuggingFace Transformers ASR (generic ASR for community models)
   # Supports: Whisper, Wav2Vec2, HuBERT, MMS, and 10,000+ HF ASR models
-  # Default model (whisper-large-v3) supports GPU and CPU inference.
+  # Auto-detects GPU/CPU like faster-whisper.
   stt-batch-transcribe-hf-asr:
     image: dalston/stt-batch-transcribe-hf-asr:1.0.0
     build:
@@ -419,8 +419,6 @@ services:
     volumes:
       - model-cache:/models
     depends_on: *batch-depends
-    profiles: [gpu]
-    deploy: *gpu-deploy
     restart: unless-stopped
 
   # --- ALIGN STAGE ---
