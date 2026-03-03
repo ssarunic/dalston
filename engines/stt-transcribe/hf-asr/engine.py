@@ -20,6 +20,7 @@ Environment variables:
     DALSTON_MODEL_TTL_SECONDS: Evict models idle longer than this (default: 3600)
     DALSTON_MAX_LOADED_MODELS: Maximum models to keep loaded (default: 2)
     DALSTON_MODEL_PRELOAD: Model to preload on startup (optional)
+    DALSTON_S3_BUCKET: S3 bucket for models (enables S3 storage)
 """
 
 import os
@@ -67,10 +68,20 @@ class HFASREngine(Engine):
         # Auto-detect device and dtype
         self._device, self._torch_dtype = self._detect_device()
 
+        # Configure S3 storage if bucket is set
+        model_storage = None
+        s3_bucket = os.environ.get("DALSTON_S3_BUCKET")
+        if s3_bucket:
+            from dalston.engine_sdk.model_storage import S3ModelStorage
+
+            model_storage = S3ModelStorage.from_env()
+            self.logger.info("s3_model_storage_enabled", bucket=s3_bucket)
+
         # Initialize model manager with TTL eviction
         self._manager = HFTransformersModelManager(
             device=self._device,
             torch_dtype=self._torch_dtype,
+            model_storage=model_storage,
             ttl_seconds=int(os.environ.get("DALSTON_MODEL_TTL_SECONDS", "3600")),
             max_loaded=int(os.environ.get("DALSTON_MAX_LOADED_MODELS", "2")),
             preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
@@ -304,6 +315,13 @@ class HFASREngine(Engine):
             "cuda_device_count": cuda_device_count,
             "model_manager": manager_stats,
         }
+
+    def get_local_cache_stats(self) -> dict[str, Any] | None:
+        """Get local model cache statistics for heartbeat reporting.
+
+        Returns cache stats from S3ModelStorage if configured.
+        """
+        return self._manager.get_local_cache_stats()
 
     def shutdown(self) -> None:
         """Shutdown engine and cleanup resources."""

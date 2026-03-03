@@ -476,3 +476,127 @@ class TestHFTransformersModelManager:
             )
 
         manager.shutdown()
+
+    @pytest.mark.skipif(not HAS_TORCH, reason="torch not installed")
+    def test_get_local_cache_stats_without_storage(self):
+        """get_local_cache_stats returns None without S3 storage."""
+        import torch
+
+        manager = HFTransformersModelManager(
+            device="cpu",
+            torch_dtype=torch.float32,
+            ttl_seconds=60,
+            max_loaded=1,
+        )
+
+        assert manager.get_local_cache_stats() is None
+        manager.shutdown()
+
+    @pytest.mark.skipif(not HAS_TORCH, reason="torch not installed")
+    def test_get_local_cache_stats_with_storage(self):
+        """get_local_cache_stats returns stats from S3 storage."""
+        import torch
+
+        mock_storage = MagicMock()
+        mock_storage.get_cache_stats.return_value = {
+            "models": ["openai/whisper-large-v3"],
+            "total_size_mb": 3072.5,
+            "model_count": 1,
+        }
+
+        manager = HFTransformersModelManager(
+            device="cpu",
+            torch_dtype=torch.float32,
+            model_storage=mock_storage,
+            ttl_seconds=60,
+            max_loaded=1,
+        )
+
+        stats = manager.get_local_cache_stats()
+        assert stats is not None
+        assert stats["model_count"] == 1
+        mock_storage.get_cache_stats.assert_called_once()
+        manager.shutdown()
+
+    @pytest.mark.skipif(not HAS_TORCH, reason="torch not installed")
+    def test_load_model_with_s3_storage(self):
+        """_load_model should download from S3 when storage is configured."""
+        from pathlib import Path
+
+        import torch
+
+        mock_storage = MagicMock()
+        mock_storage.ensure_local.return_value = Path(
+            "/models/s3-cache/openai--whisper-large-v3"
+        )
+
+        manager = HFTransformersModelManager(
+            device="cpu",
+            torch_dtype=torch.float32,
+            model_storage=mock_storage,
+            ttl_seconds=60,
+            max_loaded=1,
+        )
+
+        mock_pipeline_fn = MagicMock(return_value=MagicMock())
+        mock_transformers = MagicMock()
+        mock_transformers.pipeline = mock_pipeline_fn
+
+        with patch.dict(sys.modules, {"transformers": mock_transformers}):
+            manager._load_model("openai/whisper-large-v3")
+
+            # Should call ensure_local to download from S3
+            mock_storage.ensure_local.assert_called_once_with("openai/whisper-large-v3")
+
+            # Should pass local path to pipeline, not model ID
+            mock_pipeline_fn.assert_called_once_with(
+                "automatic-speech-recognition",
+                model="/models/s3-cache/openai--whisper-large-v3",
+                device="cpu",
+                torch_dtype=torch.float32,
+            )
+
+        manager.shutdown()
+
+
+@pytest.mark.skipif(not HAS_TORCH, reason="torch not installed")
+class TestHFASREngineS3Storage:
+    """Test HFASREngine S3 storage integration."""
+
+    def test_engine_get_local_cache_stats_without_storage(self):
+        """Engine get_local_cache_stats returns None without S3."""
+        with patch.dict(os.environ, {"DALSTON_DEVICE": "cpu"}):
+            with patch("torch.cuda.is_available", return_value=False):
+                HFASREngine = load_hf_asr_engine()
+                engine = HFASREngine()
+
+                assert engine.get_local_cache_stats() is None
+                engine.shutdown()
+
+    def test_engine_enables_s3_storage_from_env(self):
+        """Engine should enable S3 storage when DALSTON_S3_BUCKET is set."""
+        mock_storage_class = MagicMock()
+        mock_storage_instance = MagicMock()
+        mock_storage_class.from_env.return_value = mock_storage_instance
+        mock_storage_instance.get_cache_stats.return_value = {"model_count": 0}
+
+        with patch.dict(
+            os.environ,
+            {"DALSTON_DEVICE": "cpu", "DALSTON_S3_BUCKET": "test-bucket"},
+        ):
+            with patch("torch.cuda.is_available", return_value=False):
+                with patch(
+                    "dalston.engine_sdk.model_storage.S3ModelStorage",
+                    mock_storage_class,
+                ):
+                    HFASREngine = load_hf_asr_engine()
+                    engine = HFASREngine()
+
+                    # S3ModelStorage should have been initialized
+                    mock_storage_class.from_env.assert_called_once()
+
+                    # get_local_cache_stats should return storage stats
+                    stats = engine.get_local_cache_stats()
+                    assert stats is not None
+
+                    engine.shutdown()
