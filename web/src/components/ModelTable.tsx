@@ -3,6 +3,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  CloudDownload,
   Download,
   ExternalLink,
   Globe,
@@ -310,7 +311,7 @@ function ModelTableRow({
                 disabled={isPulling || isPurging}
                 title="Download model"
               >
-                {isPulling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                {isPulling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
               </Button>
             )}
             {/* Delete from registry (all non-downloading states) */}
