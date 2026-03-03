@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.db.models import PIIEntityTypeModel
-from dalston.gateway.dependencies import get_db
+from dalston.gateway.dependencies import RequireJobsRead, get_db
 from dalston.gateway.models.responses import (
     PIIEntityTypeResponse,
     PIIEntityTypesResponse,
@@ -23,6 +23,7 @@ router = APIRouter(prefix="/pii", tags=["pii"])
     description="Returns all available PII entity types that can be detected.",
 )
 async def list_entity_types(
+    api_key: RequireJobsRead,
     db: Annotated[AsyncSession, Depends(get_db)],
     category: str | None = Query(
         default=None,

@@ -27,6 +27,9 @@ from dalston.gateway.api.v1 import router as v1_router
 from dalston.gateway.middleware import setup_exception_handlers
 from dalston.gateway.middleware.correlation import CorrelationIdMiddleware
 from dalston.gateway.middleware.metrics import MetricsMiddleware
+from dalston.gateway.middleware.security_error_handler import (
+    SecurityErrorHandlerMiddleware,
+)
 from dalston.gateway.services.auth import AuthService, Scope
 from dalston.session_router import SessionRouter
 
@@ -189,6 +192,10 @@ app.add_middleware(CorrelationIdMiddleware)
 # Add metrics middleware (M20) - records request counts and latencies
 if dalston.metrics.is_metrics_enabled():
     app.add_middleware(MetricsMiddleware)
+
+# Add security error handler middleware (M45)
+# Converts domain security exceptions to HTTP responses
+app.add_middleware(SecurityErrorHandlerMiddleware)
 
 # Setup exception handlers
 setup_exception_handlers(app)

@@ -21,7 +21,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dalston.gateway.dependencies import get_db
+from dalston.gateway.dependencies import RequireAdmin, RequireJobsRead, get_db
 from dalston.gateway.services.model_registry import (
     ModelInUseError,
     ModelNotFoundError,
@@ -380,6 +380,7 @@ async def get_registry_model(
 )
 async def pull_model(
     model_id: str,
+    api_key: RequireAdmin,
     request: PullModelRequest | None = None,
     background_tasks: BackgroundTasks = BackgroundTasks(),
     db: AsyncSession = Depends(get_db),
@@ -457,6 +458,7 @@ async def _pull_model_background(model_id: str, force: bool) -> None:
 )
 async def remove_model(
     model_id: str,
+    api_key: RequireAdmin,
     purge: bool = Query(
         default=False,
         description="If true, delete model from registry entirely. If false, only remove files.",
@@ -495,6 +497,7 @@ async def remove_model(
     ),
 )
 async def sync_models(
+    api_key: RequireAdmin,
     db: AsyncSession = Depends(get_db),
     service: ModelRegistryService = Depends(get_model_registry_service),
 ) -> SyncModelsResponse:
@@ -555,6 +558,7 @@ class HFRoutingMappingsResponse(BaseModel):
 )
 async def resolve_hf_model(
     request: HFResolveRequest,
+    api_key: RequireAdmin,
     db: AsyncSession = Depends(get_db),
     service: ModelRegistryService = Depends(get_model_registry_service),
 ) -> HFModelMetadataResponse:
@@ -637,7 +641,9 @@ async def resolve_hf_model(
     summary="Get HuggingFace routing mappings",
     description="Get the library_name and tag mappings used for HuggingFace model routing.",
 )
-async def get_hf_routing_mappings() -> HFRoutingMappingsResponse:
+async def get_hf_routing_mappings(
+    api_key: RequireJobsRead,
+) -> HFRoutingMappingsResponse:
     """Return the routing mappings used for HuggingFace model resolution.
 
     Useful for understanding which HuggingFace models can be auto-routed

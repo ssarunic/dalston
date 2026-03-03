@@ -16,6 +16,11 @@ from dalston.config import get_settings as _get_settings
 from dalston.db.session import async_session
 from dalston.gateway.middleware.auth import authenticate_request
 from dalston.gateway.middleware.auth import require_scope as _require_scope
+from dalston.gateway.security.manager import SecurityManager
+from dalston.gateway.security.manager import (
+    get_security_manager as _get_security_manager,
+)
+from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.auth import APIKey, AuthService, Scope
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.ingestion import AudioIngestionService
@@ -183,6 +188,32 @@ RequireWebhooks = Annotated[APIKey, Depends(require_scope_dependency(Scope.WEBHO
 RequireAdmin = Annotated[APIKey, Depends(require_scope_dependency(Scope.ADMIN))]
 
 
+# =============================================================================
+# Security Manager Dependencies (M45)
+# =============================================================================
+
+
+def get_security_manager() -> SecurityManager:
+    """Get SecurityManager instance for authorization checks."""
+    return _get_security_manager()
+
+
+async def get_principal(
+    api_key: APIKey = Depends(require_auth),
+) -> Principal:
+    """Get authenticated Principal from request.
+
+    Converts API key or session token into a Principal for use
+    in authorization checks.
+    """
+    from dalston.gateway.services.auth import SessionToken
+
+    if isinstance(api_key, SessionToken):
+        return Principal.from_session_token(api_key)
+    return Principal.from_api_key(api_key)
+
+
+# =============================================================================
 # Rate limiter singleton
 _rate_limiter: RedisRateLimiter | None = None
 
