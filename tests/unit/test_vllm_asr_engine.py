@@ -25,7 +25,9 @@ def load_adapter_module(name: str):
     if not adapter_path.exists():
         pytest.skip(f"Adapter {name} not found at {adapter_path}")
 
-    spec = importlib.util.spec_from_file_location(f"vllm_asr_adapter_{name}", adapter_path)
+    spec = importlib.util.spec_from_file_location(
+        f"vllm_asr_adapter_{name}", adapter_path
+    )
     if spec is None or spec.loader is None:
         pytest.skip(f"Could not load adapter spec for {name}")
 
@@ -34,7 +36,9 @@ def load_adapter_module(name: str):
 
     # Ensure base adapter is loadable
     base_path = Path("engines/stt-transcribe/vllm-asr/adapters/base.py")
-    base_spec = importlib.util.spec_from_file_location("vllm_asr_adapter_base", base_path)
+    base_spec = importlib.util.spec_from_file_location(
+        "vllm_asr_adapter_base", base_path
+    )
     if base_spec and base_spec.loader:
         base_module = importlib.util.module_from_spec(base_spec)
         sys.modules["vllm_asr_adapter_base"] = base_module
@@ -361,7 +365,9 @@ class TestVLLMASREngine:
     def test_ensure_model_loaded_vllm_not_installed(self, engine):
         """Missing vLLM should raise RuntimeError with install instructions."""
         with patch.dict(sys.modules, {"vllm": None}):
-            with patch("builtins.__import__", side_effect=ImportError("No module named 'vllm'")):
+            with patch(
+                "builtins.__import__", side_effect=ImportError("No module named 'vllm'")
+            ):
                 with pytest.raises((RuntimeError, ImportError)):
                     engine._ensure_model_loaded("mistralai/Voxtral-Mini-3B-2507")
 
@@ -392,7 +398,9 @@ class TestVLLMASREngine:
 
         # Mock SamplingParams import
         mock_sampling_params = MagicMock()
-        with patch.dict(sys.modules, {"vllm": MagicMock(SamplingParams=mock_sampling_params)}):
+        with patch.dict(
+            sys.modules, {"vllm": MagicMock(SamplingParams=mock_sampling_params)}
+        ):
             result = engine.process(mock_input)
 
         assert result.data.text == "Hello, this is a test transcription."
@@ -424,7 +432,9 @@ class TestVLLMASREngine:
         }
 
         mock_sampling_params = MagicMock()
-        with patch.dict(sys.modules, {"vllm": MagicMock(SamplingParams=mock_sampling_params)}):
+        with patch.dict(
+            sys.modules, {"vllm": MagicMock(SamplingParams=mock_sampling_params)}
+        ):
             result = engine.process(mock_input)
 
         assert len(result.data.warnings) > 0
