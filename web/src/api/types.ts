@@ -278,10 +278,12 @@ export interface APIKeyCreatedResponse {
 }
 
 // Engine types
+export type EngineStatus = 'idle' | 'processing' | 'loading' | 'downloading' | 'error' | 'offline' | 'stale'
+
 export interface BatchEngine {
   engine_id: string
   stage: string
-  status: 'healthy' | 'unhealthy'
+  status: EngineStatus
   queue_depth: number
   processing: number
 }

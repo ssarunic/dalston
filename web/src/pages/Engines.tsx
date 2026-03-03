@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useEngines } from '@/hooks/useEngines'
 import { useModels } from '@/hooks/useModels'
-import type { BatchEngine, WorkerStatus, Model } from '@/api/types'
+import type { BatchEngine, EngineStatus, WorkerStatus, Model } from '@/api/types'
 import { cn } from '@/lib/utils'
 
 // Pipeline stages in their natural processing order
@@ -38,8 +38,10 @@ interface StageStatus {
   totalProcessing: number
 }
 
-function StatusDot({ status }: { status: 'healthy' | 'unhealthy' | 'warning' | 'empty' }) {
-  const colors = {
+type DotStatus = 'healthy' | 'unhealthy' | 'warning' | 'empty'
+
+function StatusDot({ status }: { status: DotStatus }) {
+  const colors: Record<DotStatus, string> = {
     healthy: 'bg-green-500',
     unhealthy: 'bg-red-500',
     warning: 'bg-yellow-500',
@@ -48,17 +50,67 @@ function StatusDot({ status }: { status: 'healthy' | 'unhealthy' | 'warning' | '
   return <span className={cn('inline-block w-2 h-2 rounded-full shrink-0', colors[status])} />
 }
 
-function isEngineHealthy(engine: BatchEngine): boolean {
-  // API may return 'healthy', 'running', 'idle', etc. - treat anything except 'unhealthy' as healthy
-  return engine.status !== 'unhealthy'
+/** Map engine status to a dot status for the UI. */
+function engineStatusToDot(status: EngineStatus): DotStatus {
+  switch (status) {
+    case 'idle':
+    case 'processing':
+      return 'healthy'
+    case 'loading':
+    case 'downloading':
+    case 'stale':
+      return 'warning'
+    case 'error':
+    case 'offline':
+      return 'unhealthy'
+  }
 }
 
-function getStageAggregateStatus(engines: BatchEngine[]): 'healthy' | 'unhealthy' | 'warning' | 'empty' {
+/** Human-readable label for an engine status. */
+function engineStatusLabel(status: EngineStatus): string {
+  switch (status) {
+    case 'idle':
+      return 'Idle'
+    case 'processing':
+      return 'Processing'
+    case 'loading':
+      return 'Loading model'
+    case 'downloading':
+      return 'Downloading model'
+    case 'stale':
+      return 'Stale'
+    case 'error':
+      return 'Error'
+    case 'offline':
+      return 'Offline'
+  }
+}
+
+function isEngineHealthy(engine: BatchEngine): boolean {
+  return engineStatusToDot(engine.status) !== 'unhealthy'
+}
+
+function getStageAggregateStatus(engines: BatchEngine[]): DotStatus {
   if (engines.length === 0) return 'empty'
-  const healthy = engines.filter(isEngineHealthy).length
-  const unhealthy = engines.length - healthy
-  if (unhealthy === engines.length) return 'unhealthy'
-  if (unhealthy > 0) return 'warning'
+
+  let hasWarning = false
+  let hasUnhealthy = false
+  let allUnhealthy = true
+
+  for (const engine of engines) {
+    const dot = engineStatusToDot(engine.status)
+    if (dot === 'unhealthy') {
+      hasUnhealthy = true
+    } else if (dot === 'warning') {
+      hasWarning = true
+      allUnhealthy = false
+    } else {
+      allUnhealthy = false
+    }
+  }
+
+  if (allUnhealthy) return 'unhealthy'
+  if (hasUnhealthy || hasWarning) return 'warning'
   return 'healthy'
 }
 
@@ -172,7 +224,7 @@ function getStageSpecificInfo(stage: string, models: Model[]): React.ReactNode {
 }
 
 function EngineCard({ engine, models }: { engine: BatchEngine; models: Model[] }) {
-  const isHealthy = isEngineHealthy(engine)
+  const dot = engineStatusToDot(engine.status)
   const hasActivity = engine.processing > 0 || engine.queue_depth > 0
 
   return (
@@ -181,16 +233,17 @@ function EngineCard({ engine, models }: { engine: BatchEngine; models: Model[] }
       className={cn(
         'block p-4 rounded-lg border transition-all',
         'hover:border-primary/50 hover:bg-accent/30',
-        'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
+        'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
+        dot === 'unhealthy' && 'border-red-500/30 bg-red-500/5'
       )}
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
-          <StatusDot status={isHealthy ? 'healthy' : 'unhealthy'} />
+          <StatusDot status={dot} />
           <div className="min-w-0">
             <div className="font-medium truncate">{engine.engine_id}</div>
             <div className="text-sm text-muted-foreground">
-              {isHealthy ? 'Healthy' : 'Unhealthy'}
+              {engineStatusLabel(engine.status)}
             </div>
           </div>
         </div>

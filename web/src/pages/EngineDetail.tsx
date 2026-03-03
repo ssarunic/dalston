@@ -19,7 +19,7 @@ import { BackButton } from '@/components/BackButton'
 import { apiClient } from '@/api/client'
 import { useModels } from '@/hooks/useModels'
 import { cn } from '@/lib/utils'
-import type { Engine, BatchEngine } from '@/api/types'
+import type { Engine, BatchEngine, EngineStatus } from '@/api/types'
 
 function StatusDot({ status }: { status: 'running' | 'available' | 'unhealthy' }) {
   const colors = {
@@ -132,9 +132,22 @@ export function EngineDetail() {
   }, [modelsData?.data, decodedEngineId])
 
   // Determine status from either source
-  // engineInfo.status is 'running' | 'available' | 'unhealthy'
-  // batchEngineInfo.status is 'healthy' | 'unhealthy'
-  const status: 'running' | 'available' | 'unhealthy' = engineInfo?.status ?? (batchEngineInfo?.status === 'healthy' ? 'running' : 'unhealthy')
+  // engineInfo.status is 'running' | 'available' | 'unhealthy' (from discovery API)
+  // batchEngineInfo.status is EngineStatus (from console API heartbeats)
+  function batchStatusToDiscovery(s: EngineStatus): 'running' | 'available' | 'unhealthy' {
+    switch (s) {
+      case 'idle':
+      case 'processing':
+      case 'loading':
+      case 'downloading':
+        return 'running'
+      case 'stale':
+      case 'error':
+      case 'offline':
+        return 'unhealthy'
+    }
+  }
+  const status: 'running' | 'available' | 'unhealthy' = engineInfo?.status ?? (batchEngineInfo ? batchStatusToDiscovery(batchEngineInfo.status) : 'unhealthy')
   const stage = engineInfo?.stage ?? batchEngineInfo?.stage ?? 'unknown'
 
   if (isLoading) {

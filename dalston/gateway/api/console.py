@@ -391,7 +391,9 @@ class BatchEngine(BaseModel):
 
     engine_id: str
     stage: str
-    status: str  # "healthy" or "unhealthy"
+    status: Literal[
+        "idle", "processing", "loading", "downloading", "error", "offline", "stale"
+    ]
     queue_depth: int
     processing: int
 
