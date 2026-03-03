@@ -1,13 +1,12 @@
 """Unit tests for Parakeet ONNX real-time streaming engine.
 
-Tests the ParakeetOnnxStreamingEngine implementation with mocked onnx-asr models.
+Tests the ParakeetOnnxStreamingEngine implementation with M44 dynamic model loading.
 Run with: uv run --extra dev pytest tests/unit/test_parakeet_onnx_streaming.py
 """
 
 import importlib.util
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -31,43 +30,32 @@ def load_parakeet_onnx_streaming_engine():
 
 
 class TestParakeetOnnxStreamingGetModels:
-    """Tests for get_models() model identifiers."""
+    """Tests for get_models() model identifiers.
 
-    def test_get_models_returns_onnx_model_name(self):
-        """Test that get_models returns the ONNX-specific model identifier."""
+    M44: Engine now returns all supported models since it can dynamically load any.
+    """
+
+    def test_get_models_returns_all_supported_models(self):
+        """Test that get_models returns all dynamically loadable models."""
         Engine = load_parakeet_onnx_streaming_engine()
         engine = Engine()
         models = engine.get_models()
 
-        # Default variant is ctc-0.6b
-        assert models == ["parakeet-onnx-ctc-0.6b"]
+        # M44: Returns all supported models, not just the preloaded one
+        assert "parakeet-onnx-ctc-0.6b" in models
+        assert "parakeet-onnx-ctc-1.1b" in models
+        assert "parakeet-onnx-tdt-0.6b-v2" in models
+        assert "parakeet-onnx-tdt-0.6b-v3" in models
+        assert "parakeet-onnx-rnnt-0.6b" in models
 
-    def test_get_models_with_1_1b_variant(self):
-        """Test that get_models returns correct name for 1.1b variant."""
-        with patch.dict("os.environ", {"DALSTON_MODEL_VARIANT": "ctc-1.1b"}):
-            Engine = load_parakeet_onnx_streaming_engine()
-            engine = Engine()
-            models = engine.get_models()
+    def test_get_models_returns_list(self):
+        """Test that get_models returns a list."""
+        Engine = load_parakeet_onnx_streaming_engine()
+        engine = Engine()
+        models = engine.get_models()
 
-            assert models == ["parakeet-onnx-ctc-1.1b"]
-
-    def test_get_models_with_tdt_variant(self):
-        """Test that get_models returns correct name for TDT variant."""
-        with patch.dict("os.environ", {"DALSTON_MODEL_VARIANT": "tdt-0.6b-v3"}):
-            Engine = load_parakeet_onnx_streaming_engine()
-            engine = Engine()
-            models = engine.get_models()
-
-            assert models == ["parakeet-onnx-tdt-0.6b-v3"]
-
-    def test_get_models_with_rnnt_variant(self):
-        """Test that get_models returns correct name for RNNT variant."""
-        with patch.dict("os.environ", {"DALSTON_MODEL_VARIANT": "rnnt-0.6b"}):
-            Engine = load_parakeet_onnx_streaming_engine()
-            engine = Engine()
-            models = engine.get_models()
-
-            assert models == ["parakeet-onnx-rnnt-0.6b"]
+        assert isinstance(models, list)
+        assert len(models) >= 5  # At least 5 supported models
 
 
 class TestParakeetOnnxStreamingGetLanguages:
@@ -94,72 +82,47 @@ class TestParakeetOnnxStreamingNoStreaming:
 
         assert engine.supports_streaming() is False
 
-    def test_tdt_variant_no_streaming(self):
-        """Test that TDT variant also does not claim streaming support."""
-        with patch.dict("os.environ", {"DALSTON_MODEL_VARIANT": "tdt-0.6b-v3"}):
-            Engine = load_parakeet_onnx_streaming_engine()
-            engine = Engine()
-
-            assert engine.supports_streaming() is False
-
 
 class TestParakeetOnnxStreamingEngineType:
-    """Tests for get_engine() type reporting."""
+    """Tests for get_engine() type reporting.
 
-    def test_get_engine_returns_onnx_type(self):
-        """Test that engine type includes onnx identifier."""
+    M44: Engine now returns runtime name instead of variant-specific name.
+    """
+
+    def test_get_engine_returns_runtime_name(self):
+        """Test that engine type returns the runtime identifier."""
         Engine = load_parakeet_onnx_streaming_engine()
         engine = Engine()
 
-        assert engine.get_engine() == "parakeet-onnx-ctc-0.6b"
-
-    def test_get_engine_with_1_1b_variant(self):
-        """Test that engine type reflects 1.1b variant."""
-        with patch.dict("os.environ", {"DALSTON_MODEL_VARIANT": "ctc-1.1b"}):
-            Engine = load_parakeet_onnx_streaming_engine()
-            engine = Engine()
-
-            assert engine.get_engine() == "parakeet-onnx-ctc-1.1b"
-
-    def test_get_engine_with_tdt_variant(self):
-        """Test that engine type reflects TDT variant."""
-        with patch.dict("os.environ", {"DALSTON_MODEL_VARIANT": "tdt-0.6b-v3"}):
-            Engine = load_parakeet_onnx_streaming_engine()
-            engine = Engine()
-
-            assert engine.get_engine() == "parakeet-onnx-tdt-0.6b-v3"
-
-    def test_get_engine_with_rnnt_variant(self):
-        """Test that engine type reflects RNNT variant."""
-        with patch.dict("os.environ", {"DALSTON_MODEL_VARIANT": "rnnt-0.6b"}):
-            Engine = load_parakeet_onnx_streaming_engine()
-            engine = Engine()
-
-            assert engine.get_engine() == "parakeet-onnx-rnnt-0.6b"
+        # M44: Returns runtime name, not variant-specific name
+        assert engine.get_engine() == "nemo-onnx"
 
 
 class TestParakeetOnnxStreamingHealthCheck:
     """Tests for streaming engine health check."""
 
     def test_health_check_includes_required_fields(self):
-        """Test that health check includes ONNX-specific fields."""
+        """Test that health check includes M44 model manager fields."""
         Engine = load_parakeet_onnx_streaming_engine()
         engine = Engine()
         health = engine.health_check()
 
-        assert "model_loaded" in health
-        assert "model_name" in health
+        # M44: New fields from model manager
+        assert "models_loaded" in health
+        assert "model_count" in health
+        assert "max_loaded" in health
         assert "device" in health
         assert "quantization" in health
 
-    def test_health_check_model_not_loaded_initially(self):
-        """Test that model is not loaded before load_models() is called."""
+    def test_health_check_no_models_loaded_initially(self):
+        """Test that no models are loaded before load_models() is called."""
         Engine = load_parakeet_onnx_streaming_engine()
         engine = Engine()
         health = engine.health_check()
 
-        assert health["model_loaded"] is False
-        assert health["model_name"] is None
+        # M44: models_loaded is a list, not a boolean
+        assert health["models_loaded"] == []
+        assert health["model_count"] == 0
 
 
 class TestParakeetOnnxStreamingGPUMemory:
@@ -175,28 +138,12 @@ class TestParakeetOnnxStreamingGPUMemory:
         assert "GB" in usage
 
 
-class TestParakeetOnnxStreamingVariantValidation:
-    """Tests for model variant selection and validation."""
+class TestParakeetOnnxStreamingVocabulary:
+    """Tests for vocabulary boosting support."""
 
-    def test_unknown_variant_falls_back_to_default(self):
-        """Test that unknown variant falls back to default with warning."""
-        with patch.dict("os.environ", {"DALSTON_MODEL_VARIANT": "unknown-variant"}):
-            Engine = load_parakeet_onnx_streaming_engine()
-            engine = Engine()
+    def test_does_not_support_vocabulary(self):
+        """Test that ONNX engine reports no vocabulary support."""
+        Engine = load_parakeet_onnx_streaming_engine()
+        engine = Engine()
 
-            # Should fall back to default
-            assert engine._model_variant == "ctc-0.6b"
-
-    def test_valid_variants(self):
-        """Test that all valid variants are accepted."""
-        for variant in (
-            "ctc-0.6b",
-            "ctc-1.1b",
-            "tdt-0.6b-v2",
-            "tdt-0.6b-v3",
-            "rnnt-0.6b",
-        ):
-            with patch.dict("os.environ", {"DALSTON_MODEL_VARIANT": variant}):
-                Engine = load_parakeet_onnx_streaming_engine()
-                engine = Engine()
-                assert engine._model_variant == variant
+        assert engine.get_supports_vocabulary() is False
