@@ -8,9 +8,9 @@ import {
   Globe,
   Heart,
   Loader2,
-  Cpu,
   Trash2,
   X,
+  Zap,
 } from 'lucide-react'
 import {
   Table,
@@ -224,10 +224,10 @@ function ModelTableRow({
                 stream
               </Badge>
             )}
-            {model.supports_cpu && (
-              <Badge variant="outline" className="text-xs">
-                <Cpu className="h-3 w-3 mr-1" />
-                CPU
+            {!model.supports_cpu && (
+              <Badge variant="outline" className="text-xs text-amber-600 border-amber-400">
+                <Zap className="h-3 w-3 mr-1" />
+                GPU Only
               </Badge>
             )}
           </div>
