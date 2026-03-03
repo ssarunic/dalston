@@ -362,17 +362,18 @@ export function EngineDetail() {
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
                 {engineModels.map((model) => {
+                  // Model status styling (failed shown as not_downloaded on this page)
                   const statusColors: Record<ModelStatus, string> = {
                     ready: 'bg-green-500',
                     downloading: 'bg-yellow-500 animate-pulse',
                     not_downloaded: 'bg-zinc-400',
-                    failed: 'bg-red-500',
+                    failed: 'bg-zinc-400', // Show as not downloaded
                   }
                   const statusLabels: Record<ModelStatus, string> = {
                     ready: 'Ready',
                     downloading: 'Downloading',
                     not_downloaded: 'Not Downloaded',
-                    failed: 'Failed',
+                    failed: 'Not Downloaded', // Show as not downloaded (details on Models page)
                   }
                   const sizeGb = model.size_bytes ? (model.size_bytes / 1e9).toFixed(1) : null
 
@@ -381,8 +382,7 @@ export function EngineDetail() {
                       key={model.id}
                       className={cn(
                         'p-3 rounded-lg border bg-muted/30',
-                        model.status === 'ready' && 'border-green-500/30',
-                        model.status === 'failed' && 'border-red-500/30'
+                        model.status === 'ready' && 'border-green-500/30'
                       )}
                     >
                       <div className="flex items-start justify-between gap-2">

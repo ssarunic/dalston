@@ -174,19 +174,19 @@ function StageHeader({
   )
 }
 
-// Model status styling
+// Model status styling (failed shown as not_downloaded on this page)
 const modelStatusColors: Record<ModelStatus, string> = {
   ready: 'bg-green-500',
   downloading: 'bg-yellow-500 animate-pulse',
   not_downloaded: 'bg-zinc-400',
-  failed: 'bg-red-500',
+  failed: 'bg-zinc-400', // Show as not downloaded
 }
 
 const modelStatusLabels: Record<ModelStatus, string> = {
   ready: 'Ready',
   downloading: 'Downloading',
   not_downloaded: 'Not Downloaded',
-  failed: 'Failed',
+  failed: 'Not Downloaded', // Show as not downloaded (details on Models page)
 }
 
 // Stage-specific info to show in engine cards
