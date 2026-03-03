@@ -132,14 +132,6 @@ Combine outputs from multiple stages.
 | `channel-merger` | Merge parallel channel transcriptions | No |
 | `final-merger` | Combine all results into final output | No |
 
-### MULTI-STAGE
-
-Integrated engines covering multiple stages.
-
-| Engine ID | Stages | Description | GPU |
-|-----------|--------|-------------|-----|
-| `whisperx-full` | transcribe, align, diarize | Full WhisperX pipeline | Yes |
-
 ---
 
 ## Engine Metadata Format
