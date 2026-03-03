@@ -2,7 +2,7 @@
 # This file defines the model variant metadata for runtime model management (M36)
 
 schema_version: "1.1"
-id: parakeet-tdt-0.6b-v3
+id: nvidia/parakeet-tdt-0.6b-v3
 runtime: nemo
 runtime_model_id: "nvidia/parakeet-tdt-0.6b-v3"  # HuggingFace ID passed to from_pretrained()
 

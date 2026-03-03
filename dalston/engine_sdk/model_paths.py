@@ -58,8 +58,10 @@ def get_hf_model_path(model_id: str) -> Path:
         Path to model directory in HF cache structure
     """
     # HuggingFace hub uses models--{org}--{name} format
+    # Note: When using cache_dir parameter with snapshot_download, files go
+    # directly into that directory (no /hub/ subdirectory)
     safe_id = model_id.replace("/", "--")
-    return HF_CACHE / "hub" / f"models--{safe_id}"
+    return HF_CACHE / f"models--{safe_id}"
 
 
 def get_ctranslate2_model_path(model_id: str, subdir: str = "faster-whisper") -> Path:

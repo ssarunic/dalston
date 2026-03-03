@@ -357,8 +357,8 @@
     }
   },
   "models": {
-    "faster-whisper-base": {
-      "id": "faster-whisper-base",
+    "Systran/faster-whisper-base": {
+      "id": "Systran/faster-whisper-base",
       "runtime": "faster-whisper",
       "runtime_model_id": "base",
       "name": "Faster Whisper Base",
@@ -369,8 +369,8 @@
       "languages": null,
       "capabilities": {
         "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
+        "punctuation": true,
+        "capitalization": true,
         "streaming": false,
         "max_audio_duration": 7200
       },
@@ -384,8 +384,8 @@
         "rtf_cpu": 0.4
       }
     },
-    "faster-whisper-large-v3-turbo": {
-      "id": "faster-whisper-large-v3-turbo",
+    "Systran/faster-whisper-large-v3-turbo": {
+      "id": "Systran/faster-whisper-large-v3-turbo",
       "runtime": "faster-whisper",
       "runtime_model_id": "large-v3-turbo",
       "name": "Faster Whisper Large V3 Turbo",
@@ -396,8 +396,8 @@
       "languages": null,
       "capabilities": {
         "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
+        "punctuation": true,
+        "capitalization": true,
         "streaming": false,
         "max_audio_duration": 7200
       },
@@ -411,8 +411,8 @@
         "rtf_cpu": 0.3
       }
     },
-    "faster-whisper-large-v3": {
-      "id": "faster-whisper-large-v3",
+    "Systran/faster-whisper-large-v3": {
+      "id": "Systran/faster-whisper-large-v3",
       "runtime": "faster-whisper",
       "runtime_model_id": "large-v3",
       "name": "Faster Whisper Large V3",
@@ -423,8 +423,8 @@
       "languages": null,
       "capabilities": {
         "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
+        "punctuation": true,
+        "capitalization": true,
         "streaming": false,
         "max_audio_duration": 7200
       },
@@ -438,8 +438,8 @@
         "rtf_cpu": null
       }
     },
-    "faster-whisper-medium": {
-      "id": "faster-whisper-medium",
+    "Systran/faster-whisper-medium": {
+      "id": "Systran/faster-whisper-medium",
       "runtime": "faster-whisper",
       "runtime_model_id": "medium",
       "name": "Faster Whisper Medium",
@@ -450,8 +450,8 @@
       "languages": null,
       "capabilities": {
         "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
+        "punctuation": true,
+        "capitalization": true,
         "streaming": false,
         "max_audio_duration": 7200
       },
@@ -465,8 +465,8 @@
         "rtf_cpu": 0.3
       }
     },
-    "faster-whisper-small": {
-      "id": "faster-whisper-small",
+    "Systran/faster-whisper-small": {
+      "id": "Systran/faster-whisper-small",
       "runtime": "faster-whisper",
       "runtime_model_id": "small",
       "name": "Faster Whisper Small",
@@ -477,8 +477,8 @@
       "languages": null,
       "capabilities": {
         "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
+        "punctuation": true,
+        "capitalization": true,
         "streaming": false,
         "max_audio_duration": 7200
       },
@@ -492,8 +492,8 @@
         "rtf_cpu": 0.2
       }
     },
-    "faster-whisper-tiny": {
-      "id": "faster-whisper-tiny",
+    "Systran/faster-whisper-tiny": {
+      "id": "Systran/faster-whisper-tiny",
       "runtime": "faster-whisper",
       "runtime_model_id": "tiny",
       "name": "Faster Whisper Tiny",
@@ -504,8 +504,8 @@
       "languages": null,
       "capabilities": {
         "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
+        "punctuation": true,
+        "capitalization": true,
         "streaming": false,
         "max_audio_duration": 7200
       },
@@ -519,8 +519,8 @@
         "rtf_cpu": 0.1
       }
     },
-    "parakeet-ctc-0.6b": {
-      "id": "parakeet-ctc-0.6b",
+    "nvidia/parakeet-ctc-0.6b": {
+      "id": "nvidia/parakeet-ctc-0.6b",
       "runtime": "nemo",
       "runtime_model_id": "nvidia/parakeet-ctc-0.6b",
       "name": "NVIDIA Parakeet CTC 0.6B",
@@ -548,8 +548,8 @@
         "rtf_cpu": null
       }
     },
-    "parakeet-ctc-1.1b": {
-      "id": "parakeet-ctc-1.1b",
+    "nvidia/parakeet-ctc-1.1b": {
+      "id": "nvidia/parakeet-ctc-1.1b",
       "runtime": "nemo",
       "runtime_model_id": "nvidia/parakeet-ctc-1.1b",
       "name": "NVIDIA Parakeet CTC 1.1B",
@@ -722,8 +722,8 @@
         "rtf_cpu": 0.12
       }
     },
-    "parakeet-tdt-0.6b-v3": {
-      "id": "parakeet-tdt-0.6b-v3",
+    "nvidia/parakeet-tdt-0.6b-v3": {
+      "id": "nvidia/parakeet-tdt-0.6b-v3",
       "runtime": "nemo",
       "runtime_model_id": "nvidia/parakeet-tdt-0.6b-v3",
       "name": "NVIDIA Parakeet TDT 0.6B v3",
@@ -751,8 +751,8 @@
         "rtf_cpu": null
       }
     },
-    "parakeet-tdt-1.1b": {
-      "id": "parakeet-tdt-1.1b",
+    "nvidia/parakeet-tdt-1.1b": {
+      "id": "nvidia/parakeet-tdt-1.1b",
       "runtime": "nemo",
       "runtime_model_id": "nvidia/parakeet-tdt-1.1b",
       "name": "NVIDIA Parakeet TDT 1.1B",

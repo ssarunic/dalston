@@ -1,10 +1,18 @@
 """Dalston Gateway CLI commands.
 
 Usage:
+    # API Key Management
     python -m dalston.gateway.cli create-key --name "My Key"
     python -m dalston.gateway.cli create-key --name "Admin" --scopes admin
     python -m dalston.gateway.cli list-keys
     python -m dalston.gateway.cli revoke-key <key-id>
+
+    # Model Management (M40)
+    python -m dalston.gateway.cli model ls
+    python -m dalston.gateway.cli model pull parakeet-tdt-1.1b
+    python -m dalston.gateway.cli model status parakeet-tdt-1.1b
+    python -m dalston.gateway.cli model rm parakeet-tdt-1.1b
+    python -m dalston.gateway.cli model sync
 """
 
 import asyncio
@@ -17,6 +25,7 @@ from dalston.db.session import DEFAULT_TENANT_ID
 from dalston.gateway.services.auth import DEFAULT_SCOPES, AuthService, Scope
 
 app = typer.Typer(help="Dalston Gateway CLI.")
+model_app = typer.Typer(help="Model management commands.")
 
 # Valid scope values for CLI help
 VALID_SCOPES = [s.value for s in Scope]
@@ -259,6 +268,386 @@ def revoke_key(
     else:
         typer.echo(f"API key {key_id} not found.", err=True)
         sys.exit(1)
+
+
+# =============================================================================
+# Model Management Commands (M40)
+# =============================================================================
+
+
+async def _list_models(
+    stage: str | None = None,
+    runtime: str | None = None,
+    status: str | None = None,
+) -> list:
+    """List models from the registry."""
+    from dalston.db.session import async_session
+    from dalston.gateway.services.model_registry import ModelRegistryService
+
+    async with async_session() as db:
+        service = ModelRegistryService()
+        models = await service.list_models(
+            db, stage=stage, runtime=runtime, status=status
+        )
+        return [
+            {
+                "id": m.id,
+                "name": m.name,
+                "runtime": m.runtime,
+                "stage": m.stage,
+                "status": m.status,
+                "size_bytes": m.size_bytes,
+                "downloaded_at": m.downloaded_at,
+            }
+            for m in models
+        ]
+
+
+@model_app.command("ls")
+def model_list(
+    stage: Annotated[
+        str | None,
+        typer.Option("--stage", "-s", help="Filter by stage (e.g., 'transcribe')"),
+    ] = None,
+    runtime: Annotated[
+        str | None,
+        typer.Option("--runtime", "-r", help="Filter by runtime (e.g., 'nemo')"),
+    ] = None,
+    downloaded: Annotated[
+        bool,
+        typer.Option("--downloaded", "-d", help="Only show downloaded models"),
+    ] = False,
+) -> None:
+    """List available models in the registry.
+
+    Examples:
+        # List all models
+        python -m dalston.gateway.cli model ls
+
+        # List only downloaded models
+        python -m dalston.gateway.cli model ls --downloaded
+
+        # Filter by runtime
+        python -m dalston.gateway.cli model ls --runtime nemo
+    """
+    status_filter = "ready" if downloaded else None
+
+    try:
+        models = asyncio.run(
+            _list_models(stage=stage, runtime=runtime, status=status_filter)
+        )
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    if not models:
+        typer.echo("No models found.")
+        return
+
+    typer.echo(f"Found {len(models)} model(s):")
+    typer.echo()
+
+    # Header
+    typer.echo(f"{'ID':<35} {'RUNTIME':<18} {'STAGE':<12} {'STATUS':<15} {'SIZE':<10}")
+    typer.echo("-" * 92)
+
+    for model in models:
+        status = model["status"]
+        size = ""
+        if model.get("size_bytes"):
+            size_mb = model["size_bytes"] / 1024 / 1024
+            size = f"{size_mb:.1f} MB" if size_mb < 1024 else f"{size_mb / 1024:.1f} GB"
+
+        typer.echo(
+            f"{model['id']:<35} {model['runtime']:<18} {model['stage']:<12} "
+            f"{status:<15} {size:<10}"
+        )
+
+    typer.echo()
+
+
+async def _pull_model(model_id: str, force: bool = False) -> dict:
+    """Pull (download) a model."""
+    from dalston.db.session import async_session
+    from dalston.gateway.services.model_registry import (
+        ModelNotFoundError,
+        ModelRegistryService,
+    )
+
+    async with async_session() as db:
+        service = ModelRegistryService()
+        try:
+            model = await service.pull_model(db, model_id, force=force)
+            return {
+                "id": model.id,
+                "status": model.status,
+                "size_bytes": model.size_bytes,
+                "download_path": model.download_path,
+            }
+        except ModelNotFoundError:
+            raise ValueError(f"Model not found: {model_id}") from None
+
+
+@model_app.command("pull")
+def model_pull(
+    model_id: Annotated[str, typer.Argument(help="Model ID to download")],
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Force re-download even if already cached"),
+    ] = False,
+) -> None:
+    """Download a model from HuggingFace Hub.
+
+    Examples:
+        # Download a model
+        python -m dalston.gateway.cli model pull parakeet-tdt-1.1b
+
+        # Force re-download
+        python -m dalston.gateway.cli model pull parakeet-tdt-1.1b --force
+    """
+    typer.echo(f"Downloading model: {model_id}...")
+
+    try:
+        result = asyncio.run(_pull_model(model_id, force=force))
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    if result["status"] == "ready":
+        size_mb = (result.get("size_bytes") or 0) / 1024 / 1024
+        typer.echo()
+        typer.echo("Model downloaded successfully!")
+        typer.echo(f"  ID:   {result['id']}")
+        typer.echo(f"  Size: {size_mb:.1f} MB")
+        typer.echo(f"  Path: {result['download_path']}")
+    else:
+        typer.echo(f"Download status: {result['status']}", err=True)
+        sys.exit(1)
+
+
+async def _model_status(model_id: str) -> dict | None:
+    """Get detailed model status."""
+    from dalston.db.session import async_session
+    from dalston.gateway.services.model_registry import ModelRegistryService
+
+    async with async_session() as db:
+        service = ModelRegistryService()
+        model = await service.get_model(db, model_id)
+        if model is None:
+            return None
+        return {
+            "id": model.id,
+            "name": model.name,
+            "runtime": model.runtime,
+            "runtime_model_id": model.runtime_model_id,
+            "stage": model.stage,
+            "status": model.status,
+            "download_path": model.download_path,
+            "size_bytes": model.size_bytes,
+            "downloaded_at": model.downloaded_at,
+            "languages": model.languages,
+            "word_timestamps": model.word_timestamps,
+            "punctuation": model.punctuation,
+            "capitalization": model.capitalization,
+            "streaming": model.streaming,
+            "supports_cpu": model.supports_cpu,
+            "min_vram_gb": model.min_vram_gb,
+            "min_ram_gb": model.min_ram_gb,
+            "last_used_at": model.last_used_at,
+            "created_at": model.created_at,
+        }
+
+
+@model_app.command("status")
+def model_status(
+    model_id: Annotated[str, typer.Argument(help="Model ID to check")],
+) -> None:
+    """Show detailed status of a model.
+
+    Examples:
+        python -m dalston.gateway.cli model status parakeet-tdt-1.1b
+    """
+    try:
+        model = asyncio.run(_model_status(model_id))
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    if model is None:
+        typer.echo(f"Model not found: {model_id}", err=True)
+        sys.exit(1)
+
+    typer.echo(f"Model: {model['id']}")
+    typer.echo()
+    typer.echo(f"  Name:            {model.get('name') or '-'}")
+    typer.echo(f"  Runtime:         {model['runtime']}")
+    typer.echo(f"  Runtime Model:   {model['runtime_model_id']}")
+    typer.echo(f"  Stage:           {model['stage']}")
+    typer.echo(f"  Status:          {model['status']}")
+    typer.echo()
+
+    if model["status"] == "ready":
+        size_mb = (model.get("size_bytes") or 0) / 1024 / 1024
+        typer.echo(f"  Size:            {size_mb:.1f} MB")
+        typer.echo(f"  Path:            {model.get('download_path') or '-'}")
+        if model.get("downloaded_at"):
+            typer.echo(f"  Downloaded:      {model['downloaded_at'].isoformat()}")
+
+    typer.echo()
+    typer.echo("Capabilities:")
+    if model.get("languages"):
+        typer.echo(f"  Languages:       {', '.join(model['languages'])}")
+    else:
+        typer.echo("  Languages:       multilingual")
+    typer.echo(f"  Word Timestamps: {model.get('word_timestamps', False)}")
+    typer.echo(f"  Punctuation:     {model.get('punctuation', False)}")
+    typer.echo(f"  Capitalization:  {model.get('capitalization', False)}")
+    typer.echo(f"  Streaming:       {model.get('streaming', False)}")
+
+    typer.echo()
+    typer.echo("Hardware:")
+    typer.echo(f"  CPU Support:     {model.get('supports_cpu', True)}")
+    if model.get("min_vram_gb"):
+        typer.echo(f"  Min VRAM:        {model['min_vram_gb']} GB")
+    if model.get("min_ram_gb"):
+        typer.echo(f"  Min RAM:         {model['min_ram_gb']} GB")
+
+    if model.get("last_used_at"):
+        typer.echo()
+        typer.echo(f"  Last Used:       {model['last_used_at'].isoformat()}")
+
+
+async def _remove_model(model_id: str) -> None:
+    """Remove a downloaded model."""
+    from dalston.db.session import async_session
+    from dalston.gateway.services.model_registry import (
+        ModelNotFoundError,
+        ModelRegistryService,
+    )
+
+    async with async_session() as db:
+        service = ModelRegistryService()
+        try:
+            await service.remove_model(db, model_id)
+        except ModelNotFoundError:
+            raise ValueError(f"Model not found: {model_id}") from None
+
+
+@model_app.command("rm")
+def model_remove(
+    model_id: Annotated[str, typer.Argument(help="Model ID to remove")],
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Skip confirmation"),
+    ] = False,
+) -> None:
+    """Remove a downloaded model from local cache.
+
+    Examples:
+        # Remove with confirmation
+        python -m dalston.gateway.cli model rm parakeet-tdt-1.1b
+
+        # Remove without confirmation
+        python -m dalston.gateway.cli model rm parakeet-tdt-1.1b --yes
+    """
+    if not yes:
+        typer.confirm(f"Remove model {model_id}?", abort=True)
+
+    try:
+        asyncio.run(_remove_model(model_id))
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    typer.echo(f"Model {model_id} removed.")
+
+
+async def _sync_models() -> dict:
+    """Sync registry with disk state."""
+    from dalston.db.session import async_session
+    from dalston.gateway.services.model_registry import ModelRegistryService
+
+    async with async_session() as db:
+        service = ModelRegistryService()
+        return await service.sync_from_disk(db)
+
+
+@model_app.command("sync")
+def model_sync() -> None:
+    """Sync registry with disk state.
+
+    Updates the database registry to match actual files on disk.
+    Models found on disk will be marked as 'ready', missing models
+    will be marked as 'not_downloaded'.
+
+    Examples:
+        python -m dalston.gateway.cli model sync
+    """
+    typer.echo("Syncing model registry with disk...")
+
+    try:
+        result = asyncio.run(_sync_models())
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    typer.echo(
+        f"Sync complete: {result['updated']} updated, {result['unchanged']} unchanged"
+    )
+
+
+async def _seed_models(*, update: bool = False) -> dict:
+    """Seed registry from catalog."""
+    from dalston.db.session import async_session
+    from dalston.gateway.services.model_registry import ModelRegistryService
+
+    async with async_session() as db:
+        service = ModelRegistryService()
+        return await service.seed_from_catalog(db, update_existing=update)
+
+
+@model_app.command("seed")
+def model_seed(
+    update: Annotated[
+        bool,
+        typer.Option("--update", "-u", help="Update existing models with catalog data"),
+    ] = False,
+) -> None:
+    """Seed registry from the model catalog.
+
+    Populates the database with all models defined in the static catalog.
+    This allows browsing available models and downloading them.
+
+    Examples:
+        python -m dalston.gateway.cli model seed
+        python -m dalston.gateway.cli model seed --update  # Update existing models
+    """
+    if update:
+        typer.echo("Updating model registry from catalog...")
+    else:
+        typer.echo("Seeding model registry from catalog...")
+
+    try:
+        result = asyncio.run(_seed_models(update=update))
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    parts = [f"{result['created']} created"]
+    if result.get("updated", 0) > 0:
+        parts.append(f"{result['updated']} updated")
+    parts.append(f"{result['skipped']} skipped")
+    typer.echo(f"Seed complete: {', '.join(parts)}")
+
+
+# Register model subcommand
+app.add_typer(model_app, name="model")
 
 
 def main():

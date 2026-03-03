@@ -22,6 +22,8 @@ from dalston.orchestrator.defaults import (
 )
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
     from dalston.orchestrator.catalog import EngineCatalog
     from dalston.orchestrator.registry import BatchEngineRegistry
 
@@ -73,6 +75,7 @@ async def build_task_dag(
     parameters: dict,
     registry: BatchEngineRegistry,
     catalog: EngineCatalog,
+    db: AsyncSession | None = None,
 ) -> list[Task]:
     """Build a task DAG for a job using capability-driven engine selection.
 
@@ -104,6 +107,7 @@ async def build_task_dag(
             - num_speakers/min_speakers/max_speakers: Speaker hints
         registry: Batch engine registry (running engines)
         catalog: Engine catalog (all available engines)
+        db: Optional database session for HF model lookup
 
     Returns:
         List of Task objects with dependencies wired
@@ -114,7 +118,7 @@ async def build_task_dag(
     from dalston.orchestrator.engine_selector import select_pipeline_engines
 
     # Select engines for all required stages
-    selections = await select_pipeline_engines(parameters, registry, catalog)
+    selections = await select_pipeline_engines(parameters, registry, catalog, db=db)
 
     # Build engines dict from selections
     engines = {stage: sel.engine_id for stage, sel in selections.items()}

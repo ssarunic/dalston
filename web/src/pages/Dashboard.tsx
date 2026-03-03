@@ -3,6 +3,7 @@ import { Activity, Cpu, Radio, CheckCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { StatusBadge } from '@/components/StatusBadge'
 import { MetricsPanel } from '@/components/MetricsPanel'
+import { CapabilitiesCard } from '@/components/CapabilitiesCard'
 import { useDashboard } from '@/hooks/useDashboard'
 import { useMetrics } from '@/hooks/useMetrics'
 import { useRealtimeSessions } from '@/hooks/useRealtimeSessions'
@@ -146,35 +147,7 @@ export function Dashboard() {
 
       {/* Recent Activity - Two Column Layout */}
       <div className="grid gap-6 grid-cols-1 lg:grid-cols-2">
-        {/* Realtime first in DOM for mobile stacking */}
-        <Card className="lg:order-2">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Recent Real-time Sessions</CardTitle>
-            <Link
-              to="/realtime"
-              className="text-sm text-primary hover:underline"
-            >
-              View all
-            </Link>
-          </CardHeader>
-          <CardContent>
-            {recentSessions.length === 0 ? (
-              !sessionsLoading && (
-                <p className="text-sm text-muted-foreground py-4 text-center">
-                  No sessions yet
-                </p>
-              )
-            ) : (
-              <div className="divide-y divide-border">
-                {recentSessions.map((session) => (
-                  <RecentSessionRow key={session.id} session={session} />
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="lg:order-1">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>Recent Batch Jobs</CardTitle>
             <Link
@@ -200,7 +173,37 @@ export function Dashboard() {
             )}
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>Recent Real-time Sessions</CardTitle>
+            <Link
+              to="/realtime"
+              className="text-sm text-primary hover:underline"
+            >
+              View all
+            </Link>
+          </CardHeader>
+          <CardContent>
+            {recentSessions.length === 0 ? (
+              !sessionsLoading && (
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  No sessions yet
+                </p>
+              )
+            ) : (
+              <div className="divide-y divide-border">
+                {recentSessions.map((session) => (
+                  <RecentSessionRow key={session.id} session={session} />
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
+
+      {/* System Capabilities - Full Width */}
+      <CapabilitiesCard />
     </div>
   )
 }
