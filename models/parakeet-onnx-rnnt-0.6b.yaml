@@ -1,0 +1,41 @@
+# Model catalog entry for parakeet-onnx-rnnt-0.6b
+# M41: ONNX Runtime variant of Parakeet RNNT 0.6B
+
+schema_version: "1.1"
+id: parakeet-onnx-rnnt-0.6b
+runtime: nemo-onnx
+runtime_model_id: "nvidia/parakeet-rnnt-0.6b"  # HuggingFace model, ONNX runtime
+
+name: NVIDIA Parakeet ONNX RNNT 0.6B
+source: nvidia/parakeet-rnnt-0.6b
+size_gb: 0.6
+stage: transcribe
+
+description: |
+  NVIDIA Parakeet RNNT 0.6B via ONNX Runtime for accurate English-only
+  transcription. RNN-Transducer decoder provides streaming-quality accuracy
+  in a lightweight ONNX package.
+
+  Same model accuracy as the NeMo variant but runs on ONNX Runtime for
+  lighter deployment and better CPU performance.
+
+  NOTE: Outputs lowercase text without punctuation.
+
+languages:
+  - en
+
+capabilities:
+  word_timestamps: true
+  punctuation: false
+  capitalization: false
+  streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  min_vram_gb: 2
+  supports_cpu: true
+  min_ram_gb: 4
+
+performance:
+  rtf_gpu: 0.0003
+  rtf_cpu: 0.12

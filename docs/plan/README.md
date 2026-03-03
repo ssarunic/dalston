@@ -142,6 +142,15 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M31](milestones/M31-capability-driven-routing.md) | Capability-Driven Routing | Route jobs based on engine capabilities | 2-3 | Complete |
 | [M32](milestones/M32-engine-variant-structure.md) | Engine Variant Structure | Model sizes as separate deployable engines | 1.5-2 | Planned |
 
+## Model Management Milestones
+
+| # | Milestone | Goal | Days | Status |
+|---|-----------|------|------|--------|
+| [M39](milestones/M39-model-cache-ttl.md) | Model Cache & TTL | Unified model cache with TTL-based eviction | 2-3 | Complete |
+| [M40](milestones/M40-model-registry.md) | Model Registry & Aliases | PostgreSQL model registry, CLI commands, HF card routing | 3-4 | Complete |
+| [M41](milestones/M41-new-engine-types.md) | New Engine Types | Support for additional ASR engines (NeMo, HF ASR, etc.) | 3-4 | Planned |
+| [M42](milestones/M42-console-model-management.md) | Console Model Management | Web UI for model discovery, download, and selection | 5-7 | Planned |
+
 ---
 
 ## Timeline
@@ -237,6 +246,10 @@ M28 ──► M29 ──► M30 ──► M31
                   │
                   └──► M32 (variant structure)
 
+M31 ──► M39 ──► M40 ──► M41
+                  │
+                  └──► M42 (console model management, also needs M10)
+
 M10 + M11 + M15 ──► M35
 ```
 
@@ -254,6 +267,8 @@ M10 + M11 + M15 ──► M35
 - **M26**: PII Detection & Audio Redaction (needs M3 word timestamps, M4 diarization, M25 retention)
 - **M28-M32**: Engine infrastructure (M28 registry → M29 capabilities → M30 metadata → M31 routing → M32 variants)
 - **M35**: Settings Page (needs M10 console, M11 auth, M15 console auth)
+- **M39-M41**: Model management (M39 cache TTL → M40 registry → M41 new engines)
+- **M42**: Console Model Management (needs M40 registry APIs, M10 console)
 
 ---
 
@@ -289,3 +304,6 @@ Each milestone has a verification section. Key checkpoints:
 | M30 | `GET /v1/engines` returns engine list; `GET /v1/capabilities` returns aggregate capabilities |
 | M32 | Catalog shows `whisper-base`, `whisper-large-v3`, `whisper-large-v3-turbo` as separate engines |
 | M35 | Settings page shows current values; admin can change rate limits and see effect immediately |
+| M39 | Model files evicted after TTL; cache stays within size limits |
+| M40 | `dalston model pull/ls/rm` works; HF model IDs auto-resolve to runtime |
+| M42 | Models page shows registry; NewJob has searchable model selector; download progress in header |

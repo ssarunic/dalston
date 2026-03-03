@@ -261,6 +261,51 @@ class TestJobsServiceDeleteJob:
         mock_get.assert_awaited_once_with(mock_db, job_id, tenant_id=tenant_id)
         assert result is job
 
+    @pytest.mark.asyncio
+    async def test_delete_calls_audit_service(self, jobs_service: JobsService, mock_db):
+        """Test that delete calls audit service when provided."""
+        tenant_id = UUID("12345678-1234-1234-1234-123456789abc")
+        job_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        job = self._make_job(
+            JobStatus.COMPLETED.value, job_id=job_id, tenant_id=tenant_id
+        )
+
+        mock_audit = AsyncMock()
+
+        with patch.object(jobs_service, "get_job", return_value=job):
+            await jobs_service.delete_job(
+                mock_db,
+                job_id,
+                tenant_id=tenant_id,
+                audit_service=mock_audit,
+                actor_type="api_key",
+                actor_id="test_key",
+                correlation_id="req-123",
+                ip_address="192.168.1.1",
+            )
+
+        mock_audit.log_job_deleted.assert_awaited_once_with(
+            job_id=job_id,
+            tenant_id=tenant_id,
+            actor_type="api_key",
+            actor_id="test_key",
+            correlation_id="req-123",
+            ip_address="192.168.1.1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_without_audit_service(
+        self, jobs_service: JobsService, mock_db
+    ):
+        """Test that delete works without audit service (backward compatible)."""
+        job = self._make_job(JobStatus.COMPLETED.value)
+
+        with patch.object(jobs_service, "get_job", return_value=job):
+            result = await jobs_service.delete_job(mock_db, job.id)
+
+        assert result is job
+        mock_db.delete.assert_awaited_once_with(job)
+
 
 class TestJobsServiceCancelJob:
     """Tests for JobsService.cancel_job method."""

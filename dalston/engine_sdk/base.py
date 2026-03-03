@@ -133,6 +133,19 @@ class Engine(ABC):
         with self._runtime_state_lock:
             return dict(self._runtime_state)
 
+    def get_local_cache_stats(self) -> dict[str, Any] | None:
+        """Get local model cache statistics for heartbeat reporting.
+
+        Override this method in engines that use S3ModelStorage to report
+        which models are cached locally. The stats are included in heartbeat
+        payloads so the orchestrator can track model availability.
+
+        Returns:
+            Dictionary with cache stats, or None if not using S3 model storage.
+            Expected format: {"models": ["model-a", "model-b"], "total_size_mb": 3500, "model_count": 2}
+        """
+        return None
+
     def get_capabilities(self) -> EngineCapabilities:
         """Return engine capabilities for registration and validation.
 

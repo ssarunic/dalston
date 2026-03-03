@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-02-28T18:48:34.411897+00:00",
+  "generated_at": "2026-03-03T09:54:18.661139+00:00",
   "schema_version": "2.0",
-  "runtime_count": 10,
-  "model_count": 13,
-  "engine_count": 10,
+  "runtime_count": 11,
+  "model_count": 15,
+  "engine_count": 11,
   "runtimes": {
     "phoneme-align": {
       "id": "phoneme-align",
@@ -279,6 +279,42 @@
         "warm_start_latency_ms": 30
       }
     },
+    "hf-asr": {
+      "id": "hf-asr",
+      "engine_id": "hf-asr",
+      "name": "HuggingFace Transformers ASR",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "description": "Generic ASR engine for HuggingFace Transformers models.\nSupports Whisper, Wav2Vec2, HuBERT, MMS, and other ASR architectures\nwith pipeline_tag=automatic-speech-recognition.\n\nUse for community fine-tunes and research models. Any of the 10,000+\nASR models on HuggingFace Hub can be loaded at runtime via runtime_model_id.",
+      "image": "dalston/stt-batch-transcribe-hf-asr:1.0.0",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": null,
+        "supports_word_timestamps": true,
+        "supports_streaming": false,
+        "max_audio_duration": 3600,
+        "max_concurrency": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": true,
+        "min_vram_gb": 4,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": true,
+        "min_ram_gb": 8,
+        "memory": "8G"
+      },
+      "performance": {
+        "rtf_gpu": 0.1,
+        "rtf_cpu": 1.0,
+        "warm_start_latency_ms": 500
+      }
+    },
     "nemo": {
       "id": "nemo",
       "engine_id": "nemo",
@@ -317,46 +353,48 @@
         "warm_start_latency_ms": 150
       }
     },
-    "hf-asr": {
-      "id": "hf-asr",
-      "engine_id": "hf-asr",
-      "name": "HuggingFace Transformers ASR",
+    "nemo-onnx": {
+      "id": "nemo-onnx",
+      "engine_id": "nemo-onnx",
+      "name": "NVIDIA Parakeet ONNX Runtime",
       "version": "1.0.0",
       "stage": "transcribe",
-      "description": "Generic ASR engine for HuggingFace Transformers models.\nSupports Whisper, Wav2Vec2, HuBERT, MMS, and other ASR architectures\nwith pipeline_tag=automatic-speech-recognition.\n\nUse for community fine-tunes and research models. Any of the 10,000+\nASR models on HuggingFace Hub can be loaded at runtime via runtime_model_id.",
-      "image": "dalston/stt-batch-transcribe-hf-asr:1.0.0",
+      "description": "Lightweight ONNX Runtime engine for NVIDIA Parakeet transcription models.\nUses the onnx-asr library for fast inference without the full NeMo toolkit.\nSupports CTC, TDT, and RNNT decoders.\n\nM41: This runtime provides the same Parakeet model accuracy with significantly\nsmaller container images (~1GB vs ~12GB) and faster startup. Uses ONNX Runtime\nfor inference and supports both CPU and GPU execution.\n\nSupported models:\n  - nvidia/parakeet-ctc-0.6b (CTC, fast, 600M params)\n  - nvidia/parakeet-ctc-1.1b (CTC, accurate, 1.1B params)\n  - nvidia/parakeet-tdt-0.6b-v2 (TDT, English-only, 600M params)\n  - nvidia/parakeet-tdt-0.6b-v3 (TDT, punctuation + capitalization, 600M params)\n  - nvidia/parakeet-rnnt-0.6b (RNNT, English-only, 600M params)\n\nAll models produce native word-level timestamps without needing a separate\nalignment stage.",
+      "image": "dalston/stt-batch-transcribe-nemo-onnx:1.0.0",
       "capabilities": {
         "stages": [
           "transcribe"
         ],
-        "languages": null,
+        "languages": [
+          "en"
+        ],
         "supports_word_timestamps": true,
         "supports_streaming": false,
-        "max_audio_duration": 3600,
+        "max_audio_duration": 7200,
         "max_concurrency": null
       },
       "hardware": {
         "gpu_required": false,
         "gpu_optional": true,
-        "min_vram_gb": 4,
+        "min_vram_gb": 2,
         "recommended_gpu": [
           "t4",
           "a10g"
         ],
         "supports_cpu": true,
-        "min_ram_gb": 8,
-        "memory": "8G"
+        "min_ram_gb": 4,
+        "memory": "4G"
       },
       "performance": {
-        "rtf_gpu": 0.1,
-        "rtf_cpu": 1.0,
-        "warm_start_latency_ms": 500
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": 0.15,
+        "warm_start_latency_ms": 50
       }
     }
   },
   "models": {
-    "faster-whisper-base": {
-      "id": "faster-whisper-base",
+    "Systran/faster-whisper-base": {
+      "id": "Systran/faster-whisper-base",
       "runtime": "faster-whisper",
       "runtime_model_id": "base",
       "name": "Faster Whisper Base",
@@ -367,8 +405,8 @@
       "languages": null,
       "capabilities": {
         "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
+        "punctuation": true,
+        "capitalization": true,
         "streaming": false,
         "max_audio_duration": 7200
       },
@@ -382,8 +420,8 @@
         "rtf_cpu": 0.4
       }
     },
-    "faster-whisper-large-v3-turbo": {
-      "id": "faster-whisper-large-v3-turbo",
+    "Systran/faster-whisper-large-v3-turbo": {
+      "id": "Systran/faster-whisper-large-v3-turbo",
       "runtime": "faster-whisper",
       "runtime_model_id": "large-v3-turbo",
       "name": "Faster Whisper Large V3 Turbo",
@@ -394,8 +432,8 @@
       "languages": null,
       "capabilities": {
         "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
+        "punctuation": true,
+        "capitalization": true,
         "streaming": false,
         "max_audio_duration": 7200
       },
@@ -409,8 +447,8 @@
         "rtf_cpu": 0.3
       }
     },
-    "faster-whisper-large-v3": {
-      "id": "faster-whisper-large-v3",
+    "Systran/faster-whisper-large-v3": {
+      "id": "Systran/faster-whisper-large-v3",
       "runtime": "faster-whisper",
       "runtime_model_id": "large-v3",
       "name": "Faster Whisper Large V3",
@@ -421,8 +459,8 @@
       "languages": null,
       "capabilities": {
         "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
+        "punctuation": true,
+        "capitalization": true,
         "streaming": false,
         "max_audio_duration": 7200
       },
@@ -436,8 +474,8 @@
         "rtf_cpu": null
       }
     },
-    "faster-whisper-medium": {
-      "id": "faster-whisper-medium",
+    "Systran/faster-whisper-medium": {
+      "id": "Systran/faster-whisper-medium",
       "runtime": "faster-whisper",
       "runtime_model_id": "medium",
       "name": "Faster Whisper Medium",
@@ -448,8 +486,8 @@
       "languages": null,
       "capabilities": {
         "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
+        "punctuation": true,
+        "capitalization": true,
         "streaming": false,
         "max_audio_duration": 7200
       },
@@ -463,8 +501,8 @@
         "rtf_cpu": 0.3
       }
     },
-    "faster-whisper-small": {
-      "id": "faster-whisper-small",
+    "Systran/faster-whisper-small": {
+      "id": "Systran/faster-whisper-small",
       "runtime": "faster-whisper",
       "runtime_model_id": "small",
       "name": "Faster Whisper Small",
@@ -475,8 +513,8 @@
       "languages": null,
       "capabilities": {
         "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
+        "punctuation": true,
+        "capitalization": true,
         "streaming": false,
         "max_audio_duration": 7200
       },
@@ -490,8 +528,8 @@
         "rtf_cpu": 0.2
       }
     },
-    "faster-whisper-tiny": {
-      "id": "faster-whisper-tiny",
+    "Systran/faster-whisper-tiny": {
+      "id": "Systran/faster-whisper-tiny",
       "runtime": "faster-whisper",
       "runtime_model_id": "tiny",
       "name": "Faster Whisper Tiny",
@@ -502,8 +540,8 @@
       "languages": null,
       "capabilities": {
         "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
+        "punctuation": true,
+        "capitalization": true,
         "streaming": false,
         "max_audio_duration": 7200
       },
@@ -517,8 +555,8 @@
         "rtf_cpu": 0.1
       }
     },
-    "parakeet-ctc-0.6b": {
-      "id": "parakeet-ctc-0.6b",
+    "nvidia/parakeet-ctc-0.6b": {
+      "id": "nvidia/parakeet-ctc-0.6b",
       "runtime": "nemo",
       "runtime_model_id": "nvidia/parakeet-ctc-0.6b",
       "name": "NVIDIA Parakeet CTC 0.6B",
@@ -546,8 +584,8 @@
         "rtf_cpu": null
       }
     },
-    "parakeet-ctc-1.1b": {
-      "id": "parakeet-ctc-1.1b",
+    "nvidia/parakeet-ctc-1.1b": {
+      "id": "nvidia/parakeet-ctc-1.1b",
       "runtime": "nemo",
       "runtime_model_id": "nvidia/parakeet-ctc-1.1b",
       "name": "NVIDIA Parakeet CTC 1.1B",
@@ -575,8 +613,153 @@
         "rtf_cpu": null
       }
     },
-    "parakeet-tdt-0.6b-v3": {
-      "id": "parakeet-tdt-0.6b-v3",
+    "parakeet-onnx-ctc-0.6b": {
+      "id": "parakeet-onnx-ctc-0.6b",
+      "runtime": "nemo-onnx",
+      "runtime_model_id": "nvidia/parakeet-ctc-0.6b",
+      "name": "NVIDIA Parakeet ONNX CTC 0.6B",
+      "source": "nvidia/parakeet-ctc-0.6b",
+      "size_gb": 0.6,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet CTC 0.6B via ONNX Runtime for fast English-only transcription.\nSame model accuracy as the NeMo variant (parakeet-ctc-0.6b) but runs on\nONNX Runtime for lighter deployment and better CPU performance.\n\nAdvantages over NeMo variant:\n  - ~12x smaller container image (~1GB vs ~12GB)\n  - ~3x faster cold start\n  - Better CPU inference (ONNX optimizations + INT8 quantization)\n  - No PyTorch dependency for CPU inference\n\nNOTE: Outputs lowercase text without punctuation.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 2,
+        "supports_cpu": true,
+        "min_ram_gb": 4
+      },
+      "performance": {
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": 0.15
+      }
+    },
+    "parakeet-onnx-ctc-1.1b": {
+      "id": "parakeet-onnx-ctc-1.1b",
+      "runtime": "nemo-onnx",
+      "runtime_model_id": "nvidia/parakeet-ctc-1.1b",
+      "name": "NVIDIA Parakeet ONNX CTC 1.1B",
+      "source": "nvidia/parakeet-ctc-1.1b",
+      "size_gb": 1.2,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet CTC 1.1B via ONNX Runtime for accurate English-only transcription.\nLarger model with better accuracy than the 0.6B variant.\nSame accuracy as the NeMo variant (parakeet-ctc-1.1b) but runs on ONNX Runtime.\n\nAdvantages over NeMo variant:\n  - ~12x smaller container image (~1GB vs ~12GB)\n  - ~3x faster cold start\n  - Better CPU inference (ONNX optimizations + INT8 quantization)\n  - No PyTorch dependency for CPU inference\n\nNOTE: Outputs lowercase text without punctuation.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 4,
+        "supports_cpu": true,
+        "min_ram_gb": 8
+      },
+      "performance": {
+        "rtf_gpu": 0.0005,
+        "rtf_cpu": 0.2
+      }
+    },
+    "parakeet-onnx-rnnt-0.6b": {
+      "id": "parakeet-onnx-rnnt-0.6b",
+      "runtime": "nemo-onnx",
+      "runtime_model_id": "nvidia/parakeet-rnnt-0.6b",
+      "name": "NVIDIA Parakeet ONNX RNNT 0.6B",
+      "source": "nvidia/parakeet-rnnt-0.6b",
+      "size_gb": 0.6,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet RNNT 0.6B via ONNX Runtime for accurate English-only\ntranscription. RNN-Transducer decoder provides streaming-quality accuracy\nin a lightweight ONNX package.\n\nSame model accuracy as the NeMo variant but runs on ONNX Runtime for\nlighter deployment and better CPU performance.\n\nNOTE: Outputs lowercase text without punctuation.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 2,
+        "supports_cpu": true,
+        "min_ram_gb": 4
+      },
+      "performance": {
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": 0.12
+      }
+    },
+    "parakeet-onnx-tdt-0.6b-v2": {
+      "id": "parakeet-onnx-tdt-0.6b-v2",
+      "runtime": "nemo-onnx",
+      "runtime_model_id": "nvidia/parakeet-tdt-0.6b-v2",
+      "name": "NVIDIA Parakeet ONNX TDT 0.6B v2",
+      "source": "nvidia/parakeet-tdt-0.6b-v2",
+      "size_gb": 0.6,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet TDT 0.6B v2 via ONNX Runtime for accurate English-only\ntranscription. TDT (Token-and-Duration Transducer) provides better accuracy\nthan CTC while maintaining fast inference.\n\nSame model accuracy as the NeMo variant but runs on ONNX Runtime for\nlighter deployment and better CPU performance.\n\nNOTE: Outputs lowercase text without punctuation.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 2,
+        "supports_cpu": true,
+        "min_ram_gb": 4
+      },
+      "performance": {
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": 0.12
+      }
+    },
+    "parakeet-onnx-tdt-0.6b-v3": {
+      "id": "parakeet-onnx-tdt-0.6b-v3",
+      "runtime": "nemo-onnx",
+      "runtime_model_id": "nvidia/parakeet-tdt-0.6b-v3",
+      "name": "NVIDIA Parakeet ONNX TDT 0.6B v3",
+      "source": "nvidia/parakeet-tdt-0.6b-v3",
+      "size_gb": 0.6,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet TDT 0.6B v3 via ONNX Runtime for accurate English-only\ntranscription with automatic punctuation and capitalization.\nTDT (Token-and-Duration Transducer) provides best accuracy among 0.6B models.\n64% faster than RNNT while achieving lower WER.\n\nSame model accuracy as the NeMo variant but runs on ONNX Runtime for\nlighter deployment and better CPU performance.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": true,
+        "capitalization": true,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 2,
+        "supports_cpu": true,
+        "min_ram_gb": 4
+      },
+      "performance": {
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": 0.12
+      }
+    },
+    "nvidia/parakeet-tdt-0.6b-v3": {
+      "id": "nvidia/parakeet-tdt-0.6b-v3",
       "runtime": "nemo",
       "runtime_model_id": "nvidia/parakeet-tdt-0.6b-v3",
       "name": "NVIDIA Parakeet TDT 0.6B v3",
@@ -604,8 +787,8 @@
         "rtf_cpu": null
       }
     },
-    "parakeet-tdt-1.1b": {
-      "id": "parakeet-tdt-1.1b",
+    "nvidia/parakeet-tdt-1.1b": {
+      "id": "nvidia/parakeet-tdt-1.1b",
       "runtime": "nemo",
       "runtime_model_id": "nvidia/parakeet-tdt-1.1b",
       "name": "NVIDIA Parakeet TDT 1.1B",
@@ -631,89 +814,6 @@
       "performance": {
         "rtf_gpu": 0.0006,
         "rtf_cpu": null
-      }
-    },
-    "hf-wav2vec2-large-960h": {
-      "id": "hf-wav2vec2-large-960h",
-      "runtime": "hf-asr",
-      "runtime_model_id": "facebook/wav2vec2-large-960h",
-      "name": "Wav2Vec2 Large 960h",
-      "source": "facebook/wav2vec2-large-960h",
-      "size_gb": 1.2,
-      "stage": "transcribe",
-      "description": "Facebook Wav2Vec2 Large model fine-tuned on 960h of LibriSpeech.\nStrong English ASR with CTC decoding. No word timestamps from pipeline;\nuse alignment stage if needed.",
-      "languages": [
-        "en"
-      ],
-      "capabilities": {
-        "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
-        "streaming": false,
-        "max_audio_duration": 3600
-      },
-      "hardware": {
-        "min_vram_gb": 4,
-        "supports_cpu": true,
-        "min_ram_gb": 8
-      },
-      "performance": {
-        "rtf_gpu": 0.05,
-        "rtf_cpu": 0.8
-      }
-    },
-    "hf-whisper-large-v3": {
-      "id": "hf-whisper-large-v3",
-      "runtime": "hf-asr",
-      "runtime_model_id": "openai/whisper-large-v3",
-      "name": "Whisper Large V3 (HF Transformers)",
-      "source": "openai/whisper-large-v3",
-      "size_gb": 3.0,
-      "stage": "transcribe",
-      "description": "OpenAI Whisper large-v3 loaded via HuggingFace Transformers pipeline.\nUse this runtime for HuggingFace-format Whisper models and community\nfine-tunes. Supports 99 languages with word-level timestamps.",
-      "languages": null,
-      "capabilities": {
-        "word_timestamps": true,
-        "punctuation": true,
-        "capitalization": true,
-        "streaming": false,
-        "max_audio_duration": 3600
-      },
-      "hardware": {
-        "min_vram_gb": 6,
-        "supports_cpu": true,
-        "min_ram_gb": 16
-      },
-      "performance": {
-        "rtf_gpu": 0.1,
-        "rtf_cpu": 1.0
-      }
-    },
-    "hf-mms-1b-all": {
-      "id": "hf-mms-1b-all",
-      "runtime": "hf-asr",
-      "runtime_model_id": "facebook/mms-1b-all",
-      "name": "MMS 1B All Languages",
-      "source": "facebook/mms-1b-all",
-      "size_gb": 3.8,
-      "stage": "transcribe",
-      "description": "Meta Massively Multilingual Speech model supporting 1,100+ languages.\nCTC-based model ideal for low-resource and underrepresented languages.\nNo word timestamps from pipeline; use alignment stage if needed.",
-      "languages": null,
-      "capabilities": {
-        "word_timestamps": false,
-        "punctuation": false,
-        "capitalization": false,
-        "streaming": false,
-        "max_audio_duration": 3600
-      },
-      "hardware": {
-        "min_vram_gb": 6,
-        "supports_cpu": true,
-        "min_ram_gb": 16
-      },
-      "performance": {
-        "rtf_gpu": 0.08,
-        "rtf_cpu": 1.2
       }
     }
   },
@@ -992,6 +1092,42 @@
         "warm_start_latency_ms": 30
       }
     },
+    "hf-asr": {
+      "id": "hf-asr",
+      "name": "HuggingFace Transformers ASR",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "type": null,
+      "description": "Generic ASR engine for HuggingFace Transformers models.\nSupports Whisper, Wav2Vec2, HuBERT, MMS, and other ASR architectures\nwith pipeline_tag=automatic-speech-recognition.\n\nUse for community fine-tunes and research models. Any of the 10,000+\nASR models on HuggingFace Hub can be loaded at runtime via runtime_model_id.",
+      "image": "dalston/stt-batch-transcribe-hf-asr:1.0.0",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": null,
+        "supports_word_timestamps": true,
+        "supports_streaming": false,
+        "max_audio_duration": 3600,
+        "max_concurrency": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": true,
+        "min_vram_gb": 4,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": true,
+        "min_ram_gb": 8,
+        "memory": "8G"
+      },
+      "performance": {
+        "rtf_gpu": 0.1,
+        "rtf_cpu": 1.0,
+        "warm_start_latency_ms": 500
+      }
+    },
     "nemo": {
       "id": "nemo",
       "name": "NVIDIA NeMo Parakeet Runtime",
@@ -1030,40 +1166,42 @@
         "warm_start_latency_ms": 150
       }
     },
-    "hf-asr": {
-      "id": "hf-asr",
-      "name": "HuggingFace Transformers ASR",
+    "nemo-onnx": {
+      "id": "nemo-onnx",
+      "name": "NVIDIA Parakeet ONNX Runtime",
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "Generic ASR engine for HuggingFace Transformers models.\nSupports Whisper, Wav2Vec2, HuBERT, MMS, and other ASR architectures\nwith pipeline_tag=automatic-speech-recognition.\n\nUse for community fine-tunes and research models. Any of the 10,000+\nASR models on HuggingFace Hub can be loaded at runtime via runtime_model_id.",
-      "image": "dalston/stt-batch-transcribe-hf-asr:1.0.0",
+      "description": "Lightweight ONNX Runtime engine for NVIDIA Parakeet transcription models.\nUses the onnx-asr library for fast inference without the full NeMo toolkit.\nSupports CTC, TDT, and RNNT decoders.\n\nM41: This runtime provides the same Parakeet model accuracy with significantly\nsmaller container images (~1GB vs ~12GB) and faster startup. Uses ONNX Runtime\nfor inference and supports both CPU and GPU execution.\n\nSupported models:\n  - nvidia/parakeet-ctc-0.6b (CTC, fast, 600M params)\n  - nvidia/parakeet-ctc-1.1b (CTC, accurate, 1.1B params)\n  - nvidia/parakeet-tdt-0.6b-v2 (TDT, English-only, 600M params)\n  - nvidia/parakeet-tdt-0.6b-v3 (TDT, punctuation + capitalization, 600M params)\n  - nvidia/parakeet-rnnt-0.6b (RNNT, English-only, 600M params)\n\nAll models produce native word-level timestamps without needing a separate\nalignment stage.",
+      "image": "dalston/stt-batch-transcribe-nemo-onnx:1.0.0",
       "capabilities": {
         "stages": [
           "transcribe"
         ],
-        "languages": null,
+        "languages": [
+          "en"
+        ],
         "supports_word_timestamps": true,
         "supports_streaming": false,
-        "max_audio_duration": 3600,
+        "max_audio_duration": 7200,
         "max_concurrency": null
       },
       "hardware": {
         "gpu_required": false,
         "gpu_optional": true,
-        "min_vram_gb": 4,
+        "min_vram_gb": 2,
         "recommended_gpu": [
           "t4",
           "a10g"
         ],
         "supports_cpu": true,
-        "min_ram_gb": 8,
-        "memory": "8G"
+        "min_ram_gb": 4,
+        "memory": "4G"
       },
       "performance": {
-        "rtf_gpu": 0.1,
-        "rtf_cpu": 1.0,
-        "warm_start_latency_ms": 500
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": 0.15,
+        "warm_start_latency_ms": 50
       }
     }
   }

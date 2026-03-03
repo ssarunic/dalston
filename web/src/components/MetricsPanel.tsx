@@ -111,7 +111,7 @@ function EngineTable({ engines }: { engines: EngineMetric[] }) {
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+      <table className="w-full min-w-[500px] text-sm">
         <thead>
           <tr className="border-b border-border text-left">
             <th className="pb-2 font-medium text-muted-foreground">Engine</th>

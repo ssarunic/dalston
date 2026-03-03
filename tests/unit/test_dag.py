@@ -190,7 +190,7 @@ class TestBuildTaskDagNemo:
     """Tests for NeMo runtime DAG behavior (M21/M36).
 
     M36: Parakeet models now route through the 'nemo' runtime.
-    Using catalog entries like 'parakeet-tdt-1.1b' instead of raw 'parakeet'.
+    Using catalog entries like 'nvidia/parakeet-tdt-1.1b' (full HuggingFace namespace).
     """
 
     @pytest.fixture
@@ -216,7 +216,7 @@ class TestBuildTaskDagNemo:
     def test_nemo_skips_align_stage(self, job_id: UUID, audio_uri: str):
         """Test that NeMo/Parakeet models skip the ALIGN stage (native word timestamps)."""
         parameters = {
-            "engine_transcribe": "parakeet-tdt-1.1b",  # MODEL_REGISTRY key
+            "engine_transcribe": "nvidia/parakeet-tdt-1.1b",  # MODEL_REGISTRY key
             "timestamps_granularity": "word",  # Request word timestamps
         }
 
@@ -233,7 +233,7 @@ class TestBuildTaskDagNemo:
     def test_nemo_with_diarization(self, job_id: UUID, audio_uri: str):
         """Test that NeMo/Parakeet works with diarization (no align, but diarize)."""
         parameters = {
-            "engine_transcribe": "parakeet-tdt-1.1b",
+            "engine_transcribe": "nvidia/parakeet-tdt-1.1b",
             "speaker_detection": "diarize",
             "timestamps_granularity": "word",
         }
@@ -248,7 +248,7 @@ class TestBuildTaskDagNemo:
     def test_nemo_per_channel_skips_align(self, job_id: UUID, audio_uri: str):
         """Test that NeMo/Parakeet per-channel mode skips align stages."""
         parameters = {
-            "engine_transcribe": "parakeet-tdt-1.1b",
+            "engine_transcribe": "nvidia/parakeet-tdt-1.1b",
             "speaker_detection": "per_channel",
             "timestamps_granularity": "word",
             "num_channels": 2,
@@ -266,7 +266,7 @@ class TestBuildTaskDagNemo:
     def test_whisper_still_has_align_stage(self, job_id: UUID, audio_uri: str):
         """Test that Whisper (faster-whisper) still uses the ALIGN stage."""
         parameters = {
-            "engine_transcribe": "faster-whisper-large-v3-turbo",  # MODEL_REGISTRY key
+            "engine_transcribe": "Systran/faster-whisper-large-v3-turbo",  # MODEL_REGISTRY key
             "timestamps_granularity": "word",
         }
 
@@ -279,7 +279,7 @@ class TestBuildTaskDagNemo:
     def test_nemo_merge_dependencies_correct(self, job_id: UUID, audio_uri: str):
         """Test that merge dependencies are correct when align is skipped."""
         parameters = {
-            "engine_transcribe": "parakeet-tdt-1.1b",
+            "engine_transcribe": "nvidia/parakeet-tdt-1.1b",
             "timestamps_granularity": "word",
         }
 
@@ -300,7 +300,7 @@ class TestBuildTaskDagNemo:
         sets runtime_model_id in the task config.
         """
         parameters = {
-            "engine_transcribe": "parakeet-tdt-1.1b",
+            "engine_transcribe": "nvidia/parakeet-tdt-1.1b",
         }
 
         tasks = build_task_dag_for_test(job_id, audio_uri, parameters)

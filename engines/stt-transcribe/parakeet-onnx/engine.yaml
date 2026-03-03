@@ -1,0 +1,60 @@
+schema_version: "1.1"
+id: nemo-onnx
+runtime: nemo-onnx
+stage: transcribe
+name: NVIDIA Parakeet ONNX Runtime
+version: 1.0.0
+description: |
+  Lightweight ONNX Runtime engine for NVIDIA Parakeet transcription models.
+  Uses the onnx-asr library for fast inference without the full NeMo toolkit.
+  Supports CTC, TDT, and RNNT decoders.
+
+  M41: This runtime provides the same Parakeet model accuracy with significantly
+  smaller container images (~1GB vs ~12GB) and faster startup. Uses ONNX Runtime
+  for inference and supports both CPU and GPU execution.
+
+  Supported models:
+    - nvidia/parakeet-ctc-0.6b (CTC, fast, 600M params)
+    - nvidia/parakeet-ctc-1.1b (CTC, accurate, 1.1B params)
+    - nvidia/parakeet-tdt-0.6b-v2 (TDT, English-only, 600M params)
+    - nvidia/parakeet-tdt-0.6b-v3 (TDT, punctuation + capitalization, 600M params)
+    - nvidia/parakeet-rnnt-0.6b (RNNT, English-only, 600M params)
+
+  All models produce native word-level timestamps without needing a separate
+  alignment stage.
+
+container:
+  gpu: optional
+  memory: 4G
+  model_cache: /models/onnx
+
+capabilities:
+  languages:
+    - en  # English-only models
+  max_audio_duration: 7200
+  streaming: false
+  word_timestamps: true  # Native word timestamps via CTC alignment
+
+input:
+  audio_formats:
+    - wav
+  sample_rate: 16000
+  channels: 1
+
+hf_compat:
+  pipeline_tag: automatic-speech-recognition
+  library_name: onnxruntime
+  license: cc-by-4.0
+
+hardware:
+  min_vram_gb: 2  # ONNX models use less VRAM than NeMo
+  recommended_gpu:
+    - t4
+    - a10g
+  supports_cpu: true  # ONNX Runtime CPU is much faster than NeMo CPU
+  min_ram_gb: 4
+
+performance:
+  rtf_gpu: 0.0003  # Faster than NeMo due to ONNX optimizations
+  rtf_cpu: 0.15  # INT8 quantization makes CPU viable
+  warm_start_latency_ms: 50  # Much faster than NeMo (~150ms)
