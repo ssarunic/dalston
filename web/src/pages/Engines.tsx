@@ -123,20 +123,24 @@ function StageHeader({
   isExpanded: boolean
   onToggle: () => void
 }) {
-  const { stage, engines, unhealthyCount, totalQueueDepth, totalProcessing } = stageStatus
+  const { stage, engines, healthyCount, totalQueueDepth, totalProcessing } = stageStatus
   const aggregateStatus = getStageAggregateStatus(engines)
 
   const summaryParts: string[] = []
   if (engines.length === 0) {
     summaryParts.push('no engines')
-  } else {
+  } else if (healthyCount === engines.length) {
+    // All engines ready - just show count
     summaryParts.push(`${engines.length} engine${engines.length !== 1 ? 's' : ''}`)
-    if (totalQueueDepth > 0 || totalProcessing > 0) {
-      const activityParts: string[] = []
-      if (totalProcessing > 0) activityParts.push(`${totalProcessing} processing`)
-      if (totalQueueDepth > 0) activityParts.push(`${totalQueueDepth} queued`)
-      summaryParts.push(activityParts.join(', '))
-    }
+  } else {
+    // Some engines offline - show fraction
+    summaryParts.push(`${healthyCount}/${engines.length} engines ready`)
+  }
+  if (totalQueueDepth > 0 || totalProcessing > 0) {
+    const activityParts: string[] = []
+    if (totalProcessing > 0) activityParts.push(`${totalProcessing} processing`)
+    if (totalQueueDepth > 0) activityParts.push(`${totalQueueDepth} queued`)
+    summaryParts.push(activityParts.join(', '))
   }
 
   return (
@@ -163,11 +167,6 @@ function StageHeader({
         </div>
       </div>
       <div className="flex items-center gap-3">
-        {aggregateStatus === 'warning' && (
-          <Badge variant="warning" className="hidden sm:inline-flex">
-            {unhealthyCount} unhealthy
-          </Badge>
-        )}
         <span className="text-sm text-muted-foreground">{summaryParts.join(' · ')}</span>
       </div>
     </button>
