@@ -173,8 +173,9 @@ export interface WorkerStatus {
   status: 'ready' | 'unhealthy'
   capacity: number
   active_sessions: number
-  models: string[]
+  models: string[]  // M43: Currently loaded models (dynamic)
   languages: string[]
+  runtime?: string | null  // M43: Model runtime (e.g., "faster-whisper")
   supports_vocabulary?: boolean
 }
 

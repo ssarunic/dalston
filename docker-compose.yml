@@ -673,22 +673,47 @@ services:
     profiles: [gpu]
     restart: unless-stopped
 
-  # Faster Whisper base (GPU)
-  stt-rt-transcribe-faster-whisper-base:
-    image: dalston/stt-rt-transcribe-faster-whisper-base:1.0.0
+  # M43: Faster Whisper (consolidated runtime - serves any model variant dynamically)
+  stt-rt-faster-whisper:
+    image: dalston/stt-rt-faster-whisper:1.0.0
     build:
       context: .
       dockerfile: engines/stt-rt/faster-whisper/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
+      DALSTON_WORKER_ID: stt-rt-faster-whisper
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
+      # M43: Dynamic model loading configuration
+      DALSTON_MODEL_TTL_SECONDS: 3600  # Unload models idle for 1 hour
+      DALSTON_MAX_LOADED_MODELS: 2     # Keep at most 2 models loaded
+      DALSTON_MODEL_PRELOAD: large-v3-turbo  # Preload default model on startup
     volumes:
       - model-cache:/models
     depends_on: *realtime-depends
     healthcheck: *ws-healthcheck
     deploy: *gpu-deploy
     profiles: [gpu]
+    restart: unless-stopped
+
+  # M43: Faster Whisper CPU (for local development without GPU)
+  stt-rt-faster-whisper-cpu:
+    image: dalston/stt-rt-faster-whisper:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-rt/faster-whisper/Dockerfile
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_WORKER_ID: stt-rt-faster-whisper-cpu
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 2
+      DALSTON_MODEL_TTL_SECONDS: 3600
+      DALSTON_MAX_LOADED_MODELS: 1
+      DALSTON_MODEL_PRELOAD: base  # Lighter model for CPU
+    volumes:
+      - model-cache:/models
+    depends_on: *realtime-depends
+    healthcheck: *ws-healthcheck
     restart: unless-stopped
 
   # M41: Parakeet ONNX CTC 0.6B (CPU - lightweight realtime English)

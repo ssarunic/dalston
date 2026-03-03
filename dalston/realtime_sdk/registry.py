@@ -178,6 +178,7 @@ class WorkerRegistry:
         active_sessions: int,
         gpu_memory_used: str,
         status: str = "ready",
+        loaded_models: list[str] | None = None,
     ) -> None:
         """Send heartbeat update.
 
@@ -190,6 +191,7 @@ class WorkerRegistry:
             active_sessions: Current number of active sessions
             gpu_memory_used: GPU memory usage string (e.g., "4.2GB")
             status: Worker status ("ready", "busy", "draining")
+            loaded_models: List of currently loaded model IDs (M43: dynamic models)
         """
         r = await self._get_redis()
         worker_key = f"{WORKER_KEY_PREFIX}{worker_id}"
@@ -202,6 +204,10 @@ class WorkerRegistry:
         if needs_reregistration and worker_id in self._registered_workers:
             # Re-populate all registration fields
             info = self._registered_workers[worker_id]
+            # M43: Use dynamic loaded_models if provided, otherwise use static models
+            models_to_report = (
+                loaded_models if loaded_models is not None else info.models
+            )
             mapping = {
                 "endpoint": info.endpoint,
                 "status": status,
@@ -209,7 +215,7 @@ class WorkerRegistry:
                 "active_sessions": str(active_sessions),
                 "gpu_memory_used": gpu_memory_used,
                 "gpu_memory_total": "0GB",
-                "models_loaded": json.dumps(info.models),
+                "models_loaded": json.dumps(models_to_report),
                 "languages_supported": json.dumps(info.languages),
                 "engine": info.engine,
                 "last_heartbeat": now,
@@ -236,17 +242,23 @@ class WorkerRegistry:
             )
         else:
             # Normal heartbeat - just update dynamic fields
-            await r.hset(
-                worker_key,
-                mapping={
-                    "status": status,
-                    "active_sessions": str(active_sessions),
-                    "gpu_memory_used": gpu_memory_used,
-                    "last_heartbeat": now,
-                },
-            )
+            mapping = {
+                "status": status,
+                "active_sessions": str(active_sessions),
+                "gpu_memory_used": gpu_memory_used,
+                "last_heartbeat": now,
+            }
+            # M43: Include loaded_models if provided (dynamic model loading)
+            if loaded_models is not None:
+                mapping["models_loaded"] = json.dumps(loaded_models)
+            await r.hset(worker_key, mapping=mapping)
 
-        logger.debug("heartbeat", worker_id=worker_id, active_sessions=active_sessions)
+        logger.debug(
+            "heartbeat",
+            worker_id=worker_id,
+            active_sessions=active_sessions,
+            loaded_models=loaded_models,
+        )
 
     async def session_started(self, worker_id: str, session_id: str) -> None:
         """Notify that a session has started on this worker.

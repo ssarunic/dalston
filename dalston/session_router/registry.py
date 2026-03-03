@@ -34,9 +34,10 @@ class WorkerState:
         status: Current status (ready, busy, draining, offline)
         capacity: Maximum concurrent sessions
         active_sessions: Current active session count
-        models_loaded: List of available model variants
+        models_loaded: List of currently loaded model variants (M43: dynamic)
         languages_supported: List of supported language codes
         engine: Engine type identifier (e.g., "parakeet", "whisper")
+        runtime: Model runtime identifier (M43: e.g., "faster-whisper", "nemo")
         supports_vocabulary: Whether this engine supports vocabulary boosting
         gpu_memory_used: GPU memory usage string
         gpu_memory_total: Total GPU memory string
@@ -52,6 +53,7 @@ class WorkerState:
     models_loaded: list[str]
     languages_supported: list[str]
     engine: str
+    runtime: str | None
     supports_vocabulary: bool
     gpu_memory_used: str
     gpu_memory_total: str
@@ -205,6 +207,7 @@ class WorkerRegistry:
             models_loaded=json.loads(data.get("models_loaded", "[]")),
             languages_supported=json.loads(data.get("languages_supported", "[]")),
             engine=data.get("engine", "unknown"),
+            runtime=data.get("runtime"),  # M43: model runtime
             supports_vocabulary=data.get("supports_vocabulary", "false") == "true",
             gpu_memory_used=data.get("gpu_memory_used", "0GB"),
             gpu_memory_total=data.get("gpu_memory_total", "0GB"),

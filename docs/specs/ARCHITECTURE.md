@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-**Dalston** is a modular, self-hosted audio transcription server that provides an ElevenLabs-compatible API for both batch and real-time transcription. It deconstructs monolithic transcription pipelines into isolated, containerized engines that communicate via Redis queues and S3 storage.
+**Dalston** is a modular, self-hosted audio transcription server that provides an ElevenLabs and OpenAI-compatible API for both batch and real-time transcription. It deconstructs monolithic transcription pipelines into isolated, containerized engines that communicate via Redis queues and S3 storage.
 
 ### Core Value Proposition
 
@@ -10,9 +10,7 @@
 - **Engine Isolation**: Each processing engine runs in its own container, eliminating dependency conflicts
 - **Pluggable Pipeline**: Swap transcription, diarization, or alignment engines without changing the system
 - **Two-Level Queue**: Jobs contain task DAGs enabling parallel processing and granular failure handling
-- **Multi-Stage Engines**: Support for integrated pipelines (like WhisperX) that handle multiple stages in one pass
-- **Hybrid Mode**: Get immediate real-time results, then enhance with batch processing
-- **Simple API, Complex Internals**: ElevenLabs-compatible API abstracts internal complexity
+- **Simple API, Complex Internals**: ElevenLabs and OpenAI-compatible API abstracts internal complexity
 
 ---
 

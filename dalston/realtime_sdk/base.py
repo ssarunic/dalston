@@ -41,10 +41,14 @@ from dalston.common.ws_close_codes import (
 )
 from dalston.engine_sdk.types import EngineCapabilities
 from dalston.realtime_sdk.assembler import TranscribeResult
+from dalston.realtime_sdk.model_manager import AsyncModelManager
 from dalston.realtime_sdk.registry import WorkerInfo, WorkerRegistry
 from dalston.realtime_sdk.session import SessionConfig, SessionHandler
 
 logger = structlog.get_logger()
+
+# Type alias for model manager (any model type)
+ModelManagerType = AsyncModelManager[Any]
 
 # Paths for engine.yaml (container path first, local fallback second)
 ENGINE_YAML_PATHS = [
@@ -138,6 +142,9 @@ class RealtimeEngine(ABC):
         self._running = False
         self._server = None
         self._metrics_runner: web.AppRunner | None = None
+
+        # M43: Dynamic model loading support
+        self._model_manager: ModelManagerType | None = None
 
     @abstractmethod
     def load_models(self) -> None:
@@ -249,6 +256,23 @@ class RealtimeEngine(ABC):
             True if vocabulary boosting is supported. Default: False
         """
         return False
+
+    def get_loaded_models(self) -> list[str] | None:
+        """Return list of currently loaded model IDs.
+
+        For engines with dynamic model loading (M43), this returns the list
+        of models currently loaded in memory. Used in heartbeat to enable
+        warm routing (Session Router prefers workers with model already loaded).
+
+        Default implementation returns None (static models defined in get_models()).
+        Override or set _model_manager to enable dynamic reporting.
+
+        Returns:
+            List of loaded model IDs, or None if using static model list
+        """
+        if self._model_manager is not None:
+            return self._model_manager.loaded_models()
+        return None
 
     def get_gpu_memory_usage(self) -> str:
         """Return GPU memory usage string.
@@ -485,6 +509,10 @@ class RealtimeEngine(ABC):
             await self._registry.unregister(self.worker_id)
             await self._registry.close()
 
+        # M43: Shutdown model manager and unload models
+        if self._model_manager is not None:
+            await self._model_manager.shutdown()
+
         # Stop metrics server
         await self._stop_metrics_server()
 
@@ -500,11 +528,13 @@ class RealtimeEngine(ABC):
                     status = (
                         "ready" if len(self._sessions) < self.max_sessions else "busy"
                     )
+                    # M43: Include dynamically loaded models in heartbeat
                     await self._registry.heartbeat(
                         worker_id=self.worker_id,
                         active_sessions=len(self._sessions),
                         gpu_memory_used=self.get_gpu_memory_usage(),
                         status=status,
+                        loaded_models=self.get_loaded_models(),
                     )
             except Exception as e:
                 logger.error("heartbeat_error", error=str(e))

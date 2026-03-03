@@ -6,7 +6,7 @@
 | **Duration** | 3-5 days |
 | **Dependencies** | M36 (Runtime Model Management), M40 (Model Registry) |
 | **Deliverable** | Dynamic model loading for RT engines, consolidated Docker images (one per runtime) |
-| **Status** | In Progress (Phase 1 Complete) |
+| **Status** | In Progress (Phase 2/2b Complete) |
 
 ## User Story
 
@@ -63,37 +63,82 @@ After:  2 RT images (faster-whisper-rt, parakeet-rt)
 - `dalston/realtime_sdk/base.py` - `get_capabilities()`, `_load_engine_yaml()`
 - `dalston/realtime_sdk/registry.py` - `WorkerInfo.capabilities`, `WorkerInfo.runtime`
 
-### Phase 2: Dynamic Model Loading (Pending)
+### Phase 2: Dynamic Model Loading (Complete)
 
 **Deliverables:**
 
-- [ ] `AsyncModelManager` wrapper for RT engines
-- [ ] RT engines use `ModelManager.acquire()/release()` per session
-- [ ] Session Router routes by `loaded_models` in heartbeat (warm routing)
-- [ ] Consolidate per-model Docker images into per-runtime images
+- [x] `AsyncModelManager` wrapper for RT engines
+- [x] RT engines use `ModelManager.acquire()/release()` per session (faster-whisper)
+- [x] Session Router routes by `loaded_models` in heartbeat (warm routing)
+- [x] Consolidate per-model Docker images into per-runtime images (faster-whisper)
 
 **Key changes:**
 
 ```python
 # Before: Models hardcoded at startup
-class FasterWhisperRealtimeEngine(RealtimeEngine):
+class WhisperStreamingEngine(RealtimeEngine):
     MODELS = {"faster-whisper-large-v3": "Systran/faster-whisper-large-v3"}
     def load_models(self):
         for name, hf_id in self.MODELS.items():
             self._models[name] = WhisperModel(hf_id, device="cuda")
 
-# After: Models loaded on-demand
-class FasterWhisperRealtimeEngine(RealtimeEngine):
-    async def setup(self):
-        self._manager = AsyncModelManager(FasterWhisperModelManager.from_env())
+# After: Models loaded on-demand via ModelManager
+class WhisperStreamingEngine(RealtimeEngine):
+    def load_models(self):
+        sync_manager = FasterWhisperModelManager(
+            device=self._device,
+            compute_type=self._compute_type,
+            ttl_seconds=int(os.environ.get("DALSTON_MODEL_TTL_SECONDS", "3600")),
+            max_loaded=int(os.environ.get("DALSTON_MAX_LOADED_MODELS", "2")),
+        )
+        self._model_manager = AsyncModelManager(sync_manager)
 
-    async def transcribe(self, audio, model_id, ...):
-        model = await self._manager.acquire(model_id)
+    def transcribe(self, audio, language, model_variant, vocabulary=None):
+        model_id = self._normalize_model_id(model_variant)
+        model = self._model_manager.manager.acquire(model_id)
         try:
-            return model.transcribe(audio, ...)
+            return self._transcribe_with_model(model, audio, language, vocabulary)
         finally:
-            await self._manager.release(model_id)
+            self._model_manager.manager.release(model_id)
 ```
+
+**Files changed:**
+
+- `dalston/realtime_sdk/model_manager.py` - New `AsyncModelManager` wrapper
+- `dalston/realtime_sdk/base.py` - Added `_model_manager`, `get_loaded_models()`
+- `dalston/realtime_sdk/registry.py` - Added `loaded_models` to heartbeat
+- `engines/stt-rt/faster-whisper/engine.py` - Refactored to use ModelManager
+- `engines/stt-rt/faster-whisper/Dockerfile` - Removed model pre-baking
+- `docker-compose.yml` - Consolidated `stt-rt-faster-whisper` service
+
+**Notes:**
+
+- Parakeet and Voxtral engines retain single-model-per-instance approach (model selected via `DALSTON_MODEL_VARIANT` env var at startup)
+- Full dynamic model loading for NeMo/Transformers runtimes deferred to future enhancement
+
+### Phase 2b: Web Console & Registry Impact (Complete)
+
+**Deliverables:**
+
+- [x] Add `runtime` field to Session Router's `WorkerState` and `WorkerStatus`
+- [x] Add `runtime` field to Console API's `RealtimeWorker` response model
+- [x] Update frontend `WorkerStatus` type with `runtime` field
+- [x] Update `RealtimeWorkerCard` UI to display runtime badge and "Loaded models" label
+
+**Files changed:**
+
+- `dalston/session_router/registry.py` - Added `runtime` field to `WorkerState`
+- `dalston/session_router/router.py` - Added `runtime` field to `WorkerStatus`
+- `dalston/gateway/api/console.py` - Added `runtime` field to `RealtimeWorker`
+- `web/src/api/types.ts` - Added `runtime` field to `WorkerStatus` interface
+- `web/src/pages/Engines.tsx` - Updated `RealtimeWorkerCard` to show runtime and clarify loaded models
+
+**UI Changes:**
+
+The Real-time Workers card in the Engines page now shows:
+
+- Runtime badge (e.g., "faster-whisper") next to worker ID
+- "Loaded models" label above the model badges to clarify these are dynamically loaded
 
 ### Phase 3: Session Router Integration (Pending)
 
@@ -138,10 +183,10 @@ Response includes warm/cold status:
 
 ## Success Criteria
 
-- [ ] RT engines serve any model variant without image rebuild
-- [ ] Session Router routes to warm workers when available
-- [ ] Cold-start latency < 60s for largest model
-- [ ] Number of RT Docker images reduced from N*M to N (runtimes only)
+- [x] RT engines serve any model variant without image rebuild (faster-whisper)
+- [ ] Session Router routes to warm workers when available (Phase 3)
+- [ ] Cold-start latency < 60s for largest model (Phase 3)
+- [x] Number of RT Docker images reduced from N*M to N (runtimes only)
 
 ---
 
