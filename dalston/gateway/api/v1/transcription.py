@@ -50,16 +50,16 @@ from dalston.gateway.api.v1.openai_audio import (
     validate_openai_request,
 )
 from dalston.gateway.dependencies import (
-    RequireJobsRead,
-    RequireJobsWrite,
     RequireJobsWriteRateLimited,
     get_audit_service,
     get_db,
     get_export_service,
     get_ingestion_service,
     get_jobs_service,
+    get_principal,
     get_rate_limiter,
     get_redis,
+    get_security_manager,
     get_settings,
 )
 from dalston.gateway.models.responses import (
@@ -73,6 +73,9 @@ from dalston.gateway.models.responses import (
     RetentionInfo,
     StageResponse,
 )
+from dalston.gateway.security.exceptions import ResourceNotFoundError
+from dalston.gateway.security.manager import SecurityManager
+from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.ingestion import AudioIngestionService
 from dalston.gateway.services.jobs import JobsService
@@ -482,7 +485,8 @@ async def create_transcription(
 )
 async def get_transcription(
     job_id: UUID,
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
@@ -494,7 +498,9 @@ async def get_transcription(
     3. If completed, fetch transcript from S3
     4. Return job with transcript data and stages
     """
-    job = await jobs_service.get_job_with_tasks(db, job_id, tenant_id=api_key.tenant_id)
+    job = await jobs_service.get_job_with_tasks_authorized(
+        db, job_id, principal, security_manager
+    )
 
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -600,7 +606,8 @@ async def get_transcription(
     description="List transcription jobs with cursor-based pagination and optional status filter.",
 )
 async def list_transcriptions(
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     limit: Annotated[int, Query(ge=1, le=100, description="Max results")] = 20,
     cursor: Annotated[
         str | None, Query(description="Pagination cursor from previous response")
@@ -610,9 +617,10 @@ async def list_transcriptions(
     jobs_service: JobsService = Depends(get_jobs_service),
 ) -> JobListResponse:
     """List jobs for the current tenant with cursor-based pagination."""
-    jobs, has_more = await jobs_service.list_jobs(
+    jobs, has_more = await jobs_service.list_jobs_authorized(
         db=db,
-        tenant_id=api_key.tenant_id,
+        principal=principal,
+        security_manager=security_manager,
         limit=limit,
         cursor=cursor,
         status=status,
@@ -660,7 +668,8 @@ async def update_transcription(
     request: Request,
     job_id: UUID,
     body: JobRenameRequest,
-    api_key: RequireJobsWrite,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
     jobs_service: JobsService = Depends(get_jobs_service),
     audit_service: AuditService = Depends(get_audit_service),
@@ -669,16 +678,16 @@ async def update_transcription(
 
     Allows renaming a job to a more meaningful label at any time.
     """
-    # Get current job to capture old name for audit
-    job = await jobs_service.get_job(db, job_id, tenant_id=api_key.tenant_id)
+    # Get current job to capture old name for audit (with authorization)
+    job = await jobs_service.get_job_authorized(db, job_id, principal, security_manager)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
     old_name = job.display_name
 
-    # Update display name
+    # Update display name (authorization already checked above)
     job = await jobs_service.update_display_name(
-        db, job_id, body.display_name, tenant_id=api_key.tenant_id
+        db, job_id, body.display_name, tenant_id=principal.tenant_id
     )
     assert job is not None  # We just verified the job exists above
 
@@ -686,11 +695,11 @@ async def update_transcription(
     request_id = getattr(request.state, "request_id", None)
     await audit_service.log_job_renamed(
         job_id=job_id,
-        tenant_id=api_key.tenant_id,
+        tenant_id=principal.tenant_id,
         old_name=old_name,
         new_name=body.display_name,
-        actor_type="api_key",
-        actor_id=api_key.prefix,
+        actor_type=principal.actor_type,
+        actor_id=principal.actor_id,
         correlation_id=request_id,
         ip_address=request.client.host if request.client else None,
     )
@@ -736,7 +745,8 @@ async def update_transcription(
 async def export_transcription(
     job_id: UUID,
     format: str,
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     include_speakers: Annotated[
         bool, Query(description="Include speaker labels in output")
     ] = True,
@@ -762,8 +772,8 @@ async def export_transcription(
     # Validate format
     export_format = export_service.validate_format(format)
 
-    # Get job
-    job = await jobs_service.get_job(db, job_id, tenant_id=api_key.tenant_id)
+    # Get job with authorization
+    job = await jobs_service.get_job_authorized(db, job_id, principal, security_manager)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -802,7 +812,8 @@ async def export_transcription(
 )
 async def get_job_audio(
     job_id: UUID,
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
@@ -814,7 +825,7 @@ async def get_job_audio(
     2. Job must be in a terminal state (completed, failed, cancelled)
     3. Audio must not have been purged by retention policy
     """
-    job = await jobs_service.get_job(db, job_id, tenant_id=api_key.tenant_id)
+    job = await jobs_service.get_job_authorized(db, job_id, principal, security_manager)
 
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -908,7 +919,8 @@ async def get_job_audio(
 )
 async def get_job_audio_redacted(
     job_id: UUID,
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
@@ -925,7 +937,7 @@ async def get_job_audio_redacted(
     Note: Uses transcript's pii_metadata.redacted_audio_uri as source of truth,
     matching the UI's redacted_audio_available flag behavior.
     """
-    job = await jobs_service.get_job(db, job_id, tenant_id=api_key.tenant_id)
+    job = await jobs_service.get_job_authorized(db, job_id, principal, security_manager)
 
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -1050,7 +1062,8 @@ async def get_job_audio_redacted(
 )
 async def cancel_transcription(
     job_id: UUID,
-    api_key: RequireJobsWrite,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     jobs_service: JobsService = Depends(get_jobs_service),
@@ -1070,7 +1083,11 @@ async def cancel_transcription(
     5. If immediate CANCELLED, decrement concurrent job counter
     """
     try:
-        result = await jobs_service.cancel_job(db, job_id, tenant_id=api_key.tenant_id)
+        result = await jobs_service.cancel_job_authorized(
+            db, job_id, principal, security_manager
+        )
+    except ResourceNotFoundError:
+        raise HTTPException(status_code=404, detail="Job not found") from None
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from None
 
@@ -1083,7 +1100,7 @@ async def cancel_transcription(
     # If job was immediately cancelled (no running tasks), decrement counter now.
     # Uses idempotent helper to prevent double-decrement if orchestrator also tries.
     if result.status == JobStatus.CANCELLED:
-        await rate_limiter.decrement_concurrent_jobs_once(job_id, api_key.tenant_id)
+        await rate_limiter.decrement_concurrent_jobs_once(job_id, principal.tenant_id)
 
     return JobCancelledResponse(
         id=result.job.id,
@@ -1107,7 +1124,8 @@ async def cancel_transcription(
 async def delete_audio(
     request: Request,
     job_id: UUID,
-    api_key: RequireJobsWrite,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
@@ -1120,7 +1138,7 @@ async def delete_audio(
     3. Delete S3 audio and task artifacts (keep transcript)
     4. Return 204 No Content
     """
-    job = await jobs_service.get_job(db, job_id, tenant_id=api_key.tenant_id)
+    job = await jobs_service.get_job_authorized(db, job_id, principal, security_manager)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -1148,9 +1166,9 @@ async def delete_audio(
     request_id = getattr(request.state, "request_id", None)
     await audit_service.log_audio_deleted(
         job_id=job_id,
-        tenant_id=api_key.tenant_id,
-        actor_type="api_key",
-        actor_id=api_key.prefix,
+        tenant_id=principal.tenant_id,
+        actor_type=principal.actor_type,
+        actor_id=principal.actor_id,
         correlation_id=request_id,
         ip_address=request.client.host if request.client else None,
     )
@@ -1172,7 +1190,8 @@ async def delete_audio(
 async def delete_transcription(
     request: Request,
     job_id: UUID,
-    api_key: RequireJobsWrite,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
@@ -1188,16 +1207,17 @@ async def delete_transcription(
     request_id = getattr(request.state, "request_id", None)
 
     try:
-        job = await jobs_service.delete_job(
+        job = await jobs_service.delete_job_authorized(
             db,
             job_id,
-            tenant_id=api_key.tenant_id,
+            principal,
+            security_manager,
             audit_service=audit_service,
-            actor_type="api_key",
-            actor_id=api_key.prefix,
             correlation_id=request_id,
             ip_address=request.client.host if request.client else None,
         )
+    except ResourceNotFoundError:
+        raise HTTPException(status_code=404, detail="Job not found") from None
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from None
 

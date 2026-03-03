@@ -4,7 +4,7 @@ Tests the /webhooks/* API endpoints including endpoint CRUD and delivery managem
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -48,8 +48,29 @@ class TestCreateWebhookEndpoint:
         )
 
     @pytest.fixture
-    def app(self, mock_service, admin_api_key):
-        from dalston.gateway.dependencies import get_db, require_auth
+    def mock_security_manager(self):
+        from dalston.gateway.security.manager import SecurityManager
+
+        return MagicMock(spec=SecurityManager)
+
+    @pytest.fixture
+    def mock_principal(self, admin_api_key):
+        from dalston.gateway.security.principal import Principal
+
+        principal = MagicMock(spec=Principal)
+        principal.tenant_id = admin_api_key.tenant_id
+        principal.id = admin_api_key.id
+        principal.is_admin = True
+        return principal
+
+    @pytest.fixture
+    def app(self, mock_service, admin_api_key, mock_security_manager, mock_principal):
+        from dalston.gateway.dependencies import (
+            get_db,
+            get_principal,
+            get_security_manager,
+            require_auth,
+        )
 
         app = FastAPI()
         app.include_router(webhooks_router)
@@ -57,6 +78,8 @@ class TestCreateWebhookEndpoint:
         app.dependency_overrides[get_webhook_endpoint_service] = lambda: mock_service
         app.dependency_overrides[require_auth] = lambda: admin_api_key
         app.dependency_overrides[get_db] = lambda: AsyncMock()
+        app.dependency_overrides[get_security_manager] = lambda: mock_security_manager
+        app.dependency_overrides[get_principal] = lambda: mock_principal
 
         return app
 
@@ -160,8 +183,29 @@ class TestListWebhookEndpoints:
         )
 
     @pytest.fixture
-    def app(self, mock_service, admin_api_key):
-        from dalston.gateway.dependencies import get_db, require_auth
+    def mock_security_manager(self):
+        from dalston.gateway.security.manager import SecurityManager
+
+        return MagicMock(spec=SecurityManager)
+
+    @pytest.fixture
+    def mock_principal(self, admin_api_key):
+        from dalston.gateway.security.principal import Principal
+
+        principal = MagicMock(spec=Principal)
+        principal.tenant_id = admin_api_key.tenant_id
+        principal.id = admin_api_key.id
+        principal.is_admin = True
+        return principal
+
+    @pytest.fixture
+    def app(self, mock_service, admin_api_key, mock_security_manager, mock_principal):
+        from dalston.gateway.dependencies import (
+            get_db,
+            get_principal,
+            get_security_manager,
+            require_auth,
+        )
 
         app = FastAPI()
         app.include_router(webhooks_router)
@@ -169,6 +213,8 @@ class TestListWebhookEndpoints:
         app.dependency_overrides[get_webhook_endpoint_service] = lambda: mock_service
         app.dependency_overrides[require_auth] = lambda: admin_api_key
         app.dependency_overrides[get_db] = lambda: AsyncMock()
+        app.dependency_overrides[get_security_manager] = lambda: mock_security_manager
+        app.dependency_overrides[get_principal] = lambda: mock_principal
 
         return app
 
@@ -178,7 +224,7 @@ class TestListWebhookEndpoints:
 
     def test_list_endpoints_empty(self, client, mock_service):
         """Test listing endpoints when none exist."""
-        mock_service.list_endpoints.return_value = []
+        mock_service.list_endpoints_authorized.return_value = []
 
         response = client.get("/webhooks")
 
@@ -219,7 +265,7 @@ class TestListWebhookEndpoints:
                 updated_at=now,
             ),
         ]
-        mock_service.list_endpoints.return_value = endpoints
+        mock_service.list_endpoints_authorized.return_value = endpoints
 
         response = client.get("/webhooks")
 
@@ -232,13 +278,13 @@ class TestListWebhookEndpoints:
 
     def test_list_endpoints_filter_active(self, client, mock_service):
         """Test filtering endpoints by active status."""
-        mock_service.list_endpoints.return_value = []
+        mock_service.list_endpoints_authorized.return_value = []
 
         response = client.get("/webhooks?is_active=true")
 
         assert response.status_code == 200
-        mock_service.list_endpoints.assert_called_once()
-        call_args = mock_service.list_endpoints.call_args
+        mock_service.list_endpoints_authorized.assert_called_once()
+        call_args = mock_service.list_endpoints_authorized.call_args
         assert call_args.kwargs["is_active"] is True
 
 
@@ -266,8 +312,29 @@ class TestGetWebhookEndpoint:
         )
 
     @pytest.fixture
-    def app(self, mock_service, admin_api_key):
-        from dalston.gateway.dependencies import get_db, require_auth
+    def mock_security_manager(self):
+        from dalston.gateway.security.manager import SecurityManager
+
+        return MagicMock(spec=SecurityManager)
+
+    @pytest.fixture
+    def mock_principal(self, admin_api_key):
+        from dalston.gateway.security.principal import Principal
+
+        principal = MagicMock(spec=Principal)
+        principal.tenant_id = admin_api_key.tenant_id
+        principal.id = admin_api_key.id
+        principal.is_admin = True
+        return principal
+
+    @pytest.fixture
+    def app(self, mock_service, admin_api_key, mock_security_manager, mock_principal):
+        from dalston.gateway.dependencies import (
+            get_db,
+            get_principal,
+            get_security_manager,
+            require_auth,
+        )
 
         app = FastAPI()
         app.include_router(webhooks_router)
@@ -275,6 +342,8 @@ class TestGetWebhookEndpoint:
         app.dependency_overrides[get_webhook_endpoint_service] = lambda: mock_service
         app.dependency_overrides[require_auth] = lambda: admin_api_key
         app.dependency_overrides[get_db] = lambda: AsyncMock()
+        app.dependency_overrides[get_security_manager] = lambda: mock_security_manager
+        app.dependency_overrides[get_principal] = lambda: mock_principal
 
         return app
 
@@ -300,7 +369,7 @@ class TestGetWebhookEndpoint:
             created_at=now,
             updated_at=now,
         )
-        mock_service.get_endpoint.return_value = endpoint
+        mock_service.get_endpoint_authorized.return_value = endpoint
 
         response = client.get(f"/webhooks/{endpoint_id}")
 
@@ -313,7 +382,7 @@ class TestGetWebhookEndpoint:
 
     def test_get_endpoint_not_found(self, client, mock_service):
         """Test 404 when endpoint doesn't exist."""
-        mock_service.get_endpoint.return_value = None
+        mock_service.get_endpoint_authorized.return_value = None
 
         response = client.get(f"/webhooks/{uuid4()}")
 
@@ -344,8 +413,29 @@ class TestDeleteWebhookEndpoint:
         )
 
     @pytest.fixture
-    def app(self, mock_service, admin_api_key):
-        from dalston.gateway.dependencies import get_db, require_auth
+    def mock_security_manager(self):
+        from dalston.gateway.security.manager import SecurityManager
+
+        return MagicMock(spec=SecurityManager)
+
+    @pytest.fixture
+    def mock_principal(self, admin_api_key):
+        from dalston.gateway.security.principal import Principal
+
+        principal = MagicMock(spec=Principal)
+        principal.tenant_id = admin_api_key.tenant_id
+        principal.id = admin_api_key.id
+        principal.is_admin = True
+        return principal
+
+    @pytest.fixture
+    def app(self, mock_service, admin_api_key, mock_security_manager, mock_principal):
+        from dalston.gateway.dependencies import (
+            get_db,
+            get_principal,
+            get_security_manager,
+            require_auth,
+        )
 
         app = FastAPI()
         app.include_router(webhooks_router)
@@ -353,6 +443,8 @@ class TestDeleteWebhookEndpoint:
         app.dependency_overrides[get_webhook_endpoint_service] = lambda: mock_service
         app.dependency_overrides[require_auth] = lambda: admin_api_key
         app.dependency_overrides[get_db] = lambda: AsyncMock()
+        app.dependency_overrides[get_security_manager] = lambda: mock_security_manager
+        app.dependency_overrides[get_principal] = lambda: mock_principal
 
         return app
 
@@ -362,7 +454,7 @@ class TestDeleteWebhookEndpoint:
 
     def test_delete_endpoint_success(self, client, mock_service):
         """Test successful endpoint deletion."""
-        mock_service.delete_endpoint.return_value = True
+        mock_service.delete_endpoint_authorized.return_value = True
 
         response = client.delete(f"/webhooks/{uuid4()}")
 
@@ -370,7 +462,11 @@ class TestDeleteWebhookEndpoint:
 
     def test_delete_endpoint_not_found(self, client, mock_service):
         """Test 404 when endpoint doesn't exist."""
-        mock_service.delete_endpoint.return_value = False
+        from dalston.gateway.security.exceptions import ResourceNotFoundError
+
+        mock_service.delete_endpoint_authorized.side_effect = ResourceNotFoundError(
+            "webhook", str(uuid4())
+        )
 
         response = client.delete(f"/webhooks/{uuid4()}")
 
@@ -401,8 +497,29 @@ class TestRotateSecret:
         )
 
     @pytest.fixture
-    def app(self, mock_service, admin_api_key):
-        from dalston.gateway.dependencies import get_db, require_auth
+    def mock_security_manager(self):
+        from dalston.gateway.security.manager import SecurityManager
+
+        return MagicMock(spec=SecurityManager)
+
+    @pytest.fixture
+    def mock_principal(self, admin_api_key):
+        from dalston.gateway.security.principal import Principal
+
+        principal = MagicMock(spec=Principal)
+        principal.tenant_id = admin_api_key.tenant_id
+        principal.id = admin_api_key.id
+        principal.is_admin = True
+        return principal
+
+    @pytest.fixture
+    def app(self, mock_service, admin_api_key, mock_security_manager, mock_principal):
+        from dalston.gateway.dependencies import (
+            get_db,
+            get_principal,
+            get_security_manager,
+            require_auth,
+        )
 
         app = FastAPI()
         app.include_router(webhooks_router)
@@ -410,6 +527,8 @@ class TestRotateSecret:
         app.dependency_overrides[get_webhook_endpoint_service] = lambda: mock_service
         app.dependency_overrides[require_auth] = lambda: admin_api_key
         app.dependency_overrides[get_db] = lambda: AsyncMock()
+        app.dependency_overrides[get_security_manager] = lambda: mock_security_manager
+        app.dependency_overrides[get_principal] = lambda: mock_principal
 
         return app
 
@@ -435,6 +554,7 @@ class TestRotateSecret:
             created_at=now,
             updated_at=now,
         )
+        mock_service.get_endpoint_authorized.return_value = endpoint
         mock_service.rotate_secret.return_value = (endpoint, "whsec_newsecret456")
 
         response = client.post(f"/webhooks/{endpoint_id}/rotate-secret")
@@ -445,7 +565,7 @@ class TestRotateSecret:
 
     def test_rotate_secret_not_found(self, client, mock_service):
         """Test 404 when endpoint doesn't exist."""
-        mock_service.rotate_secret.return_value = None
+        mock_service.get_endpoint_authorized.return_value = None
 
         response = client.post(f"/webhooks/{uuid4()}/rotate-secret")
 
@@ -476,8 +596,29 @@ class TestRetryDelivery:
         )
 
     @pytest.fixture
-    def app(self, mock_service, admin_api_key):
-        from dalston.gateway.dependencies import get_db, require_auth
+    def mock_security_manager(self):
+        from dalston.gateway.security.manager import SecurityManager
+
+        return MagicMock(spec=SecurityManager)
+
+    @pytest.fixture
+    def mock_principal(self, admin_api_key):
+        from dalston.gateway.security.principal import Principal
+
+        principal = MagicMock(spec=Principal)
+        principal.tenant_id = admin_api_key.tenant_id
+        principal.id = admin_api_key.id
+        principal.is_admin = True
+        return principal
+
+    @pytest.fixture
+    def app(self, mock_service, admin_api_key, mock_security_manager, mock_principal):
+        from dalston.gateway.dependencies import (
+            get_db,
+            get_principal,
+            get_security_manager,
+            require_auth,
+        )
 
         app = FastAPI()
         app.include_router(webhooks_router)
@@ -485,6 +626,8 @@ class TestRetryDelivery:
         app.dependency_overrides[get_webhook_endpoint_service] = lambda: mock_service
         app.dependency_overrides[require_auth] = lambda: admin_api_key
         app.dependency_overrides[get_db] = lambda: AsyncMock()
+        app.dependency_overrides[get_security_manager] = lambda: mock_security_manager
+        app.dependency_overrides[get_principal] = lambda: mock_principal
 
         return app
 
@@ -497,6 +640,23 @@ class TestRetryDelivery:
         now = datetime.now(UTC)
         endpoint_id = uuid4()
         delivery_id = uuid4()
+
+        endpoint = WebhookEndpointModel(
+            id=endpoint_id,
+            tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
+            url="https://example.com/webhook",
+            description="Test webhook",
+            events=["transcription.completed"],
+            signing_secret="whsec_secret",
+            is_active=True,
+            consecutive_failures=0,
+            last_success_at=None,
+            disabled_reason=None,
+            created_at=now,
+            updated_at=now,
+        )
+        mock_service.get_endpoint_authorized.return_value = endpoint
+
         delivery = WebhookDeliveryModel(
             id=delivery_id,
             endpoint_id=endpoint_id,
@@ -523,6 +683,24 @@ class TestRetryDelivery:
 
     def test_retry_delivery_not_failed(self, client, mock_service):
         """Test 400 when delivery is not in failed status."""
+        now = datetime.now(UTC)
+        endpoint_id = uuid4()
+
+        endpoint = WebhookEndpointModel(
+            id=endpoint_id,
+            tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
+            url="https://example.com/webhook",
+            description="Test webhook",
+            events=["transcription.completed"],
+            signing_secret="whsec_secret",
+            is_active=True,
+            consecutive_failures=0,
+            last_success_at=None,
+            disabled_reason=None,
+            created_at=now,
+            updated_at=now,
+        )
+        mock_service.get_endpoint_authorized.return_value = endpoint
         mock_service.retry_delivery.side_effect = ValueError(
             "Can only retry failed deliveries, current status: pending"
         )
@@ -534,6 +712,24 @@ class TestRetryDelivery:
 
     def test_retry_delivery_not_found(self, client, mock_service):
         """Test 404 when delivery doesn't exist."""
+        now = datetime.now(UTC)
+        endpoint_id = uuid4()
+
+        endpoint = WebhookEndpointModel(
+            id=endpoint_id,
+            tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
+            url="https://example.com/webhook",
+            description="Test webhook",
+            events=["transcription.completed"],
+            signing_secret="whsec_secret",
+            is_active=True,
+            consecutive_failures=0,
+            last_success_at=None,
+            disabled_reason=None,
+            created_at=now,
+            updated_at=now,
+        )
+        mock_service.get_endpoint_authorized.return_value = endpoint
         mock_service.retry_delivery.return_value = None
 
         response = client.post(f"/webhooks/{uuid4()}/deliveries/{uuid4()}/retry")

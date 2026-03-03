@@ -4,19 +4,27 @@ Handles CRUD operations for admin-registered webhook endpoints and
 delivery log queries.
 """
 
+from __future__ import annotations
+
 import secrets
 from datetime import UTC, datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.db.models import WebhookDeliveryModel, WebhookEndpointModel
+from dalston.gateway.security.exceptions import ResourceNotFoundError
+from dalston.gateway.security.permissions import Permission
 from dalston.gateway.services.webhook import (
     WebhookValidationError,
     validate_webhook_url,
 )
+
+if TYPE_CHECKING:
+    from dalston.gateway.security.manager import SecurityManager
+    from dalston.gateway.security.principal import Principal
 
 # Allowed event types for webhook subscriptions
 ALLOWED_EVENTS = frozenset(
@@ -443,3 +451,169 @@ class WebhookEndpointService:
                 f"Invalid event types: {invalid}. "
                 f"Allowed: {', '.join(sorted(ALLOWED_EVENTS))}"
             )
+
+    # =========================================================================
+    # Authorized Methods (M45 Phase 4)
+    # =========================================================================
+
+    async def get_endpoint_authorized(
+        self,
+        db: AsyncSession,
+        endpoint_id: UUID,
+        principal: Principal,
+        security_manager: SecurityManager,
+    ) -> WebhookEndpointModel | None:
+        """Get webhook endpoint with authorization check.
+
+        Args:
+            db: Database session
+            endpoint_id: Endpoint UUID
+            principal: Authenticated principal
+            security_manager: SecurityManager instance
+
+        Returns:
+            Webhook endpoint if found and accessible, None otherwise
+
+        Raises:
+            AuthorizationError: If principal lacks WEBHOOK_READ permission
+        """
+        security_manager.require_permission(principal, Permission.WEBHOOK_READ)
+
+        endpoint = await self.get_endpoint(db, endpoint_id, principal.tenant_id)
+        if endpoint is None:
+            return None
+
+        # Check ownership for non-admin
+        if not principal.is_admin:
+            if (
+                endpoint.created_by_key_id
+                and endpoint.created_by_key_id != principal.id
+            ):
+                return None  # Return None to map to 404 (anti-enumeration)
+
+        return endpoint
+
+    async def list_endpoints_authorized(
+        self,
+        db: AsyncSession,
+        principal: Principal,
+        security_manager: SecurityManager,
+        is_active: bool | None = None,
+    ) -> list[WebhookEndpointModel]:
+        """List webhook endpoints with authorization check.
+
+        Non-admin principals only see endpoints they created.
+
+        Args:
+            db: Database session
+            principal: Authenticated principal
+            security_manager: SecurityManager instance
+            is_active: Optional filter by active status
+
+        Returns:
+            List of webhook endpoints
+
+        Raises:
+            AuthorizationError: If principal lacks WEBHOOK_READ permission
+        """
+        security_manager.require_permission(principal, Permission.WEBHOOK_READ)
+
+        endpoints = await self.list_endpoints(
+            db, principal.tenant_id, is_active=is_active
+        )
+
+        # Filter by ownership for non-admin
+        if not principal.is_admin:
+            endpoints = [
+                e
+                for e in endpoints
+                if e.created_by_key_id is None or e.created_by_key_id == principal.id
+            ]
+
+        return endpoints
+
+    async def update_endpoint_authorized(
+        self,
+        db: AsyncSession,
+        endpoint_id: UUID,
+        principal: Principal,
+        security_manager: SecurityManager,
+        url: str | None = None,
+        events: list[str] | None = None,
+        description: str | None = None,
+        is_active: bool | None = None,
+    ) -> WebhookEndpointModel | None:
+        """Update webhook endpoint with authorization check.
+
+        Args:
+            db: Database session
+            endpoint_id: Endpoint UUID
+            principal: Authenticated principal
+            security_manager: SecurityManager instance
+            url: New URL (optional)
+            events: New events list (optional)
+            description: New description (optional)
+            is_active: New active status (optional)
+
+        Returns:
+            Updated endpoint or None if not found
+
+        Raises:
+            AuthorizationError: If principal lacks WEBHOOK_UPDATE permission
+            ResourceNotFoundError: If endpoint not found or not accessible
+        """
+        security_manager.require_permission(principal, Permission.WEBHOOK_UPDATE)
+
+        endpoint = await self.get_endpoint(db, endpoint_id, principal.tenant_id)
+        if endpoint is None:
+            raise ResourceNotFoundError("webhook_endpoint", endpoint_id)
+
+        # Check ownership for non-admin
+        if not principal.is_admin:
+            if (
+                endpoint.created_by_key_id
+                and endpoint.created_by_key_id != principal.id
+            ):
+                raise ResourceNotFoundError("webhook_endpoint", endpoint_id)
+
+        return await self.update_endpoint(
+            db, endpoint_id, principal.tenant_id, url, events, description, is_active
+        )
+
+    async def delete_endpoint_authorized(
+        self,
+        db: AsyncSession,
+        endpoint_id: UUID,
+        principal: Principal,
+        security_manager: SecurityManager,
+    ) -> bool:
+        """Delete webhook endpoint with authorization check.
+
+        Args:
+            db: Database session
+            endpoint_id: Endpoint UUID
+            principal: Authenticated principal
+            security_manager: SecurityManager instance
+
+        Returns:
+            True if deleted, False if not found
+
+        Raises:
+            AuthorizationError: If principal lacks WEBHOOK_DELETE permission
+            ResourceNotFoundError: If endpoint not found or not accessible
+        """
+        security_manager.require_permission(principal, Permission.WEBHOOK_DELETE)
+
+        endpoint = await self.get_endpoint(db, endpoint_id, principal.tenant_id)
+        if endpoint is None:
+            raise ResourceNotFoundError("webhook_endpoint", endpoint_id)
+
+        # Check ownership for non-admin
+        if not principal.is_admin:
+            if (
+                endpoint.created_by_key_id
+                and endpoint.created_by_key_id != principal.id
+            ):
+                raise ResourceNotFoundError("webhook_endpoint", endpoint_id)
+
+        return await self.delete_endpoint(db, endpoint_id, principal.tenant_id)

@@ -17,10 +17,14 @@ from dalston.common.models import (
 from dalston.common.retention import RETENTION_DEFAULT_DAYS
 from dalston.common.utils import parse_session_id
 from dalston.db.models import RealtimeSessionModel
+from dalston.gateway.security.exceptions import ResourceNotFoundError
+from dalston.gateway.security.permissions import Permission
 from dalston.gateway.services.artifacts import ArtifactService
 
 if TYPE_CHECKING:
     from dalston.config import Settings
+    from dalston.gateway.security.manager import SecurityManager
+    from dalston.gateway.security.principal import Principal
 
 logger = structlog.get_logger()
 
@@ -445,3 +449,138 @@ class RealtimeSessionService:
         Delegates to dalston.common.utils.parse_session_id.
         """
         return parse_session_id(session_id)
+
+    # =========================================================================
+    # Authorized Methods (M45 Phase 4)
+    # =========================================================================
+
+    async def get_session_authorized(
+        self,
+        session_id: str,
+        principal: Principal,
+        security_manager: SecurityManager,
+    ) -> RealtimeSessionModel | None:
+        """Get session with authorization check.
+
+        Verifies the principal has permission to read the session and enforces
+        ownership isolation for non-admin principals.
+
+        Args:
+            session_id: Session ID
+            principal: Authenticated principal
+            security_manager: SecurityManager instance
+
+        Returns:
+            Session if found and accessible, None otherwise
+
+        Raises:
+            AuthorizationError: If principal lacks SESSION_READ_OWN permission
+        """
+        security_manager.require_permission(principal, Permission.SESSION_READ_OWN)
+
+        session = await self.get_session(session_id)
+        if session is None:
+            return None
+
+        # Verify tenant isolation
+        if session.tenant_id != principal.tenant_id:
+            return None
+
+        # Check ownership for non-admin
+        if not principal.is_admin:
+            if session.created_by_key_id and session.created_by_key_id != principal.id:
+                return None  # Return None to map to 404 (anti-enumeration)
+
+        return session
+
+    async def list_sessions_authorized(
+        self,
+        principal: Principal,
+        security_manager: SecurityManager,
+        status: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+        sort: Literal["started_desc", "started_asc"] = "started_desc",
+    ) -> tuple[list[RealtimeSessionModel], bool]:
+        """List sessions with authorization check.
+
+        Non-admin principals only see sessions they created (ownership filtering).
+
+        Args:
+            principal: Authenticated principal
+            security_manager: SecurityManager instance
+            status: Filter by status
+            since: Filter sessions started after this time
+            until: Filter sessions started before this time
+            limit: Max results
+            cursor: Pagination cursor
+            sort: Sort order for started_at
+
+        Returns:
+            Tuple of (sessions, has_more)
+
+        Raises:
+            AuthorizationError: If principal lacks SESSION_READ_OWN permission
+        """
+        security_manager.require_permission(principal, Permission.SESSION_READ_OWN)
+
+        sessions, has_more = await self.list_sessions(
+            tenant_id=principal.tenant_id,
+            status=status,
+            since=since,
+            until=until,
+            limit=limit,
+            cursor=cursor,
+            sort=sort,
+        )
+
+        # Filter by ownership for non-admin
+        if not principal.is_admin:
+            sessions = [
+                s
+                for s in sessions
+                if s.created_by_key_id is None or s.created_by_key_id == principal.id
+            ]
+
+        return sessions, has_more
+
+    async def delete_session_authorized(
+        self,
+        session_id: str,
+        principal: Principal,
+        security_manager: SecurityManager,
+    ) -> bool:
+        """Delete session with authorization check.
+
+        Args:
+            session_id: Session ID
+            principal: Authenticated principal
+            security_manager: SecurityManager instance
+
+        Returns:
+            True if deleted, False if not found
+
+        Raises:
+            AuthorizationError: If principal lacks SESSION_READ_OWN permission
+            ResourceNotFoundError: If session not found or not accessible
+            ValueError: If session is still active
+        """
+        # Use SESSION_READ_OWN for now (no DELETE permission defined)
+        security_manager.require_permission(principal, Permission.SESSION_READ_OWN)
+
+        session = await self.get_session(session_id)
+        if session is None:
+            raise ResourceNotFoundError("session", session_id)
+
+        # Verify tenant isolation
+        if session.tenant_id != principal.tenant_id:
+            raise ResourceNotFoundError("session", session_id)
+
+        # Check ownership for non-admin
+        if not principal.is_admin:
+            if session.created_by_key_id and session.created_by_key_id != principal.id:
+                raise ResourceNotFoundError("session", session_id)
+
+        return await self.delete_session(session_id, principal.tenant_id)

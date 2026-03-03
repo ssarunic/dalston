@@ -24,7 +24,10 @@ from dalston.common.timeouts import S3_PRESIGNED_URL_EXPIRY_SECONDS
 from dalston.config import get_settings
 from dalston.db.models import RealtimeSessionModel
 from dalston.db.session import get_db
-from dalston.gateway.dependencies import RequireJobsRead
+from dalston.gateway.dependencies import get_principal, get_security_manager
+from dalston.gateway.security.exceptions import ResourceNotFoundError
+from dalston.gateway.security.manager import SecurityManager
+from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.realtime_sessions import RealtimeSessionService
 from dalston.gateway.services.storage import StorageService
@@ -101,7 +104,8 @@ class SessionsListResponse(BaseModel):
     description="List past and active realtime transcription sessions.",
 )
 async def list_realtime_sessions(
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: Annotated[AsyncSession, Depends(get_db)],
     status: Annotated[str | None, Query(description="Filter by status")] = None,
     since: Annotated[
@@ -141,8 +145,9 @@ async def list_realtime_sessions(
     settings = get_settings()
     service = RealtimeSessionService(db, settings)
 
-    sessions, has_more = await service.list_sessions(
-        tenant_id=api_key.tenant_id,
+    sessions, has_more = await service.list_sessions_authorized(
+        principal=principal,
+        security_manager=security_manager,
         status=status,
         since=since_dt,
         until=until_dt,
@@ -187,20 +192,19 @@ async def list_realtime_sessions(
 )
 async def get_realtime_session(
     session_id: str,
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SessionDetail:
     """Get details of a specific realtime session."""
     settings = get_settings()
     service = RealtimeSessionService(db, settings)
 
-    session = await service.get_session(session_id)
+    session = await service.get_session_authorized(
+        session_id, principal, security_manager
+    )
 
     if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    # Verify tenant access
-    if session.tenant_id != api_key.tenant_id:
         raise HTTPException(status_code=404, detail="Session not found")
 
     return SessionDetail(
@@ -241,7 +245,8 @@ async def get_realtime_session(
 )
 async def delete_realtime_session(
     session_id: str,
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Delete a realtime session.
@@ -252,7 +257,11 @@ async def delete_realtime_session(
     service = RealtimeSessionService(db, settings)
 
     try:
-        deleted = await service.delete_session(session_id, api_key.tenant_id)
+        deleted = await service.delete_session_authorized(
+            session_id, principal, security_manager
+        )
+    except ResourceNotFoundError:
+        raise HTTPException(status_code=404, detail="Session not found") from None
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
 
@@ -272,16 +281,19 @@ async def delete_realtime_session(
 )
 async def get_session_transcript(
     session_id: str,
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Get transcript JSON for a session."""
     settings = get_settings()
     service = RealtimeSessionService(db, settings)
 
-    session = await service.get_session(session_id)
+    session = await service.get_session_authorized(
+        session_id, principal, security_manager
+    )
 
-    if session is None or session.tenant_id != api_key.tenant_id:
+    if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
     if not session.transcript_uri:
@@ -356,7 +368,8 @@ def _normalize_realtime_transcript(transcript: dict) -> dict:
 async def export_session_transcript(
     session_id: str,
     format: str,
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: Annotated[AsyncSession, Depends(get_db)],
     include_speakers: Annotated[
         bool, Query(description="Include speaker labels in output")
@@ -380,10 +393,12 @@ async def export_session_transcript(
     settings = get_settings()
     service = RealtimeSessionService(db, settings)
 
-    # Get session and verify tenant access
-    session = await service.get_session(session_id)
+    # Get session with authorization check
+    session = await service.get_session_authorized(
+        session_id, principal, security_manager
+    )
 
-    if session is None or session.tenant_id != api_key.tenant_id:
+    if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
     if not session.transcript_uri:
@@ -435,16 +450,19 @@ async def export_session_transcript(
 )
 async def get_session_audio(
     session_id: str,
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Get presigned URL for session audio."""
     settings = get_settings()
     service = RealtimeSessionService(db, settings)
 
-    session = await service.get_session(session_id)
+    session = await service.get_session_authorized(
+        session_id, principal, security_manager
+    )
 
-    if session is None or session.tenant_id != api_key.tenant_id:
+    if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
     if not session.audio_uri:

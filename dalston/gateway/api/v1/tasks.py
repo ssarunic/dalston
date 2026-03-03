@@ -4,6 +4,7 @@ GET /v1/audio/transcriptions/{job_id}/tasks - List tasks for a job
 GET /v1/audio/transcriptions/{job_id}/tasks/{task_id}/artifacts - Get task artifacts
 """
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,9 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dalston.common.utils import compute_duration_ms
 from dalston.config import Settings
 from dalston.gateway.dependencies import (
-    RequireJobsRead,
     get_db,
     get_jobs_service,
+    get_principal,
+    get_security_manager,
     get_settings,
 )
 from dalston.gateway.models.responses import (
@@ -22,6 +24,8 @@ from dalston.gateway.models.responses import (
     TaskListResponse,
     TaskResponse,
 )
+from dalston.gateway.security.manager import SecurityManager
+from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
 
@@ -36,7 +40,8 @@ router = APIRouter(prefix="/audio/transcriptions", tags=["tasks"])
 )
 async def list_job_tasks(
     job_id: UUID,
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
     jobs_service: JobsService = Depends(get_jobs_service),
 ) -> TaskListResponse:
@@ -44,13 +49,15 @@ async def list_job_tasks(
 
     Returns task metadata including dependencies for pipeline visualization.
     """
-    # Verify job exists and belongs to tenant
-    job = await jobs_service.get_job(db, job_id, tenant_id=api_key.tenant_id)
+    # Verify job exists and belongs to tenant (with authorization)
+    job = await jobs_service.get_job_with_tasks_authorized(
+        db, job_id, principal, security_manager
+    )
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Fetch tasks in topological order
-    tasks = await jobs_service.get_job_tasks(db, job_id, tenant_id=api_key.tenant_id)
+    # Tasks are already loaded, just sort them topologically
+    tasks = jobs_service._topological_sort_tasks(list(job.tasks)) if job.tasks else []
 
     return TaskListResponse(
         job_id=job_id,
@@ -86,7 +93,8 @@ async def list_job_tasks(
 async def get_task_artifacts(
     job_id: UUID,
     task_id: UUID,
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
@@ -95,17 +103,20 @@ async def get_task_artifacts(
 
     Fetches the raw JSON data that was passed to and produced by the engine.
     """
-    # Fetch task (verifies job exists and belongs to tenant)
-    task = await jobs_service.get_task(db, job_id, task_id, tenant_id=api_key.tenant_id)
+    # Verify job exists and is accessible (with authorization)
+    job = await jobs_service.get_job_authorized(db, job_id, principal, security_manager)
+    if job is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "job_not_found", "message": "Job not found"},
+        )
+
+    # Fetch task (job access already verified above)
+    task = await jobs_service.get_task(
+        db, job_id, task_id, tenant_id=principal.tenant_id
+    )
 
     if task is None:
-        # Check if job exists to give appropriate error
-        job = await jobs_service.get_job(db, job_id, tenant_id=api_key.tenant_id)
-        if job is None:
-            raise HTTPException(
-                status_code=404,
-                detail={"code": "job_not_found", "message": "Job not found"},
-            )
         raise HTTPException(
             status_code=404,
             detail={"code": "task_not_found", "message": "Task not found"},

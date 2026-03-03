@@ -497,3 +497,71 @@ class AuditService:
             detail=detail if detail else None,
             correlation_id=correlation_id,
         )
+
+    async def log_permission_denied(
+        self,
+        principal_id: UUID,
+        permission: str,
+        resource_type: str,
+        resource_id: str,
+        *,
+        tenant_id: UUID | None = None,
+        correlation_id: str | None = None,
+        ip_address: str | None = None,
+    ) -> None:
+        """Log permission denied event for security monitoring.
+
+        This method records failed authorization attempts for security auditing
+        and anomaly detection.
+
+        Args:
+            principal_id: ID of the principal (API key or session) that was denied
+            permission: The permission that was required but missing
+            resource_type: Type of resource being accessed
+            resource_id: ID of the resource being accessed
+            tenant_id: Optional tenant UUID
+            correlation_id: Optional request correlation ID
+            ip_address: Optional client IP address
+        """
+        await self.log(
+            action="permission.denied",
+            resource_type=resource_type,
+            resource_id=resource_id,
+            tenant_id=tenant_id,
+            actor_type="api_key",
+            actor_id=str(principal_id),
+            detail={"required_permission": permission},
+            correlation_id=correlation_id,
+            ip_address=ip_address,
+        )
+
+    async def log_auth_failure(
+        self,
+        reason: str,
+        *,
+        key_prefix: str | None = None,
+        correlation_id: str | None = None,
+        ip_address: str | None = None,
+    ) -> None:
+        """Log authentication failure for security monitoring.
+
+        This method records failed authentication attempts for security auditing,
+        brute-force detection, and anomaly monitoring.
+
+        Args:
+            reason: The reason for authentication failure (e.g., "invalid_key",
+                   "expired_key", "revoked_key", "missing_header")
+            key_prefix: Optional key prefix for partial identification
+            correlation_id: Optional request correlation ID
+            ip_address: Optional client IP address
+        """
+        await self.log(
+            action="auth.failed",
+            resource_type="api_key",
+            resource_id=key_prefix or "unknown",
+            actor_type="anonymous",
+            actor_id="unknown",
+            detail={"reason": reason},
+            correlation_id=correlation_id,
+            ip_address=ip_address,
+        )

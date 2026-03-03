@@ -71,14 +71,39 @@ class TestCancelTranscription:
         return rate_limiter
 
     @pytest.fixture
+    def mock_security_manager(self):
+        from dalston.gateway.security.manager import SecurityManager
+
+        return MagicMock(spec=SecurityManager)
+
+    @pytest.fixture
+    def mock_principal(self):
+        from dalston.gateway.security.principal import Principal
+
+        principal = MagicMock(spec=Principal)
+        principal.tenant_id = TENANT_ID
+        principal.id = UUID("12345678-1234-1234-1234-123456789abc")
+        principal.is_admin = False
+        return principal
+
+    @pytest.fixture
     def app(
-        self, mock_jobs_service, mock_db, mock_redis, mock_settings, mock_rate_limiter
+        self,
+        mock_jobs_service,
+        mock_db,
+        mock_redis,
+        mock_settings,
+        mock_rate_limiter,
+        mock_security_manager,
+        mock_principal,
     ):
         from dalston.gateway.dependencies import (
             get_db,
             get_jobs_service,
+            get_principal,
             get_rate_limiter,
             get_redis,
+            get_security_manager,
             get_settings,
             require_auth,
         )
@@ -93,6 +118,8 @@ class TestCancelTranscription:
         app.dependency_overrides[get_settings] = lambda: mock_settings
         app.dependency_overrides[get_rate_limiter] = lambda: mock_rate_limiter
         app.dependency_overrides[require_auth] = lambda: api_key
+        app.dependency_overrides[get_security_manager] = lambda: mock_security_manager
+        app.dependency_overrides[get_principal] = lambda: mock_principal
 
         return app
 
@@ -106,7 +133,7 @@ class TestCancelTranscription:
     ):
         """Test that cancelling a pending job returns 200."""
         job = _make_job(JobStatus.PENDING.value)
-        mock_jobs_service.cancel_job.return_value = CancelResult(
+        mock_jobs_service.cancel_job_authorized.return_value = CancelResult(
             job=job,
             status=JobStatus.CANCELLED,
             message="Job cancelled.",
@@ -120,7 +147,7 @@ class TestCancelTranscription:
         assert data["id"] == str(JOB_ID)
         assert data["status"] == "cancelled"
         assert data["message"] == "Job cancelled."
-        mock_jobs_service.cancel_job.assert_awaited_once()
+        mock_jobs_service.cancel_job_authorized.assert_awaited_once()
         mock_publish.assert_awaited_once()
 
     @patch("dalston.gateway.api.v1.transcription.publish_job_cancel_requested")
@@ -129,7 +156,7 @@ class TestCancelTranscription:
     ):
         """Test that immediate cancellation decrements the concurrent job counter."""
         job = _make_job(JobStatus.PENDING.value)
-        mock_jobs_service.cancel_job.return_value = CancelResult(
+        mock_jobs_service.cancel_job_authorized.return_value = CancelResult(
             job=job,
             status=JobStatus.CANCELLED,  # Immediate cancellation
             message="Job cancelled.",
@@ -150,7 +177,7 @@ class TestCancelTranscription:
     ):
         """Test that cancelling a running job with active tasks returns cancelling."""
         job = _make_job(JobStatus.RUNNING.value)
-        mock_jobs_service.cancel_job.return_value = CancelResult(
+        mock_jobs_service.cancel_job_authorized.return_value = CancelResult(
             job=job,
             status=JobStatus.CANCELLING,
             message="Cancellation requested. 2 task(s) still running.",
@@ -170,7 +197,7 @@ class TestCancelTranscription:
     ):
         """Test that CANCELLING state does not decrement counter (orchestrator will)."""
         job = _make_job(JobStatus.RUNNING.value)
-        mock_jobs_service.cancel_job.return_value = CancelResult(
+        mock_jobs_service.cancel_job_authorized.return_value = CancelResult(
             job=job,
             status=JobStatus.CANCELLING,  # Not immediate
             message="Cancellation requested. 2 task(s) still running.",
@@ -185,7 +212,11 @@ class TestCancelTranscription:
 
     def test_cancel_nonexistent_job_returns_404(self, client, mock_jobs_service):
         """Test that cancelling a nonexistent job returns 404."""
-        mock_jobs_service.cancel_job.return_value = None
+        from dalston.gateway.security.exceptions import ResourceNotFoundError
+
+        mock_jobs_service.cancel_job_authorized.side_effect = ResourceNotFoundError(
+            "job", str(JOB_ID)
+        )
 
         response = client.post(f"/v1/audio/transcriptions/{JOB_ID}/cancel")
 
@@ -194,7 +225,7 @@ class TestCancelTranscription:
 
     def test_cancel_completed_job_returns_409(self, client, mock_jobs_service):
         """Test that cancelling a completed job returns 409."""
-        mock_jobs_service.cancel_job.side_effect = ValueError(
+        mock_jobs_service.cancel_job_authorized.side_effect = ValueError(
             "Cannot cancel job in 'completed' state. "
             "Only pending or running jobs can be cancelled."
         )
@@ -206,7 +237,7 @@ class TestCancelTranscription:
 
     def test_cancel_failed_job_returns_409(self, client, mock_jobs_service):
         """Test that cancelling a failed job returns 409."""
-        mock_jobs_service.cancel_job.side_effect = ValueError(
+        mock_jobs_service.cancel_job_authorized.side_effect = ValueError(
             "Cannot cancel job in 'failed' state. "
             "Only pending or running jobs can be cancelled."
         )
@@ -218,7 +249,7 @@ class TestCancelTranscription:
 
     def test_cancel_already_cancelled_job_returns_409(self, client, mock_jobs_service):
         """Test that cancelling an already cancelled job returns 409."""
-        mock_jobs_service.cancel_job.side_effect = ValueError(
+        mock_jobs_service.cancel_job_authorized.side_effect = ValueError(
             "Cannot cancel job in 'cancelled' state. "
             "Only pending or running jobs can be cancelled."
         )
@@ -233,30 +264,63 @@ class TestCancelTranscriptionAuthorization:
     """Tests for authorization on cancel endpoint."""
 
     def test_cancel_requires_jobs_write_scope(self):
-        """Test that POST cancel requires jobs:write scope."""
+        """Test that POST cancel requires jobs:write scope.
+
+        Authorization is now enforced via SecurityManager in the service layer.
+        The service's cancel_job_authorized raises AuthorizationError when the
+        principal lacks JOB_DELETE_OWN permission.
+        """
         from dalston.gateway.dependencies import (
             get_db,
             get_jobs_service,
+            get_principal,
             get_rate_limiter,
             get_redis,
+            get_security_manager,
             get_settings,
             require_auth,
         )
+        from dalston.gateway.middleware.security_error_handler import (
+            SecurityErrorHandlerMiddleware,
+        )
+        from dalston.gateway.security.exceptions import AuthorizationError
+        from dalston.gateway.security.manager import SecurityManager
+        from dalston.gateway.security.permissions import Permission
+        from dalston.gateway.security.principal import Principal
 
         api_key = _make_api_key(scopes=[Scope.JOBS_READ])  # No write scope
 
+        # Create mock principal and security manager
+        mock_principal = MagicMock(spec=Principal)
+        mock_principal.tenant_id = TENANT_ID
+        mock_principal.id = UUID("12345678-1234-1234-1234-123456789abc")
+        mock_principal.is_admin = False
+
+        mock_security_manager = MagicMock(spec=SecurityManager)
+
+        # Configure the mock jobs service to raise AuthorizationError
+        mock_jobs_service = AsyncMock(spec=JobsService)
+        mock_jobs_service.cancel_job_authorized.side_effect = AuthorizationError(
+            message="Access denied: requires permission job:delete_own",
+            required_permission=Permission.JOB_CANCEL_OWN.value,
+        )
+
         app = FastAPI()
+        # Add middleware to convert security exceptions to HTTP responses
+        app.add_middleware(SecurityErrorHandlerMiddleware)
         app.include_router(transcription_router, prefix="/v1")
         app.dependency_overrides[get_db] = lambda: AsyncMock()
         app.dependency_overrides[get_redis] = lambda: AsyncMock()
-        app.dependency_overrides[get_jobs_service] = lambda: AsyncMock(spec=JobsService)
+        app.dependency_overrides[get_jobs_service] = lambda: mock_jobs_service
         app.dependency_overrides[get_settings] = lambda: MagicMock(spec=Settings)
         app.dependency_overrides[get_rate_limiter] = lambda: AsyncMock(
             spec=RedisRateLimiter
         )
         app.dependency_overrides[require_auth] = lambda: api_key
+        app.dependency_overrides[get_security_manager] = lambda: mock_security_manager
+        app.dependency_overrides[get_principal] = lambda: mock_principal
 
-        client = TestClient(app)
+        client = TestClient(app, raise_server_exceptions=False)
         response = client.post(f"/v1/audio/transcriptions/{JOB_ID}/cancel")
 
         assert response.status_code == 403

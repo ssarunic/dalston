@@ -18,7 +18,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dalston.gateway.dependencies import RequireWebhooks, get_db
+from dalston.gateway.dependencies import (
+    get_db,
+    get_principal,
+    get_security_manager,
+)
+from dalston.gateway.security.exceptions import ResourceNotFoundError
+from dalston.gateway.security.manager import SecurityManager
+from dalston.gateway.security.permissions import Permission
+from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.webhook import WebhookValidationError
 from dalston.gateway.services.webhook_endpoints import (
     ALLOWED_EVENTS,
@@ -149,19 +157,22 @@ class DeliveryListResponse(BaseModel):
 )
 async def create_webhook_endpoint(
     request: CreateWebhookRequest,
-    api_key: RequireWebhooks,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
     service: WebhookEndpointService = Depends(get_webhook_endpoint_service),
 ) -> WebhookEndpointCreatedResponse:
     """Create a new webhook endpoint."""
+    security_manager.require_permission(principal, Permission.WEBHOOK_CREATE)
+
     try:
         endpoint, raw_secret = await service.create_endpoint(
             db=db,
-            tenant_id=api_key.tenant_id,
+            tenant_id=principal.tenant_id,
             url=str(request.url),
             events=request.events,
             description=request.description,
-            created_by_key_id=api_key.id,
+            created_by_key_id=principal.id,
         )
     except WebhookValidationError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -188,7 +199,8 @@ async def create_webhook_endpoint(
     description="List all webhook endpoints for your tenant.",
 )
 async def list_webhook_endpoints(
-    api_key: RequireWebhooks,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     is_active: Annotated[
         bool | None, Query(description="Filter by active status")
     ] = None,
@@ -196,9 +208,10 @@ async def list_webhook_endpoints(
     service: WebhookEndpointService = Depends(get_webhook_endpoint_service),
 ) -> WebhookEndpointListResponse:
     """List webhook endpoints."""
-    endpoints = await service.list_endpoints(
+    endpoints = await service.list_endpoints_authorized(
         db=db,
-        tenant_id=api_key.tenant_id,
+        principal=principal,
+        security_manager=security_manager,
         is_active=is_active,
     )
     return WebhookEndpointListResponse(
@@ -228,15 +241,17 @@ async def list_webhook_endpoints(
 )
 async def get_webhook_endpoint(
     endpoint_id: UUID,
-    api_key: RequireWebhooks,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
     service: WebhookEndpointService = Depends(get_webhook_endpoint_service),
 ) -> WebhookEndpointResponse:
     """Get a webhook endpoint by ID."""
-    endpoint = await service.get_endpoint(
+    endpoint = await service.get_endpoint_authorized(
         db=db,
         endpoint_id=endpoint_id,
-        tenant_id=api_key.tenant_id,
+        principal=principal,
+        security_manager=security_manager,
     )
     if endpoint is None:
         raise HTTPException(status_code=404, detail="Webhook endpoint not found")
@@ -264,21 +279,27 @@ async def get_webhook_endpoint(
 async def update_webhook_endpoint(
     endpoint_id: UUID,
     request: UpdateWebhookRequest,
-    api_key: RequireWebhooks,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
     service: WebhookEndpointService = Depends(get_webhook_endpoint_service),
 ) -> WebhookEndpointResponse:
     """Update a webhook endpoint."""
     try:
-        endpoint = await service.update_endpoint(
+        endpoint = await service.update_endpoint_authorized(
             db=db,
             endpoint_id=endpoint_id,
-            tenant_id=api_key.tenant_id,
+            principal=principal,
+            security_manager=security_manager,
             url=str(request.url) if request.url else None,
             events=request.events,
             description=request.description,
             is_active=request.is_active,
         )
+    except ResourceNotFoundError:
+        raise HTTPException(
+            status_code=404, detail="Webhook endpoint not found"
+        ) from None
     except WebhookValidationError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -307,16 +328,23 @@ async def update_webhook_endpoint(
 )
 async def delete_webhook_endpoint(
     endpoint_id: UUID,
-    api_key: RequireWebhooks,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
     service: WebhookEndpointService = Depends(get_webhook_endpoint_service),
 ) -> None:
     """Delete a webhook endpoint."""
-    deleted = await service.delete_endpoint(
-        db=db,
-        endpoint_id=endpoint_id,
-        tenant_id=api_key.tenant_id,
-    )
+    try:
+        deleted = await service.delete_endpoint_authorized(
+            db=db,
+            endpoint_id=endpoint_id,
+            principal=principal,
+            security_manager=security_manager,
+        )
+    except ResourceNotFoundError:
+        raise HTTPException(
+            status_code=404, detail="Webhook endpoint not found"
+        ) from None
     if not deleted:
         raise HTTPException(status_code=404, detail="Webhook endpoint not found")
 
@@ -329,15 +357,27 @@ async def delete_webhook_endpoint(
 )
 async def rotate_webhook_secret(
     endpoint_id: UUID,
-    api_key: RequireWebhooks,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
     service: WebhookEndpointService = Depends(get_webhook_endpoint_service),
 ) -> WebhookEndpointCreatedResponse:
     """Rotate the signing secret for a webhook endpoint."""
+    # First verify access with authorization
+    endpoint = await service.get_endpoint_authorized(
+        db=db,
+        endpoint_id=endpoint_id,
+        principal=principal,
+        security_manager=security_manager,
+    )
+    if endpoint is None:
+        raise HTTPException(status_code=404, detail="Webhook endpoint not found")
+
+    # Now rotate the secret
     result = await service.rotate_secret(
         db=db,
         endpoint_id=endpoint_id,
-        tenant_id=api_key.tenant_id,
+        tenant_id=principal.tenant_id,
     )
     if result is None:
         raise HTTPException(status_code=404, detail="Webhook endpoint not found")
@@ -366,7 +406,8 @@ async def rotate_webhook_secret(
 )
 async def list_webhook_deliveries(
     endpoint_id: UUID,
-    api_key: RequireWebhooks,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     status: Annotated[str | None, Query(description="Filter by status")] = None,
     limit: Annotated[int, Query(ge=1, le=100, description="Max results")] = 20,
     cursor: Annotated[
@@ -380,10 +421,20 @@ async def list_webhook_deliveries(
     service: WebhookEndpointService = Depends(get_webhook_endpoint_service),
 ) -> DeliveryListResponse:
     """List delivery attempts for a webhook endpoint."""
+    # First verify access to the endpoint with authorization
+    endpoint = await service.get_endpoint_authorized(
+        db=db,
+        endpoint_id=endpoint_id,
+        principal=principal,
+        security_manager=security_manager,
+    )
+    if endpoint is None:
+        raise HTTPException(status_code=404, detail="Webhook endpoint not found")
+
     deliveries, has_more = await service.list_deliveries(
         db=db,
         endpoint_id=endpoint_id,
-        tenant_id=api_key.tenant_id,
+        tenant_id=principal.tenant_id,
         status=status,
         limit=limit,
         cursor=cursor,
@@ -427,17 +478,28 @@ async def list_webhook_deliveries(
 async def retry_webhook_delivery(
     endpoint_id: UUID,
     delivery_id: UUID,
-    api_key: RequireWebhooks,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
     service: WebhookEndpointService = Depends(get_webhook_endpoint_service),
 ) -> WebhookDeliveryResponse:
     """Retry a failed webhook delivery."""
+    # First verify access to the endpoint with authorization
+    endpoint = await service.get_endpoint_authorized(
+        db=db,
+        endpoint_id=endpoint_id,
+        principal=principal,
+        security_manager=security_manager,
+    )
+    if endpoint is None:
+        raise HTTPException(status_code=404, detail="Webhook endpoint not found")
+
     try:
         delivery = await service.retry_delivery(
             db=db,
             endpoint_id=endpoint_id,
             delivery_id=delivery_id,
-            tenant_id=api_key.tenant_id,
+            tenant_id=principal.tenant_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

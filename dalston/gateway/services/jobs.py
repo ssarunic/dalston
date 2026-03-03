@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy import delete, func, select
@@ -13,6 +13,12 @@ from dalston.common.audit import AuditService
 from dalston.common.models import JobStatus, TaskStatus
 from dalston.common.retention import RETENTION_DEFAULT_DAYS
 from dalston.db.models import JobModel, TaskModel
+from dalston.gateway.security.exceptions import ResourceNotFoundError
+from dalston.gateway.security.permissions import Permission
+
+if TYPE_CHECKING:
+    from dalston.gateway.security.manager import SecurityManager
+    from dalston.gateway.security.principal import Principal
 
 
 class JobStats:
@@ -612,3 +618,258 @@ class JobsService:
             ready = sorted(ready + next_ready, key=lambda t: t.stage)
 
         return result
+
+    # =========================================================================
+    # Authorized Methods (M45 Phase 4)
+    # =========================================================================
+
+    async def get_job_authorized(
+        self,
+        db: AsyncSession,
+        job_id: UUID,
+        principal: "Principal",
+        security_manager: "SecurityManager",
+    ) -> JobModel | None:
+        """Get job with authorization check.
+
+        Verifies the principal has permission to read the job and enforces
+        ownership isolation for non-admin principals.
+
+        Args:
+            db: Database session
+            job_id: Job UUID
+            principal: Authenticated principal
+            security_manager: SecurityManager instance
+
+        Returns:
+            JobModel if found and accessible, None otherwise
+
+        Raises:
+            AuthorizationError: If principal lacks JOB_READ_OWN permission
+        """
+        security_manager.require_permission(principal, Permission.JOB_READ_OWN)
+
+        job = await self.get_job(db, job_id, tenant_id=principal.tenant_id)
+        if job is None:
+            return None
+
+        # Check ownership for non-admin
+        if not principal.is_admin:
+            if job.created_by_key_id and job.created_by_key_id != principal.id:
+                return None  # Return None to map to 404 (anti-enumeration)
+
+        return job
+
+    async def get_job_with_tasks_authorized(
+        self,
+        db: AsyncSession,
+        job_id: UUID,
+        principal: "Principal",
+        security_manager: "SecurityManager",
+    ) -> JobModel | None:
+        """Get job with tasks with authorization check.
+
+        Args:
+            db: Database session
+            job_id: Job UUID
+            principal: Authenticated principal
+            security_manager: SecurityManager instance
+
+        Returns:
+            JobModel with tasks if found and accessible, None otherwise
+
+        Raises:
+            AuthorizationError: If principal lacks JOB_READ_OWN permission
+        """
+        security_manager.require_permission(principal, Permission.JOB_READ_OWN)
+
+        job = await self.get_job_with_tasks(db, job_id, tenant_id=principal.tenant_id)
+        if job is None:
+            return None
+
+        # Check ownership for non-admin
+        if not principal.is_admin:
+            if job.created_by_key_id and job.created_by_key_id != principal.id:
+                return None  # Return None to map to 404 (anti-enumeration)
+
+        return job
+
+    async def delete_job_authorized(
+        self,
+        db: AsyncSession,
+        job_id: UUID,
+        principal: "Principal",
+        security_manager: "SecurityManager",
+        *,
+        audit_service: AuditService | None = None,
+        correlation_id: str | None = None,
+        ip_address: str | None = None,
+    ) -> JobModel | None:
+        """Delete job with authorization check.
+
+        Verifies the principal has permission to delete the job and enforces
+        ownership isolation for non-admin principals.
+
+        Args:
+            db: Database session
+            job_id: Job UUID
+            principal: Authenticated principal
+            security_manager: SecurityManager instance
+            audit_service: Optional audit service for logging
+            correlation_id: Optional request correlation ID
+            ip_address: Optional client IP address
+
+        Returns:
+            The deleted JobModel (detached) or None if not found
+
+        Raises:
+            AuthorizationError: If principal lacks JOB_DELETE_OWN permission
+            ResourceNotFoundError: If job not found or not accessible
+            ValueError: If job is not in a terminal state
+        """
+        security_manager.require_permission(principal, Permission.JOB_DELETE_OWN)
+
+        job = await self.get_job(db, job_id, tenant_id=principal.tenant_id)
+        if job is None:
+            raise ResourceNotFoundError("job", job_id)
+
+        # Check ownership for non-admin
+        if not principal.is_admin:
+            if job.created_by_key_id and job.created_by_key_id != principal.id:
+                raise ResourceNotFoundError("job", job_id)
+
+        return await self.delete_job(
+            db,
+            job_id,
+            tenant_id=principal.tenant_id,
+            audit_service=audit_service,
+            actor_type=principal.actor_type,
+            actor_id=principal.actor_id,
+            correlation_id=correlation_id,
+            ip_address=ip_address,
+        )
+
+    async def cancel_job_authorized(
+        self,
+        db: AsyncSession,
+        job_id: UUID,
+        principal: "Principal",
+        security_manager: "SecurityManager",
+    ) -> CancelResult | None:
+        """Cancel job with authorization check.
+
+        Args:
+            db: Database session
+            job_id: Job UUID
+            principal: Authenticated principal
+            security_manager: SecurityManager instance
+
+        Returns:
+            CancelResult if found and accessible, None otherwise
+
+        Raises:
+            AuthorizationError: If principal lacks JOB_CANCEL_OWN permission
+            ResourceNotFoundError: If job not found or not accessible
+            ValueError: If job is not in a cancellable state
+        """
+        security_manager.require_permission(principal, Permission.JOB_CANCEL_OWN)
+
+        job = await self.get_job(db, job_id, tenant_id=principal.tenant_id)
+        if job is None:
+            raise ResourceNotFoundError("job", job_id)
+
+        # Check ownership for non-admin
+        if not principal.is_admin:
+            if job.created_by_key_id and job.created_by_key_id != principal.id:
+                raise ResourceNotFoundError("job", job_id)
+
+        return await self.cancel_job(db, job_id, tenant_id=principal.tenant_id)
+
+    async def update_display_name_authorized(
+        self,
+        db: AsyncSession,
+        job_id: UUID,
+        display_name: str,
+        principal: "Principal",
+        security_manager: "SecurityManager",
+    ) -> JobModel | None:
+        """Update job display name with authorization check.
+
+        Args:
+            db: Database session
+            job_id: Job UUID
+            display_name: New display name
+            principal: Authenticated principal
+            security_manager: SecurityManager instance
+
+        Returns:
+            Updated JobModel if found and accessible, None otherwise
+
+        Raises:
+            AuthorizationError: If principal lacks JOB_DELETE_OWN permission
+            ResourceNotFoundError: If job not found or not accessible
+        """
+        # Use JOB_DELETE_OWN as proxy for write access to own jobs
+        security_manager.require_permission(principal, Permission.JOB_DELETE_OWN)
+
+        job = await self.get_job(db, job_id, tenant_id=principal.tenant_id)
+        if job is None:
+            raise ResourceNotFoundError("job", job_id)
+
+        # Check ownership for non-admin
+        if not principal.is_admin:
+            if job.created_by_key_id and job.created_by_key_id != principal.id:
+                raise ResourceNotFoundError("job", job_id)
+
+        return await self.update_display_name(
+            db, job_id, display_name, tenant_id=principal.tenant_id
+        )
+
+    async def list_jobs_authorized(
+        self,
+        db: AsyncSession,
+        principal: "Principal",
+        security_manager: "SecurityManager",
+        limit: int = 20,
+        cursor: str | None = None,
+        status: JobStatus | None = None,
+    ) -> tuple[list[JobModel], bool]:
+        """List jobs with authorization check.
+
+        Non-admin principals only see jobs they created (ownership filtering).
+
+        Args:
+            db: Database session
+            principal: Authenticated principal
+            security_manager: SecurityManager instance
+            limit: Maximum number of results
+            cursor: Pagination cursor
+            status: Optional status filter
+
+        Returns:
+            Tuple of (jobs list, has_more flag)
+
+        Raises:
+            AuthorizationError: If principal lacks JOB_READ_OWN permission
+        """
+        security_manager.require_permission(principal, Permission.JOB_READ_OWN)
+
+        # Get all jobs for tenant
+        jobs, has_more = await self.list_jobs(
+            db=db,
+            tenant_id=principal.tenant_id,
+            limit=limit,
+            cursor=cursor,
+            status=status,
+        )
+
+        # Filter by ownership for non-admin
+        if not principal.is_admin:
+            jobs = [
+                job
+                for job in jobs
+                if job.created_by_key_id is None
+                or job.created_by_key_id == principal.id
+            ]
+
+        return jobs, has_more

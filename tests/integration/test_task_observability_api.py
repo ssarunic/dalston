@@ -131,10 +131,36 @@ class TestJobStatusWithStages:
         )
 
     @pytest.fixture
-    def app(self, mock_jobs_service, mock_db, mock_settings, mock_api_key):
+    def mock_security_manager(self):
+        from dalston.gateway.security.manager import SecurityManager
+
+        return MagicMock(spec=SecurityManager)
+
+    @pytest.fixture
+    def mock_principal(self, mock_api_key):
+        from dalston.gateway.security.principal import Principal
+
+        principal = MagicMock(spec=Principal)
+        principal.tenant_id = mock_api_key.tenant_id
+        principal.id = mock_api_key.id
+        principal.is_admin = False
+        return principal
+
+    @pytest.fixture
+    def app(
+        self,
+        mock_jobs_service,
+        mock_db,
+        mock_settings,
+        mock_api_key,
+        mock_security_manager,
+        mock_principal,
+    ):
         from dalston.gateway.dependencies import (
             get_db,
             get_jobs_service,
+            get_principal,
+            get_security_manager,
             get_settings,
             require_auth,
         )
@@ -146,6 +172,8 @@ class TestJobStatusWithStages:
         app.dependency_overrides[get_jobs_service] = lambda: mock_jobs_service
         app.dependency_overrides[get_settings] = lambda: mock_settings
         app.dependency_overrides[require_auth] = lambda: mock_api_key
+        app.dependency_overrides[get_security_manager] = lambda: mock_security_manager
+        app.dependency_overrides[get_principal] = lambda: mock_principal
 
         return app
 
@@ -191,7 +219,7 @@ class TestJobStatusWithStages:
             tasks=[prepare_task, transcribe_task],
         )
 
-        mock_jobs_service.get_job_with_tasks.return_value = job
+        mock_jobs_service.get_job_with_tasks_authorized.return_value = job
 
         # Mock storage to return transcript
         async def mock_get_transcript(self, job_id):
@@ -228,7 +256,7 @@ class TestJobStatusWithStages:
             tasks=[],
         )
 
-        mock_jobs_service.get_job_with_tasks.return_value = job
+        mock_jobs_service.get_job_with_tasks_authorized.return_value = job
 
         response = client.get(f"/v1/audio/transcriptions/{job_id}")
 
@@ -263,7 +291,7 @@ class TestJobStatusWithStages:
             tasks=[failed_task],
         )
 
-        mock_jobs_service.get_job_with_tasks.return_value = job
+        mock_jobs_service.get_job_with_tasks_authorized.return_value = job
 
         # Mock storage to return transcript
         async def mock_get_transcript(self, job_id):
@@ -315,10 +343,35 @@ class TestTaskListEndpoint:
         )
 
     @pytest.fixture
-    def app(self, mock_jobs_service, mock_db, mock_api_key):
+    def mock_security_manager(self):
+        from dalston.gateway.security.manager import SecurityManager
+
+        return MagicMock(spec=SecurityManager)
+
+    @pytest.fixture
+    def mock_principal(self, mock_api_key):
+        from dalston.gateway.security.principal import Principal
+
+        principal = MagicMock(spec=Principal)
+        principal.tenant_id = mock_api_key.tenant_id
+        principal.id = mock_api_key.id
+        principal.is_admin = False
+        return principal
+
+    @pytest.fixture
+    def app(
+        self,
+        mock_jobs_service,
+        mock_db,
+        mock_api_key,
+        mock_security_manager,
+        mock_principal,
+    ):
         from dalston.gateway.dependencies import (
             get_db,
             get_jobs_service,
+            get_principal,
+            get_security_manager,
             require_auth,
         )
 
@@ -328,6 +381,8 @@ class TestTaskListEndpoint:
         app.dependency_overrides[get_db] = lambda: mock_db
         app.dependency_overrides[get_jobs_service] = lambda: mock_jobs_service
         app.dependency_overrides[require_auth] = lambda: mock_api_key
+        app.dependency_overrides[get_security_manager] = lambda: mock_security_manager
+        app.dependency_overrides[get_principal] = lambda: mock_principal
 
         return app
 
@@ -365,8 +420,8 @@ class TestTaskListEndpoint:
         )
 
         mock_job = _create_mock_job(job_id=job_id, tenant_id=uuid4())
-        mock_jobs_service.get_job.return_value = mock_job
-        mock_jobs_service.get_job_tasks.return_value = [prepare, transcribe, merge]
+        mock_job.tasks = [prepare, transcribe, merge]
+        mock_jobs_service.get_job_with_tasks_authorized.return_value = mock_job
 
         response = client.get(f"/v1/audio/transcriptions/{job_id}/tasks")
 
@@ -383,7 +438,7 @@ class TestTaskListEndpoint:
     def test_list_tasks_job_not_found(self, client, mock_jobs_service):
         """Test 404 response when job not found."""
         job_id = uuid4()
-        mock_jobs_service.get_job.return_value = None
+        mock_jobs_service.get_job_with_tasks_authorized.return_value = None
 
         response = client.get(f"/v1/audio/transcriptions/{job_id}/tasks")
 
@@ -417,8 +472,8 @@ class TestTaskListEndpoint:
         )
 
         mock_job = _create_mock_job(job_id=job_id, tenant_id=uuid4())
-        mock_jobs_service.get_job.return_value = mock_job
-        mock_jobs_service.get_job_tasks.return_value = [prepare, trans_ch0, trans_ch1]
+        mock_job.tasks = [prepare, trans_ch0, trans_ch1]
+        mock_jobs_service.get_job_with_tasks_authorized.return_value = mock_job
 
         response = client.get(f"/v1/audio/transcriptions/{job_id}/tasks")
 
@@ -467,10 +522,36 @@ class TestTaskArtifactsEndpoint:
         )
 
     @pytest.fixture
-    def app(self, mock_jobs_service, mock_db, mock_settings, mock_api_key):
+    def mock_security_manager(self):
+        from dalston.gateway.security.manager import SecurityManager
+
+        return MagicMock(spec=SecurityManager)
+
+    @pytest.fixture
+    def mock_principal(self, mock_api_key):
+        from dalston.gateway.security.principal import Principal
+
+        principal = MagicMock(spec=Principal)
+        principal.tenant_id = mock_api_key.tenant_id
+        principal.id = mock_api_key.id
+        principal.is_admin = False
+        return principal
+
+    @pytest.fixture
+    def app(
+        self,
+        mock_jobs_service,
+        mock_db,
+        mock_settings,
+        mock_api_key,
+        mock_security_manager,
+        mock_principal,
+    ):
         from dalston.gateway.dependencies import (
             get_db,
             get_jobs_service,
+            get_principal,
+            get_security_manager,
             get_settings,
             require_auth,
         )
@@ -482,6 +563,8 @@ class TestTaskArtifactsEndpoint:
         app.dependency_overrides[get_jobs_service] = lambda: mock_jobs_service
         app.dependency_overrides[get_settings] = lambda: mock_settings
         app.dependency_overrides[require_auth] = lambda: mock_api_key
+        app.dependency_overrides[get_security_manager] = lambda: mock_security_manager
+        app.dependency_overrides[get_principal] = lambda: mock_principal
 
         return app
 
@@ -504,6 +587,8 @@ class TestTaskArtifactsEndpoint:
             status="completed",
         )
 
+        mock_job = _create_mock_job(job_id=job_id, tenant_id=uuid4())
+        mock_jobs_service.get_job_authorized.return_value = mock_job
         mock_jobs_service.get_task.return_value = task
 
         # Mock storage service methods
@@ -555,6 +640,8 @@ class TestTaskArtifactsEndpoint:
             error="Too many speakers",
         )
 
+        mock_job = _create_mock_job(job_id=job_id, tenant_id=uuid4())
+        mock_jobs_service.get_job_authorized.return_value = mock_job
         mock_jobs_service.get_task.return_value = task
 
         mock_input = {"config": {"num_speakers": None}}
@@ -592,6 +679,8 @@ class TestTaskArtifactsEndpoint:
             status="pending",  # Not started
         )
 
+        mock_job = _create_mock_job(job_id=job_id, tenant_id=uuid4())
+        mock_jobs_service.get_job_authorized.return_value = mock_job
         mock_jobs_service.get_task.return_value = task
 
         response = client.get(
@@ -607,8 +696,7 @@ class TestTaskArtifactsEndpoint:
         job_id = uuid4()
         task_id = uuid4()
 
-        mock_jobs_service.get_task.return_value = None
-        mock_jobs_service.get_job.return_value = None
+        mock_jobs_service.get_job_authorized.return_value = None
 
         response = client.get(
             f"/v1/audio/transcriptions/{job_id}/tasks/{task_id}/artifacts"
@@ -623,10 +711,10 @@ class TestTaskArtifactsEndpoint:
         job_id = uuid4()
         task_id = uuid4()
 
-        mock_jobs_service.get_task.return_value = None
         # Job exists but task doesn't
         mock_job = _create_mock_job(job_id=job_id, tenant_id=uuid4())
-        mock_jobs_service.get_job.return_value = mock_job
+        mock_jobs_service.get_job_authorized.return_value = mock_job
+        mock_jobs_service.get_task.return_value = None
 
         response = client.get(
             f"/v1/audio/transcriptions/{job_id}/tasks/{task_id}/artifacts"
@@ -653,8 +741,17 @@ class TestTaskObservabilityAuthorization:
         from dalston.gateway.dependencies import (
             get_db,
             get_jobs_service,
+            get_principal,
+            get_security_manager,
             require_auth,
         )
+        from dalston.gateway.middleware.security_error_handler import (
+            SecurityErrorHandlerMiddleware,
+        )
+        from dalston.gateway.security.exceptions import AuthorizationError
+        from dalston.gateway.security.manager import SecurityManager
+        from dalston.gateway.security.permissions import Permission
+        from dalston.gateway.security.principal import Principal
 
         # API key without jobs:read scope
         api_key_no_read = APIKey(
@@ -671,13 +768,31 @@ class TestTaskObservabilityAuthorization:
             revoked_at=None,
         )
 
+        mock_principal = MagicMock(spec=Principal)
+        mock_principal.tenant_id = api_key_no_read.tenant_id
+        mock_principal.id = api_key_no_read.id
+        mock_principal.is_admin = False
+
+        mock_security_manager = MagicMock(spec=SecurityManager)
+
+        # Configure service to raise authorization error
+        mock_jobs_service.get_job_with_tasks_authorized.side_effect = (
+            AuthorizationError(
+                message="Access denied: requires permission job:read_own",
+                required_permission=Permission.JOB_READ_OWN.value,
+            )
+        )
+
         app = FastAPI()
+        app.add_middleware(SecurityErrorHandlerMiddleware)
         app.include_router(tasks_module.router, prefix="/v1")
         app.dependency_overrides[get_db] = lambda: mock_db
         app.dependency_overrides[get_jobs_service] = lambda: mock_jobs_service
         app.dependency_overrides[require_auth] = lambda: api_key_no_read
+        app.dependency_overrides[get_security_manager] = lambda: mock_security_manager
+        app.dependency_overrides[get_principal] = lambda: mock_principal
 
-        client = TestClient(app)
+        client = TestClient(app, raise_server_exceptions=False)
         response = client.get(f"/v1/audio/transcriptions/{uuid4()}/tasks")
 
         assert response.status_code == 403
@@ -687,8 +802,17 @@ class TestTaskObservabilityAuthorization:
         from dalston.gateway.dependencies import (
             get_db,
             get_jobs_service,
+            get_principal,
+            get_security_manager,
             require_auth,
         )
+        from dalston.gateway.middleware.security_error_handler import (
+            SecurityErrorHandlerMiddleware,
+        )
+        from dalston.gateway.security.exceptions import AuthorizationError
+        from dalston.gateway.security.manager import SecurityManager
+        from dalston.gateway.security.permissions import Permission
+        from dalston.gateway.security.principal import Principal
 
         api_key_no_read = APIKey(
             id=UUID("12345678-1234-1234-1234-123456789abc"),
@@ -704,13 +828,29 @@ class TestTaskObservabilityAuthorization:
             revoked_at=None,
         )
 
+        mock_principal = MagicMock(spec=Principal)
+        mock_principal.tenant_id = api_key_no_read.tenant_id
+        mock_principal.id = api_key_no_read.id
+        mock_principal.is_admin = False
+
+        mock_security_manager = MagicMock(spec=SecurityManager)
+
+        # Configure service to raise authorization error
+        mock_jobs_service.get_job_authorized.side_effect = AuthorizationError(
+            message="Access denied: requires permission job:read_own",
+            required_permission=Permission.JOB_READ_OWN.value,
+        )
+
         app = FastAPI()
+        app.add_middleware(SecurityErrorHandlerMiddleware)
         app.include_router(tasks_module.router, prefix="/v1")
         app.dependency_overrides[get_db] = lambda: mock_db
         app.dependency_overrides[get_jobs_service] = lambda: mock_jobs_service
         app.dependency_overrides[require_auth] = lambda: api_key_no_read
+        app.dependency_overrides[get_security_manager] = lambda: mock_security_manager
+        app.dependency_overrides[get_principal] = lambda: mock_principal
 
-        client = TestClient(app)
+        client = TestClient(app, raise_server_exceptions=False)
         response = client.get(
             f"/v1/audio/transcriptions/{uuid4()}/tasks/{uuid4()}/artifacts"
         )
