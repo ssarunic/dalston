@@ -245,7 +245,7 @@ function ModelTableRow({
               className={cn('w-2 h-2 rounded-full flex-shrink-0', statusColors[model.status])}
             />
             <span className="text-sm">{statusLabels[model.status]}</span>
-            {model.status === 'downloading' && model.download_progress !== undefined && (
+            {model.status === 'downloading' && typeof model.download_progress === 'number' && (
               <span className="text-xs text-muted-foreground">({model.download_progress}%)</span>
             )}
           </div>
