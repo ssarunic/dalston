@@ -74,7 +74,8 @@ RUN python -c "import torch; torch.hub.load('snakers4/silero-vad', 'silero_vad',
     && echo "Silero VAD model downloaded successfully"
 
 # Copy engine files
-COPY engines/stt-rt/voxtral/variants/${MODEL_VARIANT}.yaml /etc/dalston/engine.yaml
+# M50: Use main engine.yaml for structured capabilities
+COPY engines/stt-rt/voxtral/engine.yaml /etc/dalston/engine.yaml
 COPY engines/stt-rt/voxtral/engine.py .
 
 # M39: Standardized model cache directories

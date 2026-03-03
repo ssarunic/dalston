@@ -68,8 +68,8 @@ RUN if [ "$DEVICE" = "cuda" ]; then \
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy engine files
-ARG MODEL_VARIANT=ctc-0.6b
-COPY engines/stt-rt/parakeet-onnx/variants/${MODEL_VARIANT}.yaml ./engine.yaml
+# M50: Use main engine.yaml for structured capabilities
+COPY engines/stt-rt/parakeet-onnx/engine.yaml /etc/dalston/engine.yaml
 COPY engines/stt-rt/parakeet-onnx/engine.py .
 
 # M39: Standardized model cache directories
