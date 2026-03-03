@@ -362,18 +362,18 @@ export function EngineDetail() {
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
                 {engineModels.map((model) => {
-                  // Model status styling (failed shown as not_downloaded on this page)
+                  // Model status styling (only ready vs not ready matters on this page)
                   const statusColors: Record<ModelStatus, string> = {
                     ready: 'bg-green-500',
-                    downloading: 'bg-yellow-500 animate-pulse',
+                    downloading: 'bg-zinc-400',
                     not_downloaded: 'bg-zinc-400',
-                    failed: 'bg-zinc-400', // Show as not downloaded
+                    failed: 'bg-zinc-400',
                   }
                   const statusLabels: Record<ModelStatus, string> = {
                     ready: 'Ready',
-                    downloading: 'Downloading',
+                    downloading: 'Not Downloaded',
                     not_downloaded: 'Not Downloaded',
-                    failed: 'Not Downloaded', // Show as not downloaded (details on Models page)
+                    failed: 'Not Downloaded',
                   }
                   const sizeGb = model.size_bytes ? (model.size_bytes / 1e9).toFixed(1) : null
 
@@ -402,16 +402,6 @@ export function EngineDetail() {
                           </span>
                         </div>
                       </div>
-                      {model.status === 'downloading' && model.download_progress !== undefined && (
-                        <div className="mt-2">
-                          <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-primary transition-all duration-300"
-                              style={{ width: `${model.download_progress}%` }}
-                            />
-                          </div>
-                        </div>
-                      )}
                       <div className="flex flex-wrap gap-1 mt-2">
                         {model.word_timestamps && (
                           <Badge variant="outline" className="text-xs">word timestamps</Badge>
