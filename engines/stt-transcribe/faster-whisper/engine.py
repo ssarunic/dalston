@@ -65,10 +65,20 @@ class WhisperEngine(Engine):
         # Auto-detect device and compute type
         self._device, self._compute_type = self._detect_device()
 
+        # Configure S3 storage if bucket is set
+        model_storage = None
+        s3_bucket = os.environ.get("DALSTON_S3_BUCKET")
+        if s3_bucket:
+            from dalston.engine_sdk.model_storage import S3ModelStorage
+
+            model_storage = S3ModelStorage.from_env()
+            self.logger.info("s3_model_storage_enabled", bucket=s3_bucket)
+
         # Initialize model manager with TTL eviction
         self._manager = FasterWhisperModelManager(
             device=self._device,
             compute_type=self._compute_type,
+            model_storage=model_storage,
             ttl_seconds=int(os.environ.get("DALSTON_MODEL_TTL_SECONDS", "3600")),
             max_loaded=int(os.environ.get("DALSTON_MAX_LOADED_MODELS", "2")),
             preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
@@ -279,6 +289,13 @@ class WhisperEngine(Engine):
             "cuda_device_count": cuda_device_count,
             "model_manager": manager_stats,
         }
+
+    def get_local_cache_stats(self) -> dict[str, Any] | None:
+        """Get local model cache statistics for heartbeat reporting.
+
+        Returns cache stats from S3ModelStorage if configured.
+        """
+        return self._manager.get_local_cache_stats()
 
     def shutdown(self) -> None:
         """Shutdown engine and cleanup resources."""

@@ -31,7 +31,7 @@ class TestWorkerState:
             status="ready",
             capacity=4,
             active_sessions=2,
-            models_loaded=["faster-whisper-large-v3"],
+            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             supports_vocabulary=False,
@@ -50,7 +50,7 @@ class TestWorkerState:
             status="busy",
             capacity=4,
             active_sessions=4,
-            models_loaded=["faster-whisper-large-v3"],
+            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             supports_vocabulary=False,
@@ -69,7 +69,7 @@ class TestWorkerState:
             status="busy",
             capacity=4,
             active_sessions=5,  # Over capacity
-            models_loaded=["faster-whisper-large-v3"],
+            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             supports_vocabulary=False,
@@ -88,7 +88,7 @@ class TestWorkerState:
             status="ready",
             capacity=4,
             active_sessions=2,
-            models_loaded=["faster-whisper-large-v3"],
+            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             supports_vocabulary=False,
@@ -107,7 +107,7 @@ class TestWorkerState:
             status="busy",
             capacity=4,
             active_sessions=3,
-            models_loaded=["faster-whisper-large-v3"],
+            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             supports_vocabulary=False,
@@ -126,7 +126,7 @@ class TestWorkerState:
             status="offline",
             capacity=4,
             active_sessions=0,
-            models_loaded=["faster-whisper-large-v3"],
+            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             supports_vocabulary=False,
@@ -145,7 +145,7 @@ class TestWorkerState:
             status="draining",
             capacity=4,
             active_sessions=1,
-            models_loaded=["faster-whisper-large-v3"],
+            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             supports_vocabulary=False,
@@ -164,7 +164,7 @@ class TestWorkerState:
             status="busy",
             capacity=4,
             active_sessions=4,
-            models_loaded=["faster-whisper-large-v3"],
+            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             supports_vocabulary=False,
@@ -195,7 +195,7 @@ class TestWorkerRegistry:
             "status": "ready",
             "capacity": "4",
             "active_sessions": "2",
-            "models_loaded": '["faster-whisper-large-v3", "faster-whisper-distil-large-v3"]',
+            "models_loaded": '["Systran/faster-whisper-large-v3", "Systran/faster-distil-whisper-large-v3"]',
             "languages_supported": '["auto"]',
             "gpu_memory_used": "2GB",
             "gpu_memory_total": "8GB",
@@ -212,8 +212,8 @@ class TestWorkerRegistry:
         assert worker.capacity == 4
         assert worker.active_sessions == 2
         assert worker.models_loaded == [
-            "faster-whisper-large-v3",
-            "faster-whisper-distil-large-v3",
+            "Systran/faster-whisper-large-v3",
+            "Systran/faster-distil-whisper-large-v3",
         ]
         assert worker.languages_supported == ["auto"]
 
@@ -272,7 +272,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "4",  # Full
-                    "models_loaded": '["faster-whisper-large-v3"]',
+                    "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
             elif "worker-2" in key:
@@ -281,7 +281,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",  # Available
-                    "models_loaded": '["faster-whisper-large-v3"]',
+                    "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
             return {}
@@ -289,7 +289,7 @@ class TestWorkerRegistry:
         mock_redis.hgetall.side_effect = mock_hgetall
 
         available = await registry.get_available_workers(
-            "faster-whisper-large-v3", "auto"
+            "Systran/faster-whisper-large-v3", "auto"
         )
 
         assert len(available) == 1
@@ -308,7 +308,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",
-                    "models_loaded": '["faster-whisper-large-v3"]',
+                    "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
             elif "worker-2" in key:
@@ -317,7 +317,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",
-                    "models_loaded": '["faster-whisper-distil-large-v3"]',
+                    "models_loaded": '["Systran/faster-distil-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
             return {}
@@ -326,7 +326,7 @@ class TestWorkerRegistry:
 
         # Request specific model
         available = await registry.get_available_workers(
-            "faster-whisper-distil-large-v3", "auto"
+            "Systran/faster-distil-whisper-large-v3", "auto"
         )
 
         assert len(available) == 1
@@ -345,7 +345,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "3",  # 1 available
-                    "models_loaded": '["faster-whisper-large-v3"]',
+                    "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
             elif "worker-2" in key:
@@ -354,7 +354,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "1",  # 3 available (most)
-                    "models_loaded": '["faster-whisper-large-v3"]',
+                    "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
             elif "worker-3" in key:
@@ -363,7 +363,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",  # 2 available
-                    "models_loaded": '["faster-whisper-large-v3"]',
+                    "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
             return {}
@@ -371,7 +371,7 @@ class TestWorkerRegistry:
         mock_redis.hgetall.side_effect = mock_hgetall
 
         available = await registry.get_available_workers(
-            "faster-whisper-large-v3", "auto"
+            "Systran/faster-whisper-large-v3", "auto"
         )
 
         # Should be sorted by available capacity descending
@@ -411,7 +411,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",
-                    "models_loaded": '["faster-whisper-large-v3"]',
+                    "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
             return {}
@@ -477,7 +477,7 @@ class TestSessionAllocator:
             status="ready",
             capacity=4,
             active_sessions=2,
-            models_loaded=["faster-whisper-large-v3"],
+            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             supports_vocabulary=False,
@@ -527,7 +527,7 @@ class TestSessionAllocator:
             status="ready",
             capacity=4,
             active_sessions=4,  # Already at capacity
-            models_loaded=["faster-whisper-large-v3"],
+            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
             engine="whisper",
             supports_vocabulary=False,
@@ -558,7 +558,7 @@ class TestSessionAllocator:
             "worker_id": "worker-1",
             "status": "active",
             "language": "en",
-            "model": "faster-whisper-large-v3",
+            "model": "Systran/faster-whisper-large-v3",
             "client_ip": "192.168.1.100",
             "started_at": "2024-01-15T10:30:00+00:00",
         }
@@ -587,7 +587,7 @@ class TestSessionAllocator:
             "worker_id": "worker-1",
             "status": "active",
             "language": "es",
-            "model": "faster-whisper-large-v3",
+            "model": "Systran/faster-whisper-large-v3",
             "client_ip": "10.0.0.5",
             "started_at": "2024-01-15T10:30:00+00:00",
         }
@@ -598,7 +598,7 @@ class TestSessionAllocator:
         assert result.session_id == "sess_xyz"
         assert result.worker_id == "worker-1"
         assert result.language == "es"
-        assert result.model == "faster-whisper-large-v3"
+        assert result.model == "Systran/faster-whisper-large-v3"
 
 
 class TestSessionState:
@@ -610,7 +610,7 @@ class TestSessionState:
             worker_id="worker-1",
             status="active",
             language="en",
-            model="faster-whisper-large-v3",
+            model="Systran/faster-whisper-large-v3",
             client_ip="192.168.1.100",
             started_at=datetime.now(UTC),
         )
@@ -619,7 +619,7 @@ class TestSessionState:
         assert state.worker_id == "worker-1"
         assert state.status == "active"
         assert state.language == "en"
-        assert state.model == "faster-whisper-large-v3"
+        assert state.model == "Systran/faster-whisper-large-v3"
         assert state.client_ip == "192.168.1.100"
 
 

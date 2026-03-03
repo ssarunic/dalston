@@ -6,6 +6,7 @@ Mirrors the realtime_sdk/registry.py pattern for batch engines.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -159,6 +160,7 @@ class BatchEngineRegistry:
         current_task: str | None = None,
         capabilities: EngineCapabilities | None = None,
         loaded_model: str | None = None,
+        local_cache: dict | None = None,
     ) -> None:
         """Send heartbeat update.
 
@@ -172,6 +174,8 @@ class BatchEngineRegistry:
             current_task: Current task ID if processing, None if idle
             capabilities: Engine capabilities (optional, included on first heartbeat)
             loaded_model: Currently loaded model ID for runtime model management (M36)
+            local_cache: Local model cache stats from S3ModelStorage (M41)
+                Example: {"models": ["model-a"], "total_size_mb": 3500, "model_count": 1}
         """
         r = self._get_redis()
         engine_key = f"{ENGINE_KEY_PREFIX}{instance_id}"
@@ -204,6 +208,10 @@ class BatchEngineRegistry:
             if loaded_model is not None:
                 mapping["loaded_model"] = loaded_model
 
+            # M41: Include local cache stats
+            if local_cache is not None:
+                mapping["local_cache"] = json.dumps(local_cache)
+
             # Re-add to sets (idempotent)
             r.sadd(ENGINE_SET_KEY, info.engine_id)
             instances_key = f"{ENGINE_INSTANCES_PREFIX}{info.engine_id}"
@@ -232,6 +240,10 @@ class BatchEngineRegistry:
             if loaded_model is not None:
                 mapping["loaded_model"] = loaded_model
 
+            # M41: Include local cache stats
+            if local_cache is not None:
+                mapping["local_cache"] = json.dumps(local_cache)
+
         r.hset(engine_key, mapping=mapping)
 
         # Refresh TTL
@@ -243,6 +255,7 @@ class BatchEngineRegistry:
             status=status,
             current_task=current_task,
             loaded_model=loaded_model,
+            local_cache_models=local_cache.get("model_count") if local_cache else None,
         )
 
     def unregister(self, instance_id: str) -> None:

@@ -17,13 +17,14 @@ from typing import Any, Literal
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from redis.asyncio import Redis
 from sqlalchemy import case, extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_cancel_requested
 from dalston.common.models import JobStatus
 from dalston.common.streams_types import CONSUMER_GROUP
@@ -32,6 +33,7 @@ from dalston.db.models import JobModel, TaskModel
 from dalston.db.session import DEFAULT_TENANT_ID
 from dalston.gateway.dependencies import (
     RequireAdmin,
+    get_audit_service,
     get_db,
     get_jobs_service,
     get_redis,
@@ -776,18 +778,30 @@ async def get_console_job(
     },
 )
 async def delete_console_job(
+    request: Request,
     job_id: UUID,
     api_key: RequireAdmin,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Delete a job and all associated artifacts (admin endpoint).
 
     No tenant filter — admins can delete any job.
     """
+    request_id = getattr(request.state, "request_id", None)
+
     try:
-        job = await jobs_service.delete_job(db, job_id)
+        job = await jobs_service.delete_job(
+            db,
+            job_id,
+            audit_service=audit_service,
+            actor_type="api_key",
+            actor_id=api_key.prefix,
+            correlation_id=request_id,
+            ip_address=request.client.host if request.client else None,
+        )
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from None
 

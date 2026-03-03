@@ -2,7 +2,7 @@
 # This file defines the model variant metadata for runtime model management (M36)
 
 schema_version: "1.1"
-id: faster-whisper-large-v3
+id: Systran/faster-whisper-large-v3
 runtime: faster-whisper
 runtime_model_id: "large-v3"  # String passed to WhisperModel()
 
@@ -20,8 +20,8 @@ languages: null  # null means multilingual (99 languages)
 
 capabilities:
   word_timestamps: false  # Has timestamps but they're inaccurate; use alignment stage
-  punctuation: false
-  capitalization: false
+  punctuation: true
+  capitalization: true
   streaming: false
   max_audio_duration: 7200
 

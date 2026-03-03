@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-03-02T22:30:23.207157+00:00",
+  "generated_at": "2026-03-03T09:10:46.275770+00:00",
   "schema_version": "2.0",
-  "runtime_count": 10,
-  "model_count": 13,
-  "engine_count": 10,
+  "runtime_count": 11,
+  "model_count": 28,
+  "engine_count": 11,
   "runtimes": {
     "phoneme-align": {
       "id": "phoneme-align",
@@ -317,6 +317,44 @@
         "warm_start_latency_ms": 150
       }
     },
+    "nemo-onnx": {
+      "id": "nemo-onnx",
+      "engine_id": "nemo-onnx",
+      "name": "NVIDIA Parakeet ONNX Runtime",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "description": "Lightweight ONNX Runtime engine for NVIDIA Parakeet transcription models.\nUses the onnx-asr library for fast inference without the full NeMo toolkit.\nSupports CTC, TDT, and RNNT decoders.\n\nM41: This runtime provides the same Parakeet model accuracy with significantly\nsmaller container images (~1GB vs ~12GB) and faster startup. Uses ONNX Runtime\nfor inference and supports both CPU and GPU execution.\n\nSupported models:\n  - nvidia/parakeet-ctc-0.6b (CTC, fast, 600M params)\n  - nvidia/parakeet-ctc-1.1b (CTC, accurate, 1.1B params)\n  - nvidia/parakeet-tdt-0.6b-v2 (TDT, English-only, 600M params)\n  - nvidia/parakeet-tdt-0.6b-v3 (TDT, punctuation + capitalization, 600M params)\n  - nvidia/parakeet-rnnt-0.6b (RNNT, English-only, 600M params)\n\nAll models produce native word-level timestamps without needing a separate\nalignment stage.",
+      "image": "dalston/stt-batch-transcribe-nemo-onnx:1.0.0",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": [
+          "en"
+        ],
+        "supports_word_timestamps": true,
+        "supports_streaming": false,
+        "max_audio_duration": 7200,
+        "max_concurrency": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": true,
+        "min_vram_gb": 2,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": true,
+        "min_ram_gb": 4,
+        "memory": "4G"
+      },
+      "performance": {
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": 0.15,
+        "warm_start_latency_ms": 50
+      }
+    },
     "vllm-asr": {
       "id": "vllm-asr",
       "engine_id": "vllm-asr",
@@ -356,6 +394,429 @@
     }
   },
   "models": {
+    "Systran/faster-whisper-base": {
+      "id": "Systran/faster-whisper-base",
+      "runtime": "faster-whisper",
+      "runtime_model_id": "base",
+      "name": "Faster Whisper Base",
+      "source": "Systran/faster-whisper-base",
+      "size_gb": 0.3,
+      "stage": "transcribe",
+      "description": "OpenAI Whisper base model via faster-whisper (CTranslate2).\nGood balance of speed and accuracy for general transcription.\nSupports 99 languages with automatic language detection.",
+      "languages": null,
+      "capabilities": {
+        "word_timestamps": false,
+        "punctuation": true,
+        "capitalization": true,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 2,
+        "supports_cpu": true,
+        "min_ram_gb": 4
+      },
+      "performance": {
+        "rtf_gpu": 0.03,
+        "rtf_cpu": 0.4
+      }
+    },
+    "Systran/faster-whisper-large-v3-turbo": {
+      "id": "Systran/faster-whisper-large-v3-turbo",
+      "runtime": "faster-whisper",
+      "runtime_model_id": "large-v3-turbo",
+      "name": "Faster Whisper Large V3 Turbo",
+      "source": "Systran/faster-whisper-large-v3-turbo",
+      "size_gb": 1.6,
+      "stage": "transcribe",
+      "description": "OpenAI Whisper large-v3-turbo model via faster-whisper (CTranslate2).\nOptimized for speed while maintaining high accuracy.\nDistilled from large-v3 with pruned decoder for faster inference.\nSupports 99 languages with automatic language detection.\nDefault model for Dalston - good balance of speed, accuracy, and compatibility.",
+      "languages": null,
+      "capabilities": {
+        "word_timestamps": false,
+        "punctuation": true,
+        "capitalization": true,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 4,
+        "supports_cpu": true,
+        "min_ram_gb": 8
+      },
+      "performance": {
+        "rtf_gpu": 0.03,
+        "rtf_cpu": 0.3
+      }
+    },
+    "Systran/faster-whisper-large-v3": {
+      "id": "Systran/faster-whisper-large-v3",
+      "runtime": "faster-whisper",
+      "runtime_model_id": "large-v3",
+      "name": "Faster Whisper Large V3",
+      "source": "Systran/faster-whisper-large-v3",
+      "size_gb": 3.0,
+      "stage": "transcribe",
+      "description": "OpenAI Whisper large-v3 model via faster-whisper (CTranslate2).\nBest accuracy for multilingual transcription.\nSupports 99 languages with automatic language detection.",
+      "languages": null,
+      "capabilities": {
+        "word_timestamps": false,
+        "punctuation": true,
+        "capitalization": true,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 6,
+        "supports_cpu": false,
+        "min_ram_gb": 16
+      },
+      "performance": {
+        "rtf_gpu": 0.05,
+        "rtf_cpu": null
+      }
+    },
+    "Systran/faster-whisper-medium": {
+      "id": "Systran/faster-whisper-medium",
+      "runtime": "faster-whisper",
+      "runtime_model_id": "medium",
+      "name": "Faster Whisper Medium",
+      "source": "Systran/faster-whisper-medium",
+      "size_gb": 1.5,
+      "stage": "transcribe",
+      "description": "OpenAI Whisper medium model via faster-whisper (CTranslate2).\nGood accuracy with moderate resource requirements.\nSupports 99 languages with automatic language detection.",
+      "languages": null,
+      "capabilities": {
+        "word_timestamps": false,
+        "punctuation": true,
+        "capitalization": true,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 4,
+        "supports_cpu": true,
+        "min_ram_gb": 8
+      },
+      "performance": {
+        "rtf_gpu": 0.03,
+        "rtf_cpu": 0.3
+      }
+    },
+    "Systran/faster-whisper-small": {
+      "id": "Systran/faster-whisper-small",
+      "runtime": "faster-whisper",
+      "runtime_model_id": "small",
+      "name": "Faster Whisper Small",
+      "source": "Systran/faster-whisper-small",
+      "size_gb": 0.5,
+      "stage": "transcribe",
+      "description": "OpenAI Whisper small model via faster-whisper (CTranslate2).\nGood balance of speed and accuracy for resource-constrained environments.\nSupports 99 languages with automatic language detection.",
+      "languages": null,
+      "capabilities": {
+        "word_timestamps": false,
+        "punctuation": true,
+        "capitalization": true,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 2,
+        "supports_cpu": true,
+        "min_ram_gb": 4
+      },
+      "performance": {
+        "rtf_gpu": 0.02,
+        "rtf_cpu": 0.2
+      }
+    },
+    "Systran/faster-whisper-tiny": {
+      "id": "Systran/faster-whisper-tiny",
+      "runtime": "faster-whisper",
+      "runtime_model_id": "tiny",
+      "name": "Faster Whisper Tiny",
+      "source": "Systran/faster-whisper-tiny",
+      "size_gb": 0.1,
+      "stage": "transcribe",
+      "description": "OpenAI Whisper tiny model via faster-whisper (CTranslate2).\nSmallest and fastest model, ideal for real-time or resource-constrained environments.\nLower accuracy than larger models. Supports 99 languages.",
+      "languages": null,
+      "capabilities": {
+        "word_timestamps": false,
+        "punctuation": true,
+        "capitalization": true,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 1,
+        "supports_cpu": true,
+        "min_ram_gb": 2
+      },
+      "performance": {
+        "rtf_gpu": 0.01,
+        "rtf_cpu": 0.1
+      }
+    },
+    "nvidia/parakeet-ctc-0.6b": {
+      "id": "nvidia/parakeet-ctc-0.6b",
+      "runtime": "nemo",
+      "runtime_model_id": "nvidia/parakeet-ctc-0.6b",
+      "name": "NVIDIA Parakeet CTC 0.6B",
+      "source": "nvidia/parakeet-ctc-0.6b",
+      "size_gb": 1.8,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet FastConformer CTC 0.6B for fast English-only transcription.\nCTC decoder provides fastest inference with greedy decoding.\nProduces native word-level timestamps without separate alignment.\nBest choice for high-throughput batch processing.\n\nNOTE: Outputs lowercase text without punctuation. Use refine stage or\nparakeet-tdt-0.6b-v3 if punctuation/capitalization is required.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 4,
+        "supports_cpu": false,
+        "min_ram_gb": 8
+      },
+      "performance": {
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": null
+      }
+    },
+    "nvidia/parakeet-ctc-1.1b": {
+      "id": "nvidia/parakeet-ctc-1.1b",
+      "runtime": "nemo",
+      "runtime_model_id": "nvidia/parakeet-ctc-1.1b",
+      "name": "NVIDIA Parakeet CTC 1.1B",
+      "source": "nvidia/parakeet-ctc-1.1b",
+      "size_gb": 4.2,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet FastConformer CTC 1.1B for fast English-only transcription.\nCTC decoder provides fastest inference with greedy decoding.\nLarger model with better accuracy than 0.6B variant.\nBest choice for high-throughput batch processing with quality.\n\nNOTE: Outputs lowercase text without punctuation. Use refine stage or\nparakeet-tdt-0.6b-v3 if punctuation/capitalization is required.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 6,
+        "supports_cpu": false,
+        "min_ram_gb": 12
+      },
+      "performance": {
+        "rtf_gpu": 0.0005,
+        "rtf_cpu": null
+      }
+    },
+    "parakeet-onnx-ctc-0.6b": {
+      "id": "parakeet-onnx-ctc-0.6b",
+      "runtime": "nemo-onnx",
+      "runtime_model_id": "nvidia/parakeet-ctc-0.6b",
+      "name": "NVIDIA Parakeet ONNX CTC 0.6B",
+      "source": "nvidia/parakeet-ctc-0.6b",
+      "size_gb": 0.6,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet CTC 0.6B via ONNX Runtime for fast English-only transcription.\nSame model accuracy as the NeMo variant (parakeet-ctc-0.6b) but runs on\nONNX Runtime for lighter deployment and better CPU performance.\n\nAdvantages over NeMo variant:\n  - ~12x smaller container image (~1GB vs ~12GB)\n  - ~3x faster cold start\n  - Better CPU inference (ONNX optimizations + INT8 quantization)\n  - No PyTorch dependency for CPU inference\n\nNOTE: Outputs lowercase text without punctuation.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 2,
+        "supports_cpu": true,
+        "min_ram_gb": 4
+      },
+      "performance": {
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": 0.15
+      }
+    },
+    "parakeet-onnx-ctc-1.1b": {
+      "id": "parakeet-onnx-ctc-1.1b",
+      "runtime": "nemo-onnx",
+      "runtime_model_id": "nvidia/parakeet-ctc-1.1b",
+      "name": "NVIDIA Parakeet ONNX CTC 1.1B",
+      "source": "nvidia/parakeet-ctc-1.1b",
+      "size_gb": 1.2,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet CTC 1.1B via ONNX Runtime for accurate English-only transcription.\nLarger model with better accuracy than the 0.6B variant.\nSame accuracy as the NeMo variant (parakeet-ctc-1.1b) but runs on ONNX Runtime.\n\nAdvantages over NeMo variant:\n  - ~12x smaller container image (~1GB vs ~12GB)\n  - ~3x faster cold start\n  - Better CPU inference (ONNX optimizations + INT8 quantization)\n  - No PyTorch dependency for CPU inference\n\nNOTE: Outputs lowercase text without punctuation.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 4,
+        "supports_cpu": true,
+        "min_ram_gb": 8
+      },
+      "performance": {
+        "rtf_gpu": 0.0005,
+        "rtf_cpu": 0.2
+      }
+    },
+    "parakeet-onnx-rnnt-0.6b": {
+      "id": "parakeet-onnx-rnnt-0.6b",
+      "runtime": "nemo-onnx",
+      "runtime_model_id": "nvidia/parakeet-rnnt-0.6b",
+      "name": "NVIDIA Parakeet ONNX RNNT 0.6B",
+      "source": "nvidia/parakeet-rnnt-0.6b",
+      "size_gb": 0.6,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet RNNT 0.6B via ONNX Runtime for accurate English-only\ntranscription. RNN-Transducer decoder provides streaming-quality accuracy\nin a lightweight ONNX package.\n\nSame model accuracy as the NeMo variant but runs on ONNX Runtime for\nlighter deployment and better CPU performance.\n\nNOTE: Outputs lowercase text without punctuation.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 2,
+        "supports_cpu": true,
+        "min_ram_gb": 4
+      },
+      "performance": {
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": 0.12
+      }
+    },
+    "parakeet-onnx-tdt-0.6b-v2": {
+      "id": "parakeet-onnx-tdt-0.6b-v2",
+      "runtime": "nemo-onnx",
+      "runtime_model_id": "nvidia/parakeet-tdt-0.6b-v2",
+      "name": "NVIDIA Parakeet ONNX TDT 0.6B v2",
+      "source": "nvidia/parakeet-tdt-0.6b-v2",
+      "size_gb": 0.6,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet TDT 0.6B v2 via ONNX Runtime for accurate English-only\ntranscription. TDT (Token-and-Duration Transducer) provides better accuracy\nthan CTC while maintaining fast inference.\n\nSame model accuracy as the NeMo variant but runs on ONNX Runtime for\nlighter deployment and better CPU performance.\n\nNOTE: Outputs lowercase text without punctuation.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 2,
+        "supports_cpu": true,
+        "min_ram_gb": 4
+      },
+      "performance": {
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": 0.12
+      }
+    },
+    "parakeet-onnx-tdt-0.6b-v3": {
+      "id": "parakeet-onnx-tdt-0.6b-v3",
+      "runtime": "nemo-onnx",
+      "runtime_model_id": "nvidia/parakeet-tdt-0.6b-v3",
+      "name": "NVIDIA Parakeet ONNX TDT 0.6B v3",
+      "source": "nvidia/parakeet-tdt-0.6b-v3",
+      "size_gb": 0.6,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet TDT 0.6B v3 via ONNX Runtime for accurate English-only\ntranscription with automatic punctuation and capitalization.\nTDT (Token-and-Duration Transducer) provides best accuracy among 0.6B models.\n64% faster than RNNT while achieving lower WER.\n\nSame model accuracy as the NeMo variant but runs on ONNX Runtime for\nlighter deployment and better CPU performance.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": true,
+        "capitalization": true,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 2,
+        "supports_cpu": true,
+        "min_ram_gb": 4
+      },
+      "performance": {
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": 0.12
+      }
+    },
+    "nvidia/parakeet-tdt-0.6b-v3": {
+      "id": "nvidia/parakeet-tdt-0.6b-v3",
+      "runtime": "nemo",
+      "runtime_model_id": "nvidia/parakeet-tdt-0.6b-v3",
+      "name": "NVIDIA Parakeet TDT 0.6B v3",
+      "source": "nvidia/parakeet-tdt-0.6b-v3",
+      "size_gb": 1.8,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet FastConformer TDT 0.6B v3 for accurate English-only transcription.\nTDT (Token-and-Duration Transducer) provides best-in-class accuracy.\n64% faster than RNNT while achieving lower WER.\nProduces native word-level timestamps without separate alignment.\n\nNOTE: v3 includes automatic punctuation and capitalization.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": true,
+        "capitalization": true,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 4,
+        "supports_cpu": false,
+        "min_ram_gb": 8
+      },
+      "performance": {
+        "rtf_gpu": 0.0004,
+        "rtf_cpu": null
+      }
+    },
+    "nvidia/parakeet-tdt-1.1b": {
+      "id": "nvidia/parakeet-tdt-1.1b",
+      "runtime": "nemo",
+      "runtime_model_id": "nvidia/parakeet-tdt-1.1b",
+      "name": "NVIDIA Parakeet TDT 1.1B",
+      "source": "nvidia/parakeet-tdt-1.1b",
+      "size_gb": 4.2,
+      "stage": "transcribe",
+      "description": "NVIDIA Parakeet FastConformer TDT 1.1B for highest accuracy English transcription.\nTDT (Token-and-Duration Transducer) achieves state-of-the-art WER scores.\nFirst model to achieve <7.0% average WER on HuggingFace Open ASR leaderboard.\nBest choice when transcription accuracy is the priority.\n\nNOTE: Outputs lowercase text without punctuation. Use refine stage or\nparakeet-tdt-0.6b-v3 if punctuation/capitalization is required.",
+      "languages": [
+        "en"
+      ],
+      "capabilities": {
+        "word_timestamps": true,
+        "punctuation": false,
+        "capitalization": false,
+        "streaming": false,
+        "max_audio_duration": 7200
+      },
+      "hardware": {
+        "min_vram_gb": 6,
+        "supports_cpu": false,
+        "min_ram_gb": 12
+      },
+      "performance": {
+        "rtf_gpu": 0.0006,
+        "rtf_cpu": null
+      }
+    },
     "faster-whisper-base": {
       "id": "faster-whisper-base",
       "runtime": "faster-whisper",
@@ -1058,6 +1519,44 @@
         "rtf_gpu": 0.0006,
         "rtf_cpu": 0.5,
         "warm_start_latency_ms": 150
+      }
+    },
+    "nemo-onnx": {
+      "id": "nemo-onnx",
+      "name": "NVIDIA Parakeet ONNX Runtime",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "type": null,
+      "description": "Lightweight ONNX Runtime engine for NVIDIA Parakeet transcription models.\nUses the onnx-asr library for fast inference without the full NeMo toolkit.\nSupports CTC, TDT, and RNNT decoders.\n\nM41: This runtime provides the same Parakeet model accuracy with significantly\nsmaller container images (~1GB vs ~12GB) and faster startup. Uses ONNX Runtime\nfor inference and supports both CPU and GPU execution.\n\nSupported models:\n  - nvidia/parakeet-ctc-0.6b (CTC, fast, 600M params)\n  - nvidia/parakeet-ctc-1.1b (CTC, accurate, 1.1B params)\n  - nvidia/parakeet-tdt-0.6b-v2 (TDT, English-only, 600M params)\n  - nvidia/parakeet-tdt-0.6b-v3 (TDT, punctuation + capitalization, 600M params)\n  - nvidia/parakeet-rnnt-0.6b (RNNT, English-only, 600M params)\n\nAll models produce native word-level timestamps without needing a separate\nalignment stage.",
+      "image": "dalston/stt-batch-transcribe-nemo-onnx:1.0.0",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": [
+          "en"
+        ],
+        "supports_word_timestamps": true,
+        "supports_streaming": false,
+        "max_audio_duration": 7200,
+        "max_concurrency": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": true,
+        "min_vram_gb": 2,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": true,
+        "min_ram_gb": 4,
+        "memory": "4G"
+      },
+      "performance": {
+        "rtf_gpu": 0.0003,
+        "rtf_cpu": 0.15,
+        "warm_start_latency_ms": 50
       }
     },
     "vllm-asr": {

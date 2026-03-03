@@ -9,6 +9,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from dalston.common.audit import AuditService
 from dalston.common.models import JobStatus, TaskStatus
 from dalston.common.retention import RETENTION_DEFAULT_DAYS
 from dalston.db.models import JobModel, TaskModel
@@ -207,6 +208,12 @@ class JobsService:
         db: AsyncSession,
         job_id: UUID,
         tenant_id: UUID | None = None,
+        *,
+        audit_service: AuditService | None = None,
+        actor_type: str = "api_key",
+        actor_id: str = "unknown",
+        correlation_id: str | None = None,
+        ip_address: str | None = None,
     ) -> JobModel | None:
         """Delete a job record and its associated tasks.
 
@@ -217,6 +224,11 @@ class JobsService:
             db: Database session
             job_id: Job UUID
             tenant_id: Optional tenant UUID for isolation check
+            audit_service: Optional audit service for logging deletion
+            actor_type: Type of actor performing deletion (api_key, system, user)
+            actor_id: ID of actor (key prefix, system name, etc.)
+            correlation_id: Optional request correlation ID
+            ip_address: Optional client IP address
 
         Returns:
             The deleted JobModel (detached) or None if not found
@@ -234,10 +246,25 @@ class JobsService:
                 f"Only completed, failed, or cancelled jobs can be deleted."
             )
 
+        # Capture tenant_id before deletion for audit log
+        job_tenant_id = job.tenant_id
+
         # Explicitly delete tasks first (no CASCADE DELETE per CLAUDE.md)
         await db.execute(delete(TaskModel).where(TaskModel.job_id == job_id))
         await db.delete(job)
         await db.commit()
+
+        # Audit log the deletion
+        if audit_service is not None:
+            await audit_service.log_job_deleted(
+                job_id=job_id,
+                tenant_id=job_tenant_id,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                correlation_id=correlation_id,
+                ip_address=ip_address,
+            )
+
         return job
 
     # States that can be cancelled

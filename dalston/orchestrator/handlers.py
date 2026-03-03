@@ -38,6 +38,10 @@ from dalston.gateway.services.rate_limiter import (
 )
 from dalston.orchestrator.catalog import get_catalog
 from dalston.orchestrator.dag import build_task_dag
+from dalston.orchestrator.engine_selector import (
+    NoCapableEngineError,
+    NoDownloadedModelError,
+)
 from dalston.orchestrator.exceptions import (
     CatalogValidationError,
     EngineCapabilityError,
@@ -176,13 +180,31 @@ async def handle_job_created(
     # 2. Build task DAG using capability-driven engine selection (M31)
     dag_start = time.perf_counter()
     catalog = get_catalog()
-    tasks = await build_task_dag(
-        job_id=job.id,
-        audio_uri=job.audio_uri,
-        parameters=job.parameters,
-        registry=registry,
-        catalog=catalog,
-    )
+    try:
+        tasks = await build_task_dag(
+            job_id=job.id,
+            audio_uri=job.audio_uri,
+            parameters=job.parameters,
+            registry=registry,
+            catalog=catalog,
+            db=db,
+        )
+    except NoDownloadedModelError as e:
+        # No downloaded models for the auto-selected runtime
+        log.warning("no_downloaded_model", runtime=e.runtime, error=str(e))
+        job.status = JobStatus.FAILED.value
+        job.error = str(e)
+        job.completed_at = datetime.now(UTC)
+        await db.commit()
+        return
+    except NoCapableEngineError as e:
+        # No running engine can handle the job requirements
+        log.warning("no_capable_engine", stage=e.stage, error=str(e))
+        job.status = JobStatus.FAILED.value
+        job.error = str(e)
+        job.completed_at = datetime.now(UTC)
+        await db.commit()
+        return
     dalston.metrics.observe_orchestrator_dag_build(time.perf_counter() - dag_start)
 
     log.info("built_task_dag", task_count=len(tasks))

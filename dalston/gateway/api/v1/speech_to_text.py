@@ -200,17 +200,17 @@ async def create_transcription(
     ingested = await ingestion_service.ingest(file=file, url=cloud_storage_url)
 
     # Map ElevenLabs parameters to Dalston parameters
-    # ElevenLabs model_id (scribe_v1, scribe_v2, etc.) is treated as "auto"
-    # Let the orchestrator auto-select the best engine
+    # ElevenLabs model_id (scribe_v1, scribe_v2, etc.) is ignored - use default model
     dalston_language = language_code or "auto"
     dalston_speaker_detection = "diarize" if diarize else "none"
     dalston_timestamps = map_timestamps_granularity(timestamps_granularity)
 
-    # Build parameters - no engine_transcribe means auto-select
+    # Build parameters - use configured default model
     parameters: dict = {
         "language": dalston_language,
         "speaker_detection": dalston_speaker_detection,
         "timestamps_granularity": dalston_timestamps,
+        "engine_transcribe": settings.default_model,
     }
     if num_speakers is not None:
         parameters["num_speakers"] = num_speakers

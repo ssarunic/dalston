@@ -11,9 +11,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { ModelSelector } from '@/components/ModelSelector'
+import { ModelCompatibilityWarning } from '@/components/ModelCompatibilityWarning'
 import { useCreateJob } from '@/hooks/useCreateJob'
 import { useCapabilities } from '@/hooks/useCapabilities'
-import { useTranscriptionModels } from '@/hooks/useModels'
+import { useModelRegistry } from '@/hooks/useModelRegistry'
 import type {
   SpeakerDetection,
   TimestampsGranularity,
@@ -207,7 +209,7 @@ export function NewJob() {
 
   // Fetch capabilities and models for dynamic options
   const { data: capabilities } = useCapabilities()
-  const { data: modelsResponse } = useTranscriptionModels()
+  const { data: modelsResponse } = useModelRegistry({ stage: 'transcribe' })
 
   // Source
   const [sourceType, setSourceType] = useState<SourceType>('file')
@@ -230,14 +232,16 @@ export function NewJob() {
   const [retentionMode, setRetentionMode] = useState<RetentionMode>('default')
   const [retentionDays, setRetentionDays] = useState('30')
 
-  // Compute available models from the model catalog
+  // Compute available models from the model registry (ready models only)
   const availableModels = useMemo(() => {
     if (!modelsResponse?.data) return []
-    return modelsResponse.data.map((m) => ({
-      id: m.id,
-      name: m.name,
-      languages: m.languages,
-    }))
+    return modelsResponse.data
+      .filter((m) => m.status === 'ready')
+      .map((m) => ({
+        id: m.id,
+        name: m.name,
+        languages: m.languages,
+      }))
   }, [modelsResponse])
 
   // Compute available languages based on capabilities and selected model
@@ -603,7 +607,23 @@ export function NewJob() {
                 <CardTitle className="text-base font-medium">Basic Settings</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {/* Model */}
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Model</label>
+                    <ModelSelector
+                      value={model}
+                      onChange={setModel}
+                      language={language !== 'auto' ? language : undefined}
+                    />
+                    {model && model !== 'auto' && (
+                      <ModelCompatibilityWarning
+                        modelId={model}
+                        language={language !== 'auto' ? language : undefined}
+                      />
+                    )}
+                  </div>
+
                   {/* Language */}
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Language</label>
@@ -714,24 +734,6 @@ export function NewJob() {
               {showAdvanced && (
                 <CardContent className="space-y-4 pt-0">
                   <div className="grid gap-4 md:grid-cols-2">
-                    {/* Model */}
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Model</label>
-                      <Select value={model} onValueChange={setModel}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select model" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="auto">Auto</SelectItem>
-                          {availableModels.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
                     {/* Retention Policy */}
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Retention Policy</label>

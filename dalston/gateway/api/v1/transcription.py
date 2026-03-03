@@ -46,7 +46,6 @@ from dalston.gateway.api.v1.openai_audio import (
     OPENAI_MAX_FILE_SIZE,
     format_openai_response,
     is_openai_model,
-    map_openai_model,
     raise_openai_error,
     validate_openai_request,
 )
@@ -273,11 +272,10 @@ async def create_transcription(
 
     # Build parameters
     if openai_mode:
-        # OpenAI mode: map model to Dalston engine
-        engine_id = map_openai_model(model)
+        # OpenAI mode: use default model (ignore OpenAI model parameter)
         parameters: dict = {
             "language": language or "auto",
-            "engine_transcribe": engine_id,
+            "engine_transcribe": settings.default_model,
             "timestamps_granularity": "word"
             if timestamp_granularities and "word" in timestamp_granularities
             else "segment",
@@ -1093,14 +1091,19 @@ async def delete_transcription(
     3. Delete database record (cascades to tasks)
     4. Return 204 No Content
     """
-    # Save tenant_id before deletion
-    job_for_tenant = await jobs_service.get_job(db, job_id, tenant_id=api_key.tenant_id)
-    if job_for_tenant is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-    tenant_id = job_for_tenant.tenant_id
+    request_id = getattr(request.state, "request_id", None)
 
     try:
-        job = await jobs_service.delete_job(db, job_id, tenant_id=api_key.tenant_id)
+        job = await jobs_service.delete_job(
+            db,
+            job_id,
+            tenant_id=api_key.tenant_id,
+            audit_service=audit_service,
+            actor_type="api_key",
+            actor_id=api_key.prefix,
+            correlation_id=request_id,
+            ip_address=request.client.host if request.client else None,
+        )
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from None
 
@@ -1115,16 +1118,5 @@ async def delete_transcription(
         logger.warning(
             "Failed to delete S3 artifacts for job %s", job_id, exc_info=True
         )
-
-    # Audit log
-    request_id = getattr(request.state, "request_id", None)
-    await audit_service.log_job_deleted(
-        job_id=job_id,
-        tenant_id=tenant_id,
-        actor_type="api_key",
-        actor_id=api_key.prefix,
-        correlation_id=request_id,
-        ip_address=request.client.host if request.client else None,
-    )
 
     return Response(status_code=204)
