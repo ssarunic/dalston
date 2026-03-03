@@ -8,13 +8,15 @@ Given the new runtime-based engine architecture (M36) with dynamic model loading
 
 ## Quick Reference
 
-| Scenario | Instance | GPU | Monthly (8h/day) | Monthly (24/7) | Models |
-|----------|----------|-----|-------------------|----------------|--------|
-| 1. CPU-only | t3.xlarge | None | ~$35 | ~$135 | faster-whisper (all), parakeet-onnx (EN) |
-| 2. Single GPU | g5.xlarge | 1x A10G 24GB | ~$100 | ~$300 | All batch + realtime |
-| 3. Dual-purpose GPU | g5.2xlarge | 1x A10G 24GB | ~$150 | ~$450 | Higher throughput, concurrent batch+RT |
-| 4. Multi-GPU | g5.12xlarge | 4x A10G 96GB | ~$500 | ~$1,500 | Full parallel pipeline |
-| 5. Split infra | ECS + g5 | Varies | ~$200+ | ~$600+ | Auto-scaling engines |
+| Scenario | Instance | GPU | Monthly (8h/day) | w/ Spot | Models |
+|----------|----------|-----|-------------------|---------|--------|
+| 1. CPU-only | t3.xlarge | None | ~$35 | N/A | faster-whisper (all), parakeet-onnx (EN) |
+| 2. Single GPU | g5.xlarge | 1x A10G 24GB | ~$100 | ~$35 | All batch + realtime |
+| 3. Dual-purpose GPU | g5.2xlarge | 1x A10G 24GB | ~$150 | ~$50 | Higher throughput, concurrent batch+RT |
+| 4. Multi-GPU | g5.12xlarge | 4x A10G 96GB | ~$500 | ~$170 | Full parallel pipeline |
+| 5. Split infra | ECS + g5 | Varies | ~$200+ | Mixed | Auto-scaling engines |
+
+Spot instances save ~65% on GPU instances. See [Spot Instances](#spot-instances) below.
 
 ---
 
@@ -469,3 +471,192 @@ Scenario 5 (ECS split)    → Auto-scaling, managed services, production
 ```
 
 Each step is additive. Scenarios 1→3 are literally a one-line Terraform variable change. Scenario 4 needs a compose override for GPU pinning. Scenario 5 is a new Terraform module.
+
+---
+
+## Spot Instances
+
+Spot saves 60-70% on GPU instances. Dalston's architecture is already built for it.
+
+### Why it works
+
+The engine SDK was designed assuming engines can die at any time:
+
+1. **Unique instance IDs**: Each engine startup generates `{engine_id}-{uuid4[:12]}` (`runner.py:124`). A spot replacement is a fresh instance — no identity collision with the terminated one.
+
+2. **60-second heartbeat TTL**: Engine keys auto-expire in Redis if the engine stops heartbeating (`HEARTBEAT_TTL = 60`). A spot termination looks identical to a crash — the key expires, the engine disappears from the registry.
+
+3. **Stale task recovery**: The `StaleTaskScanner` runs every 60s in the orchestrator. It checks the Redis Streams Pending Entries List (PEL) for tasks owned by dead engines (`is_engine_alive()` checks heartbeat key existence). Dead engine tasks are marked FAILED and re-queued automatically.
+
+4. **Idempotent task processing**: Tasks download input from S3, process, upload output to S3. No local state that would be lost. A re-delivered task (up to `MAX_DELIVERIES = 3`) produces the same result.
+
+5. **Model cache on EBS**: Model weights live on `/data/models` (EBS volume). EBS survives spot termination. When the replacement instance boots, models are already cached — no re-download delay.
+
+### What spot termination looks like
+
+```
+t=0s    AWS sends 2-minute interruption notice
+t=0s    Instance receives SIGTERM → Docker stops containers gracefully
+t=0-5s  Engines deregister from Redis (or just stop heartbeating)
+t=60s   Heartbeat TTL expires, engine keys vanish
+t=60s   StaleTaskScanner detects orphaned tasks in PEL
+t=60s   Tasks marked FAILED, orchestrator retries them
+t=120s  Spot instance terminated
+t=?     Replacement instance launches (if using ASG/Fleet)
+t=?+60s New engine containers register, pull tasks from queue
+```
+
+The worst case: a task that was 90% done gets terminated and must restart from scratch. For a typical 10-minute audio file with GPU transcription (RTF 0.03), that's ~18 seconds of wasted compute. Negligible.
+
+### Cost savings
+
+| Instance | On-Demand | Spot (typical) | Savings |
+|----------|-----------|----------------|---------|
+| g5.xlarge | $1.006/hr | ~$0.35/hr | ~65% |
+| g5.2xlarge | $1.512/hr | ~$0.50/hr | ~67% |
+| g5.12xlarge | $5.672/hr | ~$1.90/hr | ~66% |
+
+For Scenario 2 at 8h/day weekdays:
+
+| | On-Demand | Spot |
+|---|-----------|------|
+| Monthly | ~$100 | ~$35 |
+
+That's `g5.xlarge` GPU transcription for the price of a `t3.xlarge` CPU instance.
+
+### Spot interruption frequency
+
+`g5.xlarge` in `eu-west-2` has historically low interruption rates (<5%). GPU instances generally have lower interruption rates than popular CPU instances because the spot pool is larger relative to demand.
+
+You can further reduce interruptions by:
+- Using **capacity-optimized** allocation strategy (picks the pool least likely to be interrupted)
+- Allowing multiple instance types: `g5.xlarge`, `g5.2xlarge`, `g6.xlarge` — the fleet picks whichever has capacity
+- Choosing availability zones with more capacity
+
+### How to add spot to existing Terraform
+
+#### Option A: Simple — Spot on the single EC2 (Scenarios 1-3)
+
+Minimal change to the existing `ec2-dalston` module:
+
+```hcl
+# infra/terraform/modules/ec2-dalston/variables.tf
+variable "use_spot" {
+  description = "Use spot instance pricing"
+  type        = bool
+  default     = false
+}
+
+variable "spot_max_price" {
+  description = "Maximum hourly price for spot (empty = on-demand price cap)"
+  type        = string
+  default     = ""
+}
+```
+
+```hcl
+# infra/terraform/modules/ec2-dalston/main.tf
+resource "aws_instance" "dalston" {
+  # ... existing config ...
+
+  instance_market_options {
+    market_type = var.use_spot ? "spot" : null
+
+    dynamic "spot_options" {
+      for_each = var.use_spot ? [1] : []
+      content {
+        spot_instance_type             = "persistent"
+        instance_interruption_behavior = "stop"
+        max_price                      = var.spot_max_price != "" ? var.spot_max_price : null
+      }
+    }
+  }
+}
+```
+
+```hcl
+# terraform.tfvars
+instance_type = "g5.xlarge"
+use_spot      = true
+```
+
+Key detail: `instance_interruption_behavior = "stop"` means spot interruption **stops** the instance (like `dalston-down`) rather than terminating it. The EBS volumes, Tailscale IP, and all state are preserved. When spot capacity returns, AWS restarts it automatically. This is the simplest path — it behaves exactly like your manual start/stop workflow, just triggered by AWS pricing instead of your shell alias.
+
+#### Option B: Spot Fleet with fallback (more robust)
+
+For uninterrupted availability, use an EC2 Fleet that tries spot first, falls back to on-demand:
+
+```hcl
+resource "aws_ec2_fleet" "dalston" {
+  type = "maintain"
+
+  target_capacity_specification {
+    default_target_capacity_type = "spot"
+    total_target_capacity        = 1
+    spot_target_capacity         = 1
+    on_demand_target_capacity    = 0
+  }
+
+  spot_options {
+    allocation_strategy = "capacity-optimized"
+
+    # Fall back to on-demand if spot unavailable
+    maintenance_strategies {
+      capacity_rebalance {
+        replacement_strategy = "launch-before-terminate"
+      }
+    }
+  }
+
+  launch_template_config {
+    launch_template_specification {
+      launch_template_id = aws_launch_template.dalston.id
+      version            = "$Latest"
+    }
+
+    override {
+      instance_type = "g5.xlarge"
+    }
+    override {
+      instance_type = "g5.2xlarge"  # Fallback if g5.xlarge unavailable
+    }
+  }
+}
+```
+
+This is more complex but provides near-zero downtime: when a spot interruption is predicted, AWS launches a replacement *before* terminating the old one. The new instance boots, Docker starts, engines register in Redis, and tasks resume flowing — usually within 2-3 minutes.
+
+### What needs care
+
+#### Realtime sessions
+
+Spot termination kills active WebSocket connections. This is disruptive for realtime streaming. Two approaches:
+
+1. **Accept it**: If you use realtime infrequently, a 2-minute interruption every few days is tolerable. The client reconnects and starts a new session.
+
+2. **Hybrid spot/on-demand** (Scenario 5 territory): Run gateway + realtime workers on a small on-demand instance, batch engines on spot. Realtime sessions survive interruptions; batch tasks auto-retry.
+
+For your use case (primarily batch with occasional realtime), approach 1 is fine.
+
+#### Model loading after restart
+
+If using `instance_interruption_behavior = "stop"` (Option A), the EBS volume persists. Model cache is intact. Boot → Docker starts → engines load cached models → ready in ~60-90 seconds.
+
+If using fleet replacement (Option B), the new instance needs the EBS volume. Options:
+- **Shared EBS**: Not possible across AZs. Only works if fleet is pinned to one AZ.
+- **EFS for model cache**: Mount an EFS volume at `/data/models`. Slightly slower than EBS but survives instance replacement. ~$0.30/GB/month for infrequent access tier.
+- **S3 model storage**: Already implemented in `S3ModelStorage`. Engines download from S3 on first use. Adds 1-5 minutes cold start for model download, but subsequent tasks use the local cache.
+
+For Option A (the recommended path), this isn't an issue — EBS stays attached.
+
+### Recommendation
+
+**Start with Option A**: Add `use_spot = true` to your `terraform.tfvars`. That's it.
+
+- Same Terraform module, same Docker Compose, same `dalston-up`/`dalston-down` workflow
+- Instance stops on interruption, restarts when capacity returns
+- 65% cost savings on the GPU instance
+- EBS and Tailscale IP preserved
+- Worst case: you're interrupted during a batch job, it auto-retries in ~2 minutes
+
+If you find spot interruptions too frequent (unlikely for g5), just flip `use_spot = false` and you're back to on-demand. Zero architectural changes needed.
