@@ -22,6 +22,8 @@ import {
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import type { ModelRegistryEntry } from '@/api/types'
 
@@ -75,6 +77,7 @@ export function ModelTable({
   purgingId,
 }: ModelTableProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const [purgeConfirm, setPurgeConfirm] = useState<ModelRegistryEntry | null>(null)
 
   const toggleExpanded = (id: string) => {
     setExpandedIds((prev) => {
@@ -92,43 +95,87 @@ export function ModelTable({
     return null
   }
 
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-8"></TableHead>
-          <TableHead>Model</TableHead>
-          <TableHead>Runtime</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Size</TableHead>
-          <TableHead>Capabilities</TableHead>
-          <TableHead className="text-right">Actions</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {models.map((model) => {
-          const isExpanded = expandedIds.has(model.id)
-          const isPulling = pullingId === model.id
-          const isRemoving = removingId === model.id
-          const isPurging = purgingId === model.id
+  const handlePurgeConfirm = () => {
+    if (purgeConfirm && onPurge) {
+      onPurge(purgeConfirm.id)
+      setPurgeConfirm(null)
+    }
+  }
 
-          return (
-            <ModelTableRow
-              key={model.id}
-              model={model}
-              isExpanded={isExpanded}
-              onToggle={() => toggleExpanded(model.id)}
-              onPull={onPull}
-              onRemove={onRemove}
-              onPurge={onPurge}
-              isPulling={isPulling}
-              isRemoving={isRemoving}
-              isPurging={isPurging}
-            />
-          )
-        })}
-      </TableBody>
-    </Table>
+  return (
+    <>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-8"></TableHead>
+            <TableHead>Model</TableHead>
+            <TableHead>Runtime</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Size</TableHead>
+            <TableHead>Capabilities</TableHead>
+            <TableHead className="text-right">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {models.map((model) => {
+            const isExpanded = expandedIds.has(model.id)
+            const isPulling = pullingId === model.id
+            const isRemoving = removingId === model.id
+            const isPurging = purgingId === model.id
+
+            return (
+              <ModelTableRow
+                key={model.id}
+                model={model}
+                isExpanded={isExpanded}
+                onToggle={() => toggleExpanded(model.id)}
+                onPull={onPull}
+                onRemove={onRemove}
+                onPurgeClick={onPurge ? () => setPurgeConfirm(model) : undefined}
+                isPulling={isPulling}
+                isRemoving={isRemoving}
+                isPurging={isPurging}
+              />
+            )
+          })}
+        </TableBody>
+      </Table>
+
+      {/* Purge Confirmation Dialog */}
+      <Dialog
+        open={purgeConfirm !== null}
+        onOpenChange={(open) => {
+          if (!open) setPurgeConfirm(null)
+        }}
+      >
+        <Card className="w-full max-w-md mx-4">
+          <CardHeader>
+            <CardTitle className="text-destructive">Delete from Registry</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Are you sure you want to delete this model from the registry? This action cannot be undone.
+            </p>
+            {purgeConfirm && (
+              <div className="bg-muted p-3 rounded-md">
+                <p className="font-mono text-sm truncate">{purgeConfirm.id}</p>
+                {purgeConfirm.name && purgeConfirm.name !== purgeConfirm.id && (
+                  <p className="text-sm text-muted-foreground">{purgeConfirm.name}</p>
+                )}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setPurgeConfirm(null)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={handlePurgeConfirm}>
+                Delete
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </Dialog>
+    </>
   )
 }
 
@@ -138,7 +185,7 @@ interface ModelTableRowProps {
   onToggle: () => void
   onPull?: (modelId: string) => void
   onRemove?: (modelId: string) => void
-  onPurge?: (modelId: string) => void
+  onPurgeClick?: () => void
   isPulling: boolean
   isRemoving: boolean
   isPurging: boolean
@@ -150,7 +197,7 @@ function ModelTableRow({
   onToggle,
   onPull,
   onRemove,
-  onPurge,
+  onPurgeClick,
   isPulling,
   isRemoving,
   isPurging,
@@ -267,16 +314,12 @@ function ModelTableRow({
               </Button>
             )}
             {/* Delete from registry (all non-downloading states) */}
-            {model.status !== 'downloading' && onPurge && (
+            {model.status !== 'downloading' && onPurgeClick && (
               <Button
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8 text-destructive hover:text-destructive"
-                onClick={() => {
-                  if (confirm(`Delete "${model.id}" from registry? This cannot be undone.`)) {
-                    onPurge(model.id)
-                  }
-                }}
+                onClick={onPurgeClick}
                 disabled={isPurging || isRemoving}
                 title="Delete from registry"
               >
