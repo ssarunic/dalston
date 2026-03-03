@@ -139,6 +139,17 @@ class Settings(BaseSettings):
         description="Default max utterance duration (seconds) before forcing chunk in realtime sessions",
     )
 
+    # Security Mode (M45)
+    security_mode: Literal["none", "api_key", "user"] = Field(
+        default="api_key",
+        alias="DALSTON_SECURITY_MODE",
+        description=(
+            "Security mode: 'none' (no auth checks, dev only), "
+            "'api_key' (API key validation), "
+            "'user' (future user auth)"
+        ),
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:
