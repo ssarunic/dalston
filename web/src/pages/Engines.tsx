@@ -12,8 +12,8 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useEngines } from '@/hooks/useEngines'
-import { useModels } from '@/hooks/useModels'
-import type { BatchEngine, EngineStatus, WorkerStatus, Model } from '@/api/types'
+import { useModelRegistry } from '@/hooks/useModelRegistry'
+import type { BatchEngine, EngineStatus, WorkerStatus, ModelRegistryEntry, ModelStatus } from '@/api/types'
 import { cn } from '@/lib/utils'
 
 // Pipeline stages in their natural processing order
@@ -174,56 +174,78 @@ function StageHeader({
   )
 }
 
-// Stage-specific info to show in engine cards
-function getStageSpecificInfo(stage: string, models: Model[]): React.ReactNode {
-  switch (stage) {
-    case 'transcribe':
-      // Show models for transcription engines
-      if (models.length === 0) return null
-      return (
-        <div className="mt-3 flex items-center gap-2">
-          <Box className="h-3 w-3 text-muted-foreground shrink-0" />
-          <div className="flex flex-wrap gap-1">
-            {models.slice(0, 3).map((model) => (
-              <Badge key={model.id} variant="secondary" className="text-xs">
-                {model.name || model.id}
-              </Badge>
-            ))}
-            {models.length > 3 && (
-              <Badge variant="outline" className="text-xs">
-                +{models.length - 3} more
-              </Badge>
-            )}
-          </div>
-        </div>
-      )
-    case 'diarize':
-      // Show models for diarization (if available)
-      if (models.length === 0) return null
-      return (
-        <div className="mt-3 flex items-center gap-2">
-          <Box className="h-3 w-3 text-muted-foreground shrink-0" />
-          <div className="flex flex-wrap gap-1">
-            {models.slice(0, 2).map((model) => (
-              <Badge key={model.id} variant="secondary" className="text-xs">
-                {model.name || model.id}
-              </Badge>
-            ))}
-            {models.length > 2 && (
-              <Badge variant="outline" className="text-xs">
-                +{models.length - 2} more
-              </Badge>
-            )}
-          </div>
-        </div>
-      )
-    default:
-      // Other stages: don't show models
-      return null
-  }
+// Model status styling
+const modelStatusColors: Record<ModelStatus, string> = {
+  ready: 'bg-green-500',
+  downloading: 'bg-yellow-500 animate-pulse',
+  not_downloaded: 'bg-zinc-400',
+  failed: 'bg-red-500',
 }
 
-function EngineCard({ engine, models }: { engine: BatchEngine; models: Model[] }) {
+const modelStatusLabels: Record<ModelStatus, string> = {
+  ready: 'Ready',
+  downloading: 'Downloading',
+  not_downloaded: 'Not Downloaded',
+  failed: 'Failed',
+}
+
+// Stage-specific info to show in engine cards
+function getStageSpecificInfo(stage: string, models: ModelRegistryEntry[]): React.ReactNode {
+  // Only show models for transcribe and diarize stages
+  if (stage !== 'transcribe' && stage !== 'diarize') return null
+
+  // No models in registry for this runtime
+  if (models.length === 0) {
+    return (
+      <div className="mt-3 flex items-center gap-2">
+        <Box className="h-3 w-3 text-muted-foreground shrink-0" />
+        <span className="text-xs text-muted-foreground italic">No models in registry</span>
+      </div>
+    )
+  }
+
+  // Sort: ready first, then downloading, then not_downloaded, then failed
+  const statusOrder: Record<ModelStatus, number> = { ready: 0, downloading: 1, not_downloaded: 2, failed: 3 }
+  const sortedModels = [...models].sort((a, b) => statusOrder[a.status] - statusOrder[b.status])
+  const readyCount = models.filter((m) => m.status === 'ready').length
+  const maxToShow = stage === 'transcribe' ? 3 : 2
+
+  return (
+    <div className="mt-3 flex items-center gap-2">
+      <Box className="h-3 w-3 text-muted-foreground shrink-0" />
+      <div className="flex flex-wrap gap-1">
+        {sortedModels.slice(0, maxToShow).map((model) => (
+          <Badge
+            key={model.id}
+            variant={model.status === 'ready' ? 'secondary' : 'outline'}
+            className={cn(
+              'text-xs',
+              model.status === 'not_downloaded' && 'opacity-60'
+            )}
+          >
+            <span
+              className={cn('w-1.5 h-1.5 rounded-full mr-1', modelStatusColors[model.status])}
+              title={modelStatusLabels[model.status]}
+            />
+            {model.name || model.id}
+          </Badge>
+        ))}
+        {models.length > maxToShow && (
+          <Badge variant="outline" className="text-xs">
+            +{models.length - maxToShow} more
+          </Badge>
+        )}
+        {readyCount === 0 && (
+          <span className="text-xs text-muted-foreground italic ml-1">
+            (none ready)
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function EngineCard({ engine, models }: { engine: BatchEngine; models: ModelRegistryEntry[] }) {
   const dot = engineStatusToDot(engine.status)
   const hasActivity = engine.processing > 0 || engine.queue_depth > 0
 
@@ -278,7 +300,7 @@ function StageAccordion({
   stageStatus: StageStatus
   isExpanded: boolean
   onToggle: () => void
-  modelsByRuntime: Map<string, Model[]>
+  modelsByRuntime: Map<string, ModelRegistryEntry[]>
 }) {
   return (
     <div className="border rounded-lg overflow-hidden">
@@ -359,7 +381,7 @@ function RealtimeWorkerCard({ worker }: { worker: WorkerStatus }) {
 
 export function Engines() {
   const { data, isLoading, error } = useEngines()
-  const { data: modelsData } = useModels()
+  const { data: registryData } = useModelRegistry()
   const [expandedStages, setExpandedStages] = useState<Set<StageId>>(new Set())
 
   const batchEngines = useMemo(() => data?.batch_engines ?? [], [data?.batch_engines])
@@ -367,14 +389,14 @@ export function Engines() {
 
   // Group models by runtime (engine)
   const modelsByRuntime = useMemo(() => {
-    const map = new Map<string, Model[]>()
-    for (const model of modelsData?.data ?? []) {
+    const map = new Map<string, ModelRegistryEntry[]>()
+    for (const model of registryData?.data ?? []) {
       const existing = map.get(model.runtime) ?? []
       existing.push(model)
       map.set(model.runtime, existing)
     }
     return map
-  }, [modelsData?.data])
+  }, [registryData?.data])
 
   // Group engines by stage and compute stats
   const stageStatuses = useMemo((): StageStatus[] => {

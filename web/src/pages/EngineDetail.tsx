@@ -17,9 +17,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { BackButton } from '@/components/BackButton'
 import { apiClient } from '@/api/client'
-import { useModels } from '@/hooks/useModels'
+import { useModelRegistry } from '@/hooks/useModelRegistry'
 import { cn } from '@/lib/utils'
-import type { Engine, BatchEngine, EngineStatus } from '@/api/types'
+import type { Engine, BatchEngine, EngineStatus, ModelStatus } from '@/api/types'
 
 function StatusDot({ status }: { status: 'running' | 'available' | 'unhealthy' }) {
   const colors = {
@@ -125,11 +125,11 @@ export function EngineDetail() {
     (e) => e.engine_id === decodedEngineId
   )
 
-  // Fetch models and filter by this engine's runtime
-  const { data: modelsData } = useModels()
+  // Fetch models from registry and filter by this engine's runtime
+  const { data: registryData } = useModelRegistry({ runtime: decodedEngineId })
   const engineModels = useMemo(() => {
-    return (modelsData?.data ?? []).filter((m) => m.runtime === decodedEngineId)
-  }, [modelsData?.data, decodedEngineId])
+    return registryData?.data ?? []
+  }, [registryData?.data])
 
   // Determine status - prefer console API (heartbeat-based) over discovery API
   // batchEngineInfo.status is EngineStatus (from console API heartbeats) - more accurate
@@ -356,30 +356,73 @@ export function EngineDetail() {
           </CardHeader>
           <CardContent>
             <div className="grid gap-3 sm:grid-cols-2">
-              {engineModels.map((model) => (
-                <div
-                  key={model.id}
-                  className="p-3 rounded-lg border bg-muted/30"
-                >
-                  <div className="font-medium text-sm">{model.name || model.id}</div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    {model.runtime_model_id}
-                  </div>
-                  {stage === 'transcribe' && (
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {model.capabilities.word_timestamps && (
-                        <Badge variant="outline" className="text-xs">word timestamps</Badge>
-                      )}
-                      {model.capabilities.streaming && (
-                        <Badge variant="outline" className="text-xs">streaming</Badge>
-                      )}
-                      {model.size_gb && (
-                        <Badge variant="secondary" className="text-xs">{model.size_gb}GB</Badge>
-                      )}
+              {engineModels.map((model) => {
+                const statusColors: Record<ModelStatus, string> = {
+                  ready: 'bg-green-500',
+                  downloading: 'bg-yellow-500 animate-pulse',
+                  not_downloaded: 'bg-zinc-400',
+                  failed: 'bg-red-500',
+                }
+                const statusLabels: Record<ModelStatus, string> = {
+                  ready: 'Ready',
+                  downloading: 'Downloading',
+                  not_downloaded: 'Not Downloaded',
+                  failed: 'Failed',
+                }
+                const sizeGb = model.size_bytes ? (model.size_bytes / 1e9).toFixed(1) : null
+
+                return (
+                  <div
+                    key={model.id}
+                    className={cn(
+                      'p-3 rounded-lg border bg-muted/30',
+                      model.status === 'ready' && 'border-green-500/30',
+                      model.status === 'failed' && 'border-red-500/30'
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium text-sm truncate">{model.name || model.id}</div>
+                        <div className="text-xs text-muted-foreground mt-1 truncate">
+                          {model.runtime_model_id}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span
+                          className={cn('w-2 h-2 rounded-full', statusColors[model.status])}
+                          title={statusLabels[model.status]}
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          {statusLabels[model.status]}
+                        </span>
+                      </div>
                     </div>
-                  )}
-                </div>
-              ))}
+                    {model.status === 'downloading' && model.download_progress !== undefined && (
+                      <div className="mt-2">
+                        <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary transition-all duration-300"
+                            style={{ width: `${model.download_progress}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    {stage === 'transcribe' && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {model.word_timestamps && (
+                          <Badge variant="outline" className="text-xs">word timestamps</Badge>
+                        )}
+                        {model.streaming && (
+                          <Badge variant="outline" className="text-xs">streaming</Badge>
+                        )}
+                        {sizeGb && (
+                          <Badge variant="secondary" className="text-xs">{sizeGb}GB</Badge>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </CardContent>
         </Card>
