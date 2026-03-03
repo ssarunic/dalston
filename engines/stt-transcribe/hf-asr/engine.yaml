@@ -1,0 +1,48 @@
+schema_version: "1.1"
+id: hf-asr
+runtime: hf-asr
+stage: transcribe
+name: HuggingFace Transformers ASR
+version: 1.0.0
+description: |
+  Generic ASR engine for HuggingFace Transformers models.
+  Supports Whisper, Wav2Vec2, HuBERT, MMS, and other ASR architectures
+  with pipeline_tag=automatic-speech-recognition.
+
+  Use for community fine-tunes and research models. Any of the 10,000+
+  ASR models on HuggingFace Hub can be loaded at runtime via runtime_model_id.
+
+container:
+  gpu: optional
+  memory: 8G
+  model_cache: /models/huggingface
+
+capabilities:
+  languages:
+    - all  # Model-dependent; most support multiple languages
+  max_audio_duration: 3600
+  streaming: false
+  word_timestamps: true  # Model-dependent; Whisper provides timestamps
+
+input:
+  audio_formats:
+    - wav
+  sample_rate: 16000
+  channels: 1
+
+hf_compat:
+  pipeline_tag: automatic-speech-recognition
+  library_name: transformers
+
+hardware:
+  min_vram_gb: 4
+  recommended_gpu:
+    - t4
+    - a10g
+  supports_cpu: true
+  min_ram_gb: 8
+
+performance:
+  rtf_gpu: 0.1  # Model-dependent
+  rtf_cpu: 1.0
+  warm_start_latency_ms: 500

@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-03-03T09:46:46.322541+00:00",
+  "generated_at": "2026-03-03T10:15:48.029977+00:00",
   "schema_version": "2.0",
-  "runtime_count": 11,
+  "runtime_count": 12,
   "model_count": 18,
-  "engine_count": 11,
+  "engine_count": 12,
   "runtimes": {
     "phoneme-align": {
       "id": "phoneme-align",
@@ -277,6 +277,42 @@
         "rtf_gpu": 0.03,
         "rtf_cpu": 0.4,
         "warm_start_latency_ms": 30
+      }
+    },
+    "hf-asr": {
+      "id": "hf-asr",
+      "engine_id": "hf-asr",
+      "name": "HuggingFace Transformers ASR",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "description": "Generic ASR engine for HuggingFace Transformers models.\nSupports Whisper, Wav2Vec2, HuBERT, MMS, and other ASR architectures\nwith pipeline_tag=automatic-speech-recognition.\n\nUse for community fine-tunes and research models. Any of the 10,000+\nASR models on HuggingFace Hub can be loaded at runtime via runtime_model_id.",
+      "image": "dalston/stt-batch-transcribe-hf-asr:1.0.0",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": null,
+        "supports_word_timestamps": true,
+        "supports_streaming": false,
+        "max_audio_duration": 3600,
+        "max_concurrency": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": true,
+        "min_vram_gb": 4,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": true,
+        "min_ram_gb": 8,
+        "memory": "8G"
+      },
+      "performance": {
+        "rtf_gpu": 0.1,
+        "rtf_cpu": 1.0,
+        "warm_start_latency_ms": 500
       }
     },
     "nemo": {
@@ -1203,6 +1239,42 @@
         "rtf_gpu": 0.03,
         "rtf_cpu": 0.4,
         "warm_start_latency_ms": 30
+      }
+    },
+    "hf-asr": {
+      "id": "hf-asr",
+      "name": "HuggingFace Transformers ASR",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "type": null,
+      "description": "Generic ASR engine for HuggingFace Transformers models.\nSupports Whisper, Wav2Vec2, HuBERT, MMS, and other ASR architectures\nwith pipeline_tag=automatic-speech-recognition.\n\nUse for community fine-tunes and research models. Any of the 10,000+\nASR models on HuggingFace Hub can be loaded at runtime via runtime_model_id.",
+      "image": "dalston/stt-batch-transcribe-hf-asr:1.0.0",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": null,
+        "supports_word_timestamps": true,
+        "supports_streaming": false,
+        "max_audio_duration": 3600,
+        "max_concurrency": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": true,
+        "min_vram_gb": 4,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": true,
+        "min_ram_gb": 8,
+        "memory": "8G"
+      },
+      "performance": {
+        "rtf_gpu": 0.1,
+        "rtf_cpu": 1.0,
+        "warm_start_latency_ms": 500
       }
     },
     "nemo": {
