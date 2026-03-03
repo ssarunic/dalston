@@ -27,7 +27,7 @@ capabilities:
 
 hardware:
   min_vram_gb: 6
-  supports_cpu: false
+  supports_cpu: true  # CTranslate2 supports CPU, but slow for large model
   min_ram_gb: 16
 
 performance:

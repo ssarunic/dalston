@@ -31,7 +31,7 @@ capabilities:
 
 hardware:
   min_vram_gb: 4
-  supports_cpu: false
+  supports_cpu: true  # NeMo/PyTorch supports CPU, but GPU strongly recommended
   min_ram_gb: 8
 
 performance:
