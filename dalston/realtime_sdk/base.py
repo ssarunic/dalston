@@ -11,11 +11,13 @@ import json
 import os
 import signal
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import numpy as np
 import structlog
+import yaml
 from aiohttp import web
 from websockets.asyncio.server import ServerConnection, serve
 
@@ -37,11 +39,18 @@ from dalston.common.ws_close_codes import (
     WS_CLOSE_PROTOCOL_ERROR,
     WS_CLOSE_TRY_AGAIN_LATER,
 )
+from dalston.engine_sdk.types import EngineCapabilities
 from dalston.realtime_sdk.assembler import TranscribeResult
 from dalston.realtime_sdk.registry import WorkerInfo, WorkerRegistry
 from dalston.realtime_sdk.session import SessionConfig, SessionHandler
 
 logger = structlog.get_logger()
+
+# Paths for engine.yaml (container path first, local fallback second)
+ENGINE_YAML_PATHS = [
+    Path("/etc/dalston/engine.yaml"),
+    Path("engine.yaml"),
+]
 
 
 class RealtimeEngine(ABC):
@@ -259,6 +268,88 @@ class RealtimeEngine(ABC):
             pass
         return "0GB"
 
+    def get_capabilities(self) -> EngineCapabilities:
+        """Return engine capabilities for registration and routing.
+
+        Loads capabilities from engine.yaml if available, otherwise falls back
+        to values from getter methods. The engine.yaml is expected at
+        /etc/dalston/engine.yaml in containers, or ./engine.yaml for local dev.
+
+        Returns:
+            EngineCapabilities describing what this engine can do
+        """
+        card = self._load_engine_yaml()
+        if card is None:
+            # Fallback for engines without engine.yaml
+            return EngineCapabilities(
+                engine_id=self.get_engine(),
+                version="unknown",
+                stages=["transcribe"],
+                languages=self.get_languages() or None,
+                supports_streaming=self.supports_streaming(),
+                max_concurrency=self.max_sessions,
+            )
+
+        # Extract capabilities from engine.yaml
+        caps = card.get("capabilities", {})
+        hardware = card.get("hardware", {})
+        performance = card.get("performance", {})
+
+        # Determine GPU requirement from container.gpu field
+        container = card.get("container", {})
+        gpu_field = container.get("gpu", "none")
+        gpu_required = gpu_field == "required"
+
+        # Languages: convert ["all"] to None (meaning all languages)
+        languages = caps.get("languages")
+        if languages == ["all"]:
+            languages = None
+
+        # Stages: derive from stage field
+        stage = card.get("stage")
+        stages = [stage] if stage else ["transcribe"]
+
+        return EngineCapabilities(
+            engine_id=card.get("id", self.get_engine()),
+            version=card.get("version", "unknown"),
+            stages=stages,
+            languages=languages,
+            supports_word_timestamps=caps.get("word_timestamps", False),
+            supports_streaming=caps.get("streaming", self.supports_streaming()),
+            model_variants=None,
+            gpu_required=gpu_required,
+            gpu_vram_mb=(
+                hardware.get("min_vram_gb", 0) * 1024
+                if hardware.get("min_vram_gb")
+                else None
+            ),
+            supports_cpu=hardware.get("supports_cpu", True),
+            min_ram_gb=hardware.get("min_ram_gb"),
+            rtf_gpu=performance.get("rtf_gpu"),
+            rtf_cpu=performance.get("rtf_cpu"),
+            max_concurrency=caps.get("max_concurrency", self.max_sessions),
+            runtime=card.get("runtime"),
+        )
+
+    def _load_engine_yaml(self) -> dict[str, Any] | None:
+        """Load engine.yaml from known paths.
+
+        Returns:
+            Parsed engine.yaml dict, or None if not found
+        """
+        for path in ENGINE_YAML_PATHS:
+            if path.exists():
+                try:
+                    with open(path) as f:
+                        return yaml.safe_load(f)
+                except Exception as e:
+                    logger.warning(
+                        "failed_to_load_engine_yaml",
+                        path=str(path),
+                        error=str(e),
+                    )
+        return None
+
     def health_check(self) -> dict[str, Any]:
         """Return health status for monitoring.
 
@@ -313,6 +404,9 @@ class RealtimeEngine(ABC):
         self._registry = WorkerRegistry(self.redis_url)
 
         # Register with Session Router
+        # M50: Get structured capabilities from engine.yaml
+        capabilities = self.get_capabilities()
+
         logger.info("registering_with_session_router", endpoint=self._worker_endpoint)
         await self._registry.register(
             WorkerInfo(
@@ -323,6 +417,8 @@ class RealtimeEngine(ABC):
                 languages=self.get_languages(),
                 engine=self.get_engine(),
                 supports_vocabulary=self.get_supports_vocabulary(),
+                capabilities=capabilities,
+                runtime=capabilities.runtime,
             )
         )
 

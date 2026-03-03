@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 import redis.asyncio as redis
 import structlog
 
+from dalston.engine_sdk.types import EngineCapabilities
+
 logger = structlog.get_logger()
 
 
@@ -36,6 +38,8 @@ class WorkerInfo:
         languages: List of language codes supported (e.g., ["en", "es", "auto"])
         engine: Engine type identifier (e.g., "parakeet", "whisper")
         supports_vocabulary: Whether this engine supports vocabulary boosting
+        capabilities: Structured engine capabilities from engine.yaml (M50)
+        runtime: Runtime identifier for model management (M50)
     """
 
     worker_id: str
@@ -45,6 +49,8 @@ class WorkerInfo:
     languages: list[str]
     engine: str = "unknown"
     supports_vocabulary: bool = False
+    capabilities: EngineCapabilities | None = None
+    runtime: str | None = None
 
 
 class WorkerRegistry:
@@ -116,24 +122,31 @@ class WorkerRegistry:
         r = await self._get_redis()
         worker_key = f"{WORKER_KEY_PREFIX}{info.worker_id}"
 
+        # Build registration mapping
+        mapping = {
+            "endpoint": info.endpoint,
+            "status": "ready",
+            "capacity": str(info.capacity),
+            "active_sessions": "0",
+            "gpu_memory_used": "0GB",
+            "gpu_memory_total": "0GB",
+            "models_loaded": json.dumps(info.models),
+            "languages_supported": json.dumps(info.languages),
+            "engine": info.engine,
+            "supports_vocabulary": "true" if info.supports_vocabulary else "false",
+            "last_heartbeat": datetime.now(UTC).isoformat(),
+            "started_at": datetime.now(UTC).isoformat(),
+        }
+
+        # M50: Add structured capabilities if available
+        if info.capabilities is not None:
+            mapping["capabilities"] = info.capabilities.model_dump_json()
+            mapping["engine_id"] = info.capabilities.engine_id
+        if info.runtime is not None:
+            mapping["runtime"] = info.runtime
+
         # Set worker state
-        await r.hset(
-            worker_key,
-            mapping={
-                "endpoint": info.endpoint,
-                "status": "ready",
-                "capacity": str(info.capacity),
-                "active_sessions": "0",
-                "gpu_memory_used": "0GB",
-                "gpu_memory_total": "0GB",
-                "models_loaded": json.dumps(info.models),
-                "languages_supported": json.dumps(info.languages),
-                "engine": info.engine,
-                "supports_vocabulary": "true" if info.supports_vocabulary else "false",
-                "last_heartbeat": datetime.now(UTC).isoformat(),
-                "started_at": datetime.now(UTC).isoformat(),
-            },
-        )
+        await r.hset(worker_key, mapping=mapping)
 
         # Add to worker set
         await r.sadd(WORKER_SET_KEY, info.worker_id)
@@ -189,22 +202,28 @@ class WorkerRegistry:
         if needs_reregistration and worker_id in self._registered_workers:
             # Re-populate all registration fields
             info = self._registered_workers[worker_id]
-            await r.hset(
-                worker_key,
-                mapping={
-                    "endpoint": info.endpoint,
-                    "status": status,
-                    "capacity": str(info.capacity),
-                    "active_sessions": str(active_sessions),
-                    "gpu_memory_used": gpu_memory_used,
-                    "gpu_memory_total": "0GB",
-                    "models_loaded": json.dumps(info.models),
-                    "languages_supported": json.dumps(info.languages),
-                    "engine": info.engine,
-                    "last_heartbeat": now,
-                    "started_at": now,
-                },
-            )
+            mapping = {
+                "endpoint": info.endpoint,
+                "status": status,
+                "capacity": str(info.capacity),
+                "active_sessions": str(active_sessions),
+                "gpu_memory_used": gpu_memory_used,
+                "gpu_memory_total": "0GB",
+                "models_loaded": json.dumps(info.models),
+                "languages_supported": json.dumps(info.languages),
+                "engine": info.engine,
+                "last_heartbeat": now,
+                "started_at": now,
+            }
+
+            # M50: Include capabilities on re-registration
+            if info.capabilities is not None:
+                mapping["capabilities"] = info.capabilities.model_dump_json()
+                mapping["engine_id"] = info.capabilities.engine_id
+            if info.runtime is not None:
+                mapping["runtime"] = info.runtime
+
+            await r.hset(worker_key, mapping=mapping)
 
             # Re-add to worker set (idempotent)
             await r.sadd(WORKER_SET_KEY, worker_id)
