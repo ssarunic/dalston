@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { useMemo } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   ChevronDown,
   ChevronRight,
@@ -382,7 +382,17 @@ function RealtimeWorkerCard({ worker }: { worker: WorkerStatus }) {
 export function Engines() {
   const { data, isLoading, error } = useEngines()
   const { data: registryData } = useModelRegistry()
-  const [expandedStages, setExpandedStages] = useState<Set<StageId>>(new Set())
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // Parse expanded stages from URL (e.g., ?expanded=transcribe,diarize)
+  const expandedStages = useMemo(() => {
+    const param = searchParams.get('expanded')
+    if (!param) return new Set<StageId>()
+    const ids = param.split(',').filter((id): id is StageId =>
+      PIPELINE_STAGES.some((s) => s.id === id)
+    )
+    return new Set(ids)
+  }, [searchParams])
 
   const batchEngines = useMemo(() => data?.batch_engines ?? [], [data?.batch_engines])
   const realtimeWorkers = data?.realtime_engines ?? []
@@ -425,17 +435,23 @@ export function Engines() {
     })
   }, [batchEngines])
 
-  // Auto-expand stages with issues or activity
+  // Toggle stage expansion and persist to URL
   const toggleStage = (stageId: StageId) => {
-    setExpandedStages((prev) => {
-      const next = new Set(prev)
-      if (next.has(stageId)) {
-        next.delete(stageId)
+    const next = new Set(expandedStages)
+    if (next.has(stageId)) {
+      next.delete(stageId)
+    } else {
+      next.add(stageId)
+    }
+    // Update URL params
+    setSearchParams((prev) => {
+      if (next.size === 0) {
+        prev.delete('expanded')
       } else {
-        next.add(stageId)
+        prev.set('expanded', Array.from(next).join(','))
       }
-      return next
-    })
+      return prev
+    }, { replace: true })
   }
 
   // Summary stats
