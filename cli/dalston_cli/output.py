@@ -31,18 +31,17 @@ def output_job_created(job: Job, as_json: bool = False) -> None:
         as_json: Output as JSON if True.
     """
     if as_json:
-        print(
-            json.dumps(
-                {
-                    "id": str(job.id),
-                    "status": job.status.value,
-                    "created_at": job.created_at.isoformat(),
-                },
-                indent=2,
-            )
-        )
+        data = {
+            "id": str(job.id),
+            "status": job.status.value,
+            "created_at": job.created_at.isoformat(),
+        }
+        if job.display_name:
+            data["display_name"] = job.display_name
+        print(json.dumps(data, indent=2))
     else:
-        console.print(f"Job submitted: {job.id}")
+        name_suffix = f" ({job.display_name})" if job.display_name else ""
+        console.print(f"Job submitted: {job.id}{name_suffix}")
 
 
 def output_transcript(
@@ -98,6 +97,8 @@ def _job_to_json(job: Job) -> str:
         "created_at": job.created_at.isoformat(),
     }
 
+    if job.display_name:
+        data["display_name"] = job.display_name
     if job.started_at:
         data["started_at"] = job.started_at.isoformat()
     if job.completed_at:
@@ -295,6 +296,7 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
             {
                 "id": str(j.id),
                 "status": j.status.value,
+                "display_name": j.display_name,
                 "created_at": j.created_at.isoformat(),
                 "started_at": j.started_at.isoformat() if j.started_at else None,
                 "completed_at": j.completed_at.isoformat() if j.completed_at else None,
@@ -307,6 +309,7 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
 
     table = Table()
     table.add_column("ID", style="cyan")
+    table.add_column("Name", style="white")
     table.add_column("Status")
     table.add_column("Created")
     table.add_column("Progress")
@@ -322,9 +325,14 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
     for job in jobs:
         status_style = status_styles.get(job.status.value, "")
         progress_str = f"{job.progress}%" if job.progress is not None else "-"
+        # Truncate display name if too long
+        name = job.display_name or "-"
+        if len(name) > 30:
+            name = name[:27] + "..."
 
         table.add_row(
             str(job.id)[:12] + "...",
+            name,
             f"[{status_style}]{job.status.value}[/]",
             job.created_at.strftime("%Y-%m-%d %H:%M"),
             progress_str,
@@ -346,6 +354,8 @@ def output_job_detail(job: Job, as_json: bool = False) -> None:
         return
 
     console.print(f"ID:       {job.id}")
+    if job.display_name:
+        console.print(f"Name:     {job.display_name}")
     console.print(f"Status:   {job.status.value}")
     console.print(f"Created:  {job.created_at}")
 

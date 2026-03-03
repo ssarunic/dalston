@@ -68,6 +68,7 @@ class TestAudioUrlTranscription:
         mock_job.id = UUID("00000000-0000-0000-0000-000000789abc")
         mock_job.status = "pending"
         mock_job.created_at = datetime.now(UTC)
+        mock_job.display_name = "test_audio.wav"
         service.create_job.return_value = mock_job
         return service
 

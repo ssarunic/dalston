@@ -548,10 +548,14 @@ export function JobDetail() {
           <BackButton fallbackPath="/jobs" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-              <h1 className="text-lg sm:text-2xl font-bold font-mono truncate">{job.id}</h1>
+              <h1 className="text-lg sm:text-2xl font-bold truncate" title={job.display_name || job.id}>
+                {job.display_name || job.id}
+              </h1>
               <StatusBadge status={job.status} />
             </div>
             <p className="text-xs sm:text-sm text-muted-foreground">
+              <span className="font-mono">{job.id}</span>
+              <span className="mx-2">·</span>
               Created {new Date(job.created_at).toLocaleString()}
             </p>
           </div>

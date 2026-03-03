@@ -30,6 +30,7 @@ export interface Speaker {
 export interface JobSummary {
   id: string
   status: JobStatus
+  display_name?: string
   created_at: string
   started_at?: string
   completed_at?: string
@@ -97,6 +98,7 @@ export interface JobListResponse {
 export interface ConsoleJobSummary {
   id: string
   status: JobStatus
+  display_name?: string
   model?: string
   audio_uri?: string
   created_at: string
@@ -576,6 +578,7 @@ export interface CreateJobRequest {
 export interface CreateJobResponse {
   id: string
   status: JobStatus
+  display_name?: string
   created_at: string
 }
 

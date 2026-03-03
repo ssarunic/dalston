@@ -49,9 +49,7 @@ class TestGenerateDisplayName:
         assert result == "my meeting recording.wav"
 
     def test_url_trailing_slash_handled(self):
-        result = generate_display_name(
-            url="https://example.com/audio/recording.wav/"
-        )
+        result = generate_display_name(url="https://example.com/audio/recording.wav/")
 
         assert result == "recording.wav"
 
@@ -68,7 +66,7 @@ class TestGenerateDisplayName:
             mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
             result = generate_display_name()
 
-        assert result == "Untitled \u2014 Mar 3, 2026 14:32"
+        assert result == "Untitled \u2014 Mar 03, 2026 14:32"
 
     def test_untitled_fallback_when_empty_filename(self):
         result = generate_display_name(filename="")
@@ -102,3 +100,23 @@ class TestGenerateDisplayName:
         )
 
         assert result == "audio.wav"
+
+    def test_untitled_date_format_single_digit_day_zero_padded(self):
+        """Verify single-digit days are zero-padded for cross-platform consistency."""
+        fixed_time = datetime(2026, 1, 5, 9, 7, tzinfo=UTC)
+        with patch("dalston.common.utils.datetime") as mock_dt:
+            mock_dt.now.return_value = fixed_time
+            mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+            result = generate_display_name()
+
+        assert result == "Untitled \u2014 Jan 05, 2026 09:07"
+
+    def test_untitled_date_format_double_digit_day(self):
+        """Verify double-digit days display correctly."""
+        fixed_time = datetime(2026, 12, 25, 15, 45, tzinfo=UTC)
+        with patch("dalston.common.utils.datetime") as mock_dt:
+            mock_dt.now.return_value = fixed_time
+            mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+            result = generate_display_name()
+
+        assert result == "Untitled \u2014 Dec 25, 2026 15:45"

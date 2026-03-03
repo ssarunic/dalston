@@ -272,9 +272,12 @@ export function BatchJobs() {
                     onClick={() => navigate(`/jobs/${job.id}`)}
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="font-mono text-xs break-all">{job.id}</p>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium truncate" title={job.display_name || job.id}>
+                          {job.display_name || `${job.id.slice(0, 12)}...`}
+                        </p>
                         <p className="text-xs text-muted-foreground mt-1">
+                          {job.display_name && <span className="font-mono">{job.id.slice(0, 8)} · </span>}
                           {formatDate(job.created_at)}
                         </p>
                       </div>
@@ -334,7 +337,7 @@ export function BatchJobs() {
               <Table className="min-w-[860px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="sticky left-0 z-10 bg-card">ID</TableHead>
+                    <TableHead className="sticky left-0 z-10 bg-card">Name</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Model</TableHead>
                     <TableHead>Duration</TableHead>
@@ -350,8 +353,17 @@ export function BatchJobs() {
                       className="group cursor-pointer hover:bg-accent/50"
                       onClick={() => navigate(`/jobs/${job.id}`)}
                     >
-                      <TableCell className="font-mono text-sm sticky left-0 z-10 bg-card group-hover:bg-accent/50">
-                        {job.id.slice(0, 12)}...
+                      <TableCell className="sticky left-0 z-10 bg-card group-hover:bg-accent/50">
+                        <div className="max-w-[200px]">
+                          <p className="text-sm font-medium truncate" title={job.display_name || job.id}>
+                            {job.display_name || `${job.id.slice(0, 12)}...`}
+                          </p>
+                          {job.display_name && (
+                            <p className="text-xs text-muted-foreground font-mono">
+                              {job.id.slice(0, 8)}
+                            </p>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <StatusBadge status={job.status} />

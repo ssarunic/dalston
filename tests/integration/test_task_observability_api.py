@@ -85,6 +85,8 @@ def _create_mock_job(
     job.result_character_count = None
     # Parameters dict
     job.parameters = {}
+    # Display name
+    job.display_name = "test_audio.wav"
     return job
 
 

@@ -23,7 +23,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_created
-from dalston.common.utils import generate_display_name
 from dalston.config import Settings
 from dalston.gateway.api.v1.openai_audio import (
     OPENAI_MAX_FILE_SIZE,
@@ -163,9 +162,6 @@ async def create_translation_openai(
         filename=ingested.filename,
     )
 
-    # Generate display name from filename
-    display_name = generate_display_name(filename=ingested.filename)
-
     # Create job
     job = await jobs_service.create_job(
         db=db,
@@ -178,7 +174,6 @@ async def create_translation_openai(
         audio_sample_rate=ingested.metadata.sample_rate,
         audio_channels=ingested.metadata.channels,
         audio_bit_depth=ingested.metadata.bit_depth,
-        display_name=display_name,
     )
 
     # Publish job.created event

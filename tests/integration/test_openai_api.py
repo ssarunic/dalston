@@ -278,6 +278,7 @@ class TestOpenAITranscriptionEndpoint:
         job.status = JobStatus.COMPLETED.value
         job.error = None
         job.created_at = datetime.now(UTC)
+        job.display_name = "test_audio.wav"
         return job
 
     def test_dalston_native_mode_returns_201(
@@ -533,6 +534,7 @@ class TestOpenAITranslationEndpoint:
         job.tenant_id = api_key.tenant_id
         job.status = JobStatus.COMPLETED.value
         job.error = None
+        job.display_name = "test_audio.wav"
         return job
 
     def test_translation_only_accepts_whisper_1(self, client):

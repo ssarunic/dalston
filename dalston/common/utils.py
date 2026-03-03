@@ -60,7 +60,7 @@ def generate_display_name(
 
     if not name:
         now = datetime.now(UTC)
-        name = now.strftime("Untitled \u2014 %b %-d, %Y %H:%M")
+        name = now.strftime("Untitled \u2014 %b %d, %Y %H:%M")
 
     return name[:MAX_DISPLAY_NAME_LENGTH]
 

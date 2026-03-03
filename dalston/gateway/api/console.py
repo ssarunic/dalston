@@ -582,6 +582,7 @@ class ConsoleJobSummary(BaseModel):
 
     id: UUID
     status: str
+    display_name: str | None = None
     model: str | None = None
     audio_uri: str | None = None
     created_at: datetime
@@ -701,6 +702,7 @@ async def list_console_jobs(
             ConsoleJobSummary(
                 id=job.id,
                 status=job.status,
+                display_name=job.display_name,
                 model=_get_transcribe_model(job),
                 audio_uri=job.audio_uri,
                 created_at=job.created_at,

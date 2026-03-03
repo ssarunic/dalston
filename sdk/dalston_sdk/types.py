@@ -165,6 +165,7 @@ class Job:
     id: UUID
     status: JobStatus
     created_at: datetime
+    display_name: str | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
     error: str | None = None
@@ -180,6 +181,7 @@ class JobSummary:
     id: UUID
     status: JobStatus
     created_at: datetime
+    display_name: str | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
     progress: int | None = None

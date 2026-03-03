@@ -258,6 +258,31 @@ class AuditService:
             ip_address=ip_address,
         )
 
+    async def log_job_renamed(
+        self,
+        job_id: UUID,
+        tenant_id: UUID,
+        *,
+        old_name: str,
+        new_name: str,
+        actor_type: str = "api_key",
+        actor_id: str = "unknown",
+        correlation_id: str | None = None,
+        ip_address: str | None = None,
+    ) -> None:
+        """Log job rename event."""
+        await self.log(
+            action="job.renamed",
+            resource_type="job",
+            resource_id=str(job_id),
+            tenant_id=tenant_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            detail={"old_name": old_name, "new_name": new_name},
+            correlation_id=correlation_id,
+            ip_address=ip_address,
+        )
+
     async def log_job_purged(
         self,
         job_id: UUID,

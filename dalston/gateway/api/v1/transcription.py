@@ -655,23 +655,43 @@ async def list_transcriptions(
     },
 )
 async def update_transcription(
+    request: Request,
     job_id: UUID,
     body: JobRenameRequest,
     api_key: RequireJobsWrite,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> JobResponse:
     """Update a job's display name.
 
     Allows renaming a job to a more meaningful label at any time.
     """
+    # Get current job to capture old name for audit
+    job = await jobs_service.get_job(db, job_id, tenant_id=api_key.tenant_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    old_name = job.display_name
+
+    # Update display name
     job = await jobs_service.update_display_name(
         db, job_id, body.display_name, tenant_id=api_key.tenant_id
     )
+    assert job is not None  # We just verified the job exists above
 
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+    # Audit log the rename
+    request_id = getattr(request.state, "request_id", None)
+    await audit_service.log_job_renamed(
+        job_id=job_id,
+        tenant_id=api_key.tenant_id,
+        old_name=old_name,
+        new_name=body.display_name,
+        actor_type="api_key",
+        actor_id=api_key.prefix,
+        correlation_id=request_id,
+        ip_address=request.client.host if request.client else None,
+    )
 
     # Extract model from parameters
     model = job.parameters.get("engine_transcribe") if job.parameters else None
