@@ -189,7 +189,13 @@ class TestParakeetOnnxStreamingVariantValidation:
 
     def test_valid_variants(self):
         """Test that all valid variants are accepted."""
-        for variant in ("ctc-0.6b", "ctc-1.1b", "tdt-0.6b-v2", "tdt-0.6b-v3", "rnnt-0.6b"):
+        for variant in (
+            "ctc-0.6b",
+            "ctc-1.1b",
+            "tdt-0.6b-v2",
+            "tdt-0.6b-v3",
+            "rnnt-0.6b",
+        ):
             with patch.dict("os.environ", {"DALSTON_MODEL_VARIANT": variant}):
                 Engine = load_parakeet_onnx_streaming_engine()
                 engine = Engine()
