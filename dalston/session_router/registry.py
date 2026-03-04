@@ -191,7 +191,10 @@ class WorkerRegistry:
                 key=lambda w: (model not in w.models_loaded, -w.available_capacity)
             )
         else:
-            available.sort(key=lambda w: w.available_capacity, reverse=True)
+            # Prefer workers that have models loaded (ready to go) over empty workers
+            available.sort(
+                key=lambda w: (len(w.models_loaded) == 0, -w.available_capacity)
+            )
 
         return available
 
