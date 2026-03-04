@@ -23,9 +23,10 @@ interface HFModelInputProps {
   isLoading: boolean
   result?: HFResolveResponse
   error?: Error | null
+  autoFocus?: boolean
 }
 
-export function HFModelInput({ onResolve, isLoading, result, error }: HFModelInputProps) {
+export function HFModelInput({ onResolve, isLoading, result, error, autoFocus }: HFModelInputProps) {
   const [modelId, setModelId] = useState('')
   const [suggestions, setSuggestions] = useState<HFSearchResult[]>([])
   const [isSearching, setIsSearching] = useState(false)
@@ -76,6 +77,17 @@ export function HFModelInput({ onResolve, isLoading, result, error }: HFModelInp
     }
   }, [modelId])
 
+  // Focus input when autoFocus is true (for dialog usage)
+  useEffect(() => {
+    if (autoFocus) {
+      // Delay to ensure dialog animation completes
+      const timer = setTimeout(() => {
+        inputRef.current?.focus()
+      }, 150)
+      return () => clearTimeout(timer)
+    }
+  }, [autoFocus])
+
   // Close suggestions when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -114,12 +126,11 @@ export function HFModelInput({ onResolve, isLoading, result, error }: HFModelInp
           <input
             ref={inputRef}
             type="text"
-            placeholder="Search HuggingFace models (e.g., parakeet, whisper)"
+            placeholder="parakeet, whisper, ..."
             value={modelId}
             onChange={(e) => setModelId(e.target.value)}
             onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
             className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-            autoFocus
           />
           {isSearching && (
             <div className="absolute right-3 top-1/2 -translate-y-1/2">

@@ -51,6 +51,7 @@ export function AddModelDialog({
               isLoading={isLoading}
               result={result}
               error={error}
+              autoFocus={open}
             />
           </div>
         </div>

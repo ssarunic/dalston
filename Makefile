@@ -4,7 +4,7 @@
 # Run `make help` to see all available targets.
 
 .PHONY: help dev dev-minimal dev-gpu dev-observability stop logs logs-all ps \
-        build-cpu build-gpu build-engine \
+        build-cpu build-gpu build-engine deploy-web \
         aws-start aws-stop aws-logs \
         health clean clean-local validate test lint
 
@@ -26,6 +26,7 @@ help:
 	@echo "  make build-cpu       - Build CPU engine variants (for Mac development)"
 	@echo "  make build-gpu       - Build GPU engine variants (requires NVIDIA GPU)"
 	@echo "  make build-engine ENGINE=<name> - Build a specific engine"
+	@echo "  make deploy-web      - Rebuild gateway with latest web console changes"
 	@echo ""
 	@echo "AWS Deployment:"
 	@echo "  make aws-start       - Start on AWS with local infra + GPU"
@@ -125,6 +126,11 @@ ifndef ENGINE
 	$(error ENGINE is required. Usage: make rebuild ENGINE=<service-name>)
 endif
 	docker compose up -d --build $(ENGINE)
+
+# Rebuild gateway with latest web console changes
+deploy-web:
+	docker compose build gateway
+	docker compose up -d gateway
 
 # ============================================================
 # AWS DEPLOYMENT
