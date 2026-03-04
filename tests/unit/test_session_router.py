@@ -508,7 +508,7 @@ class TestSessionAllocator:
         assert result.worker_id == "worker-1"
         assert result.endpoint == "ws://localhost:9000"
         assert result.session_id.startswith("sess_")
-        mock_registry.get_available_workers.assert_called_once_with(None, "en")
+        mock_registry.get_available_workers.assert_called_once_with(None, "en", None)
         mock_redis.hincrby.assert_called()
 
     @pytest.mark.asyncio
