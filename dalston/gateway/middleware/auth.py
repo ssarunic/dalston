@@ -65,8 +65,7 @@ def extract_api_key_from_request(request: Request) -> str | None:
 
     Checks in order:
     1. Authorization: Bearer <key>
-    2. xi-api-key: <key> (ElevenLabs compatibility)
-    3. api_key query parameter
+    2. xi-api-key: <key> (ElevenLabs compatibility, deprecated)
 
     Args:
         request: FastAPI Request object
@@ -81,15 +80,14 @@ def extract_api_key_from_request(request: Request) -> str | None:
         if len(parts) == 2 and parts[0].lower() == "bearer":
             return parts[1]
 
-    # Check xi-api-key header (ElevenLabs compatibility)
+    # Check xi-api-key header (ElevenLabs compatibility, deprecated)
     xi_key = request.headers.get("xi-api-key")
     if xi_key:
+        logger.warning(
+            "xi-api-key header is deprecated, use Authorization: Bearer instead",
+            path=request.url.path,
+        )
         return xi_key
-
-    # Check query parameter
-    api_key = request.query_params.get("api_key")
-    if api_key:
-        return api_key
 
     return None
 
@@ -98,9 +96,9 @@ def extract_api_key_from_websocket(websocket: WebSocket) -> str | None:
     """Extract API key from WebSocket connection.
 
     Checks in order:
-    1. api_key query parameter
-    2. Authorization: Bearer header (OpenAI-compatible)
-    3. xi-api-key header (ElevenLabs-compatible)
+    1. Authorization: Bearer header (preferred)
+    2. api_key query parameter (fallback for browser clients)
+    3. xi-api-key header (ElevenLabs-compatible, deprecated)
 
     Args:
         websocket: FastAPI WebSocket object
@@ -108,21 +106,25 @@ def extract_api_key_from_websocket(websocket: WebSocket) -> str | None:
     Returns:
         API key string or None if not found
     """
-    # Check query parameter (primary method for WebSocket)
-    api_key = websocket.query_params.get("api_key")
-    if api_key:
-        return api_key
-
-    # Check Authorization header (OpenAI-compatible)
+    # Check Authorization header (preferred)
     auth_header = websocket.headers.get("authorization")
     if auth_header:
         parts = auth_header.split(" ", 1)
         if len(parts) == 2 and parts[0].lower() == "bearer":
             return parts[1]
 
-    # Check xi-api-key header (ElevenLabs-compatible)
+    # Check query parameter (fallback for browser clients that can't set headers)
+    api_key = websocket.query_params.get("api_key")
+    if api_key:
+        return api_key
+
+    # Check xi-api-key header (ElevenLabs-compatible, deprecated)
     xi_key = websocket.headers.get("xi-api-key")
     if xi_key:
+        logger.warning(
+            "xi-api-key header is deprecated, use Authorization: Bearer instead",
+            path=str(websocket.url.path),
+        )
         return xi_key
 
     return None
@@ -185,17 +187,29 @@ def _get_dev_api_key_for_websocket() -> APIKey:
 
     This is only used in development and returns an API key
     with full admin permissions.
+
+    Raises:
+        RuntimeError: If security_mode=none is used outside development environment
     """
+    import os
     from datetime import UTC, datetime
     from uuid import UUID
 
     from dalston.db.session import DEFAULT_TENANT_ID
 
+    # Guard: security_mode=none requires explicit development environment
+    env = os.getenv("DALSTON_ENV", "").lower()
+    if env not in ("development", "dev", "test"):
+        raise RuntimeError(
+            "security_mode=none requires DALSTON_ENV=development|dev|test. "
+            "Refusing to disable auth in non-development environment."
+        )
+
     # Well-known dev key ID (deterministic for testing)
-    DEV_KEY_ID = UUID("00000000-0000-0000-0000-000000000002")
+    dev_key_id = UUID("00000000-0000-0000-0000-000000000002")
 
     return APIKey(
-        id=DEV_KEY_ID,
+        id=dev_key_id,
         key_hash="dev_key_hash",
         prefix="dk_dev00000",
         name="Development Key",

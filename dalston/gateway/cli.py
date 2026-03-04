@@ -7,12 +7,14 @@ Usage:
     python -m dalston.gateway.cli list-keys
     python -m dalston.gateway.cli revoke-key <key-id>
 
-    # Model Management (M40)
+    # Model Management
     python -m dalston.gateway.cli model ls
     python -m dalston.gateway.cli model pull parakeet-tdt-1.1b
     python -m dalston.gateway.cli model status parakeet-tdt-1.1b
     python -m dalston.gateway.cli model rm parakeet-tdt-1.1b
     python -m dalston.gateway.cli model sync
+
+Note: Models are seeded automatically from YAML files on gateway startup (M46).
 """
 
 import asyncio
@@ -600,50 +602,6 @@ def model_sync() -> None:
     typer.echo(
         f"Sync complete: {result['updated']} updated, {result['unchanged']} unchanged"
     )
-
-
-async def _seed_models(*, update: bool = False) -> dict:
-    """Seed registry from catalog."""
-    from dalston.db.session import async_session
-    from dalston.gateway.services.model_registry import ModelRegistryService
-
-    async with async_session() as db:
-        service = ModelRegistryService()
-        return await service.seed_from_catalog(db, update_existing=update)
-
-
-@model_app.command("seed")
-def model_seed(
-    update: Annotated[
-        bool,
-        typer.Option("--update", "-u", help="Update existing models with catalog data"),
-    ] = False,
-) -> None:
-    """Seed registry from the model catalog.
-
-    Populates the database with all models defined in the static catalog.
-    This allows browsing available models and downloading them.
-
-    Examples:
-        python -m dalston.gateway.cli model seed
-        python -m dalston.gateway.cli model seed --update  # Update existing models
-    """
-    if update:
-        typer.echo("Updating model registry from catalog...")
-    else:
-        typer.echo("Seeding model registry from catalog...")
-
-    try:
-        result = asyncio.run(_seed_models(update=update))
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        sys.exit(1)
-
-    parts = [f"{result['created']} created"]
-    if result.get("updated", 0) > 0:
-        parts.append(f"{result['updated']} updated")
-    parts.append(f"{result['skipped']} skipped")
-    typer.echo(f"Seed complete: {', '.join(parts)}")
 
 
 # Register model subcommand

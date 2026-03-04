@@ -11,7 +11,7 @@ import pytest
 
 from dalston.common.models import Task, TaskStatus
 from dalston.common.streams_types import WAITING_ENGINE_TASKS_KEY
-from dalston.orchestrator.scheduler import queue_task, remove_task_from_queue
+from dalston.orchestrator.scheduler import queue_task
 
 
 class MockSettings:
@@ -241,25 +241,3 @@ class TestQueueTaskWithStreams:
             mock_redis.sadd.assert_called_once_with(
                 WAITING_ENGINE_TASKS_KEY, str(sample_task.id)
             )
-
-
-class TestRemoveTaskFromQueue:
-    """Tests for deprecated remove_task_from_queue."""
-
-    @pytest.mark.asyncio
-    async def test_returns_false_with_streams(self, mock_redis):
-        """Test that remove_task_from_queue returns False (no-op with streams)."""
-        task_id = uuid4()
-        result = await remove_task_from_queue(mock_redis, task_id, "engine-1")
-
-        # Always returns False with streams
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_does_not_call_lrem(self, mock_redis):
-        """Test that remove_task_from_queue does not call lrem."""
-        task_id = uuid4()
-        await remove_task_from_queue(mock_redis, task_id, "engine-1")
-
-        # lrem should not be called
-        mock_redis.lrem.assert_not_called()

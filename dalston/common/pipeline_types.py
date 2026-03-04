@@ -11,12 +11,15 @@ Design principles:
 4. Single timeline - all timestamps relative to original audio
 """
 
+import logging
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dalston.common.audio_defaults import DEFAULT_SAMPLE_RATE
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # Enums
@@ -259,10 +262,34 @@ class MergedSegment(BaseModel):
 # =============================================================================
 
 
-class PrepareInput(BaseModel):
-    """Input for audio preparation stage."""
+class StageInput(BaseModel):
+    """Base class for stage input models.
+
+    Uses extra="ignore" for forward compatibility during rolling deployments
+    (newer orchestrator can send fields that older engines don't know about).
+    Logs unknown fields as warnings to catch typos and config drift.
+    """
 
     model_config = ConfigDict(extra="ignore")
+
+    @model_validator(mode="before")
+    @classmethod
+    def warn_unknown_fields(cls, values: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(values, dict):
+            return values
+        known = set(cls.model_fields.keys())
+        unknown = set(values.keys()) - known
+        if unknown:
+            logger.warning(
+                "Unknown fields in %s config (ignored): %s",
+                cls.__name__,
+                sorted(unknown),
+            )
+        return values
+
+
+class PrepareInput(StageInput):
+    """Input for audio preparation stage."""
 
     target_sample_rate: int = Field(
         default=DEFAULT_SAMPLE_RATE, description="Target sample rate"
@@ -280,10 +307,8 @@ class PrepareInput(BaseModel):
     )
 
 
-class TranscribeInput(BaseModel):
+class TranscribeInput(StageInput):
     """Input for transcription stage."""
-
-    model_config = ConfigDict(extra="ignore")
 
     # Language
     language: str | None = Field(
@@ -316,10 +341,8 @@ class TranscribeInput(BaseModel):
     best_of: int | None = Field(default=None, description="Number of candidates")
 
 
-class AlignInput(BaseModel):
+class AlignInput(StageInput):
     """Input for alignment stage."""
-
-    model_config = ConfigDict(extra="ignore")
 
     target_granularity: TimestampGranularity = Field(
         default=TimestampGranularity.WORD, description="Target timestamp precision"
@@ -335,10 +358,8 @@ class AlignInput(BaseModel):
     )
 
 
-class DiarizeInput(BaseModel):
+class DiarizeInput(StageInput):
     """Input for diarization stage."""
-
-    model_config = ConfigDict(extra="ignore")
 
     num_speakers: int | None = Field(
         default=None, ge=1, description="Exact speaker count, None=auto"
@@ -352,10 +373,8 @@ class DiarizeInput(BaseModel):
     detect_overlap: bool = Field(default=True, description="Detect overlapping speech")
 
 
-class MergeInput(BaseModel):
+class MergeInput(StageInput):
     """Input for merge stage."""
-
-    model_config = ConfigDict(extra="ignore")
 
     merge_strategy: str = Field(
         default="segment", description="'segment' or 'word' level merging"
@@ -469,9 +488,6 @@ class AlignOutput(BaseModel):
     skipped: bool = Field(default=False, description="Whether alignment was skipped")
     skip_reason: str | None = Field(default=None, description="Reason if skipped")
     warnings: list[str] = Field(default_factory=list, description="Any warnings")
-
-    # Legacy warning field for backward compatibility during migration
-    warning: dict | None = Field(default=None, description="Deprecated: use warnings")
 
 
 class DiarizeOutput(BaseModel):

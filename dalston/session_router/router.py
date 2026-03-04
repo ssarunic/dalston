@@ -167,6 +167,7 @@ class SessionRouter:
         language: str,
         model: str | None,
         client_ip: str,
+        runtime: str | None = None,
     ) -> WorkerAllocation | None:
         """Acquire a worker for a new session.
 
@@ -176,6 +177,8 @@ class SessionRouter:
             language: Requested language code or "auto"
             model: Model name (e.g., "faster-whisper-large-v3") or None for any
             client_ip: Client IP address for logging
+            runtime: Model runtime (e.g., "faster-whisper") for routing when model
+                     isn't pre-loaded. Workers matching runtime can load the model.
 
         Returns:
             WorkerAllocation with endpoint and session_id, or None if no capacity
@@ -187,6 +190,7 @@ class SessionRouter:
             language=language,
             model=model,
             client_ip=client_ip,
+            runtime=runtime,
         )
 
     async def release_worker(self, session_id: str) -> SessionState | None:

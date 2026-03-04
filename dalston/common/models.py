@@ -7,7 +7,6 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from dalston.common.retention import (
-    RETENTION_DEFAULT_DAYS,
     RETENTION_MAX_DAYS,
     RETENTION_MIN_DAYS,
     RETENTION_PERMANENT,
@@ -16,25 +15,8 @@ from dalston.common.retention import (
 )
 
 # =============================================================================
-# Retention Policy Types (M25)
+# Retention Utilities
 # =============================================================================
-
-
-class RetentionMode(str, Enum):
-    """Retention behavior mode for jobs and sessions."""
-
-    AUTO_DELETE = "auto_delete"  # Delete after hours expires
-    KEEP = "keep"  # Keep forever (purge_after stays NULL)
-    NONE = "none"  # Delete immediately on completion
-
-
-class RetentionScope(str, Enum):
-    """What to delete when purging."""
-
-    ALL = "all"  # Delete audio, task intermediates, and transcript
-    AUDIO_ONLY = (
-        "audio_only"  # Delete audio only, keep task intermediates and transcript
-    )
 
 
 def retention_to_ttl_seconds(retention_days: int) -> int | None:
@@ -89,36 +71,6 @@ def format_retention_display(retention_days: int) -> str:
     if retention_days == 1:
         return "1 day"
     return f"{retention_days} days"
-
-
-# Legacy function for backwards compatibility during migration
-def parse_retention(value: str) -> int | None:
-    """Parse legacy retention string to TTL in seconds.
-
-    DEPRECATED: Use retention_to_ttl_seconds() with integer retention_days.
-    """
-    if value == "none":
-        return 0
-    if value == "forever":
-        return None
-    if value.endswith("d"):
-        try:
-            days = int(value[:-1])
-        except ValueError as err:
-            raise ValueError(f"Invalid retention format: {value}") from err
-        if days < RETENTION_MIN_DAYS or days > RETENTION_MAX_DAYS:
-            raise ValueError(
-                f"Retention days must be between {RETENTION_MIN_DAYS} and {RETENTION_MAX_DAYS}"
-            )
-        return days * SECONDS_PER_DAY
-    raise ValueError(
-        f"Invalid retention format: {value}. "
-        "Use 'none', 'forever', or '{N}d' (e.g., '30d')"
-    )
-
-
-# Re-export for backwards compatibility
-RETENTION_DEFAULT = RETENTION_DEFAULT_DAYS
 
 
 # =============================================================================

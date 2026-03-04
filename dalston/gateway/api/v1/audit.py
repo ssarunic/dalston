@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -138,7 +138,9 @@ async def list_audit_events(
             else:
                 query = query.where(AuditLogModel.id < cursor_id)
         except ValueError:
-            pass  # Invalid cursor, ignore
+            raise HTTPException(
+                status_code=400, detail="Invalid cursor format"
+            ) from None
 
     # Fetch limit + 1 to determine has_more
     if sort == "timestamp_asc":
@@ -200,7 +202,9 @@ async def get_resource_audit_trail(
             cursor_id = int(cursor)
             query = query.where(AuditLogModel.id < cursor_id)
         except ValueError:
-            pass  # Invalid cursor, ignore
+            raise HTTPException(
+                status_code=400, detail="Invalid cursor format"
+            ) from None
 
     query = query.order_by(AuditLogModel.id.desc()).limit(limit + 1)
     result = await db.execute(query)

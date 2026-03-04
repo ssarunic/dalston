@@ -638,17 +638,18 @@ def _get_transcribe_model(job: JobModel) -> str | None:
     return None
 
 
-def _decode_job_cursor(cursor: str) -> tuple[datetime, UUID] | None:
-    """Decode a cursor into created_at and id."""
-    try:
-        parts = cursor.rsplit(":", 1)
-        if len(parts) != 2:
-            return None
-        created_at = datetime.fromisoformat(parts[0])
-        job_id = UUID(parts[1])
-        return created_at, job_id
-    except (ValueError, TypeError):
-        return None
+def _decode_job_cursor(cursor: str) -> tuple[datetime, UUID]:
+    """Decode a cursor into created_at and id.
+
+    Raises:
+        ValueError: If the cursor format is invalid.
+    """
+    parts = cursor.rsplit(":", 1)
+    if len(parts) != 2:
+        raise ValueError("Invalid cursor format")
+    created_at = datetime.fromisoformat(parts[0])
+    job_id = UUID(parts[1])
+    return created_at, job_id
 
 
 @router.get(
@@ -677,27 +678,30 @@ async def list_console_jobs(
 
     # Apply cursor filter
     if cursor:
-        decoded = _decode_job_cursor(cursor)
-        if decoded:
-            cursor_created_at, cursor_id = decoded
-            if sort == "created_asc":
-                # Get jobs created after the cursor OR same time but with larger ID
-                query = query.where(
-                    (JobModel.created_at > cursor_created_at)
-                    | (
-                        (JobModel.created_at == cursor_created_at)
-                        & (JobModel.id > cursor_id)
-                    )
+        try:
+            cursor_created_at, cursor_id = _decode_job_cursor(cursor)
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail="Invalid cursor format"
+            ) from None
+        if sort == "created_asc":
+            # Get jobs created after the cursor OR same time but with larger ID
+            query = query.where(
+                (JobModel.created_at > cursor_created_at)
+                | (
+                    (JobModel.created_at == cursor_created_at)
+                    & (JobModel.id > cursor_id)
                 )
-            else:
-                # Get jobs created before the cursor OR same time but with smaller ID
-                query = query.where(
-                    (JobModel.created_at < cursor_created_at)
-                    | (
-                        (JobModel.created_at == cursor_created_at)
-                        & (JobModel.id < cursor_id)
-                    )
+            )
+        else:
+            # Get jobs created before the cursor OR same time but with smaller ID
+            query = query.where(
+                (JobModel.created_at < cursor_created_at)
+                | (
+                    (JobModel.created_at == cursor_created_at)
+                    & (JobModel.id < cursor_id)
                 )
+            )
 
     # Fetch limit + 1 to determine has_more
     if sort == "created_asc":

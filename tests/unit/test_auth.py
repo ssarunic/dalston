@@ -543,17 +543,6 @@ class TestMiddlewareHelpers:
 
         assert key == "dk_elevenlabs_key"
 
-    def test_extract_api_key_from_query_param(self):
-        from dalston.gateway.middleware.auth import extract_api_key_from_request
-
-        request = MagicMock()
-        request.headers = {}
-        request.query_params = {"api_key": "dk_query_key"}
-
-        key = extract_api_key_from_request(request)
-
-        assert key == "dk_query_key"
-
     def test_extract_api_key_bearer_takes_priority(self):
         from dalston.gateway.middleware.auth import extract_api_key_from_request
 

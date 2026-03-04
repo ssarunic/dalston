@@ -317,27 +317,25 @@ class WebhookEndpointService:
 
         # Apply cursor filter
         if cursor:
-            decoded = self._decode_delivery_cursor(cursor)
-            if decoded:
-                cursor_created_at, cursor_id = decoded
-                if sort == "created_asc":
-                    # Get deliveries created after cursor OR same time but with larger ID
-                    query = query.where(
-                        (WebhookDeliveryModel.created_at > cursor_created_at)
-                        | (
-                            (WebhookDeliveryModel.created_at == cursor_created_at)
-                            & (WebhookDeliveryModel.id > cursor_id)
-                        )
+            cursor_created_at, cursor_id = self._decode_delivery_cursor(cursor)
+            if sort == "created_asc":
+                # Get deliveries created after cursor OR same time but with larger ID
+                query = query.where(
+                    (WebhookDeliveryModel.created_at > cursor_created_at)
+                    | (
+                        (WebhookDeliveryModel.created_at == cursor_created_at)
+                        & (WebhookDeliveryModel.id > cursor_id)
                     )
-                else:
-                    # Get deliveries created before cursor OR same time but with smaller ID
-                    query = query.where(
-                        (WebhookDeliveryModel.created_at < cursor_created_at)
-                        | (
-                            (WebhookDeliveryModel.created_at == cursor_created_at)
-                            & (WebhookDeliveryModel.id < cursor_id)
-                        )
+                )
+            else:
+                # Get deliveries created before cursor OR same time but with smaller ID
+                query = query.where(
+                    (WebhookDeliveryModel.created_at < cursor_created_at)
+                    | (
+                        (WebhookDeliveryModel.created_at == cursor_created_at)
+                        & (WebhookDeliveryModel.id < cursor_id)
                     )
+                )
 
         # Fetch limit + 1 to determine has_more
         if sort == "created_asc":
@@ -365,17 +363,18 @@ class WebhookEndpointService:
         """Encode a cursor from a delivery's created_at and id."""
         return f"{delivery.created_at.isoformat()}:{delivery.id}"
 
-    def _decode_delivery_cursor(self, cursor: str) -> tuple[datetime, UUID] | None:
-        """Decode a cursor into created_at and id."""
-        try:
-            parts = cursor.rsplit(":", 1)
-            if len(parts) != 2:
-                return None
-            created_at = datetime.fromisoformat(parts[0])
-            delivery_id = UUID(parts[1])
-            return created_at, delivery_id
-        except (ValueError, TypeError):
-            return None
+    def _decode_delivery_cursor(self, cursor: str) -> tuple[datetime, UUID]:
+        """Decode a cursor into created_at and id.
+
+        Raises:
+            ValueError: If the cursor format is invalid.
+        """
+        parts = cursor.rsplit(":", 1)
+        if len(parts) != 2:
+            raise ValueError("Invalid cursor format")
+        created_at = datetime.fromisoformat(parts[0])
+        delivery_id = UUID(parts[1])
+        return created_at, delivery_id
 
     async def retry_delivery(
         self,

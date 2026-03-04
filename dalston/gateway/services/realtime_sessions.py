@@ -160,10 +160,10 @@ class RealtimeSessionService:
     ) -> RealtimeSessionModel | None:
         """Finalize a session on completion or error.
 
-        Computes purge_after based on session's retention settings:
-        - auto_delete: purge_after = ended_at + retention_hours
-        - none: purge_after = now (immediate purge)
-        - keep: purge_after stays NULL (never purge)
+        Computes purge_after based on session's retention setting:
+        - 0 (transient): purge_after = ended_at (immediate purge)
+        - -1 (permanent): purge_after stays NULL (never purge)
+        - N (days): purge_after = ended_at + N days
 
         Args:
             session_id: Session ID
@@ -353,27 +353,25 @@ class RealtimeSessionService:
 
         # Apply cursor filter
         if cursor:
-            decoded = self._decode_session_cursor(cursor)
-            if decoded:
-                cursor_started_at, cursor_id = decoded
-                if sort == "started_asc":
-                    # Get sessions started after cursor OR same time but with larger ID
-                    stmt = stmt.where(
-                        (RealtimeSessionModel.started_at > cursor_started_at)
-                        | (
-                            (RealtimeSessionModel.started_at == cursor_started_at)
-                            & (RealtimeSessionModel.id > cursor_id)
-                        )
+            cursor_started_at, cursor_id = self._decode_session_cursor(cursor)
+            if sort == "started_asc":
+                # Get sessions started after cursor OR same time but with larger ID
+                stmt = stmt.where(
+                    (RealtimeSessionModel.started_at > cursor_started_at)
+                    | (
+                        (RealtimeSessionModel.started_at == cursor_started_at)
+                        & (RealtimeSessionModel.id > cursor_id)
                     )
-                else:
-                    # Get sessions started before cursor OR same time but with smaller ID
-                    stmt = stmt.where(
-                        (RealtimeSessionModel.started_at < cursor_started_at)
-                        | (
-                            (RealtimeSessionModel.started_at == cursor_started_at)
-                            & (RealtimeSessionModel.id < cursor_id)
-                        )
+                )
+            else:
+                # Get sessions started before cursor OR same time but with smaller ID
+                stmt = stmt.where(
+                    (RealtimeSessionModel.started_at < cursor_started_at)
+                    | (
+                        (RealtimeSessionModel.started_at == cursor_started_at)
+                        & (RealtimeSessionModel.id < cursor_id)
                     )
+                )
 
         # Fetch limit + 1 to determine has_more
         if sort == "started_asc":
@@ -401,17 +399,18 @@ class RealtimeSessionService:
         """Encode a cursor from a session's started_at and id."""
         return f"{session.started_at.isoformat()}:{session.id}"
 
-    def _decode_session_cursor(self, cursor: str) -> tuple[datetime, UUID] | None:
-        """Decode a cursor into started_at and id."""
-        try:
-            parts = cursor.rsplit(":", 1)
-            if len(parts) != 2:
-                return None
-            started_at = datetime.fromisoformat(parts[0])
-            session_id = UUID(parts[1])
-            return started_at, session_id
-        except (ValueError, TypeError):
-            return None
+    def _decode_session_cursor(self, cursor: str) -> tuple[datetime, UUID]:
+        """Decode a cursor into started_at and id.
+
+        Raises:
+            ValueError: If the cursor format is invalid.
+        """
+        parts = cursor.rsplit(":", 1)
+        if len(parts) != 2:
+            raise ValueError("Invalid cursor format")
+        started_at = datetime.fromisoformat(parts[0])
+        session_id = UUID(parts[1])
+        return started_at, session_id
 
     async def delete_session(
         self,
@@ -504,14 +503,10 @@ class RealtimeSessionService:
         if session is None:
             return None
 
-        # Verify tenant isolation
-        if session.tenant_id != principal.tenant_id:
+        if not security_manager.can_access_resource(
+            principal, session.tenant_id, session.created_by_key_id
+        ):
             return None
-
-        # Check ownership for non-admin
-        if not principal.is_admin:
-            if session.created_by_key_id and session.created_by_key_id != principal.id:
-                return None  # Return None to map to 404 (anti-enumeration)
 
         return session
 
@@ -592,13 +587,12 @@ class RealtimeSessionService:
         if session is None:
             raise ResourceNotFoundError("session", session_id)
 
-        # Verify tenant isolation
-        if session.tenant_id != principal.tenant_id:
-            raise ResourceNotFoundError("session", session_id)
-
-        # Check ownership for non-admin
-        if not principal.is_admin:
-            if session.created_by_key_id and session.created_by_key_id != principal.id:
-                raise ResourceNotFoundError("session", session_id)
+        security_manager.require_resource_access(
+            principal,
+            session.tenant_id,
+            "session",
+            session_id,
+            session.created_by_key_id,
+        )
 
         return await self.delete_session(session_id, principal.tenant_id)

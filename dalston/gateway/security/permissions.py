@@ -41,6 +41,7 @@ class Permission(str, Enum):
 
     # Model permissions
     MODEL_READ = "model:read"
+    MODEL_WRITE = "model:write"
     MODEL_PULL = "model:pull"
     MODEL_DELETE = "model:delete"
     MODEL_SYNC = "model:sync"

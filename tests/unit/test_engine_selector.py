@@ -245,7 +245,6 @@ class TestSelectEngine:
     def mock_catalog(self):
         catalog = MagicMock(spec=EngineCatalog)
         catalog.find_engines.return_value = []
-        catalog.get_model.return_value = None  # Default: not a model ID
         return catalog
 
     @pytest.mark.asyncio
@@ -457,7 +456,6 @@ class TestSelectPipelineEngines:
     def mock_catalog(self):
         catalog = MagicMock(spec=EngineCatalog)
         catalog.find_engines.return_value = []
-        catalog.get_model.return_value = None  # Default: not a model ID
         return catalog
 
     @pytest.mark.asyncio

@@ -117,6 +117,7 @@ class SessionAllocator:
         language: str,
         model: str | None,
         client_ip: str,
+        runtime: str | None = None,
     ) -> WorkerAllocation | None:
         """Find worker with capacity and reserve a slot.
 
@@ -126,6 +127,8 @@ class SessionAllocator:
             language: Requested language code or "auto"
             model: Model name (e.g., "faster-whisper-large-v3") or None for any
             client_ip: Client IP address for logging
+            runtime: Model runtime (e.g., "faster-whisper") for routing when model
+                     isn't pre-loaded. Workers matching runtime can load the model.
 
         Returns:
             WorkerAllocation if successful, None if no capacity available
@@ -136,10 +139,13 @@ class SessionAllocator:
             attributes={
                 "dalston.language": language,
                 "dalston.model": model,
+                "dalston.runtime": runtime,
             },
         ):
             # Find available workers
-            available = await self._registry.get_available_workers(model, language)
+            available = await self._registry.get_available_workers(
+                model, language, runtime
+            )
 
             if not available:
                 logger.warning("no_workers_available", model=model, language=language)

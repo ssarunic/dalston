@@ -383,18 +383,17 @@ export const apiClient = {
   resetSettingsNamespace: (namespace: string) =>
     currentClient.post(`api/console/settings/${namespace}/reset`).json<NamespaceSettings>(),
 
-  // Model Registry (M42)
-  getModelRegistry: (filters?: ModelFilters, options?: { sync?: boolean }) => {
+  // Model Registry (M42, M46: unified to /v1/models)
+  getModelRegistry: (filters?: ModelFilters) => {
     const searchParams = new URLSearchParams()
     if (filters?.stage) searchParams.set('stage', filters.stage)
     if (filters?.runtime) searchParams.set('runtime', filters.runtime)
     if (filters?.status) searchParams.set('status', filters.status)
-    if (options?.sync) searchParams.set('sync', 'true')
-    return currentClient.get('v1/models/registry', { searchParams }).json<ModelRegistryListResponse>()
+    return currentClient.get('v1/models', { searchParams }).json<ModelRegistryListResponse>()
   },
 
   getModelRegistryEntry: (modelId: string) =>
-    currentClient.get(`v1/models/registry/${encodeURIComponent(modelId)}`).json<ModelRegistryEntry>(),
+    currentClient.get(`v1/models/${encodeURIComponent(modelId)}`).json<ModelRegistryEntry>(),
 
   pullModel: (modelId: string, force?: boolean) =>
     currentClient.post(`v1/models/${encodeURIComponent(modelId)}/pull`, { json: { force } }).json<PullModelResponse>(),

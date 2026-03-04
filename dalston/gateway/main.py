@@ -94,7 +94,8 @@ async def _ensure_admin_key_exists() -> None:
         logger.info("=" * 70)
 
     except Exception as e:
-        logger.warning("Could not auto-bootstrap admin key: %s", e)
+        logger.error("Could not auto-bootstrap admin key: %s", e)
+        raise
 
 
 @asynccontextmanager
@@ -127,12 +128,35 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing database...")
     await init_db()
 
+    # Seed model registry from YAML files
+    logger.info("Seeding model registry from YAMLs...")
+    try:
+        from dalston.db.session import async_session
+        from dalston.gateway.services.model_registry import ModelRegistryService
+
+        async with async_session() as db:
+            service = ModelRegistryService()
+            result = await service.seed_from_yamls(db)
+            logger.info(
+                "model_registry_seeded",
+                created=result["created"],
+                updated=result["updated"],
+                preserved=result["preserved"],
+            )
+    except FileNotFoundError:
+        # Models directory doesn't exist - skip seeding (e.g., in tests)
+        logger.warning("models_directory_not_found", msg="Skipping model seeding")
+    except Exception as e:
+        logger.error("model_seeding_failed", error=str(e))
+        raise
+
     # Ensure S3 bucket exists
     logger.info("Ensuring S3 bucket exists...")
     try:
         await ensure_bucket_exists()
     except Exception as e:
-        logger.warning("Could not ensure S3 bucket exists: %s", e)
+        logger.error("S3 bucket check failed: %s", e)
+        raise
 
     # Start Session Router for real-time transcription
     logger.info("Starting Session Router...")

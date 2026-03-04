@@ -1,4 +1,3 @@
-import { useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import type { ModelFilters, HFResolveRequest } from '@/api/types'
@@ -6,21 +5,13 @@ import type { ModelFilters, HFResolveRequest } from '@/api/types'
 /**
  * Fetch the model registry with optional filters.
  * Used for the Models page to show downloaded/available models.
- * Syncs with disk on first load to detect engine-downloaded models.
+ * M46: Models are seeded from YAMLs on gateway startup (no manual sync needed).
  * Automatically polls every 2s when any model is downloading.
  */
 export function useModelRegistry(filters?: ModelFilters) {
-  // Track if we've done the initial sync
-  const hasSynced = useRef(false)
-
   return useQuery({
     queryKey: ['modelRegistry', filters],
-    queryFn: () => {
-      // Sync on first fetch to detect engine-downloaded models
-      const shouldSync = !hasSynced.current
-      hasSynced.current = true
-      return apiClient.getModelRegistry(filters, { sync: shouldSync })
-    },
+    queryFn: () => apiClient.getModelRegistry(filters),
     staleTime: 30_000,
     // Poll every 2s while any model is downloading
     refetchInterval: (query) => {

@@ -29,7 +29,6 @@ from dalston.gateway.services.model_registry import (
     ModelNotFoundError,
     ModelRegistryService,
 )
-from dalston.orchestrator.catalog import get_catalog
 
 router = APIRouter(prefix="/models", tags=["models"])
 
@@ -97,78 +96,6 @@ class ModelListResponse(BaseModel):
     data: list[ModelResponse]
 
 
-@router.get(
-    "",
-    response_model=ModelListResponse,
-    summary="List model catalog",
-    description=(
-        "List all available model variants from the catalog. "
-        "Each model maps to a runtime that can load it. "
-        "Use the model ID with the `model` parameter in transcription requests."
-    ),
-)
-async def list_models(
-    runtime: str | None = Query(
-        default=None,
-        description="Filter by runtime (e.g., 'nemo', 'faster-whisper')",
-    ),
-    stage: str | None = Query(
-        default=None,
-        description="Filter by pipeline stage (e.g., 'transcribe')",
-    ),
-) -> ModelListResponse:
-    """List all model variants from the catalog.
-
-    Returns all models that can be used with the `model` parameter in
-    transcription requests. Each model is served by a specific runtime.
-    """
-    catalog = get_catalog()
-
-    # Get models with optional filtering
-    if runtime:
-        models = catalog.get_models_for_runtime(runtime)
-    elif stage:
-        models = catalog.get_models_for_stage(stage)
-    else:
-        models = catalog.get_all_models()
-
-    data = [
-        ModelResponse(
-            id=m.id,
-            name=m.name,
-            runtime=m.runtime,
-            runtime_model_id=m.runtime_model_id,
-            source=m.source,
-            size_gb=m.size_gb,
-            stage=m.stage,
-            languages=m.languages,
-            capabilities=ModelCapabilitiesResponse(
-                word_timestamps=m.word_timestamps,
-                punctuation=m.punctuation,
-                capitalization=m.capitalization,
-                streaming=False,  # Batch models don't stream
-            ),
-            hardware=ModelHardwareResponse(
-                min_vram_gb=m.min_vram_gb,
-                supports_cpu=m.supports_cpu,
-                min_ram_gb=m.min_ram_gb,
-            ),
-            performance=ModelPerformanceResponse(
-                rtf_gpu=m.rtf_gpu,
-                rtf_cpu=m.rtf_cpu,
-            ),
-        )
-        for m in models
-    ]
-
-    return ModelListResponse(data=data)
-
-
-# =============================================================================
-# M40: Model Registry Endpoints
-# =============================================================================
-
-
 class ModelMetadataResponse(BaseModel):
     """Model metadata from HuggingFace or other sources."""
 
@@ -203,6 +130,7 @@ class ModelRegistryResponse(BaseModel):
     min_vram_gb: float | None = None
     min_ram_gb: float | None = None
     supports_cpu: bool = True
+    metadata_source: str = "yaml"  # yaml, user, hf
     metadata: ModelMetadataResponse = ModelMetadataResponse()
     last_used_at: datetime | None = None
     created_at: datetime
@@ -214,6 +142,87 @@ class ModelRegistryListResponse(BaseModel):
 
     object: Literal["list"] = "list"
     data: list[ModelRegistryResponse]
+
+
+@router.get(
+    "",
+    response_model=ModelRegistryListResponse,
+    summary="List models",
+    description=(
+        "List all available models from the registry. "
+        "Each model maps to a runtime that can load it. "
+        "Use the model ID with the `model` parameter in transcription requests."
+    ),
+)
+async def list_models(
+    principal: Annotated[Principal, Depends(get_principal)],
+    db: AsyncSession = Depends(get_db),
+    runtime: str | None = Query(
+        default=None,
+        description="Filter by runtime (e.g., 'nemo', 'faster-whisper')",
+    ),
+    stage: str | None = Query(
+        default=None,
+        description="Filter by pipeline stage (e.g., 'transcribe')",
+    ),
+    status: str | None = Query(
+        default=None,
+        description="Filter by status (e.g., 'ready', 'not_downloaded')",
+    ),
+    service: ModelRegistryService = Depends(get_model_registry_service),
+) -> ModelRegistryListResponse:
+    """List all models from the registry.
+
+    Returns all models that can be used with the `model` parameter in
+    transcription requests. Each model is served by a specific runtime.
+    """
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.MODEL_READ)
+
+    models = await service.list_models(
+        db,
+        stage=stage,
+        runtime=runtime,
+        status=status,
+    )
+
+    data = [
+        ModelRegistryResponse(
+            id=m.id,
+            name=m.name,
+            runtime=m.runtime,
+            runtime_model_id=m.runtime_model_id,
+            stage=m.stage,
+            status=m.status,
+            download_path=m.download_path,
+            size_bytes=m.size_bytes,
+            download_progress=None,
+            downloaded_at=m.downloaded_at,
+            source=m.source,
+            library_name=m.library_name,
+            languages=m.languages,
+            word_timestamps=m.word_timestamps,
+            punctuation=m.punctuation,
+            capitalization=m.capitalization,
+            streaming=m.streaming,
+            min_vram_gb=m.min_vram_gb,
+            min_ram_gb=m.min_ram_gb,
+            supports_cpu=m.supports_cpu,
+            metadata_source=m.metadata_source,
+            metadata=_build_metadata_response(m.model_metadata),
+            last_used_at=m.last_used_at,
+            created_at=m.created_at,
+            updated_at=m.updated_at,
+        )
+        for m in models
+    ]
+
+    return ModelRegistryListResponse(data=data)
+
+
+# =============================================================================
+# M40: Model Registry Request/Response Models
+# =============================================================================
 
 
 class PullModelRequest(BaseModel):
@@ -244,6 +253,20 @@ class DeleteModelResponse(BaseModel):
     model_id: str
 
 
+class UpdateModelRequest(BaseModel):
+    """Request body for updating model metadata."""
+
+    name: str | None = None
+    languages: list[str] | None = None
+    word_timestamps: bool | None = None
+    punctuation: bool | None = None
+    capitalization: bool | None = None
+    streaming: bool | None = None
+    min_vram_gb: float | None = None
+    min_ram_gb: float | None = None
+    supports_cpu: bool | None = None
+
+
 def _build_metadata_response(model_metadata: dict | None) -> ModelMetadataResponse:
     """Convert DB model_metadata dict to API response model."""
     if not model_metadata:
@@ -257,90 +280,37 @@ def _build_metadata_response(model_metadata: dict | None) -> ModelMetadataRespon
     )
 
 
-@router.get(
-    "/registry",
-    response_model=ModelRegistryListResponse,
-    summary="List model registry",
-    description=(
-        "List all models from the database registry with download status. "
-        "Use status filter to find downloaded models (status=ready). "
-        "Pass sync=true to sync with disk before returning results."
-    ),
-)
-async def list_registry_models(
-    principal: Annotated[Principal, Depends(get_principal)],
-    db: AsyncSession = Depends(get_db),
-    stage: str | None = Query(default=None, description="Filter by stage"),
-    runtime: str | None = Query(default=None, description="Filter by runtime"),
-    status: str | None = Query(default=None, description="Filter by status"),
-    sync: bool = Query(default=False, description="Sync with disk before listing"),
-    service: ModelRegistryService = Depends(get_model_registry_service),
-) -> ModelRegistryListResponse:
-    """List all models from the registry with download status."""
-    security_manager = get_security_manager()
-    security_manager.require_permission(principal, Permission.MODEL_READ)
-    # Optionally sync with disk first to detect engine-downloaded models
-    if sync:
-        await service.sync_from_disk(db)
-
-    models = await service.list_models(
-        db,
-        stage=stage,
-        runtime=runtime,
-        status=status,
-    )
-
-    data = [
-        ModelRegistryResponse(
-            id=m.id,
-            name=m.name,
-            runtime=m.runtime,
-            runtime_model_id=m.runtime_model_id,
-            stage=m.stage,
-            status=m.status,
-            download_path=m.download_path,
-            size_bytes=m.size_bytes,
-            download_progress=None,  # Progress tracking not yet implemented
-            downloaded_at=m.downloaded_at,
-            source=m.source,
-            library_name=m.library_name,
-            languages=m.languages,
-            word_timestamps=m.word_timestamps,
-            punctuation=m.punctuation,
-            capitalization=m.capitalization,
-            streaming=m.streaming,
-            min_vram_gb=m.min_vram_gb,
-            min_ram_gb=m.min_ram_gb,
-            supports_cpu=m.supports_cpu,
-            metadata=_build_metadata_response(m.model_metadata),
-            last_used_at=m.last_used_at,
-            created_at=m.created_at,
-            updated_at=m.updated_at,
-        )
-        for m in models
-    ]
-
-    return ModelRegistryListResponse(data=data)
-
-
-@router.get(
-    "/registry/{model_id:path}",
+@router.patch(
+    "/{model_id:path}",
     response_model=ModelRegistryResponse,
-    summary="Get model registry entry",
-    description="Get detailed registry information for a specific model.",
+    summary="Update model metadata",
+    description=(
+        "Update user-editable model metadata. "
+        "Sets metadata_source to 'user' to preserve edits across YAML re-seeding."
+    ),
     responses={404: {"description": "Model not found in registry"}},
 )
-async def get_registry_model(
+async def update_model(
     model_id: str,
+    request: UpdateModelRequest,
     principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
     service: ModelRegistryService = Depends(get_model_registry_service),
 ) -> ModelRegistryResponse:
-    """Get registry details for a specific model."""
+    """Update model metadata and mark as user-modified.
+
+    This marks the model as user-modified, preventing automatic overwrites
+    during re-seeding from YAML files on gateway startup.
+    """
     security_manager = get_security_manager()
-    security_manager.require_permission(principal, Permission.MODEL_READ)
+    security_manager.require_permission(principal, Permission.MODEL_WRITE)
+
     try:
-        model = await service.get_model_or_raise(db, model_id)
+        model = await service.update_model(
+            db,
+            model_id,
+            updates=request.model_dump(exclude_unset=True),
+        )
     except ModelNotFoundError:
         raise HTTPException(
             status_code=404,
@@ -356,7 +326,7 @@ async def get_registry_model(
         status=model.status,
         download_path=model.download_path,
         size_bytes=model.size_bytes,
-        download_progress=None,  # Progress tracking not yet implemented
+        download_progress=None,
         downloaded_at=model.downloaded_at,
         source=model.source,
         library_name=model.library_name,
@@ -368,6 +338,7 @@ async def get_registry_model(
         min_vram_gb=model.min_vram_gb,
         min_ram_gb=model.min_ram_gb,
         supports_cpu=model.supports_cpu,
+        metadata_source=model.metadata_source,
         metadata=_build_metadata_response(model.model_metadata),
         last_used_at=model.last_used_at,
         created_at=model.created_at,
@@ -381,7 +352,7 @@ async def get_registry_model(
     summary="Download a model",
     description=(
         "Start downloading a model from HuggingFace Hub. "
-        "The download runs in the background. Poll GET /v1/models/registry/{model_id} "
+        "The download runs in the background. Poll GET /v1/models/{model_id} "
         "to check status."
     ),
     responses={404: {"description": "Model not found in registry"}},
@@ -397,7 +368,7 @@ async def pull_model(
     """Download a model from HuggingFace Hub.
 
     The download runs asynchronously. Check the model status with
-    GET /v1/models/registry/{model_id} to monitor progress.
+    GET /v1/models/{model_id} to monitor progress.
     """
     security_manager = get_security_manager()
     security_manager.require_permission(principal, Permission.MODEL_PULL)
@@ -686,48 +657,57 @@ async def get_hf_routing_mappings(
 
 @router.get(
     "/{model_id:path}",
-    response_model=ModelResponse,
+    response_model=ModelRegistryResponse,
     summary="Get model details",
-    description="Get detailed information about a specific model variant.",
-    responses={404: {"description": "Model not found in catalog"}},
+    description="Get detailed information about a specific model.",
+    responses={404: {"description": "Model not found in registry"}},
 )
-async def get_model(model_id: str) -> ModelResponse:
-    """Get details for a specific model variant.
+async def get_model(
+    model_id: str,
+    principal: Annotated[Principal, Depends(get_principal)],
+    db: AsyncSession = Depends(get_db),
+    service: ModelRegistryService = Depends(get_model_registry_service),
+) -> ModelRegistryResponse:
+    """Get details for a specific model.
 
     Args:
-        model_id: Model identifier (e.g., 'parakeet-tdt-1.1b', 'faster-whisper-large-v3-turbo')
+        model_id: Model identifier (e.g., 'nvidia/parakeet-tdt-1.1b')
     """
-    catalog = get_catalog()
-    model = catalog.get_model(model_id)
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.MODEL_READ)
 
-    if model is None:
+    try:
+        model = await service.get_model_or_raise(db, model_id)
+    except ModelNotFoundError:
         raise HTTPException(
             status_code=404,
             detail=f"Model not found: {model_id}. Use GET /v1/models to see available models.",
-        )
+        ) from None
 
-    return ModelResponse(
+    return ModelRegistryResponse(
         id=model.id,
         name=model.name,
         runtime=model.runtime,
         runtime_model_id=model.runtime_model_id,
-        source=model.source,
-        size_gb=model.size_gb,
         stage=model.stage,
+        status=model.status,
+        download_path=model.download_path,
+        size_bytes=model.size_bytes,
+        download_progress=None,
+        downloaded_at=model.downloaded_at,
+        source=model.source,
+        library_name=model.library_name,
         languages=model.languages,
-        capabilities=ModelCapabilitiesResponse(
-            word_timestamps=model.word_timestamps,
-            punctuation=model.punctuation,
-            capitalization=model.capitalization,
-            streaming=False,
-        ),
-        hardware=ModelHardwareResponse(
-            min_vram_gb=model.min_vram_gb,
-            supports_cpu=model.supports_cpu,
-            min_ram_gb=model.min_ram_gb,
-        ),
-        performance=ModelPerformanceResponse(
-            rtf_gpu=model.rtf_gpu,
-            rtf_cpu=model.rtf_cpu,
-        ),
+        word_timestamps=model.word_timestamps,
+        punctuation=model.punctuation,
+        capitalization=model.capitalization,
+        streaming=model.streaming,
+        min_vram_gb=model.min_vram_gb,
+        min_ram_gb=model.min_ram_gb,
+        supports_cpu=model.supports_cpu,
+        metadata_source=model.metadata_source,
+        metadata=_build_metadata_response(model.model_metadata),
+        last_used_at=model.last_used_at,
+        created_at=model.created_at,
+        updated_at=model.updated_at,
     )

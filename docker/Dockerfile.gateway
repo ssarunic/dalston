@@ -42,6 +42,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml .
 COPY dalston/ dalston/
 
+# Copy model YAML definitions for auto-seeding (M46)
+COPY models/ models/
+
 RUN pip install --no-cache-dir -e ".[gateway]"
 
 # Copy built web console from Stage 1
