@@ -94,8 +94,8 @@ test.describe('Realtime Sessions', () => {
     const firstModelCell = page.locator('tbody tr').first().locator('td').nth(2)
     await expect(firstModelCell).toContainText('session.desc.1')
 
-    await page.getByRole('button', { name: 'Filters' }).click()
-    await page.getByRole('button', { name: 'started_desc' }).click()
+    // Click on the sort dropdown trigger button (shows "Newest first" by default)
+    await page.getByRole('button', { name: 'Newest first' }).click()
     await page.getByRole('option', { name: 'Oldest first' }).click()
 
     await expect(page).toHaveURL(/\/console\/realtime\?(?=.*sort=started_asc)/)
@@ -172,13 +172,15 @@ test.describe('Realtime Sessions', () => {
     await page.getByRole('button', { name: 'Load More' }).click()
     await expect(page.getByText('Showing 40 sessions')).toBeVisible()
 
-    await page.getByRole('button', { name: 'Filters' }).click()
+    // Apply status filter
     await page.getByRole('button', { name: 'All' }).click()
     await page.getByRole('option', { name: 'Error' }).click()
 
-    await page.getByRole('button', { name: 'started_desc' }).click()
+    // Change sort dropdown
+    await page.getByRole('button', { name: 'Newest first' }).click()
     await page.getByRole('option', { name: 'Oldest first' }).click()
 
+    // Change limit dropdown
     await page.getByRole('button', { name: '50' }).click()
     await page.getByRole('option', { name: '100' }).click()
 

@@ -79,8 +79,11 @@ test.describe('Audit Log', () => {
     const firstActionCell = page.locator('tbody tr').first().locator('td').nth(2)
     await expect(firstActionCell).toContainText('audit.desc.1')
 
+    // Expand the filter panel first
     await page.getByRole('button', { name: 'Filters' }).click()
-    await page.getByRole('button', { name: 'timestamp_desc' }).click()
+
+    // Click on the sort dropdown (shows "Newest first" by default)
+    await page.getByRole('button', { name: 'Newest first' }).click()
     await page.getByRole('option', { name: 'Oldest first' }).click()
 
     await expect(page).toHaveURL(/\/console\/audit\?(?=.*sort=timestamp_asc)/)
@@ -92,6 +95,7 @@ test.describe('Audit Log', () => {
       sessionStorage.setItem('dalston_api_key', 'test-admin-key')
     })
 
+    // Default page size is 50 for audit log
     await page.route('**/v1/audit*', (route, request) => {
       const url = new URL(request.url())
       const cursor = url.searchParams.get('cursor')
@@ -119,7 +123,7 @@ test.describe('Audit Log', () => {
         route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify(makeAuditPage(301, 20, false, null)),
+          body: JSON.stringify(makeAuditPage(301, 50, false, null)),
         })
         return
       }
@@ -128,7 +132,7 @@ test.describe('Audit Log', () => {
         route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify(makeAuditPage(1, 20, true, 'cursor-page-2')),
+          body: JSON.stringify(makeAuditPage(1, 50, true, 'cursor-page-2')),
         })
         return
       }
@@ -136,23 +140,29 @@ test.describe('Audit Log', () => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify(makeAuditPage(21, 20, false, null)),
+        body: JSON.stringify(makeAuditPage(51, 50, false, null)),
       })
     })
 
     await page.goto('/console/audit')
 
-    await expect(page.getByText('Showing 20 events')).toBeVisible()
+    // Default page size is 50
+    await expect(page.getByText('Showing 50 events')).toBeVisible()
     await page.getByRole('button', { name: 'Load More' }).click()
-    await expect(page.getByText('Showing 40 events')).toBeVisible()
+    await expect(page.getByText('Showing 100 events')).toBeVisible()
 
+    // Expand the filter panel
     await page.getByRole('button', { name: 'Filters' }).click()
+
+    // Apply resource type filter (placeholder is "All Resources")
     await page.getByRole('button', { name: 'All Resources' }).click()
     await page.getByRole('option', { name: 'Job' }).click()
 
-    await page.getByRole('button', { name: 'timestamp_desc' }).click()
+    // Change sort dropdown
+    await page.getByRole('button', { name: 'Newest first' }).click()
     await page.getByRole('option', { name: 'Oldest first' }).click()
 
+    // Change limit dropdown (default is 50)
     await page.getByRole('button', { name: '50' }).click()
     await page.getByRole('option', { name: '100' }).click()
 
