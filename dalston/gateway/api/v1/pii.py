@@ -7,11 +7,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.db.models import PIIEntityTypeModel
-from dalston.gateway.dependencies import RequireJobsRead, get_db
+from dalston.gateway.dependencies import get_db, get_principal, get_security_manager
 from dalston.gateway.models.responses import (
     PIIEntityTypeResponse,
     PIIEntityTypesResponse,
 )
+from dalston.gateway.security.permissions import Permission
+from dalston.gateway.security.principal import Principal
 
 router = APIRouter(prefix="/pii", tags=["pii"])
 
@@ -23,7 +25,7 @@ router = APIRouter(prefix="/pii", tags=["pii"])
     description="Returns all available PII entity types that can be detected.",
 )
 async def list_entity_types(
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
     db: Annotated[AsyncSession, Depends(get_db)],
     category: str | None = Query(
         default=None,
@@ -39,6 +41,9 @@ async def list_entity_types(
     Returns all entity types that can be configured for PII detection.
     Optionally filter by category (pii, pci, phi) or default status.
     """
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.JOB_READ)
+
     query = select(PIIEntityTypeModel)
 
     if category:

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Callable
-from typing import TYPE_CHECKING, Annotated
+from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING
 
 import structlog
 from fastapi import Depends, HTTPException, Request
@@ -15,7 +15,6 @@ from dalston.config import Settings
 from dalston.config import get_settings as _get_settings
 from dalston.db.session import async_session
 from dalston.gateway.middleware.auth import authenticate_request
-from dalston.gateway.middleware.auth import require_scope as _require_scope
 from dalston.gateway.security.manager import SecurityManager
 from dalston.gateway.security.manager import (
     get_security_manager as _get_security_manager,
@@ -192,42 +191,6 @@ async def require_auth(
     return await authenticate_request(request, auth_service)
 
 
-def require_scope_dependency(scope: Scope) -> Callable:
-    """Factory for scope-checking dependencies.
-
-    Usage:
-        @router.post("/endpoint")
-        async def endpoint(
-            api_key: APIKey = Depends(require_scope_dependency(Scope.JOBS_WRITE))
-        ):
-            ...
-
-    Args:
-        scope: Required scope for the endpoint
-
-    Returns:
-        Dependency function that validates the scope
-    """
-
-    async def check_scope(
-        api_key: APIKey = Depends(require_auth),
-    ) -> APIKey:
-        _require_scope(api_key, scope)
-        return api_key
-
-    return check_scope
-
-
-# Pre-built scope dependencies for common use cases
-RequireJobsRead = Annotated[APIKey, Depends(require_scope_dependency(Scope.JOBS_READ))]
-RequireJobsWrite = Annotated[
-    APIKey, Depends(require_scope_dependency(Scope.JOBS_WRITE))
-]
-RequireRealtime = Annotated[APIKey, Depends(require_scope_dependency(Scope.REALTIME))]
-RequireWebhooks = Annotated[APIKey, Depends(require_scope_dependency(Scope.WEBHOOKS))]
-RequireAdmin = Annotated[APIKey, Depends(require_scope_dependency(Scope.ADMIN))]
-
-
 # =============================================================================
 # Security Manager Dependencies (M45)
 # =============================================================================
@@ -372,91 +335,6 @@ async def check_concurrent_sessions_limit(
             },
         )
     return api_key
-
-
-def require_jobs_write_rate_limited_dependency() -> Callable:
-    """Dependency that requires JOBS_WRITE scope and checks rate limits."""
-
-    async def check(
-        api_key: APIKey = Depends(require_scope_dependency(Scope.JOBS_WRITE)),
-        rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
-    ) -> APIKey:
-        # Check request rate limit
-        rate_result = await rate_limiter.check_request_rate(api_key.tenant_id)
-        if not rate_result.allowed:
-            raise HTTPException(
-                status_code=429,
-                detail="Rate limit exceeded",
-                headers={
-                    "Retry-After": str(rate_result.reset_seconds),
-                    "X-RateLimit-Limit": str(rate_result.limit),
-                    "X-RateLimit-Remaining": str(rate_result.remaining),
-                },
-            )
-
-        # Check concurrent jobs limit
-        jobs_result = await rate_limiter.check_concurrent_jobs(api_key.tenant_id)
-        if not jobs_result.allowed:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Concurrent job limit exceeded ({jobs_result.limit} max)",
-                headers={
-                    "X-RateLimit-Limit": str(jobs_result.limit),
-                    "X-RateLimit-Remaining": str(jobs_result.remaining),
-                },
-            )
-
-        return api_key
-
-    return check
-
-
-def require_realtime_rate_limited_dependency() -> Callable:
-    """Dependency that requires REALTIME scope and checks rate limits."""
-
-    async def check(
-        api_key: APIKey = Depends(require_scope_dependency(Scope.REALTIME)),
-        rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
-    ) -> APIKey:
-        # Check request rate limit
-        rate_result = await rate_limiter.check_request_rate(api_key.tenant_id)
-        if not rate_result.allowed:
-            raise HTTPException(
-                status_code=429,
-                detail="Rate limit exceeded",
-                headers={
-                    "Retry-After": str(rate_result.reset_seconds),
-                    "X-RateLimit-Limit": str(rate_result.limit),
-                    "X-RateLimit-Remaining": str(rate_result.remaining),
-                },
-            )
-
-        # Check concurrent sessions limit
-        sessions_result = await rate_limiter.check_concurrent_sessions(
-            api_key.tenant_id
-        )
-        if not sessions_result.allowed:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Concurrent session limit exceeded ({sessions_result.limit} max)",
-                headers={
-                    "X-RateLimit-Limit": str(sessions_result.limit),
-                    "X-RateLimit-Remaining": str(sessions_result.remaining),
-                },
-            )
-
-        return api_key
-
-    return check
-
-
-# Legacy rate-limited scope dependencies (deprecated - use Principal + SecurityManager)
-RequireJobsWriteRateLimited = Annotated[
-    APIKey, Depends(require_jobs_write_rate_limited_dependency())
-]
-RequireRealtimeRateLimited = Annotated[
-    APIKey, Depends(require_realtime_rate_limited_dependency())
-]
 
 
 # =============================================================================

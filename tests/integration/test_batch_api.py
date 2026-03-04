@@ -176,6 +176,9 @@ class TestJobsStatsEndpointAuthorization:
             get_jobs_service,
             require_auth,
         )
+        from dalston.gateway.middleware.security_error_handler import (
+            SecurityErrorHandlerMiddleware,
+        )
 
         # API key without jobs:read scope
         api_key_no_read = APIKey(
@@ -193,6 +196,7 @@ class TestJobsStatsEndpointAuthorization:
         )
 
         app = FastAPI()
+        app.add_middleware(SecurityErrorHandlerMiddleware)
         app.include_router(jobs_router, prefix="/v1")
         app.dependency_overrides[get_db] = lambda: mock_db
         app.dependency_overrides[get_jobs_service] = lambda: mock_jobs_service

@@ -3,11 +3,20 @@
 GET /v1/jobs/stats - Get job statistics for dashboard
 """
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dalston.gateway.dependencies import RequireJobsRead, get_db, get_jobs_service
+from dalston.gateway.dependencies import (
+    get_db,
+    get_jobs_service,
+    get_principal,
+    get_security_manager,
+)
 from dalston.gateway.models.responses import JobStatsResponse
+from dalston.gateway.security.permissions import Permission
+from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.jobs import JobsService
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -20,12 +29,15 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
     description="Get job statistics including running, queued, and today's completed/failed counts.",
 )
 async def get_job_stats(
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
     jobs_service: JobsService = Depends(get_jobs_service),
 ) -> JobStatsResponse:
     """Get job statistics for the current tenant."""
-    stats = await jobs_service.get_stats(db, tenant_id=api_key.tenant_id)
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.JOB_READ)
+
+    stats = await jobs_service.get_stats(db, tenant_id=principal.tenant_id)
 
     return JobStatsResponse(
         running=stats.running,

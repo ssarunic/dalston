@@ -107,8 +107,8 @@ class TestPIIEndpointsRequireAuth:
         )
 
 
-class TestModelEndpointsRequireAdminScope:
-    """Tests that verify model mutation endpoints require admin scope."""
+class TestModelEndpointsRequireAdminPermission:
+    """Tests that verify model mutation endpoints require admin permission."""
 
     @pytest.fixture
     def non_admin_api_key(self):
@@ -136,8 +136,12 @@ class TestModelEndpointsRequireAdminScope:
         """Create FastAPI app with non-admin auth."""
         from dalston.gateway.api.v1.models import get_model_registry_service
         from dalston.gateway.dependencies import get_db, require_auth
+        from dalston.gateway.middleware.security_error_handler import (
+            SecurityErrorHandlerMiddleware,
+        )
 
         app = FastAPI()
+        app.add_middleware(SecurityErrorHandlerMiddleware)
         app.include_router(models_router, prefix="/v1")
         app.include_router(pii_router, prefix="/v1")
 
@@ -157,44 +161,44 @@ class TestModelEndpointsRequireAdminScope:
         return TestClient(app_with_non_admin, raise_server_exceptions=False)
 
     def test_pull_model_requires_admin_scope(self, client_non_admin):
-        """POST /v1/models/{model_id}/pull requires admin scope."""
+        """POST /v1/models/{model_id}/pull requires admin permission."""
         response = client_non_admin.post("/v1/models/test-model/pull")
         assert response.status_code == 403, (
             f"POST /v1/models/{{model_id}}/pull returned {response.status_code}, "
-            "expected 403. Endpoint may not be enforcing admin scope requirement."
+            "expected 403. Endpoint may not be enforcing admin permission requirement."
         )
 
     def test_delete_model_requires_admin_scope(self, client_non_admin):
-        """DELETE /v1/models/{model_id} requires admin scope."""
+        """DELETE /v1/models/{model_id} requires admin permission."""
         response = client_non_admin.delete("/v1/models/test-model")
         assert response.status_code == 403, (
             f"DELETE /v1/models/{{model_id}} returned {response.status_code}, "
-            "expected 403. Endpoint may not be enforcing admin scope requirement."
+            "expected 403. Endpoint may not be enforcing admin permission requirement."
         )
 
     def test_sync_models_requires_admin_scope(self, client_non_admin):
-        """POST /v1/models/sync requires admin scope."""
+        """POST /v1/models/sync requires admin permission."""
         response = client_non_admin.post("/v1/models/sync")
         assert response.status_code == 403, (
             f"POST /v1/models/sync returned {response.status_code}, "
-            "expected 403. Endpoint may not be enforcing admin scope requirement."
+            "expected 403. Endpoint may not be enforcing admin permission requirement."
         )
 
     def test_resolve_hf_model_requires_admin_scope(self, client_non_admin):
-        """POST /v1/models/hf/resolve requires admin scope."""
+        """POST /v1/models/hf/resolve requires admin permission."""
         response = client_non_admin.post(
             "/v1/models/hf/resolve",
             json={"model_id": "openai/whisper-base"},
         )
         assert response.status_code == 403, (
             f"POST /v1/models/hf/resolve returned {response.status_code}, "
-            "expected 403. Endpoint may not be enforcing admin scope requirement."
+            "expected 403. Endpoint may not be enforcing admin permission requirement."
         )
 
     def test_hf_mappings_allowed_with_jobs_read(self, client_non_admin):
         """GET /v1/models/hf/mappings should work with jobs:read scope."""
         response = client_non_admin.get("/v1/models/hf/mappings")
-        # This endpoint requires RequireJobsRead, which the non-admin key has
+        # This endpoint requires MODEL_READ permission, granted by JOBS_READ scope
         assert response.status_code == 200, (
             f"GET /v1/models/hf/mappings returned {response.status_code}, "
             "expected 200. Non-admin with jobs:read should have access."

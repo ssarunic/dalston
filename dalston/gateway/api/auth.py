@@ -16,10 +16,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from dalston.gateway.dependencies import (
-    RequireAdmin,
     get_auth_service,
+    get_principal,
+    get_security_manager,
     require_auth,
 )
+from dalston.gateway.security.permissions import Permission
+from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.auth import (
     DEFAULT_TOKEN_TTL,
     APIKey,
@@ -168,13 +171,16 @@ class SessionTokenResponse(BaseModel):
 )
 async def create_api_key(
     request: CreateAPIKeyRequest,
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     auth_service: AuthService = Depends(get_auth_service),
 ) -> APIKeyCreatedResponse:
     """Create a new API key for the current tenant.
 
     The full key is returned only once - store it securely!
     """
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.API_KEY_CREATE)
+
     # Parse scopes
     scopes: list[Scope] | None = None
     if request.scopes:
@@ -190,7 +196,7 @@ async def create_api_key(
     # Create key
     raw_key, new_key = await auth_service.create_api_key(
         name=request.name,
-        tenant_id=api_key.tenant_id,
+        tenant_id=principal.tenant_id,
         scopes=scopes,
         rate_limit=request.rate_limit,
     )
@@ -215,7 +221,7 @@ async def create_api_key(
     description="List all API keys for the current tenant. Requires admin scope.",
 )
 async def list_api_keys(
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     include_revoked: Annotated[
         bool,
         Query(description="Include revoked keys in the list"),
@@ -223,13 +229,18 @@ async def list_api_keys(
     auth_service: AuthService = Depends(get_auth_service),
 ) -> APIKeyListResponse:
     """List all API keys for the current tenant."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.API_KEY_LIST)
+
     keys = await auth_service.list_api_keys(
-        api_key.tenant_id,
+        principal.tenant_id,
         include_revoked=include_revoked,
     )
 
     return APIKeyListResponse(
-        keys=[APIKeyResponse.from_api_key(k, current_key_id=api_key.id) for k in keys],
+        keys=[
+            APIKeyResponse.from_api_key(k, current_key_id=principal.id) for k in keys
+        ],
         total=len(keys),
     )
 
@@ -243,20 +254,23 @@ async def list_api_keys(
 )
 async def get_api_key(
     key_id: UUID,
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     auth_service: AuthService = Depends(get_auth_service),
 ) -> APIKeyResponse:
     """Get details of a specific API key."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.API_KEY_LIST)
+
     target_key = await auth_service.get_api_key_by_id(key_id)
 
     if target_key is None:
         raise HTTPException(status_code=404, detail="API key not found")
 
     # Verify tenant ownership
-    if target_key.tenant_id != api_key.tenant_id:
+    if target_key.tenant_id != principal.tenant_id:
         raise HTTPException(status_code=404, detail="API key not found")
 
-    return APIKeyResponse.from_api_key(target_key, current_key_id=api_key.id)
+    return APIKeyResponse.from_api_key(target_key, current_key_id=principal.id)
 
 
 @router.delete(
@@ -268,21 +282,24 @@ async def get_api_key(
 )
 async def revoke_api_key(
     key_id: UUID,
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     auth_service: AuthService = Depends(get_auth_service),
 ) -> None:
     """Revoke an API key."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.API_KEY_REVOKE)
+
     # First check if key exists and belongs to tenant
     target_key = await auth_service.get_api_key_by_id(key_id)
 
     if target_key is None:
         raise HTTPException(status_code=404, detail="API key not found")
 
-    if target_key.tenant_id != api_key.tenant_id:
+    if target_key.tenant_id != principal.tenant_id:
         raise HTTPException(status_code=404, detail="API key not found")
 
     # Prevent self-revocation
-    if target_key.id == api_key.id:
+    if target_key.id == principal.id:
         raise HTTPException(
             status_code=400,
             detail="Cannot revoke your own API key",

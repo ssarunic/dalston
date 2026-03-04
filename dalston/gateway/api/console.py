@@ -13,7 +13,7 @@ POST /api/console/settings/{namespace}/reset - Reset to defaults
 
 import os
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 import structlog
@@ -32,15 +32,18 @@ from dalston.config import Settings
 from dalston.db.models import JobModel, TaskModel
 from dalston.db.session import DEFAULT_TENANT_ID
 from dalston.gateway.dependencies import (
-    RequireAdmin,
     get_audit_service,
     get_db,
     get_jobs_service,
+    get_principal,
     get_redis,
+    get_security_manager,
     get_session_router,
     get_settings,
 )
 from dalston.gateway.models.responses import JobCancelledResponse
+from dalston.gateway.security.permissions import Permission
+from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
 from dalston.session_router import SessionRouter
@@ -132,11 +135,13 @@ class DashboardResponse(BaseModel):
     description="Get aggregated dashboard data including system status, batch stats, realtime capacity, and recent jobs.",
 )
 async def get_dashboard(
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
     session_router: SessionRouter = Depends(get_session_router),
 ) -> DashboardResponse:
     """Get aggregated dashboard data in a single call."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
     # Get job counts by status
     status_counts = await db.execute(
         select(JobModel.status, func.count(JobModel.id))
@@ -242,10 +247,12 @@ class TaskListResponse(BaseModel):
 )
 async def get_job_tasks(
     job_id: UUID,
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
 ) -> TaskListResponse:
     """Get task DAG for a job."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
     # Fetch job with tasks
     result = await db.execute(
         select(JobModel)
@@ -328,10 +335,12 @@ class TaskArtifactResponse(BaseModel):
 async def get_task_artifacts(
     job_id: UUID,
     task_id: UUID,
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
 ) -> TaskArtifactResponse:
     """Get task artifacts for debugging."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
     from dalston.config import get_settings
     from dalston.gateway.services.storage import StorageService
 
@@ -435,7 +444,7 @@ ENGINE_INSTANCES_PREFIX = "dalston:batch:engine:instances:"
     description="Get status of all batch and realtime engines.",
 )
 async def get_engines(
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     redis: Redis = Depends(get_redis),
     session_router: SessionRouter = Depends(get_session_router),
 ) -> EnginesResponse:
@@ -444,6 +453,8 @@ async def get_engines(
     Uses the engine catalog as the source of truth for which engines exist,
     combined with Redis heartbeats for live status.
     """
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
     from dalston.orchestrator.catalog import get_catalog
 
     catalog = get_catalog()
@@ -647,7 +658,7 @@ def _decode_job_cursor(cursor: str) -> tuple[datetime, UUID] | None:
     description="List all jobs across all tenants (admin only).",
 )
 async def list_console_jobs(
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
     limit: int = 20,
     cursor: str | None = None,
@@ -655,6 +666,8 @@ async def list_console_jobs(
     sort: Literal["created_desc", "created_asc"] = "created_desc",
 ) -> ConsoleJobListResponse:
     """List all jobs for console (admin view) with cursor-based pagination."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
     # Build base query - no tenant filter for admin
     query = select(JobModel)
 
@@ -750,10 +763,12 @@ class ConsoleJobDetailResponse(BaseModel):
 )
 async def get_console_job(
     job_id: UUID,
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
 ) -> ConsoleJobDetailResponse:
     """Get job details for console (admin view)."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
     result = await db.execute(select(JobModel).where(JobModel.id == job_id))
     job = result.scalar_one_or_none()
 
@@ -787,7 +802,7 @@ async def get_console_job(
 async def delete_console_job(
     request: Request,
     job_id: UUID,
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
@@ -797,6 +812,8 @@ async def delete_console_job(
 
     No tenant filter — admins can delete any job.
     """
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
     request_id = getattr(request.state, "request_id", None)
 
     try:
@@ -804,8 +821,8 @@ async def delete_console_job(
             db,
             job_id,
             audit_service=audit_service,
-            actor_type="api_key",
-            actor_id=api_key.prefix,
+            actor_type=principal.actor_type,
+            actor_id=principal.actor_id,
             correlation_id=request_id,
             ip_address=request.client.host if request.client else None,
         )
@@ -840,7 +857,7 @@ async def delete_console_job(
 )
 async def cancel_console_job(
     job_id: UUID,
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     jobs_service: JobsService = Depends(get_jobs_service),
@@ -849,6 +866,8 @@ async def cancel_console_job(
 
     No tenant filter — admins can cancel any job.
     """
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
     try:
         result = await jobs_service.cancel_job(db, job_id)
     except ValueError as e:
@@ -931,10 +950,12 @@ class UpdateSettingsRequest(BaseModel):
     description="List all setting namespaces with override status.",
 )
 async def list_settings_namespaces(
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
 ) -> SettingsNamespaceListResponse:
     """List all settings namespaces."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.SETTINGS_READ)
     from dalston.gateway.services.settings import SettingsService
 
     service = SettingsService()
@@ -963,10 +984,12 @@ async def list_settings_namespaces(
 )
 async def get_settings_namespace(
     namespace: str,
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
 ) -> NamespaceSettingsResponse:
     """Get settings for a namespace."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.SETTINGS_READ)
     from dalston.gateway.services.settings import SettingsService
 
     service = SettingsService()
@@ -1014,10 +1037,13 @@ async def get_settings_namespace(
 async def update_settings_namespace(
     namespace: str,
     body: UpdateSettingsRequest,
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
 ) -> NamespaceSettingsResponse:
     """Update settings in a namespace."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.SETTINGS_WRITE)
+
     from dalston.gateway.services.settings import ConflictError, SettingsService
 
     service = SettingsService()
@@ -1027,7 +1053,7 @@ async def update_settings_namespace(
             db=db,
             namespace=namespace,
             updates=body.settings,
-            updated_by=api_key.id,
+            updated_by=principal.id,
             expected_updated_at=body.expected_updated_at,
         )
     except ConflictError as e:
@@ -1054,9 +1080,9 @@ async def update_settings_namespace(
                     action="settings.updated",
                     resource_type="settings",
                     resource_id=namespace,
-                    tenant_id=api_key.tenant_id,
-                    actor_type="api_key",
-                    actor_id=str(api_key.id),
+                    tenant_id=principal.tenant_id,
+                    actor_type=principal.actor_type,
+                    actor_id=principal.actor_id,
                     detail={"changes": changes},
                 )
         except Exception:
@@ -1100,10 +1126,13 @@ async def update_settings_namespace(
 )
 async def reset_settings_namespace(
     namespace: str,
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
 ) -> NamespaceSettingsResponse:
     """Reset settings namespace to defaults."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.SETTINGS_WRITE)
+
     from dalston.gateway.services.settings import SettingsService
 
     service = SettingsService()
@@ -1125,9 +1154,9 @@ async def reset_settings_namespace(
                 action="settings.reset",
                 resource_type="settings",
                 resource_id=namespace,
-                tenant_id=api_key.tenant_id,
-                actor_type="api_key",
-                actor_id=str(api_key.id),
+                tenant_id=principal.tenant_id,
+                actor_type=principal.actor_type,
+                actor_id=principal.actor_id,
                 detail={"reset_keys": list(result.old_values.keys())},
             )
         except Exception:
@@ -1212,7 +1241,7 @@ class MetricsResponse(BaseModel):
     description="Key operational metrics for the web console dashboard.",
 )
 async def get_metrics(
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
@@ -1222,6 +1251,8 @@ async def get_metrics(
     Queries the database for job/task statistics and Redis for queue depths.
     Designed to be called on a polling interval (e.g. 30s) by the frontend.
     """
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
     now = datetime.now(UTC)
 
     # -- Hourly throughput (last 24 hours) --------------------------------

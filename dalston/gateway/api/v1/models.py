@@ -15,13 +15,15 @@ M40 adds database-backed model registry with download management.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dalston.gateway.dependencies import RequireAdmin, RequireJobsRead, get_db
+from dalston.gateway.dependencies import get_db, get_principal, get_security_manager
+from dalston.gateway.security.permissions import Permission
+from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.model_registry import (
     ModelInUseError,
     ModelNotFoundError,
@@ -266,6 +268,7 @@ def _build_metadata_response(model_metadata: dict | None) -> ModelMetadataRespon
     ),
 )
 async def list_registry_models(
+    principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
     stage: str | None = Query(default=None, description="Filter by stage"),
     runtime: str | None = Query(default=None, description="Filter by runtime"),
@@ -274,6 +277,8 @@ async def list_registry_models(
     service: ModelRegistryService = Depends(get_model_registry_service),
 ) -> ModelRegistryListResponse:
     """List all models from the registry with download status."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.MODEL_READ)
     # Optionally sync with disk first to detect engine-downloaded models
     if sync:
         await service.sync_from_disk(db)
@@ -327,10 +332,13 @@ async def list_registry_models(
 )
 async def get_registry_model(
     model_id: str,
+    principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
     service: ModelRegistryService = Depends(get_model_registry_service),
 ) -> ModelRegistryResponse:
     """Get registry details for a specific model."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.MODEL_READ)
     try:
         model = await service.get_model_or_raise(db, model_id)
     except ModelNotFoundError:
@@ -380,7 +388,7 @@ async def get_registry_model(
 )
 async def pull_model(
     model_id: str,
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     request: PullModelRequest | None = None,
     background_tasks: BackgroundTasks = BackgroundTasks(),
     db: AsyncSession = Depends(get_db),
@@ -391,6 +399,8 @@ async def pull_model(
     The download runs asynchronously. Check the model status with
     GET /v1/models/registry/{model_id} to monitor progress.
     """
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.MODEL_PULL)
     force = request.force if request else False
 
     try:
@@ -458,7 +468,7 @@ async def _pull_model_background(model_id: str, force: bool) -> None:
 )
 async def remove_model(
     model_id: str,
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     purge: bool = Query(
         default=False,
         description="If true, delete model from registry entirely. If false, only remove files.",
@@ -467,6 +477,8 @@ async def remove_model(
     service: ModelRegistryService = Depends(get_model_registry_service),
 ) -> DeleteModelResponse:
     """Remove a downloaded model from disk, optionally deleting from registry."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.MODEL_DELETE)
     try:
         await service.remove_model(db, model_id, purge=purge)
     except ModelNotFoundError:
@@ -497,11 +509,13 @@ async def remove_model(
     ),
 )
 async def sync_models(
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
     service: ModelRegistryService = Depends(get_model_registry_service),
 ) -> SyncModelsResponse:
     """Sync registry with disk state."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.MODEL_SYNC)
     result = await service.sync_from_disk(db)
     return SyncModelsResponse(
         updated=result["updated"],
@@ -558,7 +572,7 @@ class HFRoutingMappingsResponse(BaseModel):
 )
 async def resolve_hf_model(
     request: HFResolveRequest,
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
     service: ModelRegistryService = Depends(get_model_registry_service),
 ) -> HFModelMetadataResponse:
@@ -575,6 +589,9 @@ async def resolve_hf_model(
     2. Model tags (fallback) - e.g., "nemo" tag -> "nemo" runtime
     3. pipeline_tag (last resort) - "automatic-speech-recognition" -> "hf-asr"
     """
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.MODEL_PULL)
+
     from dalston.gateway.services.hf_resolver import HFResolver
 
     resolver = HFResolver()
@@ -642,13 +659,16 @@ async def resolve_hf_model(
     description="Get the library_name and tag mappings used for HuggingFace model routing.",
 )
 async def get_hf_routing_mappings(
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> HFRoutingMappingsResponse:
     """Return the routing mappings used for HuggingFace model resolution.
 
     Useful for understanding which HuggingFace models can be auto-routed
     to Dalston engines.
     """
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.MODEL_READ)
+
     from dalston.gateway.services.hf_resolver import HFResolver
 
     resolver = HFResolver()

@@ -484,6 +484,9 @@ class TestAuthApiKeyEndpointAuthorization:
             get_auth_service,
             require_auth,
         )
+        from dalston.gateway.middleware.security_error_handler import (
+            SecurityErrorHandlerMiddleware,
+        )
 
         # API key without admin scope
         non_admin_key = APIKey(
@@ -501,6 +504,7 @@ class TestAuthApiKeyEndpointAuthorization:
         )
 
         app = FastAPI()
+        app.add_middleware(SecurityErrorHandlerMiddleware)
         app.include_router(auth_router)
         app.dependency_overrides[get_auth_service] = lambda: mock_auth_service
         app.dependency_overrides[require_auth] = lambda: non_admin_key
@@ -517,6 +521,9 @@ class TestAuthApiKeyEndpointAuthorization:
             get_auth_service,
             require_auth,
         )
+        from dalston.gateway.middleware.security_error_handler import (
+            SecurityErrorHandlerMiddleware,
+        )
 
         # API key without admin scope
         non_admin_key = APIKey(
@@ -534,6 +541,7 @@ class TestAuthApiKeyEndpointAuthorization:
         )
 
         app = FastAPI()
+        app.add_middleware(SecurityErrorHandlerMiddleware)
         app.include_router(auth_router)
         app.dependency_overrides[get_auth_service] = lambda: mock_auth_service
         app.dependency_overrides[require_auth] = lambda: non_admin_key

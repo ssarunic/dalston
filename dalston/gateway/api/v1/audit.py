@@ -14,7 +14,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.db.models import AuditLogModel
-from dalston.gateway.dependencies import RequireAdmin, get_db
+from dalston.gateway.dependencies import get_db, get_principal, get_security_manager
+from dalston.gateway.security.permissions import Permission
+from dalston.gateway.security.principal import Principal
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
@@ -69,7 +71,7 @@ def _audit_to_response(audit: AuditLogModel) -> AuditEventResponse:
     description="List audit events with optional filters. Requires admin scope.",
 )
 async def list_audit_events(
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     resource_type: Annotated[
         str | None, Query(description="Filter by resource type (e.g., job, session)")
     ] = None,
@@ -103,11 +105,14 @@ async def list_audit_events(
 ) -> AuditListResponse:
     """List audit events with filtering and cursor-based pagination.
 
-    Events are filtered to the tenant of the authenticated API key.
+    Events are filtered to the tenant of the authenticated principal.
     Pass the cursor from the previous response to fetch the next page.
     """
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.AUDIT_READ)
+
     # Build query with filters
-    query = select(AuditLogModel).where(AuditLogModel.tenant_id == api_key.tenant_id)
+    query = select(AuditLogModel).where(AuditLogModel.tenant_id == principal.tenant_id)
 
     if resource_type:
         query = query.where(AuditLogModel.resource_type == resource_type)
@@ -167,7 +172,7 @@ async def list_audit_events(
 async def get_resource_audit_trail(
     resource_type: str,
     resource_id: str,
-    api_key: RequireAdmin,
+    principal: Annotated[Principal, Depends(get_principal)],
     limit: Annotated[int, Query(ge=1, le=100, description="Max results")] = 25,
     cursor: Annotated[
         str | None, Query(description="Cursor for pagination (last event ID)")
@@ -179,9 +184,12 @@ async def get_resource_audit_trail(
     This is useful for compliance audits to see the complete history
     of actions on a job, session, or other resource.
     """
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.AUDIT_READ)
+
     query = (
         select(AuditLogModel)
-        .where(AuditLogModel.tenant_id == api_key.tenant_id)
+        .where(AuditLogModel.tenant_id == principal.tenant_id)
         .where(AuditLogModel.resource_type == resource_type)
         .where(AuditLogModel.resource_id == resource_id)
     )

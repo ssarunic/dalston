@@ -106,7 +106,12 @@ def mock_session_router():
 
 def _make_app(admin_key, mock_db, mock_redis, mock_session_router):
     """Create a FastAPI app with mocked dependencies."""
+    from dalston.gateway.middleware.security_error_handler import (
+        SecurityErrorHandlerMiddleware,
+    )
+
     app = FastAPI()
+    app.add_middleware(SecurityErrorHandlerMiddleware)
     app.include_router(console_router)
 
     app.dependency_overrides[require_auth] = lambda: admin_key

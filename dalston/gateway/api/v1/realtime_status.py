@@ -5,10 +5,18 @@ GET /v1/realtime/workers - List workers
 GET /v1/realtime/workers/{worker_id} - Get worker status
 """
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from dalston.gateway.dependencies import RequireJobsRead, get_session_router
+from dalston.gateway.dependencies import (
+    get_principal,
+    get_security_manager,
+    get_session_router,
+)
+from dalston.gateway.security.permissions import Permission
+from dalston.gateway.security.principal import Principal
 from dalston.session_router import SessionRouter
 
 router = APIRouter(prefix="/realtime", tags=["realtime"])
@@ -51,10 +59,13 @@ class WorkersListResponse(BaseModel):
     description="Get capacity and availability information for real-time transcription.",
 )
 async def get_realtime_status(
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
     session_router: SessionRouter = Depends(get_session_router),
 ) -> RealtimeStatusResponse:
     """Get real-time transcription system status."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.SESSION_READ)
+
     capacity = await session_router.get_capacity()
 
     # Determine overall status
@@ -82,10 +93,13 @@ async def get_realtime_status(
     description="List all registered real-time transcription workers.",
 )
 async def list_realtime_workers(
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
     session_router: SessionRouter = Depends(get_session_router),
 ) -> WorkersListResponse:
     """List all real-time workers."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.SESSION_READ)
+
     workers = await session_router.list_workers()
 
     return WorkersListResponse(
@@ -114,10 +128,13 @@ async def list_realtime_workers(
 )
 async def get_worker_status(
     worker_id: str,
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
     session_router: SessionRouter = Depends(get_session_router),
 ) -> WorkerStatusResponse:
     """Get specific worker status."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.SESSION_READ)
+
     worker = await session_router.get_worker(worker_id)
 
     if worker is None:
