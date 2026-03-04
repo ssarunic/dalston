@@ -94,7 +94,8 @@ async def _ensure_admin_key_exists() -> None:
         logger.info("=" * 70)
 
     except Exception as e:
-        logger.warning("Could not auto-bootstrap admin key: %s", e)
+        logger.error("Could not auto-bootstrap admin key: %s", e)
+        raise
 
 
 @asynccontextmanager
@@ -132,7 +133,8 @@ async def lifespan(app: FastAPI):
     try:
         await ensure_bucket_exists()
     except Exception as e:
-        logger.warning("Could not ensure S3 bucket exists: %s", e)
+        logger.error("S3 bucket check failed: %s", e)
+        raise
 
     # Start Session Router for real-time transcription
     logger.info("Starting Session Router...")
