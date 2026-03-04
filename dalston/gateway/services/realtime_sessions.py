@@ -503,14 +503,10 @@ class RealtimeSessionService:
         if session is None:
             return None
 
-        # Verify tenant isolation
-        if session.tenant_id != principal.tenant_id:
+        if not security_manager.can_access_resource(
+            principal, session.tenant_id, session.created_by_key_id
+        ):
             return None
-
-        # Check ownership for non-admin
-        if not principal.is_admin:
-            if session.created_by_key_id and session.created_by_key_id != principal.id:
-                return None  # Return None to map to 404 (anti-enumeration)
 
         return session
 
@@ -591,13 +587,12 @@ class RealtimeSessionService:
         if session is None:
             raise ResourceNotFoundError("session", session_id)
 
-        # Verify tenant isolation
-        if session.tenant_id != principal.tenant_id:
-            raise ResourceNotFoundError("session", session_id)
-
-        # Check ownership for non-admin
-        if not principal.is_admin:
-            if session.created_by_key_id and session.created_by_key_id != principal.id:
-                raise ResourceNotFoundError("session", session_id)
+        security_manager.require_resource_access(
+            principal,
+            session.tenant_id,
+            "session",
+            session_id,
+            session.created_by_key_id,
+        )
 
         return await self.delete_session(session_id, principal.tenant_id)

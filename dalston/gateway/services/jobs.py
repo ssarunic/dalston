@@ -678,10 +678,10 @@ class JobsService:
         if job is None:
             return None
 
-        # Check ownership for non-admin
-        if not principal.is_admin:
-            if job.created_by_key_id and job.created_by_key_id != principal.id:
-                return None  # Return None to map to 404 (anti-enumeration)
+        if not security_manager.can_access_resource(
+            principal, job.tenant_id, job.created_by_key_id
+        ):
+            return None
 
         return job
 
@@ -712,10 +712,10 @@ class JobsService:
         if job is None:
             return None
 
-        # Check ownership for non-admin
-        if not principal.is_admin:
-            if job.created_by_key_id and job.created_by_key_id != principal.id:
-                return None  # Return None to map to 404 (anti-enumeration)
+        if not security_manager.can_access_resource(
+            principal, job.tenant_id, job.created_by_key_id
+        ):
+            return None
 
         return job
 
@@ -758,10 +758,9 @@ class JobsService:
         if job is None:
             raise ResourceNotFoundError("job", job_id)
 
-        # Check ownership for non-admin
-        if not principal.is_admin:
-            if job.created_by_key_id and job.created_by_key_id != principal.id:
-                raise ResourceNotFoundError("job", job_id)
+        security_manager.require_resource_access(
+            principal, job.tenant_id, "job", job_id, job.created_by_key_id
+        )
 
         return await self.delete_job(
             db,
@@ -803,10 +802,9 @@ class JobsService:
         if job is None:
             raise ResourceNotFoundError("job", job_id)
 
-        # Check ownership for non-admin
-        if not principal.is_admin:
-            if job.created_by_key_id and job.created_by_key_id != principal.id:
-                raise ResourceNotFoundError("job", job_id)
+        security_manager.require_resource_access(
+            principal, job.tenant_id, "job", job_id, job.created_by_key_id
+        )
 
         return await self.cancel_job(db, job_id, tenant_id=principal.tenant_id)
 
@@ -840,10 +838,9 @@ class JobsService:
         if job is None:
             raise ResourceNotFoundError("job", job_id)
 
-        # Check ownership for non-admin
-        if not principal.is_admin:
-            if job.created_by_key_id and job.created_by_key_id != principal.id:
-                raise ResourceNotFoundError("job", job_id)
+        security_manager.require_resource_access(
+            principal, job.tenant_id, "job", job_id, job.created_by_key_id
+        )
 
         old_name = job.display_name
         updated_job = await self.update_display_name(

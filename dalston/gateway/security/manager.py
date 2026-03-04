@@ -147,8 +147,10 @@ class SecurityManager:
         1. Security mode is 'none' (development)
         2. Principal is in the same tenant AND:
            a. Principal has admin scope, OR
-           b. Resource has no creator (backward compat), OR
-           c. Principal is the creator
+           b. Principal is the creator
+
+        Non-admins are denied access when resource has no creator attribution.
+        This catches missing attribution bugs early and enforces strict ownership.
 
         Args:
             principal: Authenticated principal
@@ -169,13 +171,8 @@ class SecurityManager:
         if Scope.ADMIN in principal.scopes:
             return True
 
-        # If resource has ownership tracking and principal is non-admin,
-        # only owner can access
-        if resource_created_by is not None:
-            return principal.id == resource_created_by
-
-        # No ownership info = tenant-wide access (backward compatibility)
-        return True
+        # Non-admin: must be the creator (deny if no attribution)
+        return principal.id == resource_created_by
 
     def require_resource_access(
         self,
