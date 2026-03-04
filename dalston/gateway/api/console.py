@@ -12,7 +12,7 @@ POST /api/console/settings/{namespace}/reset - Reset to defaults
 """
 
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -20,19 +20,17 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from redis.asyncio import Redis
-from sqlalchemy import case, extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_cancel_requested
 from dalston.common.models import JobStatus
 from dalston.common.streams_types import CONSUMER_GROUP
 from dalston.config import Settings
-from dalston.db.models import JobModel, TaskModel
 from dalston.db.session import DEFAULT_TENANT_ID
 from dalston.gateway.dependencies import (
     get_audit_service,
+    get_console_service,
     get_db,
     get_jobs_service,
     get_principal,
@@ -44,6 +42,7 @@ from dalston.gateway.dependencies import (
 from dalston.gateway.models.responses import JobCancelledResponse
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
+from dalston.gateway.services.console import ConsoleService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
 from dalston.session_router import SessionRouter
@@ -138,41 +137,13 @@ async def get_dashboard(
     principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
     session_router: SessionRouter = Depends(get_session_router),
+    console_service: ConsoleService = Depends(get_console_service),
 ) -> DashboardResponse:
     """Get aggregated dashboard data in a single call."""
     security_manager = get_security_manager()
     security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
-    # Get job counts by status
-    status_counts = await db.execute(
-        select(JobModel.status, func.count(JobModel.id))
-        .where(JobModel.tenant_id == DEFAULT_TENANT_ID)
-        .group_by(JobModel.status)
-    )
-    counts = {row[0]: row[1] for row in status_counts.all()}
 
-    # Get today's completed/failed counts
-    today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-    today_completed = await db.execute(
-        select(func.count(JobModel.id))
-        .where(JobModel.tenant_id == DEFAULT_TENANT_ID)
-        .where(JobModel.status == JobStatus.COMPLETED.value)
-        .where(JobModel.completed_at >= today_start)
-    )
-    today_failed = await db.execute(
-        select(func.count(JobModel.id))
-        .where(JobModel.tenant_id == DEFAULT_TENANT_ID)
-        .where(JobModel.status == JobStatus.FAILED.value)
-        .where(JobModel.completed_at >= today_start)
-    )
-
-    # Get recent jobs
-    recent_result = await db.execute(
-        select(JobModel)
-        .where(JobModel.tenant_id == DEFAULT_TENANT_ID)
-        .order_by(JobModel.created_at.desc())
-        .limit(5)
-    )
-    recent_jobs = recent_result.scalars().all()
+    stats = await console_service.get_dashboard_stats(db)
 
     # Get realtime capacity
     try:
@@ -197,21 +168,21 @@ async def get_dashboard(
     return DashboardResponse(
         system=SystemStatus(healthy=True),
         batch=BatchStats(
-            running_jobs=counts.get(JobStatus.RUNNING.value, 0),
-            queued_jobs=counts.get(JobStatus.PENDING.value, 0),
-            completed_today=today_completed.scalar() or 0,
-            failed_today=today_failed.scalar() or 0,
+            running_jobs=stats.status_counts.get(JobStatus.RUNNING.value, 0),
+            queued_jobs=stats.status_counts.get(JobStatus.PENDING.value, 0),
+            completed_today=stats.completed_today,
+            failed_today=stats.failed_today,
         ),
         realtime=realtime,
         recent_jobs=[
             JobSummary(
-                id=job.id,
-                status=job.status,
-                created_at=job.created_at,
-                started_at=job.started_at,
-                completed_at=job.completed_at,
+                id=dto.id,
+                status=dto.status,
+                created_at=dto.created_at,
+                started_at=dto.started_at,
+                completed_at=dto.completed_at,
             )
-            for job in recent_jobs
+            for dto in stats.recent_jobs
         ],
     )
 
@@ -249,20 +220,17 @@ async def get_job_tasks(
     job_id: UUID,
     principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
+    console_service: ConsoleService = Depends(get_console_service),
 ) -> TaskListResponse:
     """Get task DAG for a job."""
     security_manager = get_security_manager()
     security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
-    # Fetch job with tasks
-    result = await db.execute(
-        select(JobModel)
-        .where(JobModel.id == job_id)
-        .where(JobModel.tenant_id == DEFAULT_TENANT_ID)
-        .options(selectinload(JobModel.tasks))
-    )
-    job = result.scalar_one_or_none()
 
-    if job is None:
+    job_dto = await console_service.get_job_with_tasks_admin(
+        db, job_id, DEFAULT_TENANT_ID
+    )
+
+    if job_dto is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
     # Sort tasks by stage order for display
@@ -277,7 +245,7 @@ async def get_job_tasks(
         "merge": 7,
     }
     sorted_tasks = sorted(
-        job.tasks,
+        job_dto.tasks,
         key=lambda t: (stage_order.get(t.stage, 99), t.engine_id),
     )
 
@@ -288,14 +256,14 @@ async def get_job_tasks(
         return None
 
     return TaskListResponse(
-        job_id=job.id,
+        job_id=job_dto.id,
         tasks=[
             TaskResponse(
                 id=task.id,
                 stage=task.stage,
                 engine_id=task.engine_id,
                 status=task.status,
-                dependencies=task.dependencies or [],
+                dependencies=task.dependencies,
                 started_at=task.started_at,
                 completed_at=task.completed_at,
                 duration_ms=compute_duration(task),
@@ -337,26 +305,20 @@ async def get_task_artifacts(
     task_id: UUID,
     principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
+    console_service: ConsoleService = Depends(get_console_service),
 ) -> TaskArtifactResponse:
     """Get task artifacts for debugging."""
     security_manager = get_security_manager()
     security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
     from dalston.config import get_settings
-    from dalston.gateway.services.storage import StorageService
 
-    # Fetch job with tasks
-    result = await db.execute(
-        select(JobModel)
-        .where(JobModel.id == job_id)
-        .options(selectinload(JobModel.tasks))
-    )
-    job = result.scalar_one_or_none()
+    job_dto = await console_service.get_job_with_tasks_admin(db, job_id)
 
-    if job is None:
+    if job_dto is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
     # Find the task
-    task = next((t for t in job.tasks if t.id == task_id), None)
+    task = next((t for t in job_dto.tasks if t.id == task_id), None)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
 
@@ -388,7 +350,7 @@ async def get_task_artifacts(
         retries=task.retries,
         max_retries=task.max_retries,
         error=task.error,
-        dependencies=task.dependencies or [],
+        dependencies=task.dependencies,
         input=input_data,
         output=output_data,
     )
@@ -622,36 +584,6 @@ class ConsoleJobListResponse(BaseModel):
     has_more: bool
 
 
-def _encode_job_cursor(job: JobModel) -> str:
-    """Encode a cursor from a job's created_at and id."""
-    return f"{job.created_at.isoformat()}:{job.id}"
-
-
-def _get_transcribe_model(job: JobModel) -> str | None:
-    """Extract the transcription model ID from job parameters.
-
-    Returns the model ID (e.g., 'parakeet-tdt-0.6b-v3') that was used for
-    transcription. This is stored in job.parameters['engine_transcribe'].
-    """
-    if job.parameters:
-        return job.parameters.get("engine_transcribe")
-    return None
-
-
-def _decode_job_cursor(cursor: str) -> tuple[datetime, UUID]:
-    """Decode a cursor into created_at and id.
-
-    Raises:
-        ValueError: If the cursor format is invalid.
-    """
-    parts = cursor.rsplit(":", 1)
-    if len(parts) != 2:
-        raise ValueError("Invalid cursor format")
-    created_at = datetime.fromisoformat(parts[0])
-    job_id = UUID(parts[1])
-    return created_at, job_id
-
-
 @router.get(
     "/jobs",
     response_model=ConsoleJobListResponse,
@@ -661,6 +593,7 @@ def _decode_job_cursor(cursor: str) -> tuple[datetime, UUID]:
 async def list_console_jobs(
     principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
+    console_service: ConsoleService = Depends(get_console_service),
     limit: int = 20,
     cursor: str | None = None,
     status: str | None = None,
@@ -669,74 +602,32 @@ async def list_console_jobs(
     """List all jobs for console (admin view) with cursor-based pagination."""
     security_manager = get_security_manager()
     security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
-    # Build base query - no tenant filter for admin
-    query = select(JobModel)
 
-    # Optional status filter
-    if status:
-        query = query.where(JobModel.status == status)
-
-    # Apply cursor filter
-    if cursor:
-        try:
-            cursor_created_at, cursor_id = _decode_job_cursor(cursor)
-        except ValueError:
-            raise HTTPException(
-                status_code=400, detail="Invalid cursor format"
-            ) from None
-        if sort == "created_asc":
-            # Get jobs created after the cursor OR same time but with larger ID
-            query = query.where(
-                (JobModel.created_at > cursor_created_at)
-                | (
-                    (JobModel.created_at == cursor_created_at)
-                    & (JobModel.id > cursor_id)
-                )
-            )
-        else:
-            # Get jobs created before the cursor OR same time but with smaller ID
-            query = query.where(
-                (JobModel.created_at < cursor_created_at)
-                | (
-                    (JobModel.created_at == cursor_created_at)
-                    & (JobModel.id < cursor_id)
-                )
-            )
-
-    # Fetch limit + 1 to determine has_more
-    if sort == "created_asc":
-        query = query.order_by(JobModel.created_at.asc(), JobModel.id.asc())
-    else:
-        query = query.order_by(JobModel.created_at.desc(), JobModel.id.desc())
-    query = query.limit(limit + 1)
-    result = await db.execute(query)
-    jobs = list(result.scalars().all())
-
-    has_more = len(jobs) > limit
-    if has_more:
-        jobs = jobs[:limit]
-
-    # Next cursor is encoded from the last job
-    next_cursor = _encode_job_cursor(jobs[-1]) if jobs and has_more else None
+    try:
+        jobs, next_cursor, has_more = await console_service.list_jobs_admin(
+            db, limit=limit, cursor=cursor, status=status, sort=sort
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid cursor format") from None
 
     return ConsoleJobListResponse(
         jobs=[
             ConsoleJobSummary(
-                id=job.id,
-                status=job.status,
-                display_name=job.display_name,
-                model=_get_transcribe_model(job),
-                audio_uri=job.audio_uri,
-                created_at=job.created_at,
-                started_at=job.started_at,
-                completed_at=job.completed_at,
-                audio_duration_seconds=job.audio_duration,
-                result_language_code=job.result_language_code,
-                result_word_count=job.result_word_count,
-                result_segment_count=job.result_segment_count,
-                result_speaker_count=job.result_speaker_count,
+                id=dto.id,
+                status=dto.status,
+                display_name=dto.display_name,
+                model=dto.model,
+                audio_uri=dto.audio_uri,
+                created_at=dto.created_at,
+                started_at=dto.started_at,
+                completed_at=dto.completed_at,
+                audio_duration_seconds=dto.audio_duration_seconds,
+                result_language_code=dto.result_language_code,
+                result_word_count=dto.result_word_count,
+                result_segment_count=dto.result_segment_count,
+                result_speaker_count=dto.result_speaker_count,
             )
-            for job in jobs
+            for dto in jobs
         ],
         cursor=next_cursor,
         has_more=has_more,
@@ -769,26 +660,27 @@ async def get_console_job(
     job_id: UUID,
     principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
+    console_service: ConsoleService = Depends(get_console_service),
 ) -> ConsoleJobDetailResponse:
     """Get job details for console (admin view)."""
     security_manager = get_security_manager()
     security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
-    result = await db.execute(select(JobModel).where(JobModel.id == job_id))
-    job = result.scalar_one_or_none()
 
-    if job is None:
+    job_dto = await console_service.get_job_admin(db, job_id)
+
+    if job_dto is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
     return ConsoleJobDetailResponse(
-        id=job.id,
-        status=job.status,
-        audio_uri=job.audio_uri,
-        parameters=job.parameters,
-        result=job.result,
-        error=job.error,
-        created_at=job.created_at,
-        started_at=job.started_at,
-        completed_at=job.completed_at,
+        id=job_dto.id,
+        status=job_dto.status,
+        audio_uri=job_dto.audio_uri,
+        parameters=job_dto.parameters,
+        result=job_dto.result,
+        error=job_dto.error,
+        created_at=job_dto.created_at,
+        started_at=job_dto.started_at,
+        completed_at=job_dto.completed_at,
     )
 
 
@@ -1248,7 +1140,7 @@ async def get_metrics(
     principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
-    settings: Settings = Depends(get_settings),
+    console_service: ConsoleService = Depends(get_console_service),
 ) -> MetricsResponse:
     """Return key metrics for the web console.
 
@@ -1257,113 +1149,28 @@ async def get_metrics(
     """
     security_manager = get_security_manager()
     security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
-    now = datetime.now(UTC)
 
-    # -- Hourly throughput (last 24 hours) --------------------------------
-    twenty_four_hours_ago = now - timedelta(hours=24)
+    # Get metrics from service
+    throughput_data = await console_service.get_hourly_throughput(db)
+    success_rate_data = await console_service.get_success_rates(db)
+    total_audio_minutes = await console_service.get_total_audio_minutes(db)
+    total_jobs_all_time = await console_service.get_total_jobs_count(db)
 
-    # Use date_trunc to bucket completed jobs by hour
-    hour_col = func.date_trunc("hour", JobModel.completed_at)
-    throughput_query = (
-        select(
-            hour_col.label("hour"),
-            func.count(JobModel.id).label("total"),
-            func.sum(
-                case(
-                    (JobModel.status == JobStatus.COMPLETED.value, 1),
-                    else_=0,
-                )
-            ).label("completed"),
-            func.sum(
-                case(
-                    (JobModel.status == JobStatus.FAILED.value, 1),
-                    else_=0,
-                )
-            ).label("failed"),
+    # Convert service dataclasses to API response models
+    throughput = [
+        ThroughputBucket(hour=b.hour, completed=b.completed, failed=b.failed)
+        for b in throughput_data
+    ]
+    success_rates = [
+        SuccessRate(
+            window=r.window,
+            total=r.total,
+            completed=r.completed,
+            failed=r.failed,
+            rate=r.rate,
         )
-        .where(JobModel.completed_at >= twenty_four_hours_ago)
-        .where(JobModel.status.in_([JobStatus.COMPLETED.value, JobStatus.FAILED.value]))
-        .group_by(hour_col)
-        .order_by(hour_col)
-    )
-    throughput_rows = (await db.execute(throughput_query)).all()
-
-    # Build a full 24-hour series (fill gaps with zeros)
-    bucket_map: dict[str, ThroughputBucket] = {}
-    for row in throughput_rows:
-        key = row.hour.isoformat()
-        bucket_map[key] = ThroughputBucket(
-            hour=key,
-            completed=row.completed or 0,
-            failed=row.failed or 0,
-        )
-
-    throughput: list[ThroughputBucket] = []
-    for i in range(24):
-        bucket_start = (now - timedelta(hours=23 - i)).replace(
-            minute=0, second=0, microsecond=0
-        )
-        key = bucket_start.isoformat()
-        throughput.append(
-            bucket_map.get(
-                key,
-                ThroughputBucket(hour=key, completed=0, failed=0),
-            )
-        )
-
-    # -- Success rates (1h and 24h windows) --------------------------------
-    success_rates: list[SuccessRate] = []
-    for label, window_start in [
-        ("1h", now - timedelta(hours=1)),
-        ("24h", twenty_four_hours_ago),
-    ]:
-        rate_query = (
-            select(
-                func.count(JobModel.id).label("total"),
-                func.sum(
-                    case(
-                        (JobModel.status == JobStatus.COMPLETED.value, 1),
-                        else_=0,
-                    )
-                ).label("completed"),
-                func.sum(
-                    case(
-                        (JobModel.status == JobStatus.FAILED.value, 1),
-                        else_=0,
-                    )
-                ).label("failed"),
-            )
-            .where(JobModel.completed_at >= window_start)
-            .where(
-                JobModel.status.in_([JobStatus.COMPLETED.value, JobStatus.FAILED.value])
-            )
-        )
-        row = (await db.execute(rate_query)).one()
-        total = row.total or 0
-        completed = row.completed or 0
-        failed = row.failed or 0
-        success_rates.append(
-            SuccessRate(
-                window=label,
-                total=total,
-                completed=completed,
-                failed=failed,
-                rate=completed / total if total > 0 else 1.0,
-            )
-        )
-
-    # -- Total audio minutes (all time) ------------------------------------
-    audio_sum = await db.execute(
-        select(func.coalesce(func.sum(JobModel.audio_duration), 0.0)).where(
-            JobModel.status == JobStatus.COMPLETED.value
-        )
-    )
-    total_audio_seconds = float(audio_sum.scalar() or 0)
-    total_audio_minutes = total_audio_seconds / 60.0
-
-    # -- Total jobs all time -----------------------------------------------
-    total_jobs_row = await db.execute(select(func.count(JobModel.id)))
-    total_jobs_all_time = total_jobs_row.scalar() or 0
+        for r in success_rate_data
+    ]
 
     # -- Per-engine metrics ------------------------------------------------
     from dalston.orchestrator.catalog import get_catalog
@@ -1379,44 +1186,7 @@ async def get_metrics(
         stage = entry.capabilities.stages[0]
 
         # Task stats from DB (last 24h)
-        engine_task_query = (
-            select(
-                func.count(TaskModel.id)
-                .filter(TaskModel.status == "completed")
-                .label("completed"),
-                func.count(TaskModel.id)
-                .filter(TaskModel.status == "failed")
-                .label("failed"),
-                func.avg(
-                    extract(
-                        "epoch",
-                        TaskModel.completed_at - TaskModel.started_at,
-                    )
-                )
-                .filter(
-                    TaskModel.status == "completed",
-                    TaskModel.started_at.isnot(None),
-                    TaskModel.completed_at.isnot(None),
-                )
-                .label("avg_seconds"),
-                func.percentile_cont(0.95)
-                .within_group(
-                    extract(
-                        "epoch",
-                        TaskModel.completed_at - TaskModel.started_at,
-                    )
-                )
-                .filter(
-                    TaskModel.status == "completed",
-                    TaskModel.started_at.isnot(None),
-                    TaskModel.completed_at.isnot(None),
-                )
-                .label("p95_seconds"),
-            )
-            .where(TaskModel.engine_id == engine_id)
-            .where(TaskModel.started_at >= twenty_four_hours_ago)
-        )
-        task_row = (await db.execute(engine_task_query)).one()
+        stats = await console_service.get_engine_task_stats(db, engine_id)
 
         # Queue depth from Redis
         stream_key = f"dalston:stream:{engine_id}"
@@ -1426,18 +1196,10 @@ async def get_metrics(
             EngineMetric(
                 engine_id=engine_id,
                 stage=stage,
-                completed=task_row.completed or 0,
-                failed=task_row.failed or 0,
-                avg_duration_ms=(
-                    round(task_row.avg_seconds * 1000, 1)
-                    if task_row.avg_seconds is not None
-                    else None
-                ),
-                p95_duration_ms=(
-                    round(task_row.p95_seconds * 1000, 1)
-                    if task_row.p95_seconds is not None
-                    else None
-                ),
+                completed=stats.completed,
+                failed=stats.failed,
+                avg_duration_ms=stats.avg_duration_ms,
+                p95_duration_ms=stats.p95_duration_ms,
                 queue_depth=queue_depth,
             )
         )

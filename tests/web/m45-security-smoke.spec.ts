@@ -10,7 +10,7 @@ const ADMIN_API_KEY = 'dk_PE2-k0faXI3JBhW-tYWqPPzbJxpqlWHsXG_SMNZU8bo';
 
 // Helper function to login as admin
 async function loginAsAdmin(page: Page) {
-  await page.goto('http://localhost:3007/login');
+  await page.goto('/console/login');
   await page.getByRole('textbox', { name: 'API Key' }).fill(ADMIN_API_KEY);
   await page.getByRole('button', { name: 'Login' }).click();
   await expect(page).not.toHaveURL(/\/login/);
@@ -45,7 +45,7 @@ test.describe('M45 Security Smoke Tests', () => {
 
       // Navigate to Batch Jobs
       await page.getByRole('link', { name: 'Batch Jobs' }).click();
-      await expect(page).toHaveURL(/\/jobs$/);
+      await expect(page).toHaveURL(/\/console\/jobs$/);
 
       // Verify page heading
       await expect(page.getByRole('heading', { name: 'Batch Jobs', level: 1 })).toBeVisible();
@@ -60,7 +60,7 @@ test.describe('M45 Security Smoke Tests', () => {
       // Navigate to Batch Jobs
       await page.getByRole('link', { name: 'Batch Jobs' }).click();
 
-      // Check if there are any jobs in the list
+      // Check if there are any jobs in the list (internal links use /jobs/, base path is added)
       const jobLinks = page.locator('a[href^="/jobs/"]').filter({ hasNot: page.locator('text=View all') });
       const jobCount = await jobLinks.count();
 
@@ -69,7 +69,7 @@ test.describe('M45 Security Smoke Tests', () => {
         await jobLinks.first().click();
 
         // Verify we're on a job detail page
-        await expect(page).toHaveURL(/\/jobs\/[a-f0-9-]+$/);
+        await expect(page).toHaveURL(/\/console\/jobs\/[a-f0-9-]+$/);
 
         // Verify back button exists
         await expect(page.getByRole('button', { name: /back/i })).toBeVisible();
@@ -83,7 +83,7 @@ test.describe('M45 Security Smoke Tests', () => {
 
       // Navigate to API Keys
       await page.getByRole('link', { name: 'API Keys' }).click();
-      await expect(page).toHaveURL(/\/keys$/);
+      await expect(page).toHaveURL(/\/console\/keys$/);
 
       // Verify page heading
       await expect(page.getByRole('heading', { name: 'API Keys', level: 1 })).toBeVisible();
@@ -146,15 +146,15 @@ test.describe('M45 Security Smoke Tests', () => {
 
       // Test each navigation link
       const pages = [
-        { link: 'Batch Jobs', url: '/jobs' },
-        { link: 'Real-time', url: '/realtime' },
-        { link: 'Engines', url: '/engines' },
-        { link: 'Models', url: '/models' },
-        { link: 'API Keys', url: '/keys' },
-        { link: 'Webhooks', url: '/webhooks' },
-        { link: 'Audit Log', url: '/audit' },
-        { link: 'Settings', url: '/settings' },
-        { link: 'Dashboard', url: '/' },
+        { link: 'Batch Jobs', url: '/console/jobs' },
+        { link: 'Real-time', url: '/console/realtime' },
+        { link: 'Engines', url: '/console/engines' },
+        { link: 'Models', url: '/console/models' },
+        { link: 'API Keys', url: '/console/keys' },
+        { link: 'Webhooks', url: '/console/webhooks' },
+        { link: 'Audit Log', url: '/console/audit' },
+        { link: 'Settings', url: '/console/settings' },
+        { link: 'Dashboard', url: '/console' },
       ];
 
       for (const { link, url } of pages) {
@@ -166,7 +166,7 @@ test.describe('M45 Security Smoke Tests', () => {
 
   test.describe('Authentication Rejection', () => {
     test('should reject invalid API key', async ({ page }) => {
-      await page.goto('http://localhost:3007/login');
+      await page.goto('/console/login');
       await page.getByRole('textbox', { name: 'API Key' }).fill('dk_invalid_key_12345');
       await page.getByRole('button', { name: 'Login' }).click();
 
@@ -180,7 +180,7 @@ test.describe('M45 Security Smoke Tests', () => {
     test('should reject non-admin API key', async ({ page }) => {
       // This test verifies that keys without admin scope are rejected.
       // We use an invalid key format which will be rejected by the API.
-      await page.goto('http://localhost:3007/login');
+      await page.goto('/console/login');
 
       // Use a properly formatted but non-existent key
       await page.getByRole('textbox', { name: 'API Key' }).fill('dk_test123456789012345678901234567890123456');
@@ -215,7 +215,7 @@ test.describe('M45 Security Smoke Tests', () => {
       await page.getByRole('button', { name: 'Logout' }).click();
 
       // Try to access protected route
-      await page.goto('http://localhost:3007/jobs');
+      await page.goto('/console/jobs');
 
       // Should redirect to login
       await expect(page).toHaveURL(/\/login$/);
@@ -225,10 +225,10 @@ test.describe('M45 Security Smoke Tests', () => {
   test.describe('Protected Routes', () => {
     test('should redirect unauthenticated users to login', async ({ page }) => {
       // Try to access various protected routes directly
-      const protectedRoutes = ['/jobs', '/keys', '/settings', '/engines', '/models'];
+      const protectedRoutes = ['/console/jobs', '/console/keys', '/console/settings', '/console/engines', '/console/models'];
 
       for (const route of protectedRoutes) {
-        await page.goto(`http://localhost:3007${route}`);
+        await page.goto(route);
         await expect(page).toHaveURL(/\/login$/);
       }
     });

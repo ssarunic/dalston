@@ -20,10 +20,13 @@ from dalston.gateway.security.manager import (
     get_security_manager as _get_security_manager,
 )
 from dalston.gateway.security.principal import Principal
+from dalston.gateway.services.audit_query import AuditQueryService
 from dalston.gateway.services.auth import APIKey, AuthService, Scope
+from dalston.gateway.services.console import ConsoleService
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.ingestion import AudioIngestionService
 from dalston.gateway.services.jobs import JobsService
+from dalston.gateway.services.pii_entity_types import PIIEntityTypeService
 from dalston.gateway.services.rate_limiter import RedisRateLimiter
 
 if TYPE_CHECKING:
@@ -56,6 +59,9 @@ def get_settings() -> Settings:
 _jobs_service: JobsService | None = None
 _export_service: ExportService | None = None
 _audit_service: AuditService | None = None
+_console_service: ConsoleService | None = None
+_audit_query_service: AuditQueryService | None = None
+_pii_entity_type_service: PIIEntityTypeService | None = None
 
 
 def get_jobs_service() -> JobsService:
@@ -72,6 +78,30 @@ def get_export_service() -> ExportService:
     if _export_service is None:
         _export_service = ExportService()
     return _export_service
+
+
+def get_console_service() -> ConsoleService:
+    """Get ConsoleService instance (singleton)."""
+    global _console_service
+    if _console_service is None:
+        _console_service = ConsoleService()
+    return _console_service
+
+
+def get_audit_query_service() -> AuditQueryService:
+    """Get AuditQueryService instance (singleton)."""
+    global _audit_query_service
+    if _audit_query_service is None:
+        _audit_query_service = AuditQueryService()
+    return _audit_query_service
+
+
+def get_pii_entity_type_service() -> PIIEntityTypeService:
+    """Get PIIEntityTypeService instance (singleton)."""
+    global _pii_entity_type_service
+    if _pii_entity_type_service is None:
+        _pii_entity_type_service = PIIEntityTypeService()
+    return _pii_entity_type_service
 
 
 def get_ingestion_service(

@@ -125,6 +125,30 @@ class ModelRegistryService:
             raise ModelNotFoundError(model_id)
         return model
 
+    async def get_model_by_runtime_model_id(
+        self,
+        db: AsyncSession,
+        runtime_model_id: str,
+    ) -> ModelRegistryModel | None:
+        """Get a model by its runtime_model_id.
+
+        This is used to check if a HuggingFace model is already registered
+        under a different Dalston model ID.
+
+        Args:
+            db: Database session
+            runtime_model_id: The HuggingFace model ID or runtime-specific model ID
+
+        Returns:
+            Model if found, None otherwise
+        """
+        result = await db.execute(
+            select(ModelRegistryModel).where(
+                ModelRegistryModel.runtime_model_id == runtime_model_id
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def list_models(
         self,
         db: AsyncSession,
