@@ -43,16 +43,6 @@ from dalston.common.streams_types import (
 
 logger = structlog.get_logger()
 
-# Re-export for backwards compatibility
-__all__ = [
-    "STREAM_PREFIX",
-    "CONSUMER_GROUP",
-    "JOB_CANCELLED_KEY_PREFIX",
-    "JOB_CANCELLED_TTL_SECONDS",
-    "StreamMessage",
-    "PendingTask",
-]
-
 
 def _stream_key(stage: str) -> str:
     """Build stream key from queue identifier."""

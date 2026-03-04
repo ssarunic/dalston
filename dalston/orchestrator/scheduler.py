@@ -417,41 +417,6 @@ async def queue_task(
     log.info("task_queued", stream=f"dalston:stream:{queue_id}", message_id=message_id)
 
 
-async def remove_task_from_queue(
-    redis: Redis,
-    task_id: UUID,
-    engine_id: str,
-) -> bool:
-    """Remove a task from its engine queue.
-
-    DEPRECATED: With Redis Streams (M33), tasks cannot be removed directly.
-    Instead, engines check job cancellation status when claiming tasks.
-    This function is kept for backwards compatibility during migration
-    but will be removed in a future version.
-
-    Used during job cancellation to prevent READY tasks from being picked up.
-
-    Args:
-        redis: Async Redis client
-        task_id: Task UUID to remove
-        engine_id: Engine queue to remove from
-
-    Returns:
-        True if task was found and removed, False otherwise.
-        Always returns False with Streams (tasks handled via cancellation check).
-    """
-    # With Redis Streams, we cannot remove messages by task_id.
-    # The engine will check job cancellation status when it claims the task.
-    # See M33 Step 33.6 for updated cancellation flow.
-    logger.debug(
-        "remove_task_from_queue_noop",
-        task_id=str(task_id),
-        engine_id=engine_id,
-        reason="streams_migration",
-    )
-    return False
-
-
 async def write_task_input(
     task: Task,
     settings: Settings,

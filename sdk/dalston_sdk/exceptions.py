@@ -40,10 +40,6 @@ class ForbiddenError(DalstonError):
         super().__init__(message, status_code=403)
 
 
-# Backward compatibility alias (deprecated)
-PermissionError = ForbiddenError
-
-
 class NotFoundError(DalstonError):
     """Resource not found (404)."""
 
@@ -86,19 +82,11 @@ class ConnectError(DalstonError):
         super().__init__(message)
 
 
-# Backward compatibility alias (deprecated)
-ConnectionError = ConnectError
-
-
 class TimeoutException(DalstonError):
     """Request or operation timeout."""
 
     def __init__(self, message: str = "Operation timed out") -> None:
         super().__init__(message)
-
-
-# Backward compatibility alias (deprecated)
-TimeoutError = TimeoutException
 
 
 class WebhookVerificationError(DalstonError):
