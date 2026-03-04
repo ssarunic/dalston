@@ -408,8 +408,8 @@ class TestEngineCatalog:
         transcribers = catalog.get_engines_for_stage("transcribe")
 
         assert len(transcribers) == 2
-        engine_ids = {e.runtime for e in transcribers}
-        assert engine_ids == {"parakeet", "faster-whisper"}
+        runtimes = {e.runtime for e in transcribers}
+        assert runtimes == {"parakeet", "faster-whisper"}
 
     def test_find_engines_supporting_language(self, catalog_json):
         """Test finding engines that support a language."""

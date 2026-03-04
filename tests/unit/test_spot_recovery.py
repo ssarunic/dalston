@@ -29,7 +29,7 @@ class TestEngineRunnerInstanceId:
             runner1 = EngineRunner(mock_engine)
             runner2 = EngineRunner(mock_engine)
 
-            # Both should have the same logical engine_id
+            # Both should have the same logical runtime
             assert runner1.runtime == "whisper-cpu"
             assert runner2.runtime == "whisper-cpu"
 
@@ -48,8 +48,8 @@ class TestEngineRunnerInstanceId:
 
             runner = EngineRunner(mock_engine)
 
-            # Format: {engine_id}-{12_char_hex}
-            # engine_id may contain hyphens, so extract suffix by removing prefix
+            # Format: {runtime}-{12_char_hex}
+            # runtime may contain hyphens, so extract suffix by removing prefix
             assert runner.instance.startswith("faster-whisper-")
             suffix = runner.instance.replace("faster-whisper-", "")
             assert len(suffix) == 12
@@ -607,7 +607,7 @@ class TestStaleEngineCleanup:
     async def test_removes_runtime_when_no_instances_remain(
         self, mock_redis, mock_settings
     ):
-        """Test cleanup removes engine_id from main set when no instances remain."""
+        """Test cleanup removes runtime from main set when no instances remain."""
         from dalston.orchestrator.reconciler import ReconciliationSweeper
 
         sweeper = ReconciliationSweeper(
@@ -625,7 +625,7 @@ class TestStaleEngineCleanup:
 
         await sweeper._cleanup_stale_engine_entries()
 
-        # Should remove engine_id from main set
+        # Should remove runtime from main set
         mock_redis.srem.assert_any_call("dalston:batch:runtimes", "faster-whisper")
         # Should delete the empty instances set
         mock_redis.delete.assert_called_once_with(
@@ -636,7 +636,7 @@ class TestStaleEngineCleanup:
     async def test_keeps_runtime_when_healthy_instances_exist(
         self, mock_redis, mock_settings
     ):
-        """Test cleanup keeps engine_id when at least one instance is healthy."""
+        """Test cleanup keeps runtime when at least one instance is healthy."""
         from dalston.orchestrator.reconciler import ReconciliationSweeper
 
         sweeper = ReconciliationSweeper(
@@ -669,7 +669,7 @@ class TestStaleEngineCleanup:
             "dalston:batch:runtime:instances:faster-whisper",
             "faster-whisper-stale",
         )
-        # Should NOT remove engine_id from main set (still has healthy instance)
+        # Should NOT remove runtime from main set (still has healthy instance)
         srem_calls = mock_redis.srem.call_args_list
         engine_set_calls = [c for c in srem_calls if "dalston:batch:runtimes" in str(c)]
         assert len(engine_set_calls) == 0

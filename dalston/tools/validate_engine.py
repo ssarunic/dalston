@@ -90,7 +90,7 @@ def validate_engine(
         )
         errors.append(f"{path_str}: {error.message}")
 
-    engine_id = data.get("id")
+    runtime_id = data.get("id")
     version = data.get("version")
     schema_version = data.get("schema_version")
     stage_or_type = data.get("stage") or data.get("type")
@@ -99,7 +99,7 @@ def validate_engine(
     return ValidationResult(
         path=engine_path,
         valid=len(errors) == 0,
-        runtime=engine_id,
+        runtime=runtime_id,
         version=version,
         schema_version=schema_version,
         stage_or_type=stage_or_type,

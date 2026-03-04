@@ -119,10 +119,10 @@ class TestHandleTaskStarted:
 
     @pytest.mark.asyncio
     async def test_passes_runtime_to_logs(self, task_id, mock_task, mock_db):
-        """Test that engine_id parameter is accepted."""
+        """Test that runtime parameter is accepted."""
         from dalston.orchestrator.handlers import handle_task_started
 
-        # Should not raise with engine_id
+        # Should not raise with runtime
         await handle_task_started(task_id, mock_db, runtime="faster-whisper")
 
         # Verify the function completed (basic smoke test)

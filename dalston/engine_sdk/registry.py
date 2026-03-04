@@ -58,14 +58,14 @@ class BatchEngineRegistry:
 
         # Register on startup
         await registry.register(BatchEngineInfo(
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
             stage="transcribe",
             stream_name="dalston:stream:faster-whisper",
         ))
 
         # Send heartbeats periodically
         await registry.heartbeat(
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
             status="idle",
             current_task=None,
         )

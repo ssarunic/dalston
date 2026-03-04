@@ -350,7 +350,7 @@ class {class_name}(Engine):
     def get_capabilities(self) -> EngineCapabilities:
         """Return engine capabilities for catalog validation."""
         return EngineCapabilities(
-            engine_id="{config.runtime}",
+            runtime="{config.runtime}",
             version="1.0.0",
             stages=["{config.stage}"],
             languages={repr(config.languages)},
@@ -888,7 +888,7 @@ Examples:
     parser.add_argument(
         "--name",
         type=str,
-        help="Human-readable name (default: derived from engine_id)",
+        help="Human-readable name (default: derived from runtime)",
     )
     parser.add_argument(
         "--description",
@@ -955,7 +955,7 @@ Examples:
         return 0
 
     if not args.runtime:
-        parser.error("engine_id is required (or use --list-stages)")
+        parser.error("runtime is required (or use --list-stages)")
 
     if not args.stage:
         parser.error("--stage is required")

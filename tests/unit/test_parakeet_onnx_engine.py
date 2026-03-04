@@ -90,7 +90,7 @@ class TestParakeetOnnxEngineHealthCheck:
         assert health["loaded_model_id"] is None
 
     def test_health_check_reports_runtime(self):
-        """Test that health check reports correct engine_id."""
+        """Test that health check reports correct runtime."""
         ParakeetOnnxEngine = load_parakeet_onnx_engine()
         engine = ParakeetOnnxEngine()
         health = engine.health_check()

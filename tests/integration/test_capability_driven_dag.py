@@ -104,7 +104,7 @@ def create_mock_registry(engine_configs: dict[str, dict]) -> AsyncMock:
 
     Args:
         engine_configs: Dict mapping stage to engine config dict with keys:
-            - engine_id: str
+            - runtime: str
             - capabilities: EngineCapabilities or dict with capability options
 
     Returns:

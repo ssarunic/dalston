@@ -218,7 +218,7 @@ class TestGenerateEnginePy:
         compile(content, "<string>", "exec")
 
     def test_uses_correct_class_name(self, basic_config: ScaffoldConfig) -> None:
-        """Should use correct class name derived from engine_id."""
+        """Should use correct class name derived from runtime."""
         content = generate_engine_py(basic_config)
 
         assert "class TestEngineEngine(Engine):" in content
