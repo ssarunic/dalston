@@ -574,6 +574,183 @@ Each step is additive. Scenarios 1→3 are literally a one-line Terraform variab
 
 ---
 
+## Observability
+
+Every Dalston service emits structured logs, Prometheus metrics, and (optionally) OpenTelemetry traces out of the box. The question is where to collect and view them.
+
+### What's built in (no extra services needed)
+
+Every service already provides:
+
+- **Structured JSON logs** via `structlog` — correlation IDs (job_id, task_id, request_id) propagate across Gateway → Orchestrator → Engines. Configure with `DALSTON_LOG_LEVEL` and `DALSTON_LOG_FORMAT`.
+- **Prometheus `/metrics` endpoint** on every service — Gateway (:8000), Orchestrator (:8001), all engines (:9100). Key metrics include request latency, job duration, task processing time, queue wait time, S3 I/O, and engine redeliveries.
+- **Health endpoints** — `GET /health` on Gateway and engines.
+- **Web console** — built-in React dashboard at `/console` with 24h throughput chart, per-engine performance table, success rates, and queue depths. No extra setup.
+- **CLI tools** — `make health`, `make status`, `make queues` for quick checks.
+
+### Built-in monitoring stack (add `--profile observability`)
+
+The `observability` compose profile adds Prometheus, Grafana, Jaeger, and a queue metrics exporter. Zero configuration needed — scrape targets and Grafana dashboards are pre-provisioned.
+
+```
+┌──────────────────────────────────────────────────┐
+│  Observability stack (--profile observability)    │
+│                                                  │
+│  ┌──────────────┐   ┌───────────────────────┐    │
+│  │  Prometheus   │──▶│  Grafana (:3001)      │    │
+│  │  (:9090)      │   │  dalston-overview.json │   │
+│  └──────┬───────┘   └───────────────────────┘    │
+│         │ scrapes every 15s                      │
+│         ├── gateway:8000/metrics                 │
+│         ├── orchestrator:8001/metrics            │
+│         ├── metrics-exporter:9100/metrics        │
+│         ├── stt-batch-*:9100/metrics             │
+│         └── stt-rt-*:9100/metrics                │
+│                                                  │
+│  ┌──────────────┐                                │
+│  │  Jaeger       │  OTLP traces (when enabled)   │
+│  │  (:16686 UI)  │  ← gateway, orchestrator      │
+│  │  (:4317 gRPC) │  ← engines                    │
+│  └──────────────┘                                │
+│                                                  │
+│  ┌──────────────┐                                │
+│  │ Metrics      │  Queue depth + oldest task age  │
+│  │ Exporter     │  from Redis stream metadata     │
+│  │ (:9100)      │                                │
+│  └──────────────┘                                │
+└──────────────────────────────────────────────────┘
+```
+
+#### How to enable
+
+```bash
+# Local dev
+make dev-observability
+
+# AWS (add the profile to your compose command)
+docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
+  --env-file .env.aws --profile local-infra --profile observability up -d \
+  gateway orchestrator ...engines...
+```
+
+Then access:
+- **Grafana**: `http://<host>:3001` (admin/dalston, anonymous viewer enabled)
+- **Prometheus**: `http://<host>:9090`
+- **Jaeger**: `http://<host>:16686` (requires `OTEL_ENABLED=true`)
+
+Via Tailscale, these are accessible as `http://dalston:3001`, etc.
+
+#### Grafana dashboard
+
+The pre-provisioned `dalston-overview.json` dashboard shows:
+
+- Job throughput (completed/failed per hour)
+- Task processing duration by engine (avg, p95, p99)
+- Queue depth per stage (transcribe, align, diarize, merge)
+- Oldest waiting task age (spot potential stale tasks)
+- Engine health (heartbeat status, loaded models)
+- Gateway request rate and latency
+- S3 upload/download times
+- WebSocket connection count (realtime sessions)
+
+#### Key Prometheus metrics
+
+| Metric | Type | What it tells you |
+|--------|------|-------------------|
+| `dalston_gateway_request_duration_seconds` | Histogram | API latency by endpoint |
+| `dalston_orchestrator_job_duration_seconds` | Histogram | Total job time including all stages |
+| `dalston_engine_task_duration_seconds` | Histogram | Per-engine processing time |
+| `dalston_engine_queue_wait_seconds` | Histogram | Time tasks sit in queue before pickup |
+| `dalston_engine_task_redelivery_total` | Counter | Crash recovery events (spot interruptions show up here) |
+| `dalston_queue_depth` | Gauge | Tasks waiting per engine stream |
+| `dalston_queue_oldest_task_age_seconds` | Gauge | Oldest unprocessed task (alerts on stale tasks) |
+| `dalston_orchestrator_tasks_timed_out_total` | Counter | Timeout failures |
+| `dalston_session_router_sessions_active` | Gauge | Active realtime sessions per worker |
+
+#### OpenTelemetry tracing
+
+Distributed tracing is off by default (zero overhead). Enable it to trace requests across services:
+
+```bash
+# In .env.aws or docker-compose override
+OTEL_ENABLED=true
+OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+```
+
+Traces show the full path: API request → job creation → task scheduling → engine processing → S3 upload → completion event. Useful for debugging slow jobs or understanding pipeline bottlenecks.
+
+### Per-scenario recommendations
+
+#### Scenario 1-3: Built-in stack is sufficient
+
+The `observability` compose profile runs Prometheus, Grafana, and Jaeger on the same instance alongside your engines. Resource overhead is minimal:
+
+| Component | RAM | CPU |
+|-----------|-----|-----|
+| Prometheus (1-day retention, 500 MB) | ~200 MB | Negligible |
+| Grafana | ~100 MB | Negligible |
+| Jaeger (in-memory) | ~100 MB | Negligible |
+| Metrics exporter | ~50 MB | Negligible |
+| **Total** | **~450 MB** | |
+
+On Scenario 1 (t3.xlarge, 16 GB), this fits within the ~7 GB headroom. On Scenario 2-3 with GPU, it's trivial.
+
+**Retention**: Default Prometheus retention is 1 day / 500 MB. For longer history on a single instance, increase in the compose override:
+
+```yaml
+# docker-compose.override.yml
+services:
+  prometheus:
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=2GB'
+    volumes:
+      - /data/prometheus:/prometheus  # Persist to data volume
+```
+
+#### Scenario 4-5: Consider managed services
+
+For multi-GPU or split architecture, co-located monitoring has limitations:
+
+- **Prometheus retention**: 30 days of metrics from 4 GPUs + many engines fills up fast. Consider shipping to a remote backend:
+  - **Amazon Managed Prometheus (AMP)**: Drop-in Prometheus remote write. ~$0.30/million samples ingested + $0.03/million queries. Add `remote_write` to prometheus.yml.
+  - **Grafana Cloud free tier**: 10k series, 14-day retention. Sufficient for a single Dalston deployment.
+
+- **Log aggregation**: JSON logs from `docker compose logs` are fine for debugging, but for multi-instance deployments, ship to CloudWatch Logs or Loki:
+  - **CloudWatch**: Add the `awslogs` log driver to compose services. No extra containers. ~$0.50/GB ingested.
+  - **Loki**: Add a Loki container to the observability profile. Grafana already supports it as a datasource. Light on resources.
+
+- **Tracing**: Jaeger all-in-one with in-memory storage loses traces on restart. For production:
+  - **AWS X-Ray**: OpenTelemetry exporter supports X-Ray natively. No extra infrastructure.
+  - **Jaeger with Elasticsearch backend**: Persistent trace storage.
+  - **Grafana Tempo**: OTLP-compatible, integrates with Grafana.
+
+#### Tailscale access
+
+All monitoring UIs are accessible over Tailscale without exposing ports to the internet:
+
+```
+http://dalston:3001  → Grafana
+http://dalston:9090  → Prometheus
+http://dalston:16686 → Jaeger
+http://dalston:8000  → Gateway (includes /console web UI)
+```
+
+No ALB, no HTTPS certificates, no security groups to manage. The Tailscale ACL controls who can access what.
+
+### Quick start checklist
+
+1. Add `--profile observability` to your compose command
+2. Open Grafana at `:3001` — the dalston-overview dashboard loads automatically
+3. Submit a test job and watch metrics flow
+4. Optionally enable tracing: `OTEL_ENABLED=true` in your env file
+5. For alerting: add Prometheus alerting rules and configure a notification channel in Grafana
+
+---
+
 ## Spot Instances
 
 Spot saves 60-70% on GPU instances. Dalston's architecture is already built for it.
