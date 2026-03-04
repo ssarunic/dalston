@@ -16,9 +16,9 @@ logger = structlog.get_logger()
 
 
 # Redis key patterns (shared with realtime_sdk)
-WORKER_SET_KEY = "dalston:realtime:workers"
-WORKER_KEY_PREFIX = "dalston:realtime:worker:"
-WORKER_SESSIONS_SUFFIX = ":sessions"
+INSTANCE_SET_KEY = "dalston:realtime:instances"
+INSTANCE_KEY_PREFIX = "dalston:realtime:instance:"
+INSTANCE_SESSIONS_SUFFIX = ":sessions"
 SESSION_KEY_PREFIX = "dalston:realtime:session:"
 ACTIVE_SESSIONS_KEY = "dalston:realtime:sessions:active"
 EVENTS_CHANNEL = "dalston:realtime:events"
@@ -29,15 +29,14 @@ class WorkerState:
     """Worker state read from Redis.
 
     Attributes:
-        worker_id: Unique identifier
+        instance: Unique instance identifier
         endpoint: WebSocket endpoint URL
         status: Current status (ready, busy, draining, offline)
         capacity: Maximum concurrent sessions
         active_sessions: Current active session count
         models_loaded: List of currently loaded model variants (M43: dynamic)
         languages_supported: List of supported language codes
-        engine: Engine type identifier (e.g., "parakeet", "whisper")
-        runtime: Model runtime identifier (M43: e.g., "faster-whisper", "nemo")
+        runtime: The inference framework (e.g., "faster-whisper", "parakeet")
         supports_vocabulary: Whether this engine supports vocabulary boosting
         gpu_memory_used: GPU memory usage string
         gpu_memory_total: Total GPU memory string
@@ -45,15 +44,14 @@ class WorkerState:
         started_at: Worker start timestamp
     """
 
-    worker_id: str
+    instance: str
     endpoint: str
     status: str
     capacity: int
     active_sessions: int
     models_loaded: list[str]
     languages_supported: list[str]
-    engine: str
-    runtime: str | None
+    runtime: str
     supports_vocabulary: bool
     gpu_memory_used: str
     gpu_memory_total: str
@@ -110,38 +108,39 @@ class WorkerRegistry:
         Returns:
             List of all worker states
         """
-        worker_ids = await self._redis.smembers(WORKER_SET_KEY)
+        instances = await self._redis.smembers(INSTANCE_SET_KEY)
         workers = []
 
-        for worker_id in worker_ids:
-            worker = await self.get_worker(worker_id)
+        for instance in instances:
+            worker = await self.get_worker(instance)
             if worker is not None:
                 workers.append(worker)
 
         return workers
 
-    async def get_worker(self, worker_id: str) -> WorkerState | None:
+    async def get_worker(self, instance: str) -> WorkerState | None:
         """Get specific worker state.
 
         Args:
-            worker_id: Worker identifier
+            instance: Worker identifier
 
         Returns:
             WorkerState if found, None otherwise
         """
-        worker_key = f"{WORKER_KEY_PREFIX}{worker_id}"
+        worker_key = f"{INSTANCE_KEY_PREFIX}{instance}"
         data = await self._redis.hgetall(worker_key)
 
         if not data:
             return None
 
-        return self._parse_worker_state(worker_id, data)
+        return self._parse_worker_state(instance, data)
 
     async def get_available_workers(
         self,
         model: str | None,
         language: str,
         runtime: str | None = None,
+        valid_runtimes: set[str] | None = None,
     ) -> list[WorkerState]:
         """Get workers with capacity that support requested model/language/runtime.
 
@@ -150,6 +149,9 @@ class WorkerRegistry:
             language: Language code or "auto"
             runtime: Model runtime (e.g., "faster-whisper") for routing when model
                      isn't pre-loaded. Workers matching runtime can load the model.
+            valid_runtimes: When model=None and runtime=None, only consider workers
+                     whose runtime is in this set. Used for "Any available" routing
+                     to filter by runtimes that have downloaded models in registry.
 
         Returns:
             List of available workers matching criteria, sorted by available capacity
@@ -162,7 +164,7 @@ class WorkerRegistry:
                 continue
 
             # Model/Runtime filtering:
-            # - model=None, runtime=None: any worker
+            # - model=None, runtime=None: any worker (or filter by valid_runtimes)
             # - model specified: prefer workers with model loaded, fallback to runtime match
             # - runtime specified: workers with matching runtime (can load any model)
             if model is not None:
@@ -176,6 +178,12 @@ class WorkerRegistry:
             elif runtime is not None:
                 # No specific model, but filter by runtime
                 if worker.runtime != runtime:
+                    continue
+            elif valid_runtimes is not None:
+                # No specific model or runtime, but filter by valid runtimes from registry
+                # This ensures "Any available" only routes to workers whose runtime
+                # has downloaded models in the registry
+                if worker.runtime not in valid_runtimes:
                     continue
 
             # Language filtering
@@ -198,29 +206,29 @@ class WorkerRegistry:
 
         return available
 
-    async def mark_worker_offline(self, worker_id: str) -> None:
+    async def mark_worker_offline(self, instance: str) -> None:
         """Mark worker as offline due to stale heartbeat.
 
         Args:
-            worker_id: Worker identifier
+            instance: Worker identifier
         """
-        worker_key = f"{WORKER_KEY_PREFIX}{worker_id}"
+        worker_key = f"{INSTANCE_KEY_PREFIX}{instance}"
         await self._redis.hset(worker_key, "status", "offline")
-        logger.warning("worker_marked_offline", worker_id=worker_id)
+        logger.warning("worker_marked_offline", instance=instance)
 
-    async def get_worker_session_ids(self, worker_id: str) -> set[str]:
+    async def get_worker_session_ids(self, instance: str) -> set[str]:
         """Get active session IDs for a worker.
 
         Args:
-            worker_id: Worker identifier
+            instance: Worker identifier
 
         Returns:
             Set of session IDs
         """
-        sessions_key = f"{WORKER_KEY_PREFIX}{worker_id}{WORKER_SESSIONS_SUFFIX}"
+        sessions_key = f"{INSTANCE_KEY_PREFIX}{instance}{INSTANCE_SESSIONS_SUFFIX}"
         return await self._redis.smembers(sessions_key)
 
-    def _parse_worker_state(self, worker_id: str, data: dict) -> WorkerState | None:
+    def _parse_worker_state(self, instance: str, data: dict) -> WorkerState | None:
         """Parse worker state from Redis hash data.
 
         Returns None if critical fields are missing/invalid, which quarantines
@@ -231,7 +239,7 @@ class WorkerRegistry:
         if not endpoint:
             logger.error(
                 "worker_quarantined_missing_endpoint",
-                worker_id=worker_id,
+                instance=instance,
                 raw_data=dict(data),
             )
             return None
@@ -244,17 +252,17 @@ class WorkerRegistry:
         except (ValueError, TypeError) as e:
             logger.error(
                 "worker_quarantined_invalid_capacity",
-                worker_id=worker_id,
+                instance=instance,
                 capacity_raw=capacity_str,
                 error=str(e),
             )
             return None
 
-        engine = data.get("engine")
-        if not engine:
+        runtime = data.get("runtime")
+        if not runtime:
             logger.error(
-                "worker_quarantined_missing_engine",
-                worker_id=worker_id,
+                "worker_quarantined_missing_runtime",
+                instance=instance,
                 raw_data=dict(data),
             )
             return None
@@ -267,7 +275,7 @@ class WorkerRegistry:
         except (json.JSONDecodeError, ValueError) as e:
             logger.warning(
                 "worker_invalid_models_loaded",
-                worker_id=worker_id,
+                instance=instance,
                 raw_value=data.get("models_loaded"),
                 error=str(e),
             )
@@ -280,7 +288,7 @@ class WorkerRegistry:
         except (json.JSONDecodeError, ValueError) as e:
             logger.warning(
                 "worker_invalid_languages_supported",
-                worker_id=worker_id,
+                instance=instance,
                 raw_value=data.get("languages_supported"),
                 error=str(e),
             )
@@ -291,35 +299,32 @@ class WorkerRegistry:
         except (ValueError, TypeError):
             logger.warning(
                 "worker_invalid_active_sessions",
-                worker_id=worker_id,
+                instance=instance,
                 raw_value=data.get("active_sessions"),
             )
             active_sessions = 0
 
         return WorkerState(
-            worker_id=worker_id,
+            instance=instance,
             endpoint=endpoint,
             status=data.get("status", "offline"),
             capacity=capacity,
             active_sessions=active_sessions,
             models_loaded=models_loaded,
             languages_supported=languages_supported,
-            engine=engine,
-            runtime=data.get("runtime"),
+            runtime=runtime,
             supports_vocabulary=data.get("supports_vocabulary", "false") == "true",
             gpu_memory_used=data.get("gpu_memory_used", "0GB"),
             gpu_memory_total=data.get("gpu_memory_total", "0GB"),
             last_heartbeat=self._parse_datetime(
-                worker_id, "last_heartbeat", data.get("last_heartbeat")
+                instance, "last_heartbeat", data.get("last_heartbeat")
             ),
             started_at=self._parse_datetime(
-                worker_id, "started_at", data.get("started_at")
+                instance, "started_at", data.get("started_at")
             ),
         )
 
-    def _parse_datetime(
-        self, worker_id: str, field: str, value: str | None
-    ) -> datetime:
+    def _parse_datetime(self, instance: str, field: str, value: str | None) -> datetime:
         """Parse ISO datetime string.
 
         Returns epoch (1970-01-01) on parse failure, which will cause the worker
@@ -328,7 +333,7 @@ class WorkerRegistry:
         if not value:
             logger.warning(
                 "worker_missing_timestamp",
-                worker_id=worker_id,
+                instance=instance,
                 field=field,
             )
             return datetime.min.replace(tzinfo=UTC)
@@ -338,7 +343,7 @@ class WorkerRegistry:
         except ValueError as e:
             logger.warning(
                 "worker_invalid_timestamp",
-                worker_id=worker_id,
+                instance=instance,
                 field=field,
                 raw_value=value,
                 error=str(e),

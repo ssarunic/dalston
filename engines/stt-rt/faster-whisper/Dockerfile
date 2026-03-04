@@ -68,7 +68,7 @@ ENV DALSTON_MAX_LOADED_MODELS=2
 # Set DALSTON_S3_BUCKET to enable S3-based model storage
 
 # Default environment variables
-ENV DALSTON_WORKER_ID=stt-rt-faster-whisper
+ENV DALSTON_INSTANCE=stt-rt-faster-whisper
 ENV DALSTON_WORKER_PORT=9000
 ENV DALSTON_MAX_SESSIONS=4
 ENV REDIS_URL=redis://redis:6379

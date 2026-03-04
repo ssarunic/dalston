@@ -107,7 +107,7 @@ class TestVoxtralAdapter:
 
         assert result.text == "Hello world, this is a test."
         assert result.language == "en"
-        assert result.engine_id == "vllm-asr"
+        assert result.runtime == "vllm-asr"
         assert result.skipped is False
         assert len(result.segments) == 1
         assert result.segments[0].text == "Hello world, this is a test."
@@ -194,7 +194,7 @@ class TestQwen2AudioAdapter:
 
         assert result.text == "Hello world"
         assert result.language == "en"
-        assert result.engine_id == "vllm-asr"
+        assert result.runtime == "vllm-asr"
         assert len(result.segments) == 1
 
     def test_sampling_kwargs(self, adapter):
@@ -287,7 +287,7 @@ class TestVLLMASREngine:
         with patch.dict(
             os.environ,
             {
-                "DALSTON_ENGINE_ID": "vllm-asr",
+                "DALSTON_RUNTIME": "vllm-asr",
                 "DALSTON_DEFAULT_MODEL_ID": "mistralai/Voxtral-Mini-3B-2507",
             },
         ):
@@ -309,7 +309,7 @@ class TestVLLMASREngine:
 
     def test_engine_init(self, engine):
         """Engine should initialize with correct defaults."""
-        assert engine._engine_id == "vllm-asr"
+        assert engine._runtime == "vllm-asr"
         assert engine._default_model_id == "mistralai/Voxtral-Mini-3B-2507"
         assert engine._llm is None
         assert engine._loaded_model_id is None
@@ -318,7 +318,7 @@ class TestVLLMASREngine:
         """Engine should raise RuntimeError when CUDA is unavailable."""
         with patch.dict(
             os.environ,
-            {"DALSTON_ENGINE_ID": "vllm-asr"},
+            {"DALSTON_RUNTIME": "vllm-asr"},
         ):
             with patch("torch.cuda.is_available", return_value=False):
                 VLLMASREngine = load_vllm_asr_engine()
@@ -330,7 +330,7 @@ class TestVLLMASREngine:
         """Engine capabilities should be correct."""
         caps = engine.get_capabilities()
 
-        assert caps.engine_id == "vllm-asr"
+        assert caps.runtime == "vllm-asr"
         assert caps.version == "1.0.0"
         assert caps.stages == ["transcribe"]
         assert caps.languages is None  # Multilingual
@@ -352,7 +352,7 @@ class TestVLLMASREngine:
                         health = engine.health_check()
 
         assert health["status"] == "healthy"
-        assert health["engine_id"] == "vllm-asr"
+        assert health["runtime"] == "vllm-asr"
         assert health["model_loaded"] is False
         assert health["loaded_model_id"] is None
         assert "mistralai/Voxtral-Mini-3B-2507" in health["supported_models"]
@@ -404,7 +404,7 @@ class TestVLLMASREngine:
             result = engine.process(mock_input)
 
         assert result.data.text == "Hello, this is a test transcription."
-        assert result.data.engine_id == "vllm-asr"
+        assert result.data.runtime == "vllm-asr"
         assert result.data.language == "en"
         assert len(result.data.segments) == 1
         assert result.data.skipped is False
@@ -457,12 +457,12 @@ class TestVLLMASREngine:
 class TestVLLMASREngineEnvironment:
     """Test engine environment variable handling."""
 
-    def test_custom_engine_id(self):
+    def test_custom_runtime(self):
         """Custom ENGINE_ID should be respected."""
         with patch.dict(
             os.environ,
             {
-                "DALSTON_ENGINE_ID": "custom-vllm",
+                "DALSTON_RUNTIME": "custom-vllm",
                 "DALSTON_DEFAULT_MODEL_ID": "mistralai/Voxtral-Mini-3B-2507",
             },
         ):
@@ -471,14 +471,14 @@ class TestVLLMASREngineEnvironment:
                     VLLMASREngine = load_vllm_asr_engine()
                     engine = VLLMASREngine()
 
-                    assert engine._engine_id == "custom-vllm"
+                    assert engine._runtime == "custom-vllm"
 
     def test_custom_gpu_memory_utilization(self):
         """Custom GPU memory utilization should be respected."""
         with patch.dict(
             os.environ,
             {
-                "DALSTON_ENGINE_ID": "vllm-asr",
+                "DALSTON_RUNTIME": "vllm-asr",
                 "DALSTON_VLLM_GPU_MEMORY_UTILIZATION": "0.7",
             },
         ):
@@ -494,7 +494,7 @@ class TestVLLMASREngineEnvironment:
         with patch.dict(
             os.environ,
             {
-                "DALSTON_ENGINE_ID": "vllm-asr",
+                "DALSTON_RUNTIME": "vllm-asr",
                 "DALSTON_VLLM_MAX_MODEL_LEN": "8192",
             },
         ):

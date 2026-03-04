@@ -47,11 +47,11 @@ class RealtimeSessionService:
         self,
         session_id: str,
         tenant_id: UUID,
-        worker_id: str,
+        instance: str,
         client_ip: str,
         language: str | None = None,
         model: str | None = None,
-        engine: str | None = None,
+        runtime: str | None = None,
         encoding: str | None = None,
         sample_rate: int | None = None,
         retention: int = RETENTION_DEFAULT_DAYS,
@@ -64,11 +64,11 @@ class RealtimeSessionService:
         Args:
             session_id: Session ID (from session router, e.g., sess_abc123)
             tenant_id: Tenant UUID
-            worker_id: Assigned worker ID
+            instance: Assigned worker instance ID
             client_ip: Client IP address
             language: Language code or "auto"
             model: Model variant requested by user
-            engine: Engine type that handled the session (e.g., "parakeet", "whisper")
+            runtime: Runtime framework that handled the session (e.g., "parakeet", "faster-whisper")
             encoding: Audio encoding
             sample_rate: Audio sample rate
             retention: Retention in days (0=transient, -1=permanent, N=days)
@@ -87,11 +87,11 @@ class RealtimeSessionService:
             status="active",
             language=language,
             model=model,
-            engine=engine,
+            runtime=runtime,
             encoding=encoding,
             sample_rate=sample_rate,
             retention=retention,
-            worker_id=worker_id,
+            instance=instance,
             client_ip=client_ip,
             previous_session_id=previous_session_id,
             started_at=datetime.now(UTC),

@@ -114,7 +114,7 @@ class TestRealtimeManagementEndpoints:
     def test_list_realtime_workers(self, client, mock_session_router):
         mock_session_router.list_workers.return_value = [
             WorkerStatus(
-                worker_id="worker-1",
+                instance="worker-1",
                 endpoint="ws://localhost:9000",
                 status="ready",
                 capacity=4,
@@ -123,7 +123,7 @@ class TestRealtimeManagementEndpoints:
                 languages=["auto"],
             ),
             WorkerStatus(
-                worker_id="worker-2",
+                instance="worker-2",
                 endpoint="ws://localhost:9001",
                 status="busy",
                 capacity=4,
@@ -139,14 +139,14 @@ class TestRealtimeManagementEndpoints:
         data = response.json()
         assert data["total"] == 2
         assert len(data["workers"]) == 2
-        assert data["workers"][0]["worker_id"] == "worker-1"
+        assert data["workers"][0]["instance"] == "worker-1"
         assert data["workers"][0]["status"] == "ready"
-        assert data["workers"][1]["worker_id"] == "worker-2"
+        assert data["workers"][1]["instance"] == "worker-2"
         assert data["workers"][1]["status"] == "busy"
 
     def test_get_worker_status(self, client, mock_session_router):
         mock_session_router.get_worker.return_value = WorkerStatus(
-            worker_id="worker-1",
+            instance="worker-1",
             endpoint="ws://localhost:9000",
             status="ready",
             capacity=4,
@@ -159,7 +159,7 @@ class TestRealtimeManagementEndpoints:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["worker_id"] == "worker-1"
+        assert data["instance"] == "worker-1"
         assert data["endpoint"] == "ws://localhost:9000"
         assert data["status"] == "ready"
         assert data["capacity"] == 4
@@ -370,7 +370,7 @@ class TestWorkerStatus:
 
     def test_worker_status_creation(self):
         status = WorkerStatus(
-            worker_id="stt-rt-transcribe-whisper-1",
+            instance="stt-rt-transcribe-whisper-1",
             endpoint="ws://localhost:9000",
             status="ready",
             capacity=4,
@@ -379,7 +379,7 @@ class TestWorkerStatus:
             languages=["auto", "en", "es"],
         )
 
-        assert status.worker_id == "stt-rt-transcribe-whisper-1"
+        assert status.instance == "stt-rt-transcribe-whisper-1"
         assert status.endpoint == "ws://localhost:9000"
         assert status.status == "ready"
         assert status.capacity == 4

@@ -78,7 +78,7 @@ ENV HF_HOME=/models/huggingface
 RUN mkdir -p /models/huggingface /models/onnx
 
 # Default environment variables
-ENV DALSTON_WORKER_ID=stt-rt-transcribe-parakeet-onnx
+ENV DALSTON_INSTANCE=stt-rt-transcribe-parakeet-onnx
 ENV DALSTON_WORKER_PORT=9000
 ENV DALSTON_MAX_SESSIONS=4
 ENV REDIS_URL=redis://redis:6379

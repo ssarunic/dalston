@@ -16,10 +16,10 @@ import dalston.metrics
 from dalston.session_router.registry import (
     ACTIVE_SESSIONS_KEY,
     EVENTS_CHANNEL,
+    INSTANCE_KEY_PREFIX,
+    INSTANCE_SESSIONS_SUFFIX,
+    INSTANCE_SET_KEY,
     SESSION_KEY_PREFIX,
-    WORKER_KEY_PREFIX,
-    WORKER_SESSIONS_SUFFIX,
-    WORKER_SET_KEY,
     WorkerRegistry,
 )
 
@@ -119,24 +119,24 @@ class HealthMonitor:
 
             if age > self.HEARTBEAT_TIMEOUT:
                 logger.warning(
-                    "worker_heartbeat_stale",
-                    worker_id=worker.worker_id,
+                    "instance_heartbeat_stale",
+                    instance=worker.instance,
                     age_seconds=round(age),
                     timeout=self.HEARTBEAT_TIMEOUT,
                 )
 
                 # Mark offline
-                await self._registry.mark_worker_offline(worker.worker_id)
+                await self._registry.mark_worker_offline(worker.instance)
 
                 # Get affected sessions
                 session_ids = await self._registry.get_worker_session_ids(
-                    worker.worker_id
+                    worker.instance
                 )
 
                 # Publish event for each affected session
                 for session_id in session_ids:
-                    await self._publish_worker_offline_event(
-                        worker.worker_id, session_id
+                    await self._publish_instance_offline_event(
+                        worker.instance, session_id
                     )
             else:
                 # Worker is healthy (not stale)
@@ -185,34 +185,36 @@ class HealthMonitor:
                 reason="session_key_expired",
             )
 
-            # Find which worker had this session
-            worker_ids = await self._redis.smembers(WORKER_SET_KEY)
-            for worker_id in worker_ids:
-                sessions_key = f"{WORKER_KEY_PREFIX}{worker_id}{WORKER_SESSIONS_SUFFIX}"
+            # Find which instance had this session
+            instances = await self._redis.smembers(INSTANCE_SET_KEY)
+            for instance in instances:
+                sessions_key = (
+                    f"{INSTANCE_KEY_PREFIX}{instance}{INSTANCE_SESSIONS_SUFFIX}"
+                )
                 if await self._redis.sismember(sessions_key, session_id):
-                    # Found the worker - decrement counter and remove from set
-                    worker_key = f"{WORKER_KEY_PREFIX}{worker_id}"
+                    # Found the instance - decrement counter and remove from set
+                    instance_key = f"{INSTANCE_KEY_PREFIX}{instance}"
                     new_count = await self._redis.hincrby(
-                        worker_key, "active_sessions", -1
+                        instance_key, "active_sessions", -1
                     )
 
                     # Ensure counter doesn't go negative
                     if new_count < 0:
-                        await self._redis.hset(worker_key, "active_sessions", 0)
+                        await self._redis.hset(instance_key, "active_sessions", 0)
                         new_count = 0
 
-                    # Remove from worker's session set
+                    # Remove from instance's session set
                     await self._redis.srem(sessions_key, session_id)
 
                     # Update metrics
                     dalston.metrics.set_session_router_sessions_active(
-                        worker_id, max(0, new_count)
+                        instance, max(0, new_count)
                     )
 
                     logger.info(
-                        "orphaned_session_cleaned_from_worker",
+                        "orphaned_session_cleaned_from_instance",
                         session_id=session_id,
-                        worker_id=worker_id,
+                        instance=instance,
                         new_active_sessions=new_count,
                     )
                     break
@@ -234,25 +236,25 @@ class HealthMonitor:
 
         return cleaned_count
 
-    async def _publish_worker_offline_event(
+    async def _publish_instance_offline_event(
         self,
-        worker_id: str,
+        instance: str,
         session_id: str,
     ) -> None:
-        """Publish worker offline event to Redis pub/sub.
+        """Publish instance offline event to Redis pub/sub.
 
         Gateway subscribes to these events to notify affected clients.
 
         Args:
-            worker_id: Worker that went offline
+            instance: Instance that went offline
             session_id: Affected session
         """
         await self._redis.publish(
             EVENTS_CHANNEL,
             json.dumps(
                 {
-                    "type": "worker.offline",
-                    "worker_id": worker_id,
+                    "type": "instance.offline",
+                    "instance": instance,
                     "session_id": session_id,
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
@@ -260,7 +262,7 @@ class HealthMonitor:
         )
 
         logger.info(
-            "published_worker_offline_event", worker_id=worker_id, session_id=session_id
+            "published_instance_offline_event", instance=instance, session_id=session_id
         )
 
     @property

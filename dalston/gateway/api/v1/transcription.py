@@ -518,7 +518,7 @@ async def get_transcription(
             StageResponse(
                 stage=task.stage,
                 task_id=task.id,
-                engine_id=task.engine_id,
+                runtime=task.runtime,
                 status=task.status,
                 required=task.required,
                 started_at=task.started_at,

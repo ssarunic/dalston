@@ -24,7 +24,7 @@ class Engine(ABC):
     The SDK runner handles queue polling, S3 I/O, and event publishing.
 
     The base class provides ``self.logger``, a structlog bound logger
-    pre-configured with the engine_id.  Engine authors can use it directly::
+    pre-configured with the runtime.  Engine authors can use it directly::
 
         self.logger.info("model_loaded", model="large-v3")
 
@@ -160,7 +160,7 @@ class Engine(ABC):
         if card is None:
             # Fallback for engines without engine.yaml
             return EngineCapabilities(
-                engine_id=getattr(self, "engine_id", "unknown"),
+                runtime=getattr(self, "runtime", "unknown"),
                 version="unknown",
                 stages=[],
             )
@@ -185,7 +185,7 @@ class Engine(ABC):
         stages = [stage] if stage else []
 
         return EngineCapabilities(
-            engine_id=card.get("id", "unknown"),
+            runtime=card.get("runtime") or card.get("id", "unknown"),
             version=card.get("version", "unknown"),
             stages=stages,
             languages=languages,
@@ -203,8 +203,6 @@ class Engine(ABC):
             rtf_gpu=performance.get("rtf_gpu"),
             rtf_cpu=performance.get("rtf_cpu"),
             max_concurrency=caps.get("max_concurrency"),
-            # M36: Runtime engine identifier for model swapping
-            runtime=card.get("runtime"),
         )
 
     def _load_engine_yaml(self) -> dict[str, Any] | None:

@@ -60,7 +60,7 @@ def sample_task():
         id=uuid4(),
         job_id=uuid4(),
         stage="transcribe",
-        engine_id="whisper-cpu",
+        runtime="whisper-cpu",
         status=TaskStatus.READY,
         input_uri="s3://bucket/audio.wav",
         created_at=datetime.now(UTC),
@@ -101,7 +101,7 @@ class TestQueueTaskWithStreams:
             call_args = mock_add_task.call_args
 
             assert call_args[0][0] == mock_redis  # redis client
-            assert call_args[1]["stage"] == sample_task.engine_id
+            assert call_args[1]["stage"] == sample_task.runtime
             assert call_args[1]["task_id"] == str(sample_task.id)
             assert call_args[1]["job_id"] == str(sample_task.job_id)
             assert "timeout_s" in call_args[1]
@@ -142,7 +142,7 @@ class TestQueueTaskWithStreams:
             id=uuid4(),
             job_id=uuid4(),
             stage="transcribe_ch1",
-            engine_id="whisper-cpu",
+            runtime="whisper-cpu",
             status=TaskStatus.READY,
             input_uri="s3://bucket/audio.wav",
             created_at=datetime.now(UTC),
@@ -171,7 +171,7 @@ class TestQueueTaskWithStreams:
 
             mock_add_task.assert_called_once()
             call_args = mock_add_task.call_args
-            assert call_args[1]["stage"] == per_channel_task.engine_id
+            assert call_args[1]["stage"] == per_channel_task.runtime
 
     @pytest.mark.asyncio
     async def test_uses_add_task_once_when_idempotency_key_provided(
@@ -237,7 +237,7 @@ class TestQueueTaskWithStreams:
 
             mock_publish_engine_needed.assert_called_once()
             mock_add_task.assert_called_once()
-            assert mock_add_task.call_args[1]["stage"] == sample_task.engine_id
+            assert mock_add_task.call_args[1]["stage"] == sample_task.runtime
             mock_redis.sadd.assert_called_once_with(
                 WAITING_ENGINE_TASKS_KEY, str(sample_task.id)
             )

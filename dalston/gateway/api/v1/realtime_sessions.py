@@ -49,7 +49,7 @@ class SessionSummary(BaseModel):
     status: str
     language: str | None
     model: str | None
-    engine: str | None
+    runtime: str | None
     audio_duration_seconds: float
     segment_count: int
     word_count: int
@@ -65,7 +65,7 @@ class SessionDetail(BaseModel):
     status: str
     language: str | None
     model: str | None
-    engine: str | None
+    runtime: str | None
     encoding: str | None
     sample_rate: int | None
     audio_duration_seconds: float
@@ -76,7 +76,7 @@ class SessionDetail(BaseModel):
     purged_at: str | None
     audio_uri: str | None
     transcript_uri: str | None
-    worker_id: str | None
+    instance: str | None
     client_ip: str | None
     previous_session_id: str | None
     started_at: str
@@ -174,7 +174,7 @@ async def list_realtime_sessions(
             status=s.status,
             language=s.language,
             model=s.model,
-            engine=s.engine,
+            runtime=s.runtime,
             audio_duration_seconds=s.audio_duration_seconds,
             segment_count=s.segment_count,
             word_count=s.word_count,
@@ -219,7 +219,7 @@ async def get_realtime_session(
         status=session.status,
         language=session.language,
         model=session.model,
-        engine=session.engine,
+        runtime=session.runtime,
         encoding=session.encoding,
         sample_rate=session.sample_rate,
         audio_duration_seconds=session.audio_duration_seconds,
@@ -230,7 +230,7 @@ async def get_realtime_session(
         purged_at=session.purged_at.isoformat() if session.purged_at else None,
         audio_uri=session.audio_uri,
         transcript_uri=session.transcript_uri,
-        worker_id=session.worker_id,
+        instance=session.instance,
         client_ip=session.client_ip,
         previous_session_id=str(session.previous_session_id)
         if session.previous_session_id

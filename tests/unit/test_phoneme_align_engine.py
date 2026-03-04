@@ -655,7 +655,7 @@ class TestPhonemeAlignEngineFallback:
         assert output.skipped is True
         assert output.skip_reason == "test fallback"
         assert output.word_timestamps is False
-        assert output.engine_id == "phoneme-align"
+        assert output.runtime == "phoneme-align"
         assert len(output.segments) == 1
         assert output.segments[0].text == "hello world"
 

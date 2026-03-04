@@ -45,6 +45,11 @@ from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.console import ConsoleService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
+from dalston.orchestrator.registry import (
+    ENGINE_INSTANCES_PREFIX,
+    ENGINE_KEY_PREFIX,
+    ENGINE_SET_KEY,
+)
 from dalston.session_router import SessionRouter
 
 logger = structlog.get_logger()
@@ -192,7 +197,7 @@ class TaskResponse(BaseModel):
 
     id: UUID
     stage: str
-    engine_id: str
+    runtime: str
     status: str
     dependencies: list[UUID]
     started_at: datetime | None = None
@@ -246,7 +251,7 @@ async def get_job_tasks(
     }
     sorted_tasks = sorted(
         job_dto.tasks,
-        key=lambda t: (stage_order.get(t.stage, 99), t.engine_id),
+        key=lambda t: (stage_order.get(t.stage, 99), t.runtime),
     )
 
     def compute_duration(task):
@@ -261,7 +266,7 @@ async def get_job_tasks(
             TaskResponse(
                 id=task.id,
                 stage=task.stage,
-                engine_id=task.engine_id,
+                runtime=task.runtime,
                 status=task.status,
                 dependencies=task.dependencies,
                 started_at=task.started_at,
@@ -280,7 +285,7 @@ class TaskArtifactResponse(BaseModel):
     task_id: UUID
     job_id: UUID
     stage: str
-    engine_id: str
+    runtime: str
     status: str
     required: bool
     started_at: datetime | None = None
@@ -341,7 +346,7 @@ async def get_task_artifacts(
         task_id=task.id,
         job_id=job_id,
         stage=task.stage,
-        engine_id=task.engine_id,
+        runtime=task.runtime,
         status=task.status,
         required=task.required,
         started_at=task.started_at,
@@ -360,7 +365,7 @@ async def get_task_artifacts(
 class BatchEngine(BaseModel):
     """Batch engine status."""
 
-    engine_id: str
+    runtime: str
     stage: str
     status: Literal[
         "idle", "processing", "loading", "downloading", "error", "offline", "stale"
@@ -372,7 +377,7 @@ class BatchEngine(BaseModel):
 class RealtimeWorker(BaseModel):
     """Realtime worker status."""
 
-    worker_id: str
+    instance: str
     endpoint: str
     status: str
     capacity: int
@@ -392,11 +397,6 @@ class EnginesResponse(BaseModel):
 
 # Heartbeat timeout thresholds (seconds)
 HEARTBEAT_STALE_THRESHOLD = 30  # Mark as stale after 30s without heartbeat
-
-# Redis key patterns for engine registry (shared with orchestrator)
-ENGINE_SET_KEY = "dalston:batch:engines"
-ENGINE_KEY_PREFIX = "dalston:batch:engine:"
-ENGINE_INSTANCES_PREFIX = "dalston:batch:engine:instances:"
 
 
 @router.get(
@@ -421,24 +421,24 @@ async def get_engines(
 
     catalog = get_catalog()
 
-    # Fetch heartbeats for all registered engines from Redis
-    # Now uses instance-based lookup: engine_id -> instance set -> instance heartbeats
-    registered_engine_ids = await redis.smembers(ENGINE_SET_KEY)
+    # Fetch heartbeats for all registered runtimes from Redis
+    # Now uses instance-based lookup: runtime -> instance set -> instance heartbeats
+    registered_runtimes = await redis.smembers(ENGINE_SET_KEY)
     discovered_heartbeats: dict[str, list[dict[str, str]]] = {}
 
-    for engine_id in registered_engine_ids:
-        # Get all instances for this logical engine
-        instances_key = f"{ENGINE_INSTANCES_PREFIX}{engine_id}"
+    for runtime in registered_runtimes:
+        # Get all instances for this runtime
+        instances_key = f"{ENGINE_INSTANCES_PREFIX}{runtime}"
         instance_ids = await redis.smembers(instances_key)
 
         instance_heartbeats = []
         for instance_id in instance_ids:
             data = await redis.hgetall(f"{ENGINE_KEY_PREFIX}{instance_id}")
-            if data and "engine_id" in data:
+            if data and "runtime" in data:
                 instance_heartbeats.append(data)
 
         if instance_heartbeats:
-            discovered_heartbeats[engine_id] = instance_heartbeats
+            discovered_heartbeats[runtime] = instance_heartbeats
 
     now = datetime.now(UTC)
     batch_engines = []
@@ -449,13 +449,13 @@ async def get_engines(
         if not entry.capabilities.stages:
             continue
 
-        engine_id = entry.engine_id
+        runtime = entry.runtime
         stage = entry.capabilities.stages[0]
 
-        stream_key = f"dalston:stream:{engine_id}"
+        stream_key = f"dalston:stream:{runtime}"
         queue_depth = await _get_stream_backlog(redis, stream_key)
 
-        instance_heartbeats = discovered_heartbeats.get(engine_id, [])
+        instance_heartbeats = discovered_heartbeats.get(runtime, [])
         if not instance_heartbeats:
             # No heartbeats = offline
             status = "offline"
@@ -490,7 +490,7 @@ async def get_engines(
 
         batch_engines.append(
             BatchEngine(
-                engine_id=engine_id,
+                runtime=runtime,
                 stage=stage,
                 status=status,
                 queue_depth=queue_depth,
@@ -505,10 +505,10 @@ async def get_engines(
     try:
         workers = await session_router.list_workers()
         for worker in workers:
-            running_engine_types.add(worker.engine)
+            running_engine_types.add(worker.runtime or "unknown")
             realtime_engines.append(
                 RealtimeWorker(
-                    worker_id=worker.worker_id,
+                    instance=worker.instance,
                     endpoint=worker.endpoint,
                     status=worker.status,
                     capacity=worker.capacity,
@@ -529,15 +529,15 @@ async def get_engines(
         if entry.capabilities.stages:
             continue
 
-        engine_id = entry.engine_id
+        runtime = entry.runtime
         # Check if any workers are running for this engine type
         # Worker engine field uses short name (e.g., "whisper" not "whisper-streaming")
-        engine_short_name = engine_id.replace("-streaming", "")
+        engine_short_name = runtime.replace("-streaming", "")
         if engine_short_name not in running_engine_types:
             # No workers running - add offline placeholder
             realtime_engines.append(
                 RealtimeWorker(
-                    worker_id=f"{engine_id} (offline)",
+                    instance=f"{runtime} (offline)",
                     endpoint="",
                     status="offline",
                     capacity=entry.capabilities.max_concurrency or 4,
@@ -1110,7 +1110,7 @@ class SuccessRate(BaseModel):
 class EngineMetric(BaseModel):
     """Per-engine performance summary."""
 
-    engine_id: str
+    runtime: str
     stage: str
     completed: int
     failed: int
@@ -1182,19 +1182,19 @@ async def get_metrics(
         if not entry.capabilities.stages:
             continue  # skip realtime engines
 
-        engine_id = entry.engine_id
+        runtime = entry.runtime
         stage = entry.capabilities.stages[0]
 
         # Task stats from DB (last 24h)
-        stats = await console_service.get_engine_task_stats(db, engine_id)
+        stats = await console_service.get_engine_task_stats(db, runtime)
 
         # Queue depth from Redis
-        stream_key = f"dalston:stream:{engine_id}"
+        stream_key = f"dalston:stream:{runtime}"
         queue_depth = await _get_stream_backlog(redis, stream_key)
 
         engine_metrics.append(
             EngineMetric(
-                engine_id=engine_id,
+                runtime=runtime,
                 stage=stage,
                 completed=stats.completed,
                 failed=stats.failed,

@@ -101,7 +101,7 @@ export function RealtimeWorkerDetail() {
 
   // Find the worker
   const worker: WorkerStatus | undefined = enginesData?.realtime_engines.find(
-    (w) => w.worker_id === decodedWorkerId
+    (w) => w.instance === decodedWorkerId
   )
 
   // Fetch models from registry filtered by this worker's runtime
@@ -408,7 +408,7 @@ export function RealtimeWorkerDetail() {
           <CardTitle className="text-base font-medium">Worker Details</CardTitle>
         </CardHeader>
         <CardContent className="space-y-1">
-          <CapabilityRow label="Worker ID" value={worker.worker_id} />
+          <CapabilityRow label="Instance" value={worker.instance} />
           <CapabilityRow label="Endpoint" value={worker.endpoint} />
           <CapabilityRow label="Runtime" value={worker.runtime ?? 'Unknown'} />
           <CapabilityRow label="Status" value={isReady ? 'Ready' : 'Unhealthy'} />

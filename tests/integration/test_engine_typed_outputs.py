@@ -52,7 +52,7 @@ class TestFinalMergerEngineOutput:
                         "duration": 10.0,
                         "sample_rate": 16000,
                         "channels": 1,
-                        "engine_id": "audio-prepare",
+                        "runtime": "audio-prepare",
                     },
                     "transcribe": {
                         "segments": [
@@ -69,7 +69,7 @@ class TestFinalMergerEngineOutput:
                         "text": "Hello world",
                         "language": "en",
                         "language_confidence": 0.98,
-                        "engine_id": "faster-whisper",
+                        "runtime": "faster-whisper",
                     },
                     "align": {
                         "segments": [
@@ -96,7 +96,7 @@ class TestFinalMergerEngineOutput:
                         "text": "Hello world",
                         "language": "en",
                         "word_timestamps": True,
-                        "engine_id": "phoneme-align",
+                        "runtime": "phoneme-align",
                     },
                 },
                 config={"speaker_detection": "none", "word_timestamps": True},
@@ -151,7 +151,7 @@ class TestFinalMergerEngineOutput:
                         "duration": 10.0,
                         "sample_rate": 16000,
                         "channels": 1,
-                        "engine_id": "audio-prepare",
+                        "runtime": "audio-prepare",
                     },
                     "transcribe": {
                         "segments": [
@@ -160,7 +160,7 @@ class TestFinalMergerEngineOutput:
                         ],
                         "text": "Hello Hi there",
                         "language": "en",
-                        "engine_id": "faster-whisper",
+                        "runtime": "faster-whisper",
                     },
                     "diarize": {
                         "turns": [
@@ -169,7 +169,7 @@ class TestFinalMergerEngineOutput:
                         ],
                         "speakers": ["SPEAKER_00", "SPEAKER_01"],
                         "num_speakers": 2,
-                        "engine_id": "pyannote-4.0",
+                        "runtime": "pyannote-4.0",
                     },
                 },
                 config={"speaker_detection": "diarize"},
@@ -223,7 +223,7 @@ class TestFinalMergerEngineOutput:
                         "sample_rate": 16000,
                         "channels": 1,
                         "original_channels": 2,
-                        "engine_id": "audio-prepare",
+                        "runtime": "audio-prepare",
                     },
                     "transcribe_ch0": {
                         "segments": [
@@ -232,7 +232,7 @@ class TestFinalMergerEngineOutput:
                         "text": "Agent speaking",
                         "language": "en",
                         "channel": 0,
-                        "engine_id": "faster-whisper",
+                        "runtime": "faster-whisper",
                     },
                     "transcribe_ch1": {
                         "segments": [
@@ -241,7 +241,7 @@ class TestFinalMergerEngineOutput:
                         "text": "Customer here",
                         "language": "en",
                         "channel": 1,
-                        "engine_id": "faster-whisper",
+                        "runtime": "faster-whisper",
                     },
                 },
                 config={
@@ -292,20 +292,20 @@ class TestFinalMergerEngineOutput:
                         "duration": 10.0,
                         "sample_rate": 16000,
                         "channels": 1,
-                        "engine_id": "audio-prepare",
+                        "runtime": "audio-prepare",
                     },
                     "transcribe": {
                         "segments": [{"start": 0.0, "end": 5.0, "text": "Hello"}],
                         "text": "Hello",
                         "language": "xx",
-                        "engine_id": "faster-whisper",
+                        "runtime": "faster-whisper",
                     },
                     "align": {
                         "segments": [{"start": 0.0, "end": 5.0, "text": "Hello"}],
                         "text": "Hello",
                         "language": "xx",
                         "word_timestamps": False,
-                        "engine_id": "phoneme-align",
+                        "runtime": "phoneme-align",
                         "skipped": True,
                         "skip_reason": "No alignment model for language 'xx'",
                         "warnings": ["No alignment model for language 'xx'"],
@@ -359,7 +359,7 @@ class TestOutputValidation:
             timestamp_granularity_requested=TimestampGranularity.WORD,
             timestamp_granularity_actual=TimestampGranularity.WORD,
             alignment_method=AlignmentMethod.ATTENTION,
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
             skipped=False,
             skip_reason=None,
             warnings=[],
@@ -397,7 +397,7 @@ class TestOutputValidation:
             unaligned_words=[],
             unaligned_ratio=0.0,
             granularity_achieved=TimestampGranularity.WORD,
-            engine_id="phoneme-align",
+            runtime="phoneme-align",
         )
 
         data = output.model_dump(mode="json")
@@ -426,7 +426,7 @@ class TestOutputValidation:
             num_speakers=2,
             overlap_duration=0.5,
             overlap_ratio=0.05,
-            engine_id="pyannote-4.0",
+            runtime="pyannote-4.0",
         )
 
         data = output.model_dump(mode="json")
@@ -448,7 +448,7 @@ class TestOutputValidation:
                 )
             ],
             split_channels=False,
-            engine_id="audio-prepare",
+            runtime="audio-prepare",
         )
 
         data = output.model_dump(mode="json")
@@ -475,7 +475,7 @@ class TestOutputValidation:
             language="en",
             language_confidence=0.98,
             timestamp_granularity_actual=TimestampGranularity.WORD,
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
         )
 
         # Serialize to dict (as would be stored in Redis/JSON)

@@ -87,18 +87,18 @@ class TestStaleTaskScanner:
         assert scanner._running is False
         assert scanner._task is None
         assert scanner._is_leader is False
-        assert scanner._instance_id is not None
+        assert scanner._instance is not None
 
-    def test_init_with_custom_instance_id(self, mock_redis, mock_db_session):
+    def test_init_with_custom_instance(self, mock_redis, mock_db_session):
         """Test scanner initialization with custom instance ID."""
         scanner = StaleTaskScanner(
             redis=mock_redis,
             db_session_factory=mock_db_session,
             settings=MockSettings(),
-            instance_id="test-instance-1",
+            instance="test-instance-1",
         )
 
-        assert scanner._instance_id == "test-instance-1"
+        assert scanner._instance == "test-instance-1"
 
     @pytest.mark.asyncio
     async def test_start_stop(self, mock_redis, mock_db_session):
@@ -470,7 +470,7 @@ class TestWaitEngineTimeoutScan:
             "waiting_for_engine": "true",
             "wait_deadline_at": (datetime.now(UTC) - timedelta(minutes=5)).isoformat(),
             "wait_timeout_s": "120",
-            "engine_id": "whisper-cpu",
+            "runtime": "whisper-cpu",
             "queue_id": "whisper-cpu",
             "stream_message_id": "123-0",
         }
@@ -478,7 +478,7 @@ class TestWaitEngineTimeoutScan:
 
         mock_task = MagicMock()
         mock_task.status = TaskStatus.READY.value
-        mock_task.engine_id = "whisper-cpu"
+        mock_task.runtime = "whisper-cpu"
 
         class MockSession:
             async def get(self, model, key):
@@ -514,7 +514,7 @@ class TestWaitEngineTimeoutScan:
             "waiting_for_engine": "true",
             "wait_deadline_at": (datetime.now(UTC) - timedelta(minutes=5)).isoformat(),
             "wait_timeout_s": "120",
-            "engine_id": "whisper-cpu",
+            "runtime": "whisper-cpu",
             "queue_id": "whisper-cpu",
             "stream_message_id": "123-0",
         }
@@ -523,7 +523,7 @@ class TestWaitEngineTimeoutScan:
 
         mock_task = MagicMock()
         mock_task.status = TaskStatus.READY.value
-        mock_task.engine_id = "whisper-cpu"
+        mock_task.runtime = "whisper-cpu"
 
         class MockSession:
             async def get(self, model, key):
@@ -561,7 +561,7 @@ class TestLeaderElection:
             redis=mock_redis,
             db_session_factory=mock_db_session,
             settings=MockSettings(),
-            instance_id="test-instance-1",
+            instance="test-instance-1",
         )
 
         mock_redis.set.return_value = True  # Lock acquired
@@ -581,7 +581,7 @@ class TestLeaderElection:
             redis=mock_redis,
             db_session_factory=mock_db_session,
             settings=MockSettings(),
-            instance_id="test-instance-1",
+            instance="test-instance-1",
         )
 
         mock_redis.set.return_value = None  # Lock not acquired
@@ -597,7 +597,7 @@ class TestLeaderElection:
             redis=mock_redis,
             db_session_factory=mock_db_session,
             settings=MockSettings(),
-            instance_id="test-instance-1",
+            instance="test-instance-1",
         )
 
         await scanner._release_leader_lock()
@@ -612,7 +612,7 @@ class TestLeaderElection:
             redis=mock_redis,
             db_session_factory=mock_db_session,
             settings=MockSettings(),
-            instance_id="test-instance-1",
+            instance="test-instance-1",
         )
 
         mock_redis.eval.return_value = 1  # Lock extended
@@ -628,7 +628,7 @@ class TestLeaderElection:
             redis=mock_redis,
             db_session_factory=mock_db_session,
             settings=MockSettings(),
-            instance_id="test-instance-1",
+            instance="test-instance-1",
         )
 
         mock_redis.eval.return_value = 0  # Lock not extended (different owner)
@@ -644,7 +644,7 @@ class TestLeaderElection:
             redis=mock_redis,
             db_session_factory=mock_db_session,
             settings=MockSettings(),
-            instance_id="test-instance-1",
+            instance="test-instance-1",
         )
 
         # First call: lock acquired, second call: lock not acquired
@@ -676,7 +676,7 @@ class TestLeaderElection:
             redis=mock_redis,
             db_session_factory=mock_db_session,
             settings=MockSettings(),
-            instance_id="test-instance-1",
+            instance="test-instance-1",
         )
 
         # Simulate being the leader

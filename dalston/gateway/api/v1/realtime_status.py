@@ -2,7 +2,7 @@
 
 GET /v1/realtime/status - System capacity
 GET /v1/realtime/workers - List workers
-GET /v1/realtime/workers/{worker_id} - Get worker status
+GET /v1/realtime/workers/{instance} - Get worker status
 """
 
 from typing import Annotated
@@ -36,7 +36,7 @@ class RealtimeStatusResponse(BaseModel):
 class WorkerStatusResponse(BaseModel):
     """Worker status."""
 
-    worker_id: str
+    instance: str
     endpoint: str
     status: str
     capacity: int
@@ -105,7 +105,7 @@ async def list_realtime_workers(
     return WorkersListResponse(
         workers=[
             WorkerStatusResponse(
-                worker_id=w.worker_id,
+                instance=w.instance,
                 endpoint=w.endpoint,
                 status=w.status,
                 capacity=w.capacity,
@@ -120,14 +120,14 @@ async def list_realtime_workers(
 
 
 @router.get(
-    "/workers/{worker_id}",
+    "/workers/{instance}",
     response_model=WorkerStatusResponse,
     summary="Get worker status",
     description="Get status of a specific real-time worker.",
     responses={404: {"description": "Worker not found"}},
 )
 async def get_worker_status(
-    worker_id: str,
+    instance: str,
     principal: Annotated[Principal, Depends(get_principal)],
     session_router: SessionRouter = Depends(get_session_router),
 ) -> WorkerStatusResponse:
@@ -135,13 +135,13 @@ async def get_worker_status(
     security_manager = get_security_manager()
     security_manager.require_permission(principal, Permission.SESSION_READ)
 
-    worker = await session_router.get_worker(worker_id)
+    worker = await session_router.get_worker(instance)
 
     if worker is None:
         raise HTTPException(status_code=404, detail="Worker not found")
 
     return WorkerStatusResponse(
-        worker_id=worker.worker_id,
+        instance=worker.instance,
         endpoint=worker.endpoint,
         status=worker.status,
         capacity=worker.capacity,

@@ -143,7 +143,7 @@ class TestDiarizeDAG:
         )
 
         by_stage = {t.stage: t for t in tasks}
-        assert "pyannote" in by_stage["diarize"].engine_id
+        assert "pyannote" in by_stage["diarize"].runtime
 
 
 # ---------------------------------------------------------------------------

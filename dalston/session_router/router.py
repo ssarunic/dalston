@@ -29,29 +29,27 @@ class WorkerStatus:
     Simplified view of worker state for management APIs.
     """
 
-    worker_id: str
+    instance: str
     endpoint: str
     status: str
     capacity: int
     active_sessions: int
     models: list[str]
     languages: list[str]
-    engine: str = "unknown"
-    runtime: str | None = None  # M43: model runtime (e.g., "faster-whisper")
+    runtime: str | None = None
     supports_vocabulary: bool = False
 
     @classmethod
     def from_worker_state(cls, state: WorkerState) -> WorkerStatus:
         """Create from WorkerState."""
         return cls(
-            worker_id=state.worker_id,
+            instance=state.instance,
             endpoint=state.endpoint,
             status=state.status,
             capacity=state.capacity,
             active_sessions=state.active_sessions,
             models=state.models_loaded,
             languages=state.languages_supported,
-            engine=state.engine,
             runtime=state.runtime,
             supports_vocabulary=state.supports_vocabulary,
         )
@@ -168,6 +166,7 @@ class SessionRouter:
         model: str | None,
         client_ip: str,
         runtime: str | None = None,
+        valid_runtimes: set[str] | None = None,
     ) -> WorkerAllocation | None:
         """Acquire a worker for a new session.
 
@@ -179,6 +178,9 @@ class SessionRouter:
             client_ip: Client IP address for logging
             runtime: Model runtime (e.g., "faster-whisper") for routing when model
                      isn't pre-loaded. Workers matching runtime can load the model.
+            valid_runtimes: When model=None and runtime=None, only consider workers
+                     whose runtime is in this set. Used for "Any available" routing
+                     to filter by runtimes that have downloaded models in registry.
 
         Returns:
             WorkerAllocation with endpoint and session_id, or None if no capacity
@@ -191,6 +193,7 @@ class SessionRouter:
             model=model,
             client_ip=client_ip,
             runtime=runtime,
+            valid_runtimes=valid_runtimes,
         )
 
     async def release_worker(self, session_id: str) -> SessionState | None:
@@ -251,11 +254,11 @@ class SessionRouter:
         workers = await self._registry.get_workers()
         return [WorkerStatus.from_worker_state(w) for w in workers]
 
-    async def get_worker(self, worker_id: str) -> WorkerStatus | None:
+    async def get_worker(self, instance: str) -> WorkerStatus | None:
         """Get specific worker status.
 
         Args:
-            worker_id: Worker identifier
+            instance: Instance identifier
 
         Returns:
             WorkerStatus if found, None otherwise
@@ -263,7 +266,7 @@ class SessionRouter:
         if not self._registry:
             raise RuntimeError("Session router not started")
 
-        worker = await self._registry.get_worker(worker_id)
+        worker = await self._registry.get_worker(instance)
         if worker:
             return WorkerStatus.from_worker_state(worker)
         return None

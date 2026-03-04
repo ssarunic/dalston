@@ -63,7 +63,7 @@ class SuccessRateWindow:
 class EngineTaskStats:
     """Per-engine task statistics."""
 
-    engine_id: str
+    runtime: str
     stage: str
     completed: int
     failed: int
@@ -111,7 +111,7 @@ class TaskDTO:
 
     id: UUID
     stage: str
-    engine_id: str
+    runtime: str
     status: str
     required: bool
     dependencies: list[UUID]
@@ -345,7 +345,7 @@ class ConsoleService:
             TaskDTO(
                 id=task.id,
                 stage=task.stage,
-                engine_id=task.engine_id,
+                runtime=task.runtime,
                 status=task.status,
                 required=task.required,
                 dependencies=task.dependencies or [],
@@ -495,14 +495,14 @@ class ConsoleService:
     async def get_engine_task_stats(
         self,
         db: AsyncSession,
-        engine_id: str,
+        runtime: str,
         hours: int = 24,
     ) -> EngineTaskStats:
-        """Get task statistics for a specific engine.
+        """Get task statistics for a specific engine runtime.
 
         Args:
             db: Database session
-            engine_id: Engine identifier
+            runtime: Engine runtime identifier
             hours: Time window in hours
 
         Returns:
@@ -546,13 +546,13 @@ class ConsoleService:
                 )
                 .label("p95_seconds"),
             )
-            .where(TaskModel.engine_id == engine_id)
+            .where(TaskModel.runtime == runtime)
             .where(TaskModel.started_at >= cutoff)
         )
         row = (await db.execute(query)).one()
 
         return EngineTaskStats(
-            engine_id=engine_id,
+            runtime=runtime,
             stage="",  # Caller provides stage from catalog
             completed=row.completed or 0,
             failed=row.failed or 0,

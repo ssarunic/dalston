@@ -415,31 +415,31 @@ def observe_orchestrator_job_duration(stage_count: int, duration: float) -> None
     ).observe(duration)
 
 
-def inc_orchestrator_tasks_scheduled(engine_id: str, stage: str) -> None:
+def inc_orchestrator_tasks_scheduled(runtime: str, stage: str) -> None:
     """Increment tasks scheduled counter.
 
     Args:
-        engine_id: Engine identifier
+        runtime: Engine identifier
         stage: Pipeline stage name
     """
     if not _metrics_enabled or "tasks_scheduled_total" not in _orchestrator_metrics:
         return
     _orchestrator_metrics["tasks_scheduled_total"].labels(
-        engine_id=engine_id, stage=stage
+        engine_id=runtime, stage=stage
     ).inc()
 
 
-def inc_orchestrator_tasks_completed(engine_id: str, status: str) -> None:
+def inc_orchestrator_tasks_completed(runtime: str, status: str) -> None:
     """Increment tasks completed counter.
 
     Args:
-        engine_id: Engine identifier
+        runtime: Engine identifier
         status: Task status (success, failure)
     """
     if not _metrics_enabled or "tasks_completed_total" not in _orchestrator_metrics:
         return
     _orchestrator_metrics["tasks_completed_total"].labels(
-        engine_id=engine_id, status=status
+        engine_id=runtime, status=status
     ).inc()
 
 
@@ -499,68 +499,66 @@ def inc_orchestrator_scanner_scans(status: str) -> None:
 # =============================================================================
 
 
-def inc_engine_tasks(engine_id: str, status: str) -> None:
+def inc_engine_tasks(runtime: str, status: str) -> None:
     """Increment engine tasks processed counter.
 
     Args:
-        engine_id: Engine identifier
+        runtime: Engine identifier
         status: Task status (success, failure)
     """
     if not _metrics_enabled or "tasks_processed_total" not in _engine_metrics:
         return
     _engine_metrics["tasks_processed_total"].labels(
-        engine_id=engine_id, status=status
+        engine_id=runtime, status=status
     ).inc()
 
 
-def observe_engine_task_duration(engine_id: str, duration: float) -> None:
+def observe_engine_task_duration(runtime: str, duration: float) -> None:
     """Record engine task processing duration.
 
     Args:
-        engine_id: Engine identifier
+        runtime: Engine identifier
         duration: Duration in seconds
     """
     if not _metrics_enabled or "task_duration_seconds" not in _engine_metrics:
         return
-    _engine_metrics["task_duration_seconds"].labels(engine_id=engine_id).observe(
-        duration
-    )
+    _engine_metrics["task_duration_seconds"].labels(engine_id=runtime).observe(duration)
 
 
-def observe_engine_queue_wait(engine_id: str, duration: float) -> None:
+def observe_engine_queue_wait(runtime: str, duration: float) -> None:
     """Record queue wait time.
 
     Args:
-        engine_id: Engine identifier
+        runtime: Engine identifier
         duration: Duration in seconds
     """
     if not _metrics_enabled or "queue_wait_seconds" not in _engine_metrics:
         return
-    _engine_metrics["queue_wait_seconds"].labels(engine_id=engine_id).observe(duration)
+    _engine_metrics["queue_wait_seconds"].labels(engine_id=runtime).observe(duration)
 
 
-def observe_engine_s3_download(engine_id: str, duration: float) -> None:
+def observe_engine_s3_download(runtime: str, duration: float) -> None:
     """Record S3 download time.
 
     Args:
-        engine_id: Engine identifier
+        runtime: Engine identifier
         duration: Duration in seconds
     """
     if not _metrics_enabled or "s3_download_seconds" not in _engine_metrics:
         return
-    _engine_metrics["s3_download_seconds"].labels(engine_id=engine_id).observe(duration)
+    _engine_metrics["s3_download_seconds"].labels(engine_id=runtime).observe(duration)
 
 
-def observe_engine_s3_upload(engine_id: str, duration: float) -> None:
+def observe_engine_s3_upload(runtime: str, duration: float) -> None:
     """Record S3 upload time.
 
     Args:
-        engine_id: Engine identifier
+        runtime: Engine identifier
         duration: Duration in seconds
     """
     if not _metrics_enabled or "s3_upload_seconds" not in _engine_metrics:
         return
-    _engine_metrics["s3_upload_seconds"].labels(engine_id=engine_id).observe(duration)
+    _engine_metrics["s3_upload_seconds"].labels(engine_id=runtime).observe(duration)
 
 
 def inc_task_redelivery(stage: str, reason: str) -> None:
@@ -722,28 +720,28 @@ def init_queue_metrics() -> None:
     _init_queue_metrics()
 
 
-def set_queue_depth(engine_id: str, depth: int) -> None:
+def set_queue_depth(runtime: str, depth: int) -> None:
     """Set queue depth for an engine.
 
     Args:
-        engine_id: Engine identifier
+        runtime: Engine identifier
         depth: Number of tasks in queue
     """
     if not _metrics_enabled or "queue_depth" not in _queue_metrics:
         return
-    _queue_metrics["queue_depth"].labels(engine_id=engine_id).set(depth)
+    _queue_metrics["queue_depth"].labels(engine_id=runtime).set(depth)
 
 
-def set_queue_oldest_task_age(engine_id: str, age_seconds: float) -> None:
+def set_queue_oldest_task_age(runtime: str, age_seconds: float) -> None:
     """Set oldest task age for an engine.
 
     Args:
-        engine_id: Engine identifier
+        runtime: Engine identifier
         age_seconds: Age in seconds
     """
     if not _metrics_enabled or "queue_oldest_task_age_seconds" not in _queue_metrics:
         return
-    _queue_metrics["queue_oldest_task_age_seconds"].labels(engine_id=engine_id).set(
+    _queue_metrics["queue_oldest_task_age_seconds"].labels(engine_id=runtime).set(
         age_seconds
     )
 

@@ -336,7 +336,7 @@ class TestAuditServiceSessionMethods:
         await audit_service.log_session_started(
             session_id=session_id,
             tenant_id=tenant_id,
-            worker_id="worker-1",
+            instance="worker-1",
         )
 
         call_args = mock_db_session.add.call_args
@@ -344,7 +344,7 @@ class TestAuditServiceSessionMethods:
         assert entry.action == "session.started"
         assert entry.resource_type == "session"
         assert entry.resource_id == str(session_id)
-        assert entry.detail == {"worker_id": "worker-1"}
+        assert entry.detail == {"instance": "worker-1"}
 
     @pytest.mark.asyncio
     async def test_log_session_ended(

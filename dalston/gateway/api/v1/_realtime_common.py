@@ -1,0 +1,176 @@
+"""Shared helpers for real-time WebSocket endpoints.
+
+Used by realtime.py, elevenlabs (realtime.py), and openai_realtime.py.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+from uuid import UUID
+
+import structlog
+
+from dalston.common.redis import get_redis as _get_redis
+from dalston.config import get_settings
+from dalston.db.session import get_db as _get_db
+from dalston.gateway.services.auth import AuthService
+from dalston.gateway.services.model_registry import ModelRegistryService
+from dalston.gateway.services.rate_limiter import RedisRateLimiter
+
+logger = structlog.get_logger()
+
+
+# ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
+
+
+async def get_realtime_auth_service() -> tuple[AuthService, Any]:
+    """Get AuthService for WebSocket authentication.
+
+    Returns:
+        Tuple of (AuthService, db_gen). Caller must call db_gen.aclose().
+    """
+    redis = await _get_redis()
+    db_gen = _get_db()
+    db = await db_gen.__anext__()
+    return AuthService(db, redis), db_gen
+
+
+# ---------------------------------------------------------------------------
+# Rate-limit helpers
+# ---------------------------------------------------------------------------
+
+
+async def decrement_realtime_session_count(tenant_id: UUID) -> None:
+    """Decrement concurrent session count when a WebSocket connection closes."""
+    try:
+        settings = get_settings()
+        redis = await _get_redis()
+        rate_limiter = RedisRateLimiter(
+            redis=redis,
+            requests_per_minute=settings.rate_limit_requests_per_minute,
+            max_concurrent_jobs=settings.rate_limit_concurrent_jobs,
+            max_concurrent_sessions=settings.rate_limit_concurrent_sessions,
+        )
+        await rate_limiter.decrement_concurrent_sessions(tenant_id)
+    except Exception as e:
+        logger.warning("failed_to_decrement_session_count", error=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Session keepalive
+# ---------------------------------------------------------------------------
+
+
+async def keep_session_alive(
+    session_router,
+    session_id: str,
+    interval: int = 60,
+) -> None:
+    """Periodically extend session TTL to prevent expiration.
+
+    Sessions have a 5-minute TTL in Redis. For long-running sessions,
+    this task extends the TTL every interval seconds to prevent the
+    health monitor from treating the session as orphaned.
+
+    Args:
+        session_router: SessionRouter instance
+        session_id: Session ID to keep alive
+        interval: How often to extend in seconds (default: 60s)
+    """
+    import asyncio
+
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await session_router.extend_session_ttl(session_id)
+            logger.debug("session_ttl_extended", session_id=session_id)
+        except Exception as e:
+            logger.warning(
+                "session_ttl_extend_failed", session_id=session_id, error=str(e)
+            )
+
+
+# ---------------------------------------------------------------------------
+# RT routing
+# ---------------------------------------------------------------------------
+
+
+class RTRoutingParams:
+    """Resolved routing parameters for a real-time session."""
+
+    __slots__ = ("routing_model", "model_runtime", "valid_runtimes", "effective_model")
+
+    def __init__(
+        self,
+        routing_model: str | None,
+        model_runtime: str | None,
+        valid_runtimes: set[str] | None,
+        effective_model: str,
+    ) -> None:
+        self.routing_model = routing_model
+        self.model_runtime = model_runtime
+        self.valid_runtimes = valid_runtimes
+        self.effective_model = effective_model
+
+
+async def resolve_rt_routing(requested_model: str | None) -> RTRoutingParams:
+    """Resolve routing parameters for a real-time session.
+
+    When a specific model is requested, looks up its runtime for worker matching.
+    When no model is requested (None / empty), auto-selects the largest ready
+    streaming model from the registry (M48) and collects valid runtimes for
+    fallback routing.
+
+    Args:
+        requested_model: Model ID from client, or None/empty for auto-select.
+
+    Returns:
+        Routing parameters to pass to the session allocator.
+    """
+    routing_model = requested_model or None
+    model_runtime: str | None = None
+    valid_runtimes: set[str] | None = None
+    effective_model: str = requested_model or ""
+
+    if routing_model:
+        try:
+            async for db in _get_db():
+                model_entry = await ModelRegistryService().get_model(db, routing_model)
+                if model_entry:
+                    model_runtime = model_entry.runtime
+                break
+        except Exception as e:
+            logger.warning("model_lookup_failed", model=routing_model, error=str(e))
+    else:
+        # Auto-select: pick the largest ready streaming model from the registry (M48).
+        # This ensures workers load from S3, not directly from HuggingFace.
+        try:
+            async for db in _get_db():
+                downloaded_models = await ModelRegistryService().list_models(
+                    db, stage="transcribe", status="ready"
+                )
+                rt_models = [m for m in downloaded_models if m.streaming]
+                candidates = rt_models if rt_models else list(downloaded_models)
+
+                if candidates:
+                    largest = max(candidates, key=lambda m: m.size_bytes or 0)
+                    routing_model = largest.id
+                    model_runtime = largest.runtime
+                    effective_model = largest.id
+                    logger.info(
+                        "auto_selected_rt_model",
+                        model_id=largest.id,
+                        runtime=largest.runtime,
+                        size_mb=round((largest.size_bytes or 0) / 1024 / 1024, 1),
+                    )
+
+                valid_runtimes = {m.runtime for m in downloaded_models if m.runtime}
+                break
+        except Exception as e:
+            logger.warning("registry_lookup_failed", error=str(e))
+
+    return RTRoutingParams(
+        routing_model, model_runtime, valid_runtimes, effective_model
+    )

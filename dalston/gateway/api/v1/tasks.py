@@ -65,7 +65,7 @@ async def list_job_tasks(
             TaskResponse(
                 task_id=task.id,
                 stage=task.stage,
-                engine_id=task.engine_id,
+                runtime=task.runtime,
                 status=task.status,
                 required=task.required,
                 dependencies=list(task.dependencies) if task.dependencies else [],
@@ -138,7 +138,7 @@ async def get_task_artifacts(
         task_id=task.id,
         job_id=job_id,
         stage=task.stage,
-        engine_id=task.engine_id,
+        runtime=task.runtime,
         status=task.status,
         input=input_data,
         output=output_data,

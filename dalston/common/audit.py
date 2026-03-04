@@ -314,12 +314,12 @@ class AuditService:
         actor_id: str = "unknown",
         correlation_id: str | None = None,
         ip_address: str | None = None,
-        worker_id: str | None = None,
+        instance: str | None = None,
     ) -> None:
         """Log realtime session start event."""
         detail = {}
-        if worker_id:
-            detail["worker_id"] = worker_id
+        if instance:
+            detail["instance"] = instance
 
         await self.log(
             action="session.started",
