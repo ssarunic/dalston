@@ -134,7 +134,7 @@ export interface ConsoleJobDetail {
 export interface Task {
   id: string
   stage: string
-  engine_id: string
+  runtime: string
   status: TaskStatus
   required?: boolean
   dependencies: string[]
@@ -154,7 +154,7 @@ export interface TaskArtifact {
   task_id: string
   job_id: string
   stage: string
-  engine_id: string
+  runtime: string
   status: TaskStatus
   required: boolean
   started_at?: string
@@ -170,7 +170,7 @@ export interface TaskArtifact {
 
 // Realtime types
 export interface WorkerStatus {
-  worker_id: string
+  instance: string
   endpoint: string
   status: 'ready' | 'unhealthy'
   capacity: number
@@ -282,7 +282,7 @@ export interface APIKeyCreatedResponse {
 export type EngineStatus = 'idle' | 'processing' | 'loading' | 'downloading' | 'error' | 'offline' | 'stale'
 
 export interface BatchEngine {
-  engine_id: string
+  runtime: string
   stage: string
   status: EngineStatus
   queue_depth: number
@@ -356,7 +356,7 @@ export interface RealtimeSessionSummary {
   status: RealtimeSessionStatus
   language: string | null
   model: string | null
-  engine: string | null
+  runtime: string | null
   audio_duration_seconds: number
   segment_count: number
   word_count: number
@@ -372,7 +372,7 @@ export interface RealtimeSessionDetail extends RealtimeSessionSummary {
   purged_at?: string
   audio_uri: string | null
   transcript_uri: string | null
-  worker_id: string | null
+  instance: string | null
   client_ip: string | null
   previous_session_id: string | null
   error: string | null
@@ -520,7 +520,7 @@ export interface SuccessRate {
 }
 
 export interface EngineMetric {
-  engine_id: string
+  runtime: string
   stage: string
   completed: number
   failed: number

@@ -121,7 +121,7 @@ async def build_task_dag(
     selections = await select_pipeline_engines(parameters, registry, catalog, db=db)
 
     # Build engines dict from selections
-    engines = {stage: sel.engine_id for stage, sel in selections.items()}
+    engines = {stage: sel.runtime for stage, sel in selections.items()}
 
     # Extract runtime_model_id from transcribe selection (if user requested a specific model)
     transcribe_selection = selections["transcribe"]
@@ -135,7 +135,7 @@ async def build_task_dag(
     logger.info(
         "dag_shape_decided",
         job_id=str(job_id),
-        transcriber=transcribe_selection.engine_id,
+        transcriber=transcribe_selection.runtime,
         runtime_model_id=runtime_model_id,
         alignment_included=not skip_alignment,
         diarization_included=not skip_diarization,
@@ -147,7 +147,7 @@ async def build_task_dag(
         "orchestrator.dag_build",
         attributes={
             "dalston.job_id": str(job_id),
-            "dalston.runtime": transcribe_selection.engine_id,
+            "dalston.runtime": transcribe_selection.runtime,
             "dalston.model": runtime_model_id or "",
             "dalston.dag.stages": list(selections.keys()),
             "dalston.dag.task_count": len(selections),
@@ -280,7 +280,7 @@ def _build_dag_with_engines(
         id=uuid4(),
         job_id=job_id,
         stage="prepare",
-        engine_id=engines.get("prepare", DEFAULT_ENGINES["prepare"]),
+        runtime=engines.get("prepare", DEFAULT_ENGINES["prepare"]),
         status=TaskStatus.PENDING,
         dependencies=[],
         config=prepare_config,
@@ -313,7 +313,7 @@ def _build_dag_with_engines(
             id=uuid4(),
             job_id=job_id,
             stage="diarize",
-            engine_id=engines.get("diarize", DEFAULT_ENGINES["diarize"]),
+            runtime=engines.get("diarize", DEFAULT_ENGINES["diarize"]),
             status=TaskStatus.PENDING,
             dependencies=[prepare_task.id],
             config=diarize_config,
@@ -330,7 +330,7 @@ def _build_dag_with_engines(
         id=uuid4(),
         job_id=job_id,
         stage="transcribe",
-        engine_id=engines.get("transcribe", DEFAULT_ENGINES["transcribe"]),
+        runtime=engines.get("transcribe", DEFAULT_ENGINES["transcribe"]),
         status=TaskStatus.PENDING,
         dependencies=[prepare_task.id],
         config=transcribe_config,
@@ -349,7 +349,7 @@ def _build_dag_with_engines(
             id=uuid4(),
             job_id=job_id,
             stage="align",
-            engine_id=engines.get("align", DEFAULT_ENGINES["align"]),
+            runtime=engines.get("align", DEFAULT_ENGINES["align"]),
             status=TaskStatus.PENDING,
             dependencies=[transcribe_task.id],
             config={"word_timestamps": True},
@@ -384,7 +384,7 @@ def _build_dag_with_engines(
             id=uuid4(),
             job_id=job_id,
             stage="pii_detect",
-            engine_id=engines.get("pii_detect", DEFAULT_ENGINES["pii_detect"]),
+            runtime=engines.get("pii_detect", DEFAULT_ENGINES["pii_detect"]),
             status=TaskStatus.PENDING,
             dependencies=pii_dependencies,
             config=pii_detect_config,
@@ -410,7 +410,7 @@ def _build_dag_with_engines(
                 id=uuid4(),
                 job_id=job_id,
                 stage="audio_redact",
-                engine_id=engines.get("audio_redact", DEFAULT_ENGINES["audio_redact"]),
+                runtime=engines.get("audio_redact", DEFAULT_ENGINES["audio_redact"]),
                 status=TaskStatus.PENDING,
                 dependencies=[pii_detect_task.id],
                 config=audio_redact_config,
@@ -444,7 +444,7 @@ def _build_dag_with_engines(
         id=uuid4(),
         job_id=job_id,
         stage="merge",
-        engine_id=engines.get("merge", DEFAULT_ENGINES["merge"]),
+        runtime=engines.get("merge", DEFAULT_ENGINES["merge"]),
         status=TaskStatus.PENDING,
         dependencies=merge_dependencies,
         config=merge_config,
@@ -511,7 +511,7 @@ def _build_per_channel_dag_with_engines(
             id=uuid4(),
             job_id=job_id,
             stage=f"transcribe_ch{channel}",
-            engine_id=engines.get("transcribe", DEFAULT_ENGINES["transcribe"]),
+            runtime=engines.get("transcribe", DEFAULT_ENGINES["transcribe"]),
             status=TaskStatus.PENDING,
             dependencies=[prepare_task.id],
             config=channel_transcribe_config,
@@ -532,7 +532,7 @@ def _build_per_channel_dag_with_engines(
                 id=uuid4(),
                 job_id=job_id,
                 stage=f"align_ch{channel}",
-                engine_id=engines.get("align", DEFAULT_ENGINES["align"]),
+                runtime=engines.get("align", DEFAULT_ENGINES["align"]),
                 status=TaskStatus.PENDING,
                 dependencies=[transcribe_task.id],
                 config={"word_timestamps": True, "channel": channel},
@@ -560,7 +560,7 @@ def _build_per_channel_dag_with_engines(
                 id=uuid4(),
                 job_id=job_id,
                 stage=f"pii_detect_ch{channel}",
-                engine_id=engines.get("pii_detect", DEFAULT_ENGINES["pii_detect"]),
+                runtime=engines.get("pii_detect", DEFAULT_ENGINES["pii_detect"]),
                 status=TaskStatus.PENDING,
                 dependencies=[last_task.id],
                 config=pii_detect_config,
@@ -590,7 +590,7 @@ def _build_per_channel_dag_with_engines(
                     id=uuid4(),
                     job_id=job_id,
                     stage=f"audio_redact_ch{channel}",
-                    engine_id=engines.get(
+                    runtime=engines.get(
                         "audio_redact", DEFAULT_ENGINES["audio_redact"]
                     ),
                     status=TaskStatus.PENDING,
@@ -625,7 +625,7 @@ def _build_per_channel_dag_with_engines(
         id=uuid4(),
         job_id=job_id,
         stage="merge",
-        engine_id=engines.get("merge", DEFAULT_ENGINES["merge"]),
+        runtime=engines.get("merge", DEFAULT_ENGINES["merge"]),
         status=TaskStatus.PENDING,
         dependencies=merge_dependencies,
         config=merge_config,

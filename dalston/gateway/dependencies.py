@@ -28,6 +28,7 @@ from dalston.gateway.services.ingestion import AudioIngestionService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.pii_entity_types import PIIEntityTypeService
 from dalston.gateway.services.rate_limiter import RedisRateLimiter
+from dalston.gateway.services.storage import StorageService
 
 if TYPE_CHECKING:
     from dalston.common.audit import AuditService
@@ -102,6 +103,13 @@ def get_pii_entity_type_service() -> PIIEntityTypeService:
     if _pii_entity_type_service is None:
         _pii_entity_type_service = PIIEntityTypeService()
     return _pii_entity_type_service
+
+
+def get_storage_service(
+    settings: Settings = Depends(get_settings),
+) -> StorageService:
+    """Get StorageService instance."""
+    return StorageService(settings)
 
 
 def get_ingestion_service(

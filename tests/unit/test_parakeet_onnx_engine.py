@@ -74,7 +74,7 @@ class TestParakeetOnnxEngineHealthCheck:
         health = engine.health_check()
 
         assert "status" in health
-        assert "engine_id" in health
+        assert "runtime" in health
         assert "device" in health
         assert "model_loaded" in health
         assert "quantization" in health
@@ -89,13 +89,13 @@ class TestParakeetOnnxEngineHealthCheck:
         assert health["model_loaded"] is False
         assert health["loaded_model_id"] is None
 
-    def test_health_check_reports_engine_id(self):
-        """Test that health check reports correct engine_id."""
+    def test_health_check_reports_runtime(self):
+        """Test that health check reports correct runtime."""
         ParakeetOnnxEngine = load_parakeet_onnx_engine()
         engine = ParakeetOnnxEngine()
         health = engine.health_check()
 
-        assert health["engine_id"] == "nemo-onnx"
+        assert health["runtime"] == "nemo-onnx"
 
 
 class TestParakeetOnnxEngineCapabilities:

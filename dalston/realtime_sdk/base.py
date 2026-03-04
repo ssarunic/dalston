@@ -113,7 +113,7 @@ class RealtimeEngine(ABC):
             asyncio.run(engine.run())
 
     Environment variables:
-        DALSTON_WORKER_ID: Unique identifier for this worker (required)
+        DALSTON_INSTANCE: Unique identifier for this instance (required)
         DALSTON_WORKER_PORT: WebSocket server port (default: 9000)
         DALSTON_WORKER_ENDPOINT: WebSocket endpoint URL for registration (auto-detected)
         DALSTON_MAX_SESSIONS: Maximum concurrent sessions (default: 2)
@@ -122,7 +122,7 @@ class RealtimeEngine(ABC):
 
     def __init__(self) -> None:
         """Initialize the engine."""
-        self.worker_id = os.environ.get("DALSTON_WORKER_ID", "realtime-worker")
+        self.instance = os.environ.get("DALSTON_INSTANCE", "realtime-worker")
         self.port = int(os.environ.get("DALSTON_WORKER_PORT", "9000"))
         self.max_sessions = int(os.environ.get("DALSTON_MAX_SESSIONS", "2"))
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
@@ -234,14 +234,14 @@ class RealtimeEngine(ABC):
         """
         return ["auto"]
 
-    def get_engine(self) -> str:
-        """Return engine type identifier.
+    def get_runtime(self) -> str:
+        """Return the inference framework identifier.
 
-        Override to report the engine type (e.g., "parakeet", "whisper").
+        Override to report the runtime (e.g., "faster-whisper", "parakeet").
         Used when registering with Session Router.
 
         Returns:
-            Engine type string. Default: "unknown"
+            Runtime string. Default: "unknown"
         """
         return "unknown"
 
@@ -306,7 +306,7 @@ class RealtimeEngine(ABC):
         if card is None:
             # Fallback for engines without engine.yaml
             return EngineCapabilities(
-                engine_id=self.get_engine(),
+                runtime=self.get_runtime(),
                 version="unknown",
                 stages=["transcribe"],
                 languages=self.get_languages() or None,
@@ -334,7 +334,7 @@ class RealtimeEngine(ABC):
         stages = [stage] if stage else ["transcribe"]
 
         return EngineCapabilities(
-            engine_id=card.get("id", self.get_engine()),
+            runtime=card.get("runtime") or card.get("id", self.get_runtime()),
             version=card.get("version", "unknown"),
             stages=stages,
             languages=languages,
@@ -352,7 +352,6 @@ class RealtimeEngine(ABC):
             rtf_gpu=performance.get("rtf_gpu"),
             rtf_cpu=performance.get("rtf_cpu"),
             max_concurrency=caps.get("max_concurrency", self.max_sessions),
-            runtime=card.get("runtime"),
         )
 
     def _load_engine_yaml(self) -> dict[str, Any] | None:
@@ -384,7 +383,7 @@ class RealtimeEngine(ABC):
         """
         return {
             "status": "healthy",
-            "worker_id": self.worker_id,
+            "instance": self.instance,
             "active_sessions": len(self._sessions),
             "capacity": self.max_sessions,
             "gpu_memory": self.get_gpu_memory_usage(),
@@ -406,16 +405,16 @@ class RealtimeEngine(ABC):
                 asyncio.run(engine.run())
         """
         # Configure unified structured logging for this worker
-        dalston.logging.configure(f"realtime-{self.worker_id}")
+        dalston.logging.configure(f"realtime-{self.instance}")
 
         # Configure distributed tracing (M19)
-        dalston.telemetry.configure_tracing(f"dalston-realtime-{self.worker_id}")
+        dalston.telemetry.configure_tracing(f"dalston-realtime-{self.instance}")
 
         # Configure Prometheus metrics (M20)
-        dalston.metrics.configure_metrics(f"realtime-{self.worker_id}")
+        dalston.metrics.configure_metrics(f"realtime-{self.instance}")
 
-        # Bind worker_id to logging context for all subsequent log calls
-        structlog.contextvars.bind_contextvars(worker_id=self.worker_id)
+        # Bind instance to logging context for all subsequent log calls
+        structlog.contextvars.bind_contextvars(instance=self.instance)
 
         logger.info("starting_realtime_engine")
 
@@ -434,15 +433,14 @@ class RealtimeEngine(ABC):
         logger.info("registering_with_session_router", endpoint=self._worker_endpoint)
         await self._registry.register(
             WorkerInfo(
-                worker_id=self.worker_id,
+                instance=self.instance,
                 endpoint=self._worker_endpoint,
                 capacity=self.max_sessions,
                 models=self.get_models(),
                 languages=self.get_languages(),
-                engine=self.get_engine(),
+                runtime=capabilities.runtime,
                 supports_vocabulary=self.get_supports_vocabulary(),
                 capabilities=capabilities,
-                runtime=capabilities.runtime,
             )
         )
 
@@ -476,7 +474,7 @@ class RealtimeEngine(ABC):
             process_request=capture_request_path,
         ) as server:
             self._server = server
-            logger.info("realtime_engine_ready", worker_id=self.worker_id)
+            logger.info("realtime_engine_ready", instance=self.instance)
 
             # Wait until shutdown
             while self._running:
@@ -506,7 +504,7 @@ class RealtimeEngine(ABC):
 
         # Unregister from Session Router
         if self._registry:
-            await self._registry.unregister(self.worker_id)
+            await self._registry.unregister(self.instance)
             await self._registry.close()
 
         # M43: Shutdown model manager and unload models
@@ -530,7 +528,7 @@ class RealtimeEngine(ABC):
                     )
                     # M43: Include dynamically loaded models in heartbeat
                     await self._registry.heartbeat(
-                        worker_id=self.worker_id,
+                        instance=self.instance,
                         active_sessions=len(self._sessions),
                         gpu_memory_used=self.get_gpu_memory_usage(),
                         status=status,
@@ -630,7 +628,7 @@ class RealtimeEngine(ABC):
 
         # Notify registry
         if self._registry:
-            await self._registry.session_started(self.worker_id, config.session_id)
+            await self._registry.session_started(self.instance, config.session_id)
 
         # Bind session_id to logging context for this session
         structlog.contextvars.bind_contextvars(session_id=config.session_id)
@@ -647,7 +645,7 @@ class RealtimeEngine(ABC):
                 "dalston.session_id": config.session_id,
                 "dalston.runtime": session_runtime,
                 "dalston.model": session_model,
-                "dalston.instance": self.worker_id,
+                "dalston.instance": self.instance,
                 "dalston.language": config.language,
             },
         ):
@@ -686,7 +684,7 @@ class RealtimeEngine(ABC):
 
         if self._registry:
             await self._registry.session_ended(
-                worker_id=self.worker_id,
+                instance=self.instance,
                 session_id=session_id,
                 duration=duration,
                 status=status,

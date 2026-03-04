@@ -14,7 +14,7 @@ Features:
     - Output normalization across architectures to Dalston format
 
 Environment variables:
-    DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "hf-asr")
+    DALSTON_RUNTIME: Runtime engine ID for registration (default: "hf-asr")
     DALSTON_DEFAULT_MODEL_ID: Default HF model ID (default: "openai/whisper-large-v3")
     DALSTON_DEVICE: Device for inference (cuda, cpu). Defaults to cuda if available.
     DALSTON_MODEL_TTL_SECONDS: Evict models idle longer than this (default: 3600)
@@ -63,7 +63,7 @@ class HFASREngine(Engine):
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
         )
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "hf-asr")
+        self._runtime = os.environ.get("DALSTON_RUNTIME", "hf-asr")
 
         # Auto-detect device and dtype
         self._device, self._torch_dtype = self._detect_device()
@@ -89,7 +89,7 @@ class HFASREngine(Engine):
 
         self.logger.info(
             "engine_init",
-            engine_id=self._engine_id,
+            runtime=self._runtime,
             default_model=self._default_model_id,
             device=self._device,
             torch_dtype=str(self._torch_dtype),
@@ -294,7 +294,7 @@ class HFASREngine(Engine):
                 AlignmentMethod.ATTENTION if has_word_timestamps else None
             ),
             channel=channel,
-            engine_id=self._engine_id,
+            runtime=self._runtime,
             skipped=False,
             skip_reason=None,
             warnings=[],
@@ -308,7 +308,7 @@ class HFASREngine(Engine):
 
         return {
             "status": "healthy",
-            "engine_id": self._engine_id,
+            "runtime": self._runtime,
             "device": self._device,
             "torch_dtype": str(self._torch_dtype),
             "cuda_available": cuda_available,

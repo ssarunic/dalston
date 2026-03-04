@@ -349,7 +349,7 @@ class TestPrepareOutput:
         out = PrepareOutput(
             channel_files=[prepared],
             split_channels=False,
-            engine_id="audio-prepare",
+            runtime="audio-prepare",
         )
         assert len(out.channel_files) == 1
         assert out.channel_files[0].duration == 60.0
@@ -379,7 +379,7 @@ class TestPrepareOutput:
         out = PrepareOutput(
             channel_files=[ch0, ch1],
             split_channels=True,
-            engine_id="audio-prepare",
+            runtime="audio-prepare",
         )
         assert out.split_channels is True
         assert len(out.channel_files) == 2
@@ -406,7 +406,7 @@ class TestPrepareOutput:
             split_channels=False,
             speech_regions=regions,
             speech_ratio=0.32,
-            engine_id="audio-prepare",
+            runtime="audio-prepare",
         )
         assert len(out.speech_regions) == 2
         assert out.speech_ratio == 0.32
@@ -421,7 +421,7 @@ class TestTranscribeOutput:
             segments=[Segment(start=0.0, end=5.0, text="Hello world")],
             text="Hello world",
             language="en",
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
         )
         assert len(out.segments) == 1
         assert out.text == "Hello world"
@@ -441,7 +441,7 @@ class TestTranscribeOutput:
             timestamp_granularity_requested=TimestampGranularity.WORD,
             timestamp_granularity_actual=TimestampGranularity.WORD,
             alignment_method=AlignmentMethod.ATTENTION,
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
         )
         assert out.timestamp_granularity_actual == TimestampGranularity.WORD
         assert out.alignment_method == AlignmentMethod.ATTENTION
@@ -453,7 +453,7 @@ class TestTranscribeOutput:
             text="Bonjour",
             language="fr",
             language_confidence=0.97,
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
         )
         assert out.language == "fr"
         assert out.language_confidence == 0.97
@@ -469,7 +469,7 @@ class TestAlignOutput:
             text="Hello",
             language="en",
             word_timestamps=True,
-            engine_id="phoneme-align",
+            runtime="phoneme-align",
         )
         assert out.word_timestamps is True
         assert out.skipped is False
@@ -485,7 +485,7 @@ class TestAlignOutput:
             unaligned_words=["unfamiliarterm"],
             unaligned_ratio=0.05,
             granularity_achieved=TimestampGranularity.WORD,
-            engine_id="phoneme-align",
+            runtime="phoneme-align",
         )
         assert out.alignment_confidence == 0.92
         assert out.unaligned_ratio == 0.05
@@ -498,7 +498,7 @@ class TestAlignOutput:
             text="Hello",
             language="xx",
             word_timestamps=False,
-            engine_id="phoneme-align",
+            runtime="phoneme-align",
             skipped=True,
             skip_reason="No alignment model for language 'xx'",
             warnings=["No alignment model for language 'xx'"],
@@ -520,7 +520,7 @@ class TestDiarizeOutput:
             ],
             speakers=["SPEAKER_00", "SPEAKER_01"],
             num_speakers=2,
-            engine_id="pyannote-4.0",
+            runtime="pyannote-4.0",
         )
         assert out.num_speakers == 2
         assert len(out.turns) == 2
@@ -542,7 +542,7 @@ class TestDiarizeOutput:
             num_speakers=2,
             overlap_duration=0.5,
             overlap_ratio=0.05,
-            engine_id="pyannote-4.0",
+            runtime="pyannote-4.0",
         )
         assert out.overlap_duration == 0.5
         assert out.overlap_ratio == 0.05
@@ -686,7 +686,7 @@ class TestModelSerialization:
             text="Hello",
             language="en",
             timestamp_granularity_actual=TimestampGranularity.WORD,
-            engine_id="test",
+            runtime="test",
         )
         data = out.model_dump(mode="json")
         assert data["language"] == "en"
@@ -699,7 +699,7 @@ class TestModelSerialization:
             turns=[SpeakerTurn(speaker="SPEAKER_00", start=0.0, end=5.0)],
             speakers=["SPEAKER_00"],
             num_speakers=1,
-            engine_id="test",
+            runtime="test",
         )
         data = out.model_dump(mode="json")
         assert data["num_speakers"] == 1
@@ -727,7 +727,7 @@ class TestModelValidation:
                 turns=[],
                 speakers=[],
                 num_speakers=-1,
-                engine_id="test",
+                runtime="test",
             )
 
     def test_audio_media_sample_rate_positive(self):
