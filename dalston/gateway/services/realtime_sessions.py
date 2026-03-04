@@ -353,27 +353,25 @@ class RealtimeSessionService:
 
         # Apply cursor filter
         if cursor:
-            decoded = self._decode_session_cursor(cursor)
-            if decoded:
-                cursor_started_at, cursor_id = decoded
-                if sort == "started_asc":
-                    # Get sessions started after cursor OR same time but with larger ID
-                    stmt = stmt.where(
-                        (RealtimeSessionModel.started_at > cursor_started_at)
-                        | (
-                            (RealtimeSessionModel.started_at == cursor_started_at)
-                            & (RealtimeSessionModel.id > cursor_id)
-                        )
+            cursor_started_at, cursor_id = self._decode_session_cursor(cursor)
+            if sort == "started_asc":
+                # Get sessions started after cursor OR same time but with larger ID
+                stmt = stmt.where(
+                    (RealtimeSessionModel.started_at > cursor_started_at)
+                    | (
+                        (RealtimeSessionModel.started_at == cursor_started_at)
+                        & (RealtimeSessionModel.id > cursor_id)
                     )
-                else:
-                    # Get sessions started before cursor OR same time but with smaller ID
-                    stmt = stmt.where(
-                        (RealtimeSessionModel.started_at < cursor_started_at)
-                        | (
-                            (RealtimeSessionModel.started_at == cursor_started_at)
-                            & (RealtimeSessionModel.id < cursor_id)
-                        )
+                )
+            else:
+                # Get sessions started before cursor OR same time but with smaller ID
+                stmt = stmt.where(
+                    (RealtimeSessionModel.started_at < cursor_started_at)
+                    | (
+                        (RealtimeSessionModel.started_at == cursor_started_at)
+                        & (RealtimeSessionModel.id < cursor_id)
                     )
+                )
 
         # Fetch limit + 1 to determine has_more
         if sort == "started_asc":
@@ -401,17 +399,18 @@ class RealtimeSessionService:
         """Encode a cursor from a session's started_at and id."""
         return f"{session.started_at.isoformat()}:{session.id}"
 
-    def _decode_session_cursor(self, cursor: str) -> tuple[datetime, UUID] | None:
-        """Decode a cursor into started_at and id."""
-        try:
-            parts = cursor.rsplit(":", 1)
-            if len(parts) != 2:
-                return None
-            started_at = datetime.fromisoformat(parts[0])
-            session_id = UUID(parts[1])
-            return started_at, session_id
-        except (ValueError, TypeError):
-            return None
+    def _decode_session_cursor(self, cursor: str) -> tuple[datetime, UUID]:
+        """Decode a cursor into started_at and id.
+
+        Raises:
+            ValueError: If the cursor format is invalid.
+        """
+        parts = cursor.rsplit(":", 1)
+        if len(parts) != 2:
+            raise ValueError("Invalid cursor format")
+        started_at = datetime.fromisoformat(parts[0])
+        session_id = UUID(parts[1])
+        return started_at, session_id
 
     async def delete_session(
         self,

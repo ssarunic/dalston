@@ -431,15 +431,22 @@ async def list_webhook_deliveries(
     if endpoint is None:
         raise HTTPException(status_code=404, detail="Webhook endpoint not found")
 
-    deliveries, has_more = await service.list_deliveries(
-        db=db,
-        endpoint_id=endpoint_id,
-        tenant_id=principal.tenant_id,
-        status=status,
-        limit=limit,
-        cursor=cursor,
-        sort=sort,
-    )
+    try:
+        deliveries, has_more = await service.list_deliveries(
+            db=db,
+            endpoint_id=endpoint_id,
+            tenant_id=principal.tenant_id,
+            status=status,
+            limit=limit,
+            cursor=cursor,
+            sort=sort,
+        )
+    except ValueError as e:
+        if "cursor" in str(e).lower():
+            raise HTTPException(
+                status_code=400, detail="Invalid cursor format"
+            ) from None
+        raise
 
     # Compute next cursor from last delivery
     next_cursor = (

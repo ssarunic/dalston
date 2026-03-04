@@ -145,16 +145,23 @@ async def list_realtime_sessions(
     settings = get_settings()
     service = RealtimeSessionService(db, settings)
 
-    sessions, has_more = await service.list_sessions_authorized(
-        principal=principal,
-        security_manager=security_manager,
-        status=status,
-        since=since_dt,
-        until=until_dt,
-        limit=limit,
-        cursor=cursor,
-        sort=sort,
-    )
+    try:
+        sessions, has_more = await service.list_sessions_authorized(
+            principal=principal,
+            security_manager=security_manager,
+            status=status,
+            since=since_dt,
+            until=until_dt,
+            limit=limit,
+            cursor=cursor,
+            sort=sort,
+        )
+    except ValueError as e:
+        if "cursor" in str(e).lower():
+            raise HTTPException(
+                status_code=400, detail="Invalid cursor format"
+            ) from None
+        raise
 
     # Compute next cursor from last session
     next_cursor = (

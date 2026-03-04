@@ -622,14 +622,21 @@ async def list_transcriptions(
     jobs_service: JobsService = Depends(get_jobs_service),
 ) -> JobListResponse:
     """List jobs for the current tenant with cursor-based pagination."""
-    jobs, has_more = await jobs_service.list_jobs_authorized(
-        db=db,
-        principal=principal,
-        security_manager=security_manager,
-        limit=limit,
-        cursor=cursor,
-        status=status,
-    )
+    try:
+        jobs, has_more = await jobs_service.list_jobs_authorized(
+            db=db,
+            principal=principal,
+            security_manager=security_manager,
+            limit=limit,
+            cursor=cursor,
+            status=status,
+        )
+    except ValueError as e:
+        if "cursor" in str(e).lower():
+            raise HTTPException(
+                status_code=400, detail="Invalid cursor format"
+            ) from None
+        raise
 
     # Compute next cursor from last job
     next_cursor = (
