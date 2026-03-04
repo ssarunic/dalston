@@ -24,7 +24,7 @@ class TestBuildTaskDagModelSelection:
         return "s3://test-bucket/audio/test.wav"
 
     def test_default_model_config(self, job_id: UUID, audio_uri: str):
-        """Test that default model config is used when no model specified.
+        """Test that default config is used when no model specified.
 
         M36: With runtime model management, the default engine (faster-whisper-large-v3-turbo)
         is resolved to its runtime (faster-whisper).
@@ -37,7 +37,15 @@ class TestBuildTaskDagModelSelection:
         # M36: engine_id should be the runtime
         # Default engine faster-whisper-large-v3-turbo maps to faster-whisper runtime
         assert transcribe_task.engine_id == "faster-whisper"
-        assert transcribe_task.config["model"] == DEFAULT_TRANSCRIBE_CONFIG["model"]
+        # Default config values are applied
+        assert (
+            transcribe_task.config["beam_size"]
+            == DEFAULT_TRANSCRIBE_CONFIG["beam_size"]
+        )
+        assert (
+            transcribe_task.config["vad_filter"]
+            == DEFAULT_TRANSCRIBE_CONFIG["vad_filter"]
+        )
 
     def test_transcribe_config_from_parameters(self, job_id: UUID, audio_uri: str):
         """Test that transcribe_config from parameters is used."""
