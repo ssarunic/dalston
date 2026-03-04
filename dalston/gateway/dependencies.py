@@ -266,9 +266,13 @@ async def get_rate_limiter(
         _rate_limiter._max_concurrent_sessions = await svc.get_effective_value(
             db, "rate_limits", "concurrent_sessions"
         )
+    except (OSError, TimeoutError) as e:
+        # Transient errors (network, timeout) - keep existing limits
+        logger.warning("failed_to_refresh_rate_limits", error=str(e))
     except Exception:
-        # If settings service fails, keep existing limits
-        logger.warning("failed_to_refresh_rate_limits", exc_info=True)
+        # Unexpected error (likely a bug) - re-raise to fail the request
+        logger.error("failed_to_refresh_rate_limits", exc_info=True)
+        raise
 
     return _rate_limiter
 

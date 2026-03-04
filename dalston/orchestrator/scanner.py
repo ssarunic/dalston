@@ -84,6 +84,7 @@ class StaleTaskScanner:
         self._task: asyncio.Task | None = None
         self._instance_id = instance_id or f"{os.uname().nodename}:{os.getpid()}"
         self._is_leader = False
+        self._consecutive_errors = 0
 
     async def start(self) -> None:
         """Start the scanner background task."""
@@ -194,6 +195,7 @@ class StaleTaskScanner:
 
                     # Run the scan as leader
                     await self._scan()
+                    self._consecutive_errors = 0
 
                     # Release lock after scan (allow other instances to take over)
                     await self._release_leader_lock()
@@ -211,10 +213,21 @@ class StaleTaskScanner:
             except asyncio.CancelledError:
                 break
             except Exception:
-                logger.error("stale_task_scan_error", exc_info=True)
+                self._consecutive_errors += 1
+                logger.error(
+                    "stale_task_scan_error",
+                    exc_info=True,
+                    consecutive_errors=self._consecutive_errors,
+                )
                 dalston.metrics.inc_orchestrator_scanner_scans("error")
-                # Continue running despite errors
                 self._is_leader = False
+                if self._consecutive_errors >= 5:
+                    logger.critical(
+                        "scanner_circuit_breaker_tripped",
+                        consecutive_errors=self._consecutive_errors,
+                        instance_id=self._instance_id,
+                    )
+                    raise
 
     async def _scan(self) -> None:
         """Perform one scan of all streams for stale tasks."""

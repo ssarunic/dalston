@@ -95,6 +95,7 @@ class ReconciliationSweeper:
         self._task: asyncio.Task | None = None
         self._instance_id = instance_id or f"{os.uname().nodename}:{os.getpid()}"
         self._is_leader = False
+        self._consecutive_errors = 0
 
     async def start(self) -> None:
         """Start the reconciliation sweeper."""
@@ -163,6 +164,7 @@ class ReconciliationSweeper:
                         self._is_leader = True
 
                     await self._reconcile()
+                    self._consecutive_errors = 0
 
                     await self._release_leader_lock()
                     self._is_leader = False
@@ -177,8 +179,20 @@ class ReconciliationSweeper:
             except asyncio.CancelledError:
                 break
             except Exception:
-                logger.error("reconciliation_error", exc_info=True)
+                self._consecutive_errors += 1
+                logger.error(
+                    "reconciliation_error",
+                    exc_info=True,
+                    consecutive_errors=self._consecutive_errors,
+                )
                 self._is_leader = False
+                if self._consecutive_errors >= 5:
+                    logger.critical(
+                        "reconciler_circuit_breaker_tripped",
+                        consecutive_errors=self._consecutive_errors,
+                        instance_id=self._instance_id,
+                    )
+                    raise
 
     async def _reconcile(self) -> None:
         """Perform one reconciliation pass."""
