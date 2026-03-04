@@ -411,7 +411,7 @@ async def realtime_transcription(
 
         log = logger.bind(
             session_id=allocation.session_id,
-            worker_id=allocation.worker_id,
+            instance=allocation.instance,
             client_ip=client_ip,
         )
         log.info("session_allocated")
@@ -457,7 +457,7 @@ async def realtime_transcription(
                 await session_service.create_session(
                     session_id=allocation.session_id,
                     tenant_id=api_key.tenant_id,
-                    worker_id=allocation.worker_id,
+                    instance=allocation.instance,
                     client_ip=client_ip,
                     language=language,
                     model=model,
@@ -766,7 +766,7 @@ async def elevenlabs_realtime_transcription(
 
         log = logger.bind(
             session_id=allocation.session_id,
-            worker_id=allocation.worker_id,
+            instance=allocation.instance,
             client_ip=client_ip,
             protocol="elevenlabs",
         )

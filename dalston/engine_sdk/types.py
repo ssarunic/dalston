@@ -28,7 +28,7 @@ class EngineCapabilities(BaseModel):
     - Routing: (future) Select best engine for a given job
 
     Attributes:
-        engine_id: Unique engine identifier (e.g., "parakeet", "faster-whisper")
+        runtime: The inference framework (e.g., "faster-whisper", "parakeet")
         version: Engine version string
         stages: Pipeline stages this engine handles (e.g., ["transcribe"])
         languages: ISO 639-1 codes supported, None means all languages
@@ -43,13 +43,9 @@ class EngineCapabilities(BaseModel):
         rtf_cpu: Real-time factor on CPU (M30)
         max_concurrency: Max concurrent sessions (realtime engines only; batch engines use horizontal scaling)
         includes_diarization: Whether output includes speaker labels (M31)
-        runtime: Runtime engine identifier for model swapping (M36).
-                 For transcription engines: "nemo", "faster-whisper".
-                 For utility engines: same as engine_id.
-                 The orchestrator uses this to route to any engine of the same runtime.
     """
 
-    engine_id: str
+    runtime: str
     version: str
     stages: list[str]
     languages: list[str] | None = None
@@ -66,8 +62,6 @@ class EngineCapabilities(BaseModel):
     max_concurrency: int | None = None
     # M31: Capability-driven routing - output includes speaker labels (skip diarize stage)
     includes_diarization: bool = False
-    # M36: Runtime model management - identifies which runtime can load this model
-    runtime: str | None = None
 
 
 @dataclass

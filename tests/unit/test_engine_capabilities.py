@@ -35,12 +35,12 @@ class TestEngineCapabilities:
     def test_create_minimal(self):
         """Test creating capabilities with minimal fields."""
         caps = EngineCapabilities(
-            engine_id="test-engine",
+            runtime="test-engine",
             version="1.0.0",
             stages=["transcribe"],
         )
 
-        assert caps.engine_id == "test-engine"
+        assert caps.runtime == "test-engine"
         assert caps.version == "1.0.0"
         assert caps.stages == ["transcribe"]
         assert caps.languages is None
@@ -51,7 +51,7 @@ class TestEngineCapabilities:
     def test_create_full(self):
         """Test creating capabilities with all fields."""
         caps = EngineCapabilities(
-            engine_id="parakeet",
+            runtime="parakeet",
             version="1.0.0",
             stages=["transcribe"],
             languages=["en"],
@@ -62,7 +62,7 @@ class TestEngineCapabilities:
             gpu_vram_mb=4000,
         )
 
-        assert caps.engine_id == "parakeet"
+        assert caps.runtime == "parakeet"
         assert caps.languages == ["en"]
         assert caps.supports_word_timestamps is True
         assert caps.model_variants == ["tdt-110m", "rnnt-1.1b"]
@@ -72,7 +72,7 @@ class TestEngineCapabilities:
     def test_serialize_json(self):
         """Test serializing capabilities to JSON."""
         caps = EngineCapabilities(
-            engine_id="test",
+            runtime="test",
             version="1.0.0",
             stages=["transcribe"],
             languages=["en", "de"],
@@ -81,16 +81,16 @@ class TestEngineCapabilities:
         json_str = caps.model_dump_json()
         parsed = json.loads(json_str)
 
-        assert parsed["engine_id"] == "test"
+        assert parsed["runtime"] == "test"
         assert parsed["languages"] == ["en", "de"]
 
     def test_deserialize_json(self):
         """Test deserializing capabilities from JSON."""
-        json_str = '{"engine_id":"test","version":"1.0.0","stages":["transcribe"],"languages":["en"]}'
+        json_str = '{"runtime":"test","version":"1.0.0","stages":["transcribe"],"languages":["en"]}'
 
         caps = EngineCapabilities.model_validate_json(json_str)
 
-        assert caps.engine_id == "test"
+        assert caps.runtime == "test"
         assert caps.languages == ["en"]
 
 
@@ -120,7 +120,7 @@ class TestEngineGetCapabilities:
 
             def get_capabilities(self) -> EngineCapabilities:
                 return EngineCapabilities(
-                    engine_id="custom",
+                    runtime="custom",
                     version="2.0.0",
                     stages=["transcribe"],
                     languages=["en", "de"],
@@ -132,7 +132,7 @@ class TestEngineGetCapabilities:
         engine = CustomEngine()
         caps = engine.get_capabilities()
 
-        assert caps.engine_id == "custom"
+        assert caps.runtime == "custom"
         assert caps.version == "2.0.0"
         assert caps.languages == ["en", "de"]
         assert caps.supports_word_timestamps is True
@@ -160,14 +160,14 @@ class TestRegistryWithCapabilities:
     def test_register_with_capabilities(self, registry, mock_redis):
         """Test registration includes capabilities."""
         caps = EngineCapabilities(
-            engine_id="test",
+            runtime="test",
             version="1.0.0",
             stages=["transcribe"],
             languages=["en"],
         )
 
         info = BatchEngineInfo(
-            engine_id="test",
+            runtime="test",
             instance_id="test-abc123def456",
             stage="transcribe",
             stream_name="dalston:stream:test",
@@ -181,13 +181,13 @@ class TestRegistryWithCapabilities:
         assert "capabilities" in mapping
         # Parse the stored JSON to verify
         stored_caps = json.loads(mapping["capabilities"])
-        assert stored_caps["engine_id"] == "test"
+        assert stored_caps["runtime"] == "test"
         assert stored_caps["languages"] == ["en"]
 
     def test_heartbeat_with_capabilities(self, registry, mock_redis):
         """Test heartbeat can include capabilities."""
         caps = EngineCapabilities(
-            engine_id="test",
+            runtime="test",
             version="1.0.0",
             stages=["transcribe"],
         )
@@ -213,14 +213,14 @@ class TestBatchEngineStateWithCapabilities:
     def test_supports_language_with_capabilities(self):
         """Test language support check with capabilities."""
         caps = EngineCapabilities(
-            engine_id="test",
+            runtime="test",
             version="1.0.0",
             stages=["transcribe"],
             languages=["en", "de"],
         )
 
         state = BatchEngineState(
-            engine_id="test",
+            runtime="test",
             instance_id="test-abc123",
             stage="transcribe",
             stream_name="dalston:stream:test",
@@ -238,14 +238,14 @@ class TestBatchEngineStateWithCapabilities:
     def test_supports_language_case_insensitive(self):
         """Test language support is case insensitive."""
         caps = EngineCapabilities(
-            engine_id="test",
+            runtime="test",
             version="1.0.0",
             stages=["transcribe"],
             languages=["EN", "De"],
         )
 
         state = BatchEngineState(
-            engine_id="test",
+            runtime="test",
             instance_id="test-abc123",
             stage="transcribe",
             stream_name="dalston:stream:test",
@@ -262,14 +262,14 @@ class TestBatchEngineStateWithCapabilities:
     def test_supports_language_null_means_all(self):
         """Test that languages=null means all languages supported."""
         caps = EngineCapabilities(
-            engine_id="test",
+            runtime="test",
             version="1.0.0",
             stages=["transcribe"],
             languages=None,  # All languages
         )
 
         state = BatchEngineState(
-            engine_id="test",
+            runtime="test",
             instance_id="test-abc123",
             stage="transcribe",
             stream_name="dalston:stream:test",
@@ -287,7 +287,7 @@ class TestBatchEngineStateWithCapabilities:
     def test_supports_language_no_capabilities(self):
         """Test backward compatibility - no capabilities means all supported."""
         state = BatchEngineState(
-            engine_id="test",
+            runtime="test",
             instance_id="test-abc123",
             stage="transcribe",
             stream_name="dalston:stream:test",
@@ -388,7 +388,7 @@ class TestEngineCatalog:
         entry = catalog.get_engine("parakeet")
 
         assert entry is not None
-        assert entry.engine_id == "parakeet"
+        assert entry.runtime == "parakeet"
         assert entry.image == "dalston/parakeet:latest"
         assert entry.capabilities.languages == ["en"]
         assert entry.capabilities.supports_word_timestamps is True
@@ -408,7 +408,7 @@ class TestEngineCatalog:
         transcribers = catalog.get_engines_for_stage("transcribe")
 
         assert len(transcribers) == 2
-        engine_ids = {e.engine_id for e in transcribers}
+        engine_ids = {e.runtime for e in transcribers}
         assert engine_ids == {"parakeet", "faster-whisper"}
 
     def test_find_engines_supporting_language(self, catalog_json):
@@ -422,7 +422,7 @@ class TestEngineCatalog:
         # Croatian - only faster-whisper (null=all)
         hr_engines = catalog.find_engines_supporting_language("transcribe", "hr")
         assert len(hr_engines) == 1
-        assert hr_engines[0].engine_id == "faster-whisper"
+        assert hr_engines[0].runtime == "faster-whisper"
 
     def test_validate_language_support_ok(self, catalog_json):
         """Test validation passes for supported language."""
@@ -469,13 +469,13 @@ class TestExceptions:
         """Test EngineCapabilityError attributes."""
         error = EngineCapabilityError(
             "Engine 'parakeet' does not support 'hr'",
-            engine_id="parakeet",
+            runtime="parakeet",
             stage="transcribe",
             language="hr",
         )
 
         assert str(error) == "Engine 'parakeet' does not support 'hr'"
-        assert error.engine_id == "parakeet"
+        assert error.runtime == "parakeet"
         assert error.stage == "transcribe"
         assert error.language == "hr"
 
@@ -499,7 +499,7 @@ class TestServerRegistryCapabilities:
         now = datetime.now(UTC).isoformat()
         caps_json = json.dumps(
             {
-                "engine_id": "parakeet",
+                "runtime": "parakeet",
                 "version": "1.0.0",
                 "stages": ["transcribe"],
                 "languages": ["en"],
@@ -514,7 +514,7 @@ class TestServerRegistryCapabilities:
         # Server registry now queries instance set first, then hgetall for instance
         mock_redis.smembers.return_value = {"parakeet-abc123"}
         mock_redis.hgetall.return_value = {
-            "engine_id": "parakeet",
+            "runtime": "parakeet",
             "instance_id": "parakeet-abc123",
             "stage": "transcribe",
             "stream_name": "dalston:stream:parakeet",
@@ -529,7 +529,7 @@ class TestServerRegistryCapabilities:
 
         assert engine is not None
         assert engine.capabilities is not None
-        assert engine.capabilities.engine_id == "parakeet"
+        assert engine.capabilities.runtime == "parakeet"
         assert engine.capabilities.languages == ["en"]
         assert engine.capabilities.supports_word_timestamps is True
         assert engine.capabilities.gpu_vram_mb == 4000
@@ -541,7 +541,7 @@ class TestServerRegistryCapabilities:
 
         mock_redis.smembers.return_value = {"old-engine-abc123"}
         mock_redis.hgetall.return_value = {
-            "engine_id": "old-engine",
+            "runtime": "old-engine",
             "instance_id": "old-engine-abc123",
             "stage": "transcribe",
             "stream_name": "dalston:stream:old-engine",
@@ -566,7 +566,7 @@ class TestServerRegistryCapabilities:
 
         mock_redis.smembers.return_value = {"bad-engine-abc123"}
         mock_redis.hgetall.return_value = {
-            "engine_id": "bad-engine",
+            "runtime": "bad-engine",
             "instance_id": "bad-engine-abc123",
             "stage": "transcribe",
             "stream_name": "dalston:stream:bad-engine",

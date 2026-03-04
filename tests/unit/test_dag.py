@@ -36,7 +36,7 @@ class TestBuildTaskDagModelSelection:
 
         # M36: engine_id should be the runtime
         # Default engine faster-whisper-large-v3-turbo maps to faster-whisper runtime
-        assert transcribe_task.engine_id == "faster-whisper"
+        assert transcribe_task.runtime == "faster-whisper"
         # Default config values are applied
         assert (
             transcribe_task.config["beam_size"]
@@ -69,7 +69,7 @@ class TestBuildTaskDagModelSelection:
         tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
-        assert transcribe_task.engine_id == "custom-engine"
+        assert transcribe_task.runtime == "custom-engine"
 
     def test_model_registry_integration(self, job_id: UUID, audio_uri: str):
         """Test parameters as they would be passed from gateway with model registry."""
@@ -86,7 +86,7 @@ class TestBuildTaskDagModelSelection:
         tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
-        assert transcribe_task.engine_id == "faster-whisper"
+        assert transcribe_task.runtime == "faster-whisper"
         assert transcribe_task.config["model"] == "base"
         assert transcribe_task.config["language"] == "en"
 
@@ -303,7 +303,7 @@ class TestBuildTaskDagNemo:
 
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
         # M36: engine_id is the runtime, not the model ID
-        assert transcribe_task.engine_id == "nemo"
+        assert transcribe_task.runtime == "nemo"
         # runtime_model_id tells the engine which specific model to load
         assert transcribe_task.config["runtime_model_id"] == "nvidia/parakeet-tdt-1.1b"
 

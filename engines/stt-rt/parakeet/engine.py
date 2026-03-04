@@ -330,8 +330,8 @@ class ParakeetStreamingEngine(RealtimeEngine):
         """
         return ["en"]
 
-    def get_engine(self) -> str:
-        """Return engine type identifier."""
+    def get_runtime(self) -> str:
+        """Return the inference framework identifier."""
         return "nemo"
 
     def get_supports_vocabulary(self) -> bool:

@@ -17,9 +17,9 @@ from dalston.common.streams_types import PendingTask
 class TestEngineRunnerInstanceId:
     """Tests for engine runner instance-unique consumer ID generation."""
 
-    def test_generates_unique_instance_id(self):
-        """Test that each EngineRunner generates a unique instance_id."""
-        with patch.dict("os.environ", {"DALSTON_ENGINE_ID": "whisper-cpu"}):
+    def test_generates_unique_instance(self):
+        """Test that each EngineRunner generates a unique instance."""
+        with patch.dict("os.environ", {"DALSTON_RUNTIME": "whisper-cpu"}):
             from dalston.engine_sdk.runner import EngineRunner
 
             mock_engine = MagicMock()
@@ -30,17 +30,17 @@ class TestEngineRunnerInstanceId:
             runner2 = EngineRunner(mock_engine)
 
             # Both should have the same logical engine_id
-            assert runner1.engine_id == "whisper-cpu"
-            assert runner2.engine_id == "whisper-cpu"
+            assert runner1.runtime == "whisper-cpu"
+            assert runner2.runtime == "whisper-cpu"
 
-            # But different instance_ids
-            assert runner1.instance_id != runner2.instance_id
-            assert runner1.instance_id.startswith("whisper-cpu-")
-            assert runner2.instance_id.startswith("whisper-cpu-")
+            # But different instances
+            assert runner1.instance != runner2.instance
+            assert runner1.instance.startswith("whisper-cpu-")
+            assert runner2.instance.startswith("whisper-cpu-")
 
-    def test_instance_id_is_12_char_hex_suffix(self):
-        """Test that instance_id has expected format."""
-        with patch.dict("os.environ", {"DALSTON_ENGINE_ID": "faster-whisper"}):
+    def test_instance_is_12_char_hex_suffix(self):
+        """Test that instance has expected format."""
+        with patch.dict("os.environ", {"DALSTON_RUNTIME": "faster-whisper"}):
             from dalston.engine_sdk.runner import EngineRunner
 
             mock_engine = MagicMock()
@@ -50,8 +50,8 @@ class TestEngineRunnerInstanceId:
 
             # Format: {engine_id}-{12_char_hex}
             # engine_id may contain hyphens, so extract suffix by removing prefix
-            assert runner.instance_id.startswith("faster-whisper-")
-            suffix = runner.instance_id.replace("faster-whisper-", "")
+            assert runner.instance.startswith("faster-whisper-")
+            suffix = runner.instance.replace("faster-whisper-", "")
             assert len(suffix) == 12
             int(suffix, 16)  # Should not raise - valid hex
 
@@ -517,8 +517,8 @@ class TestIsEngineAlive:
 
         # Fresh heartbeat
         mock_redis.hgetall.return_value = {
-            "engine_id": "whisper-cpu",
-            "instance_id": "whisper-cpu-aliveinst01",
+            "runtime": "whisper-cpu",
+            "instance": "whisper-cpu-aliveinst01",
             "status": "idle",
             "last_heartbeat": datetime.now(UTC).isoformat(),
         }
@@ -531,8 +531,8 @@ class TestIsEngineAlive:
         """Test that new instance heartbeating doesn't mask old instance's death.
 
         This is the key scenario: spot instance replaced with same ENGINE_ID.
-        Old tasks are owned by old instance_id. New instance heartbeats under
-        new instance_id. Checking old instance_id should return False.
+        Old tasks are owned by old instance. New instance heartbeats under
+        new instance. Checking old instance should return False.
         """
         from dalston.common.streams_sync import is_engine_alive
 
@@ -545,8 +545,8 @@ class TestIsEngineAlive:
                 return {}  # Old instance has no heartbeat
             elif "newinst02" in key:
                 return {
-                    "engine_id": "whisper-cpu",
-                    "instance_id": "whisper-cpu-newinst02",
+                    "runtime": "whisper-cpu",
+                    "instance": "whisper-cpu-newinst02",
                     "status": "idle",
                     "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
@@ -577,7 +577,7 @@ class TestStaleEngineCleanup:
 
     @pytest.mark.asyncio
     async def test_cleans_stale_instance_from_set(self, mock_redis, mock_settings):
-        """Test cleanup removes stale instance_ids from instance set."""
+        """Test cleanup removes stale instances from instance set."""
         from dalston.orchestrator.reconciler import ReconciliationSweeper
 
         sweeper = ReconciliationSweeper(
@@ -745,7 +745,7 @@ class TestHandleTaskCompletedReplaySafety:
         mock_task.job_id = job_id
         mock_task.stage = "transcribe"
         mock_task.status = TaskStatus.COMPLETED.value  # Already completed
-        mock_task.engine_id = "faster-whisper"
+        mock_task.runtime = "faster-whisper"
 
         # Dependent task that should be queued
         mock_dependent = MagicMock()
@@ -755,7 +755,7 @@ class TestHandleTaskCompletedReplaySafety:
         mock_dependent.status = TaskStatus.PENDING.value
         mock_dependent.dependencies = [task_id]
         mock_dependent.input_uri = None
-        mock_dependent.engine_id = "final-merger"
+        mock_dependent.runtime = "final-merger"
         mock_dependent.config = {}
         mock_dependent.output_uri = "s3://bucket/output.json"
         mock_dependent.required = True
@@ -825,7 +825,7 @@ class TestHandleTaskCompletedReplaySafety:
         mock_task.job_id = job_id
         mock_task.stage = "transcribe"
         mock_task.status = TaskStatus.COMPLETED.value  # Already completed
-        mock_task.engine_id = "faster-whisper"
+        mock_task.runtime = "faster-whisper"
 
         mock_job = MagicMock()
         mock_job.id = job_id
@@ -912,7 +912,7 @@ class TestHandleTaskFailedIdempotency:
         mock_task.retries = 1  # Already incremented by first failure
         mock_task.max_retries = 3
         mock_task.dependencies = []
-        mock_task.engine_id = "faster-whisper"
+        mock_task.runtime = "faster-whisper"
         mock_task.config = {}
         mock_task.input_uri = "s3://bucket/input.wav"
         mock_task.output_uri = "s3://bucket/output.json"
@@ -1179,7 +1179,7 @@ class TestHandleTaskFailedIdempotency:
         mock_task.max_retries = 3
         mock_task.dependencies = []
         # Additional fields needed for Pydantic Task validation
-        mock_task.engine_id = "faster-whisper"
+        mock_task.runtime = "faster-whisper"
         mock_task.config = {}
         mock_task.input_uri = "s3://bucket/input.wav"
         mock_task.output_uri = "s3://bucket/output.json"
@@ -1216,10 +1216,10 @@ class TestHandleTaskFailedIdempotency:
 
 
 class TestBatchEngineRegistry:
-    """Tests for BatchEngineRegistry with instance_id support."""
+    """Tests for BatchEngineRegistry with instance support."""
 
-    def test_register_uses_instance_id_for_key(self):
-        """Test that registration uses instance_id for Redis key."""
+    def test_register_uses_instance_for_key(self):
+        """Test that registration uses instance for Redis key."""
         from dalston.engine_sdk.registry import BatchEngineInfo, BatchEngineRegistry
 
         mock_redis = MagicMock()
@@ -1228,23 +1228,23 @@ class TestBatchEngineRegistry:
             registry = BatchEngineRegistry("redis://localhost:6379")
 
             info = BatchEngineInfo(
-                engine_id="whisper-cpu",
-                instance_id="whisper-cpu-abc123def456",
+                runtime="whisper-cpu",
+                instance="whisper-cpu-abc123def456",
                 stage="transcribe",
                 stream_name="dalston:stream:whisper-cpu",
             )
 
             registry.register(info)
 
-            # Verify Redis key includes instance_id
+            # Verify Redis key includes instance
             mock_redis.hset.assert_called_once()
             call_args = mock_redis.hset.call_args
             key = call_args[0][0]
             assert "whisper-cpu-abc123def456" in key
             assert "dalston:batch:engine:" in key
 
-    def test_heartbeat_uses_instance_id_for_key(self):
-        """Test that heartbeat uses instance_id for Redis key."""
+    def test_heartbeat_uses_instance_for_key(self):
+        """Test that heartbeat uses instance for Redis key."""
         from dalston.engine_sdk.registry import BatchEngineInfo, BatchEngineRegistry
 
         mock_redis = MagicMock()
@@ -1255,8 +1255,8 @@ class TestBatchEngineRegistry:
 
             # First register to populate cache
             info = BatchEngineInfo(
-                engine_id="whisper-cpu",
-                instance_id="whisper-cpu-abc123def456",
+                runtime="whisper-cpu",
+                instance="whisper-cpu-abc123def456",
                 stage="transcribe",
                 stream_name="dalston:stream:whisper-cpu",
             )
@@ -1265,11 +1265,11 @@ class TestBatchEngineRegistry:
 
             # Now send heartbeat
             registry.heartbeat(
-                instance_id="whisper-cpu-abc123def456",
+                instance="whisper-cpu-abc123def456",
                 status="idle",
             )
 
-            # Verify key includes instance_id
+            # Verify key includes instance
             mock_redis.hset.assert_called_once()
             mock_redis.expire.assert_called_once()
             call_args = mock_redis.expire.call_args

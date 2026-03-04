@@ -545,8 +545,8 @@ export function TaskDetail() {
             </div>
           </div>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1 truncate">
-            <span className="sm:hidden">Engine: {artifact.engine_id}</span>
-            <span className="hidden sm:inline">Engine: {artifact.engine_id} | Task: {artifact.task_id}</span>
+            <span className="sm:hidden">Runtime: {artifact.runtime}</span>
+            <span className="hidden sm:inline">Runtime: {artifact.runtime} | Task: {artifact.task_id}</span>
           </p>
         </div>
       </div>

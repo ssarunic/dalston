@@ -24,7 +24,7 @@ from dalston.orchestrator.registry import BatchEngineState
 
 
 def make_capabilities(
-    engine_id: str,
+    runtime: str,
     stage: str = "transcribe",
     languages: list[str] | None = None,
     supports_word_timestamps: bool = False,
@@ -34,7 +34,7 @@ def make_capabilities(
 ) -> EngineCapabilities:
     """Create EngineCapabilities for testing."""
     return EngineCapabilities(
-        engine_id=engine_id,
+        runtime=runtime,
         version="1.0.0",
         stages=[stage],
         languages=languages,
@@ -46,7 +46,7 @@ def make_capabilities(
 
 
 def make_engine_state(
-    engine_id: str,
+    runtime: str,
     stage: str,
     capabilities: EngineCapabilities | None = None,
     is_available: bool = True,
@@ -54,10 +54,10 @@ def make_engine_state(
     """Create BatchEngineState for testing."""
     now = datetime.now(UTC)
     return BatchEngineState(
-        engine_id=engine_id,
-        instance_id=f"{engine_id}-test-instance",
+        runtime=runtime,
+        instance=f"{runtime}-test-instance",
         stage=stage,
-        stream_name=f"dalston:stream:{engine_id}",
+        stream_name=f"dalston:stream:{runtime}",
         status="idle" if is_available else "offline",
         current_task=None,
         last_heartbeat=now,
@@ -67,16 +67,16 @@ def make_engine_state(
 
 
 def make_catalog_entry(
-    engine_id: str,
+    runtime: str,
     stage: str = "transcribe",
     languages: list[str] | None = None,
 ) -> CatalogEntry:
     """Create CatalogEntry for testing."""
     return CatalogEntry(
-        engine_id=engine_id,
-        image=f"dalston/{engine_id}:latest",
+        runtime=runtime,
+        image=f"dalston/{runtime}:latest",
         capabilities=make_capabilities(
-            engine_id=engine_id, stage=stage, languages=languages
+            runtime=runtime, stage=stage, languages=languages
         ),
     )
 
@@ -115,19 +115,19 @@ def create_mock_registry(engine_configs: dict[str, dict]) -> AsyncMock:
     engines_by_stage: dict[str, list[BatchEngineState]] = {}
 
     for stage, config in engine_configs.items():
-        engine_id = config["engine_id"]
+        runtime = config["runtime"]
         caps_config = config.get("capabilities", {})
 
         if isinstance(caps_config, EngineCapabilities):
             caps = caps_config
         else:
             caps = make_capabilities(
-                engine_id=engine_id,
+                runtime=runtime,
                 stage=stage,
                 **caps_config,
             )
 
-        engine = make_engine_state(engine_id, stage, caps)
+        engine = make_engine_state(runtime, stage, caps)
         engines_by_stage.setdefault(stage, []).append(engine)
 
     async def get_engines_for_stage(stage: str):
@@ -153,15 +153,15 @@ class TestDagShapeWithNativeWordTimestamps:
         """Transcriber with native word timestamps -> no align stage."""
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "parakeet",
+                    "runtime": "parakeet",
                     "capabilities": {
                         "supports_word_timestamps": True,
                         "languages": ["en"],
                     },
                 },
-                "merge": {"engine_id": "final-merger"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -187,13 +187,13 @@ class TestDagShapeWithNativeWordTimestamps:
         """Transcriber without native timestamps -> align stage included."""
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "capabilities": {"supports_word_timestamps": False},
                 },
-                "align": {"engine_id": "phoneme-align"},
-                "merge": {"engine_id": "final-merger"},
+                "align": {"runtime": "phoneme-align"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -220,15 +220,15 @@ class TestDagShapeWithNativeDiarization:
         """Transcriber with native diarization -> no diarize stage even if requested."""
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "whisperx-full",
+                    "runtime": "whisperx-full",
                     "capabilities": {
                         "supports_word_timestamps": True,
                         "includes_diarization": True,
                     },
                 },
-                "merge": {"engine_id": "final-merger"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -252,17 +252,17 @@ class TestDagShapeWithNativeDiarization:
         """Transcriber without native diarization -> diarize stage included when requested."""
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "capabilities": {
                         "supports_word_timestamps": False,
                         "includes_diarization": False,
                     },
                 },
-                "align": {"engine_id": "phoneme-align"},
-                "diarize": {"engine_id": "pyannote-4.0"},
-                "merge": {"engine_id": "final-merger"},
+                "align": {"runtime": "phoneme-align"},
+                "diarize": {"runtime": "pyannote-4.0"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -290,13 +290,13 @@ class TestDagShapeWithLanguageRequirements:
         """Engine supporting requested language is selected."""
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "capabilities": {"languages": None},  # Universal
                 },
-                "align": {"engine_id": "phoneme-align"},
-                "merge": {"engine_id": "final-merger"},
+                "align": {"runtime": "phoneme-align"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -309,7 +309,7 @@ class TestDagShapeWithLanguageRequirements:
         )
 
         by_stage = {t.stage: t for t in tasks}
-        assert by_stage["transcribe"].engine_id == "faster-whisper"
+        assert by_stage["transcribe"].runtime == "faster-whisper"
 
     @pytest.mark.asyncio
     async def test_raises_error_when_no_engine_supports_language(
@@ -318,12 +318,12 @@ class TestDagShapeWithLanguageRequirements:
         """NoCapableEngineError raised when no engine supports the language."""
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "parakeet",
+                    "runtime": "parakeet",
                     "capabilities": {"languages": ["en"]},  # English only
                 },
-                "merge": {"engine_id": "final-merger"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -350,12 +350,12 @@ class TestDagWithTimestampGranularity:
         """timestamps_granularity=segment skips alignment even without native timestamps."""
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "capabilities": {"supports_word_timestamps": False},
                 },
-                "merge": {"engine_id": "final-merger"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -377,13 +377,13 @@ class TestDagWithTimestampGranularity:
         """timestamps_granularity=word includes alignment when needed."""
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "capabilities": {"supports_word_timestamps": False},
                 },
-                "align": {"engine_id": "phoneme-align"},
-                "merge": {"engine_id": "final-merger"},
+                "align": {"runtime": "phoneme-align"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -409,15 +409,15 @@ class TestDagPerChannelWithCapabilities:
         """per_channel mode with native timestamps skips alignment for all channels."""
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "parakeet",
+                    "runtime": "parakeet",
                     "capabilities": {
                         "supports_word_timestamps": True,
                         "languages": ["en"],
                     },
                 },
-                "merge": {"engine_id": "final-merger"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -443,13 +443,13 @@ class TestDagPerChannelWithCapabilities:
         """per_channel mode without native timestamps includes alignment for all channels."""
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "capabilities": {"supports_word_timestamps": False},
                 },
-                "align": {"engine_id": "phoneme-align"},
-                "merge": {"engine_id": "final-merger"},
+                "align": {"runtime": "phoneme-align"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -521,7 +521,7 @@ class TestEngineRanking:
         )
 
         by_stage = {t.stage: t for t in tasks}
-        assert by_stage["transcribe"].engine_id == "parakeet"
+        assert by_stage["transcribe"].runtime == "parakeet"
         assert "align" not in [t.stage for t in tasks]  # Skipped
 
     @pytest.mark.asyncio
@@ -575,7 +575,7 @@ class TestEngineRanking:
         )
 
         by_stage = {t.stage: t for t in tasks}
-        assert by_stage["transcribe"].engine_id == "parakeet"
+        assert by_stage["transcribe"].runtime == "parakeet"
 
 
 class TestDagDependencies:
@@ -588,13 +588,13 @@ class TestDagDependencies:
         """Merge depends on all prior stages (prepare, transcribe, optional align)."""
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "capabilities": {"supports_word_timestamps": False},
                 },
-                "align": {"engine_id": "phoneme-align"},
-                "merge": {"engine_id": "final-merger"},
+                "align": {"runtime": "phoneme-align"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -618,13 +618,13 @@ class TestDagDependencies:
         """Align stage depends on transcribe."""
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "capabilities": {"supports_word_timestamps": False},
                 },
-                "align": {"engine_id": "phoneme-align"},
-                "merge": {"engine_id": "final-merger"},
+                "align": {"runtime": "phoneme-align"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -646,14 +646,14 @@ class TestDagDependencies:
         """Diarize runs parallel to transcribe, both depend on prepare."""
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "capabilities": {"includes_diarization": False},
                 },
-                "align": {"engine_id": "phoneme-align"},
-                "diarize": {"engine_id": "pyannote-4.0"},
-                "merge": {"engine_id": "final-merger"},
+                "align": {"runtime": "phoneme-align"},
+                "diarize": {"runtime": "pyannote-4.0"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -696,13 +696,13 @@ class TestMergedWavScenarios:
         job_id = uuid4()
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "capabilities": {"languages": None},  # Universal
                 },
-                "align": {"engine_id": "phoneme-align"},
-                "merge": {"engine_id": "final-merger"},
+                "align": {"runtime": "phoneme-align"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -716,7 +716,7 @@ class TestMergedWavScenarios:
         )
 
         by_stage = {t.stage: t for t in tasks}
-        assert by_stage["transcribe"].engine_id == "faster-whisper"
+        assert by_stage["transcribe"].runtime == "faster-whisper"
         assert "align" in [t.stage for t in tasks]  # Alignment included
 
     @pytest.mark.asyncio
@@ -775,7 +775,7 @@ class TestMergedWavScenarios:
 
         by_stage = {t.stage: t for t in tasks}
         # Should prefer parakeet (language-specific + native timestamps)
-        assert by_stage["transcribe"].engine_id == "parakeet"
+        assert by_stage["transcribe"].runtime == "parakeet"
         # Parakeet has native timestamps, so no alignment needed
         assert "align" not in [t.stage for t in tasks]
 
@@ -785,18 +785,18 @@ class TestMergedWavScenarios:
         job_id = uuid4()
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "capabilities": {
                         "languages": None,
                         "supports_word_timestamps": False,
                         "includes_diarization": False,
                     },
                 },
-                "align": {"engine_id": "phoneme-align"},
-                "diarize": {"engine_id": "pyannote-4.0"},
-                "merge": {"engine_id": "final-merger"},
+                "align": {"runtime": "phoneme-align"},
+                "diarize": {"runtime": "pyannote-4.0"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -819,13 +819,13 @@ class TestMergedWavScenarios:
         job_id = uuid4()
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "capabilities": {"languages": None},
                 },
-                "align": {"engine_id": "phoneme-align"},
-                "merge": {"engine_id": "final-merger"},
+                "align": {"runtime": "phoneme-align"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -847,15 +847,15 @@ class TestMergedWavScenarios:
         job_id = uuid4()
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "capabilities": {
                         "languages": None,
                         "supports_word_timestamps": False,
                     },
                 },
-                "merge": {"engine_id": "final-merger"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -887,13 +887,13 @@ class TestPiiCombinedWavScenarios:
         job_id = uuid4()
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "capabilities": {"languages": None},  # Supports all languages
                 },
-                "align": {"engine_id": "phoneme-align"},
-                "merge": {"engine_id": "final-merger"},
+                "align": {"runtime": "phoneme-align"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -906,7 +906,7 @@ class TestPiiCombinedWavScenarios:
         )
 
         by_stage = {t.stage: t for t in tasks}
-        assert by_stage["transcribe"].engine_id == "faster-whisper"
+        assert by_stage["transcribe"].runtime == "faster-whisper"
 
     @pytest.mark.asyncio
     async def test_croatian_rejects_english_only_engine(self, mock_catalog):
@@ -914,12 +914,12 @@ class TestPiiCombinedWavScenarios:
         job_id = uuid4()
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "parakeet",
+                    "runtime": "parakeet",
                     "capabilities": {"languages": ["en"]},  # English only
                 },
-                "merge": {"engine_id": "final-merger"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -951,16 +951,16 @@ class TestStereoSpeakersWavScenarios:
         job_id = uuid4()
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "capabilities": {
                         "languages": None,
                         "supports_word_timestamps": False,
                     },
                 },
-                "align": {"engine_id": "phoneme-align"},
-                "merge": {"engine_id": "final-merger"},
+                "align": {"runtime": "phoneme-align"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -988,15 +988,15 @@ class TestStereoSpeakersWavScenarios:
         job_id = uuid4()
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "parakeet",
+                    "runtime": "parakeet",
                     "capabilities": {
                         "languages": ["en"],
                         "supports_word_timestamps": True,
                     },
                 },
-                "merge": {"engine_id": "final-merger"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -1022,16 +1022,16 @@ class TestStereoSpeakersWavScenarios:
         job_id = uuid4()
         registry = create_mock_registry(
             {
-                "prepare": {"engine_id": "audio-prepare"},
+                "prepare": {"runtime": "audio-prepare"},
                 "transcribe": {
-                    "engine_id": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "capabilities": {
                         "languages": None,
                         "supports_word_timestamps": False,
                     },
                 },
-                "align": {"engine_id": "phoneme-align"},
-                "merge": {"engine_id": "final-merger"},
+                "align": {"runtime": "phoneme-align"},
+                "merge": {"runtime": "final-merger"},
             }
         )
 

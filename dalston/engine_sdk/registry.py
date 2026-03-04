@@ -19,10 +19,10 @@ logger = structlog.get_logger()
 
 
 # Redis key patterns (shared with orchestrator)
-ENGINE_SET_KEY = "dalston:batch:engines"  # Contains logical engine_ids
-ENGINE_KEY_PREFIX = "dalston:batch:engine:"  # Hash key prefix for instance state
-ENGINE_INSTANCES_PREFIX = (
-    "dalston:batch:engine:instances:"  # Set of instances per engine
+RUNTIME_SET_KEY = "dalston:batch:runtimes"  # Contains logical runtime names
+INSTANCE_KEY_PREFIX = "dalston:batch:instance:"  # Hash key prefix for instance state
+RUNTIME_INSTANCES_PREFIX = (
+    "dalston:batch:runtime:instances:"  # Set of instances per runtime
 )
 
 
@@ -31,15 +31,15 @@ class BatchEngineInfo:
     """Batch engine registration information.
 
     Attributes:
-        engine_id: Logical identifier for this engine type (e.g., "faster-whisper")
-        instance_id: Instance-unique identifier (e.g., "faster-whisper-a1b2c3d4e5f6")
+        runtime: The inference framework (e.g., "faster-whisper")
+        instance: Unique instance identifier (e.g., "faster-whisper-a1b2c3d4e5f6")
         stage: Pipeline stage this engine handles (e.g., "transcribe")
         stream_name: Redis stream this engine polls (e.g., "dalston:stream:faster-whisper")
         capabilities: Engine capabilities for validation and routing
     """
 
-    engine_id: str
-    instance_id: str
+    runtime: str
+    instance: str
     stage: str
     stream_name: str
     capabilities: EngineCapabilities | None = None
@@ -102,20 +102,20 @@ class BatchEngineRegistry:
         """Register engine with the registry.
 
         Creates engine entry in Redis with initial state including capabilities.
-        Uses instance_id for Redis key to support spot instance replacement.
+        Uses instance for Redis key to support spot instance replacement.
 
         Args:
             info: Engine registration information
         """
         r = self._get_redis()
-        # Use instance_id for Redis key to ensure uniqueness across spot replacements
-        engine_key = f"{ENGINE_KEY_PREFIX}{info.instance_id}"
+        # Use instance for Redis key to ensure uniqueness across spot replacements
+        instance_key = f"{INSTANCE_KEY_PREFIX}{info.instance}"
         now = datetime.now(UTC).isoformat()
 
         # Build mapping with required fields
         mapping: dict[str, str] = {
-            "engine_id": info.engine_id,  # Logical ID for grouping/metrics
-            "instance_id": info.instance_id,  # Unique instance identifier
+            "runtime": info.runtime,  # Inference framework for grouping/metrics
+            "instance": info.instance,  # Unique instance identifier
             "stage": info.stage,
             "stream_name": info.stream_name,
             "status": "idle",
@@ -128,26 +128,26 @@ class BatchEngineRegistry:
         if info.capabilities is not None:
             mapping["capabilities"] = info.capabilities.model_dump_json()
 
-        # Set engine state
-        r.hset(engine_key, mapping=mapping)
+        # Set instance state
+        r.hset(instance_key, mapping=mapping)
 
-        # Set TTL on engine key
-        r.expire(engine_key, self.HEARTBEAT_TTL)
+        # Set TTL on instance key
+        r.expire(instance_key, self.HEARTBEAT_TTL)
 
-        # Add logical engine_id to main set (for scheduler availability checks)
-        r.sadd(ENGINE_SET_KEY, info.engine_id)
+        # Add runtime to main set (for scheduler availability checks)
+        r.sadd(RUNTIME_SET_KEY, info.runtime)
 
-        # Track this instance under the logical engine
-        instances_key = f"{ENGINE_INSTANCES_PREFIX}{info.engine_id}"
-        r.sadd(instances_key, info.instance_id)
+        # Track this instance under the runtime
+        instances_key = f"{RUNTIME_INSTANCES_PREFIX}{info.runtime}"
+        r.sadd(instances_key, info.instance)
 
         # Store registration info for re-registration after TTL expiration
-        self._registered_engines[info.instance_id] = info
+        self._registered_engines[info.instance] = info
 
         logger.info(
             "batch_engine_registered",
-            engine_id=info.engine_id,
-            instance_id=info.instance_id,
+            runtime=info.runtime,
+            instance=info.instance,
             stage=info.stage,
             stream_name=info.stream_name,
             has_capabilities=info.capabilities is not None,
@@ -155,7 +155,7 @@ class BatchEngineRegistry:
 
     def heartbeat(
         self,
-        instance_id: str,
+        instance: str,
         status: str,
         current_task: str | None = None,
         capabilities: EngineCapabilities | None = None,
@@ -169,7 +169,7 @@ class BatchEngineRegistry:
         fields from stored info.
 
         Args:
-            instance_id: Instance-unique identifier
+            instance: Unique instance identifier
             status: Engine status ("idle" or "processing")
             current_task: Current task ID if processing, None if idle
             capabilities: Engine capabilities (optional, included on first heartbeat)
@@ -178,19 +178,19 @@ class BatchEngineRegistry:
                 Example: {"models": ["model-a"], "total_size_mb": 3500, "model_count": 1}
         """
         r = self._get_redis()
-        engine_key = f"{ENGINE_KEY_PREFIX}{instance_id}"
+        instance_key = f"{INSTANCE_KEY_PREFIX}{instance}"
         now = datetime.now(UTC).isoformat()
 
         # Check if key is missing or incomplete (TTL expired during sleep)
-        existing_data = r.hget(engine_key, "engine_id")
+        existing_data = r.hget(instance_key, "runtime")
         needs_reregistration = existing_data is None
 
-        if needs_reregistration and instance_id in self._registered_engines:
+        if needs_reregistration and instance in self._registered_engines:
             # Re-populate all registration fields
-            info = self._registered_engines[instance_id]
+            info = self._registered_engines[instance]
             mapping: dict[str, str] = {
-                "engine_id": info.engine_id,
-                "instance_id": info.instance_id,
+                "runtime": info.runtime,
+                "instance": info.instance,
                 "stage": info.stage,
                 "stream_name": info.stream_name,
                 "status": status,
@@ -213,14 +213,14 @@ class BatchEngineRegistry:
                 mapping["local_cache"] = json.dumps(local_cache)
 
             # Re-add to sets (idempotent)
-            r.sadd(ENGINE_SET_KEY, info.engine_id)
-            instances_key = f"{ENGINE_INSTANCES_PREFIX}{info.engine_id}"
-            r.sadd(instances_key, instance_id)
+            r.sadd(RUNTIME_SET_KEY, info.runtime)
+            instances_key = f"{RUNTIME_INSTANCES_PREFIX}{info.runtime}"
+            r.sadd(instances_key, instance)
 
             logger.info(
                 "batch_engine_reregistered",
-                engine_id=info.engine_id,
-                instance_id=instance_id,
+                runtime=info.runtime,
+                instance=instance,
                 stage=info.stage,
                 reason="ttl_expired",
             )
@@ -244,44 +244,44 @@ class BatchEngineRegistry:
             if local_cache is not None:
                 mapping["local_cache"] = json.dumps(local_cache)
 
-        r.hset(engine_key, mapping=mapping)
+        r.hset(instance_key, mapping=mapping)
 
         # Refresh TTL
-        r.expire(engine_key, self.HEARTBEAT_TTL)
+        r.expire(instance_key, self.HEARTBEAT_TTL)
 
         logger.debug(
             "batch_engine_heartbeat",
-            instance_id=instance_id,
+            instance=instance,
             status=status,
             current_task=current_task,
             loaded_model=loaded_model,
             local_cache_models=local_cache.get("model_count") if local_cache else None,
         )
 
-    def unregister(self, instance_id: str) -> None:
+    def unregister(self, instance: str) -> None:
         """Unregister engine on shutdown.
 
         Removes engine from registry and cleans up related keys.
 
         Args:
-            instance_id: Instance-unique identifier
+            instance: Unique instance identifier
         """
         r = self._get_redis()
-        engine_key = f"{ENGINE_KEY_PREFIX}{instance_id}"
+        instance_key = f"{INSTANCE_KEY_PREFIX}{instance}"
 
-        # Get engine_id from stored info to clean up instance set
-        info = self._registered_engines.get(instance_id)
+        # Get runtime from stored info to clean up instance set
+        info = self._registered_engines.get(instance)
         if info:
-            instances_key = f"{ENGINE_INSTANCES_PREFIX}{info.engine_id}"
-            r.srem(instances_key, instance_id)
+            instances_key = f"{RUNTIME_INSTANCES_PREFIX}{info.runtime}"
+            r.srem(instances_key, instance)
 
-        # Delete engine state hash
-        r.delete(engine_key)
+        # Delete instance state hash
+        r.delete(instance_key)
 
         # Remove from local cache
-        self._registered_engines.pop(instance_id, None)
+        self._registered_engines.pop(instance, None)
 
-        logger.info("batch_engine_unregistered", instance_id=instance_id)
+        logger.info("batch_engine_unregistered", instance=instance)
 
     def close(self) -> None:
         """Close Redis connection."""

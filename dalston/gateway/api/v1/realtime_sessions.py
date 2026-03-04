@@ -76,7 +76,7 @@ class SessionDetail(BaseModel):
     purged_at: str | None
     audio_uri: str | None
     transcript_uri: str | None
-    worker_id: str | None
+    instance: str | None
     client_ip: str | None
     previous_session_id: str | None
     started_at: str
@@ -230,7 +230,7 @@ async def get_realtime_session(
         purged_at=session.purged_at.isoformat() if session.purged_at else None,
         audio_uri=session.audio_uri,
         transcript_uri=session.transcript_uri,
-        worker_id=session.worker_id,
+        instance=session.instance,
         client_ip=session.client_ip,
         previous_session_id=str(session.previous_session_id)
         if session.previous_session_id

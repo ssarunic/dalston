@@ -294,8 +294,8 @@ class ParakeetOnnxStreamingEngine(RealtimeEngine):
         """Return list of supported languages."""
         return ["en"]
 
-    def get_engine(self) -> str:
-        """Return engine type identifier."""
+    def get_runtime(self) -> str:
+        """Return the inference framework identifier."""
         return "nemo-onnx"
 
     def get_supports_vocabulary(self) -> bool:

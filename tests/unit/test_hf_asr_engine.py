@@ -91,7 +91,7 @@ class TestHFASREngine:
         health = engine.health_check()
 
         assert health["status"] == "healthy"
-        assert health["engine_id"] == "hf-asr"
+        assert health["runtime"] == "hf-asr"
         assert health["device"] == "cpu"
         assert health["cuda_available"] is False
 
@@ -219,7 +219,7 @@ class TestHFASREngineNormalizeOutput:
 
         output = engine._normalize_output(result, "test/model", "en", None)
 
-        assert output.engine_id == "hf-asr"
+        assert output.runtime == "hf-asr"
 
     def test_normalize_output_skips_empty_chunks(self, engine):
         """Empty chunk text should be skipped."""
@@ -366,7 +366,7 @@ class TestHFASREngineProcess:
         output_dict = result.to_dict()
         assert output_dict["text"] == "Hello world"
         assert len(output_dict["segments"]) == 1
-        assert output_dict["engine_id"] == "hf-asr"
+        assert output_dict["runtime"] == "hf-asr"
 
     def test_process_releases_model_on_error(self, engine, tmp_path):
         """Process should release model even if pipeline raises."""

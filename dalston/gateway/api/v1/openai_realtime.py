@@ -327,7 +327,7 @@ async def openai_realtime_transcription(
 
         log = logger.bind(
             session_id=allocation.session_id,
-            worker_id=allocation.worker_id,
+            instance=allocation.instance,
             client_ip=client_ip,
             protocol="openai",
         )
@@ -345,12 +345,12 @@ async def openai_realtime_transcription(
             await session_service.create_session(
                 session_id=allocation.session_id,
                 tenant_id=api_key.tenant_id,
-                worker_id=allocation.worker_id,
+                instance=allocation.instance,
                 client_ip=client_ip,
                 language="auto",
                 model=model,
-                engine=allocation.worker_id.rsplit("-", 1)[0]
-                if allocation.worker_id
+                engine=allocation.instance.rsplit("-", 1)[0]
+                if allocation.instance
                 else None,
                 created_by_key_id=api_key.id,
             )

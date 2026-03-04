@@ -39,7 +39,7 @@ def _create_mock_task(
     task.id = task_id
     task.job_id = job_id
     task.stage = stage
-    task.engine_id = engine_id
+    task.runtime = engine_id
     task.status = status
     task.dependencies = dependencies or []
     task.started_at = started_at
@@ -189,7 +189,7 @@ class TestJobStatusWithStages:
             task_id=prepare_id,
             job_id=job_id,
             stage="prepare",
-            engine_id="audio-prepare",
+            runtime="audio-prepare",
             status="completed",
             dependencies=[],
             started_at=now,
@@ -199,7 +199,7 @@ class TestJobStatusWithStages:
             task_id=transcribe_id,
             job_id=job_id,
             stage="transcribe",
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
             status="completed",
             dependencies=[prepare_id],
             started_at=now + timedelta(seconds=1),
@@ -235,7 +235,7 @@ class TestJobStatusWithStages:
 
         # Verify stage fields
         prepare_stage = data["stages"][0]
-        assert prepare_stage["engine_id"] == "audio-prepare"
+        assert prepare_stage["runtime"] == "audio-prepare"
         assert prepare_stage["status"] == "completed"
         assert prepare_stage["required"] is True
         assert prepare_stage["duration_ms"] == 1000
@@ -269,7 +269,7 @@ class TestJobStatusWithStages:
             task_id=uuid4(),
             job_id=job_id,
             stage="diarize",
-            engine_id="pyannote-4.0",
+            runtime="pyannote-4.0",
             status="failed",
             required=False,
             started_at=now,
@@ -395,21 +395,21 @@ class TestTaskListEndpoint:
             task_id=prepare_id,
             job_id=job_id,
             stage="prepare",
-            engine_id="audio-prepare",
+            runtime="audio-prepare",
             dependencies=[],
         )
         transcribe = _create_mock_task(
             task_id=transcribe_id,
             job_id=job_id,
             stage="transcribe",
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
             dependencies=[prepare_id],
         )
         merge = _create_mock_task(
             task_id=merge_id,
             job_id=job_id,
             stage="merge",
-            engine_id="final-merger",
+            runtime="final-merger",
             dependencies=[transcribe_id],
         )
 
@@ -447,21 +447,21 @@ class TestTaskListEndpoint:
             task_id=prepare_id,
             job_id=job_id,
             stage="prepare",
-            engine_id="audio-prepare",
+            runtime="audio-prepare",
             dependencies=[],
         )
         trans_ch0 = _create_mock_task(
             task_id=uuid4(),
             job_id=job_id,
             stage="transcribe_ch0",
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
             dependencies=[prepare_id],
         )
         trans_ch1 = _create_mock_task(
             task_id=uuid4(),
             job_id=job_id,
             stage="transcribe_ch1",
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
             dependencies=[prepare_id],
         )
 
@@ -577,7 +577,7 @@ class TestTaskArtifactsEndpoint:
             task_id=task_id,
             job_id=job_id,
             stage="transcribe",
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
             status="completed",
         )
 
@@ -629,7 +629,7 @@ class TestTaskArtifactsEndpoint:
             task_id=task_id,
             job_id=job_id,
             stage="diarize",
-            engine_id="pyannote-4.0",
+            runtime="pyannote-4.0",
             status="failed",
             error="Too many speakers",
         )
@@ -669,7 +669,7 @@ class TestTaskArtifactsEndpoint:
             task_id=task_id,
             job_id=job_id,
             stage="transcribe",
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
             status="pending",  # Not started
         )
 

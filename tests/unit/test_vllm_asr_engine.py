@@ -107,7 +107,7 @@ class TestVoxtralAdapter:
 
         assert result.text == "Hello world, this is a test."
         assert result.language == "en"
-        assert result.engine_id == "vllm-asr"
+        assert result.runtime == "vllm-asr"
         assert result.skipped is False
         assert len(result.segments) == 1
         assert result.segments[0].text == "Hello world, this is a test."
@@ -194,7 +194,7 @@ class TestQwen2AudioAdapter:
 
         assert result.text == "Hello world"
         assert result.language == "en"
-        assert result.engine_id == "vllm-asr"
+        assert result.runtime == "vllm-asr"
         assert len(result.segments) == 1
 
     def test_sampling_kwargs(self, adapter):
@@ -330,7 +330,7 @@ class TestVLLMASREngine:
         """Engine capabilities should be correct."""
         caps = engine.get_capabilities()
 
-        assert caps.engine_id == "vllm-asr"
+        assert caps.runtime == "vllm-asr"
         assert caps.version == "1.0.0"
         assert caps.stages == ["transcribe"]
         assert caps.languages is None  # Multilingual
@@ -352,7 +352,7 @@ class TestVLLMASREngine:
                         health = engine.health_check()
 
         assert health["status"] == "healthy"
-        assert health["engine_id"] == "vllm-asr"
+        assert health["runtime"] == "vllm-asr"
         assert health["model_loaded"] is False
         assert health["loaded_model_id"] is None
         assert "mistralai/Voxtral-Mini-3B-2507" in health["supported_models"]
@@ -404,7 +404,7 @@ class TestVLLMASREngine:
             result = engine.process(mock_input)
 
         assert result.data.text == "Hello, this is a test transcription."
-        assert result.data.engine_id == "vllm-asr"
+        assert result.data.runtime == "vllm-asr"
         assert result.data.language == "en"
         assert len(result.data.segments) == 1
         assert result.data.skipped is False

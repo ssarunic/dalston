@@ -144,9 +144,9 @@ def is_openai_response_format(response_format: str | None) -> bool:
 
 
 def map_openai_model(model: str) -> str:
-    """Map OpenAI model ID to Dalston engine ID.
+    """Map OpenAI model ID to Dalston runtime.
 
-    Returns: engine_id
+    Returns: runtime identifier
 
     Uses explicit mappings from OPENAI_MODEL_MAP if available,
     otherwise falls back to DEFAULT_OPENAI_ENGINE.

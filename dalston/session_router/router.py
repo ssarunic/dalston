@@ -29,7 +29,7 @@ class WorkerStatus:
     Simplified view of worker state for management APIs.
     """
 
-    worker_id: str
+    instance: str
     endpoint: str
     status: str
     capacity: int
@@ -44,7 +44,7 @@ class WorkerStatus:
     def from_worker_state(cls, state: WorkerState) -> WorkerStatus:
         """Create from WorkerState."""
         return cls(
-            worker_id=state.worker_id,
+            instance=state.instance,
             endpoint=state.endpoint,
             status=state.status,
             capacity=state.capacity,
@@ -256,11 +256,11 @@ class SessionRouter:
         workers = await self._registry.get_workers()
         return [WorkerStatus.from_worker_state(w) for w in workers]
 
-    async def get_worker(self, worker_id: str) -> WorkerStatus | None:
+    async def get_worker(self, instance: str) -> WorkerStatus | None:
         """Get specific worker status.
 
         Args:
-            worker_id: Worker identifier
+            instance: Instance identifier
 
         Returns:
             WorkerStatus if found, None otherwise
@@ -268,7 +268,7 @@ class SessionRouter:
         if not self._registry:
             raise RuntimeError("Session router not started")
 
-        worker = await self._registry.get_worker(worker_id)
+        worker = await self._registry.get_worker(instance)
         if worker:
             return WorkerStatus.from_worker_state(worker)
         return None

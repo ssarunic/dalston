@@ -8,7 +8,7 @@ This module replaces hardcoded engine defaults with dynamic selection based on:
 Example:
     requirements = extract_requirements(job_parameters)
     selection = await select_engine("transcribe", requirements, registry, catalog)
-    # selection.engine_id = "parakeet"
+    # selection.runtime = "parakeet"
     # selection.capabilities.supports_word_timestamps = True
 """
 
@@ -51,14 +51,14 @@ class EngineSelectionResult:
     """Result of engine selection.
 
     Attributes:
-        engine_id: Selected engine identifier (runtime ID, e.g., "nemo", "faster-whisper")
+        runtime: Selected engine identifier (runtime ID, e.g., "nemo", "faster-whisper")
         capabilities: Engine's declared capabilities
         selection_reason: Human-readable explanation of why this engine was selected
         runtime_model_id: Model ID to pass to the engine (e.g., "nvidia/parakeet-tdt-1.1b")
                          Only set when user requested a specific model variant.
     """
 
-    engine_id: str
+    runtime: str
     capabilities: EngineCapabilities
     selection_reason: str
     runtime_model_id: str | None = None
@@ -107,7 +107,7 @@ class NoCapableEngineError(Exception):
             lines.append(f"  Running engines for '{self.stage}':")
             for engine in self.candidates:
                 mismatch = self._explain_mismatch(engine)
-                lines.append(f"    - {engine.engine_id}: {mismatch}")
+                lines.append(f"    - {engine.runtime}: {mismatch}")
         else:
             lines.append(f"  No engines running for stage '{self.stage}'.")
 
@@ -115,9 +115,9 @@ class NoCapableEngineError(Exception):
             lines.append("")
             lines.append("  Available in catalog (not running):")
             for alt in self.catalog_alternatives:
-                lines.append(f"    - {alt.engine_id}")
+                lines.append(f"    - {alt.runtime}")
                 lines.append(
-                    f"      Start: docker compose up stt-batch-{self.stage}-{alt.engine_id}"
+                    f"      Start: docker compose up stt-batch-{self.stage}-{alt.runtime}"
                 )
 
         return "\n".join(lines)
@@ -150,11 +150,11 @@ class NoCapableEngineError(Exception):
             "stage": self.stage,
             "requirements": self.requirements,
             "running_engines": [
-                {"id": e.engine_id, "reason": self._explain_mismatch(e)}
+                {"id": e.runtime, "reason": self._explain_mismatch(e)}
                 for e in self.candidates
             ],
             "catalog_alternatives": [
-                {"id": a.engine_id, "languages": a.capabilities.languages}
+                {"id": a.runtime, "languages": a.capabilities.languages}
                 for a in self.catalog_alternatives
             ],
         }
@@ -361,10 +361,10 @@ def _rank_and_select(
         reasons.append(f"ranked first of {len(capable)}")
 
     return EngineSelectionResult(
-        engine_id=winner.engine_id,
+        runtime=winner.runtime,
         capabilities=winner.capabilities
         or EngineCapabilities(
-            engine_id=winner.engine_id, version="unknown", stages=[winner.stage]
+            runtime=winner.runtime, version="unknown", stages=[winner.stage]
         ),
         selection_reason=", ".join(reasons) or "best available",
     )
@@ -459,10 +459,10 @@ async def select_engine(
             )
 
             return EngineSelectionResult(
-                engine_id=runtime_id,
+                runtime=runtime_id,
                 capabilities=engine.capabilities
                 or EngineCapabilities(
-                    engine_id=runtime_id, version="unknown", stages=[stage]
+                    runtime=runtime_id, version="unknown", stages=[stage]
                 ),
                 selection_reason="database model lookup",
                 runtime_model_id=runtime_model_id,
@@ -493,10 +493,10 @@ async def select_engine(
             )
 
         return EngineSelectionResult(
-            engine_id=engine.engine_id,
+            runtime=engine.runtime,
             capabilities=engine.capabilities
             or EngineCapabilities(
-                engine_id=engine.engine_id, version="unknown", stages=[stage]
+                runtime=engine.runtime, version="unknown", stages=[stage]
             ),
             selection_reason="user preference",
         )
@@ -530,25 +530,25 @@ async def select_engine(
         selection_reason = "only capable engine"
     else:
         ranked_result = _rank_and_select(capable, requirements)
-        engine = next(e for e in capable if e.engine_id == ranked_result.engine_id)
+        engine = next(e for e in capable if e.runtime == ranked_result.runtime)
         selection_reason = ranked_result.selection_reason
 
     # 6. For transcribe stage with no user model preference, find best downloaded model
     auto_model_id: str | None = None
     if stage == "transcribe" and db is not None:
         auto_model_id = await _find_best_downloaded_model(
-            runtime=engine.engine_id,
+            runtime=engine.runtime,
             requirements=requirements,
             db=db,
         )
         if auto_model_id is None:
             # No downloaded models for this runtime
-            raise NoDownloadedModelError(runtime=engine.engine_id, stage=stage)
+            raise NoDownloadedModelError(runtime=engine.runtime, stage=stage)
 
     logger.info(
         "engine_selected",
         stage=stage,
-        selected_engine=engine.engine_id,
+        selected_engine=engine.runtime,
         runtime_model_id=auto_model_id,
         selection_reason=selection_reason,
         candidates_evaluated=len(candidates),
@@ -557,10 +557,10 @@ async def select_engine(
     )
 
     return EngineSelectionResult(
-        engine_id=engine.engine_id,
+        runtime=engine.runtime,
         capabilities=engine.capabilities
         or EngineCapabilities(
-            engine_id=engine.engine_id, version="unknown", stages=[stage]
+            runtime=engine.runtime, version="unknown", stages=[stage]
         ),
         selection_reason=selection_reason,
         runtime_model_id=auto_model_id,
@@ -730,7 +730,7 @@ async def select_pipeline_engines(
     logger.info(
         "pipeline_engines_selected",
         stages=list(selections.keys()),
-        engines={stage: sel.engine_id for stage, sel in selections.items()},
+        engines={stage: sel.runtime for stage, sel in selections.items()},
         alignment_included="align" in selections,
         diarization_included="diarize" in selections,
         pii_detection_included="pii_detect" in selections,

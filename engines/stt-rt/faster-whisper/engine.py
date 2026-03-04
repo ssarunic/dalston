@@ -275,8 +275,8 @@ class WhisperStreamingEngine(RealtimeEngine):
         """
         return ["auto"]
 
-    def get_engine(self) -> str:
-        """Return engine type identifier."""
+    def get_runtime(self) -> str:
+        """Return the inference framework identifier."""
         return "faster-whisper"
 
     def get_supports_vocabulary(self) -> bool:

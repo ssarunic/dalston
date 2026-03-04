@@ -90,8 +90,8 @@ function TaskNode({
     if (normalizeStage(task.stage) === 'transcribe' && jobModel) {
       return jobModel.name || jobModel.id
     }
-    return task.engine_id
-  }, [task.stage, task.engine_id, jobModel])
+    return task.runtime
+  }, [task.stage, task.runtime, jobModel])
 
   return (
     <Link to={`/jobs/${jobId}/tasks/${task.id}`}>

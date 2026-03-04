@@ -47,7 +47,7 @@ class RealtimeSessionService:
         self,
         session_id: str,
         tenant_id: UUID,
-        worker_id: str,
+        instance: str,
         client_ip: str,
         language: str | None = None,
         model: str | None = None,
@@ -64,7 +64,7 @@ class RealtimeSessionService:
         Args:
             session_id: Session ID (from session router, e.g., sess_abc123)
             tenant_id: Tenant UUID
-            worker_id: Assigned worker ID
+            instance: Assigned worker instance ID
             client_ip: Client IP address
             language: Language code or "auto"
             model: Model variant requested by user
@@ -91,7 +91,7 @@ class RealtimeSessionService:
             encoding=encoding,
             sample_rate=sample_rate,
             retention=retention,
-            worker_id=worker_id,
+            instance=instance,
             client_ip=client_ip,
             previous_session_id=previous_session_id,
             started_at=datetime.now(UTC),
