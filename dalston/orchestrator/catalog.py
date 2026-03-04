@@ -150,72 +150,42 @@ class EngineCatalog:
                 "Run 'python scripts/generate_catalog.py' to generate it from engine.yaml files."
             ) from None
 
-        # Load engine/runtime entries (backward compatible)
+        # Load engine/runtime entries with strict validation
         entries: dict[str, CatalogEntry] = {}
         engines_data = data.get("engines", {})
+        parse_errors: list[str] = []
 
         for engine_id, engine_data in engines_data.items():
-            caps_data = engine_data.get("capabilities", {})
-            hw_data = engine_data.get("hardware", {})
-            perf_data = engine_data.get("performance", {})
+            try:
+                entry = cls._parse_engine_entry(engine_id, engine_data)
+                entries[engine_id] = entry
+            except (KeyError, TypeError, ValueError) as e:
+                parse_errors.append(f"engine '{engine_id}': {e}")
 
-            capabilities = EngineCapabilities(
-                engine_id=engine_id,
-                version=engine_data.get("version", "unknown"),
-                stages=caps_data.get("stages", []),
-                languages=caps_data.get("languages"),
-                supports_word_timestamps=caps_data.get(
-                    "supports_word_timestamps", False
-                ),
-                supports_streaming=caps_data.get("supports_streaming", False),
-                model_variants=None,
-                gpu_required=hw_data.get("gpu_required", False),
-                gpu_vram_mb=(
-                    hw_data.get("min_vram_gb", 0) * 1024
-                    if hw_data.get("min_vram_gb")
-                    else None
-                ),
-                supports_cpu=hw_data.get("supports_cpu", True),
-                min_ram_gb=hw_data.get("min_ram_gb"),
-                rtf_gpu=perf_data.get("rtf_gpu"),
-                rtf_cpu=perf_data.get("rtf_cpu"),
-                max_concurrency=caps_data.get("max_concurrency"),
-                # M31: includes_diarization for capability-driven routing
-                includes_diarization=caps_data.get("includes_diarization", False),
+        if parse_errors:
+            raise ValueError(
+                f"Engine catalog has {len(parse_errors)} invalid entries. "
+                f"Regenerate with 'python scripts/generate_catalog.py'.\n"
+                + "\n".join(f"  - {err}" for err in parse_errors)
             )
 
-            entries[engine_id] = CatalogEntry(
-                engine_id=engine_id,
-                image=engine_data.get("image", f"dalston/{engine_id}:latest"),
-                capabilities=capabilities,
-            )
-
-        # M36: Load model entries
+        # M36: Load model entries with strict validation
         models: dict[str, ModelEntry] = {}
         models_data = data.get("models", {})
+        model_errors: list[str] = []
 
         for model_id, model_data in models_data.items():
-            caps_data = model_data.get("capabilities", {})
-            hw_data = model_data.get("hardware", {})
-            perf_data = model_data.get("performance", {})
+            try:
+                entry = cls._parse_model_entry(model_id, model_data)
+                models[model_id] = entry
+            except (KeyError, TypeError, ValueError) as e:
+                model_errors.append(f"model '{model_id}': {e}")
 
-            models[model_id] = ModelEntry(
-                id=model_id,
-                runtime=model_data["runtime"],
-                runtime_model_id=model_data["runtime_model_id"],
-                name=model_data.get("name", model_id),
-                source=model_data.get("source"),
-                size_gb=model_data.get("size_gb"),
-                stage=model_data.get("stage"),
-                languages=model_data.get("languages"),
-                word_timestamps=caps_data.get("word_timestamps", False),
-                punctuation=caps_data.get("punctuation", False),
-                capitalization=caps_data.get("capitalization", False),
-                supports_cpu=hw_data.get("supports_cpu", False),
-                min_vram_gb=hw_data.get("min_vram_gb"),
-                min_ram_gb=hw_data.get("min_ram_gb"),
-                rtf_gpu=perf_data.get("rtf_gpu"),
-                rtf_cpu=perf_data.get("rtf_cpu"),
+        if model_errors:
+            raise ValueError(
+                f"Engine catalog has {len(model_errors)} invalid model entries. "
+                f"Regenerate with 'python scripts/generate_catalog.py'.\n"
+                + "\n".join(f"  - {err}" for err in model_errors)
             )
 
         logger.info(
@@ -224,6 +194,123 @@ class EngineCatalog:
             model_count=len(models),
         )
         return cls(entries, models)
+
+    # =========================================================================
+    # Parsing helpers (strict validation)
+    # =========================================================================
+
+    @classmethod
+    def _parse_engine_entry(cls, engine_id: str, engine_data: dict) -> CatalogEntry:
+        """Parse and validate a single engine entry.
+
+        Raises:
+            KeyError: Missing required field
+            TypeError: Field has wrong type
+            ValueError: Field has invalid value
+        """
+        caps_data = engine_data.get("capabilities", {})
+        hw_data = engine_data.get("hardware", {})
+        perf_data = engine_data.get("performance", {})
+
+        # Validate required fields
+        stages = caps_data.get("stages")
+        if stages is None:
+            raise KeyError("capabilities.stages is required")
+        if not isinstance(stages, list):
+            raise TypeError(
+                f"capabilities.stages must be a list, got {type(stages).__name__}"
+            )
+        if not stages:
+            raise ValueError("capabilities.stages cannot be empty")
+
+        # Validate languages if present (None means multilingual)
+        languages = caps_data.get("languages")
+        if languages is not None and not isinstance(languages, list):
+            raise TypeError(
+                f"capabilities.languages must be a list or null, got {type(languages).__name__}"
+            )
+
+        capabilities = EngineCapabilities(
+            engine_id=engine_id,
+            version=engine_data.get("version", "unknown"),
+            stages=stages,
+            languages=languages,
+            supports_word_timestamps=caps_data.get("supports_word_timestamps", False),
+            supports_streaming=caps_data.get("supports_streaming", False),
+            model_variants=None,
+            gpu_required=hw_data.get("gpu_required", False),
+            gpu_vram_mb=(
+                hw_data.get("min_vram_gb", 0) * 1024
+                if hw_data.get("min_vram_gb")
+                else None
+            ),
+            supports_cpu=hw_data.get("supports_cpu", True),
+            min_ram_gb=hw_data.get("min_ram_gb"),
+            rtf_gpu=perf_data.get("rtf_gpu"),
+            rtf_cpu=perf_data.get("rtf_cpu"),
+            max_concurrency=caps_data.get("max_concurrency"),
+            includes_diarization=caps_data.get("includes_diarization", False),
+        )
+
+        return CatalogEntry(
+            engine_id=engine_id,
+            image=engine_data.get("image", f"dalston/{engine_id}:latest"),
+            capabilities=capabilities,
+        )
+
+    @classmethod
+    def _parse_model_entry(cls, model_id: str, model_data: dict) -> ModelEntry:
+        """Parse and validate a single model entry.
+
+        Raises:
+            KeyError: Missing required field
+            TypeError: Field has wrong type
+            ValueError: Field has invalid value
+        """
+        # Required fields - fail hard if missing
+        runtime = model_data.get("runtime")
+        if not runtime:
+            raise KeyError("runtime is required")
+        if not isinstance(runtime, str):
+            raise TypeError(f"runtime must be a string, got {type(runtime).__name__}")
+
+        runtime_model_id = model_data.get("runtime_model_id")
+        if not runtime_model_id:
+            raise KeyError("runtime_model_id is required")
+        if not isinstance(runtime_model_id, str):
+            raise TypeError(
+                f"runtime_model_id must be a string, got {type(runtime_model_id).__name__}"
+            )
+
+        # Validate languages if present (None means multilingual)
+        languages = model_data.get("languages")
+        if languages is not None and not isinstance(languages, list):
+            raise TypeError(
+                f"languages must be a list or null, got {type(languages).__name__}"
+            )
+
+        caps_data = model_data.get("capabilities", {})
+        hw_data = model_data.get("hardware", {})
+        perf_data = model_data.get("performance", {})
+
+        return ModelEntry(
+            id=model_id,
+            runtime=runtime,
+            runtime_model_id=runtime_model_id,
+            name=model_data.get("name", model_id),
+            source=model_data.get("source"),
+            size_gb=model_data.get("size_gb"),
+            stage=model_data.get("stage"),
+            languages=languages,
+            word_timestamps=caps_data.get("word_timestamps", False),
+            punctuation=caps_data.get("punctuation", False),
+            capitalization=caps_data.get("capitalization", False),
+            supports_cpu=hw_data.get("supports_cpu", False),
+            min_vram_gb=hw_data.get("min_vram_gb"),
+            min_ram_gb=hw_data.get("min_ram_gb"),
+            rtf_gpu=perf_data.get("rtf_gpu"),
+            rtf_cpu=perf_data.get("rtf_cpu"),
+        )
 
     # =========================================================================
     # Engine/Runtime methods (backward compatible)

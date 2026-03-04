@@ -203,6 +203,7 @@ class TestWorkerRegistry:
             "status": "ready",
             "capacity": "4",
             "active_sessions": "2",
+            "engine": "faster-whisper",
             "models_loaded": '["Systran/faster-whisper-large-v3", "Systran/faster-distil-whisper-large-v3"]',
             "languages_supported": '["auto"]',
             "gpu_memory_used": "2GB",
@@ -244,6 +245,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",
+                    "engine": "faster-whisper",
                     "models_loaded": "[]",
                     "languages_supported": "[]",
                 }
@@ -253,6 +255,7 @@ class TestWorkerRegistry:
                     "status": "busy",
                     "capacity": "4",
                     "active_sessions": "3",
+                    "engine": "faster-whisper",
                     "models_loaded": "[]",
                     "languages_supported": "[]",
                 }
@@ -280,6 +283,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "4",  # Full
+                    "engine": "faster-whisper",
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
@@ -289,6 +293,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",  # Available
+                    "engine": "faster-whisper",
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
@@ -316,6 +321,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",
+                    "engine": "faster-whisper",
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
@@ -325,6 +331,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",
+                    "engine": "faster-whisper",
                     "models_loaded": '["Systran/faster-distil-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
@@ -353,6 +360,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "3",  # 1 available
+                    "engine": "faster-whisper",
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
@@ -362,6 +370,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "1",  # 3 available (most)
+                    "engine": "faster-whisper",
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
@@ -371,6 +380,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",  # 2 available
+                    "engine": "faster-whisper",
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
@@ -410,6 +420,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",
+                    "engine": "nemo",
                     "models_loaded": '["parakeet-rnnt-0.6b"]',
                     "languages_supported": '["auto"]',
                 }
@@ -419,6 +430,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",
+                    "engine": "faster-whisper",
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
@@ -443,6 +455,7 @@ class TestWorkerRegistry:
             "status": "ready",
             "capacity": "4",
             "active_sessions": "2",
+            "engine": "nemo",
             "models_loaded": '["parakeet-rnnt-0.6b"]',
             "languages_supported": '["auto"]',
         }

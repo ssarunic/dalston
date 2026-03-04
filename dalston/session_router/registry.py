@@ -220,30 +220,127 @@ class WorkerRegistry:
         sessions_key = f"{WORKER_KEY_PREFIX}{worker_id}{WORKER_SESSIONS_SUFFIX}"
         return await self._redis.smembers(sessions_key)
 
-    def _parse_worker_state(self, worker_id: str, data: dict) -> WorkerState:
-        """Parse worker state from Redis hash data."""
+    def _parse_worker_state(self, worker_id: str, data: dict) -> WorkerState | None:
+        """Parse worker state from Redis hash data.
+
+        Returns None if critical fields are missing/invalid, which quarantines
+        the worker from the pool until the issue is resolved.
+        """
+        # Critical fields - worker is unusable without these
+        endpoint = data.get("endpoint")
+        if not endpoint:
+            logger.error(
+                "worker_quarantined_missing_endpoint",
+                worker_id=worker_id,
+                raw_data=dict(data),
+            )
+            return None
+
+        capacity_str = data.get("capacity")
+        try:
+            capacity = int(capacity_str) if capacity_str else 0
+            if capacity <= 0:
+                raise ValueError("capacity must be positive")
+        except (ValueError, TypeError) as e:
+            logger.error(
+                "worker_quarantined_invalid_capacity",
+                worker_id=worker_id,
+                capacity_raw=capacity_str,
+                error=str(e),
+            )
+            return None
+
+        engine = data.get("engine")
+        if not engine:
+            logger.error(
+                "worker_quarantined_missing_engine",
+                worker_id=worker_id,
+                raw_data=dict(data),
+            )
+            return None
+
+        # Parse JSON fields with validation
+        try:
+            models_loaded = json.loads(data.get("models_loaded", "[]"))
+            if not isinstance(models_loaded, list):
+                raise ValueError("models_loaded must be a list")
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning(
+                "worker_invalid_models_loaded",
+                worker_id=worker_id,
+                raw_value=data.get("models_loaded"),
+                error=str(e),
+            )
+            models_loaded = []
+
+        try:
+            languages_supported = json.loads(data.get("languages_supported", "[]"))
+            if not isinstance(languages_supported, list):
+                raise ValueError("languages_supported must be a list")
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning(
+                "worker_invalid_languages_supported",
+                worker_id=worker_id,
+                raw_value=data.get("languages_supported"),
+                error=str(e),
+            )
+            languages_supported = []
+
+        try:
+            active_sessions = int(data.get("active_sessions", "0"))
+        except (ValueError, TypeError):
+            logger.warning(
+                "worker_invalid_active_sessions",
+                worker_id=worker_id,
+                raw_value=data.get("active_sessions"),
+            )
+            active_sessions = 0
+
         return WorkerState(
             worker_id=worker_id,
-            endpoint=data.get("endpoint", ""),
+            endpoint=endpoint,
             status=data.get("status", "offline"),
-            capacity=int(data.get("capacity", "0")),
-            active_sessions=int(data.get("active_sessions", "0")),
-            models_loaded=json.loads(data.get("models_loaded", "[]")),
-            languages_supported=json.loads(data.get("languages_supported", "[]")),
-            engine=data.get("engine", "unknown"),
-            runtime=data.get("runtime"),  # M43: model runtime
+            capacity=capacity,
+            active_sessions=active_sessions,
+            models_loaded=models_loaded,
+            languages_supported=languages_supported,
+            engine=engine,
+            runtime=data.get("runtime"),
             supports_vocabulary=data.get("supports_vocabulary", "false") == "true",
             gpu_memory_used=data.get("gpu_memory_used", "0GB"),
             gpu_memory_total=data.get("gpu_memory_total", "0GB"),
-            last_heartbeat=self._parse_datetime(data.get("last_heartbeat")),
-            started_at=self._parse_datetime(data.get("started_at")),
+            last_heartbeat=self._parse_datetime(
+                worker_id, "last_heartbeat", data.get("last_heartbeat")
+            ),
+            started_at=self._parse_datetime(
+                worker_id, "started_at", data.get("started_at")
+            ),
         )
 
-    def _parse_datetime(self, value: str | None) -> datetime:
-        """Parse ISO datetime string."""
-        if value:
-            try:
-                return datetime.fromisoformat(value.replace("Z", "+00:00"))
-            except ValueError:
-                pass
-        return datetime.now(UTC)
+    def _parse_datetime(
+        self, worker_id: str, field: str, value: str | None
+    ) -> datetime:
+        """Parse ISO datetime string.
+
+        Returns epoch (1970-01-01) on parse failure, which will cause the worker
+        to be flagged as stale by health checks rather than appearing fresh.
+        """
+        if not value:
+            logger.warning(
+                "worker_missing_timestamp",
+                worker_id=worker_id,
+                field=field,
+            )
+            return datetime.min.replace(tzinfo=UTC)
+
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as e:
+            logger.warning(
+                "worker_invalid_timestamp",
+                worker_id=worker_id,
+                field=field,
+                raw_value=value,
+                error=str(e),
+            )
+            return datetime.min.replace(tzinfo=UTC)
