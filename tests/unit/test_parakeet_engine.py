@@ -123,19 +123,6 @@ class TestParakeetEngineEnglishOnly:
 class TestParakeetEngineDagIntegration:
     """Tests for Parakeet/NeMo integration with DAG builder (M21/M36)."""
 
-    def test_nemo_models_have_native_word_timestamps(self):
-        """Test that NeMo/Parakeet models have word_timestamps=True in catalog."""
-        from dalston.orchestrator.catalog import get_catalog
-
-        catalog = get_catalog()
-        # All parakeet/nemo models should have word_timestamps=True
-        nemo_models = catalog.get_models_for_runtime("nemo")
-        assert len(nemo_models) > 0, "Expected at least one nemo model in catalog"
-        for model in nemo_models:
-            assert model.word_timestamps is True, (
-                f"Model {model.id} should have word_timestamps=True"
-            )
-
     def test_dag_skips_align_for_nemo(self):
         """Test that DAG builder skips align stage for NeMo/Parakeet models."""
         from uuid import uuid4

@@ -209,18 +209,6 @@ class TestBuildTaskDagNemo:
     def audio_uri(self) -> str:
         return "s3://test-bucket/audio/test.wav"
 
-    def test_nemo_models_support_word_timestamps(self):
-        """Test that NeMo/Parakeet models have word_timestamps=True in catalog."""
-        from dalston.orchestrator.catalog import get_catalog
-
-        catalog = get_catalog()
-        nemo_models = catalog.get_models_for_runtime("nemo")
-        assert len(nemo_models) > 0, "Expected at least one nemo model in catalog"
-        for model in nemo_models:
-            assert model.word_timestamps is True, (
-                f"Model {model.id} should have word_timestamps=True"
-            )
-
     def test_nemo_skips_align_stage(self, job_id: UUID, audio_uri: str):
         """Test that NeMo/Parakeet models skip the ALIGN stage (native word timestamps)."""
         parameters = {

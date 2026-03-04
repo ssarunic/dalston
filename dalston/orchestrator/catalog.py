@@ -1,9 +1,8 @@
-"""Engine and model catalog loader.
+"""Engine catalog loader.
 
-The catalog is a JSON file declaring all runtimes and models that could be used
+The catalog is a JSON file declaring all runtimes (engines) that could be used
 in the system. It enables:
 - Validation: Check job requirements before engines are running
-- Model routing: Map model IDs to runtimes and native model identifiers
 - Auto-scaling (future): Know which images to boot for pending jobs
 
 The catalog answers "what could I start?" while the registry (Redis heartbeats)
@@ -13,8 +12,8 @@ M30: Catalog is generated from engine.yaml files at build time using
 'python scripts/generate_catalog.py'. Each engine's metadata lives in its
 engine.yaml file (single source of truth).
 
-M36: Catalog now includes a models section with runtime mappings. The catalog
-provides methods to resolve model IDs to runtimes and native model identifiers.
+M46: Model metadata has moved to the database (ModelRegistryModel). Use
+ModelRegistryService for model lookups. The catalog now only handles engines.
 """
 
 from __future__ import annotations
@@ -45,58 +44,17 @@ class CatalogEntry:
     capabilities: EngineCapabilities
 
 
-@dataclass
-class ModelEntry:
-    """A model entry in the catalog (M36).
-
-    Maps a Dalston public model ID to its runtime and native model identifier.
-
-    Attributes:
-        id: Dalston's public model ID (e.g., "parakeet-tdt-1.1b")
-        runtime: Runtime that loads this model (e.g., "nemo")
-        runtime_model_id: Native model ID for loading (e.g., "nvidia/parakeet-tdt-1.1b")
-        name: Human-readable name
-        source: Download source (e.g., HuggingFace model ID)
-        size_gb: Estimated model size in GB
-        stage: Pipeline stage this model serves
-        languages: Supported languages (None means multilingual)
-        word_timestamps: Whether model produces word-level timestamps
-        supports_cpu: Whether model can run on CPU
-    """
-
-    id: str
-    runtime: str
-    runtime_model_id: str
-    name: str
-    source: str | None = None
-    size_gb: float | None = None
-    stage: str | None = None
-    languages: list[str] | None = None
-    word_timestamps: bool = False
-    punctuation: bool = False
-    capitalization: bool = False
-    supports_cpu: bool = False
-    min_vram_gb: int | None = None
-    min_ram_gb: int | None = None
-    rtf_gpu: float | None = None
-    rtf_cpu: float | None = None
-
-
 class EngineCatalog:
-    """Static catalog of deployable engines and models.
+    """Static catalog of deployable engines.
 
     Loaded from JSON at orchestrator startup. Used for early validation
     of job requirements before checking if engines are actually running.
 
-    M36: Now supports both runtime and model lookups.
+    M46: Model metadata has moved to the database. Use ModelRegistryService
+    for model lookups. This catalog now only handles engine capabilities.
 
     Example:
         catalog = EngineCatalog.load()
-
-        # Get model info for routing
-        model = catalog.get_model("parakeet-tdt-1.1b")
-        runtime = model.runtime  # "nemo"
-        native_id = model.runtime_model_id  # "nvidia/parakeet-tdt-1.1b"
 
         # Check if any engine in catalog supports Croatian transcription
         engines = catalog.get_engines_for_stage("transcribe")
@@ -106,19 +64,13 @@ class EngineCatalog:
         )
     """
 
-    def __init__(
-        self,
-        entries: dict[str, CatalogEntry],
-        models: dict[str, ModelEntry] | None = None,
-    ) -> None:
-        """Initialize catalog with entries.
+    def __init__(self, entries: dict[str, CatalogEntry]) -> None:
+        """Initialize catalog with engine entries.
 
         Args:
             entries: Map of engine_id to CatalogEntry
-            models: Map of model_id to ModelEntry (M36)
         """
         self._entries = entries
-        self._models = models or {}
 
     @classmethod
     def load(cls, path: Path | str | None = None) -> EngineCatalog:
@@ -169,31 +121,8 @@ class EngineCatalog:
                 + "\n".join(f"  - {err}" for err in parse_errors)
             )
 
-        # M36: Load model entries with strict validation
-        models: dict[str, ModelEntry] = {}
-        models_data = data.get("models", {})
-        model_errors: list[str] = []
-
-        for model_id, model_data in models_data.items():
-            try:
-                entry = cls._parse_model_entry(model_id, model_data)
-                models[model_id] = entry
-            except (KeyError, TypeError, ValueError) as e:
-                model_errors.append(f"model '{model_id}': {e}")
-
-        if model_errors:
-            raise ValueError(
-                f"Engine catalog has {len(model_errors)} invalid model entries. "
-                f"Regenerate with 'python scripts/generate_catalog.py'.\n"
-                + "\n".join(f"  - {err}" for err in model_errors)
-            )
-
-        logger.info(
-            "engine_catalog_loaded",
-            engine_count=len(entries),
-            model_count=len(models),
-        )
-        return cls(entries, models)
+        logger.info("engine_catalog_loaded", engine_count=len(entries))
+        return cls(entries)
 
     # =========================================================================
     # Parsing helpers (strict validation)
@@ -258,62 +187,8 @@ class EngineCatalog:
             capabilities=capabilities,
         )
 
-    @classmethod
-    def _parse_model_entry(cls, model_id: str, model_data: dict) -> ModelEntry:
-        """Parse and validate a single model entry.
-
-        Raises:
-            KeyError: Missing required field
-            TypeError: Field has wrong type
-            ValueError: Field has invalid value
-        """
-        # Required fields - fail hard if missing
-        runtime = model_data.get("runtime")
-        if not runtime:
-            raise KeyError("runtime is required")
-        if not isinstance(runtime, str):
-            raise TypeError(f"runtime must be a string, got {type(runtime).__name__}")
-
-        runtime_model_id = model_data.get("runtime_model_id")
-        if not runtime_model_id:
-            raise KeyError("runtime_model_id is required")
-        if not isinstance(runtime_model_id, str):
-            raise TypeError(
-                f"runtime_model_id must be a string, got {type(runtime_model_id).__name__}"
-            )
-
-        # Validate languages if present (None means multilingual)
-        languages = model_data.get("languages")
-        if languages is not None and not isinstance(languages, list):
-            raise TypeError(
-                f"languages must be a list or null, got {type(languages).__name__}"
-            )
-
-        caps_data = model_data.get("capabilities", {})
-        hw_data = model_data.get("hardware", {})
-        perf_data = model_data.get("performance", {})
-
-        return ModelEntry(
-            id=model_id,
-            runtime=runtime,
-            runtime_model_id=runtime_model_id,
-            name=model_data.get("name", model_id),
-            source=model_data.get("source"),
-            size_gb=model_data.get("size_gb"),
-            stage=model_data.get("stage"),
-            languages=languages,
-            word_timestamps=caps_data.get("word_timestamps", False),
-            punctuation=caps_data.get("punctuation", False),
-            capitalization=caps_data.get("capitalization", False),
-            supports_cpu=hw_data.get("supports_cpu", False),
-            min_vram_gb=hw_data.get("min_vram_gb"),
-            min_ram_gb=hw_data.get("min_ram_gb"),
-            rtf_gpu=perf_data.get("rtf_gpu"),
-            rtf_cpu=perf_data.get("rtf_cpu"),
-        )
-
     # =========================================================================
-    # Engine/Runtime methods (backward compatible)
+    # Engine methods
     # =========================================================================
 
     def get_engine(self, engine_id: str) -> CatalogEntry | None:
@@ -434,96 +309,6 @@ class EngineCatalog:
             return False
 
         return True
-
-    # =========================================================================
-    # M36: Model catalog methods
-    # =========================================================================
-
-    def get_model(self, model_id: str) -> ModelEntry | None:
-        """Get a specific model entry.
-
-        Args:
-            model_id: Dalston public model ID (e.g., "parakeet-tdt-1.1b")
-
-        Returns:
-            ModelEntry if found, None otherwise
-        """
-        return self._models.get(model_id)
-
-    def get_all_models(self) -> list[ModelEntry]:
-        """Get all models in the catalog.
-
-        Returns:
-            List of all ModelEntry objects
-        """
-        return list(self._models.values())
-
-    def get_runtime_for_model(self, model_id: str) -> str | None:
-        """Get the runtime that loads a model.
-
-        Args:
-            model_id: Dalston public model ID
-
-        Returns:
-            Runtime ID (e.g., "nemo") or None if model not found
-        """
-        model = self._models.get(model_id)
-        return model.runtime if model else None
-
-    def get_runtime_model_id(self, model_id: str) -> str | None:
-        """Get the native model ID for loading.
-
-        Args:
-            model_id: Dalston public model ID (e.g., "faster-whisper-large-v3-turbo")
-
-        Returns:
-            Native model ID (e.g., "large-v3-turbo") or None if model not found
-        """
-        model = self._models.get(model_id)
-        return model.runtime_model_id if model else None
-
-    def get_models_for_runtime(self, runtime: str) -> list[ModelEntry]:
-        """Get all models that a runtime can load.
-
-        Args:
-            runtime: Runtime ID (e.g., "nemo", "faster-whisper")
-
-        Returns:
-            List of ModelEntry objects for the runtime
-        """
-        return [m for m in self._models.values() if m.runtime == runtime]
-
-    def get_models_for_stage(self, stage: str) -> list[ModelEntry]:
-        """Get all models for a specific pipeline stage.
-
-        Args:
-            stage: Pipeline stage (e.g., "transcribe")
-
-        Returns:
-            List of ModelEntry objects for the stage
-        """
-        return [m for m in self._models.values() if m.stage == stage]
-
-    def find_models_supporting_language(
-        self, stage: str, language: str
-    ) -> list[ModelEntry]:
-        """Find models for a stage that support a specific language.
-
-        Args:
-            stage: Pipeline stage
-            language: ISO 639-1 language code
-
-        Returns:
-            List of models that support the language for the stage
-        """
-        result = []
-        for model in self.get_models_for_stage(stage):
-            # None means all languages (multilingual)
-            if model.languages is None:
-                result.append(model)
-            elif language.lower() in [lang.lower() for lang in model.languages]:
-                result.append(model)
-        return result
 
     # =========================================================================
     # Dunder methods

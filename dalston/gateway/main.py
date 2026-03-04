@@ -128,6 +128,28 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing database...")
     await init_db()
 
+    # Seed model registry from YAML files
+    logger.info("Seeding model registry from YAMLs...")
+    try:
+        from dalston.db.session import async_session
+        from dalston.gateway.services.model_registry import ModelRegistryService
+
+        async with async_session() as db:
+            service = ModelRegistryService()
+            result = await service.seed_from_yamls(db)
+            logger.info(
+                "model_registry_seeded",
+                created=result["created"],
+                updated=result["updated"],
+                preserved=result["preserved"],
+            )
+    except FileNotFoundError:
+        # Models directory doesn't exist - skip seeding (e.g., in tests)
+        logger.warning("models_directory_not_found", msg="Skipping model seeding")
+    except Exception as e:
+        logger.error("model_seeding_failed", error=str(e))
+        raise
+
     # Ensure S3 bucket exists
     logger.info("Ensuring S3 bucket exists...")
     try:

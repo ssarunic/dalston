@@ -405,11 +405,9 @@ async def select_engine(
     """
     # 1. Validate explicit user choice if provided
     if user_preference:
-        # First, try to resolve as a model ID from the catalog
-        model = catalog.get_model(user_preference)
-
-        # If not in catalog, try database lookup (for HF-registered models)
-        if model is None and db is not None:
+        # Look up model in database (the single source of truth)
+        db_model = None
+        if db is not None:
             from sqlalchemy import select
 
             from dalston.db.models import ModelRegistryModel
@@ -420,52 +418,15 @@ async def select_engine(
                 )
             )
             db_model = result.scalar_one_or_none()
-            if db_model is not None:
-                # Found in database - create a minimal CatalogEntry-like object
-                runtime_id = db_model.runtime
-                # Use source as runtime_model_id for HF models
-                runtime_model_id = db_model.source or db_model.runtime_model_id
 
-                engine = await registry.get_engine(runtime_id)
-                if engine is None or not engine.is_available:
-                    catalog_alts = catalog.find_engines(stage, requirements)
-                    raise NoCapableEngineError(
-                        stage=stage,
-                        requirements=requirements,
-                        candidates=[],
-                        catalog_alternatives=catalog_alts,
-                    )
-
-                logger.info(
-                    "engine_selected",
-                    stage=stage,
-                    selected_engine=runtime_id,
-                    runtime_model_id=runtime_model_id,
-                    selection_reason="database model lookup",
-                    original_model_id=user_preference,
-                )
-
-                return EngineSelectionResult(
-                    engine_id=runtime_id,
-                    capabilities=engine.capabilities
-                    or EngineCapabilities(
-                        engine_id=runtime_id, version="unknown", stages=[stage]
-                    ),
-                    selection_reason="database model lookup",
-                    runtime_model_id=runtime_model_id,
-                )
-        if model is not None:
-            # User specified a model ID (e.g., "parakeet-tdt-1.1b")
-            # Resolve to runtime and look up in registry
-            runtime_id = model.runtime
-            # Use source (HuggingFace repo ID) for S3 lookup, matching upload key
-            # runtime_model_id is what the library expects internally (e.g., "large-v3-turbo")
-            # but uploads use model.id (e.g., "Systran/faster-whisper-large-v3-turbo")
-            runtime_model_id = model.source or model.id
+        if db_model is not None:
+            # Found in database
+            runtime_id = db_model.runtime
+            # Use source as runtime_model_id for S3 lookup
+            runtime_model_id = db_model.source or db_model.runtime_model_id
 
             engine = await registry.get_engine(runtime_id)
             if engine is None or not engine.is_available:
-                # Runtime not running
                 catalog_alts = catalog.find_engines(stage, requirements)
                 raise NoCapableEngineError(
                     stage=stage,
@@ -474,11 +435,11 @@ async def select_engine(
                     catalog_alternatives=catalog_alts,
                 )
 
-            # Check model's language requirements (from catalog)
-            if model.languages is not None:
+            # Check model's language requirements
+            if db_model.languages is not None:
                 lang = requirements.get("language")
                 if lang and lang.lower() not in [
-                    lng.lower() for lng in model.languages
+                    lng.lower() for lng in db_model.languages
                 ]:
                     catalog_alts = catalog.find_engines(stage, requirements)
                     raise NoCapableEngineError(
@@ -493,7 +454,7 @@ async def select_engine(
                 stage=stage,
                 selected_engine=runtime_id,
                 runtime_model_id=runtime_model_id,
-                selection_reason="user model preference",
+                selection_reason="database model lookup",
                 original_model_id=user_preference,
             )
 
@@ -503,7 +464,7 @@ async def select_engine(
                 or EngineCapabilities(
                     engine_id=runtime_id, version="unknown", stages=[stage]
                 ),
-                selection_reason="user model preference",
+                selection_reason="database model lookup",
                 runtime_model_id=runtime_model_id,
             )
 

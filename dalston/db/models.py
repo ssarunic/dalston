@@ -702,6 +702,12 @@ class ModelRegistryModel(Base):
         JSONB, nullable=False, server_default="{}"
     )
 
+    # Provenance tracking - where did this model's metadata come from?
+    # Values: "yaml" (from YAML files), "user" (manually enriched), "hf" (HuggingFace)
+    metadata_source: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="yaml"
+    )
+
     # Usage tracking
     last_used_at: Mapped[datetime | None] = mapped_column(
         TIMESTAMP(timezone=True), nullable=True

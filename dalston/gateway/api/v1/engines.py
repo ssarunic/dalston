@@ -11,11 +11,18 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from dalston.gateway.dependencies import get_principal, get_redis, get_security_manager
+from dalston.gateway.dependencies import (
+    get_db,
+    get_principal,
+    get_redis,
+    get_security_manager,
+)
 from dalston.gateway.security.manager import SecurityManager
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
+from dalston.gateway.services.model_registry import ModelRegistryService
 from dalston.orchestrator.catalog import get_catalog
 from dalston.orchestrator.registry import BatchEngineRegistry
 
@@ -106,6 +113,7 @@ async def list_engines(
     principal: Annotated[Principal, Depends(get_principal)],
     security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db),
 ) -> EnginesListResponse:
     """List all engines with status.
 
@@ -115,6 +123,15 @@ async def list_engines(
     security_manager.require_permission(principal, Permission.MODEL_READ)
     catalog = get_catalog()
     registry = BatchEngineRegistry(redis)
+    model_service = ModelRegistryService()
+
+    # Load all models from DB, group by runtime for efficient lookup
+    all_models = await model_service.list_models(db)
+    models_by_runtime: dict[str, list[str]] = {}
+    for m in all_models:
+        if m.runtime not in models_by_runtime:
+            models_by_runtime[m.runtime] = []
+        models_by_runtime[m.runtime].append(m.id)
 
     # Get running engines from registry
     running_engines = await registry.get_engines()
@@ -141,9 +158,8 @@ async def list_engines(
         else:
             status = "available"
 
-        # M36: Get available models for this runtime from catalog
-        runtime_models = catalog.get_models_for_runtime(engine_id)
-        available_models = [m.id for m in runtime_models] if runtime_models else None
+        # M36/M46: Get available models for this runtime from DB
+        available_models = models_by_runtime.get(engine_id) or None
 
         engines.append(
             EngineResponse(

@@ -154,6 +154,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M40](milestones/M40-model-registry.md) | Model Registry & HF Integration | PostgreSQL model registry, HF auto-routing, download workflow | 3-4 | Complete |
 | [M41](milestones/M41-new-engine-types.md) | New Engine Types | Parakeet ONNX, HF-ASR, vLLM-ASR engine containers | 5-7 | Planned |
 | [M42](milestones/M42-console-model-management.md) | Console Model Management | Web UI for model registry, download, and selection | 5-7 | Complete |
+| [M46](milestones/M46-model-registry-as-source-of-truth.md) | Model Registry as Source of Truth | DB as single source, auto-seeding, user enrichment API | 3-4 | Planned |
 
 ---
 
@@ -250,7 +251,9 @@ M28 ──► M29 ──► M30 ──► M31 ──► M36 (runtime model manag
                   │                │
                   └──► M32         └──► M39 ──► M40 ──► M41
                                              │
-                                             └──► M42 (console model management, also needs M10)
+                                             ├──► M42 (console model management, also needs M10)
+                                             │
+                                             └──► M46 (model registry as source of truth)
 
 M10 + M11 + M15 ──► M35
 ```
@@ -270,7 +273,7 @@ M10 + M11 + M15 ──► M35
 - **M28-M32**: Engine infrastructure (M28 registry → M29 capabilities → M30 metadata → M31 routing → M32 variants)
 - **M35**: Settings Page (needs M10 console, M11 auth, M15 console auth)
 - **M36**: Runtime Model Management (needs M31 routing; enables dynamic model loading)
-- **M39-M42**: Model management (M36 → M39 cache TTL → M40 registry → M41 new engines, M42 console)
+- **M39-M46**: Model management (M36 → M39 cache TTL → M40 registry → M41 new engines, M42 console, M46 DB source of truth)
 - **M42**: Console Model Management (needs M40 registry APIs, M10 console)
 
 ---
@@ -311,3 +314,4 @@ Each milestone has a verification section. Key checkpoints:
 | M39 | Model files evicted after TTL; cache stays within size limits |
 | M40 | `POST /v1/models/{id}/pull` downloads to S3; HF models auto-resolve to runtime |
 | M42 | Models page shows registry with download/remove actions; Add from HF dialog works |
+| M46 | Models auto-seeded on startup; PATCH updates metadata; user edits preserved across restarts |

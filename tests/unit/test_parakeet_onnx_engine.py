@@ -219,99 +219,11 @@ class TestParakeetOnnxDecoderTypeDetection:
 
 
 class TestParakeetOnnxCatalogIntegration:
-    """Tests for Parakeet ONNX integration with the model catalog (M41)."""
+    """Tests for Parakeet ONNX integration with the engine catalog (M41).
 
-    def test_onnx_ctc_models_exist_in_catalog(self):
-        """Test that CTC ONNX model entries exist in the catalog."""
-        from dalston.orchestrator.catalog import get_catalog
-
-        catalog = get_catalog()
-        model_06 = catalog.get_model("parakeet-onnx-ctc-0.6b")
-        model_11 = catalog.get_model("parakeet-onnx-ctc-1.1b")
-
-        assert model_06 is not None, "parakeet-onnx-ctc-0.6b not found in catalog"
-        assert model_11 is not None, "parakeet-onnx-ctc-1.1b not found in catalog"
-
-    def test_onnx_tdt_models_exist_in_catalog(self):
-        """Test that TDT ONNX model entries exist in the catalog."""
-        from dalston.orchestrator.catalog import get_catalog
-
-        catalog = get_catalog()
-        model_v2 = catalog.get_model("parakeet-onnx-tdt-0.6b-v2")
-        model_v3 = catalog.get_model("parakeet-onnx-tdt-0.6b-v3")
-
-        assert model_v2 is not None, "parakeet-onnx-tdt-0.6b-v2 not found in catalog"
-        assert model_v3 is not None, "parakeet-onnx-tdt-0.6b-v3 not found in catalog"
-
-    def test_onnx_rnnt_model_exists_in_catalog(self):
-        """Test that RNNT ONNX model entry exists in the catalog."""
-        from dalston.orchestrator.catalog import get_catalog
-
-        catalog = get_catalog()
-        model = catalog.get_model("parakeet-onnx-rnnt-0.6b")
-
-        assert model is not None, "parakeet-onnx-rnnt-0.6b not found in catalog"
-
-    def test_onnx_models_use_nemo_onnx_runtime(self):
-        """Test that all ONNX models map to nemo-onnx runtime."""
-        from dalston.orchestrator.catalog import get_catalog
-
-        catalog = get_catalog()
-
-        for model_id in [
-            "parakeet-onnx-ctc-0.6b",
-            "parakeet-onnx-ctc-1.1b",
-            "parakeet-onnx-tdt-0.6b-v2",
-            "parakeet-onnx-tdt-0.6b-v3",
-            "parakeet-onnx-rnnt-0.6b",
-        ]:
-            runtime = catalog.get_runtime_for_model(model_id)
-            assert runtime == "nemo-onnx", f"{model_id} should use nemo-onnx runtime"
-
-    def test_onnx_models_have_correct_runtime_model_ids(self):
-        """Test that ONNX models map to correct HuggingFace model IDs."""
-        from dalston.orchestrator.catalog import get_catalog
-
-        catalog = get_catalog()
-
-        expected = {
-            "parakeet-onnx-ctc-0.6b": "nvidia/parakeet-ctc-0.6b",
-            "parakeet-onnx-ctc-1.1b": "nvidia/parakeet-ctc-1.1b",
-            "parakeet-onnx-tdt-0.6b-v2": "nvidia/parakeet-tdt-0.6b-v2",
-            "parakeet-onnx-tdt-0.6b-v3": "nvidia/parakeet-tdt-0.6b-v3",
-            "parakeet-onnx-rnnt-0.6b": "nvidia/parakeet-rnnt-0.6b",
-        }
-
-        for model_id, expected_runtime_id in expected.items():
-            actual = catalog.get_runtime_model_id(model_id)
-            assert actual == expected_runtime_id, (
-                f"{model_id}: expected {expected_runtime_id}, got {actual}"
-            )
-
-    def test_onnx_models_support_cpu(self):
-        """Test that ONNX models support CPU (unlike NeMo variants)."""
-        from dalston.orchestrator.catalog import get_catalog
-
-        catalog = get_catalog()
-        onnx_models = catalog.get_models_for_runtime("nemo-onnx")
-
-        assert len(onnx_models) >= 5
-        for model in onnx_models:
-            assert model.supports_cpu is True, (
-                f"ONNX model {model.id} should support CPU"
-            )
-
-    def test_onnx_models_have_word_timestamps(self):
-        """Test that ONNX models report word timestamp support."""
-        from dalston.orchestrator.catalog import get_catalog
-
-        catalog = get_catalog()
-        onnx_models = catalog.get_models_for_runtime("nemo-onnx")
-
-        for model in onnx_models:
-            assert model.word_timestamps is True, (
-                f"ONNX model {model.id} should have word_timestamps=True"
-            )
+    Note: Model metadata tests have been removed as models are now managed
+    in the database (M46). Use ModelRegistryService for model metadata.
+    """
 
     def test_onnx_runtime_exists_in_catalog(self):
         """Test that nemo-onnx runtime exists in the engine catalog."""

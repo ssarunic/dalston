@@ -707,94 +707,154 @@ class ModelRegistryService:
 
         return model
 
-    async def seed_from_catalog(
+    async def seed_from_yamls(
         self,
         db: AsyncSession,
         *,
-        update_existing: bool = False,
+        models_dir: Path | None = None,
     ) -> dict[str, int]:
-        """Seed the registry with models from the static catalog.
+        """Seed registry from YAML files, preserving user-modified entries.
 
-        This populates the database with all models defined in the catalog,
-        allowing users to browse available models and download them.
+        This replaces the manual seed_from_catalog() flow with direct YAML loading.
+        Called automatically on gateway startup.
+
+        For each YAML model:
+        - If not in DB: INSERT with metadata_source="yaml"
+        - If in DB with metadata_source="yaml": UPDATE all fields
+        - If in DB with metadata_source="user": SKIP (preserve user edits)
+        - If in DB with metadata_source="hf": UPDATE (improve HF-resolved data)
 
         Args:
             db: Database session
-            update_existing: If True, update existing models with catalog data
+            models_dir: Directory containing model YAMLs. Defaults to repo/models/
 
         Returns:
-            Dict with counts: {"created": N, "updated": N, "skipped": N}
+            Dict with counts: {"created": N, "updated": N, "preserved": N}
         """
-        from dalston.orchestrator.catalog import get_catalog, reload_catalog
+        from dalston.gateway.services.model_yaml_loader import load_model_yamls
 
-        # Force reload to get fresh data
-        reload_catalog()
-        catalog = get_catalog()
-        models = catalog.get_all_models()
+        entries = load_model_yamls(models_dir)
+        result = {"created": 0, "updated": 0, "preserved": 0}
 
-        created = 0
-        updated = 0
-        skipped = 0
+        for entry in entries:
+            existing = await self.get_model(db, entry.id)
 
-        for m in models:
-            # Check if model already exists
-            existing = await self.get_model(db, m.id)
-            if existing is not None:
-                if update_existing:
-                    # Update existing model with catalog data
-                    await db.execute(
-                        update(ModelRegistryModel)
-                        .where(ModelRegistryModel.id == m.id)
-                        .values(
-                            name=m.name,
-                            runtime=m.runtime,
-                            runtime_model_id=m.runtime_model_id,
-                            stage=m.stage or "transcribe",
-                            source=m.source,
-                            languages=m.languages,
-                            word_timestamps=m.word_timestamps,
-                            punctuation=m.punctuation,
-                            capitalization=m.capitalization,
-                            min_vram_gb=m.min_vram_gb,
-                            min_ram_gb=m.min_ram_gb,
-                            supports_cpu=m.supports_cpu,
-                        )
+            if existing is None:
+                # New model - insert
+                model = ModelRegistryModel(
+                    id=entry.id,
+                    name=entry.name,
+                    runtime=entry.runtime,
+                    runtime_model_id=entry.runtime_model_id,
+                    stage=entry.stage,
+                    status="not_downloaded",
+                    source=entry.source,
+                    languages=entry.languages,
+                    word_timestamps=entry.word_timestamps,
+                    punctuation=entry.punctuation,
+                    capitalization=entry.capitalization,
+                    streaming=entry.streaming,
+                    min_vram_gb=entry.min_vram_gb,
+                    min_ram_gb=entry.min_ram_gb,
+                    supports_cpu=entry.supports_cpu,
+                    metadata_source="yaml",
+                )
+                db.add(model)
+                result["created"] += 1
+
+            elif existing.metadata_source == "user":
+                # User-modified - preserve
+                result["preserved"] += 1
+
+            else:
+                # yaml or hf - update with fresh YAML data
+                await db.execute(
+                    update(ModelRegistryModel)
+                    .where(ModelRegistryModel.id == entry.id)
+                    .values(
+                        name=entry.name,
+                        runtime=entry.runtime,
+                        runtime_model_id=entry.runtime_model_id,
+                        stage=entry.stage,
+                        source=entry.source,
+                        languages=entry.languages,
+                        word_timestamps=entry.word_timestamps,
+                        punctuation=entry.punctuation,
+                        capitalization=entry.capitalization,
+                        streaming=entry.streaming,
+                        min_vram_gb=entry.min_vram_gb,
+                        min_ram_gb=entry.min_ram_gb,
+                        supports_cpu=entry.supports_cpu,
+                        metadata_source="yaml",
                     )
-                    updated += 1
-                else:
-                    skipped += 1
-                continue
-
-            # Create new registry entry
-            model = ModelRegistryModel(
-                id=m.id,
-                name=m.name,
-                runtime=m.runtime,
-                runtime_model_id=m.runtime_model_id,
-                stage=m.stage or "transcribe",
-                status="not_downloaded",
-                source=m.source,
-                languages=m.languages,
-                word_timestamps=m.word_timestamps,
-                punctuation=m.punctuation,
-                capitalization=m.capitalization,
-                min_vram_gb=m.min_vram_gb,
-                min_ram_gb=m.min_ram_gb,
-                supports_cpu=m.supports_cpu,
-            )
-            db.add(model)
-            created += 1
+                )
+                result["updated"] += 1
 
         await db.commit()
 
         logger.info(
-            "catalog_seeded",
-            created=created,
-            updated=updated,
-            skipped=skipped,
+            "model_yamls_seeded",
+            created=result["created"],
+            updated=result["updated"],
+            preserved=result["preserved"],
         )
 
-        return {"created": created, "updated": updated, "skipped": skipped}
+        return result
+
+    async def update_model(
+        self,
+        db: AsyncSession,
+        model_id: str,
+        updates: dict,
+    ) -> ModelRegistryModel:
+        """Update model metadata and set metadata_source to 'user'.
+
+        This marks the model as user-modified, preventing automatic overwrites
+        during re-seeding from YAML files.
+
+        Args:
+            db: Database session
+            model_id: Dalston model ID
+            updates: Dictionary of fields to update
+
+        Returns:
+            Updated model entry
+
+        Raises:
+            ModelNotFoundError: If model doesn't exist
+        """
+        model = await self.get_model_or_raise(db, model_id)
+
+        # Update allowed fields
+        allowed_fields = {
+            "name",
+            "languages",
+            "word_timestamps",
+            "punctuation",
+            "capitalization",
+            "streaming",
+            "min_vram_gb",
+            "min_ram_gb",
+            "supports_cpu",
+        }
+
+        for key, value in updates.items():
+            if key in allowed_fields and hasattr(model, key):
+                setattr(model, key, value)
+
+        # Mark as user-modified
+        model.metadata_source = "user"
+
+        await db.commit()
+        await db.refresh(model)
+
+        logger.info(
+            "model_updated",
+            model_id=model_id,
+            fields=list(updates.keys()),
+        )
+
+        return model
 
     async def resolve_hf_model(
         self,
