@@ -21,6 +21,51 @@ jobs:
       - name: Format check
         run: uvx ruff@0.9.4 format --check .
 
+  typecheck:
+    runs-on: ubuntu-latest
+    # Non-blocking until error count is reduced (currently ~94 errors, mostly redis async typing)
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv venv && uv pip install -e ".[gateway,orchestrator,session-router,dev]" mypy
+
+      - name: Run mypy
+        run: |
+          uv run mypy dalston/ 2>&1 | tee mypy-output.txt || true
+          echo "Error count: $(grep -c '^dalston.*error:' mypy-output.txt || echo 0)"
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
   validate-engines:
     runs-on: ubuntu-latest
     steps:
