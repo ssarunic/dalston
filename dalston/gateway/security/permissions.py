@@ -21,6 +21,8 @@ class Permission(str, Enum):
     JOB_CREATE = "job:create"
     JOB_READ = "job:read"
     JOB_READ_OWN = "job:read:own"
+    JOB_UPDATE = "job:update"
+    JOB_UPDATE_OWN = "job:update:own"
     JOB_DELETE = "job:delete"
     JOB_DELETE_OWN = "job:delete:own"
     JOB_CANCEL = "job:cancel"

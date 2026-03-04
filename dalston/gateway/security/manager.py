@@ -33,6 +33,7 @@ SCOPE_PERMISSIONS: dict[Scope, set[Permission]] = {
     },
     Scope.JOBS_WRITE: {
         Permission.JOB_CREATE,
+        Permission.JOB_UPDATE_OWN,
         Permission.JOB_DELETE_OWN,
         Permission.JOB_CANCEL_OWN,
     },

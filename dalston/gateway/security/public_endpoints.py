@@ -64,9 +64,21 @@ def is_optional_auth_endpoint(path: str) -> bool:
     if path in OPTIONAL_AUTH_ENDPOINTS:
         return True
 
-    # Pattern matching for parameterized paths
-    # /v1/models/{model_id} matches /v1/models/anything
-    if path.startswith("/v1/models/") and "/pull" not in path:
-        return True
+    # Pattern matching for parameterized paths - be restrictive to avoid
+    # accidentally matching protected endpoints like /v1/models/sync,
+    # /v1/models/registry, /v1/models/{model_id}/pull
+    if path.startswith("/v1/models/"):
+        # Exclude known protected paths
+        if "/pull" in path:
+            return False
+        if "/registry" in path:
+            return False
+        if path == "/v1/models/sync":
+            return False
+        # Only allow single-segment model IDs (e.g., /v1/models/whisper-large)
+        # but not paths with sub-resources (e.g., /v1/models/something/action)
+        remaining = path[len("/v1/models/") :]
+        if "/" not in remaining:
+            return True
 
     return False

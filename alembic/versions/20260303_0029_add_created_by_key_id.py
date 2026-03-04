@@ -3,8 +3,8 @@
 Adds created_by_key_id column to jobs, realtime_sessions, webhook_endpoints,
 and api_keys tables for resource ownership enforcement.
 
-Revision ID: 0017
-Revises: 0016
+Revision ID: 0029
+Revises: 0028
 Create Date: 2026-03-03
 """
 
@@ -16,8 +16,8 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 # Revision identifiers, used by Alembic.
-revision: str = "0017"
-down_revision: str | None = "0016"
+revision: str = "0029"
+down_revision: str | None = "0028"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
