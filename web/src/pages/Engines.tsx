@@ -326,9 +326,20 @@ function StageAccordion({
   )
 }
 
-function RealtimeWorkerCard({ worker }: { worker: WorkerStatus }) {
+function RealtimeWorkerCard({ worker, models }: { worker: WorkerStatus; models: ModelRegistryEntry[] }) {
   const isReady = worker.status === 'ready'
   const utilization = worker.capacity > 0 ? (worker.active_sessions / worker.capacity) * 100 : 0
+  const loadedModelSet = new Set(worker.models)
+
+  // Sort: loaded first, then by status (ready > downloading > not_downloaded > failed)
+  const statusOrder: Record<ModelStatus, number> = { ready: 0, downloading: 1, not_downloaded: 2, failed: 3 }
+  const sortedModels = [...models].sort((a, b) => {
+    const aLoaded = loadedModelSet.has(a.id) || loadedModelSet.has(a.name || '')
+    const bLoaded = loadedModelSet.has(b.id) || loadedModelSet.has(b.name || '')
+    if (aLoaded !== bLoaded) return aLoaded ? -1 : 1
+    return statusOrder[a.status] - statusOrder[b.status]
+  })
+  const maxToShow = 4
 
   return (
     <Link
@@ -374,16 +385,31 @@ function RealtimeWorkerCard({ worker }: { worker: WorkerStatus }) {
           )}
         </div>
       </div>
-      {/* M43: Show dynamically loaded models */}
-      {worker.models.length > 0 && (
-        <div className="mt-3">
-          <div className="text-xs text-muted-foreground mb-1">Loaded models</div>
+      {models.length > 0 && (
+        <div className="mt-3 flex items-center gap-2">
+          <Box className="h-3 w-3 text-muted-foreground shrink-0" />
           <div className="flex flex-wrap gap-1">
-            {worker.models.map((model) => (
-              <Badge key={model} variant="secondary" className="text-xs">
-                {model}
+            {sortedModels.slice(0, maxToShow).map((model) => {
+              const isLoaded = loadedModelSet.has(model.id) || loadedModelSet.has(model.name || '')
+              return (
+                <Badge
+                  key={model.id}
+                  variant={isLoaded ? 'secondary' : 'outline'}
+                  className={cn('text-xs', !isLoaded && model.status === 'not_downloaded' && 'opacity-60')}
+                >
+                  <span
+                    className={cn('w-1.5 h-1.5 rounded-full mr-1', isLoaded ? 'bg-blue-500' : modelStatusColors[model.status])}
+                    title={isLoaded ? 'Loaded' : modelStatusLabels[model.status]}
+                  />
+                  {model.name || model.id}
+                </Badge>
+              )
+            })}
+            {models.length > maxToShow && (
+              <Badge variant="outline" className="text-xs">
+                +{models.length - maxToShow} more
               </Badge>
-            ))}
+            )}
           </div>
         </div>
       )}
@@ -584,9 +610,9 @@ export function Engines() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-2">
               {[1, 2].map((i) => (
-                <div key={i} className="h-24 bg-muted animate-pulse rounded-lg" />
+                <div key={i} className="h-16 bg-muted animate-pulse rounded-lg" />
               ))}
             </div>
           ) : realtimeWorkers.length === 0 ? (
@@ -595,9 +621,13 @@ export function Engines() {
               No real-time workers registered
             </div>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-2">
               {realtimeWorkers.map((worker) => (
-                <RealtimeWorkerCard key={worker.worker_id} worker={worker} />
+                <RealtimeWorkerCard
+                  key={worker.worker_id}
+                  worker={worker}
+                  models={modelsByRuntime.get(worker.runtime ?? '') ?? []}
+                />
               ))}
             </div>
           )}
