@@ -352,7 +352,7 @@ async def update_model(
     summary="Download a model",
     description=(
         "Start downloading a model from HuggingFace Hub. "
-        "The download runs in the background. Poll GET /v1/models/registry/{model_id} "
+        "The download runs in the background. Poll GET /v1/models/{model_id} "
         "to check status."
     ),
     responses={404: {"description": "Model not found in registry"}},
@@ -368,7 +368,7 @@ async def pull_model(
     """Download a model from HuggingFace Hub.
 
     The download runs asynchronously. Check the model status with
-    GET /v1/models/registry/{model_id} to monitor progress.
+    GET /v1/models/{model_id} to monitor progress.
     """
     security_manager = get_security_manager()
     security_manager.require_permission(principal, Permission.MODEL_PULL)
