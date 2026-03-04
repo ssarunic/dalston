@@ -10,7 +10,7 @@ import asyncio
 import base64
 import binascii
 import json
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 import structlog
@@ -43,7 +43,7 @@ from dalston.gateway.services.realtime_sessions import RealtimeSessionService
 logger = structlog.get_logger()
 
 
-async def _get_auth_service() -> tuple[AuthService, any]:
+async def _get_auth_service() -> tuple[AuthService, Any]:
     """Get AuthService for WebSocket authentication.
 
     Returns:

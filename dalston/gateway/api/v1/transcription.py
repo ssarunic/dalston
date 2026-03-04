@@ -304,7 +304,7 @@ async def create_transcription(
         # Dalston native mode
         # If model is "auto", let orchestrator select engine based on capabilities
         # Otherwise, pass the engine ID directly
-        parameters: dict = {
+        parameters = {
             "language": language or "auto",
             "speaker_detection": speaker_detection,
             "num_speakers": num_speakers,

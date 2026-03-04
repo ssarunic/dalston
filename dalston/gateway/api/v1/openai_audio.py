@@ -13,7 +13,7 @@ Used by:
 import os
 import re
 from enum import Enum
-from typing import Any
+from typing import Any, NoReturn
 
 from fastapi import HTTPException, Response
 from pydantic import BaseModel, Field
@@ -160,7 +160,7 @@ def raise_openai_error(
     error_type: str = "invalid_request_error",
     param: str | None = None,
     code: str = "invalid_request",
-) -> None:
+) -> NoReturn:
     """Raise HTTPException with OpenAI error format."""
     raise HTTPException(
         status_code=status_code,

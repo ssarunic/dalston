@@ -281,6 +281,9 @@ if _console_dir:
             name="console-assets",
         )
 
+    # Capture in local variable for type narrowing in closure
+    console_dir = _console_dir
+
     # Serve index.html for all /console routes (SPA fallback)
     @app.get("/console/{path:path}", include_in_schema=False)
     @app.get("/console", include_in_schema=False)
@@ -289,10 +292,10 @@ if _console_dir:
         # Try to serve static file first (for vite.svg, etc.)
         # Use resolve() and is_relative_to() to prevent path traversal attacks
         if path:
-            static_file = (_console_dir / path).resolve()
-            if static_file.is_relative_to(_console_dir) and static_file.is_file():
+            static_file = (console_dir / path).resolve()
+            if static_file.is_relative_to(console_dir) and static_file.is_file():
                 return FileResponse(static_file)
         # Otherwise serve index.html for SPA routing
-        return FileResponse(_console_dir / "index.html")
+        return FileResponse(console_dir / "index.html")
 else:
     logger.warning("Web console not found. Run 'npm run build' in web/ directory.")

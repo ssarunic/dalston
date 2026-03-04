@@ -308,7 +308,7 @@ class ConsoleService:
             status=job.status,
             audio_uri=job.audio_uri,
             parameters=job.parameters,
-            result=job.result,
+            result=None,  # Results fetched from S3, not stored in DB
             error=job.error,
             created_at=job.created_at,
             started_at=job.started_at,

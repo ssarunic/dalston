@@ -148,7 +148,7 @@ class AuditService:
         audio_duration: float | None = None,
     ) -> None:
         """Log audio upload event."""
-        detail = {}
+        detail: dict[str, int | float] = {}
         if file_size is not None:
             detail["file_size"] = file_size
         if audio_duration is not None:

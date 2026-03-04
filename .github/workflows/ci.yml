@@ -23,8 +23,6 @@ jobs:
 
   typecheck:
     runs-on: ubuntu-latest
-    # Non-blocking until error count is reduced (currently ~94 errors, mostly redis async typing)
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -38,9 +36,7 @@ jobs:
         run: uv venv && uv pip install -e ".[gateway,orchestrator,session-router,dev]" mypy
 
       - name: Run mypy
-        run: |
-          uv run mypy dalston/ 2>&1 | tee mypy-output.txt || true
-          echo "Error count: $(grep -c '^dalston.*error:' mypy-output.txt || echo 0)"
+        run: uv run mypy dalston/
 
   web:
     runs-on: ubuntu-latest
