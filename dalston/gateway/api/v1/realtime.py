@@ -333,6 +333,8 @@ async def realtime_transcription(
         routing_model = model if model else None
         model_runtime = None
         valid_runtimes: set[str] | None = None
+        # effective_model: the model ID to pass to the worker (may differ from user input)
+        effective_model = model
 
         # Look up model's runtime for routing (allows workers to load model dynamically)
         if routing_model:
@@ -346,14 +348,36 @@ async def realtime_transcription(
             except Exception as e:
                 logger.warning("model_lookup_failed", model=routing_model, error=str(e))
         else:
-            # When "Any available" selected, get valid runtimes from registry (M48)
-            # This ensures routing only considers workers whose runtime has downloaded models
+            # When "Any available" selected, pick the largest downloaded model (M48)
+            # This ensures workers load from S3 registry, not directly from HuggingFace
             try:
                 async for db in _get_db():
                     model_service = ModelRegistryService()
                     downloaded_models = await model_service.list_models(
                         db, stage="transcribe", status="ready"
                     )
+                    # Filter to models with streaming support (RT-capable)
+                    rt_models = [m for m in downloaded_models if m.streaming]
+                    # Fall back to all downloaded if no streaming models
+                    candidates = rt_models if rt_models else list(downloaded_models)
+
+                    if candidates:
+                        # Pick largest model by size (best quality)
+                        largest = max(
+                            candidates,
+                            key=lambda m: m.size_bytes or 0,
+                        )
+                        routing_model = largest.id
+                        model_runtime = largest.runtime
+                        effective_model = largest.id
+                        logger.info(
+                            "auto_selected_model",
+                            model_id=largest.id,
+                            runtime=largest.runtime,
+                            size_mb=round((largest.size_bytes or 0) / 1024 / 1024, 1),
+                        )
+
+                    # Also collect valid runtimes for routing fallback
                     valid_runtimes = {m.runtime for m in downloaded_models if m.runtime}
                     break
             except Exception as e:
@@ -454,7 +478,7 @@ async def realtime_transcription(
                 worker_endpoint=allocation.endpoint,
                 session_id=allocation.session_id,
                 language=language,
-                model=model,  # Pass original model (empty = worker default)
+                model=effective_model,  # Pass selected model (auto-selected if empty)
                 encoding=encoding,
                 sample_rate=sample_rate,
                 enable_vad=enable_vad,
@@ -680,18 +704,40 @@ async def elevenlabs_realtime_transcription(
                 return
 
         # ElevenLabs model_id (scribe_v1, scribe_v2, etc.) is treated as "auto"
-        # Let the session router select the best available realtime engine
-        routing_model = None  # Auto-select
-
-        # Get valid runtimes from registry for "Any available" routing (M48)
-        # This ensures routing only considers workers whose runtime has downloaded models
+        # Pick the largest downloaded model for best quality (M48)
+        routing_model = None
+        model_runtime = None
         valid_runtimes: set[str] | None = None
+        effective_model = ""  # Model ID to pass to worker
+
         try:
             async for db in _get_db():
                 model_service = ModelRegistryService()
                 downloaded_models = await model_service.list_models(
                     db, stage="transcribe", status="ready"
                 )
+                # Filter to models with streaming support (RT-capable)
+                rt_models = [m for m in downloaded_models if m.streaming]
+                # Fall back to all downloaded if no streaming models
+                candidates = rt_models if rt_models else list(downloaded_models)
+
+                if candidates:
+                    # Pick largest model by size (best quality)
+                    largest = max(
+                        candidates,
+                        key=lambda m: m.size_bytes or 0,
+                    )
+                    routing_model = largest.id
+                    model_runtime = largest.runtime
+                    effective_model = largest.id
+                    logger.info(
+                        "elevenlabs_auto_selected_model",
+                        model_id=largest.id,
+                        runtime=largest.runtime,
+                        size_mb=round((largest.size_bytes or 0) / 1024 / 1024, 1),
+                    )
+
+                # Also collect valid runtimes for routing fallback
                 valid_runtimes = {m.runtime for m in downloaded_models if m.runtime}
                 break
         except Exception as e:
@@ -705,6 +751,7 @@ async def elevenlabs_realtime_transcription(
             language=language_code,
             model=routing_model,
             client_ip=client_ip,
+            runtime=model_runtime,
             valid_runtimes=valid_runtimes,
         )
 
@@ -754,7 +801,7 @@ async def elevenlabs_realtime_transcription(
                 worker_endpoint=allocation.endpoint,
                 session_id=allocation.session_id,
                 language=language_code,
-                model="",  # ElevenLabs doesn't specify RT model, use worker default
+                model=effective_model,  # Auto-selected largest model from registry
                 sample_rate=sample_rate,
                 enable_vad=(commit_strategy == "vad"),
                 interim_results=True,

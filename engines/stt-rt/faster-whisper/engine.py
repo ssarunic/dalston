@@ -53,6 +53,10 @@ class WhisperStreamingEngine(RealtimeEngine):
 
         Models are loaded on-demand, not all at once. This method sets up
         the ModelManager and optionally preloads a default model.
+
+        When DALSTON_S3_BUCKET is set, models are downloaded from S3 (the registry)
+        instead of directly from HuggingFace. This ensures consistency with the
+        model registry as the single source of truth.
         """
         # Detect device
         self._device, self._compute_type = self._detect_device()
@@ -60,13 +64,34 @@ class WhisperStreamingEngine(RealtimeEngine):
             "using_device", device=self._device, compute_type=self._compute_type
         )
 
+        # Configure S3 storage if bucket is set (M48: registry as source of truth)
+        model_storage = None
+        s3_bucket = os.environ.get("DALSTON_S3_BUCKET")
+        if s3_bucket:
+            from dalston.engine_sdk.model_storage import S3ModelStorage
+
+            model_storage = S3ModelStorage.from_env()
+            logger.info(
+                "s3_model_storage_enabled",
+                bucket=s3_bucket,
+            )
+
+        # Don't preload when S3 storage is enabled - models will be loaded on-demand
+        # using the full model ID from the registry (e.g., "Systran/faster-whisper-base")
+        # The DALSTON_MODEL_PRELOAD env var uses short names like "base" which won't
+        # match S3 keys
+        preload_model = (
+            None if model_storage else os.environ.get("DALSTON_MODEL_PRELOAD")
+        )
+
         # Create sync model manager
         sync_manager = FasterWhisperModelManager(
             device=self._device,
             compute_type=self._compute_type,
+            model_storage=model_storage,
             ttl_seconds=int(os.environ.get("DALSTON_MODEL_TTL_SECONDS", "3600")),
             max_loaded=int(os.environ.get("DALSTON_MAX_LOADED_MODELS", "2")),
-            preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
+            preload=preload_model,
         )
 
         # Wrap in async manager
@@ -77,6 +102,7 @@ class WhisperStreamingEngine(RealtimeEngine):
             max_loaded=sync_manager.max_loaded,
             ttl_seconds=sync_manager.ttl_seconds,
             preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
+            s3_storage_enabled=model_storage is not None,
         )
 
     def _detect_device(self) -> tuple[str, str]:
