@@ -317,6 +317,7 @@ async def handle_job_created(
             log.info("queued_initial_task", task_id=str(task.id), stage=task.stage)
 
 
+
 async def handle_task_started(
     task_id: UUID,
     db: AsyncSession,
@@ -1113,10 +1114,17 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
     else:
         job.status = JobStatus.COMPLETED.value
         dalston.metrics.inc_orchestrator_jobs("completed")
-        # Record job duration (M20)
+        # Record job duration with runtime/model from transcribe task
         if job.started_at:
             duration = (datetime.now(UTC) - job.started_at).total_seconds()
-            dalston.metrics.observe_orchestrator_job_duration(len(all_tasks), duration)
+            transcribe_task = next(
+                (t for t in all_tasks if t.stage == "transcribe"), None
+            )
+            job_runtime = transcribe_task.engine_id if transcribe_task else ""
+            job_model = (job.parameters or {}).get("model", "")
+            dalston.metrics.observe_orchestrator_job_duration(
+                job_runtime, job_model, duration
+            )
         log.info("job_completed")
 
         # Extract and store result stats from transcript
