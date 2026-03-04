@@ -2,21 +2,42 @@
 
 Deployment options for Dalston on AWS, ordered from simplest/cheapest to most capable. Each scenario builds on the previous one.
 
-Given the new runtime-based engine architecture (M36) with dynamic model loading from HuggingFace, the core question is: **how much GPU do you need, and how many runtimes do you want running?**
+The runtime-based engine architecture loads models dynamically from HuggingFace — 12 runtimes, 18 cataloged models, and any HF-compatible model via `hf-asr`. The orchestrator's engine selector automatically picks the best runtime and downloaded model for each job based on language, capabilities, and hardware. The core question is: **how much GPU do you need, and which runtimes do you want running?**
 
 ---
 
 ## Quick Reference
 
-| Scenario | Instance | GPU | Monthly (8h/day) | w/ Spot | Models |
-|----------|----------|-----|-------------------|---------|--------|
-| 1. CPU-only | t3.xlarge | None | ~$35 | N/A | faster-whisper (all), parakeet-onnx (EN) |
-| 2. Single GPU | g5.xlarge | 1x A10G 24GB | ~$100 | ~$35 | All batch + realtime |
+| Scenario | Instance | GPU | Monthly (8h/day) | w/ Spot | Runtimes |
+|----------|----------|-----|-------------------|---------|----------|
+| 1. CPU-only | t3.xlarge | None | ~$35 | N/A | nemo-onnx (EN), faster-whisper (multi) |
+| 2. Single GPU | g5.xlarge | 1x A10G 24GB | ~$100 | ~$35 | All batch + realtime + diarization |
 | 3. Dual-purpose GPU | g5.2xlarge | 1x A10G 24GB | ~$150 | ~$50 | Higher throughput, concurrent batch+RT |
-| 4. Multi-GPU | g5.12xlarge | 4x A10G 96GB | ~$500 | ~$170 | Full parallel pipeline |
+| 4. Multi-GPU | g5.12xlarge | 4x A10G 96GB | ~$500 | ~$170 | Full parallel pipeline + vllm-asr |
 | 5. Split infra | ECS + g5 | Varies | ~$200+ | Mixed | Auto-scaling engines |
 
 Spot instances save ~65% on GPU instances. See [Spot Instances](#spot-instances) below.
+
+### Runtimes at a glance
+
+Runtimes are inference engines that load models dynamically. Each runtime is a Docker container that can serve multiple models from the same family.
+
+| Runtime | Stage | Languages | GPU required | Key models |
+|---------|-------|-----------|-------------|------------|
+| **nemo** | transcribe | EN | No (slow on CPU) | parakeet-tdt-1.1b, parakeet-ctc-0.6b |
+| **nemo-onnx** | transcribe | EN | No | Same models, 12x smaller image, better CPU perf |
+| **faster-whisper** | transcribe | 99 langs | No | large-v3-turbo, large-v3, medium, small, base, tiny |
+| **hf-asr** | transcribe | Varies | No | Any HuggingFace ASR model (10,000+) |
+| **vllm-asr** | transcribe | 8-12 langs | **Yes** | Voxtral Mini 3B, Qwen2-Audio 7B, Voxtral Small 24B |
+| **pyannote-4.0** | diarize | All | No (slow on CPU) | Community-1 pipeline (needs HF_TOKEN) |
+| **nemo-msdd** | diarize | All | No (slow on CPU) | NeMo MSDD (open CC-BY-4.0, no HF_TOKEN) |
+| **phoneme-align** | align | 35+ langs | No | wav2vec2-based forced alignment |
+| **pii-presidio** | pii_detect | All | No | GLiNER NER + Presidio checksums |
+| **audio-redactor** | audio_redact | N/A | No | FFmpeg silence/beep replacement |
+| **audio-prepare** | prepare | N/A | No | FFmpeg format conversion |
+| **final-merger** | merge | N/A | No | Transcript assembly |
+
+The engine selector automatically picks the best runtime for each pipeline stage based on job language, requested model, and what's currently running. See `dalston/orchestrator/engine_selector.py`.
 
 ---
 
@@ -35,12 +56,12 @@ Spot instances save ~65% on GPU instances. See [Spot Instances](#spot-instances)
 │  │   Redis    │  │   Postgres   │            │
 │  └────────────┘  └──────────────┘            │
 │                                              │
-│  Engines (CPU):                              │
+│  Runtimes (CPU):                             │
 │  ┌──────────────────────────────────┐        │
-│  │ faster-whisper (large-v3-turbo)  │ 4 GB   │
+│  │ nemo-onnx (parakeet-tdt-0.6b-v3)│ 4 GB   │
 │  └──────────────────────────────────┘        │
 │  ┌──────────────────────────────────┐        │
-│  │ nemo-onnx (parakeet-ctc-0.6b)   │ 2 GB   │
+│  │ faster-whisper (large-v3-turbo)  │ 8 GB   │
 │  └──────────────────────────────────┘        │
 │  ┌──────────┐  ┌────────┐  ┌───────┐        │
 │  │ prepare  │  │ align  │  │ merge │        │
@@ -52,14 +73,26 @@ Spot instances save ~65% on GPU instances. See [Spot Instances](#spot-instances)
 
 ### What you get
 
-- **English**: Parakeet ONNX (nemo-onnx) with native word timestamps, ~6.5x realtime on CPU
-- **Multilingual**: faster-whisper with large-v3-turbo, ~2.5x realtime on CPU
-- **No realtime streaming** (CPU too slow for real-time)
+- **English**: nemo-onnx with parakeet-tdt-0.6b-v3 — native word timestamps, punctuation + capitalization, ~8x realtime on CPU (RTF 0.12). The ~1 GB container image starts in seconds vs ~12 GB for full NeMo.
+- **Multilingual**: faster-whisper with large-v3-turbo — 99 languages, ~3.3x realtime on CPU (RTF 0.3)
+- **No realtime streaming** (CPU too slow for streaming inference)
 - Batch-only, sequential processing
+- The engine selector auto-routes: English jobs → nemo-onnx, non-English → faster-whisper
+
+**nemo-onnx model choices** (all English, all have native word timestamps):
+
+| Model | RTF (CPU) | Punctuation | Size |
+|-------|-----------|-------------|------|
+| parakeet-tdt-0.6b-v3 | 0.12 | Yes | 0.6 GB |
+| parakeet-ctc-0.6b | 0.15 | No | 0.6 GB |
+| parakeet-ctc-1.1b | 0.20 | No | 1.2 GB |
+| parakeet-rnnt-0.6b | 0.12 | No | 0.6 GB |
+
+parakeet-tdt-0.6b-v3 is the best default — same speed as rnnt, better accuracy, and includes punctuation/capitalization so you skip the refine stage.
 
 ### How to deploy
 
-This is what you have today. Existing Terraform + `make aws-start` with the GPU profile disabled:
+Existing Terraform + `make aws-start` with the GPU profile disabled:
 
 ```bash
 # In terraform.tfvars
@@ -69,21 +102,25 @@ instance_type = "t3.xlarge"
 docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
   --env-file .env.aws --profile local-infra up -d \
   gateway orchestrator \
-  stt-batch-prepare stt-batch-transcribe-faster-whisper \
-  stt-batch-transcribe-nemo-onnx stt-batch-align-phoneme-cpu stt-batch-merge
+  stt-batch-prepare stt-batch-transcribe-nemo-onnx \
+  stt-batch-transcribe-faster-whisper stt-batch-align-phoneme-cpu stt-batch-merge
 ```
 
 ### Memory budget (16 GB)
+
+Only one transcription runtime loads at a time — the orchestrator routes tasks to the right runtime, and idle runtimes consume minimal memory until a task arrives.
 
 | Component | RAM |
 |-----------|-----|
 | OS + Docker | ~1.5 GB |
 | Redis + Postgres | ~1 GB |
 | Gateway + Orchestrator | ~0.5 GB |
-| faster-whisper (large-v3-turbo, int8) | ~4 GB |
-| nemo-onnx (parakeet-ctc-0.6b) | ~2 GB |
+| nemo-onnx (parakeet-tdt-0.6b-v3) | ~4 GB |
+| faster-whisper (large-v3-turbo, idle) | ~1 GB |
 | prepare + align + merge | ~1 GB |
-| **Headroom** | **~5.5 GB** |
+| **Headroom** | **~7 GB** |
+
+When faster-whisper actively processes a task, it loads the model (~8 GB peak). The nemo-onnx runtime is lightweight enough that both can coexist, but for sustained mixed workloads consider running only one transcription runtime and relying on model swapping.
 
 ### Cost
 
@@ -95,16 +132,16 @@ docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
 
 ### Limitations
 
-- Transcription is slow (~2.5-6.5x realtime, i.e., a 10min file takes 1.5-4 min)
+- Transcription is slow (~3-8x realtime, i.e., a 10min file takes 1.25-3.3 min)
 - No realtime/streaming
-- Running both runtimes simultaneously eats most of the RAM — pick one default, the other loads on demand via M36 model swapping
-- No diarization (pyannote needs GPU or is very slow on CPU)
+- No diarization — pyannote and nemo-msdd both work on CPU but are slow (~1-2x realtime, meaning a 10min file takes 10-20 min). Acceptable for occasional use, not for every job
+- t3 is burstable: sustained back-to-back transcription will exhaust CPU credits and drop to 40% baseline. For sustained CPU workloads, use m5.xlarge (same price, non-burstable)
 
 ---
 
 ## Scenario 2: Single GPU — The Sweet Spot (`g5.xlarge`)
 
-**For**: Your primary use case. Good Parakeet for English, faster-whisper for other languages, realtime streaming, diarization.
+**For**: Your primary use case. Parakeet for English, faster-whisper for other languages, realtime streaming, diarization.
 
 ```
 ┌──────────────────────────────────────────────────────┐
@@ -123,13 +160,13 @@ docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
 │                                                      │
 │  GPU (24 GB VRAM, shared):                           │
 │  ┌──────────────────────────────────────┐            │
-│  │ faster-whisper (large-v3-turbo)      │ ~3 GB VRAM │
-│  └──────────────────────────────────────┘            │
-│  ┌──────────────────────────────────────┐            │
 │  │ nemo (parakeet-tdt-1.1b)            │ ~6 GB VRAM │
 │  └──────────────────────────────────────┘            │
 │  ┌──────────────────────────────────────┐            │
-│  │ pyannote-4.0 (diarization)          │ ~3 GB VRAM │
+│  │ faster-whisper (large-v3-turbo)      │ ~4 GB VRAM │
+│  └──────────────────────────────────────┘            │
+│  ┌──────────────────────────────────────┐            │
+│  │ pyannote-4.0 or nemo-msdd (diarize) │ ~2-4 VRAM  │
 │  └──────────────────────────────────────┘            │
 │  ┌──────────────────────────────────────┐            │
 │  │ RT: parakeet-rnnt-0.6b (streaming)  │ ~2 GB VRAM │
@@ -141,29 +178,32 @@ docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
 
 ### What you get
 
-- **English batch**: Parakeet TDT 1.1B via NeMo — best English accuracy, native word timestamps, ~150x realtime on GPU
-- **Multilingual batch**: faster-whisper large-v3-turbo — 99 languages, ~30x realtime on GPU
+- **English batch**: Parakeet TDT 1.1B via NeMo — best English accuracy (<7% avg WER), native word timestamps, RTF 0.0006 (~1667x realtime on GPU)
+- **Multilingual batch**: faster-whisper large-v3-turbo — 99 languages, RTF 0.03 (~33x realtime on GPU)
 - **English realtime**: Parakeet RNNT 0.6B streaming — sub-200ms latency
-- **Diarization**: pyannote 4.0 for speaker identification
+- **Diarization**: pyannote 4.0 (RTF 0.08) or nemo-msdd (RTF 0.05, no HF_TOKEN needed)
 - **Full pipeline**: prepare → transcribe → align → diarize → merge
+- **Auto-routing**: The engine selector picks the best runtime per job — English → nemo, non-English → faster-whisper. Parakeet's native word timestamps skip the align stage entirely.
 
 ### VRAM budget (24 GB)
 
-This is the key constraint. With M36 runtime model swapping, models load/unload on demand, but you need to plan for what's loaded simultaneously:
+The key constraint. Runtimes load models on demand and report loaded state via heartbeat. Plan for what's loaded simultaneously:
 
 | Concurrent load | VRAM |
 |-----------------|------|
-| faster-whisper (large-v3-turbo) | ~3 GB |
 | nemo (parakeet-tdt-1.1b) | ~6 GB |
-| pyannote-4.0 | ~3 GB |
+| faster-whisper (large-v3-turbo) | ~4 GB |
+| pyannote-4.0 | ~2 GB |
 | RT parakeet-rnnt-0.6b | ~2 GB |
 | **Total if all loaded** | **~14 GB** |
 | CUDA overhead + buffers | ~2 GB |
 | **Available headroom** | **~8 GB** |
 
-All four fit simultaneously on 24 GB — this is the comfortable scenario. If you add alignment GPU, it still fits.
+All four fit simultaneously on 24 GB — comfortable. Adding phoneme-align GPU (~2 GB) or nemo-msdd (~4 GB) still fits.
 
-**If you only run English** (parakeet for batch + RT + pyannote): ~11 GB used, 13 GB free. Very comfortable.
+**If you only run English** (nemo for batch + RT parakeet + diarization): ~10-12 GB used, 12-14 GB free. Plenty of room to experiment with additional models.
+
+**Lighter alternative**: Use nemo-onnx instead of full NeMo — same Parakeet models, ~2 GB VRAM, ~12x smaller container image. Slightly slower on GPU but negligible for single-file workloads. Frees VRAM for other runtimes.
 
 ### How to deploy
 
@@ -176,7 +216,7 @@ docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
   --env-file .env.aws --profile local-infra --profile gpu up -d
 ```
 
-Or cherry-pick the engines you actually want:
+Or cherry-pick runtimes:
 
 ```bash
 docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
@@ -190,6 +230,13 @@ docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
   stt-rt-transcribe-parakeet-rnnt-0.6b
 ```
 
+**Using nemo-msdd instead of pyannote** (no HF_TOKEN required, open CC-BY-4.0 license):
+
+```bash
+# Replace stt-batch-diarize-pyannote-4.0 with:
+  stt-batch-diarize-nemo-msdd
+```
+
 ### Cost
 
 | State | Monthly |
@@ -198,14 +245,15 @@ docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
 | Running 8h/day weekdays | ~$100 |
 | Stopped | ~$6 |
 
-### Why this is the sweet spot for your needs
+### Why this is the sweet spot
 
-1. **Parakeet TDT 1.1B** is the best English model — native word timestamps, no alignment stage needed, WER competitive with Whisper large-v3
-2. **faster-whisper** handles everything non-English at high speed
-3. **M36 model swapping** means both runtimes share the GPU — the orchestrator routes `model=parakeet-tdt-1.1b` to the nemo runtime and `model=faster-whisper-large-v3-turbo` to the faster-whisper runtime
-4. Realtime streaming works for live English transcription
-5. Diarization available for meeting/interview recordings
-6. One machine, one `terraform apply`, done
+1. **Parakeet TDT 1.1B** is the best English model — native word timestamps skip the align stage, first model to achieve <7.0% avg WER on the HuggingFace Open ASR leaderboard
+2. **faster-whisper** handles everything non-English at ~33x realtime
+3. **Engine selector auto-routing** — submit a job and the orchestrator picks the best downloaded model for the job's language. Or explicitly request `model=nvidia/parakeet-tdt-1.1b` to pin a specific model.
+4. **Model swapping** — both runtimes share the GPU. The nemo runtime loads parakeet-tdt-1.1b for one job, could load parakeet-ctc-0.6b for the next. No container restart needed.
+5. **Two diarization options**: pyannote 4.0 (battle-tested, needs HF_TOKEN) or nemo-msdd (open license, built-in overlap detection)
+6. Realtime streaming for live English transcription
+7. One machine, one `terraform apply`, done
 
 ---
 
@@ -224,10 +272,11 @@ Same architecture as Scenario 2, but:
 
 The GPU is identical — the extra spend buys more CPU and RAM for:
 
-- Running more utility engines concurrently (prepare, align, merge run CPU-side)
+- Running more utility engines concurrently (prepare, align, merge, PII detection run CPU-side)
 - Higher batch throughput (CPU-bound stages don't bottleneck)
 - Comfortable headroom for web console, monitoring stack (Prometheus/Grafana)
-- Could add PII detection + audio redaction without RAM pressure
+- Could add nemo-onnx as a secondary CPU transcription runtime alongside GPU nemo
+- PII detection (pii-presidio) + audio redaction without RAM pressure
 
 ```bash
 # In terraform.tfvars
@@ -240,7 +289,7 @@ Everything else is identical to Scenario 2. Only worth it if you're hitting CPU/
 
 ## Scenario 4: Multi-GPU Power (`g5.12xlarge`)
 
-**For**: Production workloads, parallel pipeline stages, multiple concurrent realtime sessions, Voxtral/vLLM.
+**For**: Production workloads, parallel pipeline stages, multiple concurrent realtime sessions, audio LLMs (Voxtral, Qwen2-Audio).
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
@@ -253,12 +302,12 @@ Everything else is identical to Scenario 2. Only worth it if you're hitting CPU/
 │                                                               │
 │  GPU 1 (24 GB): Realtime + diarization                       │
 │  ┌─────────────────────────┐  ┌────────────────────────────┐  │
-│  │ RT parakeet-rnnt-0.6b   │  │ pyannote-4.0 (diarize)    │  │
+│  │ RT parakeet-rnnt-0.6b   │  │ nemo-msdd (diarize)        │  │
 │  └─────────────────────────┘  └────────────────────────────┘  │
 │                                                               │
-│  GPU 2 (24 GB): Voxtral / vLLM                               │
+│  GPU 2 (24 GB): Audio LLM (vllm-asr)                        │
 │  ┌──────────────────────────────────────────────────────────┐ │
-│  │ vllm-asr (Voxtral-Mini-3B)                              │ │
+│  │ vllm-asr (Voxtral-Mini-3B or Qwen2-Audio-7B)           │ │
 │  └──────────────────────────────────────────────────────────┘ │
 │                                                               │
 │  GPU 3 (24 GB): Alignment + PII + spare                      │
@@ -274,13 +323,23 @@ Everything else is identical to Scenario 2. Only worth it if you're hitting CPU/
 
 - **True parallel pipeline**: Transcribe job N while aligning job N-1 and diarizing job N-2
 - **Multiple realtime sessions**: Dedicated GPU for streaming, no batch contention
-- **Voxtral**: State-of-the-art accuracy via audio LLM (no timestamps, chains with align stage)
-- **PII detection on GPU**: Faster NER model inference
+- **Audio LLMs via vllm-asr**: Highest-accuracy transcription for supported languages. Three model options:
+
+  | Model | VRAM | Languages | RTF (GPU) | Notes |
+  |-------|------|-----------|-----------|-------|
+  | Voxtral Mini 3B | ~8 GB | en, es, fr, pt, hi, de, nl, it | 0.12 | Best speed/accuracy trade-off |
+  | Qwen2-Audio 7B | ~16 GB | en, zh, ja, ko, fr, de, es, pt, it, nl, ru, ar | 0.18 | Best CJK language support |
+  | Voxtral Small 24B | ~55 GB | en, es, fr, pt, hi, de, nl, it | 0.20 | Needs 3x A10G (multi-GPU) |
+
+  Audio LLMs produce text only — no word timestamps. Chain with phoneme-align stage for timing.
+
+- **nemo-msdd diarization**: Neural end-to-end system with built-in overlap detection, open CC-BY-4.0 license (no HF_TOKEN). Or use pyannote-4.0 if you prefer.
+- **PII detection + audio redaction on GPU**: GLiNER NER inference + FFmpeg redaction
 - **No model swapping delays**: Each runtime gets its own GPU, models stay loaded
 
 ### GPU assignment
 
-Use `NVIDIA_VISIBLE_DEVICES` or `CUDA_VISIBLE_DEVICES` in docker-compose to pin engines to GPUs:
+Use `CUDA_VISIBLE_DEVICES` in a compose override to pin runtimes to GPUs:
 
 ```yaml
 # In docker-compose.aws-multigpu.yml (override)
@@ -297,7 +356,7 @@ services:
     environment:
       CUDA_VISIBLE_DEVICES: "1"
 
-  stt-batch-diarize-pyannote-4.0:
+  stt-batch-diarize-nemo-msdd:
     environment:
       CUDA_VISIBLE_DEVICES: "1"
 
@@ -380,28 +439,29 @@ This is serious money. Only justified for production workloads with throughput r
 | ALB | ~$20 | ~$25 |
 | **Total** | **~$100** | **~$475** |
 
-This is the M16 "Future Phases" 3+4 combined. Significant infrastructure complexity increase. Only worth it when you need multi-user access or scale-to-zero economics.
+Significant infrastructure complexity increase. Only worth it when you need multi-user access or scale-to-zero economics.
 
 ---
 
 ## Recommendation: Start with Scenario 2
 
-For your stated needs (Parakeet for English, faster-whisper for other languages):
+For Parakeet for English + faster-whisper for other languages:
 
 **`g5.xlarge`** is the right answer. Here's why:
 
-1. **Both runtimes fit in 24 GB VRAM** with room for diarization and realtime
-2. **M36 model swapping** makes it seamless — submit a job with `model=parakeet-tdt-1.1b` or `model=faster-whisper-large-v3-turbo` and the right runtime handles it
-3. **Dynamic HF download** means you can `dalston model pull` any compatible model without rebuilding images
-4. **~$100/month** at 8h/day usage is very reasonable for GPU transcription
-5. **Upgrade path is clear**: if you hit limits, bump to g5.2xlarge (same Terraform, change one variable)
+1. **All runtimes fit in 24 GB VRAM** — nemo + faster-whisper + diarization + realtime with 8 GB headroom
+2. **Engine selector auto-routing** — submit a job and the orchestrator picks the best downloaded model. English → nemo (parakeet-tdt-1.1b), non-English → faster-whisper. Or pin a specific model per request.
+3. **`dalston model pull`** downloads any compatible model from HuggingFace without rebuilding images
+4. **~$100/month** at 8h/day usage (~$35 with spot)
+5. **Upgrade path is clear**: bump to g5.2xlarge (same Terraform, one variable) or add vllm-asr for audio LLMs on g5.12xlarge
 
-### Concrete config for your needs
+### Concrete config
 
 ```hcl
 # terraform.tfvars
-instance_type   = "g5.xlarge"
-data_volume_size = 100  # 50→100 GB for model cache (parakeet-tdt-1.1b is ~4.5 GB)
+instance_type    = "g5.xlarge"
+data_volume_size = 50   # Sufficient for typical setup (~10 GB models)
+use_spot         = true # ~65% savings, auto-retry on interruption
 ```
 
 Start these services:
@@ -415,44 +475,84 @@ docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
   stt-batch-transcribe-nemo \
   stt-batch-transcribe-faster-whisper \
   stt-batch-align-phoneme \
-  stt-batch-diarize-pyannote-4.0 \
+  stt-batch-diarize-nemo-msdd \
   stt-batch-merge \
   stt-rt-transcribe-parakeet-rnnt-0.6b
 ```
 
-Then pre-pull your models so first transcription doesn't wait for download:
+Pre-pull models so the first transcription doesn't wait for download:
 
 ```bash
-# On the instance, after services are up
-# Models download to the shared /data/models volume
-docker compose exec gateway python -c "
-from dalston.gateway.services.model_registry import ModelRegistryService
-# Or just hit the API:
-"
+# Via the model registry API
+curl -X POST http://localhost:8000/v1/models/nvidia/parakeet-tdt-1.1b/pull
+curl -X POST http://localhost:8000/v1/models/Systran/faster-whisper-large-v3-turbo/pull
 
-# Or via API once M40 lands:
-# dalston model pull parakeet-tdt-1.1b
-# dalston model pull faster-whisper-large-v3-turbo
+# Check download status
+curl http://localhost:8000/v1/models | jq '.models[] | {id, status, size_bytes}'
 ```
+
+The model registry tracks download state (`not_downloaded` → `downloading` → `ready`) and the engine selector only routes to models with status `ready`.
 
 ---
 
 ## Model Cache Sizing
 
-The `/data/models` volume needs enough space for downloaded weights:
+The `/data/models` volume needs enough space for downloaded weights. Sizes from the model catalog:
+
+**Transcription models (nemo runtime — full NeMo toolkit)**:
 
 | Model | Size | Notes |
 |-------|------|-------|
-| parakeet-tdt-1.1b | ~4.5 GB | Best English accuracy |
-| parakeet-ctc-0.6b | ~2.5 GB | Lighter English option |
-| faster-whisper large-v3-turbo | ~3.1 GB | Default multilingual |
-| faster-whisper large-v3 | ~6.2 GB | Highest Whisper accuracy |
-| pyannote 4.0 | ~0.3 GB | Diarization |
-| parakeet-rnnt-0.6b (RT) | ~2.5 GB | Realtime streaming |
-| phoneme-align model | ~1.2 GB | Word alignment |
-| **Total (typical setup)** | **~20 GB** | |
+| nvidia/parakeet-tdt-1.1b | 4.2 GB | Best English accuracy |
+| nvidia/parakeet-ctc-1.1b | 4.2 GB | Fast CTC decoder, no punctuation |
+| nvidia/parakeet-tdt-0.6b-v3 | 1.8 GB | Punctuation + capitalization |
+| nvidia/parakeet-ctc-0.6b | 1.8 GB | Lightest NeMo model |
 
-50 GB data volume is sufficient. 100 GB gives room for model experimentation.
+**Transcription models (nemo-onnx runtime — lightweight ONNX)**:
+
+| Model | Size | Notes |
+|-------|------|-------|
+| parakeet-onnx-tdt-0.6b-v3 | 0.6 GB | Best for CPU, has punctuation |
+| parakeet-onnx-ctc-0.6b | 0.6 GB | Fastest CPU inference |
+| parakeet-onnx-ctc-1.1b | 1.2 GB | Better accuracy, still fast |
+| parakeet-onnx-rnnt-0.6b | 0.6 GB | RNNT decoder |
+
+**Transcription models (faster-whisper runtime)**:
+
+| Model | Size | Notes |
+|-------|------|-------|
+| Systran/faster-whisper-large-v3-turbo | 1.6 GB | Default multilingual |
+| Systran/faster-whisper-large-v3 | 3.0 GB | Best Whisper accuracy |
+| Systran/faster-whisper-medium | 1.5 GB | Good mid-range option |
+| Systran/faster-whisper-small | 0.5 GB | Resource-constrained |
+| Systran/faster-whisper-base | 0.3 GB | Testing / low resource |
+| Systran/faster-whisper-tiny | 0.1 GB | Minimal |
+
+**Audio LLM models (vllm-asr runtime)**:
+
+| Model | Size | Notes |
+|-------|------|-------|
+| mistralai/Voxtral-Mini-3B-2507 | 6.0 GB | Best speed/accuracy |
+| Qwen/Qwen2-Audio-7B-Instruct | 15.0 GB | Best CJK support |
+| mistralai/Voxtral-Small-24B-2507 | 48.0 GB | Needs multi-GPU |
+
+**Other**:
+
+| Model | Size | Notes |
+|-------|------|-------|
+| pyannote 4.0 | ~0.3 GB | Diarization (needs HF_TOKEN) |
+| nemo-msdd | ~0.5 GB | Diarization (open license) |
+| phoneme-align | ~1.2 GB | Word alignment (wav2vec2) |
+
+**Typical setups**:
+
+| Setup | Models | Total |
+|-------|--------|-------|
+| CPU-only (EN) | nemo-onnx tdt-0.6b-v3 + faster-whisper lg-v3-turbo | ~2.2 GB |
+| Scenario 2 (EN + multi) | parakeet-tdt-1.1b + fw lg-v3-turbo + pyannote + align | ~9.3 GB |
+| Scenario 4 (everything) | All above + Voxtral Mini 3B | ~15 GB |
+
+50 GB data volume is sufficient for any single-GPU setup. 100 GB gives room for experimentation with multiple model variants and audio LLMs.
 
 ---
 
