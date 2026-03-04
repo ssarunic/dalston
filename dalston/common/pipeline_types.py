@@ -489,9 +489,6 @@ class AlignOutput(BaseModel):
     skip_reason: str | None = Field(default=None, description="Reason if skipped")
     warnings: list[str] = Field(default_factory=list, description="Any warnings")
 
-    # Legacy warning field for backward compatibility during migration
-    warning: dict | None = Field(default=None, description="Deprecated: use warnings")
-
 
 class DiarizeOutput(BaseModel):
     """Output from diarization stage."""
