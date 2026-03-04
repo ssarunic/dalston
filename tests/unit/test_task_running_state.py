@@ -118,7 +118,7 @@ class TestHandleTaskStarted:
         mock_db.commit.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_passes_engine_id_to_logs(self, task_id, mock_task, mock_db):
+    async def test_passes_runtime_to_logs(self, task_id, mock_task, mock_db):
         """Test that engine_id parameter is accepted."""
         from dalston.orchestrator.handlers import handle_task_started
 

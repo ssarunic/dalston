@@ -25,7 +25,7 @@ def _create_mock_task(
     task_id: UUID,
     job_id: UUID,
     stage: str,
-    engine_id: str,
+    runtime: str,
     status: str = "completed",
     dependencies: list[UUID] | None = None,
     started_at: datetime | None = None,
@@ -39,7 +39,7 @@ def _create_mock_task(
     task.id = task_id
     task.job_id = job_id
     task.stage = stage
-    task.runtime = engine_id
+    task.runtime = runtime
     task.status = status
     task.dependencies = dependencies or []
     task.started_at = started_at

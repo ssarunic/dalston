@@ -20,50 +20,50 @@ from dalston.tools.scaffold_engine import (
     scaffold_engine,
     to_class_name,
     to_human_name,
-    validate_engine_id,
+    validate_runtime,
 )
 
 
 class TestValidateEngineId:
-    """Tests for validate_engine_id function."""
+    """Tests for validate_runtime function."""
 
     def test_valid_simple_id(self) -> None:
         """Simple lowercase ID should pass."""
-        assert validate_engine_id("my-engine") is None
+        assert validate_runtime("my-engine") is None
 
     def test_valid_id_with_dots(self) -> None:
         """ID with dots should pass (e.g., pyannote-4.0)."""
-        assert validate_engine_id("pyannote-4.0") is None
+        assert validate_runtime("pyannote-4.0") is None
 
     def test_valid_id_with_numbers(self) -> None:
         """ID with numbers should pass."""
-        assert validate_engine_id("whisper2") is None
+        assert validate_runtime("whisper2") is None
 
     def test_invalid_uppercase(self) -> None:
         """Uppercase letters should fail."""
-        result = validate_engine_id("MyEngine")
+        result = validate_runtime("MyEngine")
         assert result is not None
         assert "invalid" in result.lower()
 
     def test_invalid_starts_with_number(self) -> None:
         """ID starting with number should fail."""
-        result = validate_engine_id("123-engine")
+        result = validate_runtime("123-engine")
         assert result is not None
 
     def test_invalid_ends_with_hyphen(self) -> None:
         """ID ending with hyphen should fail."""
-        result = validate_engine_id("my-engine-")
+        result = validate_runtime("my-engine-")
         assert result is not None
 
     def test_invalid_too_short(self) -> None:
         """Single character ID should fail."""
-        result = validate_engine_id("a")
+        result = validate_runtime("a")
         assert result is not None
         assert "invalid" in result.lower()
 
     def test_invalid_special_characters(self) -> None:
         """ID with special characters should fail."""
-        result = validate_engine_id("my_engine")
+        result = validate_runtime("my_engine")
         assert result is not None
 
 
@@ -110,7 +110,7 @@ class TestGenerateEngineYaml:
     def basic_config(self) -> ScaffoldConfig:
         """Basic scaffold configuration."""
         return ScaffoldConfig(
-            engine_id="test-engine",
+            runtime="test-engine",
             stage="transcribe",
             name="Test Engine",
             description="A test engine for testing.",
@@ -171,7 +171,7 @@ class TestGenerateEngineYaml:
         """Should use correct pipeline tag for each stage."""
         for stage in VALID_STAGES:
             config = ScaffoldConfig(
-                engine_id=f"test-{stage}",
+                runtime=f"test-{stage}",
                 stage=stage,
                 name=f"Test {stage}",
                 description="Test engine for testing.",
@@ -197,7 +197,7 @@ class TestGenerateEnginePy:
     def basic_config(self) -> ScaffoldConfig:
         """Basic scaffold configuration."""
         return ScaffoldConfig(
-            engine_id="test-engine",
+            runtime="test-engine",
             stage="transcribe",
             name="Test Engine",
             description="A test engine for testing.",
@@ -246,7 +246,7 @@ class TestGenerateDockerfile:
     def basic_config(self) -> ScaffoldConfig:
         """Basic scaffold configuration."""
         return ScaffoldConfig(
-            engine_id="test-engine",
+            runtime="test-engine",
             stage="transcribe",
             name="Test Engine",
             description="A test engine for testing.",
@@ -282,7 +282,7 @@ class TestGenerateDockerfile:
     def test_gpu_required_comment(self) -> None:
         """Should add GPU comment for required GPU."""
         config = ScaffoldConfig(
-            engine_id="test-engine",
+            runtime="test-engine",
             stage="diarize",
             name="Test Engine",
             description="A test engine.",
@@ -305,7 +305,7 @@ class TestGenerateRequirementsTxt:
     def test_generates_content(self) -> None:
         """Should generate requirements.txt content."""
         config = ScaffoldConfig(
-            engine_id="test-engine",
+            runtime="test-engine",
             stage="transcribe",
             name="Test Engine",
             description="A test engine.",
@@ -330,7 +330,7 @@ class TestGenerateReadme:
     def basic_config(self) -> ScaffoldConfig:
         """Basic scaffold configuration."""
         return ScaffoldConfig(
-            engine_id="test-engine",
+            runtime="test-engine",
             stage="transcribe",
             name="Test Engine",
             description="A test engine for testing.",
@@ -374,7 +374,7 @@ class TestScaffoldEngine:
             engines_dir = Path(tmpdir)
 
             config = ScaffoldConfig(
-                engine_id="test-engine",
+                runtime="test-engine",
                 stage="transcribe",
                 name="Test Engine",
                 description="A test engine.",
@@ -398,7 +398,7 @@ class TestScaffoldEngine:
             engines_dir = Path(tmpdir)
 
             config = ScaffoldConfig(
-                engine_id="test-engine",
+                runtime="test-engine",
                 stage="transcribe",
                 name="Test Engine",
                 description="A test engine.",
@@ -429,7 +429,7 @@ class TestScaffoldEngine:
             engines_dir = Path(tmpdir)
 
             config = ScaffoldConfig(
-                engine_id="test-engine",
+                runtime="test-engine",
                 stage="transcribe",
                 name="Test Engine",
                 description="A test engine.",
@@ -462,7 +462,7 @@ class TestScaffoldEngine:
             existing_dir.mkdir(parents=True)
 
             config = ScaffoldConfig(
-                engine_id="test-engine",
+                runtime="test-engine",
                 stage="transcribe",
                 name="Test Engine",
                 description="A test engine.",

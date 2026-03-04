@@ -81,7 +81,7 @@ def transform_runtime_to_entry(data: dict, yaml_path: Path) -> dict:
 
     entry = {
         "id": runtime_id,
-        "engine_id": engine_id,  # Original engine ID
+        "runtime": engine_id,  # Runtime ID for capability routing
         "name": data.get("name", runtime_id),
         "version": version,
         "stage": stage,

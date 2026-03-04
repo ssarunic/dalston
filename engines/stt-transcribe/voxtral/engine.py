@@ -232,7 +232,7 @@ class VoxtralEngine(Engine):
             timestamp_granularity_actual=TimestampGranularity.SEGMENT,
             alignment_method=AlignmentMethod.UNKNOWN,
             channel=channel,
-            engine_id=f"voxtral-{self._model_variant}",
+            runtime=f"voxtral-{self._model_variant}",
             skipped=False,
             skip_reason=None,
             warnings=warnings,
@@ -267,7 +267,7 @@ class VoxtralEngine(Engine):
         vram_mb = 9500 if self._model_variant == "mini-3b" else 55000
 
         return EngineCapabilities(
-            engine_id=f"voxtral-{self._model_variant}",
+            runtime=f"voxtral-{self._model_variant}",
             version="1.0.0",
             stages=["transcribe"],
             languages=self.SUPPORTED_LANGUAGES,

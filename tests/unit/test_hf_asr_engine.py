@@ -76,15 +76,15 @@ class TestHFASREngine:
             engine = HFASREngine()
             assert engine._default_model_id == "facebook/wav2vec2-large-960h"
 
-    def test_engine_id_from_env(self):
-        """Engine should respect DALSTON_ENGINE_ID env var."""
+    def test_runtime_from_env(self):
+        """Engine should respect DALSTON_RUNTIME env var."""
         with patch.dict(
-            os.environ, {"DALSTON_ENGINE_ID": "custom-hf-asr", "DALSTON_DEVICE": "cpu"}
+            os.environ, {"DALSTON_RUNTIME": "custom-hf-asr", "DALSTON_DEVICE": "cpu"}
         ):
             with patch("torch.cuda.is_available", return_value=False):
                 HFASREngine = load_hf_asr_engine()
                 engine = HFASREngine()
-                assert engine._engine_id == "custom-hf-asr"
+                assert engine._runtime == "custom-hf-asr"
 
     def test_health_check(self, engine):
         """Health check should return healthy status."""
@@ -213,7 +213,7 @@ class TestHFASREngineNormalizeOutput:
 
         assert output.channel == 0
 
-    def test_normalize_output_engine_id(self, engine):
+    def test_normalize_output_runtime(self, engine):
         """Engine ID should be set."""
         result = {"text": "test"}
 

@@ -349,7 +349,7 @@ class PIIDetectionEngine(Engine):
             entity_count_by_type=dict(entity_count_by_type),
             entity_count_by_category=dict(entity_count_by_category),
             processing_time_ms=processing_time_ms,
-            engine_id="pii-presidio",
+            runtime="pii-presidio",
             skipped=False,
             skip_reason=None,
             warnings=[],

@@ -168,7 +168,7 @@ class TestRegistryWithCapabilities:
 
         info = BatchEngineInfo(
             runtime="test",
-            instance_id="test-abc123def456",
+            instance="test-abc123def456",
             stage="transcribe",
             stream_name="dalston:stream:test",
             capabilities=caps,
@@ -196,7 +196,7 @@ class TestRegistryWithCapabilities:
         mock_redis.hget.return_value = "test"
 
         registry.heartbeat(
-            instance_id="test-abc123def456",
+            instance="test-abc123def456",
             status="idle",
             current_task=None,
             capabilities=caps,
@@ -221,7 +221,7 @@ class TestBatchEngineStateWithCapabilities:
 
         state = BatchEngineState(
             runtime="test",
-            instance_id="test-abc123",
+            instance="test-abc123",
             stage="transcribe",
             stream_name="dalston:stream:test",
             status="idle",
@@ -246,7 +246,7 @@ class TestBatchEngineStateWithCapabilities:
 
         state = BatchEngineState(
             runtime="test",
-            instance_id="test-abc123",
+            instance="test-abc123",
             stage="transcribe",
             stream_name="dalston:stream:test",
             status="idle",
@@ -270,7 +270,7 @@ class TestBatchEngineStateWithCapabilities:
 
         state = BatchEngineState(
             runtime="test",
-            instance_id="test-abc123",
+            instance="test-abc123",
             stage="transcribe",
             stream_name="dalston:stream:test",
             status="idle",
@@ -288,7 +288,7 @@ class TestBatchEngineStateWithCapabilities:
         """Test backward compatibility - no capabilities means all supported."""
         state = BatchEngineState(
             runtime="test",
-            instance_id="test-abc123",
+            instance="test-abc123",
             stage="transcribe",
             stream_name="dalston:stream:test",
             status="idle",

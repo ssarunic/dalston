@@ -599,12 +599,12 @@ class TestStaleEngineCleanup:
         assert count == 1
         # Should remove stale instance from set
         mock_redis.srem.assert_any_call(
-            "dalston:batch:engine:instances:faster-whisper",
+            "dalston:batch:runtime:instances:faster-whisper",
             "faster-whisper-abc123",
         )
 
     @pytest.mark.asyncio
-    async def test_removes_engine_id_when_no_instances_remain(
+    async def test_removes_runtime_when_no_instances_remain(
         self, mock_redis, mock_settings
     ):
         """Test cleanup removes engine_id from main set when no instances remain."""
@@ -626,14 +626,14 @@ class TestStaleEngineCleanup:
         await sweeper._cleanup_stale_engine_entries()
 
         # Should remove engine_id from main set
-        mock_redis.srem.assert_any_call("dalston:batch:engines", "faster-whisper")
+        mock_redis.srem.assert_any_call("dalston:batch:runtimes", "faster-whisper")
         # Should delete the empty instances set
         mock_redis.delete.assert_called_once_with(
-            "dalston:batch:engine:instances:faster-whisper"
+            "dalston:batch:runtime:instances:faster-whisper"
         )
 
     @pytest.mark.asyncio
-    async def test_keeps_engine_id_when_healthy_instances_exist(
+    async def test_keeps_runtime_when_healthy_instances_exist(
         self, mock_redis, mock_settings
     ):
         """Test cleanup keeps engine_id when at least one instance is healthy."""
@@ -666,12 +666,12 @@ class TestStaleEngineCleanup:
         # Should only remove stale instance
         assert count == 1
         mock_redis.srem.assert_called_once_with(
-            "dalston:batch:engine:instances:faster-whisper",
+            "dalston:batch:runtime:instances:faster-whisper",
             "faster-whisper-stale",
         )
         # Should NOT remove engine_id from main set (still has healthy instance)
         srem_calls = mock_redis.srem.call_args_list
-        engine_set_calls = [c for c in srem_calls if "dalston:batch:engines" in str(c)]
+        engine_set_calls = [c for c in srem_calls if "dalston:batch:runtimes" in str(c)]
         assert len(engine_set_calls) == 0
 
     @pytest.mark.asyncio
@@ -1241,7 +1241,7 @@ class TestBatchEngineRegistry:
             call_args = mock_redis.hset.call_args
             key = call_args[0][0]
             assert "whisper-cpu-abc123def456" in key
-            assert "dalston:batch:engine:" in key
+            assert "dalston:batch:instance:" in key
 
     def test_heartbeat_uses_instance_for_key(self):
         """Test that heartbeat uses instance for Redis key."""

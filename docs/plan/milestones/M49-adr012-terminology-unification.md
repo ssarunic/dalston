@@ -59,26 +59,23 @@ Unify batch and RT terminology per ADR-012. **No backwards compatibility** - bre
 
 - [x] Environment variables: `DALSTON_RUNTIME`, `DALSTON_INSTANCE`
 
-### 🔄 In Progress / Known Issues
+#### 9. Engine Implementations
 
-#### Tests (63 failures remaining)
+- [x] All engine.py files use `self._runtime` and `DALSTON_RUNTIME` env var
+- [x] Health checks return `runtime` field
+- [x] Capabilities use `runtime` field
 
-Some engine-specific tests still fail due to terminology mismatches in:
+#### 10. CLI Tools
 
-- `test_hf_asr_engine.py` (15 failures) - HuggingFace ASR engine tests
-- `test_engine_selector.py` (14 failures) - Engine selector tests
-- `test_vllm_asr_engine.py` (8 failures) - VLLM ASR engine tests
-- `test_task_observability_api.py` (7 failures) - Task API tests
-- Various other engine tests
+- [x] `scaffold_engine.py`: Uses `runtime` terminology
+- [x] `validate_engine.py`: Uses `runtime` in ValidationResult
+- [x] `generate_catalog.py`: Outputs `runtime` field
 
-These failures are in test helper functions and mock data that need `engine_id` → `runtime` updates.
+#### 11. Tests
 
-#### Engine Implementations
-
-Individual engine source files in `engines/` may need verification for:
-
-- Health check responses using `runtime` instead of `engine`
-- Model output types using correct field names
+- [x] All test files updated with correct field names
+- [x] Test helper functions use `runtime` and `instance` parameters
+- [x] Redis key patterns in assertions updated
 
 ## Verification
 
@@ -86,8 +83,8 @@ Individual engine source files in `engines/` may need verification for:
 # Core imports work
 python -c "from dalston.gateway.main import app; from dalston.orchestrator.main import main"
 
-# Run tests
-make test  # 63 failures, 1655 passed
+# All tests pass
+make test  # 1723 passed, 3 skipped
 
 # Lint passes
 make lint
@@ -109,6 +106,5 @@ dalston:realtime:instance:{instance}      # Hash with worker state
 ## Notes
 
 - **NO aliases, NO deprecation period**
-- If something breaks, fix it immediately
 - Clean break from legacy terminology
-- Test failures should be fixed incrementally
+- All tests passing
