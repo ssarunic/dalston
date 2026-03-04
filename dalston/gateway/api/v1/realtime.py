@@ -10,7 +10,7 @@ import asyncio
 import base64
 import binascii
 import json
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import UUID
 
 import structlog
@@ -33,27 +33,25 @@ from dalston.common.ws_close_codes import (
 )
 from dalston.config import get_settings
 from dalston.db.session import get_db as _get_db
+from dalston.gateway.api.v1._realtime_common import (
+    decrement_realtime_session_count as _decrement_session_count,
+)
+from dalston.gateway.api.v1._realtime_common import (
+    get_realtime_auth_service as _get_auth_service,
+)
+from dalston.gateway.api.v1._realtime_common import (
+    keep_session_alive as _keep_session_alive,
+)
+from dalston.gateway.api.v1._realtime_common import (
+    resolve_rt_routing as _resolve_rt_routing,
+)
 from dalston.gateway.dependencies import get_session_router
 from dalston.gateway.middleware.auth import authenticate_websocket
-from dalston.gateway.services.auth import AuthService, Scope
-from dalston.gateway.services.model_registry import ModelRegistryService
+from dalston.gateway.services.auth import Scope
 from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.realtime_sessions import RealtimeSessionService
 
 logger = structlog.get_logger()
-
-
-async def _get_auth_service() -> tuple[AuthService, Any]:
-    """Get AuthService for WebSocket authentication.
-
-    Returns:
-        Tuple of (AuthService, db_session) for use in WebSocket endpoints.
-        Caller should ensure db_session lifecycle is managed properly.
-    """
-    redis = await _get_redis()
-    db_gen = _get_db()
-    db = await db_gen.__anext__()
-    return AuthService(db, redis), db_gen
 
 
 async def _check_realtime_rate_limits(
@@ -82,7 +80,6 @@ async def _check_realtime_rate_limits(
         max_concurrent_sessions=settings.rate_limit_concurrent_sessions,
     )
 
-    # Check concurrent sessions limit
     sessions_result = await rate_limiter.check_concurrent_sessions(tenant_id)
     if not sessions_result.allowed:
         await websocket.send_json(
@@ -95,30 +92,8 @@ async def _check_realtime_rate_limits(
         await websocket.close(code=WS_CLOSE_RATE_LIMITED, reason="Rate limit exceeded")
         return False
 
-    # Increment concurrent sessions counter (will be decremented on disconnect)
     await rate_limiter.increment_concurrent_sessions(tenant_id)
-
     return True
-
-
-async def _decrement_session_count(tenant_id: UUID) -> None:
-    """Decrement concurrent session count when connection closes.
-
-    Args:
-        tenant_id: Tenant UUID for rate limit lookup
-    """
-    try:
-        settings = get_settings()
-        redis = await _get_redis()
-        rate_limiter = RedisRateLimiter(
-            redis=redis,
-            requests_per_minute=settings.rate_limit_requests_per_minute,
-            max_concurrent_jobs=settings.rate_limit_concurrent_jobs,
-            max_concurrent_sessions=settings.rate_limit_concurrent_sessions,
-        )
-        await rate_limiter.decrement_concurrent_sessions(tenant_id)
-    except Exception as e:
-        logger.warning("failed_to_decrement_session_count", error=str(e))
 
 
 # Router for WebSocket endpoint (mounted under /audio/transcriptions)
@@ -328,60 +303,7 @@ async def realtime_transcription(
             )
             return
 
-        # Model parameter: use engine ID directly or None for any available worker
-        # For realtime routing, we pass the engine ID to the session router
-        routing_model = model if model else None
-        model_runtime = None
-        valid_runtimes: set[str] | None = None
-        # effective_model: the model ID to pass to the worker (may differ from user input)
-        effective_model = model
-
-        # Look up model's runtime for routing (allows workers to load model dynamically)
-        if routing_model:
-            try:
-                async for db in _get_db():
-                    model_service = ModelRegistryService()
-                    model_entry = await model_service.get_model(db, routing_model)
-                    if model_entry:
-                        model_runtime = model_entry.runtime
-                    break
-            except Exception as e:
-                logger.warning("model_lookup_failed", model=routing_model, error=str(e))
-        else:
-            # When "Any available" selected, pick the largest downloaded model (M48)
-            # This ensures workers load from S3 registry, not directly from HuggingFace
-            try:
-                async for db in _get_db():
-                    model_service = ModelRegistryService()
-                    downloaded_models = await model_service.list_models(
-                        db, stage="transcribe", status="ready"
-                    )
-                    # Filter to models with streaming support (RT-capable)
-                    rt_models = [m for m in downloaded_models if m.streaming]
-                    # Fall back to all downloaded if no streaming models
-                    candidates = rt_models if rt_models else list(downloaded_models)
-
-                    if candidates:
-                        # Pick largest model by size (best quality)
-                        largest = max(
-                            candidates,
-                            key=lambda m: m.size_bytes or 0,
-                        )
-                        routing_model = largest.id
-                        model_runtime = largest.runtime
-                        effective_model = largest.id
-                        logger.info(
-                            "auto_selected_model",
-                            model_id=largest.id,
-                            runtime=largest.runtime,
-                            size_mb=round((largest.size_bytes or 0) / 1024 / 1024, 1),
-                        )
-
-                    # Also collect valid runtimes for routing fallback
-                    valid_runtimes = {m.runtime for m in downloaded_models if m.runtime}
-                    break
-            except Exception as e:
-                logger.warning("registry_lookup_failed", error=str(e))
+        rt = await _resolve_rt_routing(model if model else None)
 
         # Get client IP for logging
         client_ip = websocket.client.host if websocket.client else "unknown"
@@ -389,10 +311,10 @@ async def realtime_transcription(
         # Acquire worker from Session Router (use alias for matching)
         allocation = await session_router.acquire_worker(
             language=language,
-            model=routing_model,
+            model=rt.routing_model,
             client_ip=client_ip,
-            runtime=model_runtime,
-            valid_runtimes=valid_runtimes,
+            runtime=rt.model_runtime,
+            valid_runtimes=rt.valid_runtimes,
         )
 
         if allocation is None:
@@ -478,7 +400,7 @@ async def realtime_transcription(
                 worker_endpoint=allocation.endpoint,
                 session_id=allocation.session_id,
                 language=language,
-                model=effective_model,  # Pass selected model (auto-selected if empty)
+                model=rt.effective_model,  # Pass selected model (auto-selected if empty)
                 encoding=encoding,
                 sample_rate=sample_rate,
                 enable_vad=enable_vad,
@@ -704,44 +626,7 @@ async def elevenlabs_realtime_transcription(
                 return
 
         # ElevenLabs model_id (scribe_v1, scribe_v2, etc.) is treated as "auto"
-        # Pick the largest downloaded model for best quality (M48)
-        routing_model = None
-        model_runtime = None
-        valid_runtimes: set[str] | None = None
-        effective_model = ""  # Model ID to pass to worker
-
-        try:
-            async for db in _get_db():
-                model_service = ModelRegistryService()
-                downloaded_models = await model_service.list_models(
-                    db, stage="transcribe", status="ready"
-                )
-                # Filter to models with streaming support (RT-capable)
-                rt_models = [m for m in downloaded_models if m.streaming]
-                # Fall back to all downloaded if no streaming models
-                candidates = rt_models if rt_models else list(downloaded_models)
-
-                if candidates:
-                    # Pick largest model by size (best quality)
-                    largest = max(
-                        candidates,
-                        key=lambda m: m.size_bytes or 0,
-                    )
-                    routing_model = largest.id
-                    model_runtime = largest.runtime
-                    effective_model = largest.id
-                    logger.info(
-                        "elevenlabs_auto_selected_model",
-                        model_id=largest.id,
-                        runtime=largest.runtime,
-                        size_mb=round((largest.size_bytes or 0) / 1024 / 1024, 1),
-                    )
-
-                # Also collect valid runtimes for routing fallback
-                valid_runtimes = {m.runtime for m in downloaded_models if m.runtime}
-                break
-        except Exception as e:
-            logger.warning("registry_lookup_failed", error=str(e))
+        rt = await _resolve_rt_routing(None)
 
         # Get client IP
         client_ip = websocket.client.host if websocket.client else "unknown"
@@ -749,10 +634,10 @@ async def elevenlabs_realtime_transcription(
         # Acquire worker
         allocation = await session_router.acquire_worker(
             language=language_code,
-            model=routing_model,
+            model=rt.routing_model,
             client_ip=client_ip,
-            runtime=model_runtime,
-            valid_runtimes=valid_runtimes,
+            runtime=rt.model_runtime,
+            valid_runtimes=rt.valid_runtimes,
         )
 
         if allocation is None:
@@ -801,7 +686,7 @@ async def elevenlabs_realtime_transcription(
                 worker_endpoint=allocation.endpoint,
                 session_id=allocation.session_id,
                 language=language_code,
-                model=effective_model,  # Auto-selected largest model from registry
+                model=rt.effective_model,  # Auto-selected largest model from registry
                 sample_rate=sample_rate,
                 enable_vad=(commit_strategy == "vad"),
                 interim_results=True,
@@ -830,33 +715,6 @@ async def elevenlabs_realtime_transcription(
         # regardless of whether we successfully acquired a worker or hit
         # an early error. This ensures no counter leaks.
         await _decrement_session_count(session_tenant_id)
-
-
-async def _keep_session_alive(
-    session_router,
-    session_id: str,
-    interval: int = 60,
-) -> None:
-    """Periodically extend session TTL to prevent expiration.
-
-    Sessions have a 5-minute TTL in Redis. For long-running sessions,
-    this task extends the TTL every interval seconds to prevent the
-    health monitor from treating the session as orphaned.
-
-    Args:
-        session_router: SessionRouter instance
-        session_id: Session ID to keep alive
-        interval: How often to extend in seconds (default: 60s)
-    """
-    while True:
-        await asyncio.sleep(interval)
-        try:
-            await session_router.extend_session_ttl(session_id)
-            logger.debug("session_ttl_extended", session_id=session_id)
-        except Exception as e:
-            logger.warning(
-                "session_ttl_extend_failed", session_id=session_id, error=str(e)
-            )
 
 
 async def _proxy_to_worker(
