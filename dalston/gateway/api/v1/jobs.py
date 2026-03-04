@@ -37,7 +37,11 @@ async def get_job_stats(
     security_manager = get_security_manager()
     security_manager.require_permission(principal, Permission.JOB_READ)
 
-    stats = await jobs_service.get_stats(db, tenant_id=principal.tenant_id)
+    # Non-admin keys only see stats for jobs they created
+    key_filter = None if principal.is_admin else principal.id
+    stats = await jobs_service.get_stats(
+        db, tenant_id=principal.tenant_id, created_by_key_id=key_filter
+    )
 
     return JobStatsResponse(
         running=stats.running,

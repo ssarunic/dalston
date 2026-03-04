@@ -441,21 +441,25 @@ class JobsService:
         self,
         db: AsyncSession,
         tenant_id: UUID | None = None,
+        created_by_key_id: UUID | None = None,
     ) -> JobStats:
         """Get job statistics for dashboard.
 
         Args:
             db: Database session
             tenant_id: Optional tenant UUID for isolation (None = all tenants)
+            created_by_key_id: Optional key UUID for ownership filtering (non-admin keys)
 
         Returns:
             JobStats with running, queued, completed_today, failed_today counts
         """
 
-        # Base filter (optional tenant isolation)
+        # Base filter (optional tenant isolation + ownership)
         def base_filter(query):
             if tenant_id is not None:
-                return query.where(JobModel.tenant_id == tenant_id)
+                query = query.where(JobModel.tenant_id == tenant_id)
+            if created_by_key_id is not None:
+                query = query.where(JobModel.created_by_key_id == created_by_key_id)
             return query
 
         # Count running jobs
