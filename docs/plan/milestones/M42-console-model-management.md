@@ -894,35 +894,15 @@ export function ModelSelector({ value, onChange, language }: ModelSelectorProps)
               </CommandGroup>
             ))}
 
-            {/* Custom HuggingFace model */}
-            <CommandGroup heading="Custom">
-              <div className="p-2">
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="HuggingFace model ID..."
-                    value={customHF}
-                    onChange={(e) => setCustomHF(e.target.value)}
-                    className="text-sm"
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    disabled={!customHF.trim()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onChange(customHF.trim());
-                      setOpen(false);
-                    }}
-                  >
-                    Use
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  e.g., nvidia/parakeet-tdt-1.1b
-                </p>
-              </div>
-            </CommandGroup>
+            {/* Help link to Models page */}
+            <div className="border-t mt-2 pt-2 px-3 pb-1">
+              <p className="text-xs text-muted-foreground">
+                Register more models on the{' '}
+                <a href="/models" className="underline hover:text-foreground">
+                  Models page
+                </a>
+              </p>
+            </div>
           </CommandList>
         </Command>
       </PopoverContent>

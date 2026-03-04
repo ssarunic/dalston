@@ -298,6 +298,18 @@ export function ModelSelector({ value, onChange, language }: ModelSelectorProps)
                       </div>
                     )
                   )}
+
+                  {/* Help link - show when not searching and models exist */}
+                  {!userInput && readyModels.length > 0 && (
+                    <div className="border-t mt-2 pt-2 px-3 pb-1">
+                      <p className="text-xs text-muted-foreground">
+                        Register more models on the{' '}
+                        <a href="/models" className="underline hover:text-foreground">
+                          Models page
+                        </a>
+                      </p>
+                    </div>
+                  )}
                 </>
               )}
             </div>
