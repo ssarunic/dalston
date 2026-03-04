@@ -332,6 +332,7 @@ async def realtime_transcription(
         # For realtime routing, we pass the engine ID to the session router
         routing_model = model if model else None
         model_runtime = None
+        valid_runtimes: set[str] | None = None
 
         # Look up model's runtime for routing (allows workers to load model dynamically)
         if routing_model:
@@ -344,6 +345,19 @@ async def realtime_transcription(
                     break
             except Exception as e:
                 logger.warning("model_lookup_failed", model=routing_model, error=str(e))
+        else:
+            # When "Any available" selected, get valid runtimes from registry (M48)
+            # This ensures routing only considers workers whose runtime has downloaded models
+            try:
+                async for db in _get_db():
+                    model_service = ModelRegistryService()
+                    downloaded_models = await model_service.list_models(
+                        db, stage="transcribe", status="ready"
+                    )
+                    valid_runtimes = {m.runtime for m in downloaded_models if m.runtime}
+                    break
+            except Exception as e:
+                logger.warning("registry_lookup_failed", error=str(e))
 
         # Get client IP for logging
         client_ip = websocket.client.host if websocket.client else "unknown"
@@ -354,6 +368,7 @@ async def realtime_transcription(
             model=routing_model,
             client_ip=client_ip,
             runtime=model_runtime,
+            valid_runtimes=valid_runtimes,
         )
 
         if allocation is None:
@@ -668,6 +683,20 @@ async def elevenlabs_realtime_transcription(
         # Let the session router select the best available realtime engine
         routing_model = None  # Auto-select
 
+        # Get valid runtimes from registry for "Any available" routing (M48)
+        # This ensures routing only considers workers whose runtime has downloaded models
+        valid_runtimes: set[str] | None = None
+        try:
+            async for db in _get_db():
+                model_service = ModelRegistryService()
+                downloaded_models = await model_service.list_models(
+                    db, stage="transcribe", status="ready"
+                )
+                valid_runtimes = {m.runtime for m in downloaded_models if m.runtime}
+                break
+        except Exception as e:
+            logger.warning("registry_lookup_failed", error=str(e))
+
         # Get client IP
         client_ip = websocket.client.host if websocket.client else "unknown"
 
@@ -676,6 +705,7 @@ async def elevenlabs_realtime_transcription(
             language=language_code,
             model=routing_model,
             client_ip=client_ip,
+            valid_runtimes=valid_runtimes,
         )
 
         if allocation is None:

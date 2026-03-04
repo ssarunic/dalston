@@ -168,6 +168,7 @@ class SessionRouter:
         model: str | None,
         client_ip: str,
         runtime: str | None = None,
+        valid_runtimes: set[str] | None = None,
     ) -> WorkerAllocation | None:
         """Acquire a worker for a new session.
 
@@ -179,6 +180,9 @@ class SessionRouter:
             client_ip: Client IP address for logging
             runtime: Model runtime (e.g., "faster-whisper") for routing when model
                      isn't pre-loaded. Workers matching runtime can load the model.
+            valid_runtimes: When model=None and runtime=None, only consider workers
+                     whose runtime is in this set. Used for "Any available" routing
+                     to filter by runtimes that have downloaded models in registry.
 
         Returns:
             WorkerAllocation with endpoint and session_id, or None if no capacity
@@ -191,6 +195,7 @@ class SessionRouter:
             model=model,
             client_ip=client_ip,
             runtime=runtime,
+            valid_runtimes=valid_runtimes,
         )
 
     async def release_worker(self, session_id: str) -> SessionState | None:

@@ -118,6 +118,7 @@ class SessionAllocator:
         model: str | None,
         client_ip: str,
         runtime: str | None = None,
+        valid_runtimes: set[str] | None = None,
     ) -> WorkerAllocation | None:
         """Find worker with capacity and reserve a slot.
 
@@ -129,6 +130,8 @@ class SessionAllocator:
             client_ip: Client IP address for logging
             runtime: Model runtime (e.g., "faster-whisper") for routing when model
                      isn't pre-loaded. Workers matching runtime can load the model.
+            valid_runtimes: When model=None and runtime=None, only consider workers
+                     whose runtime is in this set. Used for "Any available" routing.
 
         Returns:
             WorkerAllocation if successful, None if no capacity available
@@ -144,7 +147,7 @@ class SessionAllocator:
         ):
             # Find available workers
             available = await self._registry.get_available_workers(
-                model, language, runtime
+                model, language, runtime, valid_runtimes
             )
 
             if not available:

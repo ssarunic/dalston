@@ -142,6 +142,7 @@ class WorkerRegistry:
         model: str | None,
         language: str,
         runtime: str | None = None,
+        valid_runtimes: set[str] | None = None,
     ) -> list[WorkerState]:
         """Get workers with capacity that support requested model/language/runtime.
 
@@ -150,6 +151,9 @@ class WorkerRegistry:
             language: Language code or "auto"
             runtime: Model runtime (e.g., "faster-whisper") for routing when model
                      isn't pre-loaded. Workers matching runtime can load the model.
+            valid_runtimes: When model=None and runtime=None, only consider workers
+                     whose runtime is in this set. Used for "Any available" routing
+                     to filter by runtimes that have downloaded models in registry.
 
         Returns:
             List of available workers matching criteria, sorted by available capacity
@@ -162,7 +166,7 @@ class WorkerRegistry:
                 continue
 
             # Model/Runtime filtering:
-            # - model=None, runtime=None: any worker
+            # - model=None, runtime=None: any worker (or filter by valid_runtimes)
             # - model specified: prefer workers with model loaded, fallback to runtime match
             # - runtime specified: workers with matching runtime (can load any model)
             if model is not None:
@@ -176,6 +180,12 @@ class WorkerRegistry:
             elif runtime is not None:
                 # No specific model, but filter by runtime
                 if worker.runtime != runtime:
+                    continue
+            elif valid_runtimes is not None:
+                # No specific model or runtime, but filter by valid runtimes from registry
+                # This ensures "Any available" only routes to workers whose runtime
+                # has downloaded models in the registry
+                if worker.runtime not in valid_runtimes:
                     continue
 
             # Language filtering
