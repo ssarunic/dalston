@@ -331,7 +331,6 @@ async def realtime_transcription(
         # Model parameter: use engine ID directly or None for any available worker
         # For realtime routing, we pass the engine ID to the session router
         routing_model = model if model else None
-        resolved_model = model or "any"  # For logging
         model_runtime = None
 
         # Look up model's runtime for routing (allows workers to load model dynamically)
@@ -440,7 +439,7 @@ async def realtime_transcription(
                 worker_endpoint=allocation.endpoint,
                 session_id=allocation.session_id,
                 language=language,
-                model=resolved_model,
+                model=model,  # Pass original model (empty = worker default)
                 encoding=encoding,
                 sample_rate=sample_rate,
                 enable_vad=enable_vad,
@@ -668,7 +667,6 @@ async def elevenlabs_realtime_transcription(
         # ElevenLabs model_id (scribe_v1, scribe_v2, etc.) is treated as "auto"
         # Let the session router select the best available realtime engine
         routing_model = None  # Auto-select
-        resolved_model = model_id  # For logging
 
         # Get client IP
         client_ip = websocket.client.host if websocket.client else "unknown"
@@ -726,7 +724,7 @@ async def elevenlabs_realtime_transcription(
                 worker_endpoint=allocation.endpoint,
                 session_id=allocation.session_id,
                 language=language_code,
-                model=resolved_model,
+                model="",  # ElevenLabs doesn't specify RT model, use worker default
                 sample_rate=sample_rate,
                 enable_vad=(commit_strategy == "vad"),
                 interim_results=True,
