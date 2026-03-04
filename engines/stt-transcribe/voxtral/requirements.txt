@@ -1,7 +1,7 @@
 # Mistral Voxtral Engine Dependencies
 
-# Transformers with Voxtral support
-transformers>=4.54.0
+# Transformers with Voxtral support (5.x required for huggingface_hub 1.x)
+transformers>=5.0.0
 
 # Mistral common library with audio support
 mistral-common[audio]>=1.5.0

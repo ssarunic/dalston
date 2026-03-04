@@ -30,7 +30,7 @@ gateway = [
     "types-aiobotocore-s3>=2.13.0",
     "websockets>=12.0",  # For realtime WebSocket proxy
     "tinytag>=2.0.0",  # Audio metadata extraction
-    "huggingface_hub>=0.20.0",  # For HF card routing (M40.5)
+    "huggingface_hub>=1.0.0",  # For HF card routing (M40.5)
     # OpenTelemetry auto-instrumentation (M19)
     "opentelemetry-instrumentation-fastapi>=0.60b0,<1.0.0",
     "opentelemetry-instrumentation-redis>=0.60b0,<1.0.0",
