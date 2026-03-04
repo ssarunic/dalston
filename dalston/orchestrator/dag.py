@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 
 import structlog
 
+import dalston.telemetry
 from dalston.common.models import Task, TaskStatus
 from dalston.orchestrator.defaults import (
     DEFAULT_PII_BUFFER_MS,
@@ -142,15 +143,29 @@ async def build_task_dag(
     )
 
     # Build the DAG with selected engines
-    return _build_dag_with_engines(
-        job_id=job_id,
-        audio_uri=audio_uri,
-        parameters=parameters,
-        engines=engines,
-        skip_alignment=skip_alignment,
-        skip_diarization=skip_diarization,
-        runtime_model_id=runtime_model_id,
-    )
+    with dalston.telemetry.create_span(
+        "orchestrator.dag_build",
+        attributes={
+            "dalston.job_id": str(job_id),
+            "dalston.runtime": transcribe_selection.runtime,
+            "dalston.model": runtime_model_id or "",
+            "dalston.dag.stages": list(selections.keys()),
+            "dalston.dag.task_count": len(selections),
+            "dalston.dag.has_alignment": not skip_alignment,
+            "dalston.dag.has_diarization": not skip_diarization,
+        },
+    ):
+        tasks = _build_dag_with_engines(
+            job_id=job_id,
+            audio_uri=audio_uri,
+            parameters=parameters,
+            engines=engines,
+            skip_alignment=skip_alignment,
+            skip_diarization=skip_diarization,
+            runtime_model_id=runtime_model_id,
+        )
+        dalston.telemetry.set_span_attribute("dalston.dag.task_count", len(tasks))
+        return tasks
 
 
 def _build_dag_with_engines(

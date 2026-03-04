@@ -11,7 +11,8 @@ Metric Naming Convention:
     dalston_{service}_{metric_name}_{unit}
 
 Common Labels:
-    service: Service name (gateway, orchestrator, engine-*, etc.)
+    runtime: Runtime identifier (e.g., "faster-whisper", "nemo")
+    model: Model identifier (e.g., "nvidia/parakeet-tdt-1.1b")
     instance: Instance identifier
 """
 
@@ -32,6 +33,8 @@ _engine_metrics: dict[str, Any] = {}
 _session_router_metrics: dict[str, Any] = {}
 _realtime_metrics: dict[str, Any] = {}
 _queue_metrics: dict[str, Any] = {}
+_webhook_metrics: dict[str, Any] = {}
+_model_metrics: dict[str, Any] = {}
 
 
 def is_metrics_enabled() -> bool:
@@ -131,20 +134,20 @@ def _init_orchestrator_metrics() -> None:
     _orchestrator_metrics["job_duration_seconds"] = Histogram(
         "dalston_orchestrator_job_duration_seconds",
         "Total job duration from creation to completion",
-        ["stage_count"],
+        ["runtime", "model"],
         buckets=(1, 5, 10, 30, 60, 120, 300, 600, 1800),
     )
 
     _orchestrator_metrics["tasks_scheduled_total"] = Counter(
         "dalston_orchestrator_tasks_scheduled_total",
         "Tasks pushed to queues",
-        ["engine_id", "stage"],
+        ["runtime", "stage"],
     )
 
     _orchestrator_metrics["tasks_completed_total"] = Counter(
         "dalston_orchestrator_tasks_completed_total",
         "Task completions",
-        ["engine_id", "status"],
+        ["runtime", "status"],
     )
 
     _orchestrator_metrics["events_processed_total"] = Counter(
@@ -179,34 +182,34 @@ def _init_engine_metrics() -> None:
     _engine_metrics["tasks_processed_total"] = Counter(
         "dalston_engine_tasks_processed_total",
         "Tasks processed",
-        ["engine_id", "status"],
+        ["runtime", "model", "status"],
     )
 
     _engine_metrics["task_duration_seconds"] = Histogram(
         "dalston_engine_task_duration_seconds",
         "Task processing time (excludes queue wait)",
-        ["engine_id"],
+        ["runtime", "model"],
         buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300),
     )
 
     _engine_metrics["queue_wait_seconds"] = Histogram(
         "dalston_engine_queue_wait_seconds",
         "Time between task enqueue and dequeue",
-        ["engine_id"],
+        ["runtime"],
         buckets=(0.01, 0.1, 0.5, 1, 5, 10, 30, 60, 300),
     )
 
     _engine_metrics["s3_download_seconds"] = Histogram(
         "dalston_engine_s3_download_seconds",
         "Input download time",
-        ["engine_id"],
+        ["runtime"],
         buckets=(0.01, 0.05, 0.1, 0.5, 1, 2.5, 5, 10),
     )
 
     _engine_metrics["s3_upload_seconds"] = Histogram(
         "dalston_engine_s3_upload_seconds",
         "Output upload time",
-        ["engine_id"],
+        ["runtime"],
         buckets=(0.01, 0.05, 0.1, 0.5, 1, 2.5, 5, 10),
     )
 
@@ -220,6 +223,19 @@ def _init_engine_metrics() -> None:
         "dalston_engine_tasks_skipped_cancelled_total",
         "Tasks skipped because job was cancelled",
         ["stage"],
+    )
+
+    _engine_metrics["model_load_seconds"] = Histogram(
+        "dalston_engine_model_load_seconds",
+        "Model loading time (cold load or cache miss)",
+        ["runtime", "model"],
+        buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300),
+    )
+
+    _engine_metrics["model_cache_hits_total"] = Counter(
+        "dalston_engine_model_cache_hits_total",
+        "Model cache hits (model already loaded)",
+        ["runtime", "model"],
     )
 
 
@@ -263,19 +279,20 @@ def _init_realtime_metrics() -> None:
     _realtime_metrics["session_duration_seconds"] = Histogram(
         "dalston_realtime_session_duration_seconds",
         "Total session duration",
+        ["runtime", "model"],
         buckets=(1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600),
     )
 
     _realtime_metrics["audio_processed_seconds"] = Counter(
         "dalston_realtime_audio_processed_seconds",
         "Cumulative audio processed",
-        ["worker_id"],
+        ["runtime", "model"],
     )
 
     _realtime_metrics["transcripts_total"] = Counter(
         "dalston_realtime_transcripts_total",
         "Transcripts emitted",
-        ["type"],
+        ["runtime", "model", "type"],
     )
 
 
@@ -286,18 +303,35 @@ def _init_queue_metrics() -> None:
     _queue_metrics["queue_depth"] = Gauge(
         "dalston_queue_depth",
         "Tasks waiting in each engine queue",
-        ["engine_id"],
+        ["runtime"],
     )
 
     _queue_metrics["queue_oldest_task_age_seconds"] = Gauge(
         "dalston_queue_oldest_task_age_seconds",
         "Age of oldest task in queue",
-        ["engine_id"],
+        ["runtime"],
     )
 
     _queue_metrics["redis_connected"] = Gauge(
         "dalston_redis_connected",
         "Redis connectivity (1 = connected, 0 = disconnected)",
+    )
+
+
+def _init_webhook_metrics() -> None:
+    """Initialize webhook delivery metrics."""
+    from prometheus_client import Counter, Histogram
+
+    _webhook_metrics["deliveries_total"] = Counter(
+        "dalston_webhook_deliveries_total",
+        "Webhook deliveries by outcome",
+        ["status"],
+    )
+
+    _webhook_metrics["delivery_duration_seconds"] = Histogram(
+        "dalston_webhook_delivery_duration_seconds",
+        "Webhook delivery latency",
+        buckets=(0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30),
     )
 
 
@@ -401,17 +435,20 @@ def inc_orchestrator_jobs(status: str) -> None:
     _orchestrator_metrics["jobs_total"].labels(status=status).inc()
 
 
-def observe_orchestrator_job_duration(stage_count: int, duration: float) -> None:
+def observe_orchestrator_job_duration(
+    runtime: str, model: str, duration: float
+) -> None:
     """Record job duration.
 
     Args:
-        stage_count: Number of stages in the job
+        runtime: Runtime identifier (e.g., "faster-whisper")
+        model: Model identifier (e.g., "nvidia/parakeet-tdt-1.1b")
         duration: Duration in seconds
     """
     if not _metrics_enabled or "job_duration_seconds" not in _orchestrator_metrics:
         return
     _orchestrator_metrics["job_duration_seconds"].labels(
-        stage_count=str(stage_count)
+        runtime=runtime, model=model
     ).observe(duration)
 
 
@@ -419,13 +456,13 @@ def inc_orchestrator_tasks_scheduled(runtime: str, stage: str) -> None:
     """Increment tasks scheduled counter.
 
     Args:
-        runtime: Engine identifier
+        runtime: Runtime identifier
         stage: Pipeline stage name
     """
     if not _metrics_enabled or "tasks_scheduled_total" not in _orchestrator_metrics:
         return
     _orchestrator_metrics["tasks_scheduled_total"].labels(
-        engine_id=runtime, stage=stage
+        runtime=runtime, stage=stage
     ).inc()
 
 
@@ -433,13 +470,13 @@ def inc_orchestrator_tasks_completed(runtime: str, status: str) -> None:
     """Increment tasks completed counter.
 
     Args:
-        runtime: Engine identifier
+        runtime: Runtime identifier
         status: Task status (success, failure)
     """
     if not _metrics_enabled or "tasks_completed_total" not in _orchestrator_metrics:
         return
     _orchestrator_metrics["tasks_completed_total"].labels(
-        engine_id=runtime, status=status
+        runtime=runtime, status=status
     ).inc()
 
 
@@ -499,66 +536,97 @@ def inc_orchestrator_scanner_scans(status: str) -> None:
 # =============================================================================
 
 
-def inc_engine_tasks(runtime: str, status: str) -> None:
+def inc_engine_tasks(runtime: str, model: str, status: str) -> None:
     """Increment engine tasks processed counter.
 
     Args:
-        runtime: Engine identifier
+        runtime: Runtime identifier (e.g., "faster-whisper")
+        model: Model identifier (e.g., "nvidia/parakeet-tdt-1.1b")
         status: Task status (success, failure)
     """
     if not _metrics_enabled or "tasks_processed_total" not in _engine_metrics:
         return
     _engine_metrics["tasks_processed_total"].labels(
-        engine_id=runtime, status=status
+        runtime=runtime, model=model, status=status
     ).inc()
 
 
-def observe_engine_task_duration(runtime: str, duration: float) -> None:
+def observe_engine_task_duration(runtime: str, model: str, duration: float) -> None:
     """Record engine task processing duration.
 
     Args:
-        runtime: Engine identifier
+        runtime: Runtime identifier
+        model: Model identifier
         duration: Duration in seconds
     """
     if not _metrics_enabled or "task_duration_seconds" not in _engine_metrics:
         return
-    _engine_metrics["task_duration_seconds"].labels(engine_id=runtime).observe(duration)
+    _engine_metrics["task_duration_seconds"].labels(
+        runtime=runtime, model=model
+    ).observe(duration)
 
 
 def observe_engine_queue_wait(runtime: str, duration: float) -> None:
     """Record queue wait time.
 
     Args:
-        runtime: Engine identifier
+        runtime: Runtime identifier
         duration: Duration in seconds
     """
     if not _metrics_enabled or "queue_wait_seconds" not in _engine_metrics:
         return
-    _engine_metrics["queue_wait_seconds"].labels(engine_id=runtime).observe(duration)
+    _engine_metrics["queue_wait_seconds"].labels(runtime=runtime).observe(duration)
 
 
 def observe_engine_s3_download(runtime: str, duration: float) -> None:
     """Record S3 download time.
 
     Args:
-        runtime: Engine identifier
+        runtime: Runtime identifier
         duration: Duration in seconds
     """
     if not _metrics_enabled or "s3_download_seconds" not in _engine_metrics:
         return
-    _engine_metrics["s3_download_seconds"].labels(engine_id=runtime).observe(duration)
+    _engine_metrics["s3_download_seconds"].labels(runtime=runtime).observe(duration)
 
 
 def observe_engine_s3_upload(runtime: str, duration: float) -> None:
     """Record S3 upload time.
 
     Args:
-        runtime: Engine identifier
+        runtime: Runtime identifier
         duration: Duration in seconds
     """
     if not _metrics_enabled or "s3_upload_seconds" not in _engine_metrics:
         return
-    _engine_metrics["s3_upload_seconds"].labels(engine_id=runtime).observe(duration)
+    _engine_metrics["s3_upload_seconds"].labels(runtime=runtime).observe(duration)
+
+
+def observe_engine_model_load(runtime: str, model: str, duration: float) -> None:
+    """Record model loading time.
+
+    Args:
+        runtime: Runtime identifier
+        model: Model identifier
+        duration: Duration in seconds
+    """
+    if not _metrics_enabled or "model_load_seconds" not in _engine_metrics:
+        return
+    _engine_metrics["model_load_seconds"].labels(runtime=runtime, model=model).observe(
+        duration
+    )
+
+
+def inc_engine_model_cache_hit(runtime: str, model: str) -> None:
+    """Increment model cache hit counter.
+
+    Args:
+        runtime: Runtime identifier
+        model: Model identifier
+    """
+    if not _metrics_enabled or "model_cache_hits_total" not in _engine_metrics:
+        return
+    _engine_metrics["model_cache_hits_total"].labels(runtime=runtime, model=model).inc()
 
 
 def inc_task_redelivery(stage: str, reason: str) -> None:
@@ -658,40 +726,51 @@ def observe_session_router_allocation(duration: float) -> None:
 # =============================================================================
 
 
-def observe_realtime_session_duration(duration: float) -> None:
+def observe_realtime_session_duration(
+    runtime: str, model: str, duration: float
+) -> None:
     """Record realtime session duration.
 
     Args:
+        runtime: Runtime identifier
+        model: Model identifier
         duration: Duration in seconds
     """
     if not _metrics_enabled or "session_duration_seconds" not in _realtime_metrics:
         return
-    _realtime_metrics["session_duration_seconds"].observe(duration)
+    _realtime_metrics["session_duration_seconds"].labels(
+        runtime=runtime, model=model
+    ).observe(duration)
 
 
-def inc_realtime_audio_processed(worker_id: str, seconds: float) -> None:
+def inc_realtime_audio_processed(runtime: str, model: str, seconds: float) -> None:
     """Increment audio processed counter.
 
     Args:
-        worker_id: Worker identifier
+        runtime: Runtime identifier
+        model: Model identifier
         seconds: Audio duration in seconds
     """
     if not _metrics_enabled or "audio_processed_seconds" not in _realtime_metrics:
         return
-    _realtime_metrics["audio_processed_seconds"].labels(worker_id=worker_id).inc(
-        seconds
-    )
+    _realtime_metrics["audio_processed_seconds"].labels(
+        runtime=runtime, model=model
+    ).inc(seconds)
 
 
-def inc_realtime_transcripts(transcript_type: str) -> None:
+def inc_realtime_transcripts(runtime: str, model: str, transcript_type: str) -> None:
     """Increment transcripts counter.
 
     Args:
+        runtime: Runtime identifier
+        model: Model identifier
         transcript_type: Transcript type (partial, final)
     """
     if not _metrics_enabled or "transcripts_total" not in _realtime_metrics:
         return
-    _realtime_metrics["transcripts_total"].labels(type=transcript_type).inc()
+    _realtime_metrics["transcripts_total"].labels(
+        runtime=runtime, model=model, type=transcript_type
+    ).inc()
 
 
 # =============================================================================
@@ -721,27 +800,27 @@ def init_queue_metrics() -> None:
 
 
 def set_queue_depth(runtime: str, depth: int) -> None:
-    """Set queue depth for an engine.
+    """Set queue depth for a runtime.
 
     Args:
-        runtime: Engine identifier
+        runtime: Runtime identifier
         depth: Number of tasks in queue
     """
     if not _metrics_enabled or "queue_depth" not in _queue_metrics:
         return
-    _queue_metrics["queue_depth"].labels(engine_id=runtime).set(depth)
+    _queue_metrics["queue_depth"].labels(runtime=runtime).set(depth)
 
 
 def set_queue_oldest_task_age(runtime: str, age_seconds: float) -> None:
-    """Set oldest task age for an engine.
+    """Set oldest task age for a runtime.
 
     Args:
-        runtime: Engine identifier
+        runtime: Runtime identifier
         age_seconds: Age in seconds
     """
     if not _metrics_enabled or "queue_oldest_task_age_seconds" not in _queue_metrics:
         return
-    _queue_metrics["queue_oldest_task_age_seconds"].labels(engine_id=runtime).set(
+    _queue_metrics["queue_oldest_task_age_seconds"].labels(runtime=runtime).set(
         age_seconds
     )
 
@@ -755,3 +834,38 @@ def set_redis_connected(connected: bool) -> None:
     if not _metrics_enabled or "redis_connected" not in _queue_metrics:
         return
     _queue_metrics["redis_connected"].set(1 if connected else 0)
+
+
+# =============================================================================
+# Webhook Metrics
+# =============================================================================
+
+
+def inc_webhook_deliveries(status: str) -> None:
+    """Increment webhook deliveries counter.
+
+    Args:
+        status: Delivery status (success, failed, retried)
+    """
+    if not _metrics_enabled or "deliveries_total" not in _webhook_metrics:
+        return
+    _webhook_metrics["deliveries_total"].labels(status=status).inc()
+
+
+def observe_webhook_delivery_duration(duration: float) -> None:
+    """Record webhook delivery latency.
+
+    Args:
+        duration: Duration in seconds
+    """
+    if not _metrics_enabled or "delivery_duration_seconds" not in _webhook_metrics:
+        return
+    _webhook_metrics["delivery_duration_seconds"].observe(duration)
+
+
+def init_webhook_metrics() -> None:
+    """Initialize webhook metrics for use in orchestrator."""
+    if not _metrics_enabled:
+        return
+    if "deliveries_total" not in _webhook_metrics:
+        _init_webhook_metrics()

@@ -498,6 +498,9 @@ class EngineRunner:
         # Extract trace context from task metadata (M19)
         task_metadata = self._get_task_metadata(task_id)
 
+        # Extract model from task config (set by orchestrator's engine selector)
+        task_model = task_metadata.get("runtime_model_id", "")
+
         # Record queue wait time (M20) - time between enqueue and dequeue
         enqueued_at_str = task_metadata.get("enqueued_at")
         if enqueued_at_str:
@@ -524,7 +527,9 @@ class EngineRunner:
             attributes={
                 "dalston.task_id": task_id,
                 "dalston.runtime": self.runtime,
+                "dalston.model": task_model,
                 "dalston.stage": task_metadata.get("stage", "unknown"),
+                "dalston.instance": self.instance,
             },
         ):
             try:
@@ -540,6 +545,14 @@ class EngineRunner:
                 )
                 job_id = task_input.job_id
 
+                # Resolve model from task input config if not in metadata
+                if not task_model:
+                    task_model = task_input.config.get("runtime_model_id", "")
+                    if task_model:
+                        dalston.telemetry.set_span_attribute(
+                            "dalston.model", task_model
+                        )
+
                 # Set job_id on span
                 dalston.telemetry.set_span_attribute("dalston.job_id", job_id)
 
@@ -549,6 +562,7 @@ class EngineRunner:
                     task_id=task_id,
                     job_id=job_id,
                     runtime=self.runtime,
+                    model=task_model,
                     **({"request_id": request_id} if request_id else {}),
                 )
 
@@ -574,8 +588,10 @@ class EngineRunner:
                 )
 
                 # Record task success metrics (M20)
-                dalston.metrics.observe_engine_task_duration(self.runtime, process_time)
-                dalston.metrics.inc_engine_tasks(self.runtime, "success")
+                dalston.metrics.observe_engine_task_duration(
+                    self.runtime, task_model, process_time
+                )
+                dalston.metrics.inc_engine_tasks(self.runtime, task_model, "success")
 
                 # Publish success event
                 self._publish_task_completed(task_id, job_id)
@@ -588,7 +604,7 @@ class EngineRunner:
                 logger.exception("task_failed", error=str(e))
 
                 # Record task failure metric (M20)
-                dalston.metrics.inc_engine_tasks(self.runtime, "failure")
+                dalston.metrics.inc_engine_tasks(self.runtime, task_model, "failure")
 
                 # We need job_id for the event, try to extract from input
                 try:

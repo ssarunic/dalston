@@ -633,13 +633,20 @@ class RealtimeEngine(ABC):
         # Bind session_id to logging context for this session
         structlog.contextvars.bind_contextvars(session_id=config.session_id)
 
+        # Resolve runtime from capabilities
+        capabilities = self.get_capabilities()
+        session_runtime = capabilities.runtime or ""
+        session_model = config.model or ""
+
         # Create span for session lifetime (M19)
         with dalston.telemetry.create_span(
             "realtime.session",
             attributes={
                 "dalston.session_id": config.session_id,
+                "dalston.runtime": session_runtime,
+                "dalston.model": session_model,
+                "dalston.instance": self.instance,
                 "dalston.language": config.language,
-                "dalston.model": config.model,
             },
         ):
             try:
@@ -664,8 +671,15 @@ class RealtimeEngine(ABC):
             duration: Session duration in seconds
             status: End status ("completed" or "error")
         """
+        # Resolve runtime and model for metrics
+        capabilities = self.get_capabilities()
+        rt = capabilities.runtime or ""
+        # Get model from session config if still tracked
+        session = self._sessions.get(session_id)
+        model = session.config.model if session and hasattr(session, "config") else ""
+
         # Record session metrics (M20)
-        dalston.metrics.observe_realtime_session_duration(duration)
+        dalston.metrics.observe_realtime_session_duration(rt, model or "", duration)
         dalston.metrics.inc_session_router_sessions(status)
 
         if self._registry:

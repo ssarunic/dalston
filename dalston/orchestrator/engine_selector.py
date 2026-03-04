@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+import dalston.telemetry
 from dalston.db.models import ModelRegistryModel
 from dalston.engine_sdk.types import EngineCapabilities
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog
@@ -646,86 +647,106 @@ async def select_pipeline_engines(
     requirements = extract_requirements(parameters)
     selections: dict[str, EngineSelectionResult] = {}
 
-    # Prepare (always required)
-    selections["prepare"] = await select_engine(
-        "prepare",
-        {},  # No special requirements for prepare
-        registry,
-        catalog,
-        user_preference=parameters.get("engine_prepare"),
-        db=db,
-    )
-
-    # Transcription (always required)
-    selections["transcribe"] = await select_engine(
-        "transcribe",
-        requirements,
-        registry,
-        catalog,
-        user_preference=parameters.get("engine_transcribe"),
-        db=db,
-    )
-
-    # Alignment (conditional on transcriber capabilities)
-    if _should_add_alignment(parameters, selections["transcribe"]):
-        # Alignment only needs language requirement
-        align_requirements = (
-            {"language": requirements.get("language")}
-            if requirements.get("language")
-            else {}
-        )
-        selections["align"] = await select_engine(
-            "align",
-            align_requirements,
+    with dalston.telemetry.create_span(
+        "orchestrator.engine_selection",
+        attributes={
+            "dalston.language": requirements.get("language", ""),
+            "dalston.model": parameters.get("model", ""),
+        },
+    ):
+        # Prepare (always required)
+        selections["prepare"] = await select_engine(
+            "prepare",
+            {},  # No special requirements for prepare
             registry,
             catalog,
-            user_preference=parameters.get("engine_align"),
+            user_preference=parameters.get("engine_prepare"),
             db=db,
         )
 
-    # Diarization (conditional on parameters and transcriber capabilities)
-    if _should_add_diarization(parameters, selections["transcribe"]):
-        selections["diarize"] = await select_engine(
-            "diarize",
-            {},  # No special requirements for diarize
+        # Transcription (always required)
+        selections["transcribe"] = await select_engine(
+            "transcribe",
+            requirements,
             registry,
             catalog,
-            user_preference=parameters.get("engine_diarize"),
+            user_preference=parameters.get("engine_transcribe"),
             db=db,
         )
 
-    # PII detection (conditional on parameters)
-    pii_detection_enabled = parameters.get("pii_detection", False)
-    if pii_detection_enabled:
-        selections["pii_detect"] = await select_engine(
-            "pii_detect",
-            {},  # No special requirements for PII detection
-            registry,
-            catalog,
-            user_preference=parameters.get("engine_pii_detect"),
-            db=db,
-        )
-
-        # Audio redaction (conditional on parameters, requires PII detection)
-        if parameters.get("redact_pii_audio", False):
-            selections["audio_redact"] = await select_engine(
-                "audio_redact",
-                {},  # No special requirements for audio redaction
+        # Alignment (conditional on transcriber capabilities)
+        if _should_add_alignment(parameters, selections["transcribe"]):
+            # Alignment only needs language requirement
+            align_requirements = (
+                {"language": requirements.get("language")}
+                if requirements.get("language")
+                else {}
+            )
+            selections["align"] = await select_engine(
+                "align",
+                align_requirements,
                 registry,
                 catalog,
-                user_preference=parameters.get("engine_audio_redact"),
+                user_preference=parameters.get("engine_align"),
                 db=db,
             )
 
-    # Merge (always required)
-    selections["merge"] = await select_engine(
-        "merge",
-        {},  # No special requirements for merge
-        registry,
-        catalog,
-        user_preference=parameters.get("engine_merge"),
-        db=db,
-    )
+        # Diarization (conditional on parameters and transcriber capabilities)
+        if _should_add_diarization(parameters, selections["transcribe"]):
+            selections["diarize"] = await select_engine(
+                "diarize",
+                {},  # No special requirements for diarize
+                registry,
+                catalog,
+                user_preference=parameters.get("engine_diarize"),
+                db=db,
+            )
+
+        # PII detection (conditional on parameters)
+        pii_detection_enabled = parameters.get("pii_detection", False)
+        if pii_detection_enabled:
+            selections["pii_detect"] = await select_engine(
+                "pii_detect",
+                {},  # No special requirements for PII detection
+                registry,
+                catalog,
+                user_preference=parameters.get("engine_pii_detect"),
+                db=db,
+            )
+
+            # Audio redaction (conditional on parameters, requires PII detection)
+            if parameters.get("redact_pii_audio", False):
+                selections["audio_redact"] = await select_engine(
+                    "audio_redact",
+                    {},  # No special requirements for audio redaction
+                    registry,
+                    catalog,
+                    user_preference=parameters.get("engine_audio_redact"),
+                    db=db,
+                )
+
+        # Merge (always required)
+        selections["merge"] = await select_engine(
+            "merge",
+            {},  # No special requirements for merge
+            registry,
+            catalog,
+            user_preference=parameters.get("engine_merge"),
+            db=db,
+        )
+
+        # Record selection results on span
+        transcribe_sel = selections["transcribe"]
+        dalston.telemetry.set_span_attribute("dalston.runtime", transcribe_sel.runtime)
+        dalston.telemetry.set_span_attribute(
+            "dalston.model", transcribe_sel.runtime_model_id or ""
+        )
+        dalston.telemetry.set_span_attribute(
+            "dalston.selection.reason", transcribe_sel.selection_reason
+        )
+        dalston.telemetry.set_span_attribute(
+            "dalston.dag.stages", list(selections.keys())
+        )
 
     logger.info(
         "pipeline_engines_selected",

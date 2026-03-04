@@ -63,6 +63,7 @@ dalston.telemetry.configure_tracing("dalston-orchestrator")
 
 # Configure Prometheus metrics (M20)
 dalston.metrics.configure_metrics("orchestrator")
+dalston.metrics.init_webhook_metrics()
 
 # Shutdown flag
 _shutdown_event: asyncio.Event | None = None
