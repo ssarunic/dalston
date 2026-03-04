@@ -26,7 +26,6 @@ from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_cancel_requested
 from dalston.common.models import JobStatus
 from dalston.common.streams_types import CONSUMER_GROUP
-from dalston.config import Settings
 from dalston.db.session import DEFAULT_TENANT_ID
 from dalston.gateway.dependencies import (
     get_audit_service,
@@ -37,7 +36,7 @@ from dalston.gateway.dependencies import (
     get_redis,
     get_security_manager,
     get_session_router,
-    get_settings,
+    get_storage_service,
 )
 from dalston.gateway.models.responses import JobCancelledResponse
 from dalston.gateway.security.permissions import Permission
@@ -311,11 +310,11 @@ async def get_task_artifacts(
     principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
     console_service: ConsoleService = Depends(get_console_service),
+    storage: StorageService = Depends(get_storage_service),
 ) -> TaskArtifactResponse:
     """Get task artifacts for debugging."""
     security_manager = get_security_manager()
     security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
-    from dalston.config import get_settings
 
     job_dto = await console_service.get_job_with_tasks_admin(db, job_id)
 
@@ -337,8 +336,6 @@ async def get_task_artifacts(
     input_data = None
     output_data = None
     if task.status != "pending":
-        settings = get_settings()
-        storage = StorageService(settings)
         input_data = await storage.get_task_input(job_id, task_id)
         output_data = await storage.get_task_output(job_id, task_id)
 
@@ -700,9 +697,9 @@ async def delete_console_job(
     job_id: UUID,
     principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
     audit_service: AuditService = Depends(get_audit_service),
+    storage: StorageService = Depends(get_storage_service),
 ) -> Response:
     """Delete a job and all associated artifacts (admin endpoint).
 
@@ -730,7 +727,6 @@ async def delete_console_job(
 
     # Clean up S3 artifacts (best-effort)
     try:
-        storage = StorageService(settings)
         await storage.delete_job_artifacts(job_id)
     except Exception:
         logger.warning(

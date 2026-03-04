@@ -159,9 +159,7 @@ class TestCorrelationIdGatewayFlow:
         mock_job.created_at = datetime.now(UTC)
         mock_jobs_service.create_job.return_value = mock_job
 
-        with patch(
-            "dalston.gateway.api.v1.transcription.StorageService"
-        ) as MockStorage:
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
             MockStorage.return_value.upload_audio = AsyncMock(
                 return_value="s3://test-bucket/audio.wav"
             )
