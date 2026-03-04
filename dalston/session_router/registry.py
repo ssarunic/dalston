@@ -141,12 +141,15 @@ class WorkerRegistry:
         self,
         model: str | None,
         language: str,
+        runtime: str | None = None,
     ) -> list[WorkerState]:
-        """Get workers with capacity that support requested model/language.
+        """Get workers with capacity that support requested model/language/runtime.
 
         Args:
             model: Exact model name (e.g., "parakeet-tdt-0.6b-v3") or None for any
             language: Language code or "auto"
+            runtime: Model runtime (e.g., "faster-whisper") for routing when model
+                     isn't pre-loaded. Workers matching runtime can load the model.
 
         Returns:
             List of available workers matching criteria, sorted by available capacity
@@ -158,9 +161,22 @@ class WorkerRegistry:
             if not worker.is_available:
                 continue
 
-            # Model filtering: None = any, otherwise exact match
-            if model is not None and model not in worker.models_loaded:
-                continue
+            # Model/Runtime filtering:
+            # - model=None, runtime=None: any worker
+            # - model specified: prefer workers with model loaded, fallback to runtime match
+            # - runtime specified: workers with matching runtime (can load any model)
+            if model is not None:
+                # First check if model is already loaded
+                if model in worker.models_loaded:
+                    pass  # Model loaded, worker matches
+                elif runtime and worker.runtime == runtime:
+                    pass  # Model not loaded but runtime matches, worker can load it
+                else:
+                    continue  # No match
+            elif runtime is not None:
+                # No specific model, but filter by runtime
+                if worker.runtime != runtime:
+                    continue
 
             # Language filtering
             if language != "auto" and "auto" not in worker.languages_supported:
@@ -169,8 +185,13 @@ class WorkerRegistry:
 
             available.append(worker)
 
-        # Sort by available capacity (most available first)
-        available.sort(key=lambda w: w.available_capacity, reverse=True)
+        # Sort: prefer workers with model loaded, then by available capacity
+        if model:
+            available.sort(
+                key=lambda w: (model not in w.models_loaded, -w.available_capacity)
+            )
+        else:
+            available.sort(key=lambda w: w.available_capacity, reverse=True)
 
         return available
 

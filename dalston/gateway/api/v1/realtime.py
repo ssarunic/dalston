@@ -36,6 +36,7 @@ from dalston.db.session import get_db as _get_db
 from dalston.gateway.dependencies import get_session_router
 from dalston.gateway.middleware.auth import authenticate_websocket
 from dalston.gateway.services.auth import AuthService, Scope
+from dalston.gateway.services.model_registry import ModelRegistryService
 from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.realtime_sessions import RealtimeSessionService
 
@@ -331,6 +332,19 @@ async def realtime_transcription(
         # For realtime routing, we pass the engine ID to the session router
         routing_model = model if model else None
         resolved_model = model or "any"  # For logging
+        model_runtime = None
+
+        # Look up model's runtime for routing (allows workers to load model dynamically)
+        if routing_model:
+            try:
+                async for db in _get_db():
+                    model_service = ModelRegistryService()
+                    model_entry = await model_service.get_model(db, routing_model)
+                    if model_entry:
+                        model_runtime = model_entry.runtime
+                    break
+            except Exception as e:
+                logger.warning("model_lookup_failed", model=routing_model, error=str(e))
 
         # Get client IP for logging
         client_ip = websocket.client.host if websocket.client else "unknown"
@@ -340,6 +354,7 @@ async def realtime_transcription(
             language=language,
             model=routing_model,
             client_ip=client_ip,
+            runtime=model_runtime,
         )
 
         if allocation is None:

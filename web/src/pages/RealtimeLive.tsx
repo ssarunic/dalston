@@ -24,6 +24,7 @@ import { LiveTranscript } from '@/components/LiveTranscript'
 import { useLiveSession } from '@/contexts/LiveSessionContext'
 import { useEngines } from '@/hooks/useEngines'
 import { useRealtimeStatus } from '@/hooks/useRealtimeStatus'
+import { useModelRegistry } from '@/hooks/useModelRegistry'
 import type { LiveSessionConfig } from '@/api/types'
 
 const LANGUAGES = [
@@ -79,17 +80,42 @@ export function RealtimeLive() {
 
   const { data: enginesData } = useEngines()
   const { data: statusData } = useRealtimeStatus()
+  const { data: registryData } = useModelRegistry({ stage: 'transcribe' })
 
-  // Extract available models from realtime engines
+  // Get runtimes from available RT workers
+  const rtRuntimes = useMemo(() => {
+    if (!enginesData?.realtime_engines) return new Set<string>()
+    const runtimes = new Set<string>()
+    for (const worker of enginesData.realtime_engines) {
+      if (worker.runtime) {
+        runtimes.add(worker.runtime)
+      }
+    }
+    return runtimes
+  }, [enginesData])
+
+  // Get models that are downloaded (ready) and match an RT worker's runtime
   const availableModels = useMemo(() => {
-    if (!enginesData?.realtime_engines) return []
+    if (!registryData?.data || rtRuntimes.size === 0) return []
+    return registryData.data
+      .filter((m) => m.status === 'ready' && rtRuntimes.has(m.runtime))
+      .map((m) => ({
+        id: m.runtime_model_id,  // Use runtime_model_id for the request
+        label: m.name || m.id,   // Display name
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [registryData, rtRuntimes])
+
+  // Also track currently loaded models for display hints
+  const loadedModels = useMemo(() => {
+    if (!enginesData?.realtime_engines) return new Set<string>()
     const models = new Set<string>()
     for (const worker of enginesData.realtime_engines) {
       for (const m of worker.models) {
         models.add(m)
       }
     }
-    return Array.from(models).sort()
+    return models
   }, [enginesData])
 
   // Check if selected model supports vocabulary boosting based on worker capabilities
@@ -109,23 +135,28 @@ export function RealtimeLive() {
       return { supported: false, text: 'No available engines support vocabulary boosting' }
     }
 
-    // Find workers that have the selected model
-    const workersWithModel = enginesData.realtime_engines.filter((w) =>
-      w.models.includes(model)
-    )
-
-    if (workersWithModel.length === 0) {
-      // Model not found - shouldn't happen but handle gracefully
+    // Find the runtime for the selected model
+    const selectedModel = registryData?.data?.find((m) => m.runtime_model_id === model)
+    if (!selectedModel) {
       return { supported: null, text: null }
     }
 
-    // Check if any worker with this model supports vocabulary
-    const supportsVocab = workersWithModel.some((w) => w.supports_vocabulary)
+    // Find workers with matching runtime
+    const workersForRuntime = enginesData.realtime_engines.filter(
+      (w) => w.runtime === selectedModel.runtime
+    )
+
+    if (workersForRuntime.length === 0) {
+      return { supported: null, text: null }
+    }
+
+    // Check if any worker with this runtime supports vocabulary
+    const supportsVocab = workersForRuntime.some((w) => w.supports_vocabulary)
     if (supportsVocab) {
       return { supported: true, text: null }
     }
     return { supported: false, text: 'This model does not support vocabulary boosting' }
-  }, [model, enginesData])
+  }, [model, enginesData, registryData])
 
   const isAtCapacity = statusData?.status === 'at_capacity'
   const isUnavailable = statusData?.status === 'unavailable'
@@ -215,12 +246,17 @@ export function RealtimeLive() {
                   <SelectContent>
                     <SelectItem value="">Any available</SelectItem>
                     {availableModels.map((m) => (
-                      <SelectItem key={m} value={m}>
-                        {m}
+                      <SelectItem key={m.id} value={m.id}>
+                        {loadedModels.has(m.id) ? `${m.label} (loaded)` : m.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {availableModels.length === 0 && rtRuntimes.size > 0 && (
+                  <p className="text-xs text-amber-500 mt-1">
+                    No downloaded models for available runtimes. Visit Models page to download.
+                  </p>
+                )}
               </div>
               <div className="sm:col-span-2">
                 <label className="text-xs text-muted-foreground mb-1 block">

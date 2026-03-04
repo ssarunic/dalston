@@ -332,9 +332,12 @@ function RealtimeWorkerCard({ worker }: { worker: WorkerStatus }) {
   const utilization = worker.capacity > 0 ? (worker.active_sessions / worker.capacity) * 100 : 0
 
   return (
-    <div
+    <Link
+      to={`/realtime/workers/${encodeURIComponent(worker.worker_id)}`}
       className={cn(
-        'p-4 rounded-lg border',
+        'block p-4 rounded-lg border transition-all',
+        'hover:border-primary/50 hover:bg-accent/30',
+        'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
         isReady ? 'border-border' : 'border-red-500/30 bg-red-500/5'
       )}
     >
@@ -385,7 +388,7 @@ function RealtimeWorkerCard({ worker }: { worker: WorkerStatus }) {
           </div>
         </div>
       )}
-    </div>
+    </Link>
   )
 }
 
