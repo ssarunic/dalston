@@ -36,8 +36,7 @@ class WorkerStatus:
     active_sessions: int
     models: list[str]
     languages: list[str]
-    engine: str = "unknown"
-    runtime: str | None = None  # M43: model runtime (e.g., "faster-whisper")
+    runtime: str | None = None
     supports_vocabulary: bool = False
 
     @classmethod
@@ -51,7 +50,6 @@ class WorkerStatus:
             active_sessions=state.active_sessions,
             models=state.models_loaded,
             languages=state.languages_supported,
-            engine=state.engine,
             runtime=state.runtime,
             supports_vocabulary=state.supports_vocabulary,
         )

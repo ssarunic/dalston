@@ -618,6 +618,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
+      DALSTON_INSTANCE: stt-rt-transcribe-parakeet-rnnt-0.6b
       DALSTON_MODEL_VARIANT: 0.6b
       DALSTON_DEVICE: cuda
       DALSTON_WORKER_PORT: 9000
@@ -641,6 +642,7 @@ services:
         DEVICE: cpu
     environment:
       <<: [*common-env, *observability-env]
+      DALSTON_INSTANCE: stt-rt-transcribe-parakeet-rnnt-0.6b-cpu
       DALSTON_MODEL_VARIANT: 0.6b
       DALSTON_DEVICE: cpu
       DALSTON_WORKER_PORT: 9000
@@ -662,6 +664,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
+      DALSTON_INSTANCE: stt-rt-transcribe-parakeet-rnnt-1.1b
       DALSTON_MODEL_VARIANT: 1.1b
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
@@ -826,6 +829,7 @@ services:
         DEVICE: cpu
     environment:
       <<: [*common-env, *observability-env]
+      DALSTON_INSTANCE: stt-rt-transcribe-parakeet-onnx-ctc-0.6b
       DALSTON_MODEL_VARIANT: ctc-0.6b
       DALSTON_DEVICE: cpu
       DALSTON_WORKER_PORT: 9000
@@ -847,6 +851,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
+      DALSTON_INSTANCE: stt-rt-transcribe-parakeet-onnx-ctc-0.6b-gpu
       DALSTON_MODEL_VARIANT: ctc-0.6b
       DALSTON_DEVICE: cuda
       DALSTON_WORKER_PORT: 9000
@@ -870,6 +875,7 @@ services:
         DEVICE: cpu
     environment:
       <<: [*common-env, *observability-env]
+      DALSTON_INSTANCE: stt-rt-transcribe-parakeet-onnx-tdt-0.6b-v3
       DALSTON_MODEL_VARIANT: tdt-0.6b-v3
       DALSTON_DEVICE: cpu
       DALSTON_WORKER_PORT: 9000
@@ -891,6 +897,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
+      DALSTON_INSTANCE: stt-rt-transcribe-parakeet-onnx-tdt-0.6b-v3-gpu
       DALSTON_MODEL_VARIANT: tdt-0.6b-v3
       DALSTON_DEVICE: cuda
       DALSTON_WORKER_PORT: 9000
@@ -913,6 +920,7 @@ services:
         MODEL_VARIANT: mini-4b
     environment:
       <<: [*common-env, *observability-env]
+      DALSTON_INSTANCE: stt-rt-transcribe-voxtral-mini-4b
       DALSTON_MODEL_VARIANT: mini-4b
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4

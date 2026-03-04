@@ -349,9 +349,7 @@ async def openai_realtime_transcription(
                 client_ip=client_ip,
                 language="auto",
                 model=model,
-                engine=allocation.instance.rsplit("-", 1)[0]
-                if allocation.instance
-                else None,
+                runtime=allocation.runtime,
                 created_by_key_id=api_key.id,
             )
             log.debug("openai_session_persisted")

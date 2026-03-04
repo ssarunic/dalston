@@ -29,7 +29,7 @@ class WhisperStreamingEngine(RealtimeEngine):
     This allows a single container to serve any model variant without restart.
 
     Environment variables:
-        DALSTON_WORKER_ID: Unique identifier for this worker (required)
+        DALSTON_INSTANCE: Unique identifier for this worker (required)
         DALSTON_WORKER_PORT: WebSocket server port (default: 9000)
         DALSTON_MAX_SESSIONS: Maximum concurrent sessions (default: 2)
         REDIS_URL: Redis connection URL (default: redis://localhost:6379)

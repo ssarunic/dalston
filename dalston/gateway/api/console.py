@@ -505,7 +505,7 @@ async def get_engines(
     try:
         workers = await session_router.list_workers()
         for worker in workers:
-            running_engine_types.add(worker.engine)
+            running_engine_types.add(worker.runtime or "unknown")
             realtime_engines.append(
                 RealtimeWorker(
                     instance=worker.instance,

@@ -8,7 +8,7 @@ M44: Uses NeMoModelManager for dynamic model loading. A single container
 can serve any Parakeet RNNT/CTC model variant without rebuild.
 
 Environment variables:
-    DALSTON_WORKER_ID: Unique identifier for this worker (required)
+    DALSTON_INSTANCE: Unique identifier for this worker (required)
     DALSTON_WORKER_PORT: WebSocket server port (default: 9000)
     DALSTON_MAX_SESSIONS: Maximum concurrent sessions (default: 4)
     REDIS_URL: Redis connection URL (default: redis://localhost:6379)
@@ -49,7 +49,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
     recommended for real-time use due to latency requirements.
 
     Environment variables:
-        DALSTON_WORKER_ID: Unique identifier for this worker (required)
+        DALSTON_INSTANCE: Unique identifier for this worker (required)
         DALSTON_WORKER_PORT: WebSocket server port (default: 9000)
         DALSTON_MAX_SESSIONS: Maximum concurrent sessions (default: 4)
         REDIS_URL: Redis connection URL (default: redis://localhost:6379)

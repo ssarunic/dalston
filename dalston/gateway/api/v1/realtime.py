@@ -453,7 +453,7 @@ async def realtime_transcription(
 
                 # Create session record
                 # Store user's original model parameter (e.g., "fast", "parakeet-0.6b")
-                # and the actual engine that handled it (e.g., "parakeet", "whisper")
+                # and the runtime that handled it (e.g., "parakeet", "faster-whisper")
                 await session_service.create_session(
                     session_id=allocation.session_id,
                     tenant_id=api_key.tenant_id,
@@ -461,7 +461,7 @@ async def realtime_transcription(
                     client_ip=client_ip,
                     language=language,
                     model=model,
-                    engine=allocation.engine,
+                    runtime=allocation.runtime,
                     encoding=encoding,
                     sample_rate=sample_rate,
                     retention=effective_retention,
