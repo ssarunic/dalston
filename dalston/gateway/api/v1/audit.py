@@ -10,13 +10,17 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dalston.db.models import AuditLogModel
-from dalston.gateway.dependencies import get_db, get_principal, get_security_manager
+from dalston.gateway.dependencies import (
+    get_audit_query_service,
+    get_db,
+    get_principal,
+    get_security_manager,
+)
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
+from dalston.gateway.services.audit_query import AuditEventDTO, AuditQueryService
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
@@ -46,21 +50,21 @@ class AuditListResponse(BaseModel):
     has_more: bool
 
 
-def _audit_to_response(audit: AuditLogModel) -> AuditEventResponse:
-    """Convert AuditLogModel to response."""
+def _dto_to_response(dto: AuditEventDTO) -> AuditEventResponse:
+    """Convert AuditEventDTO to response."""
     return AuditEventResponse(
-        id=audit.id,
-        timestamp=audit.timestamp,
-        correlation_id=audit.correlation_id,
-        tenant_id=audit.tenant_id,
-        actor_type=audit.actor_type,
-        actor_id=audit.actor_id,
-        action=audit.action,
-        resource_type=audit.resource_type,
-        resource_id=audit.resource_id,
-        detail=audit.detail,
-        ip_address=str(audit.ip_address) if audit.ip_address else None,
-        user_agent=audit.user_agent,
+        id=dto.id,
+        timestamp=dto.timestamp,
+        correlation_id=dto.correlation_id,
+        tenant_id=dto.tenant_id,
+        actor_type=dto.actor_type,
+        actor_id=dto.actor_id,
+        action=dto.action,
+        resource_type=dto.resource_type,
+        resource_id=dto.resource_id,
+        detail=dto.detail,
+        ip_address=dto.ip_address,
+        user_agent=dto.user_agent,
     )
 
 
@@ -102,6 +106,7 @@ async def list_audit_events(
         Query(description="Sort order by timestamp"),
     ] = "timestamp_desc",
     db: AsyncSession = Depends(get_db),
+    audit_service: AuditQueryService = Depends(get_audit_query_service),
 ) -> AuditListResponse:
     """List audit events with filtering and cursor-based pagination.
 
@@ -111,57 +116,28 @@ async def list_audit_events(
     security_manager = get_security_manager()
     security_manager.require_permission(principal, Permission.AUDIT_READ)
 
-    # Build query with filters
-    query = select(AuditLogModel).where(AuditLogModel.tenant_id == principal.tenant_id)
-
-    if resource_type:
-        query = query.where(AuditLogModel.resource_type == resource_type)
-    if resource_id:
-        query = query.where(AuditLogModel.resource_id == resource_id)
-    if action:
-        query = query.where(AuditLogModel.action == action)
-    if actor_id:
-        query = query.where(AuditLogModel.actor_id == actor_id)
-    if correlation_id:
-        query = query.where(AuditLogModel.correlation_id == correlation_id)
-    if start_time:
-        query = query.where(AuditLogModel.timestamp >= start_time)
-    if end_time:
-        query = query.where(AuditLogModel.timestamp < end_time)
-
-    # Apply cursor filter
-    if cursor:
-        try:
-            cursor_id = int(cursor)
-            if sort == "timestamp_asc":
-                query = query.where(AuditLogModel.id > cursor_id)
-            else:
-                query = query.where(AuditLogModel.id < cursor_id)
-        except ValueError:
-            raise HTTPException(
-                status_code=400, detail="Invalid cursor format"
-            ) from None
-
-    # Fetch limit + 1 to determine has_more
-    if sort == "timestamp_asc":
-        query = query.order_by(AuditLogModel.id.asc())
-    else:
-        query = query.order_by(AuditLogModel.id.desc())
-    query = query.limit(limit + 1)
-    result = await db.execute(query)
-    events = list(result.scalars().all())
-
-    has_more = len(events) > limit
-    if has_more:
-        events = events[:limit]
-
-    # Next cursor is the ID of the last event
-    next_cursor = str(events[-1].id) if events and has_more else None
+    try:
+        result = await audit_service.list_events(
+            db,
+            principal.tenant_id,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            action=action,
+            actor_id=actor_id,
+            start_time=start_time,
+            end_time=end_time,
+            correlation_id=correlation_id,
+            limit=limit,
+            cursor=cursor,
+            sort=sort,
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid cursor format") from None
 
     return AuditListResponse(
-        events=[_audit_to_response(e) for e in events],
-        cursor=next_cursor,
-        has_more=has_more,
+        events=[_dto_to_response(e) for e in result.events],
+        cursor=result.cursor,
+        has_more=result.has_more,
     )
 
 
@@ -180,6 +156,7 @@ async def get_resource_audit_trail(
         str | None, Query(description="Cursor for pagination (last event ID)")
     ] = None,
     db: AsyncSession = Depends(get_db),
+    audit_service: AuditQueryService = Depends(get_audit_query_service),
 ) -> AuditListResponse:
     """Get all audit events for a specific resource.
 
@@ -189,35 +166,20 @@ async def get_resource_audit_trail(
     security_manager = get_security_manager()
     security_manager.require_permission(principal, Permission.AUDIT_READ)
 
-    query = (
-        select(AuditLogModel)
-        .where(AuditLogModel.tenant_id == principal.tenant_id)
-        .where(AuditLogModel.resource_type == resource_type)
-        .where(AuditLogModel.resource_id == resource_id)
-    )
-
-    # Apply cursor filter
-    if cursor:
-        try:
-            cursor_id = int(cursor)
-            query = query.where(AuditLogModel.id < cursor_id)
-        except ValueError:
-            raise HTTPException(
-                status_code=400, detail="Invalid cursor format"
-            ) from None
-
-    query = query.order_by(AuditLogModel.id.desc()).limit(limit + 1)
-    result = await db.execute(query)
-    events = list(result.scalars().all())
-
-    has_more = len(events) > limit
-    if has_more:
-        events = events[:limit]
-
-    next_cursor = str(events[-1].id) if events and has_more else None
+    try:
+        result = await audit_service.get_resource_trail(
+            db,
+            principal.tenant_id,
+            resource_type,
+            resource_id,
+            limit=limit,
+            cursor=cursor,
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid cursor format") from None
 
     return AuditListResponse(
-        events=[_audit_to_response(e) for e in events],
-        cursor=next_cursor,
-        has_more=has_more,
+        events=[_dto_to_response(e) for e in result.events],
+        cursor=result.cursor,
+        has_more=result.has_more,
     )
