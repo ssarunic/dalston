@@ -133,6 +133,35 @@ async def get_auth_service(
     return AuthService(db, redis)
 
 
+def _get_dev_api_key() -> APIKey:
+    """Create a development API key for security_mode=none.
+
+    This is only used in development and returns an API key
+    with full admin permissions.
+    """
+    from datetime import UTC, datetime
+    from uuid import UUID
+
+    from dalston.db.session import DEFAULT_TENANT_ID
+
+    # Well-known dev key ID (deterministic for testing)
+    DEV_KEY_ID = UUID("00000000-0000-0000-0000-000000000002")
+
+    return APIKey(
+        id=DEV_KEY_ID,
+        key_hash="dev_key_hash",
+        prefix="dk_dev00000",
+        name="Development Key",
+        tenant_id=DEFAULT_TENANT_ID,
+        scopes=[Scope.ADMIN],  # Full access in dev mode
+        rate_limit=None,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        last_used_at=None,
+        expires_at=datetime(2099, 12, 31, 23, 59, 59, tzinfo=UTC),
+        revoked_at=None,
+    )
+
+
 async def require_auth(
     request: Request,
     auth_service: AuthService = Depends(get_auth_service),
@@ -142,6 +171,9 @@ async def require_auth(
     Extracts and validates the API key from the request.
     Attaches api_key and tenant_id to request.state.
 
+    In security_mode=none (development only), returns a dev API key
+    with admin permissions without requiring authentication.
+
     Returns:
         Validated APIKey object
 
@@ -149,6 +181,14 @@ async def require_auth(
         HTTPException 401: If key is missing or invalid
         HTTPException 429: If rate limit exceeded
     """
+    security_manager = _get_security_manager()
+    if security_manager.mode == "none":
+        # Development mode: return dev API key with admin access
+        dev_key = _get_dev_api_key()
+        request.state.api_key = dev_key
+        request.state.tenant_id = dev_key.tenant_id
+        return dev_key
+
     return await authenticate_request(request, auth_service)
 
 
@@ -410,10 +450,52 @@ def require_realtime_rate_limited_dependency() -> Callable:
     return check
 
 
-# Rate-limited scope dependencies
+# Legacy rate-limited scope dependencies (deprecated - use Principal + SecurityManager)
 RequireJobsWriteRateLimited = Annotated[
     APIKey, Depends(require_jobs_write_rate_limited_dependency())
 ]
 RequireRealtimeRateLimited = Annotated[
     APIKey, Depends(require_realtime_rate_limited_dependency())
 ]
+
+
+# =============================================================================
+# Principal-based rate limited dependencies (M45)
+# =============================================================================
+
+
+async def get_principal_with_job_rate_limit(
+    principal: Principal = Depends(get_principal),
+    rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
+) -> Principal:
+    """Get authenticated Principal with job rate limit checks.
+
+    Checks both request rate limit and concurrent jobs limit.
+    Use with SecurityManager for permission checks.
+    """
+    # Check request rate limit
+    rate_result = await rate_limiter.check_request_rate(principal.tenant_id)
+    if not rate_result.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded",
+            headers={
+                "Retry-After": str(rate_result.reset_seconds),
+                "X-RateLimit-Limit": str(rate_result.limit),
+                "X-RateLimit-Remaining": str(rate_result.remaining),
+            },
+        )
+
+    # Check concurrent jobs limit
+    jobs_result = await rate_limiter.check_concurrent_jobs(principal.tenant_id)
+    if not jobs_result.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Concurrent job limit exceeded ({jobs_result.limit} max)",
+            headers={
+                "X-RateLimit-Limit": str(jobs_result.limit),
+                "X-RateLimit-Remaining": str(jobs_result.remaining),
+            },
+        )
+
+    return principal

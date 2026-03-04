@@ -31,16 +31,20 @@ from dalston.gateway.api.v1.openai_audio import (
     raise_openai_error,
 )
 from dalston.gateway.dependencies import (
-    RequireJobsWriteRateLimited,
     get_audit_service,
     get_db,
     get_export_service,
     get_ingestion_service,
     get_jobs_service,
+    get_principal_with_job_rate_limit,
     get_rate_limiter,
     get_redis,
+    get_security_manager,
     get_settings,
 )
+from dalston.gateway.security.manager import SecurityManager
+from dalston.gateway.security.permissions import Permission
+from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.ingestion import AudioIngestionService
 from dalston.gateway.services.jobs import JobsService
@@ -66,7 +70,8 @@ router = APIRouter(prefix="/audio", tags=["openai"])
 )
 async def create_translation_openai(
     request: Request,
-    api_key: RequireJobsWriteRateLimited,
+    principal: Annotated[Principal, Depends(get_principal_with_job_rate_limit)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     file: UploadFile = File(..., description="Audio file to translate"),
     model: Annotated[
         str,
@@ -98,6 +103,7 @@ async def create_translation_openai(
     This endpoint accepts audio in any supported language and translates it to English.
     The translation is performed by the transcription engine with English output forced.
     """
+    security_manager.require_permission(principal, Permission.JOB_CREATE)
     # Validate model (only whisper-1 supports translation)
     if model != "whisper-1":
         raise_openai_error(
@@ -166,7 +172,7 @@ async def create_translation_openai(
     job = await jobs_service.create_job(
         db=db,
         job_id=job_id,
-        tenant_id=api_key.tenant_id,
+        tenant_id=principal.tenant_id,
         audio_uri=audio_uri,
         parameters=parameters,
         audio_format=ingested.metadata.format,
@@ -174,21 +180,23 @@ async def create_translation_openai(
         audio_sample_rate=ingested.metadata.sample_rate,
         audio_channels=ingested.metadata.channels,
         audio_bit_depth=ingested.metadata.bit_depth,
+        # Ownership tracking (M45)
+        created_by_key_id=principal.id,
     )
 
     # Publish job.created event
     await publish_job_created(redis, job.id)
 
     # Track concurrent job
-    await rate_limiter.increment_concurrent_jobs(api_key.tenant_id)
+    await rate_limiter.increment_concurrent_jobs(principal.tenant_id)
 
     # Audit log
     request_id = getattr(request.state, "request_id", None)
     await audit_service.log_job_created(
         job_id=job.id,
-        tenant_id=api_key.tenant_id,
-        actor_type="api_key",
-        actor_id=api_key.prefix,
+        tenant_id=principal.tenant_id,
+        actor_type=principal.actor_type,
+        actor_id=principal.actor_id,
         correlation_id=request_id,
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),

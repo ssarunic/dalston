@@ -302,6 +302,8 @@ class RealtimeSessionService:
         limit: int = 50,
         cursor: str | None = None,
         sort: Literal["started_desc", "started_asc"] = "started_desc",
+        created_by_key_id: UUID | None = None,
+        include_unowned: bool = True,
     ) -> tuple[list[RealtimeSessionModel], bool]:
         """List sessions for a tenant with optional filters and cursor pagination.
 
@@ -313,10 +315,16 @@ class RealtimeSessionService:
             limit: Max results
             cursor: Pagination cursor (format: started_at_iso:session_id)
             sort: Sort order for started_at
+            created_by_key_id: Optional filter for ownership (returns sessions
+                created by this key)
+            include_unowned: If True and created_by_key_id is set, also
+                includes sessions with no ownership (created_by_key_id is NULL).
 
         Returns:
             Tuple of (sessions, has_more)
         """
+        from sqlalchemy import or_
+
         # Build base query
         stmt = select(RealtimeSessionModel).where(
             RealtimeSessionModel.tenant_id == tenant_id
@@ -328,6 +336,20 @@ class RealtimeSessionService:
             stmt = stmt.where(RealtimeSessionModel.started_at >= since)
         if until:
             stmt = stmt.where(RealtimeSessionModel.started_at <= until)
+
+        # Ownership filter - applied at SQL level for correct pagination
+        if created_by_key_id is not None:
+            if include_unowned:
+                stmt = stmt.where(
+                    or_(
+                        RealtimeSessionModel.created_by_key_id == created_by_key_id,
+                        RealtimeSessionModel.created_by_key_id.is_(None),
+                    )
+                )
+            else:
+                stmt = stmt.where(
+                    RealtimeSessionModel.created_by_key_id == created_by_key_id
+                )
 
         # Apply cursor filter
         if cursor:
@@ -506,7 +528,8 @@ class RealtimeSessionService:
     ) -> tuple[list[RealtimeSessionModel], bool]:
         """List sessions with authorization check.
 
-        Non-admin principals only see sessions they created (ownership filtering).
+        Non-admin principals only see sessions they created (ownership filtering
+        applied at SQL level for correct pagination).
 
         Args:
             principal: Authenticated principal
@@ -526,7 +549,10 @@ class RealtimeSessionService:
         """
         security_manager.require_permission(principal, Permission.SESSION_READ_OWN)
 
-        sessions, has_more = await self.list_sessions(
+        # Apply ownership filter at SQL level for correct pagination
+        created_by_key_id = None if principal.is_admin else principal.id
+
+        return await self.list_sessions(
             tenant_id=principal.tenant_id,
             status=status,
             since=since,
@@ -534,17 +560,9 @@ class RealtimeSessionService:
             limit=limit,
             cursor=cursor,
             sort=sort,
+            created_by_key_id=created_by_key_id,
+            include_unowned=False,  # Strict ownership enforcement
         )
-
-        # Filter by ownership for non-admin
-        if not principal.is_admin:
-            sessions = [
-                s
-                for s in sessions
-                if s.created_by_key_id is None or s.created_by_key_id == principal.id
-            ]
-
-        return sessions, has_more
 
     async def delete_session_authorized(
         self,

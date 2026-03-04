@@ -94,6 +94,8 @@ class WebhookEndpointService:
         db: AsyncSession,
         tenant_id: UUID,
         is_active: bool | None = None,
+        created_by_key_id: UUID | None = None,
+        include_unowned: bool = True,
     ) -> list[WebhookEndpointModel]:
         """List webhook endpoints for a tenant.
 
@@ -101,15 +103,36 @@ class WebhookEndpointService:
             db: Database session
             tenant_id: Tenant UUID for isolation
             is_active: Optional filter by active status
+            created_by_key_id: Optional filter for ownership (returns endpoints
+                created by this key)
+            include_unowned: If True and created_by_key_id is set, also
+                includes endpoints with no ownership (created_by_key_id is NULL).
 
         Returns:
             List of webhook endpoints
         """
+        from sqlalchemy import or_
+
         query = select(WebhookEndpointModel).where(
             WebhookEndpointModel.tenant_id == tenant_id
         )
         if is_active is not None:
             query = query.where(WebhookEndpointModel.is_active == is_active)
+
+        # Ownership filter - applied at SQL level for consistency
+        if created_by_key_id is not None:
+            if include_unowned:
+                query = query.where(
+                    or_(
+                        WebhookEndpointModel.created_by_key_id == created_by_key_id,
+                        WebhookEndpointModel.created_by_key_id.is_(None),
+                    )
+                )
+            else:
+                query = query.where(
+                    WebhookEndpointModel.created_by_key_id == created_by_key_id
+                )
+
         query = query.order_by(WebhookEndpointModel.created_at.desc())
 
         result = await db.execute(query)
@@ -502,7 +525,8 @@ class WebhookEndpointService:
     ) -> list[WebhookEndpointModel]:
         """List webhook endpoints with authorization check.
 
-        Non-admin principals only see endpoints they created.
+        Non-admin principals only see endpoints they created (ownership filtering
+        applied at SQL level for consistency).
 
         Args:
             db: Database session
@@ -518,19 +542,16 @@ class WebhookEndpointService:
         """
         security_manager.require_permission(principal, Permission.WEBHOOK_READ)
 
-        endpoints = await self.list_endpoints(
-            db, principal.tenant_id, is_active=is_active
+        # Apply ownership filter at SQL level
+        created_by_key_id = None if principal.is_admin else principal.id
+
+        return await self.list_endpoints(
+            db,
+            principal.tenant_id,
+            is_active=is_active,
+            created_by_key_id=created_by_key_id,
+            include_unowned=False,  # Strict ownership enforcement
         )
-
-        # Filter by ownership for non-admin
-        if not principal.is_admin:
-            endpoints = [
-                e
-                for e in endpoints
-                if e.created_by_key_id is None or e.created_by_key_id == principal.id
-            ]
-
-        return endpoints
 
     async def update_endpoint_authorized(
         self,

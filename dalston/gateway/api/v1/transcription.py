@@ -50,13 +50,14 @@ from dalston.gateway.api.v1.openai_audio import (
     validate_openai_request,
 )
 from dalston.gateway.dependencies import (
-    RequireJobsWriteRateLimited,
+    check_request_rate_limit,
     get_audit_service,
     get_db,
     get_export_service,
     get_ingestion_service,
     get_jobs_service,
     get_principal,
+    get_principal_with_job_rate_limit,
     get_rate_limiter,
     get_redis,
     get_security_manager,
@@ -75,6 +76,7 @@ from dalston.gateway.models.responses import (
 )
 from dalston.gateway.security.exceptions import ResourceNotFoundError
 from dalston.gateway.security.manager import SecurityManager
+from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.ingestion import AudioIngestionService
@@ -104,7 +106,8 @@ logger = structlog.get_logger()
 async def create_transcription(
     request: Request,
     response: Response,
-    api_key: RequireJobsWriteRateLimited,
+    principal: Annotated[Principal, Depends(get_principal_with_job_rate_limit)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     file: UploadFile | None = File(
         default=None, description="Audio file to transcribe"
     ),
@@ -229,6 +232,8 @@ async def create_transcription(
     **Dalston Native Mode:**
     Returns job ID immediately for async polling.
     """
+    security_manager.require_permission(principal, Permission.JOB_CREATE)
+
     # Detect OpenAI mode based on model parameter
     openai_mode = is_openai_model(model)
 
@@ -394,7 +399,7 @@ async def create_transcription(
     job = await jobs_service.create_job(
         db=db,
         job_id=job_id,
-        tenant_id=api_key.tenant_id,
+        tenant_id=principal.tenant_id,
         audio_uri=audio_uri,
         parameters=parameters,
         audio_format=ingested.metadata.format,
@@ -411,7 +416,7 @@ async def create_transcription(
         pii_redact_audio=redact_pii_audio,
         pii_redaction_mode=pii_redaction_mode if redact_pii_audio else None,
         # Ownership tracking (M45)
-        created_by_key_id=api_key.id,
+        created_by_key_id=principal.id,
     )
 
     # Publish event for orchestrator (include request_id for correlation)
@@ -420,14 +425,14 @@ async def create_transcription(
     await publish_job_created(redis, job.id, request_id=request_id)
 
     # Track concurrent job for rate limiting
-    await rate_limiter.increment_concurrent_jobs(api_key.tenant_id)
+    await rate_limiter.increment_concurrent_jobs(principal.tenant_id)
 
     # Audit log job creation
     await audit_service.log_job_created(
         job_id=job.id,
-        tenant_id=api_key.tenant_id,
-        actor_type="api_key",
-        actor_id=api_key.prefix,
+        tenant_id=principal.tenant_id,
+        actor_type=principal.actor_type,
+        actor_id=principal.actor_id,
         correlation_id=request_id,
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
@@ -677,19 +682,12 @@ async def update_transcription(
     """Update a job's display name.
 
     Allows renaming a job to a more meaningful label at any time.
+    Requires jobs:write scope (JOB_UPDATE_OWN permission).
     """
-    # Get current job to capture old name for audit (with authorization)
-    job = await jobs_service.get_job_authorized(db, job_id, principal, security_manager)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    old_name = job.display_name
-
-    # Update display name (authorization already checked above)
-    job = await jobs_service.update_display_name(
-        db, job_id, body.display_name, tenant_id=principal.tenant_id
+    # Update display name (returns old name for audit)
+    old_name, job = await jobs_service.update_display_name_authorized(
+        db, job_id, body.display_name, principal, security_manager
     )
-    assert job is not None  # We just verified the job exists above
 
     # Audit log the rename
     request_id = getattr(request.state, "request_id", None)
@@ -1126,6 +1124,7 @@ async def delete_audio(
     job_id: UUID,
     principal: Annotated[Principal, Depends(get_principal)],
     security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
+    _rate_limited: Annotated[None, Depends(check_request_rate_limit)],
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
@@ -1133,11 +1132,20 @@ async def delete_audio(
 ) -> Response:
     """Delete audio while preserving transcript.
 
+    Requires jobs:write scope (JOB_DELETE_OWN permission).
+    Rate limited to prevent abuse.
+
     1. Validate job exists and is in a terminal state
     2. Check audio hasn't already been purged
     3. Delete S3 audio and task artifacts (keep transcript)
     4. Return 204 No Content
     """
+    # Check delete permission (destructive operation)
+    from dalston.gateway.security.permissions import Permission
+
+    security_manager.require_permission(principal, Permission.JOB_DELETE_OWN)
+
+    # Get job with authorization (includes ownership check)
     job = await jobs_service.get_job_authorized(db, job_id, principal, security_manager)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -1192,12 +1200,15 @@ async def delete_transcription(
     job_id: UUID,
     principal: Annotated[Principal, Depends(get_principal)],
     security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
+    _rate_limited: Annotated[None, Depends(check_request_rate_limit)],
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Delete a job and all associated artifacts.
+
+    Rate limited to prevent abuse.
 
     1. Validate job exists and is in a terminal state
     2. Delete S3 artifacts (audio, task outputs, transcript)

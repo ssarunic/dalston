@@ -120,14 +120,27 @@ class TestCreateTranscriptionEndpoint:
             get_db,
             get_ingestion_service,
             get_jobs_service,
+            get_principal_with_job_rate_limit,
             get_rate_limiter,
             get_redis,
+            get_security_manager,
             get_settings,
             require_auth,
         )
+        from dalston.gateway.security.manager import SecurityManager
+        from dalston.gateway.security.principal import Principal, PrincipalType
 
         app = FastAPI()
         app.include_router(speech_to_text_router, prefix="/v1")
+
+        # Create principal from api_key
+        principal = Principal(
+            type=PrincipalType.API_KEY,
+            id=api_key.id,
+            tenant_id=api_key.tenant_id,
+            scopes=api_key.scopes,
+            key_prefix=api_key.prefix,
+        )
 
         app.dependency_overrides[get_db] = lambda: AsyncMock()
         app.dependency_overrides[get_jobs_service] = lambda: mock_jobs_service
@@ -136,6 +149,10 @@ class TestCreateTranscriptionEndpoint:
         app.dependency_overrides[get_ingestion_service] = lambda: mock_ingestion_service
         app.dependency_overrides[get_rate_limiter] = lambda: mock_rate_limiter
         app.dependency_overrides[require_auth] = lambda: api_key
+        app.dependency_overrides[get_principal_with_job_rate_limit] = lambda: principal
+        app.dependency_overrides[get_security_manager] = lambda: MagicMock(
+            spec=SecurityManager
+        )
 
         return app
 
@@ -541,17 +558,34 @@ class TestGetTranscriptEndpoint:
         from dalston.gateway.dependencies import (
             get_db,
             get_jobs_service,
+            get_principal,
+            get_security_manager,
             get_settings,
             require_auth,
         )
+        from dalston.gateway.security.manager import SecurityManager
+        from dalston.gateway.security.principal import Principal, PrincipalType
 
         app = FastAPI()
         app.include_router(speech_to_text_router, prefix="/v1")
+
+        # Create principal from api_key
+        principal = Principal(
+            type=PrincipalType.API_KEY,
+            id=api_key.id,
+            tenant_id=api_key.tenant_id,
+            scopes=api_key.scopes,
+            key_prefix=api_key.prefix,
+        )
 
         app.dependency_overrides[get_db] = lambda: AsyncMock()
         app.dependency_overrides[get_jobs_service] = lambda: mock_jobs_service
         app.dependency_overrides[get_settings] = lambda: mock_settings
         app.dependency_overrides[require_auth] = lambda: api_key
+        app.dependency_overrides[get_principal] = lambda: principal
+        app.dependency_overrides[get_security_manager] = lambda: MagicMock(
+            spec=SecurityManager
+        )
 
         return app
 
@@ -568,7 +602,7 @@ class TestGetTranscriptEndpoint:
         job.status = JobStatus.COMPLETED.value
         job.error = None
 
-        mock_jobs_service.get_job.return_value = job
+        mock_jobs_service.get_job_authorized.return_value = job
 
         with patch(
             "dalston.gateway.api.v1.speech_to_text.StorageService"
@@ -602,7 +636,7 @@ class TestGetTranscriptEndpoint:
         job.status = JobStatus.RUNNING.value
         job.error = None
 
-        mock_jobs_service.get_job.return_value = job
+        mock_jobs_service.get_job_authorized.return_value = job
 
         response = client.get(f"/v1/speech-to-text/transcripts/{job_id}")
 
@@ -620,7 +654,7 @@ class TestGetTranscriptEndpoint:
         job.status = JobStatus.FAILED.value
         job.error = "Transcription engine error"
 
-        mock_jobs_service.get_job.return_value = job
+        mock_jobs_service.get_job_authorized.return_value = job
 
         response = client.get(f"/v1/speech-to-text/transcripts/{job_id}")
 
@@ -631,7 +665,7 @@ class TestGetTranscriptEndpoint:
 
     def test_get_transcript_not_found(self, client, mock_jobs_service):
         """Test 404 when transcript doesn't exist."""
-        mock_jobs_service.get_job.return_value = None
+        mock_jobs_service.get_job_authorized.return_value = None
 
         response = client.get(f"/v1/speech-to-text/transcripts/{uuid4()}")
 
@@ -681,18 +715,35 @@ class TestExportTranscriptEndpoint:
             get_db,
             get_export_service,
             get_jobs_service,
+            get_principal,
+            get_security_manager,
             get_settings,
             require_auth,
         )
+        from dalston.gateway.security.manager import SecurityManager
+        from dalston.gateway.security.principal import Principal, PrincipalType
 
         app = FastAPI()
         app.include_router(speech_to_text_router, prefix="/v1")
+
+        # Create principal from api_key
+        principal = Principal(
+            type=PrincipalType.API_KEY,
+            id=api_key.id,
+            tenant_id=api_key.tenant_id,
+            scopes=api_key.scopes,
+            key_prefix=api_key.prefix,
+        )
 
         app.dependency_overrides[get_db] = lambda: AsyncMock()
         app.dependency_overrides[get_jobs_service] = lambda: mock_jobs_service
         app.dependency_overrides[get_export_service] = lambda: mock_export_service
         app.dependency_overrides[get_settings] = lambda: mock_settings
         app.dependency_overrides[require_auth] = lambda: api_key
+        app.dependency_overrides[get_principal] = lambda: principal
+        app.dependency_overrides[get_security_manager] = lambda: MagicMock(
+            spec=SecurityManager
+        )
 
         return app
 
@@ -702,7 +753,7 @@ class TestExportTranscriptEndpoint:
 
     def test_export_not_found(self, client, mock_jobs_service):
         """Test 404 when transcript doesn't exist."""
-        mock_jobs_service.get_job.return_value = None
+        mock_jobs_service.get_job_authorized.return_value = None
 
         response = client.get(f"/v1/speech-to-text/transcripts/{uuid4()}/export/srt")
 
@@ -716,7 +767,7 @@ class TestExportTranscriptEndpoint:
         job.tenant_id = api_key.tenant_id
         job.status = JobStatus.RUNNING.value
 
-        mock_jobs_service.get_job.return_value = job
+        mock_jobs_service.get_job_authorized.return_value = job
 
         response = client.get(f"/v1/speech-to-text/transcripts/{job_id}/export/srt")
 

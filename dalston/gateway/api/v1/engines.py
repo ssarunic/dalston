@@ -6,13 +6,16 @@ GET /v1/capabilities - Aggregate capabilities of running engines
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from redis.asyncio import Redis
 
-from dalston.gateway.dependencies import RequireJobsRead, get_redis
+from dalston.gateway.dependencies import get_principal, get_redis, get_security_manager
+from dalston.gateway.security.manager import SecurityManager
+from dalston.gateway.security.permissions import Permission
+from dalston.gateway.security.principal import Principal
 from dalston.orchestrator.catalog import get_catalog
 from dalston.orchestrator.registry import BatchEngineRegistry
 
@@ -100,7 +103,8 @@ class AggregateCapabilitiesResponse(BaseModel):
     ),
 )
 async def list_engines(
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     redis: Redis = Depends(get_redis),
 ) -> EnginesListResponse:
     """List all engines with status.
@@ -108,6 +112,7 @@ async def list_engines(
     Merges catalog (what could run) with registry (what's running)
     to provide a complete view of the engine fleet.
     """
+    security_manager.require_permission(principal, Permission.MODEL_READ)
     catalog = get_catalog()
     registry = BatchEngineRegistry(redis)
 
@@ -184,7 +189,8 @@ async def list_engines(
     ),
 )
 async def get_capabilities(
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     redis: Redis = Depends(get_redis),
 ) -> AggregateCapabilitiesResponse:
     """Get aggregate capabilities of running engines.
@@ -192,6 +198,7 @@ async def get_capabilities(
     Combines capabilities from all healthy engines to show
     what the deployment can currently handle.
     """
+    security_manager.require_permission(principal, Permission.MODEL_READ)
     catalog = get_catalog()
     registry = BatchEngineRegistry(redis)
 

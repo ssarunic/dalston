@@ -32,17 +32,21 @@ from dalston.common.events import publish_job_created
 from dalston.common.models import JobStatus
 from dalston.config import Settings
 from dalston.gateway.dependencies import (
-    RequireJobsRead,
-    RequireJobsWriteRateLimited,
     get_audit_service,
     get_db,
     get_export_service,
     get_ingestion_service,
     get_jobs_service,
+    get_principal,
+    get_principal_with_job_rate_limit,
     get_rate_limiter,
     get_redis,
+    get_security_manager,
     get_settings,
 )
+from dalston.gateway.security.manager import SecurityManager
+from dalston.gateway.security.permissions import Permission
+from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.ingestion import AudioIngestionService
 from dalston.gateway.services.jobs import JobsService
@@ -132,7 +136,8 @@ def map_timestamps_granularity(granularity: str) -> str:
 )
 async def create_transcription(
     request: Request,
-    api_key: RequireJobsWriteRateLimited,
+    principal: Annotated[Principal, Depends(get_principal_with_job_rate_limit)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     file: UploadFile | None = File(
         default=None, description="Audio file to transcribe"
     ),
@@ -196,6 +201,8 @@ async def create_transcription(
     - file: Direct file upload
     - cloud_storage_url: HTTPS URL to audio file (S3/GCS presigned URL, etc.)
     """
+    security_manager.require_permission(principal, Permission.JOB_CREATE)
+
     # Ingest audio (validates input, downloads from URL if needed, probes metadata)
     ingested = await ingestion_service.ingest(file=file, url=cloud_storage_url)
 
@@ -263,7 +270,7 @@ async def create_transcription(
     job = await jobs_service.create_job(
         db=db,
         job_id=job_id,
-        tenant_id=api_key.tenant_id,
+        tenant_id=principal.tenant_id,
         audio_uri=audio_uri,
         parameters=parameters,
         audio_format=ingested.metadata.format,
@@ -271,21 +278,23 @@ async def create_transcription(
         audio_sample_rate=ingested.metadata.sample_rate,
         audio_channels=ingested.metadata.channels,
         audio_bit_depth=ingested.metadata.bit_depth,
+        # Ownership tracking (M45)
+        created_by_key_id=principal.id,
     )
 
     # Publish job.created event for orchestrator
     await publish_job_created(redis, job.id)
 
     # Track concurrent job for rate limiting
-    await rate_limiter.increment_concurrent_jobs(api_key.tenant_id)
+    await rate_limiter.increment_concurrent_jobs(principal.tenant_id)
 
     # Audit log job creation
     request_id = getattr(request.state, "request_id", None)
     await audit_service.log_job_created(
         job_id=job.id,
-        tenant_id=api_key.tenant_id,
-        actor_type="api_key",
-        actor_id=api_key.prefix,
+        tenant_id=principal.tenant_id,
+        actor_type=principal.actor_type,
+        actor_id=principal.actor_id,
         correlation_id=request_id,
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
@@ -339,7 +348,8 @@ async def create_transcription(
 )
 async def get_transcript(
     transcription_id: UUID,
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
@@ -347,8 +357,11 @@ async def get_transcript(
     """Get transcription result in ElevenLabs format.
 
     Returns the transcript if completed, or processing status if still running.
+    Enforces ownership: non-admin principals can only access their own transcripts.
     """
-    job = await jobs_service.get_job(db, transcription_id, tenant_id=api_key.tenant_id)
+    job = await jobs_service.get_job_authorized(
+        db, transcription_id, principal, security_manager
+    )
     if job is None:
         raise HTTPException(status_code=404, detail="Transcription not found")
 
@@ -453,7 +466,8 @@ def _format_elevenlabs_response(
 async def export_transcript(
     transcription_id: UUID,
     format: str,
-    api_key: RequireJobsRead,
+    principal: Annotated[Principal, Depends(get_principal)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     include_speakers: Annotated[
         bool, Query(description="Include speaker labels in output")
     ] = True,
@@ -478,12 +492,16 @@ async def export_transcript(
 
     Note: ElevenLabs uses 'webvtt' while Dalston native uses 'vtt'.
     Both are supported.
+
+    Enforces ownership: non-admin principals can only access their own transcripts.
     """
     # Validate format
     export_format = export_service.validate_format(format)
 
-    # Get job (transcription_id maps to job_id internally)
-    job = await jobs_service.get_job(db, transcription_id, tenant_id=api_key.tenant_id)
+    # Get job with authorization (transcription_id maps to job_id internally)
+    job = await jobs_service.get_job_authorized(
+        db, transcription_id, principal, security_manager
+    )
     if job is None:
         raise HTTPException(status_code=404, detail="Transcription not found")
 

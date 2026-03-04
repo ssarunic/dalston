@@ -92,6 +92,7 @@ class TestDeleteTranscription:
         mock_audit_service,
     ):
         from dalston.gateway.dependencies import (
+            check_request_rate_limit,
             get_audit_service,
             get_db,
             get_jobs_service,
@@ -112,6 +113,7 @@ class TestDeleteTranscription:
         app.dependency_overrides[get_security_manager] = lambda: mock_security_manager
         app.dependency_overrides[get_principal] = lambda: mock_principal
         app.dependency_overrides[get_audit_service] = lambda: mock_audit_service
+        app.dependency_overrides[check_request_rate_limit] = lambda: None
 
         return app
 
@@ -191,6 +193,7 @@ class TestDeleteTranscriptionAuthorization:
         """
         from dalston.common.audit import AuditService
         from dalston.gateway.dependencies import (
+            check_request_rate_limit,
             get_audit_service,
             get_db,
             get_jobs_service,
@@ -237,6 +240,7 @@ class TestDeleteTranscriptionAuthorization:
         app.dependency_overrides[get_audit_service] = lambda: AsyncMock(
             spec=AuditService
         )
+        app.dependency_overrides[check_request_rate_limit] = lambda: None
 
         client = TestClient(app, raise_server_exceptions=False)
         response = client.delete(f"/v1/audio/transcriptions/{JOB_ID}")

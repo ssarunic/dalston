@@ -148,6 +148,8 @@ class JobsService:
         limit: int = 20,
         cursor: str | None = None,
         status: JobStatus | None = None,
+        created_by_key_id: UUID | None = None,
+        include_unowned: bool = True,
     ) -> tuple[list[JobModel], bool]:
         """List jobs for a tenant with cursor-based pagination.
 
@@ -157,16 +159,38 @@ class JobsService:
             limit: Maximum number of results
             cursor: Pagination cursor (format: created_at_iso:job_id)
             status: Optional status filter
+            created_by_key_id: Optional filter for ownership (returns jobs
+                created by this key)
+            include_unowned: If True and created_by_key_id is set, also
+                includes jobs with no ownership (created_by_key_id is NULL).
+                This supports backwards compatibility for jobs created before
+                ownership tracking was added.
 
         Returns:
             Tuple of (jobs list, has_more flag)
         """
+        from sqlalchemy import or_
+
         # Base query with tenant filter
         query = select(JobModel).where(JobModel.tenant_id == tenant_id)
 
         # Optional status filter
         if status is not None:
             query = query.where(JobModel.status == status.value)
+
+        # Ownership filter - applied at SQL level for correct pagination
+        if created_by_key_id is not None:
+            if include_unowned:
+                # Include jobs owned by this key OR jobs with no owner
+                query = query.where(
+                    or_(
+                        JobModel.created_by_key_id == created_by_key_id,
+                        JobModel.created_by_key_id.is_(None),
+                    )
+                )
+            else:
+                # Only jobs owned by this key
+                query = query.where(JobModel.created_by_key_id == created_by_key_id)
 
         # Apply cursor filter if provided
         if cursor:
@@ -792,7 +816,7 @@ class JobsService:
         display_name: str,
         principal: "Principal",
         security_manager: "SecurityManager",
-    ) -> JobModel | None:
+    ) -> tuple[str | None, JobModel]:
         """Update job display name with authorization check.
 
         Args:
@@ -803,14 +827,13 @@ class JobsService:
             security_manager: SecurityManager instance
 
         Returns:
-            Updated JobModel if found and accessible, None otherwise
+            Tuple of (old_display_name, updated_job). Old name may be None.
 
         Raises:
-            AuthorizationError: If principal lacks JOB_DELETE_OWN permission
+            AuthorizationError: If principal lacks JOB_UPDATE_OWN permission
             ResourceNotFoundError: If job not found or not accessible
         """
-        # Use JOB_DELETE_OWN as proxy for write access to own jobs
-        security_manager.require_permission(principal, Permission.JOB_DELETE_OWN)
+        security_manager.require_permission(principal, Permission.JOB_UPDATE_OWN)
 
         job = await self.get_job(db, job_id, tenant_id=principal.tenant_id)
         if job is None:
@@ -821,9 +844,13 @@ class JobsService:
             if job.created_by_key_id and job.created_by_key_id != principal.id:
                 raise ResourceNotFoundError("job", job_id)
 
-        return await self.update_display_name(
+        old_name = job.display_name
+        updated_job = await self.update_display_name(
             db, job_id, display_name, tenant_id=principal.tenant_id
         )
+        # update_display_name always returns the job when found
+        assert updated_job is not None
+        return old_name, updated_job
 
     async def list_jobs_authorized(
         self,
@@ -836,7 +863,8 @@ class JobsService:
     ) -> tuple[list[JobModel], bool]:
         """List jobs with authorization check.
 
-        Non-admin principals only see jobs they created (ownership filtering).
+        Non-admin principals only see jobs they created (ownership filtering
+        applied at SQL level for correct pagination).
 
         Args:
             db: Database session
@@ -854,22 +882,15 @@ class JobsService:
         """
         security_manager.require_permission(principal, Permission.JOB_READ_OWN)
 
-        # Get all jobs for tenant
-        jobs, has_more = await self.list_jobs(
+        # Apply ownership filter at SQL level for correct pagination
+        created_by_key_id = None if principal.is_admin else principal.id
+
+        return await self.list_jobs(
             db=db,
             tenant_id=principal.tenant_id,
             limit=limit,
             cursor=cursor,
             status=status,
+            created_by_key_id=created_by_key_id,
+            include_unowned=False,  # Strict ownership enforcement
         )
-
-        # Filter by ownership for non-admin
-        if not principal.is_admin:
-            jobs = [
-                job
-                for job in jobs
-                if job.created_by_key_id is None
-                or job.created_by_key_id == principal.id
-            ]
-
-        return jobs, has_more

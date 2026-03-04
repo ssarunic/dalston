@@ -180,6 +180,35 @@ async def authenticate_request(
     return api_key
 
 
+def _get_dev_api_key_for_websocket() -> APIKey:
+    """Create a development API key for WebSocket security_mode=none.
+
+    This is only used in development and returns an API key
+    with full admin permissions.
+    """
+    from datetime import UTC, datetime
+    from uuid import UUID
+
+    from dalston.db.session import DEFAULT_TENANT_ID
+
+    # Well-known dev key ID (deterministic for testing)
+    DEV_KEY_ID = UUID("00000000-0000-0000-0000-000000000002")
+
+    return APIKey(
+        id=DEV_KEY_ID,
+        key_hash="dev_key_hash",
+        prefix="dk_dev00000",
+        name="Development Key",
+        tenant_id=DEFAULT_TENANT_ID,
+        scopes=[Scope.ADMIN],  # Full access in dev mode
+        rate_limit=None,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        last_used_at=None,
+        expires_at=datetime(2099, 12, 31, 23, 59, 59, tzinfo=UTC),
+        revoked_at=None,
+    )
+
+
 async def authenticate_websocket(
     websocket: WebSocket,
     auth_service: AuthService,
@@ -191,6 +220,9 @@ async def authenticate_websocket(
     This must be called before websocket.accept() to reject
     invalid connections with appropriate close codes.
 
+    In security_mode=none (development only), returns a dev API key
+    with admin permissions without requiring authentication.
+
     Args:
         websocket: FastAPI WebSocket object
         auth_service: AuthService instance
@@ -200,6 +232,13 @@ async def authenticate_websocket(
         Validated APIKey or SessionToken object, or None if authentication failed
         (connection will be closed with appropriate code)
     """
+    from dalston.gateway.security.manager import get_security_manager
+
+    security_manager = get_security_manager()
+    if security_manager.mode == "none":
+        # Development mode: return dev API key with admin access
+        return _get_dev_api_key_for_websocket()
+
     raw_key = extract_api_key_from_websocket(websocket)
 
     if not raw_key:
