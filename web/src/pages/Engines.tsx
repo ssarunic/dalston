@@ -261,11 +261,10 @@ function EngineCard({ engine, models }: { engine: BatchEngine; models: ModelRegi
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
           <StatusDot status={dot} />
-          <div className="min-w-0">
-            <div className="font-medium truncate">{engine.engine_id}</div>
-            <div className="text-sm text-muted-foreground">
-              {engineStatusLabel(engine.status)}
-            </div>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="font-medium truncate">{engine.engine_id}</span>
+            <span className="text-sm text-muted-foreground">·</span>
+            <span className="text-sm text-muted-foreground shrink-0">{engineStatusLabel(engine.status)}</span>
           </div>
         </div>
         {hasActivity && (
@@ -305,7 +304,7 @@ function StageAccordion({
     <div className="border rounded-lg overflow-hidden">
       <StageHeader stageStatus={stageStatus} isExpanded={isExpanded} onToggle={onToggle} />
       {isExpanded && stageStatus.engines.length > 0 && (
-        <div className="p-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="p-4 space-y-2">
           {stageStatus.engines.map((engine) => (
             <EngineCard
               key={engine.engine_id}
