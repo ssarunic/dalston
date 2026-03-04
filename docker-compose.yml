@@ -98,7 +98,7 @@ services:
   # ============================================================
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_USER: dalston
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
@@ -115,7 +115,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     # AOF persistence for durable Streams (M33)
     # - appendonly yes: enables append-only file persistence
     # - appendfsync everysec: fsync every second (balance of durability and performance)
