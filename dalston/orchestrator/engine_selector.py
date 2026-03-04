@@ -737,9 +737,7 @@ async def select_pipeline_engines(
 
         # Record selection results on span
         transcribe_sel = selections["transcribe"]
-        dalston.telemetry.set_span_attribute(
-            "dalston.runtime", transcribe_sel.engine_id
-        )
+        dalston.telemetry.set_span_attribute("dalston.runtime", transcribe_sel.runtime)
         dalston.telemetry.set_span_attribute(
             "dalston.model", transcribe_sel.runtime_model_id or ""
         )
