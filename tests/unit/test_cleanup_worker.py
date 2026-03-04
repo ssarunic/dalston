@@ -224,14 +224,12 @@ class TestCleanupWorkerSweep:
         self,
         job_id: UUID,
         tenant_id: UUID,
-        retention_scope: str = "all",
         purge_after: datetime | None = None,
     ):
         """Create a mock job."""
         job = MagicMock()
         job.id = job_id
         job.tenant_id = tenant_id
-        job.retention_scope = retention_scope
         job.purge_after = purge_after or datetime.now(UTC) - timedelta(hours=1)
         job.purged_at = None
         return job
@@ -275,11 +273,11 @@ class TestCleanupWorkerSweep:
             mock_logger.info.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_purge_expired_jobs_all_scope(self, mock_redis, settings):
-        """Test purging jobs with retention_scope=all using two-phase commit."""
+    async def test_purge_expired_jobs(self, mock_redis, settings):
+        """Test purging expired jobs using two-phase commit."""
         job_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
         tenant_id = UUID("12345678-1234-1234-1234-123456789abc")
-        job = self._make_job(job_id, tenant_id, retention_scope="all")
+        job = self._make_job(job_id, tenant_id)
 
         # Track DB sessions
         query_session = AsyncMock()
@@ -327,55 +325,11 @@ class TestCleanupWorkerSweep:
             mock_redis.delete.assert_awaited()
 
     @pytest.mark.asyncio
-    async def test_purge_expired_jobs_audio_only_scope(self, mock_redis, settings):
-        """Test purging jobs with retention_scope=audio_only."""
-        job_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-        tenant_id = UUID("12345678-1234-1234-1234-123456789abc")
-        job = self._make_job(job_id, tenant_id, retention_scope="audio_only")
-
-        query_session = AsyncMock()
-        update_session = AsyncMock()
-
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [job]
-        query_session.execute.return_value = mock_result
-
-        job_record = MagicMock()
-        job_record.purged_at = None
-        update_session.get.return_value = job_record
-
-        session_calls = [query_session, update_session]
-        call_index = 0
-
-        @asynccontextmanager
-        async def session_factory():
-            nonlocal call_index
-            session = session_calls[call_index]
-            call_index += 1
-            yield session
-
-        worker = CleanupWorker(
-            db_session_factory=session_factory,
-            settings=settings,
-        )
-        worker._redis = mock_redis
-
-        with patch("dalston.orchestrator.cleanup.StorageService") as MockStorageService:
-            mock_storage = AsyncMock()
-            MockStorageService.return_value = mock_storage
-
-            purged = await worker._purge_expired_jobs()
-
-            assert purged == 1
-            mock_storage.delete_job_audio.assert_awaited_once_with(job_id)
-            mock_storage.delete_job_artifacts.assert_not_awaited()
-
-    @pytest.mark.asyncio
     async def test_purge_expired_jobs_with_audit(self, mock_redis, settings):
         """Test that purge logs to audit service after DB commit."""
         job_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
         tenant_id = UUID("12345678-1234-1234-1234-123456789abc")
-        job = self._make_job(job_id, tenant_id, retention_scope="all")
+        job = self._make_job(job_id, tenant_id)
 
         query_session = AsyncMock()
         update_session = AsyncMock()
@@ -586,7 +540,6 @@ class TestCleanupWorkerBatchSize:
             job = MagicMock()
             job.id = UUID(f"aaaaaaaa-aaaa-aaaa-aaaa-{i:012d}")
             job.tenant_id = UUID("12345678-1234-1234-1234-123456789abc")
-            job.retention_scope = "all"
             job.purged_at = None
             jobs.append(job)
 
@@ -752,7 +705,6 @@ class TestTwoPhaseCommitBehavior:
         job = MagicMock()
         job.id = job_id
         job.tenant_id = tenant_id
-        job.retention_scope = "all"
         job.purged_at = None
 
         query_session = AsyncMock()
@@ -805,7 +757,6 @@ class TestTwoPhaseCommitBehavior:
         job = MagicMock()
         job.id = job_id
         job.tenant_id = tenant_id
-        job.retention_scope = "all"
         job.purged_at = None
 
         mock_db_session = AsyncMock()

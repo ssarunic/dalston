@@ -518,7 +518,7 @@ class JobsService:
         job_id: UUID,
         tenant_id: UUID | None = None,
     ) -> JobModel | None:
-        """Fetch a job with its tasks and retention policy eagerly loaded.
+        """Fetch a job with its tasks eagerly loaded.
 
         Args:
             db: Database session
@@ -526,14 +526,11 @@ class JobsService:
             tenant_id: Optional tenant UUID for isolation check
 
         Returns:
-            JobModel with tasks and retention_policy loaded, or None if not found
+            JobModel with tasks loaded, or None if not found
         """
         query = (
             select(JobModel)
-            .options(
-                selectinload(JobModel.tasks),
-                selectinload(JobModel.retention_policy),
-            )
+            .options(selectinload(JobModel.tasks))
             .where(JobModel.id == job_id)
         )
 

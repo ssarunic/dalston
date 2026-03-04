@@ -160,10 +160,10 @@ class RealtimeSessionService:
     ) -> RealtimeSessionModel | None:
         """Finalize a session on completion or error.
 
-        Computes purge_after based on session's retention settings:
-        - auto_delete: purge_after = ended_at + retention_hours
-        - none: purge_after = now (immediate purge)
-        - keep: purge_after stays NULL (never purge)
+        Computes purge_after based on session's retention setting:
+        - 0 (transient): purge_after = ended_at (immediate purge)
+        - -1 (permanent): purge_after stays NULL (never purge)
+        - N (days): purge_after = ended_at + N days
 
         Args:
             session_id: Session ID

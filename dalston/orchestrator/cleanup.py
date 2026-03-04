@@ -22,7 +22,6 @@ from redis import asyncio as aioredis
 from sqlalchemy import func, select
 
 from dalston.common.audit import AuditService
-from dalston.common.models import RetentionScope
 from dalston.config import Settings
 from dalston.db.models import JobModel, RealtimeSessionModel
 from dalston.gateway.services.storage import StorageService
@@ -228,7 +227,6 @@ class CleanupWorker:
         for job in jobs:
             job_id = job.id
             tenant_id = job.tenant_id
-            retention_scope = job.retention_scope
 
             # Phase 1: Acquire lock before S3 deletion
             if not await self._acquire_job_lock(job_id):
@@ -240,9 +238,7 @@ class CleanupWorker:
 
             try:
                 # Delete S3 artifacts (irreversible operation)
-                artifacts_deleted = await self._delete_job_artifacts(
-                    job_id, retention_scope, storage
-                )
+                artifacts_deleted = await self._delete_job_artifacts(job_id, storage)
 
                 # Phase 2: Mark as purged in fresh DB session
                 # This ensures clean transaction state
@@ -256,7 +252,6 @@ class CleanupWorker:
                         logger.info(
                             "job_purged",
                             job_id=str(job_id),
-                            retention_scope=retention_scope,
                             artifacts_deleted=artifacts_deleted,
                         )
 
@@ -285,34 +280,22 @@ class CleanupWorker:
     async def _delete_job_artifacts(
         self,
         job_id: UUID,
-        retention_scope: str,
         storage: StorageService,
     ) -> list[str]:
-        """Delete job artifacts from S3 based on retention scope.
+        """Delete all job artifacts from S3.
 
         This operation is idempotent - deleting already-deleted artifacts
         is safe and will not raise an error.
 
         Args:
             job_id: Job UUID
-            retention_scope: What to delete (all, audio_only)
             storage: Storage service
 
         Returns:
             List of artifact types deleted
         """
-        artifacts_deleted = []
-
-        if retention_scope == RetentionScope.ALL.value:
-            # Delete everything
-            await storage.delete_job_artifacts(job_id)
-            artifacts_deleted = ["audio", "tasks", "transcript"]
-        elif retention_scope == RetentionScope.AUDIO_ONLY.value:
-            # Delete audio only, keep tasks and transcript
-            await storage.delete_job_audio(job_id)
-            artifacts_deleted = ["audio"]
-
-        return artifacts_deleted
+        await storage.delete_job_artifacts(job_id)
+        return ["audio", "tasks", "transcript"]
 
     async def _purge_expired_sessions(self) -> int:
         """Find and purge expired realtime sessions using two-phase commit.

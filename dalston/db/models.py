@@ -27,52 +27,6 @@ class Base(DeclarativeBase):
     pass
 
 
-class RetentionPolicyModel(Base):
-    """Retention policy for automated data lifecycle management."""
-
-    __tablename__ = "retention_policies"
-
-    id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
-        primary_key=True,
-        server_default=func.gen_random_uuid(),
-    )
-    tenant_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("tenants.id"),
-        nullable=True,  # NULL for system policies
-        index=True,
-    )
-    name: Mapped[str] = mapped_column(String(100), nullable=False)
-    mode: Mapped[str] = mapped_column(
-        String(20), nullable=False
-    )  # auto_delete, keep, none
-    hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    scope: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default="all"
-    )  # all, audio_only
-    realtime_mode: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default="inherit"
-    )
-    realtime_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    delete_realtime_on_enhancement: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default="true"
-    )
-    is_system: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default="false"
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-    )
-
-    # Relationships
-    tenant: Mapped["TenantModel | None"] = relationship(
-        back_populates="retention_policies"
-    )
-
-
 class AuditLogModel(Base):
     """Immutable audit log entry for compliance and security tracking."""
 
@@ -144,9 +98,6 @@ class TenantModel(Base):
     realtime_sessions: Mapped[list["RealtimeSessionModel"]] = relationship(
         back_populates="tenant"
     )
-    retention_policies: Mapped[list["RetentionPolicyModel"]] = relationship(
-        back_populates="tenant"
-    )
 
 
 class JobModel(Base):
@@ -207,20 +158,6 @@ class JobModel(Base):
         TIMESTAMP(timezone=True), nullable=True
     )
 
-    # Legacy retention fields (M25) - kept for backwards compatibility
-    retention_policy_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("retention_policies.id"),
-        nullable=True,
-    )
-    retention_mode: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default="auto_delete"
-    )
-    retention_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    retention_scope: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default="all"
-    )
-
     # Result summary stats (populated on successful completion)
     result_language_code: Mapped[str | None] = mapped_column(String(10), nullable=True)
     result_word_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -253,7 +190,6 @@ class JobModel(Base):
     # Relationships
     tenant: Mapped["TenantModel"] = relationship(back_populates="jobs")
     tasks: Mapped[list["TaskModel"]] = relationship(back_populates="job")
-    retention_policy: Mapped["RetentionPolicyModel | None"] = relationship()
 
 
 class TaskModel(Base):
@@ -690,17 +626,6 @@ class RealtimeSessionModel(Base):
         TIMESTAMP(timezone=True), nullable=True
     )
 
-    # Legacy retention fields (M25) - kept for backwards compatibility
-    retention_policy_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("retention_policies.id"),
-        nullable=True,
-    )
-    retention_mode: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default="auto_delete"
-    )
-    retention_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
-
     # Ownership tracking (M45)
     created_by_key_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -714,7 +639,6 @@ class RealtimeSessionModel(Base):
     previous_session: Mapped["RealtimeSessionModel | None"] = relationship(
         remote_side="RealtimeSessionModel.id"
     )
-    retention_policy: Mapped["RetentionPolicyModel | None"] = relationship()
 
 
 # =============================================================================
