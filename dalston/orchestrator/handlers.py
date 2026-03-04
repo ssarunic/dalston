@@ -317,7 +317,6 @@ async def handle_job_created(
             log.info("queued_initial_task", task_id=str(task.id), stage=task.stage)
 
 
-
 async def handle_task_started(
     task_id: UUID,
     db: AsyncSession,

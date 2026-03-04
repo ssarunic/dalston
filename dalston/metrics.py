@@ -551,9 +551,7 @@ def inc_engine_tasks(runtime: str, model: str, status: str) -> None:
     ).inc()
 
 
-def observe_engine_task_duration(
-    runtime: str, model: str, duration: float
-) -> None:
+def observe_engine_task_duration(runtime: str, model: str, duration: float) -> None:
     """Record engine task processing duration.
 
     Args:
@@ -604,9 +602,7 @@ def observe_engine_s3_upload(runtime: str, duration: float) -> None:
     _engine_metrics["s3_upload_seconds"].labels(runtime=runtime).observe(duration)
 
 
-def observe_engine_model_load(
-    runtime: str, model: str, duration: float
-) -> None:
+def observe_engine_model_load(runtime: str, model: str, duration: float) -> None:
     """Record model loading time.
 
     Args:
@@ -616,9 +612,9 @@ def observe_engine_model_load(
     """
     if not _metrics_enabled or "model_load_seconds" not in _engine_metrics:
         return
-    _engine_metrics["model_load_seconds"].labels(
-        runtime=runtime, model=model
-    ).observe(duration)
+    _engine_metrics["model_load_seconds"].labels(runtime=runtime, model=model).observe(
+        duration
+    )
 
 
 def inc_engine_model_cache_hit(runtime: str, model: str) -> None:
@@ -630,9 +626,7 @@ def inc_engine_model_cache_hit(runtime: str, model: str) -> None:
     """
     if not _metrics_enabled or "model_cache_hits_total" not in _engine_metrics:
         return
-    _engine_metrics["model_cache_hits_total"].labels(
-        runtime=runtime, model=model
-    ).inc()
+    _engine_metrics["model_cache_hits_total"].labels(runtime=runtime, model=model).inc()
 
 
 def inc_task_redelivery(stage: str, reason: str) -> None:
@@ -749,9 +743,7 @@ def observe_realtime_session_duration(
     ).observe(duration)
 
 
-def inc_realtime_audio_processed(
-    runtime: str, model: str, seconds: float
-) -> None:
+def inc_realtime_audio_processed(runtime: str, model: str, seconds: float) -> None:
     """Increment audio processed counter.
 
     Args:
@@ -766,9 +758,7 @@ def inc_realtime_audio_processed(
     ).inc(seconds)
 
 
-def inc_realtime_transcripts(
-    runtime: str, model: str, transcript_type: str
-) -> None:
+def inc_realtime_transcripts(runtime: str, model: str, transcript_type: str) -> None:
     """Increment transcripts counter.
 
     Args:

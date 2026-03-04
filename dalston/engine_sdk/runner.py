@@ -591,9 +591,7 @@ class EngineRunner:
                 dalston.metrics.observe_engine_task_duration(
                     self.runtime, task_model, process_time
                 )
-                dalston.metrics.inc_engine_tasks(
-                    self.runtime, task_model, "success"
-                )
+                dalston.metrics.inc_engine_tasks(self.runtime, task_model, "success")
 
                 # Publish success event
                 self._publish_task_completed(task_id, job_id)
@@ -606,9 +604,7 @@ class EngineRunner:
                 logger.exception("task_failed", error=str(e))
 
                 # Record task failure metric (M20)
-                dalston.metrics.inc_engine_tasks(
-                    self.runtime, task_model, "failure"
-                )
+                dalston.metrics.inc_engine_tasks(self.runtime, task_model, "failure")
 
                 # We need job_id for the event, try to extract from input
                 try:

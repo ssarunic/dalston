@@ -164,9 +164,7 @@ async def build_task_dag(
             skip_diarization=skip_diarization,
             runtime_model_id=runtime_model_id,
         )
-        dalston.telemetry.set_span_attribute(
-            "dalston.dag.task_count", len(tasks)
-        )
+        dalston.telemetry.set_span_attribute("dalston.dag.task_count", len(tasks))
         return tasks
 
 
