@@ -297,8 +297,8 @@ class VoxtralStreamingEngine(RealtimeEngine):
         """Return list of supported languages."""
         return self.SUPPORTED_LANGUAGES
 
-    def get_engine(self) -> str:
-        """Return engine type identifier."""
+    def get_runtime(self) -> str:
+        """Return the inference framework identifier."""
         return f"voxtral-{self._model_variant}"
 
     def get_gpu_memory_usage(self) -> str:

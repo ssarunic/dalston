@@ -159,9 +159,7 @@ class TestCorrelationIdGatewayFlow:
         mock_job.created_at = datetime.now(UTC)
         mock_jobs_service.create_job.return_value = mock_job
 
-        with patch(
-            "dalston.gateway.api.v1.transcription.StorageService"
-        ) as MockStorage:
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
             MockStorage.return_value.upload_audio = AsyncMock(
                 return_value="s3://test-bucket/audio.wav"
             )
@@ -268,7 +266,7 @@ class TestRequestIdInTaskMetadata:
             id=uuid4(),
             job_id=uuid4(),
             stage="transcribe",
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
             input_uri="s3://bucket/audio.wav",
             config={},
             depends_on=[],
@@ -292,7 +290,7 @@ class TestRequestIdInTaskMetadata:
         assert mapping is not None
         assert mapping["request_id"] == "req_xyz789"
         assert mapping["job_id"] == str(task.job_id)
-        assert mapping["engine_id"] == "faster-whisper"
+        assert mapping["runtime"] == "faster-whisper"
 
         # Cleanup
         structlog.contextvars.clear_contextvars()
@@ -309,7 +307,7 @@ class TestRequestIdInTaskMetadata:
             id=uuid4(),
             job_id=uuid4(),
             stage="transcribe",
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
             input_uri="s3://bucket/audio.wav",
             config={},
             depends_on=[],

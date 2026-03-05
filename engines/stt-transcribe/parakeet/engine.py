@@ -22,7 +22,7 @@ Phase 1 (Runtime Model Management):
     falling back to DALSTON_DEFAULT_MODEL_ID environment variable.
 
 Environment variables:
-    DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "nemo")
+    DALSTON_RUNTIME: Runtime engine ID for registration (default: "nemo")
     DALSTON_DEFAULT_MODEL_ID: Default NeMo model ID (default: "nvidia/parakeet-tdt-1.1b")
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
 """
@@ -93,7 +93,7 @@ class ParakeetEngine(Engine):
         )
 
         # Get engine ID from environment for registration (runtime ID, not variant ID)
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "nemo")
+        self._runtime = os.environ.get("DALSTON_RUNTIME", "nemo")
 
         # Determine device from environment or availability
         requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
@@ -129,7 +129,7 @@ class ParakeetEngine(Engine):
 
         self.logger.info(
             "engine_init",
-            engine_id=self._engine_id,
+            runtime=self._runtime,
             default_model=self._default_model_id,
             device=self._device,
         )
@@ -417,7 +417,7 @@ class ParakeetEngine(Engine):
                     language="en",
                     language_confidence=1.0,
                     channel=channel,
-                    engine_id=self._engine_id,
+                    runtime=self._runtime,
                     skipped=False,
                     warnings=[],
                 )
@@ -574,7 +574,7 @@ class ParakeetEngine(Engine):
             timestamp_granularity_actual=timestamp_granularity_actual,
             alignment_method=alignment_method,
             channel=channel,
-            engine_id=self._engine_id,
+            runtime=self._runtime,
             skipped=False,
             skip_reason=None,
             warnings=warnings,
@@ -595,7 +595,7 @@ class ParakeetEngine(Engine):
 
         return {
             "status": "healthy",
-            "engine_id": self._engine_id,
+            "runtime": self._runtime,
             "device": self._device,
             "model_loaded": self._model is not None,
             "loaded_model_id": self._loaded_model_id,
@@ -620,7 +620,7 @@ class ParakeetEngine(Engine):
         vram_mb = 6000  # Maximum (tdt-1.1b)
 
         return EngineCapabilities(
-            engine_id=self._engine_id,
+            runtime=self._runtime,
             version="1.0.0",
             stages=["transcribe"],
             languages=["en"],  # English only
@@ -629,7 +629,6 @@ class ParakeetEngine(Engine):
             model_variants=sorted(self.SUPPORTED_MODELS),
             gpu_required=True,
             gpu_vram_mb=vram_mb,
-            runtime="nemo",  # M36: Runtime ID for model routing
         )
 
 

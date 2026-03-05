@@ -372,7 +372,9 @@ class TestServiceMetricsConfiguration:
             # These should all work without errors
             dalston.metrics.inc_orchestrator_jobs("completed")
             dalston.metrics.inc_orchestrator_jobs("failed")
-            dalston.metrics.observe_orchestrator_job_duration(5, 120.5)
+            dalston.metrics.observe_orchestrator_job_duration(
+                "faster-whisper", "", 120.5
+            )
             dalston.metrics.inc_orchestrator_tasks_scheduled("whisper", "transcribe")
             dalston.metrics.inc_orchestrator_tasks_completed("whisper", "success")
             dalston.metrics.inc_orchestrator_events("job.created")
@@ -384,8 +386,8 @@ class TestServiceMetricsConfiguration:
             dalston.metrics.configure_metrics("stt-batch-transcribe-whisper")
 
             # These should all work without errors
-            dalston.metrics.inc_engine_tasks("faster-whisper", "success")
-            dalston.metrics.observe_engine_task_duration("faster-whisper", 15.5)
+            dalston.metrics.inc_engine_tasks("faster-whisper", "", "success")
+            dalston.metrics.observe_engine_task_duration("faster-whisper", "", 15.5)
             dalston.metrics.observe_engine_queue_wait("faster-whisper", 2.5)
             dalston.metrics.observe_engine_s3_download("faster-whisper", 0.5)
             dalston.metrics.observe_engine_s3_upload("faster-whisper", 0.3)

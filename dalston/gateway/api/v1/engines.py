@@ -135,20 +135,20 @@ async def list_engines(
 
     # Get running engines from registry
     running_engines = await registry.get_engines()
-    running_map = {e.engine_id: e for e in running_engines}
+    running_map = {e.runtime: e for e in running_engines}
 
     engines: list[EngineResponse] = []
 
     # Process all engines from catalog
     for entry in catalog.get_all_engines():
-        engine_id = entry.engine_id
+        runtime = entry.runtime
         caps = entry.capabilities
 
         # Determine status and runtime state from registry
         loaded_model: str | None = None
 
-        if engine_id in running_map:
-            reg_engine = running_map[engine_id]
+        if runtime in running_map:
+            reg_engine = running_map[runtime]
             if reg_engine.is_available:
                 status: Literal["running", "available", "unhealthy"] = "running"
             else:
@@ -159,11 +159,11 @@ async def list_engines(
             status = "available"
 
         # M36/M46: Get available models for this runtime from DB
-        available_models = models_by_runtime.get(engine_id) or None
+        available_models = models_by_runtime.get(runtime) or None
 
         engines.append(
             EngineResponse(
-                id=engine_id,
+                id=runtime,
                 name=None,  # Could be added to catalog if needed
                 stage=caps.stages[0] if caps.stages else "unknown",
                 version=caps.version,
@@ -220,7 +220,7 @@ async def get_capabilities(
 
     # Get running engines from registry
     running_engines = await registry.get_engines()
-    running_ids = {e.engine_id for e in running_engines if e.is_available}
+    running_ids = {e.runtime for e in running_engines if e.is_available}
 
     # Aggregate capabilities from running engines
     all_languages: set[str] = set()
@@ -228,7 +228,7 @@ async def get_capabilities(
     max_duration: int | None = None
 
     for entry in catalog.get_all_engines():
-        if entry.engine_id not in running_ids:
+        if entry.runtime not in running_ids:
             continue
 
         caps = entry.capabilities
@@ -252,7 +252,7 @@ async def get_capabilities(
                 )
 
             stage_caps = stages[stage]
-            stage_caps.engines.append(entry.engine_id)
+            stage_caps.engines.append(entry.runtime)
 
             # Merge capabilities (union for booleans, intersection for languages)
             if caps.supports_word_timestamps:

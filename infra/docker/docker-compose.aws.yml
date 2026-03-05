@@ -78,16 +78,6 @@ services:
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
       AWS_REGION: ${AWS_REGION}
 
-  stt-rt-transcribe-parakeet-rnnt-0.6b:
-    environment:
-      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
-      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
-      AWS_REGION: ${AWS_REGION}
-      HF_HOME: /data/models
-      NEMO_CACHE: /data/models
-    volumes:
-      - /data/models:/data/models
-
 # Exclude MinIO services - using S3 instead
 # The base docker-compose.yml may define minio and minio-init
 # but they won't be started unless explicitly included

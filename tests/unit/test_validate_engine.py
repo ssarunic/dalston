@@ -92,7 +92,7 @@ class TestValidateEngine:
             result = validate_engine(Path(f.name), schema)
 
         assert result.valid is True
-        assert result.engine_id == "test-engine"
+        assert result.runtime == "test-engine"
         assert result.version == "1.0.0"
         assert result.schema_version == "1.0"
         assert result.stage_or_type == "transcribe"
@@ -108,7 +108,7 @@ class TestValidateEngine:
             result = validate_engine(Path(f.name), schema)
 
         assert result.valid is True
-        assert result.engine_id == "test-streaming"
+        assert result.runtime == "test-streaming"
         assert result.stage_or_type == "realtime"
         assert result.errors == []
 
@@ -176,7 +176,7 @@ class TestValidateEngine:
             result = validate_engine(Path(f.name), schema)
 
         assert result.valid is True
-        assert result.engine_id == "pyannote-4.0"
+        assert result.runtime == "pyannote-4.0"
 
     def test_invalid_gpu_value_fails(
         self, schema: dict, valid_batch_engine: dict

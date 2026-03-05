@@ -13,9 +13,9 @@ from dalston.session_router.allocator import (
 from dalston.session_router.health import HealthMonitor
 from dalston.session_router.registry import (
     ACTIVE_SESSIONS_KEY,
+    INSTANCE_KEY_PREFIX,
+    INSTANCE_SESSIONS_SUFFIX,
     SESSION_KEY_PREFIX,
-    WORKER_KEY_PREFIX,
-    WORKER_SESSIONS_SUFFIX,
     WorkerRegistry,
     WorkerState,
 )
@@ -26,14 +26,13 @@ class TestWorkerState:
 
     def test_available_capacity(self):
         worker = WorkerState(
-            worker_id="worker-1",
+            instance="worker-1",
             endpoint="ws://localhost:9000",
             status="ready",
             capacity=4,
             active_sessions=2,
             models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
-            engine="whisper",
             runtime="faster-whisper",
             supports_vocabulary=False,
             gpu_memory_used="2GB",
@@ -46,14 +45,13 @@ class TestWorkerState:
 
     def test_available_capacity_at_capacity(self):
         worker = WorkerState(
-            worker_id="worker-1",
+            instance="worker-1",
             endpoint="ws://localhost:9000",
             status="busy",
             capacity=4,
             active_sessions=4,
             models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
-            engine="whisper",
             runtime="faster-whisper",
             supports_vocabulary=False,
             gpu_memory_used="4GB",
@@ -66,14 +64,13 @@ class TestWorkerState:
 
     def test_available_capacity_negative_clamped(self):
         worker = WorkerState(
-            worker_id="worker-1",
+            instance="worker-1",
             endpoint="ws://localhost:9000",
             status="busy",
             capacity=4,
             active_sessions=5,  # Over capacity
             models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
-            engine="whisper",
             runtime="faster-whisper",
             supports_vocabulary=False,
             gpu_memory_used="4GB",
@@ -86,14 +83,13 @@ class TestWorkerState:
 
     def test_is_available_ready_with_capacity(self):
         worker = WorkerState(
-            worker_id="worker-1",
+            instance="worker-1",
             endpoint="ws://localhost:9000",
             status="ready",
             capacity=4,
             active_sessions=2,
             models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
-            engine="whisper",
             runtime="faster-whisper",
             supports_vocabulary=False,
             gpu_memory_used="2GB",
@@ -106,14 +102,13 @@ class TestWorkerState:
 
     def test_is_available_busy_with_capacity(self):
         worker = WorkerState(
-            worker_id="worker-1",
+            instance="worker-1",
             endpoint="ws://localhost:9000",
             status="busy",
             capacity=4,
             active_sessions=3,
             models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
-            engine="whisper",
             runtime="faster-whisper",
             supports_vocabulary=False,
             gpu_memory_used="3GB",
@@ -126,14 +121,13 @@ class TestWorkerState:
 
     def test_is_not_available_offline(self):
         worker = WorkerState(
-            worker_id="worker-1",
+            instance="worker-1",
             endpoint="ws://localhost:9000",
             status="offline",
             capacity=4,
             active_sessions=0,
             models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
-            engine="whisper",
             runtime="faster-whisper",
             supports_vocabulary=False,
             gpu_memory_used="0GB",
@@ -146,14 +140,13 @@ class TestWorkerState:
 
     def test_is_not_available_draining(self):
         worker = WorkerState(
-            worker_id="worker-1",
+            instance="worker-1",
             endpoint="ws://localhost:9000",
             status="draining",
             capacity=4,
             active_sessions=1,
             models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
-            engine="whisper",
             runtime="faster-whisper",
             supports_vocabulary=False,
             gpu_memory_used="1GB",
@@ -166,14 +159,13 @@ class TestWorkerState:
 
     def test_is_not_available_at_capacity(self):
         worker = WorkerState(
-            worker_id="worker-1",
+            instance="worker-1",
             endpoint="ws://localhost:9000",
             status="busy",
             capacity=4,
             active_sessions=4,
             models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
-            engine="whisper",
             runtime="faster-whisper",
             supports_vocabulary=False,
             gpu_memory_used="4GB",
@@ -203,7 +195,7 @@ class TestWorkerRegistry:
             "status": "ready",
             "capacity": "4",
             "active_sessions": "2",
-            "engine": "faster-whisper",
+            "runtime": "faster-whisper",
             "models_loaded": '["Systran/faster-whisper-large-v3", "Systran/faster-distil-whisper-large-v3"]',
             "languages_supported": '["auto"]',
             "gpu_memory_used": "2GB",
@@ -215,7 +207,7 @@ class TestWorkerRegistry:
         worker = await registry.get_worker("worker-1")
 
         assert worker is not None
-        assert worker.worker_id == "worker-1"
+        assert worker.instance == "worker-1"
         assert worker.endpoint == "ws://localhost:9000"
         assert worker.status == "ready"
         assert worker.capacity == 4
@@ -245,7 +237,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",
-                    "engine": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "models_loaded": "[]",
                     "languages_supported": "[]",
                 }
@@ -255,7 +247,7 @@ class TestWorkerRegistry:
                     "status": "busy",
                     "capacity": "4",
                     "active_sessions": "3",
-                    "engine": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "models_loaded": "[]",
                     "languages_supported": "[]",
                 }
@@ -283,7 +275,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "4",  # Full
-                    "engine": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
@@ -293,7 +285,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",  # Available
-                    "engine": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
@@ -321,7 +313,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",
-                    "engine": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
@@ -331,7 +323,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",
-                    "engine": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "models_loaded": '["Systran/faster-distil-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
@@ -360,7 +352,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "3",  # 1 available
-                    "engine": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
@@ -370,7 +362,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "1",  # 3 available (most)
-                    "engine": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
@@ -380,7 +372,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",  # 2 available
-                    "engine": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
@@ -403,7 +395,7 @@ class TestWorkerRegistry:
         await registry.mark_worker_offline("worker-1")
 
         mock_redis.hset.assert_called_once_with(
-            f"{WORKER_KEY_PREFIX}worker-1", "status", "offline"
+            f"{INSTANCE_KEY_PREFIX}worker-1", "status", "offline"
         )
 
     @pytest.mark.asyncio
@@ -420,7 +412,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",
-                    "engine": "nemo",
+                    "runtime": "nemo",
                     "models_loaded": '["parakeet-rnnt-0.6b"]',
                     "languages_supported": '["auto"]',
                 }
@@ -430,7 +422,7 @@ class TestWorkerRegistry:
                     "status": "ready",
                     "capacity": "4",
                     "active_sessions": "2",
-                    "engine": "faster-whisper",
+                    "runtime": "faster-whisper",
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
                     "languages_supported": '["auto"]',
                 }
@@ -455,7 +447,7 @@ class TestWorkerRegistry:
             "status": "ready",
             "capacity": "4",
             "active_sessions": "2",
-            "engine": "nemo",
+            "runtime": "nemo",
             "models_loaded": '["parakeet-rnnt-0.6b"]',
             "languages_supported": '["auto"]',
         }
@@ -493,14 +485,13 @@ class TestSessionAllocator:
     ):
         # Setup available workers
         worker = WorkerState(
-            worker_id="worker-1",
+            instance="worker-1",
             endpoint="ws://localhost:9000",
             status="ready",
             capacity=4,
             active_sessions=2,
             models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
-            engine="whisper",
             runtime="faster-whisper",
             supports_vocabulary=False,
             gpu_memory_used="2GB",
@@ -518,10 +509,12 @@ class TestSessionAllocator:
         )
 
         assert result is not None
-        assert result.worker_id == "worker-1"
+        assert result.instance == "worker-1"
         assert result.endpoint == "ws://localhost:9000"
         assert result.session_id.startswith("sess_")
-        mock_registry.get_available_workers.assert_called_once_with(None, "en", None)
+        mock_registry.get_available_workers.assert_called_once_with(
+            None, "en", None, None
+        )
         mock_redis.hincrby.assert_called()
 
     @pytest.mark.asyncio
@@ -544,14 +537,13 @@ class TestSessionAllocator:
     ):
         # Setup worker that will exceed capacity after increment
         worker = WorkerState(
-            worker_id="worker-1",
+            instance="worker-1",
             endpoint="ws://localhost:9000",
             status="ready",
             capacity=4,
             active_sessions=4,  # Already at capacity
             models_loaded=["Systran/Systran/faster-whisper-large-v3"],
             languages_supported=["auto"],
-            engine="whisper",
             runtime="faster-whisper",
             supports_vocabulary=False,
             gpu_memory_used="4GB",
@@ -578,7 +570,7 @@ class TestSessionAllocator:
         self, allocator: SessionAllocator, mock_redis
     ):
         mock_redis.hgetall.return_value = {
-            "worker_id": "worker-1",
+            "instance": "worker-1",
             "status": "active",
             "language": "en",
             "model": "Systran/faster-whisper-large-v3",
@@ -590,7 +582,7 @@ class TestSessionAllocator:
 
         assert result is not None
         assert result.session_id == "sess_abc123"
-        assert result.worker_id == "worker-1"
+        assert result.instance == "worker-1"
         assert result.status == "ended"
         mock_redis.hincrby.assert_called()  # Decremented active_sessions
 
@@ -607,7 +599,7 @@ class TestSessionAllocator:
     @pytest.mark.asyncio
     async def test_get_session(self, allocator: SessionAllocator, mock_redis):
         mock_redis.hgetall.return_value = {
-            "worker_id": "worker-1",
+            "instance": "worker-1",
             "status": "active",
             "language": "es",
             "model": "Systran/faster-whisper-large-v3",
@@ -619,7 +611,7 @@ class TestSessionAllocator:
 
         assert result is not None
         assert result.session_id == "sess_xyz"
-        assert result.worker_id == "worker-1"
+        assert result.instance == "worker-1"
         assert result.language == "es"
         assert result.model == "Systran/faster-whisper-large-v3"
 
@@ -630,7 +622,7 @@ class TestSessionState:
     def test_create_session_state(self):
         state = SessionState(
             session_id="sess_abc123",
-            worker_id="worker-1",
+            instance="worker-1",
             status="active",
             language="en",
             model="Systran/faster-whisper-large-v3",
@@ -639,7 +631,7 @@ class TestSessionState:
         )
 
         assert state.session_id == "sess_abc123"
-        assert state.worker_id == "worker-1"
+        assert state.instance == "worker-1"
         assert state.status == "active"
         assert state.language == "en"
         assert state.model == "Systran/faster-whisper-large-v3"
@@ -651,14 +643,14 @@ class TestWorkerAllocation:
 
     def test_create_allocation(self):
         allocation = WorkerAllocation(
-            worker_id="worker-1",
+            instance="worker-1",
             endpoint="ws://localhost:9000",
             session_id="sess_abc123",
-            engine="whisper",
+            runtime="faster-whisper",
         )
 
-        assert allocation.worker_id == "worker-1"
-        assert allocation.engine == "whisper"
+        assert allocation.instance == "worker-1"
+        assert allocation.runtime == "faster-whisper"
         assert allocation.endpoint == "ws://localhost:9000"
         assert allocation.session_id == "sess_abc123"
 
@@ -710,12 +702,12 @@ class TestHealthMonitor:
     ):
         """Orphaned session is properly cleaned up."""
         orphaned_session = "sess_orphaned"
-        worker_id = "worker-1"
+        instance = "worker-1"
 
         # Setup: session is in active set but key expired
         mock_redis.smembers.side_effect = [
             {orphaned_session},  # First call: ACTIVE_SESSIONS_KEY
-            {worker_id},  # Second call: WORKER_SET_KEY
+            {instance},  # Second call: INSTANCE_SET_KEY
         ]
         mock_redis.exists.return_value = False  # Session key expired
         mock_redis.sismember.return_value = True  # Session in worker's set
@@ -732,12 +724,12 @@ class TestHealthMonitor:
 
         # Verify worker was found and counter decremented
         mock_redis.hincrby.assert_called_once_with(
-            f"{WORKER_KEY_PREFIX}{worker_id}", "active_sessions", -1
+            f"{INSTANCE_KEY_PREFIX}{instance}", "active_sessions", -1
         )
 
         # Verify session removed from worker's set
         mock_redis.srem.assert_any_call(
-            f"{WORKER_KEY_PREFIX}{worker_id}{WORKER_SESSIONS_SUFFIX}",
+            f"{INSTANCE_KEY_PREFIX}{instance}{INSTANCE_SESSIONS_SUFFIX}",
             orphaned_session,
         )
 
@@ -746,7 +738,7 @@ class TestHealthMonitor:
 
         # Verify metrics updated
         mock_metrics.set_session_router_sessions_active.assert_called_once_with(
-            worker_id, 1
+            instance, 1
         )
 
     @pytest.mark.asyncio
@@ -756,11 +748,11 @@ class TestHealthMonitor:
     ):
         """Counter is clamped to zero if it goes negative."""
         orphaned_session = "sess_orphaned"
-        worker_id = "worker-1"
+        instance = "worker-1"
 
         mock_redis.smembers.side_effect = [
             {orphaned_session},
-            {worker_id},
+            {instance},
         ]
         mock_redis.exists.return_value = False
         mock_redis.sismember.return_value = True
@@ -772,12 +764,12 @@ class TestHealthMonitor:
 
         # Verify counter was reset to 0
         mock_redis.hset.assert_called_once_with(
-            f"{WORKER_KEY_PREFIX}{worker_id}", "active_sessions", 0
+            f"{INSTANCE_KEY_PREFIX}{instance}", "active_sessions", 0
         )
 
         # Metrics should show 0
         mock_metrics.set_session_router_sessions_active.assert_called_once_with(
-            worker_id, 0
+            instance, 0
         )
 
     @pytest.mark.asyncio
@@ -787,14 +779,14 @@ class TestHealthMonitor:
     ):
         """Multiple orphaned sessions are all cleaned up."""
         orphaned_sessions = {"sess_1", "sess_2", "sess_3"}
-        worker_id = "worker-1"
+        instance = "worker-1"
 
         # Track calls to smembers
         smembers_calls = [
             orphaned_sessions,  # ACTIVE_SESSIONS_KEY
-            {worker_id},  # WORKER_SET_KEY for sess_1
-            {worker_id},  # WORKER_SET_KEY for sess_2
-            {worker_id},  # WORKER_SET_KEY for sess_3
+            {instance},  # INSTANCE_SET_KEY for sess_1
+            {instance},  # INSTANCE_SET_KEY for sess_2
+            {instance},  # INSTANCE_SET_KEY for sess_3
         ]
         mock_redis.smembers.side_effect = smembers_calls
         mock_redis.exists.return_value = False  # All expired
@@ -816,7 +808,7 @@ class TestHealthMonitor:
 
         mock_redis.smembers.side_effect = [
             {orphaned_session},  # ACTIVE_SESSIONS_KEY
-            {"worker-1", "worker-2"},  # WORKER_SET_KEY
+            {"worker-1", "worker-2"},  # INSTANCE_SET_KEY
         ]
         mock_redis.exists.return_value = False
         mock_redis.sismember.return_value = False  # Not in any worker's set

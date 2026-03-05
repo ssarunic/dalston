@@ -98,7 +98,7 @@ services:
   # ============================================================
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_USER: dalston
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
@@ -115,7 +115,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     # AOF persistence for durable Streams (M33)
     # - appendonly yes: enables append-only file persistence
     # - appendfsync everysec: fsync every second (balance of durability and performance)
@@ -281,7 +281,7 @@ services:
       dockerfile: engines/stt-prepare/audio-prepare/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: audio-prepare
+      DALSTON_RUNTIME: audio-prepare
     depends_on: *batch-depends
     restart: unless-stopped
 
@@ -301,7 +301,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: nemo
+      DALSTON_RUNTIME: nemo
       DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-tdt-1.1b"
     volumes:
       - model-cache:/models
@@ -320,7 +320,7 @@ services:
         DEVICE: cpu
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: nemo
+      DALSTON_RUNTIME: nemo
       DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-ctc-0.6b"
     volumes:
       - model-cache:/models
@@ -337,7 +337,7 @@ services:
       dockerfile: engines/stt-transcribe/faster-whisper/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: faster-whisper
+      DALSTON_RUNTIME: faster-whisper
       DALSTON_DEFAULT_MODEL_ID: "large-v3-turbo"
     volumes:
       - model-cache:/models
@@ -356,7 +356,7 @@ services:
         DEVICE: cpu
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: nemo-onnx
+      DALSTON_RUNTIME: nemo-onnx
       DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-ctc-0.6b"
       DALSTON_QUANTIZATION: "none"
     volumes:
@@ -374,7 +374,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: nemo-onnx
+      DALSTON_RUNTIME: nemo-onnx
       DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-ctc-0.6b"
       DALSTON_DEVICE: cuda
     volumes:
@@ -396,7 +396,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: voxtral-mini-3b
+      DALSTON_RUNTIME: voxtral-mini-3b
     volumes:
       - model-cache:/models
     depends_on: *batch-depends
@@ -414,7 +414,7 @@ services:
       dockerfile: engines/stt-transcribe/vllm-asr/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: vllm-asr
+      DALSTON_RUNTIME: vllm-asr
       DALSTON_DEFAULT_MODEL_ID: "mistralai/Voxtral-Mini-3B-2507"
       DALSTON_MODEL_TTL_SECONDS: 7200
       DALSTON_MAX_LOADED_MODELS: 1
@@ -438,7 +438,7 @@ services:
       dockerfile: engines/stt-transcribe/hf-asr/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: hf-asr
+      DALSTON_RUNTIME: hf-asr
       DALSTON_DEFAULT_MODEL_ID: "openai/whisper-large-v3"
     volumes:
       - model-cache:/models
@@ -455,7 +455,7 @@ services:
       dockerfile: engines/stt-align/phoneme-align/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: phoneme-align
+      DALSTON_RUNTIME: phoneme-align
     volumes:
       - model-cache:/models
     depends_on: *batch-depends
@@ -466,7 +466,7 @@ services:
     image: dalston/stt-batch-align-phoneme:latest
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: phoneme-align
+      DALSTON_RUNTIME: phoneme-align
     volumes:
       - model-cache:/models
     depends_on: *batch-depends
@@ -484,7 +484,7 @@ services:
       dockerfile: engines/stt-diarize/pyannote-4.0/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: pyannote-4.0
+      DALSTON_RUNTIME: pyannote-4.0
       HF_TOKEN: ${HF_TOKEN:-}
       DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
     volumes:
@@ -497,7 +497,7 @@ services:
     image: dalston/stt-batch-diarize-pyannote-4.0:latest
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: pyannote-4.0
+      DALSTON_RUNTIME: pyannote-4.0
       HF_TOKEN: ${HF_TOKEN:-}
     volumes:
       - model-cache:/models
@@ -516,7 +516,7 @@ services:
         SKIP_MODEL_DOWNLOAD: ${SKIP_MODEL_DOWNLOAD:-false}
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: nemo-msdd
+      DALSTON_RUNTIME: nemo-msdd
       DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
       DALSTON_NEMO_ALLOW_CPU: ${DALSTON_NEMO_ALLOW_CPU:-false}
     volumes:
@@ -535,7 +535,7 @@ services:
         SKIP_MODEL_DOWNLOAD: ${SKIP_MODEL_DOWNLOAD:-false}
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: nemo-msdd
+      DALSTON_RUNTIME: nemo-msdd
       DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
       DALSTON_NEMO_ALLOW_CPU: "true"
     volumes:
@@ -554,7 +554,7 @@ services:
         DEVICE: cpu
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: pii-presidio
+      DALSTON_RUNTIME: pii-presidio
       DALSTON_DEVICE: cpu
     volumes:
       - model-cache:/models
@@ -570,7 +570,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: pii-presidio
+      DALSTON_RUNTIME: pii-presidio
       DALSTON_DEVICE: cuda
     volumes:
       - model-cache:/models
@@ -587,7 +587,7 @@ services:
       dockerfile: engines/stt-redact/audio-redactor/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: audio-redactor
+      DALSTON_RUNTIME: audio-redactor
     depends_on: *batch-depends
     restart: unless-stopped
 
@@ -599,79 +599,13 @@ services:
       dockerfile: engines/stt-merge/final-merger/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: final-merger
+      DALSTON_RUNTIME: final-merger
     depends_on: *batch-depends
     restart: unless-stopped
 
   # ============================================================
   # REALTIME STT WORKERS
   # ============================================================
-
-  # Parakeet RNNT 0.6B (GPU - default realtime worker, streaming capable)
-  stt-rt-transcribe-parakeet-rnnt-0.6b:
-    image: dalston/stt-rt-transcribe-parakeet-rnnt-0.6b:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-rt/parakeet/Dockerfile
-      args:
-        MODEL_VARIANT: 0.6b
-        DEVICE: cuda
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_MODEL_VARIANT: 0.6b
-      DALSTON_DEVICE: cuda
-      DALSTON_WORKER_PORT: 9000
-      DALSTON_MAX_SESSIONS: 4
-    volumes:
-      - model-cache:/models
-    depends_on: *realtime-depends
-    healthcheck: *ws-healthcheck
-    deploy: *gpu-deploy
-    profiles: [gpu]
-    restart: unless-stopped
-
-  # Parakeet RNNT 0.6B CPU (CPU-only realtime worker)
-  stt-rt-transcribe-parakeet-rnnt-0.6b-cpu:
-    image: dalston/stt-rt-transcribe-parakeet-rnnt-0.6b-cpu:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-rt/parakeet/Dockerfile
-      args:
-        MODEL_VARIANT: 0.6b
-        DEVICE: cpu
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_MODEL_VARIANT: 0.6b
-      DALSTON_DEVICE: cpu
-      DALSTON_WORKER_PORT: 9000
-      DALSTON_MAX_SESSIONS: 4
-    volumes:
-      - model-cache:/models
-    depends_on: *realtime-depends
-    healthcheck: *ws-healthcheck
-    restart: unless-stopped
-
-  # Parakeet RNNT 1.1B (GPU - accurate English streaming)
-  stt-rt-transcribe-parakeet-rnnt-1.1b:
-    image: dalston/stt-rt-transcribe-parakeet-rnnt-1.1b:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-rt/parakeet/Dockerfile
-      args:
-        MODEL_VARIANT: 1.1b
-        DEVICE: cuda
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_MODEL_VARIANT: 1.1b
-      DALSTON_WORKER_PORT: 9000
-      DALSTON_MAX_SESSIONS: 4
-    volumes:
-      - model-cache:/models
-    depends_on: *realtime-depends
-    healthcheck: *ws-healthcheck
-    deploy: *gpu-deploy
-    profiles: [gpu]
-    restart: unless-stopped
 
   # M43: Faster Whisper (consolidated runtime - serves any model variant dynamically)
   stt-rt-faster-whisper:
@@ -681,7 +615,7 @@ services:
       dockerfile: engines/stt-rt/faster-whisper/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_WORKER_ID: stt-rt-faster-whisper
+      DALSTON_INSTANCE: stt-rt-faster-whisper
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
       # M43: Dynamic model loading configuration
@@ -704,7 +638,7 @@ services:
       dockerfile: engines/stt-rt/faster-whisper/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_WORKER_ID: stt-rt-faster-whisper-cpu
+      DALSTON_INSTANCE: stt-rt-faster-whisper-cpu
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 2
       DALSTON_MODEL_TTL_SECONDS: 3600
@@ -727,7 +661,7 @@ services:
         SKIP_MODEL_DOWNLOAD: "true"  # Download models on-demand
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_WORKER_ID: stt-rt-nemo
+      DALSTON_INSTANCE: stt-rt-nemo
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
       # M44: Dynamic model loading configuration
@@ -753,7 +687,7 @@ services:
         SKIP_MODEL_DOWNLOAD: "true"
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_WORKER_ID: stt-rt-nemo-cpu
+      DALSTON_INSTANCE: stt-rt-nemo-cpu
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 2
       DALSTON_DEVICE: cpu
@@ -776,7 +710,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_WORKER_ID: stt-rt-nemo-onnx
+      DALSTON_INSTANCE: stt-rt-nemo-onnx
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
       DALSTON_DEVICE: cuda
@@ -802,7 +736,7 @@ services:
         DEVICE: cpu
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_WORKER_ID: stt-rt-nemo-onnx-cpu
+      DALSTON_INSTANCE: stt-rt-nemo-onnx-cpu
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
       DALSTON_DEVICE: cpu
@@ -815,94 +749,6 @@ services:
     healthcheck: *ws-healthcheck
     restart: unless-stopped
 
-  # M41: Parakeet ONNX CTC 0.6B (CPU - lightweight realtime English)
-  stt-rt-transcribe-parakeet-onnx-ctc-0.6b:
-    image: dalston/stt-rt-transcribe-parakeet-onnx-ctc-0.6b:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-rt/parakeet-onnx/Dockerfile
-      args:
-        MODEL_VARIANT: ctc-0.6b
-        DEVICE: cpu
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_MODEL_VARIANT: ctc-0.6b
-      DALSTON_DEVICE: cpu
-      DALSTON_WORKER_PORT: 9000
-      DALSTON_MAX_SESSIONS: 4
-    volumes:
-      - model-cache:/models
-    depends_on: *realtime-depends
-    healthcheck: *ws-healthcheck
-    restart: unless-stopped
-
-  # M41: Parakeet ONNX CTC 0.6B (GPU)
-  stt-rt-transcribe-parakeet-onnx-ctc-0.6b-gpu:
-    image: dalston/stt-rt-transcribe-parakeet-onnx-ctc-0.6b-gpu:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-rt/parakeet-onnx/Dockerfile
-      args:
-        MODEL_VARIANT: ctc-0.6b
-        DEVICE: cuda
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_MODEL_VARIANT: ctc-0.6b
-      DALSTON_DEVICE: cuda
-      DALSTON_WORKER_PORT: 9000
-      DALSTON_MAX_SESSIONS: 4
-    volumes:
-      - model-cache:/models
-    depends_on: *realtime-depends
-    healthcheck: *ws-healthcheck
-    deploy: *gpu-deploy
-    profiles: [gpu]
-    restart: unless-stopped
-
-  # M41: Parakeet ONNX TDT 0.6B v3 (CPU - accurate with punctuation)
-  stt-rt-transcribe-parakeet-onnx-tdt-0.6b-v3:
-    image: dalston/stt-rt-transcribe-parakeet-onnx-tdt-0.6b-v3:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-rt/parakeet-onnx/Dockerfile
-      args:
-        MODEL_VARIANT: tdt-0.6b-v3
-        DEVICE: cpu
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_MODEL_VARIANT: tdt-0.6b-v3
-      DALSTON_DEVICE: cpu
-      DALSTON_WORKER_PORT: 9000
-      DALSTON_MAX_SESSIONS: 4
-    volumes:
-      - model-cache:/models
-    depends_on: *realtime-depends
-    healthcheck: *ws-healthcheck
-    restart: unless-stopped
-
-  # M41: Parakeet ONNX TDT 0.6B v3 (GPU)
-  stt-rt-transcribe-parakeet-onnx-tdt-0.6b-v3-gpu:
-    image: dalston/stt-rt-transcribe-parakeet-onnx-tdt-0.6b-v3-gpu:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-rt/parakeet-onnx/Dockerfile
-      args:
-        MODEL_VARIANT: tdt-0.6b-v3
-        DEVICE: cuda
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_MODEL_VARIANT: tdt-0.6b-v3
-      DALSTON_DEVICE: cuda
-      DALSTON_WORKER_PORT: 9000
-      DALSTON_MAX_SESSIONS: 4
-    volumes:
-      - model-cache:/models
-    depends_on: *realtime-depends
-    healthcheck: *ws-healthcheck
-    deploy: *gpu-deploy
-    profiles: [gpu]
-    restart: unless-stopped
-
   # Voxtral Mini 4B (GPU - multilingual realtime)
   stt-rt-transcribe-voxtral-mini-4b:
     image: dalston/stt-rt-transcribe-voxtral-mini-4b:1.0.0
@@ -913,6 +759,7 @@ services:
         MODEL_VARIANT: mini-4b
     environment:
       <<: [*common-env, *observability-env]
+      DALSTON_INSTANCE: stt-rt-transcribe-voxtral-mini-4b
       DALSTON_MODEL_VARIANT: mini-4b
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4

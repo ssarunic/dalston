@@ -53,15 +53,15 @@ def _build_engine_info(
     unhealthy_ids: set[str],
 ) -> EngineInfo:
     """Build EngineInfo from catalog entry with runtime status."""
-    if entry.engine_id in running_ids:
+    if entry.runtime in running_ids:
         status = "running"
-    elif entry.engine_id in unhealthy_ids:
+    elif entry.runtime in unhealthy_ids:
         status = "unhealthy"
     else:
         status = "available"
 
     return EngineInfo(
-        id=entry.engine_id,
+        id=entry.runtime,
         languages=entry.capabilities.languages,
         supports_word_timestamps=entry.capabilities.supports_word_timestamps,
         status=status,
@@ -89,8 +89,8 @@ async def _build_error_details(
     """
     # Get running engine states
     running_engines = await registry.get_engines()
-    running_ids = {e.engine_id for e in running_engines if e.is_available}
-    unhealthy_ids = {e.engine_id for e in running_engines if not e.is_available}
+    running_ids = {e.runtime for e in running_engines if e.is_available}
+    unhealthy_ids = {e.runtime for e in running_engines if not e.is_available}
 
     # Get all engines for this stage from catalog
     stage_engines = catalog.get_engines_for_stage(stage)
@@ -208,7 +208,7 @@ async def queue_task(
     """
     task_id_str = str(task.id)
     job_id_str = str(task.job_id)
-    queue_id = task.engine_id
+    queue_id = task.runtime
 
     # Get language from task config (if present)
     # Normalize "auto" to None - it means auto-detect, not a language requirement
@@ -245,7 +245,7 @@ async def queue_task(
     engine_wait_timeout_seconds = int(
         getattr(settings, "engine_wait_timeout_seconds", 300)
     )
-    engine_available = await registry.is_engine_available(task.engine_id)
+    engine_available = await registry.is_engine_available(task.runtime)
     waiting_for_engine = False
 
     if not engine_available:
@@ -255,9 +255,9 @@ async def queue_task(
                 catalog, registry, task.stage, language, word_timestamps
             )
             raise EngineUnavailableError(
-                f"Engine '{task.engine_id}' is not available. "
+                f"Engine '{task.runtime}' is not available. "
                 f"No healthy engine registered for stage '{task.stage}'.",
-                engine_id=task.engine_id,
+                runtime=task.runtime,
                 stage=task.stage,
                 details=details,
             )
@@ -266,7 +266,7 @@ async def queue_task(
             waiting_for_engine = True
             logger.info(
                 "engine_not_available_waiting",
-                engine_id=task.engine_id,
+                runtime=task.runtime,
                 stage=task.stage,
                 job_id=str(task.job_id),
                 task_id=str(task.id),
@@ -275,7 +275,7 @@ async def queue_task(
             # Publish event for external scalers to start the engine
             await publish_engine_needed(
                 redis,
-                engine_id=task.engine_id,
+                runtime=task.runtime,
                 stage=task.stage,
                 job_id=task.job_id,
                 task_id=task.id,
@@ -284,23 +284,23 @@ async def queue_task(
 
     # 3. Capabilities check - does running engine support job requirements? (M29)
     if language and task.stage == "transcribe":
-        engine_state = await registry.get_engine(task.engine_id)
+        engine_state = await registry.get_engine(task.runtime)
         if engine_state and not engine_state.supports_language(language):
             # Build detailed error context (M30)
             details = await _build_error_details(
                 catalog, registry, task.stage, language, word_timestamps
             )
             raise EngineCapabilityError(
-                f"Engine '{task.engine_id}' is running but does not support "
+                f"Engine '{task.runtime}' is running but does not support "
                 f"language '{language}'. Supported languages: "
                 f"{engine_state.capabilities.languages if engine_state.capabilities else 'unknown'}",
-                engine_id=task.engine_id,
+                runtime=task.runtime,
                 stage=task.stage,
                 language=language,
                 details=details,
             )
 
-    log = logger.bind(task_id=task_id_str, job_id=job_id_str, engine_id=task.engine_id)
+    log = logger.bind(task_id=task_id_str, job_id=job_id_str, runtime=task.runtime)
 
     # 1. Store task metadata in Redis hash (includes request_id for correlation)
     metadata_key = TASK_METADATA_KEY.format(task_id=task_id_str)
@@ -308,7 +308,7 @@ async def queue_task(
     metadata_mapping: dict[str, str] = {
         "job_id": job_id_str,
         "stage": task.stage,
-        "engine_id": task.engine_id,
+        "runtime": task.runtime,
         "queue_id": queue_id,
         "enqueued_at": datetime.now(
             UTC
@@ -346,7 +346,7 @@ async def queue_task(
         audio_duration = task.config["audio_duration"]
 
     # Get RTF from catalog entry
-    catalog_entry = catalog.get_engine(task.engine_id)
+    catalog_entry = catalog.get_engine(task.runtime)
     rtf_gpu = None
     rtf_cpu = None
     if catalog_entry and catalog_entry.capabilities:

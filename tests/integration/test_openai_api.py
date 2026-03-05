@@ -64,13 +64,13 @@ class TestOpenAIModelDetection:
 
     def test_map_openai_model_whisper_1(self):
         """Test whisper-1 maps to faster-whisper."""
-        engine_id = map_openai_model("whisper-1")
-        assert engine_id == "faster-whisper"
+        runtime = map_openai_model("whisper-1")
+        assert runtime == "faster-whisper"
 
     def test_map_openai_model_gpt_4o_transcribe(self):
         """Test gpt-4o-transcribe maps to faster-whisper."""
-        engine_id = map_openai_model("gpt-4o-transcribe")
-        assert engine_id == "faster-whisper"
+        runtime = map_openai_model("gpt-4o-transcribe")
+        assert runtime == "faster-whisper"
 
 
 class TestOpenAIResponseFormatting:
@@ -291,9 +291,7 @@ class TestOpenAITranscriptionEndpoint:
         mock_job.status = JobStatus.PENDING.value
         mock_jobs_service.create_job.return_value = mock_job
 
-        with patch(
-            "dalston.gateway.api.v1.transcription.StorageService"
-        ) as MockStorage:
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
             MockStorage.return_value.upload_audio = AsyncMock(
                 return_value="s3://bucket/audio.mp3"
             )
@@ -326,9 +324,7 @@ class TestOpenAITranscriptionEndpoint:
         """Test OpenAI mode is detected when model=whisper-1."""
         mock_jobs_service.create_job.return_value = mock_job
 
-        with patch(
-            "dalston.gateway.api.v1.transcription.StorageService"
-        ) as MockStorage:
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
             MockStorage.return_value.upload_audio = AsyncMock(
                 return_value="s3://bucket/audio.mp3"
             )
@@ -369,9 +365,7 @@ class TestOpenAITranscriptionEndpoint:
         """Test OpenAI mode with verbose_json response format."""
         mock_jobs_service.create_job.return_value = mock_job
 
-        with patch(
-            "dalston.gateway.api.v1.transcription.StorageService"
-        ) as MockStorage:
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
             MockStorage.return_value.upload_audio = AsyncMock(
                 return_value="s3://bucket/audio.mp3"
             )

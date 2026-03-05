@@ -217,13 +217,13 @@ async def handle_job_created(
                 "creating_task",
                 task_id=str(task.id),
                 stage=task.stage,
-                engine_id=task.engine_id,
+                runtime=task.runtime,
             )
             task_model = TaskModel(
                 id=task.id,
                 job_id=task.job_id,
                 stage=task.stage,
-                engine_id=task.engine_id,
+                runtime=task.runtime,
                 status=task.status.value,
                 dependencies=list(task.dependencies),
                 config=task.config,
@@ -306,13 +306,13 @@ async def handle_job_created(
                 log.error(
                     "job_failed_engine_error",
                     error_type=type(e).__name__,
-                    engine_id=getattr(e, "engine_id", None),
+                    runtime=getattr(e, "runtime", None),
                     stage=getattr(e, "stage", None),
                 )
                 return
 
             # Record task scheduled metric (M20)
-            dalston.metrics.inc_orchestrator_tasks_scheduled(task.engine_id, task.stage)
+            dalston.metrics.inc_orchestrator_tasks_scheduled(task.runtime, task.stage)
 
             log.info("queued_initial_task", task_id=str(task.id), stage=task.stage)
 
@@ -320,7 +320,7 @@ async def handle_job_created(
 async def handle_task_started(
     task_id: UUID,
     db: AsyncSession,
-    engine_id: str | None = None,
+    runtime: str | None = None,
 ) -> None:
     """Handle task.started event with atomic claim.
 
@@ -336,9 +336,9 @@ async def handle_task_started(
     Args:
         task_id: UUID of the started task
         db: Database session
-        engine_id: ID of the engine claiming the task (for logging)
+        runtime: ID of the runtime claiming the task (for logging)
     """
-    log = logger.bind(task_id=str(task_id), engine_id=engine_id)
+    log = logger.bind(task_id=str(task_id), runtime=runtime)
     log.info("handling_task_started")
 
     # Atomic UPDATE: only transition READY -> RUNNING
@@ -440,7 +440,7 @@ async def handle_task_completed(
         log.info("marked_task_completed")
 
         # Record task completion metric (M20) - only on first completion
-        dalston.metrics.inc_orchestrator_tasks_completed(task.engine_id, "success")
+        dalston.metrics.inc_orchestrator_tasks_completed(task.runtime, "success")
 
     # Update job audio_duration from prepare stage output if not already set
     # This handles enhancement jobs that don't have duration set at creation time
@@ -571,14 +571,14 @@ async def handle_task_completed(
                 log.error(
                     "job_failed_engine_error",
                     error_type=type(e).__name__,
-                    engine_id=getattr(e, "engine_id", None),
+                    runtime=getattr(e, "runtime", None),
                     stage=getattr(e, "stage", None),
                 )
                 return
 
             # Record task scheduled metric (M20)
             dalston.metrics.inc_orchestrator_tasks_scheduled(
-                dependent.engine_id, dependent.stage
+                dependent.runtime, dependent.stage
             )
 
             log.info(
@@ -748,7 +748,7 @@ async def handle_task_failed(
             log.error(
                 "job_failed_engine_error_on_retry",
                 error_type=type(e).__name__,
-                engine_id=getattr(e, "engine_id", None),
+                runtime=getattr(e, "runtime", None),
                 stage=getattr(e, "stage", None),
             )
             return
@@ -773,7 +773,7 @@ async def handle_task_failed(
     await db.commit()
 
     # Record task failure metric (M20)
-    dalston.metrics.inc_orchestrator_tasks_completed(task.engine_id, "failure")
+    dalston.metrics.inc_orchestrator_tasks_completed(task.runtime, "failure")
 
     job = await db.get(JobModel, job_id)
     if job:
@@ -809,7 +809,7 @@ async def handle_task_wait_timeout(
         return
 
     job_id = task.job_id
-    log = log.bind(job_id=str(job_id), stage=task.stage, engine_id=task.engine_id)
+    log = log.bind(job_id=str(job_id), stage=task.stage, runtime=task.runtime)
 
     if task.status == TaskStatus.SKIPPED.value:
         # Replay case: SKIPPED persisted but side effects were interrupted.
@@ -852,7 +852,7 @@ async def handle_task_wait_timeout(
     task.completed_at = datetime.now(UTC)
     await db.commit()
 
-    dalston.metrics.inc_orchestrator_tasks_completed(task.engine_id, "failure")
+    dalston.metrics.inc_orchestrator_tasks_completed(task.runtime, "failure")
 
     await _ensure_job_failed_side_effects(
         task=task,
@@ -930,7 +930,7 @@ async def _ensure_retry_enqueued(
         log.error(
             "job_failed_engine_error_on_retry_replay",
             error_type=type(e).__name__,
-            engine_id=getattr(e, "engine_id", None),
+            runtime=getattr(e, "runtime", None),
             stage=getattr(e, "stage", None),
         )
 
@@ -1113,10 +1113,17 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
     else:
         job.status = JobStatus.COMPLETED.value
         dalston.metrics.inc_orchestrator_jobs("completed")
-        # Record job duration (M20)
+        # Record job duration with runtime/model from transcribe task
         if job.started_at:
             duration = (datetime.now(UTC) - job.started_at).total_seconds()
-            dalston.metrics.observe_orchestrator_job_duration(len(all_tasks), duration)
+            transcribe_task = next(
+                (t for t in all_tasks if t.stage == "transcribe"), None
+            )
+            job_runtime = transcribe_task.runtime if transcribe_task else ""
+            job_model = (job.parameters or {}).get("model", "")
+            dalston.metrics.observe_orchestrator_job_duration(
+                job_runtime, job_model, duration
+            )
         log.info("job_completed")
 
         # Extract and store result stats from transcript

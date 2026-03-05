@@ -84,18 +84,18 @@ class TestParakeetOnnxStreamingNoStreaming:
 
 
 class TestParakeetOnnxStreamingEngineType:
-    """Tests for get_engine() type reporting.
+    """Tests for get_runtime() type reporting.
 
     M44: Engine now returns runtime name instead of variant-specific name.
     """
 
-    def test_get_engine_returns_runtime_name(self):
+    def test_get_runtime_returns_runtime_name(self):
         """Test that engine type returns the runtime identifier."""
         Engine = load_parakeet_onnx_streaming_engine()
         engine = Engine()
 
         # M44: Returns runtime name, not variant-specific name
-        assert engine.get_engine() == "nemo-onnx"
+        assert engine.get_runtime() == "nemo-onnx"
 
 
 class TestParakeetOnnxStreamingHealthCheck:

@@ -82,7 +82,7 @@ output_schema:
     overlap_ratio:
       type: number
       description: Fraction of audio with overlapping speech
-    engine_id:
+    runtime:
       type: string
       description: Engine identifier
     skipped:

@@ -65,7 +65,7 @@ class StaleTaskScanner:
         db_session_factory,
         settings: Settings,
         scan_interval_seconds: int = DEFAULT_SCAN_INTERVAL_SECONDS,
-        instance_id: str | None = None,
+        instance: str | None = None,
     ):
         """Initialize the stale task scanner.
 
@@ -74,7 +74,7 @@ class StaleTaskScanner:
             db_session_factory: Async context manager factory for database sessions
             settings: Application settings
             scan_interval_seconds: How often to scan for stale tasks
-            instance_id: Unique identifier for this scanner instance (default: hostname:pid)
+            instance: Unique identifier for this scanner instance (default: hostname:pid)
         """
         self._redis = redis
         self._db_session_factory = db_session_factory
@@ -82,7 +82,7 @@ class StaleTaskScanner:
         self._scan_interval = scan_interval_seconds
         self._running = False
         self._task: asyncio.Task | None = None
-        self._instance_id = instance_id or f"{os.uname().nodename}:{os.getpid()}"
+        self._instance = instance or f"{os.uname().nodename}:{os.getpid()}"
         self._is_leader = False
         self._consecutive_errors = 0
 
@@ -98,7 +98,7 @@ class StaleTaskScanner:
             "stale_task_scanner_started",
             scan_interval_seconds=self._scan_interval,
             stale_threshold_ms=STALE_THRESHOLD_MS,
-            instance_id=self._instance_id,
+            instance=self._instance,
         )
 
     async def stop(self) -> None:
@@ -115,7 +115,7 @@ class StaleTaskScanner:
         if self._is_leader:
             await self._release_leader_lock()
 
-        logger.info("stale_task_scanner_stopped", instance_id=self._instance_id)
+        logger.info("stale_task_scanner_stopped", instance=self._instance)
 
     async def _acquire_leader_lock(self) -> bool:
         """Try to acquire the leader lock.
@@ -128,7 +128,7 @@ class StaleTaskScanner:
         """
         acquired = await self._redis.set(
             LEADER_LOCK_KEY,
-            self._instance_id,
+            self._instance,
             nx=True,
             ex=LEADER_LOCK_TTL_SECONDS,
         )
@@ -149,7 +149,7 @@ class StaleTaskScanner:
         end
         """
         try:
-            await self._redis.eval(script, 1, LEADER_LOCK_KEY, self._instance_id)
+            await self._redis.eval(script, 1, LEADER_LOCK_KEY, self._instance)
         except Exception:
             # Best effort - lock will expire anyway
             logger.debug("leader_lock_release_failed", exc_info=True)
@@ -172,7 +172,7 @@ class StaleTaskScanner:
         """
         try:
             result = await self._redis.eval(
-                script, 1, LEADER_LOCK_KEY, self._instance_id, LEADER_LOCK_TTL_SECONDS
+                script, 1, LEADER_LOCK_KEY, self._instance, LEADER_LOCK_TTL_SECONDS
             )
             return result == 1
         except Exception:
@@ -188,9 +188,7 @@ class StaleTaskScanner:
                 # Try to become leader
                 if await self._acquire_leader_lock():
                     if not self._is_leader:
-                        logger.info(
-                            "scanner_became_leader", instance_id=self._instance_id
-                        )
+                        logger.info("scanner_became_leader", instance=self._instance)
                         self._is_leader = True
 
                     # Run the scan as leader
@@ -203,11 +201,9 @@ class StaleTaskScanner:
                 else:
                     # Not the leader this round
                     if self._is_leader:
-                        logger.info(
-                            "scanner_lost_leadership", instance_id=self._instance_id
-                        )
+                        logger.info("scanner_lost_leadership", instance=self._instance)
                         self._is_leader = False
-                    logger.debug("scanner_not_leader", instance_id=self._instance_id)
+                    logger.debug("scanner_not_leader", instance=self._instance)
                     dalston.metrics.inc_orchestrator_scanner_scans("skipped_not_leader")
 
             except asyncio.CancelledError:
@@ -225,7 +221,7 @@ class StaleTaskScanner:
                     logger.critical(
                         "scanner_circuit_breaker_tripped",
                         consecutive_errors=self._consecutive_errors,
-                        instance_id=self._instance_id,
+                        instance=self._instance,
                     )
                     raise
 
@@ -263,7 +259,7 @@ class StaleTaskScanner:
         """Scan a single stream for stale tasks.
 
         Args:
-            queue_id: Queue identifier (typically engine_id)
+            queue_id: Queue identifier (typically runtime)
 
         Returns:
             Tuple of (stale_tasks_found, tasks_failed)
@@ -477,7 +473,7 @@ class StaleTaskScanner:
                     await self._clear_waiting_task_marker(task_id, metadata_key)
                     continue
 
-                queue_id = metadata.get("queue_id") or metadata.get("engine_id")
+                queue_id = metadata.get("queue_id") or metadata.get("runtime")
                 message_id = metadata.get("stream_message_id")
 
                 # If already claimed into PEL, it has been picked up.
@@ -492,9 +488,9 @@ class StaleTaskScanner:
                 wait_timeout_s = metadata.get("wait_timeout_s") or str(
                     getattr(self._settings, "engine_wait_timeout_seconds", 300)
                 )
-                engine_id = metadata.get("engine_id") or task.engine_id
+                runtime = metadata.get("runtime") or task.runtime
                 error = (
-                    f"Engine '{engine_id}' did not become available "
+                    f"Runtime '{runtime}' did not become available "
                     f"within {wait_timeout_s} seconds"
                 )
 
@@ -513,7 +509,7 @@ class StaleTaskScanner:
                     {
                         "task_id": task_id,
                         "error": error,
-                        "engine_id": engine_id,
+                        "runtime": runtime,
                         "queue_id": queue_id,
                     },
                 )
@@ -528,7 +524,7 @@ class StaleTaskScanner:
                 logger.warning(
                     "task_wait_for_engine_timeout",
                     task_id=task_id,
-                    engine_id=engine_id,
+                    runtime=runtime,
                     queue_id=queue_id,
                     wait_timeout_s=wait_timeout_s,
                 )

@@ -23,7 +23,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_created
-from dalston.config import Settings
 from dalston.gateway.api.v1.openai_audio import (
     OPENAI_MAX_FILE_SIZE,
     format_openai_response,
@@ -40,7 +39,7 @@ from dalston.gateway.dependencies import (
     get_rate_limiter,
     get_redis,
     get_security_manager,
-    get_settings,
+    get_storage_service,
 )
 from dalston.gateway.security.manager import SecurityManager
 from dalston.gateway.security.permissions import Permission
@@ -91,12 +90,12 @@ async def create_translation_openai(
     ] = 0.0,
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
-    settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
     ingestion_service: AudioIngestionService = Depends(get_ingestion_service),
     export_service: ExportService = Depends(get_export_service),
     rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
     audit_service: AuditService = Depends(get_audit_service),
+    storage: StorageService = Depends(get_storage_service),
 ) -> Response | dict[str, Any]:
     """Translate audio to English using OpenAI-compatible API.
 
@@ -161,7 +160,6 @@ async def create_translation_openai(
     job_id = uuid4()
 
     # Upload audio to S3
-    storage = StorageService(settings)
     audio_uri = await storage.upload_audio(
         job_id=job_id,
         file_content=ingested.content,

@@ -121,7 +121,7 @@ class TestDeleteTranscription:
     def client(self, app):
         return TestClient(app)
 
-    @patch("dalston.gateway.api.v1.transcription.StorageService")
+    @patch("dalston.gateway.dependencies.StorageService")
     def test_delete_completed_job_returns_204(
         self, mock_storage_cls, client, mock_jobs_service
     ):
@@ -163,7 +163,7 @@ class TestDeleteTranscription:
         assert response.status_code == 409
         assert "running" in response.json()["detail"]
 
-    @patch("dalston.gateway.api.v1.transcription.StorageService")
+    @patch("dalston.gateway.dependencies.StorageService")
     def test_delete_succeeds_even_if_s3_cleanup_fails(
         self, mock_storage_cls, client, mock_jobs_service
     ):
@@ -200,6 +200,7 @@ class TestDeleteTranscriptionAuthorization:
             get_principal,
             get_security_manager,
             get_settings,
+            get_storage_service,
             require_auth,
         )
         from dalston.gateway.middleware.security_error_handler import (
@@ -234,6 +235,7 @@ class TestDeleteTranscriptionAuthorization:
         app.dependency_overrides[get_db] = lambda: AsyncMock()
         app.dependency_overrides[get_jobs_service] = lambda: mock_jobs_service
         app.dependency_overrides[get_settings] = lambda: MagicMock(spec=Settings)
+        app.dependency_overrides[get_storage_service] = lambda: AsyncMock()
         app.dependency_overrides[require_auth] = lambda: api_key
         app.dependency_overrides[get_security_manager] = lambda: mock_security_manager
         app.dependency_overrides[get_principal] = lambda: mock_principal

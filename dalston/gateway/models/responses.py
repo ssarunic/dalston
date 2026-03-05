@@ -236,7 +236,7 @@ class StageResponse(BaseModel):
         description="Pipeline stage name (e.g., prepare, transcribe, align)"
     )
     task_id: UUID = Field(description="UUID of the underlying task")
-    engine_id: str = Field(description="Engine that executed this task")
+    runtime: str = Field(description="Runtime that executed this task")
     status: str = Field(
         description="Task status: pending, ready, running, completed, failed, skipped"
     )
@@ -268,7 +268,7 @@ class TaskResponse(BaseModel):
 
     task_id: UUID = Field(description="Task UUID")
     stage: str = Field(description="Pipeline stage name")
-    engine_id: str = Field(description="Engine that processed this task")
+    runtime: str = Field(description="Runtime that processed this task")
     status: str = Field(description="Task status")
     required: bool = Field(description="Whether this task is required for job success")
     dependencies: list[UUID] = Field(description="Task IDs this task depends on")
@@ -295,7 +295,7 @@ class TaskArtifactResponse(BaseModel):
     task_id: UUID
     job_id: UUID
     stage: str
-    engine_id: str
+    runtime: str
     status: str
     input: dict[str, Any] | None = Field(
         default=None,

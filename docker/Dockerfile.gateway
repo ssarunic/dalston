@@ -10,7 +10,7 @@
 # ============================================================
 # Stage 1: Build Web Console
 # ============================================================
-FROM node:20-slim AS web-builder
+FROM node:25-slim AS web-builder
 
 WORKDIR /web
 

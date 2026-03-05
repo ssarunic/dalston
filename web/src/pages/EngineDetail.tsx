@@ -122,7 +122,7 @@ export function EngineDetail() {
 
   // Find the engine in console API (has queue stats)
   const batchEngineInfo: BatchEngine | undefined = consoleEnginesData?.batch_engines.find(
-    (e) => e.engine_id === decodedEngineId
+    (e) => e.runtime === decodedEngineId
   )
 
   // Fetch models from registry and filter by this engine's runtime

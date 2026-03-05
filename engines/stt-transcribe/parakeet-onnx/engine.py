@@ -18,7 +18,7 @@ Supported models:
   - nvidia/parakeet-rnnt-0.6b: RNNT decoder, 600M params, English-only
 
 Environment variables:
-    DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "nemo-onnx")
+    DALSTON_RUNTIME: Runtime engine ID for registration (default: "nemo-onnx")
     DALSTON_DEFAULT_MODEL_ID: Default ONNX model ID (default: "nvidia/parakeet-ctc-0.6b")
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cpu.
     DALSTON_QUANTIZATION: ONNX quantization level (none, int8). Defaults to none.
@@ -82,7 +82,7 @@ class ParakeetOnnxEngine(Engine):
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
         )
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "nemo-onnx")
+        self._runtime = os.environ.get("DALSTON_RUNTIME", "nemo-onnx")
 
         # Quantization: "none" or "int8"
         self._quantization = os.environ.get("DALSTON_QUANTIZATION", "none").lower()
@@ -136,7 +136,7 @@ class ParakeetOnnxEngine(Engine):
 
         self.logger.info(
             "engine_init",
-            engine_id=self._engine_id,
+            runtime=self._runtime,
             default_model=self._default_model_id,
             device=self._device,
             quantization=self._quantization,
@@ -270,7 +270,7 @@ class ParakeetOnnxEngine(Engine):
             timestamp_granularity_actual=timestamp_granularity_actual,
             alignment_method=alignment_method,
             channel=channel,
-            engine_id=self._engine_id,
+            runtime=self._runtime,
             skipped=False,
             skip_reason=None,
             warnings=[],
@@ -515,7 +515,7 @@ class ParakeetOnnxEngine(Engine):
         """Return health status."""
         return {
             "status": "healthy",
-            "engine_id": self._engine_id,
+            "runtime": self._runtime,
             "device": self._device,
             "model_loaded": self._model is not None,
             "loaded_model_id": self._loaded_model_id,
@@ -525,7 +525,7 @@ class ParakeetOnnxEngine(Engine):
     def get_capabilities(self) -> EngineCapabilities:
         """Return ONNX engine capabilities."""
         return EngineCapabilities(
-            engine_id=self._engine_id,
+            runtime=self._runtime,
             version="1.1.0",
             stages=["transcribe"],
             languages=["en"],
@@ -538,7 +538,6 @@ class ParakeetOnnxEngine(Engine):
             min_ram_gb=4,
             rtf_gpu=0.0003,
             rtf_cpu=0.15,
-            runtime="nemo-onnx",
         )
 
 

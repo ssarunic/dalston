@@ -27,7 +27,7 @@ class ValidationResult(NamedTuple):
 
     path: Path
     valid: bool
-    engine_id: str | None
+    runtime: str | None
     version: str | None
     schema_version: str | None
     stage_or_type: str | None
@@ -60,7 +60,7 @@ def validate_engine(
         return ValidationResult(
             path=engine_path,
             valid=False,
-            engine_id=None,
+            runtime=None,
             version=None,
             schema_version=None,
             stage_or_type=None,
@@ -71,7 +71,7 @@ def validate_engine(
         return ValidationResult(
             path=engine_path,
             valid=False,
-            engine_id=None,
+            runtime=None,
             version=None,
             schema_version=None,
             stage_or_type=None,
@@ -90,7 +90,7 @@ def validate_engine(
         )
         errors.append(f"{path_str}: {error.message}")
 
-    engine_id = data.get("id")
+    runtime_id = data.get("id")
     version = data.get("version")
     schema_version = data.get("schema_version")
     stage_or_type = data.get("stage") or data.get("type")
@@ -99,7 +99,7 @@ def validate_engine(
     return ValidationResult(
         path=engine_path,
         valid=len(errors) == 0,
-        engine_id=engine_id,
+        runtime=runtime_id,
         version=version,
         schema_version=schema_version,
         stage_or_type=stage_or_type,
@@ -148,12 +148,12 @@ def print_result(result: ValidationResult, verbose: bool = False) -> None:
 
     if result.valid:
         print(
-            f"{status} {result.engine_id} v{result.version} (schema {result.schema_version})"
+            f"{status} {result.runtime} v{result.version} (schema {result.schema_version})"
         )
         print(f"  Stage: {result.stage_or_type}")
         print(f"  Languages: {format_languages(result.languages)}")
     else:
-        engine_info = result.engine_id or result.path.name
+        engine_info = result.runtime or result.path.name
         print(f"{status} {engine_info}")
         print(f"  Path: {result.path}")
         for error in result.errors:

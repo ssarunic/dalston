@@ -181,7 +181,7 @@ export function RealtimeSessionDetail() {
             </span>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{session.model || session.engine || '-'}</div>
+            <div className="text-2xl font-bold">{session.model || session.runtime || '-'}</div>
           </CardContent>
         </Card>
 
@@ -239,8 +239,8 @@ export function RealtimeSessionDetail() {
               <dd className="font-medium">{session.sample_rate ? `${session.sample_rate} Hz` : '-'}</dd>
             </div>
             <div>
-              <dt className="text-muted-foreground">Worker</dt>
-              <dd className="font-medium font-mono text-xs">{session.worker_id ?? '-'}</dd>
+              <dt className="text-muted-foreground">Instance</dt>
+              <dd className="font-medium font-mono text-xs">{session.instance ?? '-'}</dd>
             </div>
             <div>
               <dt className="text-muted-foreground">Client IP</dt>

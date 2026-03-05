@@ -9,9 +9,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from dalston.engine_sdk.registry import (
-    ENGINE_INSTANCES_PREFIX,
-    ENGINE_KEY_PREFIX,
-    ENGINE_SET_KEY,
+    INSTANCE_KEY_PREFIX as CLIENT_INSTANCE_KEY_PREFIX,
+)
+from dalston.engine_sdk.registry import (
+    RUNTIME_INSTANCES_PREFIX as CLIENT_RUNTIME_INSTANCES_PREFIX,
+)
+from dalston.engine_sdk.registry import (
+    RUNTIME_SET_KEY as CLIENT_RUNTIME_SET_KEY,
+)
+from dalston.engine_sdk.registry import (
     BatchEngineInfo,
 )
 from dalston.engine_sdk.registry import (
@@ -19,9 +25,9 @@ from dalston.engine_sdk.registry import (
 )
 from dalston.orchestrator.exceptions import EngineUnavailableError
 from dalston.orchestrator.registry import (
-    ENGINE_INSTANCES_PREFIX as SERVER_ENGINE_INSTANCES_PREFIX,
-)
-from dalston.orchestrator.registry import (
+    ENGINE_INSTANCES_PREFIX,
+    ENGINE_KEY_PREFIX,
+    ENGINE_SET_KEY,
     HEARTBEAT_TIMEOUT_SECONDS,
     BatchEngineState,
 )
@@ -36,14 +42,14 @@ class TestBatchEngineInfo:
     def test_create_info(self):
         """Test creating engine info."""
         info = BatchEngineInfo(
-            engine_id="faster-whisper",
-            instance_id="faster-whisper-abc123def456",
+            runtime="faster-whisper",
+            instance="faster-whisper-abc123def456",
             stage="transcribe",
             stream_name="dalston:stream:faster-whisper",
         )
 
-        assert info.engine_id == "faster-whisper"
-        assert info.instance_id == "faster-whisper-abc123def456"
+        assert info.runtime == "faster-whisper"
+        assert info.instance == "faster-whisper-abc123def456"
         assert info.stage == "transcribe"
         assert info.stream_name == "dalston:stream:faster-whisper"
 
@@ -73,21 +79,24 @@ class TestClientRegistry:
     def test_register(self, registry, mock_redis):
         """Test engine registration."""
         info = BatchEngineInfo(
-            engine_id="faster-whisper",
-            instance_id="faster-whisper-abc123def456",
+            runtime="faster-whisper",
+            instance="faster-whisper-abc123def456",
             stage="transcribe",
             stream_name="dalston:stream:faster-whisper",
         )
 
         registry.register(info)
 
-        # Check hset was called with correct key (using instance_id)
+        # Check hset was called with correct key (using instance)
         mock_redis.hset.assert_called_once()
         call_args = mock_redis.hset.call_args
-        assert call_args[0][0] == f"{ENGINE_KEY_PREFIX}faster-whisper-abc123def456"
+        assert (
+            call_args[0][0]
+            == f"{CLIENT_INSTANCE_KEY_PREFIX}faster-whisper-abc123def456"
+        )
         mapping = call_args[1]["mapping"]
-        assert mapping["engine_id"] == "faster-whisper"
-        assert mapping["instance_id"] == "faster-whisper-abc123def456"
+        assert mapping["runtime"] == "faster-whisper"
+        assert mapping["instance"] == "faster-whisper-abc123def456"
         assert mapping["stage"] == "transcribe"
         assert mapping["stream_name"] == "dalston:stream:faster-whisper"
         assert mapping["status"] == "idle"
@@ -95,14 +104,14 @@ class TestClientRegistry:
         # Check TTL was set
         mock_redis.expire.assert_called_once()
 
-        # Check added to both sets: logical engine_id and per-engine instance set
+        # Check added to both sets: logical runtime and per-runtime instance set
         assert mock_redis.sadd.call_count == 2
         sadd_calls = mock_redis.sadd.call_args_list
-        # First call: add logical engine_id to main set
-        assert sadd_calls[0][0] == (ENGINE_SET_KEY, "faster-whisper")
-        # Second call: add instance_id to per-engine instance set
+        # First call: add logical runtime to main set
+        assert sadd_calls[0][0] == (CLIENT_RUNTIME_SET_KEY, "faster-whisper")
+        # Second call: add instance to per-runtime instance set
         assert sadd_calls[1][0] == (
-            f"{ENGINE_INSTANCES_PREFIX}faster-whisper",
+            f"{CLIENT_RUNTIME_INSTANCES_PREFIX}faster-whisper",
             "faster-whisper-abc123def456",
         )
 
@@ -112,7 +121,7 @@ class TestClientRegistry:
         mock_redis.hget.return_value = "faster-whisper"
 
         registry.heartbeat(
-            instance_id="faster-whisper-abc123def456",
+            instance="faster-whisper-abc123def456",
             status="processing",
             current_task="task-123",
         )
@@ -131,7 +140,7 @@ class TestClientRegistry:
         mock_redis.hget.return_value = "faster-whisper"
 
         registry.heartbeat(
-            instance_id="faster-whisper-abc123def456",
+            instance="faster-whisper-abc123def456",
             status="idle",
             current_task=None,
         )
@@ -145,22 +154,22 @@ class TestClientRegistry:
         """Test engine unregistration."""
         # First register so we have stored info
         info = BatchEngineInfo(
-            engine_id="faster-whisper",
-            instance_id="faster-whisper-abc123def456",
+            runtime="faster-whisper",
+            instance="faster-whisper-abc123def456",
             stage="transcribe",
             stream_name="dalston:stream:faster-whisper",
         )
-        registry._registered_engines[info.instance_id] = info
+        registry._registered_engines[info.instance] = info
 
         registry.unregister("faster-whisper-abc123def456")
 
-        # Should remove from per-engine instance set
+        # Should remove from per-runtime instance set
         mock_redis.srem.assert_called_once_with(
-            f"{ENGINE_INSTANCES_PREFIX}faster-whisper",
+            f"{CLIENT_RUNTIME_INSTANCES_PREFIX}faster-whisper",
             "faster-whisper-abc123def456",
         )
         mock_redis.delete.assert_called_once_with(
-            f"{ENGINE_KEY_PREFIX}faster-whisper-abc123def456"
+            f"{CLIENT_INSTANCE_KEY_PREFIX}faster-whisper-abc123def456"
         )
 
     def test_close(self, registry, mock_redis):
@@ -178,8 +187,8 @@ class TestBatchEngineState:
         """Test engine is available with fresh heartbeat."""
         now = datetime.now(UTC)
         state = BatchEngineState(
-            engine_id="faster-whisper",
-            instance_id="faster-whisper-abc123",
+            runtime="faster-whisper",
+            instance="faster-whisper-abc123",
             stage="transcribe",
             stream_name="dalston:stream:faster-whisper",
             status="idle",
@@ -195,8 +204,8 @@ class TestBatchEngineState:
         now = datetime.now(UTC)
         old = now - timedelta(seconds=HEARTBEAT_TIMEOUT_SECONDS + 10)
         state = BatchEngineState(
-            engine_id="faster-whisper",
-            instance_id="faster-whisper-abc123",
+            runtime="faster-whisper",
+            instance="faster-whisper-abc123",
             stage="transcribe",
             stream_name="dalston:stream:faster-whisper",
             status="idle",
@@ -211,8 +220,8 @@ class TestBatchEngineState:
         """Test engine is unavailable when status is offline."""
         now = datetime.now(UTC)
         state = BatchEngineState(
-            engine_id="faster-whisper",
-            instance_id="faster-whisper-abc123",
+            runtime="faster-whisper",
+            instance="faster-whisper-abc123",
             stage="transcribe",
             stream_name="dalston:stream:faster-whisper",
             status="offline",
@@ -253,22 +262,22 @@ class TestServerRegistry:
         """Test get_engines with registered engines."""
         now = datetime.now(UTC).isoformat()
 
-        # First call: get logical engine_ids from main set
+        # First call: get logical runtimes from main set
         # Then calls to get instance sets, then hgetall for each instance
         def smembers_side_effect(key):
             if key == ENGINE_SET_KEY:
                 return {"faster-whisper", "whisperx"}
-            elif key == f"{SERVER_ENGINE_INSTANCES_PREFIX}faster-whisper":
+            elif key == f"{ENGINE_INSTANCES_PREFIX}faster-whisper":
                 return {"faster-whisper-abc123"}
-            elif key == f"{SERVER_ENGINE_INSTANCES_PREFIX}whisperx":
+            elif key == f"{ENGINE_INSTANCES_PREFIX}whisperx":
                 return {"whisperx-def456"}
             return set()
 
         mock_redis.smembers.side_effect = smembers_side_effect
         mock_redis.hgetall.side_effect = [
             {
-                "engine_id": "faster-whisper",
-                "instance_id": "faster-whisper-abc123",
+                "runtime": "faster-whisper",
+                "instance": "faster-whisper-abc123",
                 "stage": "transcribe",
                 "stream_name": "dalston:stream:faster-whisper",
                 "status": "idle",
@@ -277,8 +286,8 @@ class TestServerRegistry:
                 "registered_at": now,
             },
             {
-                "engine_id": "whisperx",
-                "instance_id": "whisperx-def456",
+                "runtime": "whisperx",
+                "instance": "whisperx-def456",
                 "stage": "align",
                 "stream_name": "dalston:stream:whisperx",
                 "status": "processing",
@@ -291,8 +300,8 @@ class TestServerRegistry:
         engines = await registry.get_engines()
 
         assert len(engines) == 2
-        engine_ids = {e.engine_id for e in engines}
-        assert engine_ids == {"faster-whisper", "whisperx"}
+        runtimes = {e.runtime for e in engines}
+        assert runtimes == {"faster-whisper", "whisperx"}
 
     @pytest.mark.asyncio
     async def test_get_engine(self, registry, mock_redis):
@@ -302,8 +311,8 @@ class TestServerRegistry:
         # get_engine queries instance set first, then hgetall for instance
         mock_redis.smembers.return_value = {"faster-whisper-abc123"}
         mock_redis.hgetall.return_value = {
-            "engine_id": "faster-whisper",
-            "instance_id": "faster-whisper-abc123",
+            "runtime": "faster-whisper",
+            "instance": "faster-whisper-abc123",
             "stage": "transcribe",
             "stream_name": "dalston:stream:faster-whisper",
             "status": "idle",
@@ -315,8 +324,8 @@ class TestServerRegistry:
         engine = await registry.get_engine("faster-whisper")
 
         assert engine is not None
-        assert engine.engine_id == "faster-whisper"
-        assert engine.instance_id == "faster-whisper-abc123"
+        assert engine.runtime == "faster-whisper"
+        assert engine.instance == "faster-whisper-abc123"
         assert engine.stage == "transcribe"
         assert engine.status == "idle"
         assert engine.current_task is None
@@ -338,19 +347,19 @@ class TestServerRegistry:
         def smembers_side_effect(key):
             if key == ENGINE_SET_KEY:
                 return {"faster-whisper", "whisperx", "pyannote"}
-            elif key == f"{SERVER_ENGINE_INSTANCES_PREFIX}faster-whisper":
+            elif key == f"{ENGINE_INSTANCES_PREFIX}faster-whisper":
                 return {"faster-whisper-abc123"}
-            elif key == f"{SERVER_ENGINE_INSTANCES_PREFIX}whisperx":
+            elif key == f"{ENGINE_INSTANCES_PREFIX}whisperx":
                 return {"whisperx-def456"}
-            elif key == f"{SERVER_ENGINE_INSTANCES_PREFIX}pyannote":
+            elif key == f"{ENGINE_INSTANCES_PREFIX}pyannote":
                 return {"pyannote-ghi789"}
             return set()
 
         mock_redis.smembers.side_effect = smembers_side_effect
         mock_redis.hgetall.side_effect = [
             {
-                "engine_id": "faster-whisper",
-                "instance_id": "faster-whisper-abc123",
+                "runtime": "faster-whisper",
+                "instance": "faster-whisper-abc123",
                 "stage": "transcribe",
                 "stream_name": "dalston:stream:faster-whisper",
                 "status": "idle",
@@ -359,8 +368,8 @@ class TestServerRegistry:
                 "registered_at": now,
             },
             {
-                "engine_id": "whisperx",
-                "instance_id": "whisperx-def456",
+                "runtime": "whisperx",
+                "instance": "whisperx-def456",
                 "stage": "align",
                 "stream_name": "dalston:stream:whisperx",
                 "status": "idle",
@@ -369,8 +378,8 @@ class TestServerRegistry:
                 "registered_at": now,
             },
             {
-                "engine_id": "pyannote",
-                "instance_id": "pyannote-ghi789",
+                "runtime": "pyannote",
+                "instance": "pyannote-ghi789",
                 "stage": "diarize",
                 "stream_name": "dalston:stream:pyannote",
                 "status": "idle",
@@ -392,8 +401,8 @@ class TestServerRegistry:
 
         mock_redis.smembers.return_value = {"faster-whisper-abc123"}
         mock_redis.hgetall.return_value = {
-            "engine_id": "faster-whisper",
-            "instance_id": "faster-whisper-abc123",
+            "runtime": "faster-whisper",
+            "instance": "faster-whisper-abc123",
             "stage": "transcribe",
             "stream_name": "dalston:stream:faster-whisper",
             "status": "idle",
@@ -422,8 +431,8 @@ class TestServerRegistry:
 
         mock_redis.smembers.return_value = {"faster-whisper-abc123"}
         mock_redis.hgetall.return_value = {
-            "engine_id": "faster-whisper",
-            "instance_id": "faster-whisper-abc123",
+            "runtime": "faster-whisper",
+            "instance": "faster-whisper-abc123",
             "stage": "transcribe",
             "stream_name": "dalston:stream:faster-whisper",
             "status": "idle",
@@ -449,8 +458,8 @@ class TestServerRegistry:
         mock_redis.hgetall.side_effect = [
             # First instance is stale
             {
-                "engine_id": "faster-whisper",
-                "instance_id": "faster-whisper-abc123",
+                "runtime": "faster-whisper",
+                "instance": "faster-whisper-abc123",
                 "stage": "transcribe",
                 "stream_name": "dalston:stream:faster-whisper",
                 "status": "idle",
@@ -460,8 +469,8 @@ class TestServerRegistry:
             },
             # Second instance is healthy
             {
-                "engine_id": "faster-whisper",
-                "instance_id": "faster-whisper-def456",
+                "runtime": "faster-whisper",
+                "instance": "faster-whisper-def456",
                 "stage": "transcribe",
                 "stream_name": "dalston:stream:faster-whisper",
                 "status": "idle",
@@ -497,8 +506,8 @@ class TestServerRegistry:
         }
         mock_redis.hgetall.side_effect = [
             {
-                "engine_id": "faster-whisper",
-                "instance_id": "faster-whisper-abc123",
+                "runtime": "faster-whisper",
+                "instance": "faster-whisper-abc123",
                 "stage": "transcribe",
                 "stream_name": "dalston:stream:faster-whisper",
                 "status": "idle",
@@ -507,8 +516,8 @@ class TestServerRegistry:
                 "registered_at": now,
             },
             {
-                "engine_id": "faster-whisper",
-                "instance_id": "faster-whisper-def456",
+                "runtime": "faster-whisper",
+                "instance": "faster-whisper-def456",
                 "stage": "transcribe",
                 "stream_name": "dalston:stream:faster-whisper",
                 "status": "idle",
@@ -536,10 +545,10 @@ class TestEngineUnavailableError:
         """Test exception has correct attributes."""
         error = EngineUnavailableError(
             message="Engine 'foo' is not available",
-            engine_id="foo",
+            runtime="foo",
             stage="transcribe",
         )
 
         assert str(error) == "Engine 'foo' is not available"
-        assert error.engine_id == "foo"
+        assert error.runtime == "foo"
         assert error.stage == "transcribe"

@@ -19,9 +19,9 @@ import dalston.telemetry
 from dalston.common.timeouts import REALTIME_SESSION_TTL_SECONDS
 from dalston.session_router.registry import (
     ACTIVE_SESSIONS_KEY,
+    INSTANCE_KEY_PREFIX,
+    INSTANCE_SESSIONS_SUFFIX,
     SESSION_KEY_PREFIX,
-    WORKER_KEY_PREFIX,
-    WORKER_SESSIONS_SUFFIX,
     WorkerRegistry,
 )
 
@@ -33,16 +33,16 @@ class WorkerAllocation:
     """Result of successful worker allocation.
 
     Attributes:
-        worker_id: Allocated worker identifier
+        instance: Allocated instance identifier
         endpoint: Worker WebSocket endpoint URL
         session_id: Newly created session ID
-        engine: Engine type (e.g., "parakeet", "whisper")
+        runtime: Runtime framework (e.g., "faster-whisper", "parakeet")
     """
 
-    worker_id: str
+    instance: str
     endpoint: str
     session_id: str
-    engine: str
+    runtime: str
 
 
 @dataclass
@@ -51,7 +51,7 @@ class SessionState:
 
     Attributes:
         session_id: Session identifier
-        worker_id: Assigned worker
+        instance: Assigned instance
         status: Session status (active, ended, error)
         language: Requested language
         model: Requested model variant
@@ -60,7 +60,7 @@ class SessionState:
     """
 
     session_id: str
-    worker_id: str
+    instance: str
     status: str
     language: str
     model: str
@@ -118,6 +118,7 @@ class SessionAllocator:
         model: str | None,
         client_ip: str,
         runtime: str | None = None,
+        valid_runtimes: set[str] | None = None,
     ) -> WorkerAllocation | None:
         """Find worker with capacity and reserve a slot.
 
@@ -129,6 +130,8 @@ class SessionAllocator:
             client_ip: Client IP address for logging
             runtime: Model runtime (e.g., "faster-whisper") for routing when model
                      isn't pre-loaded. Workers matching runtime can load the model.
+            valid_runtimes: When model=None and runtime=None, only consider workers
+                     whose runtime is in this set. Used for "Any available" routing.
 
         Returns:
             WorkerAllocation if successful, None if no capacity available
@@ -144,7 +147,7 @@ class SessionAllocator:
         ):
             # Find available workers
             available = await self._registry.get_available_workers(
-                model, language, runtime
+                model, language, runtime, valid_runtimes
             )
 
             if not available:
@@ -158,15 +161,15 @@ class SessionAllocator:
             session_id = f"sess_{uuid.uuid4().hex[:16]}"
 
             # Atomically increment active_sessions
-            worker_key = f"{WORKER_KEY_PREFIX}{worker.worker_id}"
-            new_count = await self._redis.hincrby(worker_key, "active_sessions", 1)
+            instance_key = f"{INSTANCE_KEY_PREFIX}{worker.instance}"
+            new_count = await self._redis.hincrby(instance_key, "active_sessions", 1)
 
             # Verify we didn't exceed capacity (race condition check)
             if new_count > worker.capacity:
                 # Rollback
-                await self._redis.hincrby(worker_key, "active_sessions", -1)
+                await self._redis.hincrby(instance_key, "active_sessions", -1)
                 logger.warning(
-                    "worker_at_capacity_rollback", worker_id=worker.worker_id
+                    "instance_at_capacity_rollback", instance=worker.instance
                 )
                 # Try next worker
                 if len(available) > 1:
@@ -178,15 +181,15 @@ class SessionAllocator:
             # Create session record
             await self._create_session(
                 session_id=session_id,
-                worker_id=worker.worker_id,
+                instance=worker.instance,
                 language=language,
                 model=model,
                 client_ip=client_ip,
             )
 
-            # Add to worker's session set
+            # Add to instance's session set
             sessions_key = (
-                f"{WORKER_KEY_PREFIX}{worker.worker_id}{WORKER_SESSIONS_SUFFIX}"
+                f"{INSTANCE_KEY_PREFIX}{worker.instance}{INSTANCE_SESSIONS_SUFFIX}"
             )
             await self._redis.sadd(sessions_key, session_id)
 
@@ -195,30 +198,30 @@ class SessionAllocator:
 
             # Set span attributes for allocated session
             dalston.telemetry.set_span_attribute("dalston.session_id", session_id)
-            dalston.telemetry.set_span_attribute("dalston.worker_id", worker.worker_id)
+            dalston.telemetry.set_span_attribute("dalston.instance", worker.instance)
 
             # Record allocation duration metric (M20)
             dalston.metrics.observe_session_router_allocation(
                 time.perf_counter() - allocation_start
             )
-            # Update active sessions gauge for this worker
+            # Update active sessions gauge for this instance
             dalston.metrics.set_session_router_sessions_active(
-                worker.worker_id, new_count
+                worker.instance, new_count
             )
 
             logger.info(
                 "session_allocated",
                 session_id=session_id,
-                worker_id=worker.worker_id,
+                instance=worker.instance,
                 active=new_count,
                 capacity=worker.capacity,
             )
 
             return WorkerAllocation(
-                worker_id=worker.worker_id,
+                instance=worker.instance,
                 endpoint=worker.endpoint,
                 session_id=session_id,
-                engine=worker.engine,
+                runtime=worker.runtime,
             )
 
     async def _acquire_from_list(
@@ -231,20 +234,20 @@ class SessionAllocator:
         """Try to acquire from remaining workers in list."""
         for worker in workers:
             session_id = f"sess_{uuid.uuid4().hex[:16]}"
-            worker_key = f"{WORKER_KEY_PREFIX}{worker.worker_id}"
-            new_count = await self._redis.hincrby(worker_key, "active_sessions", 1)
+            instance_key = f"{INSTANCE_KEY_PREFIX}{worker.instance}"
+            new_count = await self._redis.hincrby(instance_key, "active_sessions", 1)
 
             if new_count <= worker.capacity:
                 await self._create_session(
                     session_id=session_id,
-                    worker_id=worker.worker_id,
+                    instance=worker.instance,
                     language=language,
                     model=model,
                     client_ip=client_ip,
                 )
 
                 sessions_key = (
-                    f"{WORKER_KEY_PREFIX}{worker.worker_id}{WORKER_SESSIONS_SUFFIX}"
+                    f"{INSTANCE_KEY_PREFIX}{worker.instance}{INSTANCE_SESSIONS_SUFFIX}"
                 )
                 await self._redis.sadd(sessions_key, session_id)
                 await self._redis.sadd(ACTIVE_SESSIONS_KEY, session_id)
@@ -252,25 +255,25 @@ class SessionAllocator:
                 logger.info(
                     "session_allocated",
                     session_id=session_id,
-                    worker_id=worker.worker_id,
+                    instance=worker.instance,
                 )
 
                 return WorkerAllocation(
-                    worker_id=worker.worker_id,
+                    instance=worker.instance,
                     endpoint=worker.endpoint,
                     session_id=session_id,
-                    engine=worker.engine,
+                    runtime=worker.runtime,
                 )
 
             # Rollback and try next
-            await self._redis.hincrby(worker_key, "active_sessions", -1)
+            await self._redis.hincrby(instance_key, "active_sessions", -1)
 
         return None
 
     async def _create_session(
         self,
         session_id: str,
-        worker_id: str,
+        instance: str,
         language: str,
         model: str | None,
         client_ip: str,
@@ -281,7 +284,7 @@ class SessionAllocator:
         await self._redis.hset(
             session_key,
             mapping={
-                "worker_id": worker_id,
+                "instance": instance,
                 "status": "active",
                 "language": language,
                 "model": model or "",  # Redis can't store None
@@ -310,20 +313,20 @@ class SessionAllocator:
             logger.warning("session_not_found", session_id=session_id)
             return None
 
-        worker_id = data.get("worker_id")
-        if not worker_id:
-            logger.warning("session_no_worker_id", session_id=session_id)
+        instance = data.get("instance")
+        if not instance:
+            logger.warning("session_no_instance", session_id=session_id)
             return None
 
-        # Decrement worker's active sessions
-        worker_key = f"{WORKER_KEY_PREFIX}{worker_id}"
-        new_count = await self._redis.hincrby(worker_key, "active_sessions", -1)
+        # Decrement instance's active sessions
+        instance_key = f"{INSTANCE_KEY_PREFIX}{instance}"
+        new_count = await self._redis.hincrby(instance_key, "active_sessions", -1)
 
-        # Update active sessions gauge for this worker (M20)
-        dalston.metrics.set_session_router_sessions_active(worker_id, max(0, new_count))
+        # Update active sessions gauge for this instance (M20)
+        dalston.metrics.set_session_router_sessions_active(instance, max(0, new_count))
 
-        # Remove from worker's session set
-        sessions_key = f"{WORKER_KEY_PREFIX}{worker_id}{WORKER_SESSIONS_SUFFIX}"
+        # Remove from instance's session set
+        sessions_key = f"{INSTANCE_KEY_PREFIX}{instance}{INSTANCE_SESSIONS_SUFFIX}"
         await self._redis.srem(sessions_key, session_id)
 
         # Remove from active sessions index
@@ -335,11 +338,11 @@ class SessionAllocator:
         # Set short TTL for cleanup
         await self._redis.expire(session_key, 60)  # 1 minute
 
-        logger.info("session_released", session_id=session_id, worker_id=worker_id)
+        logger.info("session_released", session_id=session_id, instance=instance)
 
         return SessionState(
             session_id=session_id,
-            worker_id=worker_id,
+            instance=instance,
             status="ended",
             language=data.get("language", "auto"),
             model=data.get("model", "fast"),
@@ -364,7 +367,7 @@ class SessionAllocator:
 
         return SessionState(
             session_id=session_id,
-            worker_id=data.get("worker_id", ""),
+            instance=data.get("instance", ""),
             status=data.get("status", "unknown"),
             language=data.get("language", "auto"),
             model=data.get("model", "fast"),

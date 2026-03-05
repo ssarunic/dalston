@@ -58,12 +58,13 @@ class TestNeMoModelManagerInit:
 
     def test_from_env_defaults(self):
         """Test from_env with no environment variables set."""
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = False
         with patch(
             "dalston.engine_sdk.managers.nemo.NeMoModelManager._start_eviction_thread"
         ):
             with patch.dict("os.environ", {}, clear=True):
-                # Mock torch to control device detection
-                with patch("torch.cuda.is_available", return_value=False):
+                with patch.dict("sys.modules", {"torch": mock_torch}):
                     from dalston.engine_sdk.managers.nemo import NeMoModelManager
 
                     manager = NeMoModelManager.from_env()
@@ -76,11 +77,13 @@ class TestNeMoModelManagerInit:
 
     def test_from_env_with_cuda(self):
         """Test from_env when CUDA is available."""
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
         with patch(
             "dalston.engine_sdk.managers.nemo.NeMoModelManager._start_eviction_thread"
         ):
             with patch.dict("os.environ", {}, clear=True):
-                with patch("torch.cuda.is_available", return_value=True):
+                with patch.dict("sys.modules", {"torch": mock_torch}):
                     from dalston.engine_sdk.managers.nemo import NeMoModelManager
 
                     manager = NeMoModelManager.from_env()

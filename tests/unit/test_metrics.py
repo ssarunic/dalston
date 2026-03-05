@@ -142,7 +142,7 @@ class TestOrchestratorMetrics:
         """Test observing job duration."""
         import dalston.metrics
 
-        dalston.metrics.observe_orchestrator_job_duration(5, 120.5)
+        dalston.metrics.observe_orchestrator_job_duration("faster-whisper", "", 120.5)
 
     def test_inc_orchestrator_tasks_scheduled(self):
         """Test incrementing tasks scheduled counter."""
@@ -187,14 +187,14 @@ class TestEngineMetrics:
         """Test incrementing engine tasks counter."""
         import dalston.metrics
 
-        dalston.metrics.inc_engine_tasks("faster-whisper", "success")
-        dalston.metrics.inc_engine_tasks("faster-whisper", "failure")
+        dalston.metrics.inc_engine_tasks("faster-whisper", "", "success")
+        dalston.metrics.inc_engine_tasks("faster-whisper", "", "failure")
 
     def test_observe_engine_task_duration(self):
         """Test observing engine task duration."""
         import dalston.metrics
 
-        dalston.metrics.observe_engine_task_duration("faster-whisper", 15.5)
+        dalston.metrics.observe_engine_task_duration("faster-whisper", "", 15.5)
 
     def test_observe_engine_queue_wait(self):
         """Test observing engine queue wait time."""
@@ -279,20 +279,20 @@ class TestRealtimeMetrics:
         """Test observing realtime session duration."""
         import dalston.metrics
 
-        dalston.metrics.observe_realtime_session_duration(120.5)
+        dalston.metrics.observe_realtime_session_duration("faster-whisper", "", 120.5)
 
     def test_inc_realtime_audio_processed(self):
         """Test incrementing audio processed counter."""
         import dalston.metrics
 
-        dalston.metrics.inc_realtime_audio_processed("worker-1", 30.0)
+        dalston.metrics.inc_realtime_audio_processed("worker-1", "", 30.0)
 
     def test_inc_realtime_transcripts(self):
         """Test incrementing transcripts counter."""
         import dalston.metrics
 
-        dalston.metrics.inc_realtime_transcripts("partial")
-        dalston.metrics.inc_realtime_transcripts("final")
+        dalston.metrics.inc_realtime_transcripts("faster-whisper", "", "partial")
+        dalston.metrics.inc_realtime_transcripts("faster-whisper", "", "final")
 
 
 class TestQueueMetrics:
@@ -362,7 +362,7 @@ class TestMetricsNoOpWhenDisabled:
         import dalston.metrics
 
         dalston.metrics.inc_orchestrator_jobs("completed")
-        dalston.metrics.observe_orchestrator_job_duration(5, 120.5)
+        dalston.metrics.observe_orchestrator_job_duration("faster-whisper", "", 120.5)
         dalston.metrics.inc_orchestrator_tasks_scheduled("engine", "stage")
         dalston.metrics.inc_orchestrator_tasks_completed("engine", "success")
         dalston.metrics.inc_orchestrator_events("event.type")
@@ -372,8 +372,8 @@ class TestMetricsNoOpWhenDisabled:
         """Engine metrics should be no-ops when disabled."""
         import dalston.metrics
 
-        dalston.metrics.inc_engine_tasks("engine", "success")
-        dalston.metrics.observe_engine_task_duration("engine", 15.5)
+        dalston.metrics.inc_engine_tasks("engine", "", "success")
+        dalston.metrics.observe_engine_task_duration("engine", "", 15.5)
         dalston.metrics.observe_engine_queue_wait("engine", 2.5)
         dalston.metrics.observe_engine_s3_download("engine", 0.5)
         dalston.metrics.observe_engine_s3_upload("engine", 0.3)
@@ -392,6 +392,6 @@ class TestMetricsNoOpWhenDisabled:
         """Realtime metrics should be no-ops when disabled."""
         import dalston.metrics
 
-        dalston.metrics.observe_realtime_session_duration(120.5)
-        dalston.metrics.inc_realtime_audio_processed("worker", 30.0)
-        dalston.metrics.inc_realtime_transcripts("final")
+        dalston.metrics.observe_realtime_session_duration("faster-whisper", "", 120.5)
+        dalston.metrics.inc_realtime_audio_processed("worker", "", 30.0)
+        dalston.metrics.inc_realtime_transcripts("faster-whisper", "", "final")

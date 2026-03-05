@@ -219,7 +219,7 @@ async def read_task(
     Args:
         redis: Async Redis client
         stage: Pipeline stage name
-        consumer: Consumer ID (typically engine_id)
+        consumer: Consumer ID (typically instance)
         block_ms: How long to block waiting for tasks (default 30s)
 
     Returns:
@@ -549,20 +549,20 @@ async def get_stream_info(redis: Redis, stage: str) -> dict[str, Any]:
     return info
 
 
-async def is_engine_alive(redis: Redis, engine_id: str) -> bool:
-    """Check if an engine is still alive (heartbeating).
+async def is_engine_alive(redis: Redis, instance: str) -> bool:
+    """Check if an engine instance is still alive (heartbeating).
 
     Args:
         redis: Async Redis client
-        engine_id: Engine ID to check
+        instance: Instance ID to check
 
     Returns:
-        True if engine has recent heartbeat, False otherwise
+        True if instance has recent heartbeat, False otherwise
     """
-    from dalston.engine_sdk.registry import ENGINE_KEY_PREFIX
+    from dalston.engine_sdk.registry import INSTANCE_KEY_PREFIX
 
-    engine_key = f"{ENGINE_KEY_PREFIX}{engine_id}"
-    data: dict = await redis.hgetall(engine_key)  # type: ignore[assignment]
+    instance_key = f"{INSTANCE_KEY_PREFIX}{instance}"
+    data: dict = await redis.hgetall(instance_key)  # type: ignore[assignment]
 
     if not data:
         return False
