@@ -13,6 +13,15 @@
 ## Build, Test, and Development Commands
 
 - Prefer `make <target>` for common workflows; use raw commands only when no suitable Makefile target exists.
+- `make help`: list available workflows.
+- `make dev`: start full local stack (CPU-friendly).
+- `make dev-minimal`: start minimal stack for quick iteration.
+- `make dev-gpu`: start GPU stack (NVIDIA required).
+- `make stop`: stop services.
+- `make ps`: show running services.
+- `make logs` / `make logs-all`: view service logs.
+- `make health`: service health checks.
+- `make validate`: validate compose configurations.
 - `docker compose up -d`: start full local stack (gateway, workers, dependencies).
 - `pip install -e ".[gateway,orchestrator,dev]"`: install backend for development.
 - `pytest`: run default tests (`e2e` excluded by config).
@@ -21,6 +30,20 @@
 - `pre-commit run --all-files`: run all repository hooks.
 - `npm run dev --prefix web`: run frontend locally.
 - `npm run build --prefix web` and `npm run lint --prefix web`: build and lint frontend.
+
+## Runtime Mode Guardrails
+
+- Never run Docker and local Python processes for the same service simultaneously.
+- Before Docker mode (`make dev`), stop local gateway/orchestrator processes:
+  - `pkill -f "dalston.orchestrator" || true`
+  - `pkill -f "dalston.gateway" || true`
+  - `ps aux | grep -E "dalston\\.(orchestrator|gateway)" | grep -v grep`
+- Before local mode, stop conflicting containers:
+  - `docker compose stop orchestrator gateway`
+- If debugging stuck jobs, check duplicate orchestrators/consumers:
+  - `docker ps | grep orchestrator`
+  - `ps aux | grep "dalston.orchestrator" | grep -v grep`
+  - `docker compose exec redis redis-cli XINFO CONSUMERS "dalston:events:stream" orchestrators`
 
 ## Coding Style & Naming Conventions
 
@@ -46,3 +69,17 @@
 
 - Copy from `.env.example`; never commit real secrets or API keys.
 - Validate migrations in `alembic/versions/` and document config changes in `docs/` when relevant.
+
+## API Modes
+
+- Dalston-native: `/v1/audio/transcriptions/*`
+- ElevenLabs-compatible: `/v1/speech-to-text/*`
+- Realtime WS: `/v1/audio/transcriptions/stream` and `/v1/speech-to-text/realtime`
+
+## Architecture Guardrails
+
+- Keep handlers thin: parse request, call service, map response/errors.
+- Keep business logic in service/domain layers, not API handlers.
+- Prefer dependency injection over constructing external clients in core business logic.
+- Avoid blocking I/O in async paths; use `asyncio.to_thread()` where unavoidable.
+- Keep migrations append-only once released.
