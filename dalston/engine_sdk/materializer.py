@@ -12,6 +12,7 @@ from dalston.common.artifacts import (
     ArtifactReference,
     MaterializedArtifact,
     ProducedArtifact,
+    build_task_artifact_id,
 )
 from dalston.engine_sdk import io
 
@@ -105,7 +106,7 @@ class ArtifactMaterializer:
         """Upload produced files and return persisted artifact references."""
         persisted: list[ArtifactReference] = []
         for produced in produced_artifacts:
-            artifact_id = f"{task_id}:{produced.logical_name}"
+            artifact_id = build_task_artifact_id(task_id, produced.logical_name)
             storage_locator = self._locator_builder(job_id, artifact_id, produced)
             self.store.upload(produced.local_path, storage_locator)
 

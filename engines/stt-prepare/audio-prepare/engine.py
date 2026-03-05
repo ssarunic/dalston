@@ -8,6 +8,7 @@ import json
 import subprocess
 from pathlib import Path
 
+from dalston.common.artifacts import build_task_artifact_id
 from dalston.engine_sdk import (
     AudioMedia,
     BatchTaskContext,
@@ -117,7 +118,7 @@ class AudioPrepareEngine(Engine):
         self.logger.info("prepared_audio_metadata", metadata=prepared_metadata)
 
         logical_name = "prepared_audio"
-        artifact_id = f"{input.task_id}:{logical_name}"
+        artifact_id = build_task_artifact_id(input.task_id, logical_name)
         produced = ctx.describe_artifact(
             logical_name=logical_name,
             local_path=prepared_path,
@@ -197,7 +198,7 @@ class AudioPrepareEngine(Engine):
             )
 
             logical_name = f"prepared_audio_ch{channel_idx}"
-            artifact_id = f"{task_id}:{logical_name}"
+            artifact_id = build_task_artifact_id(task_id, logical_name)
             produced_artifacts.append(
                 ctx.describe_artifact(
                     logical_name=logical_name,

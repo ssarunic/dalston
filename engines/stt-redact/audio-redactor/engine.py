@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from dalston.common.artifacts import build_task_artifact_id
 from dalston.engine_sdk import (
     AudioRedactOutput,
     BatchTaskContext,
@@ -53,7 +54,7 @@ class AudioRedactionEngine(Engine):
             pii_key = "pii_detect"
 
         logical_name = f"redacted_audio{channel_suffix}"
-        artifact_id = f"{input.task_id}:{logical_name}"
+        artifact_id = build_task_artifact_id(input.task_id, logical_name)
 
         # Get config
         mode_str = config.get("redaction_mode", "silence")

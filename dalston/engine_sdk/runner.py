@@ -100,6 +100,8 @@ class EngineRunner:
     TEMP_DIR_PREFIX = "dalston_task_"
     HEARTBEAT_INTERVAL = 10  # seconds between heartbeats
     HEARTBEAT_TTL = 60  # auto-expire heartbeat if engine crashes
+    DURABLE_EVENT_MAX_RETRIES = 5
+    DURABLE_EVENT_BASE_BACKOFF_SECONDS = 0.1
 
     def __init__(self, engine: Engine) -> None:
         """Initialize the runner.
@@ -766,6 +768,41 @@ class EngineRunner:
                     artifact.model_dump_json(exclude_none=True),
                 )
 
+    def _publish_durable_event(
+        self,
+        *,
+        event_type: str,
+        payload: dict[str, Any],
+        task_id: str,
+    ) -> bool:
+        """Write durable event with retry/backoff."""
+        for attempt in range(self.DURABLE_EVENT_MAX_RETRIES):
+            try:
+                add_durable_event_sync(self.redis_client, event_type, payload)
+                return True
+            except Exception as e:
+                if attempt < self.DURABLE_EVENT_MAX_RETRIES - 1:
+                    backoff_seconds = self.DURABLE_EVENT_BASE_BACKOFF_SECONDS * (
+                        2**attempt
+                    )
+                    logger.warning(
+                        "durable_event_write_retry",
+                        event_type=event_type,
+                        task_id=task_id,
+                        attempt=attempt + 1,
+                        backoff_seconds=backoff_seconds,
+                        error=str(e),
+                    )
+                    time.sleep(backoff_seconds)
+                else:
+                    logger.error(
+                        "durable_event_write_failed",
+                        event_type=event_type,
+                        task_id=task_id,
+                        error=str(e),
+                    )
+        return False
+
     def _publish_task_started(self, task_id: str, job_id: str) -> None:
         """Publish task.started event to Redis pub/sub and durable stream.
 
@@ -789,41 +826,11 @@ class EngineRunner:
         if trace_context:
             event["_trace_context"] = trace_context
 
-        # Write to durable stream FIRST (primary mechanism)
-        # Orchestrator now consumes only from durable stream, so this MUST succeed
-        # Retry up to 5 times with exponential backoff on transient failures
-        # If all retries fail, reconciliation sweeper will eventually detect the inconsistency
-        durable_success = False
-        max_retries = 5
-        for attempt in range(max_retries):
-            try:
-                add_durable_event_sync(
-                    self.redis_client,
-                    "task.started",
-                    {"task_id": task_id, "job_id": job_id, "runtime": self.runtime},
-                )
-                durable_success = True
-                break
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    # Exponential backoff: 0.1s, 0.2s, 0.4s, 0.8s
-                    backoff_seconds = 0.1 * (2**attempt)
-                    logger.warning(
-                        "durable_event_write_retry",
-                        event_type="task.started",
-                        task_id=task_id,
-                        attempt=attempt + 1,
-                        backoff_seconds=backoff_seconds,
-                        error=str(e),
-                    )
-                    time.sleep(backoff_seconds)
-                else:
-                    logger.error(
-                        "durable_event_write_failed",
-                        event_type="task.started",
-                        task_id=task_id,
-                        error=str(e),
-                    )
+        durable_success = self._publish_durable_event(
+            event_type="task.started",
+            payload={"task_id": task_id, "job_id": job_id, "runtime": self.runtime},
+            task_id=task_id,
+        )
 
         # Publish to pub/sub for real-time delivery (secondary, for other consumers)
         self.redis_client.publish(self.EVENTS_CHANNEL, json.dumps(event))
@@ -863,41 +870,11 @@ class EngineRunner:
         if trace_context:
             event["_trace_context"] = trace_context
 
-        # Write to durable stream FIRST (primary mechanism)
-        # Orchestrator now consumes only from durable stream, so this MUST succeed
-        # Retry up to 5 times with exponential backoff on transient failures
-        # If all retries fail, reconciliation sweeper will eventually detect the inconsistency
-        durable_success = False
-        max_retries = 5
-        for attempt in range(max_retries):
-            try:
-                add_durable_event_sync(
-                    self.redis_client,
-                    "task.completed",
-                    {"task_id": task_id, "job_id": job_id, "runtime": self.runtime},
-                )
-                durable_success = True
-                break
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    # Exponential backoff: 0.1s, 0.2s, 0.4s, 0.8s
-                    backoff_seconds = 0.1 * (2**attempt)
-                    logger.warning(
-                        "durable_event_write_retry",
-                        event_type="task.completed",
-                        task_id=task_id,
-                        attempt=attempt + 1,
-                        backoff_seconds=backoff_seconds,
-                        error=str(e),
-                    )
-                    time.sleep(backoff_seconds)
-                else:
-                    logger.error(
-                        "durable_event_write_failed",
-                        event_type="task.completed",
-                        task_id=task_id,
-                        error=str(e),
-                    )
+        durable_success = self._publish_durable_event(
+            event_type="task.completed",
+            payload={"task_id": task_id, "job_id": job_id, "runtime": self.runtime},
+            task_id=task_id,
+        )
 
         # Publish to pub/sub for real-time delivery (secondary, for other consumers)
         self.redis_client.publish(self.EVENTS_CHANNEL, json.dumps(event))
@@ -944,46 +921,16 @@ class EngineRunner:
         if trace_context:
             event["_trace_context"] = trace_context
 
-        # Write to durable stream FIRST (primary mechanism)
-        # Orchestrator now consumes only from durable stream, so this MUST succeed
-        # Retry up to 5 times with exponential backoff on transient failures
-        # If all retries fail, reconciliation sweeper will eventually detect the inconsistency
-        durable_success = False
-        max_retries = 5
-        for attempt in range(max_retries):
-            try:
-                add_durable_event_sync(
-                    self.redis_client,
-                    "task.failed",
-                    {
-                        "task_id": task_id,
-                        "job_id": job_id,
-                        "runtime": self.runtime,
-                        "error": error,
-                    },
-                )
-                durable_success = True
-                break
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    # Exponential backoff: 0.1s, 0.2s, 0.4s, 0.8s
-                    backoff_seconds = 0.1 * (2**attempt)
-                    logger.warning(
-                        "durable_event_write_retry",
-                        event_type="task.failed",
-                        task_id=task_id,
-                        attempt=attempt + 1,
-                        backoff_seconds=backoff_seconds,
-                        error=str(e),
-                    )
-                    time.sleep(backoff_seconds)
-                else:
-                    logger.error(
-                        "durable_event_write_failed",
-                        event_type="task.failed",
-                        task_id=task_id,
-                        error=str(e),
-                    )
+        durable_success = self._publish_durable_event(
+            event_type="task.failed",
+            payload={
+                "task_id": task_id,
+                "job_id": job_id,
+                "runtime": self.runtime,
+                "error": error,
+            },
+            task_id=task_id,
+        )
 
         # Publish to pub/sub for real-time delivery (secondary, for other consumers)
         self.redis_client.publish(self.EVENTS_CHANNEL, json.dumps(event))

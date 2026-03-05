@@ -7,6 +7,11 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 
+def build_task_artifact_id(task_id: str, logical_name: str) -> str:
+    """Build canonical task-scoped artifact ID."""
+    return f"{task_id}:{logical_name}"
+
+
 class ArtifactSelector(BaseModel):
     """Describes which upstream artifact should fill an input slot."""
 

@@ -14,6 +14,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+from dalston.common.artifacts import build_task_artifact_id
 from dalston.engine_sdk import (
     BatchTaskContext,
     Engine,
@@ -616,7 +617,9 @@ class FinalMergerEngine(Engine):
             )
             if redacted_stereo_path:
                 logical_name = "redacted_stereo_audio"
-                redacted_stereo_artifact_id = f"{input.task_id}:{logical_name}"
+                redacted_stereo_artifact_id = build_task_artifact_id(
+                    input.task_id, logical_name
+                )
                 produced_artifacts.append(
                     ctx.describe_artifact(
                         logical_name=logical_name,
