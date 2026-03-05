@@ -155,3 +155,25 @@ def test_discarded_audio_reduces_effective_lag():
     handler._record_discarded_audio(2.0)
 
     assert handler._lag_seconds() == pytest.approx(0.0)
+
+
+@pytest.mark.asyncio
+async def test_debug_chunk_sleep_is_progressive(monkeypatch):
+    _, handler = _build_handler()
+    handler.config.debug_chunk_sleep_initial_seconds = 0.1
+    handler.config.debug_chunk_sleep_increment_seconds = 0.05
+    handler._next_debug_chunk_sleep_seconds = 0.1
+
+    sleep_calls: list[float] = []
+
+    async def _fake_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr("dalston.realtime_sdk.session.asyncio.sleep", _fake_sleep)
+
+    await handler._maybe_apply_debug_chunk_sleep()
+    await handler._maybe_apply_debug_chunk_sleep()
+    await handler._maybe_apply_debug_chunk_sleep()
+
+    assert sleep_calls == pytest.approx([0.1, 0.15, 0.2])
+    assert handler._next_debug_chunk_sleep_seconds == pytest.approx(0.25)

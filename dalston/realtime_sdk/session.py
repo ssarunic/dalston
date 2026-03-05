@@ -89,6 +89,8 @@ class SessionConfig:
         lag_warning_seconds: Lag threshold for warning event emission
         lag_hard_seconds: Lag threshold for hard termination window
         lag_hard_grace_seconds: Continuous hard-lag grace window before termination
+        debug_chunk_sleep_initial_seconds: Test-only sleep applied per chunk (starts here)
+        debug_chunk_sleep_increment_seconds: Test-only increment added after each chunk
     """
 
     session_id: str
@@ -115,6 +117,9 @@ class SessionConfig:
     lag_warning_seconds: float = 3.0
     lag_hard_seconds: float = 5.0
     lag_hard_grace_seconds: float = 2.0
+    # Debug/testing controls (default-off)
+    debug_chunk_sleep_initial_seconds: float = 0.0
+    debug_chunk_sleep_increment_seconds: float = 0.0
 
 
 class AudioBuffer:
@@ -347,6 +352,7 @@ class SessionHandler:
         self._last_lag_warning_at: float | None = None
         self._lag_monitor_task: asyncio.Task[None] | None = None
         self._lag_eval_lock = asyncio.Lock()
+        self._next_debug_chunk_sleep_seconds = config.debug_chunk_sleep_initial_seconds
 
         # Storage adapter (initialized in run() when storage is enabled)
         self._session_storage: SessionStorage | None = None
@@ -468,6 +474,8 @@ class SessionHandler:
         """
         if self._ended:
             return
+
+        await self._maybe_apply_debug_chunk_sleep()
 
         # When VAD is disabled, use time-based chunking only
         if self._vad is None:
@@ -1011,6 +1019,22 @@ class SessionHandler:
                 return
 
             await self._terminate_for_lag(lag_seconds)
+
+    async def _maybe_apply_debug_chunk_sleep(self) -> None:
+        """Inject progressive per-chunk delay for deterministic lag testing."""
+        delay_seconds = self._next_debug_chunk_sleep_seconds
+        next_delay = delay_seconds + self.config.debug_chunk_sleep_increment_seconds
+        self._next_debug_chunk_sleep_seconds = max(0.0, next_delay)
+
+        if delay_seconds <= 0:
+            return
+
+        logger.debug(
+            "debug_chunk_sleep_applied",
+            sleep_seconds=round(delay_seconds, 3),
+            next_sleep_seconds=round(self._next_debug_chunk_sleep_seconds, 3),
+        )
+        await asyncio.sleep(delay_seconds)
 
     async def _terminate_for_lag(self, lag_seconds: float) -> None:
         """Terminate session because lag exceeded hard budget for full grace window."""

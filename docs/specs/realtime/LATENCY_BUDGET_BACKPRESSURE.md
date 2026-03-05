@@ -172,11 +172,19 @@ Expose lag budget knobs via realtime worker config (environment and/or session c
 - `DALSTON_REALTIME_LAG_HARD_SECONDS`
 - `DALSTON_REALTIME_LAG_HARD_GRACE_SECONDS`
 
+For deterministic local testing, the worker also supports progressive per-chunk delay knobs (default-off):
+
+- `DALSTON_REALTIME_DEBUG_CHUNK_SLEEP_INITIAL_SECONDS`
+- `DALSTON_REALTIME_DEBUG_CHUNK_SLEEP_INCREMENT_SECONDS`
+
+These debug knobs are intended only for local/e2e lag-path verification.
+
 Validation rules:
 
 - `warning > 0`
 - `hard > warning`
 - `grace > 0`
+- `debug sleep values >= 0`
 
 Invalid values fail closed at startup/connection parse.
 

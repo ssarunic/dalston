@@ -786,6 +786,26 @@ class RealtimeEngine(ABC):
             float(os.environ.get("DALSTON_REALTIME_LAG_HARD_GRACE_SECONDS", "2.0")),
             min_val=0.001,
         )
+        debug_chunk_sleep_initial_seconds = get_float_param(
+            "debug_chunk_sleep_initial_seconds",
+            float(
+                os.environ.get(
+                    "DALSTON_REALTIME_DEBUG_CHUNK_SLEEP_INITIAL_SECONDS",
+                    "0.0",
+                )
+            ),
+            min_val=0.0,
+        )
+        debug_chunk_sleep_increment_seconds = get_float_param(
+            "debug_chunk_sleep_increment_seconds",
+            float(
+                os.environ.get(
+                    "DALSTON_REALTIME_DEBUG_CHUNK_SLEEP_INCREMENT_SECONDS",
+                    "0.0",
+                )
+            ),
+            min_val=0.0,
+        )
 
         if lag_hard_seconds <= lag_warning_seconds:
             raise ValueError(
@@ -847,4 +867,6 @@ class RealtimeEngine(ABC):
             lag_warning_seconds=lag_warning_seconds,
             lag_hard_seconds=lag_hard_seconds,
             lag_hard_grace_seconds=lag_hard_grace_seconds,
+            debug_chunk_sleep_initial_seconds=debug_chunk_sleep_initial_seconds,
+            debug_chunk_sleep_increment_seconds=debug_chunk_sleep_increment_seconds,
         )

@@ -37,6 +37,8 @@ class TestSessionConfigParsing:
         assert config.lag_warning_seconds == 3.0
         assert config.lag_hard_seconds == 5.0
         assert config.lag_hard_grace_seconds == 2.0
+        assert config.debug_chunk_sleep_initial_seconds == 0.0
+        assert config.debug_chunk_sleep_increment_seconds == 0.0
 
     def test_parse_vocabulary_valid_json(self, engine):
         """Test parsing valid vocabulary JSON array."""
@@ -110,6 +112,8 @@ class TestSessionConfigParsing:
                 "lag_warning_seconds": "2.5",
                 "lag_hard_seconds": "6.5",
                 "lag_hard_grace_seconds": "1.25",
+                "debug_chunk_sleep_initial_seconds": "0.15",
+                "debug_chunk_sleep_increment_seconds": "0.05",
             }
         )
         path = f"/session?{params}"
@@ -126,24 +130,39 @@ class TestSessionConfigParsing:
         assert config.lag_warning_seconds == 2.5
         assert config.lag_hard_seconds == 6.5
         assert config.lag_hard_grace_seconds == 1.25
+        assert config.debug_chunk_sleep_initial_seconds == 0.15
+        assert config.debug_chunk_sleep_increment_seconds == 0.05
 
     def test_parse_lag_config_from_env_defaults(self, engine, monkeypatch):
         """Test lag configuration defaults can come from environment."""
         monkeypatch.setenv("DALSTON_REALTIME_LAG_WARNING_SECONDS", "1.8")
         monkeypatch.setenv("DALSTON_REALTIME_LAG_HARD_SECONDS", "4.2")
         monkeypatch.setenv("DALSTON_REALTIME_LAG_HARD_GRACE_SECONDS", "0.9")
+        monkeypatch.setenv("DALSTON_REALTIME_DEBUG_CHUNK_SLEEP_INITIAL_SECONDS", "0.2")
+        monkeypatch.setenv(
+            "DALSTON_REALTIME_DEBUG_CHUNK_SLEEP_INCREMENT_SECONDS", "0.03"
+        )
 
         config = engine._parse_connection_params("/session")
 
         assert config.lag_warning_seconds == 1.8
         assert config.lag_hard_seconds == 4.2
         assert config.lag_hard_grace_seconds == 0.9
+        assert config.debug_chunk_sleep_initial_seconds == 0.2
+        assert config.debug_chunk_sleep_increment_seconds == 0.03
 
     def test_parse_lag_config_invalid_order_raises(self, engine):
         """Hard threshold must be greater than warning threshold."""
         with pytest.raises(ValueError, match="lag_hard_seconds must be greater"):
             engine._parse_connection_params(
                 "/session?lag_warning_seconds=5.0&lag_hard_seconds=5.0"
+            )
+
+    def test_parse_debug_chunk_sleep_negative_raises(self, engine):
+        """Debug sleep values must be non-negative."""
+        with pytest.raises(ValueError, match="debug_chunk_sleep_initial_seconds"):
+            engine._parse_connection_params(
+                "/session?debug_chunk_sleep_initial_seconds=-0.1"
             )
 
 
