@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, TypeAlias
 
 # -----------------------------------------------------------------------------
 # Shared Types
@@ -217,6 +217,71 @@ class ErrorMessage:
         return json.dumps(self.to_dict())
 
 
+@dataclass
+class ProcessingLagWarningMessage:
+    """Warning emitted when realtime lag crosses warning threshold."""
+
+    lag_seconds: float
+    warning_threshold_seconds: float
+    hard_threshold_seconds: float
+    message: str = "Processing lag is above threshold"
+    code: str = field(default="processing_lag", init=False)
+    type: str = field(default="warning", init=False)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": self.type,
+            "code": self.code,
+            "message": self.message,
+            "lag_seconds": self.lag_seconds,
+            "warning_threshold_seconds": self.warning_threshold_seconds,
+            "hard_threshold_seconds": self.hard_threshold_seconds,
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict())
+
+
+@dataclass
+class RecoveryHint:
+    """Recovery hint attached to recoverable session termination events."""
+
+    action: str
+    buffer_window_ms: int
+    retry_after_ms: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class SessionTerminatedMessage:
+    """Session terminated unexpectedly with optional recovery hint."""
+
+    session_id: str
+    reason: str
+    recoverable: bool
+    last_transcript_offset_ms: int | None = None
+    recovery_hint: RecoveryHint | None = None
+    type: str = field(default="session.terminated", init=False)
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "type": self.type,
+            "session_id": self.session_id,
+            "reason": self.reason,
+            "recoverable": self.recoverable,
+        }
+        if self.last_transcript_offset_ms is not None:
+            result["last_transcript_offset_ms"] = self.last_transcript_offset_ms
+        if self.recovery_hint is not None:
+            result["recovery_hint"] = self.recovery_hint.to_dict()
+        return result
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict())
+
+
 # -----------------------------------------------------------------------------
 # Client → Server Messages (parsed from JSON)
 # -----------------------------------------------------------------------------
@@ -252,17 +317,21 @@ class EndMessage:
 
 
 # Type alias for all client messages
-ClientMessage = ConfigUpdateMessage | FlushMessage | ClearMessage | EndMessage
+ClientMessage: TypeAlias = (
+    "ConfigUpdateMessage | FlushMessage | ClearMessage | EndMessage"
+)
 
 # Type alias for all server messages
-ServerMessage = (
-    SessionBeginMessage
-    | TranscriptPartialMessage
-    | TranscriptFinalMessage
-    | VADSpeechStartMessage
-    | VADSpeechEndMessage
-    | SessionEndMessage
-    | ErrorMessage
+ServerMessage: TypeAlias = (
+    "SessionBeginMessage"
+    " | TranscriptPartialMessage"
+    " | TranscriptFinalMessage"
+    " | VADSpeechStartMessage"
+    " | VADSpeechEndMessage"
+    " | ProcessingLagWarningMessage"
+    " | SessionEndMessage"
+    " | SessionTerminatedMessage"
+    " | ErrorMessage"
 )
 
 
@@ -313,4 +382,5 @@ class ErrorCode:
     LANGUAGE_UNSUPPORTED = "language_unsupported"
     NO_CAPACITY = "no_capacity"
     SESSION_TIMEOUT = "session_timeout"
+    LAG_EXCEEDED = "lag_exceeded"
     INTERNAL_ERROR = "internal_error"

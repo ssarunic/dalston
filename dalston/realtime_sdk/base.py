@@ -771,6 +771,28 @@ class RealtimeEngine(ABC):
                 # Invalid JSON - ignore and use None
                 pass
 
+        lag_warning_seconds = get_float_param(
+            "lag_warning_seconds",
+            float(os.environ.get("DALSTON_REALTIME_LAG_WARNING_SECONDS", "3.0")),
+            min_val=0.001,
+        )
+        lag_hard_seconds = get_float_param(
+            "lag_hard_seconds",
+            float(os.environ.get("DALSTON_REALTIME_LAG_HARD_SECONDS", "5.0")),
+            min_val=0.001,
+        )
+        lag_hard_grace_seconds = get_float_param(
+            "lag_hard_grace_seconds",
+            float(os.environ.get("DALSTON_REALTIME_LAG_HARD_GRACE_SECONDS", "2.0")),
+            min_val=0.001,
+        )
+
+        if lag_hard_seconds <= lag_warning_seconds:
+            raise ValueError(
+                "lag_hard_seconds must be greater than lag_warning_seconds "
+                f"(got warning={lag_warning_seconds}, hard={lag_hard_seconds})"
+            )
+
         return SessionConfig(
             session_id=session_id,
             language=get_param("language", "auto"),
@@ -822,4 +844,7 @@ class RealtimeEngine(ABC):
             # Storage options (S3 config read from Settings)
             store_audio=get_bool_param("store_audio", True),
             store_transcript=get_bool_param("store_transcript", True),
+            lag_warning_seconds=lag_warning_seconds,
+            lag_hard_seconds=lag_hard_seconds,
+            lag_hard_grace_seconds=lag_hard_grace_seconds,
         )

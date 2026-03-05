@@ -6,7 +6,7 @@
 | **Duration** | 3-5 days |
 | **Dependencies** | M6 (Realtime MVP), M8 (ElevenLabs compatibility) |
 | **Deliverable** | Lag budget enforcement in `SessionHandler`, protocol warning event, explicit lag close code, clean-cut removal of legacy compatibility paths |
-| **Status** | Planned |
+| **Status** | Complete (2026-03-05) |
 
 ## Desired Outcomes
 

@@ -28,6 +28,7 @@ from dalston.common.timeouts import (
 from dalston.common.utils import parse_session_id
 from dalston.common.ws_close_codes import (
     WS_CLOSE_INVALID_REQUEST,
+    WS_CLOSE_LAG_EXCEEDED,
     WS_CLOSE_RATE_LIMITED,
     WS_CLOSE_SERVICE_UNAVAILABLE,
 )
@@ -52,6 +53,10 @@ from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.realtime_sessions import RealtimeSessionService
 
 logger = structlog.get_logger()
+
+
+class RealtimeLagExceededError(RuntimeError):
+    """Raised when worker closes a session due to lag budget exceedance."""
 
 
 async def _check_realtime_rate_limits(
@@ -410,6 +415,11 @@ async def realtime_transcription(
                 store_audio=store_audio,
                 store_transcript=store_transcript,
             )
+        except RealtimeLagExceededError:
+            log.warning("session_lag_exceeded")
+            session_error = "lag_exceeded"
+            session_status = "error"
+            session_end_data = None
         except WebSocketDisconnect:
             log.info("client_disconnected")
             session_status = "interrupted"
@@ -471,6 +481,9 @@ async def realtime_transcription(
                     "session_end_data_missing",
                     msg="No session.end data received from worker",
                 )
+                if session_status == "completed":
+                    session_status = "error"
+                    session_error = session_error or "worker_no_session_end"
 
             # Finalize session in PostgreSQL
             if session_service:
@@ -863,6 +876,12 @@ async def _proxy_to_worker(
                 if exc is not None and session_end_data is None:
                     raise exc
 
+        if (
+            session_end_data is None
+            and getattr(worker_ws, "close_code", None) == WS_CLOSE_LAG_EXCEEDED
+        ):
+            raise RealtimeLagExceededError("lag_exceeded")
+
         return session_end_data
 
 
@@ -1210,6 +1229,29 @@ async def _elevenlabs_worker_to_client(
                     translated = {
                         "message_type": "error",
                         "error": data.get("message", "Unknown error"),
+                    }
+
+                elif msg_type == "warning":
+                    translated = {
+                        "message_type": "warning",
+                        "code": data.get("code", "warning"),
+                        "message": data.get("message", ""),
+                    }
+                    if "lag_seconds" in data:
+                        translated["lag_seconds"] = data.get("lag_seconds", 0)
+                    if "warning_threshold_seconds" in data:
+                        translated["warning_threshold_seconds"] = data.get(
+                            "warning_threshold_seconds", 0
+                        )
+                    if "hard_threshold_seconds" in data:
+                        translated["hard_threshold_seconds"] = data.get(
+                            "hard_threshold_seconds", 0
+                        )
+
+                elif msg_type == "session.terminated":
+                    translated = {
+                        "message_type": "error",
+                        "error": data.get("reason", "session_terminated"),
                     }
 
                 if translated:

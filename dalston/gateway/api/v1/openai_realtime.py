@@ -31,6 +31,7 @@ from dalston.common.timeouts import (
 )
 from dalston.common.ws_close_codes import (
     WS_CLOSE_INVALID_REQUEST,
+    WS_CLOSE_LAG_EXCEEDED,
     WS_CLOSE_RATE_LIMITED,
     WS_CLOSE_SERVICE_UNAVAILABLE,
 )
@@ -55,6 +56,11 @@ from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.realtime_sessions import RealtimeSessionService
 
 logger = structlog.get_logger()
+
+
+class RealtimeLagExceededError(RuntimeError):
+    """Raised when worker closes a session due to lag budget exceedance."""
+
 
 # Router for OpenAI-compatible realtime endpoint
 openai_realtime_router = APIRouter(tags=["realtime", "openai"])
@@ -333,6 +339,7 @@ async def openai_realtime_transcription(
 
         keepalive_task = None
         session_status = "completed"
+        session_error = None
         try:
             # Start keepalive task
             keepalive_task = asyncio.create_task(
@@ -367,6 +374,11 @@ async def openai_realtime_transcription(
                 model=rt.effective_model,  # Auto-selected largest model from registry
             )
 
+        except RealtimeLagExceededError:
+            log.warning("openai_session_lag_exceeded")
+            session_end_data = None
+            session_status = "error"
+            session_error = "lag_exceeded"
         except WebSocketDisconnect:
             log.info("openai_client_disconnected")
             session_end_data = None
@@ -375,6 +387,7 @@ async def openai_realtime_transcription(
             log.error("openai_session_error", error=str(e))
             session_end_data = None
             session_status = "error"
+            session_error = str(e)
         finally:
             if keepalive_task:
                 keepalive_task.cancel()
@@ -391,6 +404,7 @@ async def openai_realtime_transcription(
             # the worker connection failed silently - mark as error
             if session_end_data is None and session_status == "completed":
                 session_status = "error"
+                session_error = session_error or "worker_no_session_end"
                 log.warning(
                     "openai_session_no_end_data", msg="Worker didn't send session.end"
                 )
@@ -433,6 +447,7 @@ async def openai_realtime_transcription(
                         session_id=allocation.session_id,
                         status=session_status,
                         transcript_uri=transcript_uri,
+                        error=session_error,
                     )
                     log.debug("openai_session_finalized", status=session_status)
                 except Exception as e:
@@ -560,6 +575,12 @@ async def _proxy_to_worker_openai(
                 exc = task.exception()
                 if exc is not None and session_end_data is None:
                     raise exc
+
+        if (
+            session_end_data is None
+            and getattr(worker_ws, "close_code", None) == WS_CLOSE_LAG_EXCEEDED
+        ):
+            raise RealtimeLagExceededError("lag_exceeded")
 
         return session_end_data
 
@@ -876,6 +897,39 @@ async def _openai_worker_to_client(
                             "type": "server_error",
                             "code": data.get("code", "processing_failed"),
                             "message": data.get("message", "Unknown error"),
+                        },
+                    }
+
+                elif msg_type == "warning":
+                    translated = {
+                        "type": "warning",
+                        "event_id": generate_event_id(),
+                        "warning": {
+                            "code": data.get("code", "warning"),
+                            "message": data.get("message", ""),
+                        },
+                    }
+                    if "lag_seconds" in data:
+                        translated["warning"]["lag_seconds"] = data.get(
+                            "lag_seconds", 0
+                        )
+                    if "warning_threshold_seconds" in data:
+                        translated["warning"]["warning_threshold_seconds"] = data.get(
+                            "warning_threshold_seconds", 0
+                        )
+                    if "hard_threshold_seconds" in data:
+                        translated["warning"]["hard_threshold_seconds"] = data.get(
+                            "hard_threshold_seconds", 0
+                        )
+
+                elif msg_type == "session.terminated":
+                    translated = {
+                        "type": "error",
+                        "event_id": generate_event_id(),
+                        "error": {
+                            "type": "server_error",
+                            "code": data.get("reason", "session_terminated"),
+                            "message": "Realtime session terminated",
                         },
                     }
 

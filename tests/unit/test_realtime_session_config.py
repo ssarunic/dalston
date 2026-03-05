@@ -34,6 +34,9 @@ class TestSessionConfigParsing:
         assert config.language == "en"
         assert config.sample_rate == 16000
         assert config.vocabulary is None
+        assert config.lag_warning_seconds == 3.0
+        assert config.lag_hard_seconds == 5.0
+        assert config.lag_hard_grace_seconds == 2.0
 
     def test_parse_vocabulary_valid_json(self, engine):
         """Test parsing valid vocabulary JSON array."""
@@ -104,6 +107,9 @@ class TestSessionConfigParsing:
                 "interim_results": "true",
                 "word_timestamps": "true",
                 "vocabulary": json.dumps(vocab),
+                "lag_warning_seconds": "2.5",
+                "lag_hard_seconds": "6.5",
+                "lag_hard_grace_seconds": "1.25",
             }
         )
         path = f"/session?{params}"
@@ -117,6 +123,28 @@ class TestSessionConfigParsing:
         assert config.interim_results is True
         assert config.word_timestamps is True
         assert config.vocabulary == vocab
+        assert config.lag_warning_seconds == 2.5
+        assert config.lag_hard_seconds == 6.5
+        assert config.lag_hard_grace_seconds == 1.25
+
+    def test_parse_lag_config_from_env_defaults(self, engine, monkeypatch):
+        """Test lag configuration defaults can come from environment."""
+        monkeypatch.setenv("DALSTON_REALTIME_LAG_WARNING_SECONDS", "1.8")
+        monkeypatch.setenv("DALSTON_REALTIME_LAG_HARD_SECONDS", "4.2")
+        monkeypatch.setenv("DALSTON_REALTIME_LAG_HARD_GRACE_SECONDS", "0.9")
+
+        config = engine._parse_connection_params("/session")
+
+        assert config.lag_warning_seconds == 1.8
+        assert config.lag_hard_seconds == 4.2
+        assert config.lag_hard_grace_seconds == 0.9
+
+    def test_parse_lag_config_invalid_order_raises(self, engine):
+        """Hard threshold must be greater than warning threshold."""
+        with pytest.raises(ValueError, match="lag_hard_seconds must be greater"):
+            engine._parse_connection_params(
+                "/session?lag_warning_seconds=5.0&lag_hard_seconds=5.0"
+            )
 
 
 class TestSessionConfigDataclass:

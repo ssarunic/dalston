@@ -27,6 +27,7 @@ from dalston.common.audio_defaults import (
     DEFAULT_SAMPLE_RATE,
     DEFAULT_VAD_THRESHOLD,
 )
+from dalston.common.ws_close_codes import WS_CLOSE_LAG_EXCEEDED
 from dalston.realtime_sdk.assembler import (
     TranscribeResult,
     TranscriptAssembler,
@@ -39,10 +40,12 @@ from dalston.realtime_sdk.protocol import (
     ErrorCode,
     ErrorMessage,
     FlushMessage,
+    ProcessingLagWarningMessage,
     SegmentInfo,
     SessionBeginMessage,
     SessionConfigInfo,
     SessionEndMessage,
+    SessionTerminatedMessage,
     TranscriptFinalMessage,
     TranscriptPartialMessage,
     VADSpeechEndMessage,
@@ -56,6 +59,10 @@ if TYPE_CHECKING:
     from websockets import WebSocketServerProtocol
 
 logger = structlog.get_logger()
+
+
+LAG_MONITOR_TICK_SECONDS = 0.25
+LAG_WARNING_RATE_LIMIT_SECONDS = 1.0
 
 
 @dataclass
@@ -79,6 +86,9 @@ class SessionConfig:
         min_silence_duration_ms: Silence duration to trigger endpoint (ms)
         store_audio: Whether to record audio to S3 (uses S3_BUCKET from env)
         store_transcript: Whether to save transcript to S3 (uses S3_BUCKET from env)
+        lag_warning_seconds: Lag threshold for warning event emission
+        lag_hard_seconds: Lag threshold for hard termination window
+        lag_hard_grace_seconds: Continuous hard-lag grace window before termination
     """
 
     session_id: str
@@ -101,6 +111,10 @@ class SessionConfig:
     # Storage options (S3 bucket/endpoint read from Settings env vars)
     store_audio: bool = True
     store_transcript: bool = True
+    # Realtime lag budget controls (M53)
+    lag_warning_seconds: float = 3.0
+    lag_hard_seconds: float = 5.0
+    lag_hard_grace_seconds: float = 2.0
 
 
 class AudioBuffer:
@@ -122,6 +136,7 @@ class AudioBuffer:
         self,
         sample_rate: int,
         encoding: str,
+        channels: int = 1,
         chunk_duration_ms: int = 100,
     ) -> None:
         """Initialize audio buffer.
@@ -129,6 +144,7 @@ class AudioBuffer:
         Args:
             sample_rate: Expected sample rate
             encoding: Audio encoding (see SUPPORTED_ENCODINGS)
+            channels: Number of channels
             chunk_duration_ms: Chunk size for VAD processing in milliseconds
         """
         if encoding not in self.SUPPORTED_ENCODINGS:
@@ -139,10 +155,11 @@ class AudioBuffer:
 
         self.sample_rate = sample_rate
         self.encoding = encoding
+        self.channels = max(1, channels)
         self.chunk_duration_ms = chunk_duration_ms
 
-        # Calculate chunk size in samples
-        self.chunk_samples = int(sample_rate * chunk_duration_ms / 1000)
+        # Calculate chunk size in samples across all channels
+        self.chunk_samples = int(sample_rate * chunk_duration_ms / 1000) * self.channels
 
         # Buffer for accumulated samples (float32)
         self._buffer: list[float] = []
@@ -186,16 +203,25 @@ class AudioBuffer:
         self._buffer.clear()
         return chunk
 
-    def clear(self) -> None:
+    def clear(self) -> float:
         """Clear (discard) remaining buffered audio without returning it.
 
         Used for OpenAI-compatible input_audio_buffer.clear operation.
+
+        Returns:
+            Discarded audio duration in seconds.
         """
+        discarded_duration = self.get_buffered_duration()
         self._buffer.clear()
+        return discarded_duration
 
     def get_total_duration(self) -> float:
         """Total audio duration received in seconds."""
-        return self._total_samples / self.sample_rate
+        return self._total_samples / (self.sample_rate * self.channels)
+
+    def get_buffered_duration(self) -> float:
+        """Buffered (unprocessed) audio duration in seconds."""
+        return len(self._buffer) / (self.sample_rate * self.channels)
 
     def _decode_audio(self, data: bytes) -> np.ndarray:
         """Decode raw bytes to float32 numpy array.
@@ -287,6 +313,7 @@ class SessionHandler:
         self._buffer = AudioBuffer(
             sample_rate=config.sample_rate,
             encoding=config.encoding,
+            channels=config.channels,
         )
         # Only initialize VAD if enabled - when disabled, use time-based chunking
         if config.enable_vad:
@@ -306,10 +333,20 @@ class SessionHandler:
         self._started_at = time.time()
         self._error: str | None = None
         self._ended = False
+        self._lag_terminated = False
 
         # Streaming partial results state
         self._chunks_since_partial = 0
         self._speech_audio_buffer: list[np.ndarray] = []
+
+        # Lag accounting state (M53)
+        self._received_audio_seconds = 0.0
+        self._processed_audio_seconds = 0.0
+        self._discarded_audio_seconds = 0.0
+        self._lag_hard_exceeded_since: float | None = None
+        self._last_lag_warning_at: float | None = None
+        self._lag_monitor_task: asyncio.Task[None] | None = None
+        self._lag_eval_lock = asyncio.Lock()
 
         # Storage adapter (initialized in run() when storage is enabled)
         self._session_storage: SessionStorage | None = None
@@ -332,6 +369,7 @@ class SessionHandler:
 
         # Initialize storage recorders if enabled
         await self._init_storage()
+        self._lag_monitor_task = asyncio.create_task(self._lag_monitor_loop())
 
         try:
             async for message in self.websocket:
@@ -344,22 +382,26 @@ class SessionHandler:
                     break
 
         except Exception as e:
-            self._error = str(e)
-            logger.exception("session_error", error=str(e))
-            await self._send_error(
-                ErrorCode.INTERNAL_ERROR,
-                f"Internal error: {e}",
-                recoverable=False,
-            )
+            if self._lag_terminated:
+                logger.info("session_closed_after_lag_termination")
+            else:
+                self._error = str(e)
+                logger.exception("session_error", error=str(e))
+                await self._send_error(
+                    ErrorCode.INTERNAL_ERROR,
+                    f"Internal error: {e}",
+                    recoverable=False,
+                )
         finally:
+            await self._stop_lag_monitor()
             # Send session.end if not already sent
             if not self._ended:
                 try:
                     await self._send_session_end()
                 except Exception as e:
                     logger.error("session_end_failed", error=str(e))
-                    # Ensure cleanup happens even if session end fails
-                    await self._cleanup_storage()
+            # Ensure cleanup always runs (session.end path already finalizes storage)
+            await self._cleanup_storage()
 
         # Notify callback
         if self._on_session_end:
@@ -375,6 +417,9 @@ class SessionHandler:
         Args:
             data: Raw audio bytes
         """
+        if self._ended:
+            return
+
         # Record raw audio if enabled
         if self.config.store_audio:
             if self._session_storage:
@@ -401,13 +446,19 @@ class SessionHandler:
 
         # Add to buffer
         self._buffer.add(data)
+        self._record_received_audio(len(data))
+        await self._evaluate_lag_budget(source="audio_received")
 
         # Process in chunks
         while True:
+            if self._ended:
+                break
             chunk = self._buffer.get_chunk()
             if chunk is None:
                 break
             await self._process_chunk(chunk)
+            self._record_processed_audio(self._samples_to_seconds(len(chunk)))
+            await self._evaluate_lag_budget(source="chunk_processed")
 
     async def _process_chunk(self, audio: np.ndarray) -> None:
         """Process a single audio chunk through VAD and ASR.
@@ -415,6 +466,9 @@ class SessionHandler:
         Args:
             audio: Float32 audio samples
         """
+        if self._ended:
+            return
+
         # When VAD is disabled, use time-based chunking only
         if self._vad is None:
             await self._process_chunk_no_vad(audio)
@@ -470,6 +524,9 @@ class SessionHandler:
         When VAD is disabled, we accumulate all audio and transcribe
         at fixed intervals based on max_utterance_duration.
         """
+        if self._ended:
+            return
+
         # Always accumulate audio
         self._speech_audio_buffer.append(audio.copy())
         self._chunks_since_partial += 1
@@ -483,7 +540,7 @@ class SessionHandler:
         # Check if we've accumulated enough audio for a chunk
         if self.config.max_utterance_duration > 0:
             total_samples = sum(len(chunk) for chunk in self._speech_audio_buffer)
-            duration = total_samples / self.config.sample_rate
+            duration = self._samples_to_seconds(total_samples)
 
             if duration >= self.config.max_utterance_duration:
                 logger.info(
@@ -506,7 +563,7 @@ class SessionHandler:
 
         Called periodically for streaming models while VAD is in speech state.
         """
-        if not self._speech_audio_buffer:
+        if self._ended or not self._speech_audio_buffer:
             return
 
         try:
@@ -522,11 +579,11 @@ class SessionHandler:
                 self.config.vocabulary,
             )
 
-            if not result.text:
+            if self._ended or not result.text:
                 return
 
             # Calculate timing
-            audio_duration = len(audio) / self.config.sample_rate
+            audio_duration = self._samples_to_seconds(len(audio))
             start_time = self._assembler.current_time
             end_time = start_time + audio_duration
 
@@ -551,7 +608,7 @@ class SessionHandler:
         """
         # Calculate accumulated speech duration from VAD buffer
         speech_samples = self._vad.get_speech_buffer_samples()
-        speech_duration = speech_samples / self.config.sample_rate
+        speech_duration = self._samples_to_seconds(speech_samples)
 
         if speech_duration >= self.config.max_utterance_duration:
             logger.info(
@@ -587,6 +644,9 @@ class SessionHandler:
         Args:
             audio: Speech audio to transcribe
         """
+        if self._ended:
+            return
+
         try:
             # Call ASR in thread pool to avoid blocking event loop
             # This is critical for slow models (e.g., CPU inference) to
@@ -599,11 +659,11 @@ class SessionHandler:
                 self.config.vocabulary,
             )
 
-            if not result.text:
+            if self._ended or not result.text:
                 return
 
             # Add to assembler
-            audio_duration = len(audio) / self.config.sample_rate
+            audio_duration = self._samples_to_seconds(len(audio))
             segment = self._assembler.add_utterance(result, audio_duration)
 
             # Send transcript.final
@@ -643,6 +703,9 @@ class SessionHandler:
         Args:
             message: JSON string
         """
+        if self._ended:
+            return
+
         try:
             parsed = parse_client_message(message)
         except ValueError as e:
@@ -660,24 +723,28 @@ class SessionHandler:
 
         elif isinstance(parsed, FlushMessage):
             # Flush VAD buffer
-            remaining = self._vad.flush()
-            if remaining is not None and len(remaining) > 0:
-                await self._transcribe_and_send(remaining)
+            if self._vad is not None:
+                remaining = self._vad.flush()
+                if remaining is not None and len(remaining) > 0:
+                    await self._transcribe_and_send(remaining)
 
             # Flush audio buffer
             remaining = self._buffer.flush()
-            if (
-                remaining is not None
-                and len(remaining) > self._vad.config.sample_rate * 0.1
-            ):
-                # Only process if > 100ms
-                await self._transcribe_and_send(remaining)
+            if remaining is not None:
+                remaining_duration = self._samples_to_seconds(len(remaining))
+                if remaining_duration > 0.1:
+                    # Only process if > 100ms
+                    await self._transcribe_and_send(remaining)
+                    self._record_processed_audio(remaining_duration)
+                else:
+                    self._record_discarded_audio(remaining_duration)
 
         elif isinstance(parsed, ClearMessage):
             # Clear (discard) buffered audio without processing
             if self._vad is not None:
                 self._vad.clear()
-            self._buffer.clear()
+            discarded_duration = self._buffer.clear()
+            self._record_discarded_audio(discarded_duration)
             # Clear streaming state
             self._speech_audio_buffer = []
             self._chunks_since_partial = 0
@@ -687,6 +754,8 @@ class SessionHandler:
             # Graceful end
             await self._send_session_end()
             self._ended = True
+
+        await self._evaluate_lag_budget(source="control_message")
 
     async def _send_session_begin(self) -> None:
         """Send session.begin message."""
@@ -812,6 +881,175 @@ class SessionHandler:
 
         self._ended = True
 
+    def _samples_to_seconds(self, sample_count: int) -> float:
+        """Convert decoded sample count to audio seconds."""
+        if sample_count <= 0:
+            return 0.0
+        return sample_count / (self.config.sample_rate * self.config.channels)
+
+    def _audio_bytes_to_seconds(self, byte_count: int) -> float:
+        """Convert raw encoded audio bytes to audio seconds."""
+        if byte_count <= 0:
+            return 0.0
+
+        if self.config.encoding == "pcm_s16le":
+            bytes_per_sample = 2
+        elif self.config.encoding == "pcm_f32le":
+            bytes_per_sample = 4
+        elif self.config.encoding in {"mulaw", "alaw"}:
+            bytes_per_sample = 1
+        else:
+            # Defensive fallback: unknown encoding should have been rejected at parse time.
+            bytes_per_sample = 2
+
+        return byte_count / (
+            bytes_per_sample * self.config.sample_rate * self.config.channels
+        )
+
+    def _record_received_audio(self, byte_count: int) -> None:
+        self._received_audio_seconds += self._audio_bytes_to_seconds(byte_count)
+
+    def _record_processed_audio(self, processed_seconds: float) -> None:
+        if processed_seconds > 0:
+            self._processed_audio_seconds += processed_seconds
+
+    def _record_discarded_audio(self, discarded_seconds: float) -> None:
+        if discarded_seconds > 0:
+            self._discarded_audio_seconds += discarded_seconds
+
+    def _lag_seconds(self) -> float:
+        return max(
+            0.0,
+            self._received_audio_seconds
+            - self._processed_audio_seconds
+            - self._discarded_audio_seconds,
+        )
+
+    async def _lag_monitor_loop(self) -> None:
+        """Periodic lag monitor to enforce hard threshold during long ASR calls."""
+        try:
+            while not self._ended:
+                await self._evaluate_lag_budget(source="monitor")
+                await asyncio.sleep(LAG_MONITOR_TICK_SECONDS)
+        except asyncio.CancelledError:
+            return
+
+    async def _stop_lag_monitor(self) -> None:
+        if self._lag_monitor_task is None:
+            return
+        self._lag_monitor_task.cancel()
+        try:
+            await self._lag_monitor_task
+        except asyncio.CancelledError:
+            pass
+        self._lag_monitor_task = None
+
+    async def _evaluate_lag_budget(
+        self,
+        source: str,
+        now: float | None = None,
+    ) -> None:
+        """Evaluate lag budget and apply warning/termination policy."""
+        if self._ended:
+            return
+
+        check_time = time.monotonic() if now is None else now
+
+        async with self._lag_eval_lock:
+            if self._ended:
+                return
+
+            lag_seconds = self._lag_seconds()
+
+            if lag_seconds >= self.config.lag_warning_seconds:
+                if (
+                    self._last_lag_warning_at is None
+                    or check_time - self._last_lag_warning_at
+                    >= LAG_WARNING_RATE_LIMIT_SECONDS
+                ):
+                    await self._send(
+                        ProcessingLagWarningMessage(
+                            lag_seconds=round(lag_seconds, 3),
+                            warning_threshold_seconds=self.config.lag_warning_seconds,
+                            hard_threshold_seconds=self.config.lag_hard_seconds,
+                        )
+                    )
+                    self._last_lag_warning_at = check_time
+                    logger.warning(
+                        "processing_lag_warning",
+                        lag_seconds=round(lag_seconds, 3),
+                        warning_threshold_seconds=self.config.lag_warning_seconds,
+                        hard_threshold_seconds=self.config.lag_hard_seconds,
+                        source=source,
+                    )
+
+            if lag_seconds < self.config.lag_hard_seconds:
+                if self._lag_hard_exceeded_since is not None:
+                    logger.debug(
+                        "lag_hard_threshold_cleared",
+                        lag_seconds=round(lag_seconds, 3),
+                        source=source,
+                    )
+                self._lag_hard_exceeded_since = None
+                return
+
+            if self._lag_hard_exceeded_since is None:
+                self._lag_hard_exceeded_since = check_time
+                logger.warning(
+                    "lag_hard_threshold_crossed",
+                    lag_seconds=round(lag_seconds, 3),
+                    hard_threshold_seconds=self.config.lag_hard_seconds,
+                    grace_seconds=self.config.lag_hard_grace_seconds,
+                    source=source,
+                )
+                return
+
+            if (
+                check_time - self._lag_hard_exceeded_since
+                < self.config.lag_hard_grace_seconds
+            ):
+                return
+
+            await self._terminate_for_lag(lag_seconds)
+
+    async def _terminate_for_lag(self, lag_seconds: float) -> None:
+        """Terminate session because lag exceeded hard budget for full grace window."""
+        if self._ended:
+            return
+
+        self._lag_terminated = True
+        self._error = ErrorCode.LAG_EXCEEDED
+        self._ended = True
+
+        logger.error(
+            "lag_budget_exceeded_terminating_session",
+            lag_seconds=round(lag_seconds, 3),
+            warning_threshold_seconds=self.config.lag_warning_seconds,
+            hard_threshold_seconds=self.config.lag_hard_seconds,
+            hard_grace_seconds=self.config.lag_hard_grace_seconds,
+        )
+
+        await self._send_error(
+            code=ErrorCode.LAG_EXCEEDED,
+            message="Realtime lag budget exceeded",
+            recoverable=False,
+        )
+        await self._send(
+            SessionTerminatedMessage(
+                session_id=self.config.session_id,
+                reason=ErrorCode.LAG_EXCEEDED,
+                recoverable=False,
+            )
+        )
+
+        try:
+            await self.websocket.close(
+                code=WS_CLOSE_LAG_EXCEEDED,
+                reason="Realtime lag budget exceeded",
+            )
+        except Exception as e:
+            logger.debug("lag_close_failed", error=str(e))
+
     async def _send_error(
         self,
         code: str,
@@ -829,6 +1067,9 @@ class SessionHandler:
         Args:
             message: Protocol message with to_json() method
         """
+        message_type = getattr(message, "type", None)
+        if self._lag_terminated and message_type not in {"error", "session.terminated"}:
+            return
         try:
             await self.websocket.send(message.to_json())
         except Exception as e:

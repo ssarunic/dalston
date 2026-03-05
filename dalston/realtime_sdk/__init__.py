@@ -48,10 +48,13 @@ from dalston.realtime_sdk.assembler import (
 from dalston.realtime_sdk.protocol import (
     ErrorCode,
     ErrorMessage,
+    ProcessingLagWarningMessage,
+    RecoveryHint,
     SegmentInfo,
     SessionBeginMessage,
     SessionConfigInfo,
     SessionEndMessage,
+    SessionTerminatedMessage,
     TranscriptFinalMessage,
     TranscriptPartialMessage,
     VADSpeechEndMessage,
@@ -158,6 +161,9 @@ __all__ = [
     "TranscriptFinalMessage",
     "VADSpeechStartMessage",
     "VADSpeechEndMessage",
+    "ProcessingLagWarningMessage",
+    "SessionTerminatedMessage",
+    "RecoveryHint",
     "ErrorMessage",
     "ErrorCode",
     # Protocol types
