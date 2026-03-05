@@ -439,7 +439,7 @@ class TestOutputValidation:
         output = PrepareOutput(
             channel_files=[
                 AudioMedia(
-                    uri="s3://bucket/audio.wav",
+                    artifact_id="task-prepare:prepared_audio",
                     format="wav",
                     duration=60.5,
                     sample_rate=16000,

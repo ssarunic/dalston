@@ -5,6 +5,7 @@ Tests the typed accessors for previous stage outputs and serialization.
 
 from pathlib import Path
 
+from dalston.common.artifacts import ProducedArtifact
 from dalston.common.pipeline_types import (
     AlignOutput,
     AudioMedia,
@@ -70,7 +71,7 @@ class TestTaskInputGetPrepareOutput:
                 "prepare": {
                     "channel_files": [
                         {
-                            "uri": "s3://bucket/audio.wav",
+                            "artifact_id": "s3://bucket/audio.wav",
                             "format": "wav",
                             "duration": 60.5,
                             "sample_rate": 16000,
@@ -125,7 +126,7 @@ class TestTaskInputGetPrepareOutput:
                 "prepare": {
                     "channel_files": [
                         {
-                            "uri": "s3://bucket/ch0.wav",
+                            "artifact_id": "s3://bucket/ch0.wav",
                             "format": "wav",
                             "duration": 60.0,
                             "sample_rate": 16000,
@@ -133,7 +134,7 @@ class TestTaskInputGetPrepareOutput:
                             "bit_depth": 16,
                         },
                         {
-                            "uri": "s3://bucket/ch1.wav",
+                            "artifact_id": "s3://bucket/ch1.wav",
                             "format": "wav",
                             "duration": 60.0,
                             "sample_rate": 16000,
@@ -518,17 +519,25 @@ class TestTaskOutput:
         assert data["text"] == "Hello"
         assert data["custom"] == "value"
 
-    def test_task_output_with_artifacts(self):
-        """Test TaskOutput with artifacts."""
+    def test_task_output_with_produced_artifacts(self):
+        """Test TaskOutput with produced artifact descriptors."""
         output = TaskOutput(
             data={"result": "success"},
-            artifacts={
-                "waveform": Path("/tmp/waveform.png"),
-                "spectrogram": Path("/tmp/spectrogram.png"),
-            },
+            produced_artifacts=[
+                ProducedArtifact(
+                    logical_name="waveform",
+                    local_path=Path("/tmp/waveform.png"),
+                    kind="image",
+                ),
+                ProducedArtifact(
+                    logical_name="spectrogram",
+                    local_path=Path("/tmp/spectrogram.png"),
+                    kind="image",
+                ),
+            ],
         )
-        assert output.artifacts is not None
-        assert "waveform" in output.artifacts
+        assert output.produced_artifacts
+        assert output.produced_artifacts[0].logical_name == "waveform"
 
 
 class TestTaskInputTypedOutputIntegration:
@@ -568,7 +577,7 @@ class TestTaskInputTypedOutputIntegration:
         prepare_output = PrepareOutput(
             channel_files=[
                 AudioMedia(
-                    uri="s3://bucket/audio.wav",
+                    artifact_id="s3://bucket/audio.wav",
                     format="wav",
                     duration=60.0,
                     sample_rate=16000,

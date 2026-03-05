@@ -31,6 +31,7 @@ from dalston.realtime_sdk.assembler import (
     TranscribeResult,
     TranscriptAssembler,
 )
+from dalston.realtime_sdk.context import S3SessionStorage, SessionStorage
 from dalston.realtime_sdk.protocol import (
     ClearMessage,
     ConfigUpdateMessage,
@@ -52,7 +53,6 @@ from dalston.realtime_sdk.protocol import (
 from dalston.realtime_sdk.vad import VADConfig, VADProcessor
 
 if TYPE_CHECKING:
-    from types_aiobotocore_s3 import S3Client
     from websockets import WebSocketServerProtocol
 
 logger = structlog.get_logger()
@@ -311,13 +311,8 @@ class SessionHandler:
         self._chunks_since_partial = 0
         self._speech_audio_buffer: list[np.ndarray] = []
 
-        # Storage recorders (initialized in run() when S3 client available)
-        self._s3_context_manager = None  # Context manager for S3 client
-        self._s3_client: S3Client | None = None
-        self._audio_recorder = None  # AudioRecorder when store_audio=True
-        self._transcript_recorder = (
-            None  # TranscriptRecorder when store_transcript=True
-        )
+        # Storage adapter (initialized in run() when storage is enabled)
+        self._session_storage: SessionStorage | None = None
         self._raw_audio_buffer: list[bytes] = []  # Buffer until S3 client ready
         self._raw_audio_buffer_bytes = 0  # Track buffer size
         # Max 10MB buffer - if storage init fails, stop buffering to prevent OOM
@@ -382,9 +377,9 @@ class SessionHandler:
         """
         # Record raw audio if enabled
         if self.config.store_audio:
-            if self._audio_recorder:
+            if self._session_storage:
                 try:
-                    await self._audio_recorder.write(data)
+                    await self._session_storage.append_audio(data)
                 except Exception as e:
                     logger.warning("audio_write_failed", error=str(e))
             elif not self._storage_init_failed:
@@ -711,64 +706,22 @@ class SessionHandler:
     async def _init_storage(self) -> None:
         """Initialize storage recorders if enabled.
 
-        Creates S3 client and AudioRecorder/TranscriptRecorder instances.
-        Flushes any buffered raw audio to the recorder.
+        Creates session storage adapter and flushes any buffered raw audio.
         """
         if not self.config.store_audio and not self.config.store_transcript:
             return
 
         try:
-            from dalston.common.s3 import get_s3_client
-            from dalston.config import get_settings
-            from dalston.realtime_sdk.audio_recorder import (
-                AudioRecorder,
-                TranscriptRecorder,
+            self._session_storage = S3SessionStorage(
+                store_audio=self.config.store_audio,
+                store_transcript=self.config.store_transcript,
             )
+            await self._session_storage.start(self.config.session_id, self.config)
 
-            settings = get_settings()
-            bucket = settings.s3_bucket
-
-            if not bucket:
-                logger.warning(
-                    "storage_disabled_no_bucket",
-                    msg="store_audio/store_transcript enabled but S3_BUCKET not set",
-                )
-                return
-
-            # Create S3 client context manager (uses Settings from env vars)
-            # We store the context manager to properly manage its lifecycle
-            self._s3_context_manager = get_s3_client(settings)
-            self._s3_client = await self._s3_context_manager.__aenter__()
-
-            if self.config.store_audio:
-                self._audio_recorder = AudioRecorder(
-                    session_id=self.config.session_id,
-                    s3_client=self._s3_client,
-                    bucket=bucket,
-                    sample_rate=self.config.sample_rate,
-                )
-                await self._audio_recorder.start()
-
-                # Flush any buffered raw audio
-                for chunk in self._raw_audio_buffer:
-                    await self._audio_recorder.write(chunk)
-                self._raw_audio_buffer.clear()
-
-                logger.info(
-                    "audio_recorder_initialized",
-                    bucket=bucket,
-                )
-
-            if self.config.store_transcript:
-                self._transcript_recorder = TranscriptRecorder(
-                    session_id=self.config.session_id,
-                    s3_client=self._s3_client,
-                    bucket=bucket,
-                )
-                logger.info(
-                    "transcript_recorder_initialized",
-                    bucket=bucket,
-                )
+            for chunk in self._raw_audio_buffer:
+                await self._session_storage.append_audio(chunk)
+            self._raw_audio_buffer.clear()
+            self._raw_audio_buffer_bytes = 0
 
         except Exception as e:
             logger.error("storage_init_failed", error=str(e))
@@ -779,20 +732,13 @@ class SessionHandler:
             self._raw_audio_buffer_bytes = 0
 
     async def _cleanup_storage(self) -> None:
-        """Cleanup S3 client and abort any incomplete uploads."""
-        if self._audio_recorder and not self._audio_recorder._finalized:
+        """Cleanup storage adapter and abort any incomplete uploads."""
+        if self._session_storage:
             try:
-                await self._audio_recorder.abort()
+                await self._session_storage.abort()
             except Exception:
                 pass
-
-        if self._s3_context_manager:
-            try:
-                await self._s3_context_manager.__aexit__(None, None, None)
-            except Exception:
-                pass
-            self._s3_context_manager = None
-            self._s3_client = None
+            self._session_storage = None
 
     async def _send_session_end(self) -> None:
         """Send session.end message."""
@@ -816,16 +762,8 @@ class SessionHandler:
         audio_uri = None
         transcript_uri = None
 
-        if self._audio_recorder:
+        if self._session_storage:
             try:
-                audio_uri = await self._audio_recorder.finalize()
-                logger.info("audio_recorded", audio_uri=audio_uri)
-            except Exception as e:
-                logger.error("audio_finalize_failed", error=str(e))
-
-        if self._transcript_recorder:
-            try:
-                # Build transcript data matching batch format
                 transcript_data = {
                     "session_id": self.config.session_id,
                     "language": self.config.language,
@@ -850,10 +788,12 @@ class SessionHandler:
                         for i, s in enumerate(self._assembler.get_segments())
                     ],
                 }
-                transcript_uri = await self._transcript_recorder.save(transcript_data)
-                logger.info("transcript_saved", transcript_uri=transcript_uri)
+                await self._session_storage.save_transcript(transcript_data)
+                storage_result = await self._session_storage.finalize()
+                audio_uri = storage_result.audio_artifact_ref
+                transcript_uri = storage_result.transcript_artifact_ref
             except Exception as e:
-                logger.error("transcript_save_failed", error=str(e))
+                logger.error("session_storage_finalize_failed", error=str(e))
 
         # Cleanup S3 client
         await self._cleanup_storage()

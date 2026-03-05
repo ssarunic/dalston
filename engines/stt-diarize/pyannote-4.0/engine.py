@@ -10,6 +10,7 @@ import os
 from typing import Any
 
 from dalston.engine_sdk import (
+    BatchTaskContext,
     DiarizeOutput,
     Engine,
     SpeakerTurn,
@@ -156,7 +157,9 @@ class PyannoteEngine(Engine):
         self.logger.info("pyannote_4_0_pipeline_loaded_successfully")
         return self._pipeline
 
-    def process(self, input: TaskInput) -> TaskOutput:
+    def process(
+        self, input: TaskInput, ctx: BatchTaskContext | None = None
+    ) -> TaskOutput:
         """Run speaker diarization on audio file.
 
         Args:

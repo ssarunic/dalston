@@ -260,14 +260,14 @@ class TestAudioMediaModel:
     def test_create_audio_media(self):
         """Test creating an audio media entry."""
         am = AudioMedia(
-            uri="s3://bucket/jobs/123/audio/prepared_ch0.wav",
+            artifact_id="s3://bucket/jobs/123/audio/prepared_ch0.wav",
             format="wav",
             duration=60.5,
             sample_rate=16000,
             channels=1,
             bit_depth=16,
         )
-        assert "prepared_ch0.wav" in am.uri
+        assert "prepared_ch0.wav" in am.artifact_id
         assert am.format == "wav"
         assert am.duration == 60.5
         assert am.sample_rate == 16000
@@ -277,7 +277,7 @@ class TestAudioMediaModel:
     def test_audio_media_without_bit_depth(self):
         """Test audio media for lossy formats (no bit depth)."""
         am = AudioMedia(
-            uri="s3://bucket/audio.mp3",
+            artifact_id="s3://bucket/audio.mp3",
             format="mp3",
             duration=120.0,
             sample_rate=44100,
@@ -339,7 +339,7 @@ class TestPrepareOutput:
     def test_create_basic_prepare_output(self):
         """Test creating basic prepare output with single channel file."""
         prepared = AudioMedia(
-            uri="s3://bucket/jobs/123/audio/prepared.wav",
+            artifact_id="s3://bucket/jobs/123/audio/prepared.wav",
             format="wav",
             duration=60.0,
             sample_rate=16000,
@@ -361,7 +361,7 @@ class TestPrepareOutput:
     def test_prepare_output_split_channels(self):
         """Test prepare output with split channels as AudioMedia array."""
         ch0 = AudioMedia(
-            uri="s3://bucket/ch0.wav",
+            artifact_id="s3://bucket/ch0.wav",
             format="wav",
             duration=60.0,
             sample_rate=16000,
@@ -369,7 +369,7 @@ class TestPrepareOutput:
             bit_depth=16,
         )
         ch1 = AudioMedia(
-            uri="s3://bucket/ch1.wav",
+            artifact_id="s3://bucket/ch1.wav",
             format="wav",
             duration=60.0,
             sample_rate=16000,
@@ -384,13 +384,13 @@ class TestPrepareOutput:
         assert out.split_channels is True
         assert len(out.channel_files) == 2
         # Channel is implicit from array index
-        assert out.channel_files[0].uri == "s3://bucket/ch0.wav"
-        assert out.channel_files[1].uri == "s3://bucket/ch1.wav"
+        assert out.channel_files[0].artifact_id == "s3://bucket/ch0.wav"
+        assert out.channel_files[1].artifact_id == "s3://bucket/ch1.wav"
 
     def test_prepare_output_with_vad(self):
         """Test prepare output with VAD regions."""
         prepared = AudioMedia(
-            uri="s3://bucket/audio.wav",
+            artifact_id="s3://bucket/audio.wav",
             format="wav",
             duration=60.0,
             sample_rate=16000,
@@ -734,7 +734,7 @@ class TestModelValidation:
         """Test that sample rate must be positive in AudioMedia."""
         with pytest.raises(ValidationError):
             AudioMedia(
-                uri="s3://test",
+                artifact_id="s3://test",
                 format="wav",
                 duration=60.0,
                 sample_rate=0,

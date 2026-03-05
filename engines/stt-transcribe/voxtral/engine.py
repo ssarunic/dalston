@@ -18,6 +18,7 @@ import torch
 
 from dalston.engine_sdk import (
     AlignmentMethod,
+    BatchTaskContext,
     Engine,
     EngineCapabilities,
     Segment,
@@ -145,7 +146,9 @@ class VoxtralEngine(Engine):
 
         self.logger.info("model_loaded_successfully", model_name=model_name)
 
-    def process(self, input: TaskInput) -> TaskOutput:
+    def process(
+        self, input: TaskInput, ctx: BatchTaskContext | None = None
+    ) -> TaskOutput:
         """Transcribe audio using Voxtral.
 
         Args:

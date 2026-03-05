@@ -24,6 +24,7 @@ from typing import Any
 
 from dalston.engine_sdk import (
     AlignmentMethod,
+    BatchTaskContext,
     Engine,
     Segment,
     TaskInput,
@@ -133,7 +134,9 @@ class WhisperEngine(Engine):
         )
         return "cpu", "int8"
 
-    def process(self, input: TaskInput) -> TaskOutput:
+    def process(
+        self, input: TaskInput, ctx: BatchTaskContext | None = None
+    ) -> TaskOutput:
         """Transcribe audio using Faster-Whisper.
 
         Args:

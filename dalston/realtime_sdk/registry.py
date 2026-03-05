@@ -7,6 +7,7 @@ to the Session Router via Redis.
 from __future__ import annotations
 
 import json
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -51,7 +52,43 @@ class WorkerInfo:
     capabilities: EngineCapabilities | None = None
 
 
-class WorkerRegistry:
+class WorkerPresenceRegistry(ABC):
+    """Abstraction for realtime worker presence side effects."""
+
+    @abstractmethod
+    async def register(self, info: WorkerInfo) -> None: ...
+
+    @abstractmethod
+    async def heartbeat(
+        self,
+        instance: str,
+        active_sessions: int = 0,
+        status: str = "healthy",
+        model: str | None = None,
+        models_loaded: list[str] | None = None,
+        gpu_memory_used: str | None = None,
+    ) -> None: ...
+
+    @abstractmethod
+    async def session_started(self, instance: str, session_id: str) -> None: ...
+
+    @abstractmethod
+    async def session_ended(
+        self,
+        instance: str,
+        session_id: str,
+        duration_seconds: float,
+        reason: str,
+    ) -> None: ...
+
+    @abstractmethod
+    async def unregister(self, instance: str) -> None: ...
+
+    @abstractmethod
+    async def close(self) -> None: ...
+
+
+class WorkerRegistry(WorkerPresenceRegistry):
     """Client for registering real-time workers with Session Router.
 
     Handles:

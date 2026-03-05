@@ -36,13 +36,13 @@ config_schema:
 output_schema:
   type: object
   required:
-    - redacted_audio_uri
+    - redacted_audio_artifact_id
     - redaction_mode
     - entities_redacted
   properties:
-    redacted_audio_uri:
+    redacted_audio_artifact_id:
       type: string
-      description: S3 URI to the redacted audio file
+      description: Artifact ID of the redacted audio file
     redaction_mode:
       type: string
       description: Redaction mode used

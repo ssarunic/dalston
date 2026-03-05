@@ -94,6 +94,11 @@ docs/
 ### Implementation Reference
 
 - [Implementation Patterns](specs/implementations/README.md) — Non-obvious patterns for building Dalston
+- [New Transcription Engine Tutorial](guides/new-transcription-engine-tutorial.md) — Beginner guide for implementing a new `transcribe` runtime (M51 contract)
+
+### Testing Guides
+
+- [M51 Engine Testing Playbook](testing/M51-engine-testing-playbook.md) — Stage-by-stage testing changes after stateless engine + artifact materialization refactor
 
 ### Implementation Plan
 

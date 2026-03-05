@@ -15,6 +15,7 @@ from uuid import UUID, uuid4
 import structlog
 
 import dalston.telemetry
+from dalston.common.artifacts import ArtifactSelector, InputBinding
 from dalston.common.models import Task, TaskStatus
 from dalston.orchestrator.defaults import (
     DEFAULT_PII_BUFFER_MS,
@@ -35,6 +36,26 @@ VALID_TIMESTAMPS_GRANULARITIES = {"word", "segment", "none"}
 
 # Valid values for speaker_detection API parameter
 VALID_SPEAKER_DETECTION_MODES = {"none", "diarize", "per_channel"}
+
+
+def _audio_input_binding(
+    *,
+    producer_stage: str = "prepare",
+    channel: int | None = None,
+    role: str = "prepared",
+) -> list[dict]:
+    """Create a single audio slot binding for a task."""
+    binding = InputBinding(
+        slot="audio",
+        selector=ArtifactSelector(
+            producer_stage=producer_stage,
+            kind="audio",
+            channel=channel,
+            role=role,
+            required=True,
+        ),
+    )
+    return [binding.model_dump(exclude_none=True)]
 
 
 # Default engine IDs for each stage (runtime IDs, not model variant IDs)
@@ -281,6 +302,7 @@ def _build_dag_with_engines(
         runtime=engines.get("prepare", DEFAULT_ENGINES["prepare"]),
         status=TaskStatus.PENDING,
         dependencies=[],
+        input_bindings=[],
         config=prepare_config,
         input_uri=audio_uri,
         output_uri=None,
@@ -314,6 +336,7 @@ def _build_dag_with_engines(
             runtime=engines.get("diarize", DEFAULT_ENGINES["diarize"]),
             status=TaskStatus.PENDING,
             dependencies=[prepare_task.id],
+            input_bindings=_audio_input_binding(),
             config=diarize_config,
             input_uri=None,
             output_uri=None,
@@ -331,6 +354,7 @@ def _build_dag_with_engines(
         runtime=engines.get("transcribe", DEFAULT_ENGINES["transcribe"]),
         status=TaskStatus.PENDING,
         dependencies=[prepare_task.id],
+        input_bindings=_audio_input_binding(),
         config=transcribe_config,
         input_uri=None,
         output_uri=None,
@@ -350,6 +374,7 @@ def _build_dag_with_engines(
             runtime=engines.get("align", DEFAULT_ENGINES["align"]),
             status=TaskStatus.PENDING,
             dependencies=[transcribe_task.id],
+            input_bindings=_audio_input_binding(),
             config={"word_timestamps": True},
             input_uri=None,
             output_uri=None,
@@ -385,6 +410,7 @@ def _build_dag_with_engines(
             runtime=engines.get("pii_detect", DEFAULT_ENGINES["pii_detect"]),
             status=TaskStatus.PENDING,
             dependencies=pii_dependencies,
+            input_bindings=[],
             config=pii_detect_config,
             input_uri=None,
             output_uri=None,
@@ -411,6 +437,7 @@ def _build_dag_with_engines(
                 runtime=engines.get("audio_redact", DEFAULT_ENGINES["audio_redact"]),
                 status=TaskStatus.PENDING,
                 dependencies=[pii_detect_task.id],
+                input_bindings=_audio_input_binding(),
                 config=audio_redact_config,
                 input_uri=None,
                 output_uri=None,
@@ -437,6 +464,11 @@ def _build_dag_with_engines(
     }
     if pii_detection_enabled:
         merge_config["pii_detection"] = True
+    merge_bindings: list[dict] = []
+    if audio_redact_task is not None:
+        merge_bindings.extend(
+            _audio_input_binding(producer_stage="audio_redact", role="redacted")
+        )
 
     merge_task = Task(
         id=uuid4(),
@@ -445,6 +477,7 @@ def _build_dag_with_engines(
         runtime=engines.get("merge", DEFAULT_ENGINES["merge"]),
         status=TaskStatus.PENDING,
         dependencies=merge_dependencies,
+        input_bindings=merge_bindings,
         config=merge_config,
         input_uri=None,
         output_uri=None,
@@ -512,6 +545,7 @@ def _build_per_channel_dag_with_engines(
             runtime=engines.get("transcribe", DEFAULT_ENGINES["transcribe"]),
             status=TaskStatus.PENDING,
             dependencies=[prepare_task.id],
+            input_bindings=_audio_input_binding(channel=channel),
             config=channel_transcribe_config,
             input_uri=None,
             output_uri=None,
@@ -533,6 +567,7 @@ def _build_per_channel_dag_with_engines(
                 runtime=engines.get("align", DEFAULT_ENGINES["align"]),
                 status=TaskStatus.PENDING,
                 dependencies=[transcribe_task.id],
+                input_bindings=_audio_input_binding(channel=channel),
                 config={"word_timestamps": True, "channel": channel},
                 input_uri=None,
                 output_uri=None,
@@ -561,6 +596,7 @@ def _build_per_channel_dag_with_engines(
                 runtime=engines.get("pii_detect", DEFAULT_ENGINES["pii_detect"]),
                 status=TaskStatus.PENDING,
                 dependencies=[last_task.id],
+                input_bindings=[],
                 config=pii_detect_config,
                 input_uri=None,
                 output_uri=None,
@@ -593,6 +629,7 @@ def _build_per_channel_dag_with_engines(
                     ),
                     status=TaskStatus.PENDING,
                     dependencies=[pii_detect_task.id],
+                    input_bindings=_audio_input_binding(channel=channel),
                     config=audio_redact_config,
                     input_uri=None,
                     output_uri=None,
@@ -618,6 +655,21 @@ def _build_per_channel_dag_with_engines(
         merge_config["pii_detection"] = True
     if redact_pii_audio:
         merge_config["redact_pii_audio"] = True
+    merge_bindings: list[dict] = []
+    if redact_pii_audio:
+        for channel in range(num_channels):
+            merge_bindings.append(
+                InputBinding(
+                    slot=f"redacted_audio_ch{channel}",
+                    selector=ArtifactSelector(
+                        producer_stage=f"audio_redact_ch{channel}",
+                        kind="audio",
+                        channel=channel,
+                        role="redacted",
+                        required=True,
+                    ),
+                ).model_dump(exclude_none=True)
+            )
 
     merge_task = Task(
         id=uuid4(),
@@ -626,6 +678,7 @@ def _build_per_channel_dag_with_engines(
         runtime=engines.get("merge", DEFAULT_ENGINES["merge"]),
         status=TaskStatus.PENDING,
         dependencies=merge_dependencies,
+        input_bindings=merge_bindings,
         config=merge_config,
         input_uri=None,
         output_uri=None,

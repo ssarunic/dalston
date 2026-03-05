@@ -267,7 +267,7 @@ class TestPIIPipelineTypes:
             entities_detected=5,
             entity_count_by_type={"credit_card_number": 2, "phone_number": 3},
             entity_count_by_category={"pci": 2, "pii": 3},
-            redacted_audio_uri="s3://bucket/jobs/123/audio/redacted.wav",
+            redacted_audio_artifact_id="s3://bucket/jobs/123/audio/redacted.wav",
             processing_time_ms=42,
         )
 
@@ -277,7 +277,7 @@ class TestPIIPipelineTypes:
     def test_audio_redact_output_creation(self):
         """Test creating AudioRedactOutput."""
         output = AudioRedactOutput(
-            redacted_audio_uri="s3://bucket/jobs/123/audio/redacted.wav",
+            redacted_audio_artifact_id="s3://bucket/jobs/123/audio/redacted.wav",
             redaction_mode=PIIRedactionMode.SILENCE,
             buffer_ms=50,
             entities_redacted=3,

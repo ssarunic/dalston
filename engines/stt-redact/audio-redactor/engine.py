@@ -4,7 +4,7 @@ Replaces PII segments in audio with silence or beep tones based on
 timing information from the PII detection stage.
 """
 
-import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -12,11 +12,11 @@ from typing import Any
 
 from dalston.engine_sdk import (
     AudioRedactOutput,
+    BatchTaskContext,
     Engine,
     PIIRedactionMode,
     TaskInput,
     TaskOutput,
-    io,
 )
 
 
@@ -25,17 +25,29 @@ class AudioRedactionEngine(Engine):
 
     BEEP_FREQUENCY = 1000  # 1kHz beep tone
 
-    def process(self, input: TaskInput) -> TaskOutput:
+    def process(
+        self,
+        input: TaskInput,
+        ctx: BatchTaskContext | None = None,
+    ) -> TaskOutput:
         """Redact PII from audio file.
 
         Args:
             input: Task input with PII detection output
 
         Returns:
-            TaskOutput with AudioRedactOutput containing redacted audio URI
+            TaskOutput with AudioRedactOutput containing redacted audio artifact ID
         """
+        if ctx is None:
+            ctx = BatchTaskContext(
+                runtime="local",
+                instance="local",
+                task_id=input.task_id,
+                job_id=input.job_id,
+                stage=input.stage,
+            )
+
         config = input.config
-        job_id = input.job_id
         audio_path = input.audio_path
 
         # Get channel from config (set by DAG builder for per-channel mode)
@@ -49,7 +61,8 @@ class AudioRedactionEngine(Engine):
             channel_suffix = ""
             pii_key = "pii_detect"
 
-        output_filename = f"redacted{channel_suffix}.wav"
+        logical_name = f"redacted_audio{channel_suffix}"
+        artifact_id = f"{input.task_id}:{logical_name}"
 
         # Get config
         mode_str = config.get("redaction_mode", "silence")
@@ -58,7 +71,7 @@ class AudioRedactionEngine(Engine):
 
         self.logger.info(
             "audio_redaction_starting",
-            job_id=job_id,
+            job_id=input.job_id,
             mode=mode.value,
             buffer_ms=buffer_ms,
             channel=channel,
@@ -72,15 +85,22 @@ class AudioRedactionEngine(Engine):
         else:
             entities = [e.model_dump() for e in pii_output.entities]
 
-        if not entities:
-            self.logger.info("no_entities_to_redact", job_id=job_id)
-            # No entities - just copy the audio
-            s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
-            redacted_uri = f"s3://{s3_bucket}/jobs/{job_id}/audio/{output_filename}"
-            io.upload_file(audio_path, redacted_uri)
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            output_path = Path(tmp.name)
 
+        if not entities:
+            self.logger.info("no_entities_to_redact", job_id=input.job_id)
+            shutil.copy2(audio_path, output_path)
+            produced = ctx.describe_artifact(
+                logical_name=logical_name,
+                local_path=output_path,
+                kind="audio",
+                role="redacted",
+                channel=channel,
+                media_type="audio/wav",
+            )
             output = AudioRedactOutput(
-                redacted_audio_uri=redacted_uri,
+                redacted_audio_artifact_id=artifact_id,
                 redaction_mode=mode,
                 buffer_ms=buffer_ms,
                 entities_redacted=0,
@@ -90,7 +110,7 @@ class AudioRedactionEngine(Engine):
                 skip_reason=None,
                 warnings=[],
             )
-            return TaskOutput(data=output)
+            return TaskOutput(data=output, produced_artifacts=[produced])
 
         # Extract time ranges from entities
         ranges = self._extract_time_ranges(entities, buffer_ms)
@@ -100,49 +120,45 @@ class AudioRedactionEngine(Engine):
 
         self.logger.info(
             "redacting_ranges",
-            job_id=job_id,
+            job_id=input.job_id,
             entity_count=len(entities),
             range_count=len(merged_ranges),
         )
 
         # Build FFmpeg filter and execute
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            output_path = Path(tmp.name)
+        self._apply_redaction(audio_path, output_path, merged_ranges, mode)
 
-        try:
-            self._apply_redaction(audio_path, output_path, merged_ranges, mode)
+        self.logger.info(
+            "audio_redaction_complete",
+            job_id=input.job_id,
+            redacted_audio_artifact_id=artifact_id,
+        )
 
-            # Upload to S3
-            s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
-            redacted_uri = f"s3://{s3_bucket}/jobs/{job_id}/audio/{output_filename}"
-            io.upload_file(output_path, redacted_uri)
+        produced = ctx.describe_artifact(
+            logical_name=logical_name,
+            local_path=output_path,
+            kind="audio",
+            role="redacted",
+            channel=channel,
+            media_type="audio/wav",
+        )
 
-            self.logger.info(
-                "audio_redaction_complete",
-                job_id=job_id,
-                redacted_uri=redacted_uri,
-            )
+        # Build redaction map
+        redaction_map = self._build_redaction_map(merged_ranges, entities)
 
-            # Build redaction map
-            redaction_map = self._build_redaction_map(merged_ranges, entities)
+        output = AudioRedactOutput(
+            redacted_audio_artifact_id=artifact_id,
+            redaction_mode=mode,
+            buffer_ms=buffer_ms,
+            entities_redacted=len(entities),
+            redaction_map=redaction_map,
+            runtime="audio-redactor",
+            skipped=False,
+            skip_reason=None,
+            warnings=[],
+        )
 
-            output = AudioRedactOutput(
-                redacted_audio_uri=redacted_uri,
-                redaction_mode=mode,
-                buffer_ms=buffer_ms,
-                entities_redacted=len(entities),
-                redaction_map=redaction_map,
-                runtime="audio-redactor",
-                skipped=False,
-                skip_reason=None,
-                warnings=[],
-            )
-
-            return TaskOutput(data=output)
-
-        finally:
-            if output_path.exists():
-                output_path.unlink()
+        return TaskOutput(data=output, produced_artifacts=[produced])
 
     def _extract_time_ranges(
         self, entities: list[dict], buffer_ms: int

@@ -21,6 +21,7 @@ import structlog
 import dalston.logging
 import dalston.metrics
 import dalston.telemetry
+from dalston.common.artifacts import ArtifactReference
 from dalston.common.durable_events import add_durable_event_sync
 from dalston.common.streams_sync import (
     STALE_THRESHOLD_MS,
@@ -32,8 +33,10 @@ from dalston.common.streams_sync import (
 )
 from dalston.common.streams_types import WAITING_ENGINE_TASKS_KEY
 from dalston.engine_sdk import io
+from dalston.engine_sdk.context import BatchTaskContext
+from dalston.engine_sdk.materializer import ArtifactMaterializer, S3ArtifactStore
 from dalston.engine_sdk.registry import BatchEngineInfo, BatchEngineRegistry
-from dalston.engine_sdk.types import TaskInput, TaskOutput
+from dalston.engine_sdk.types import EngineInput, EngineOutput
 
 if TYPE_CHECKING:
     from dalston.engine_sdk.base import Engine
@@ -116,6 +119,7 @@ class EngineRunner:
         self._current_stream_id: str | None = None  # Source stream for ack
         self._task_lock = threading.Lock()  # Protects _current_task_id
         self._stage: str = "unknown"  # Pipeline stage from capabilities
+        self._materializer = ArtifactMaterializer(store=S3ArtifactStore())
 
         # Load configuration from environment
         self.runtime = os.environ.get("DALSTON_RUNTIME", "unknown")
@@ -572,8 +576,17 @@ class EngineRunner:
                 # Process the task
                 logger.info("task_processing")
                 process_start = time.time()
+                task_ctx = BatchTaskContext(
+                    runtime=self.runtime,
+                    instance=self.instance,
+                    task_id=task_id,
+                    job_id=job_id,
+                    stage=task_input.stage,
+                    metadata=task_metadata,
+                    logger=self.engine.logger,
+                )
                 with dalston.telemetry.create_span("engine.process"):
-                    output = self.engine.process(task_input)
+                    output = self.engine.process(task_input, task_ctx)
                 process_time = time.time() - process_start
 
                 # Calculate total task time (for metrics)
@@ -628,48 +641,67 @@ class EngineRunner:
                     "request_id",
                 )
 
-    def _load_task_input(self, task_id: str, temp_dir: Path) -> TaskInput:
-        """Load task input from S3 and download audio file.
-
-        Args:
-            task_id: Task identifier
-            temp_dir: Temporary directory for downloaded files
-
-        Returns:
-            TaskInput with audio file path set to local temp file
-        """
-        # First, get the task metadata from Redis to find job_id
-        # In M01, we'll use a simple convention: input is at a known location
-        # The orchestrator will write task info to S3
-
-        # For now, load from a well-known S3 path pattern
-        # The orchestrator sets this up before pushing to queue
+    def _load_task_input(self, task_id: str, temp_dir: Path) -> EngineInput:
+        """Load task input from S3 and materialize required artifacts."""
         task_metadata = self._get_task_metadata(task_id)
         job_id = task_metadata["job_id"]
+        stage = task_metadata.get("stage", "unknown")
 
-        # Download task input.json from S3
         input_uri = io.build_task_input_uri(self.s3_bucket, job_id, task_id)
         input_data = io.download_json(input_uri)
 
-        # Download audio file to temp
-        # Check for media.uri (prepare stage) or audio_uri (other stages)
-        media = input_data.get("media")
-        audio_uri = media["uri"] if media else input_data.get("audio_uri")
-        if audio_uri:
-            audio_path = temp_dir / "audio.wav"
-            io.download_file(audio_uri, audio_path)
-        else:
-            audio_path = temp_dir / "dummy.wav"
-            audio_path.touch()  # Create empty file for stub engines
+        # Canonical M51 fields.
+        payload = input_data.get("payload")
+        resolved_artifact_ids = input_data.get("resolved_artifact_ids", {})
+        artifact_index_data = input_data.get("artifact_index", {})
 
-        return TaskInput(
+        # Read from task metadata when scheduler stores JSON there.
+        resolved_from_metadata = task_metadata.get("resolved_artifact_ids_json")
+        if resolved_from_metadata:
+            try:
+                resolved_artifact_ids = json.loads(resolved_from_metadata)
+            except json.JSONDecodeError:
+                logger.warning("invalid_resolved_artifact_ids_json", task_id=task_id)
+
+        artifact_index: dict[str, ArtifactReference] = {}
+        for artifact_id, metadata in artifact_index_data.items():
+            artifact_index[artifact_id] = ArtifactReference.model_validate(metadata)
+
+        # Temporary migration bridge for tasks that still send URI-centric shape.
+        if not resolved_artifact_ids:
+            media = input_data.get("media")
+            legacy_audio_uri = (
+                media.get("uri")
+                if isinstance(media, dict)
+                else input_data.get("audio_uri")
+            )
+            if legacy_audio_uri:
+                legacy_artifact_id = "legacy:audio"
+                resolved_artifact_ids = {"audio": legacy_artifact_id}
+                artifact_index[legacy_artifact_id] = ArtifactReference(
+                    artifact_id=legacy_artifact_id,
+                    kind="audio",
+                    storage_locator=legacy_audio_uri,
+                    media_type="audio/wav",
+                )
+                if payload is None and media:
+                    payload = {"media": media}
+
+        materialized_artifacts = self._materializer.materialize(
+            resolved_artifact_ids=resolved_artifact_ids,
+            artifact_index=artifact_index,
+            target_dir=temp_dir / "materialized",
+        )
+
+        return EngineInput(
             task_id=task_id,
             job_id=job_id,
-            stage=task_metadata.get("stage", "unknown"),
-            audio_path=audio_path,
-            previous_outputs=input_data.get("previous_outputs", {}),
+            stage=stage,
             config=input_data.get("config", {}),
-            media=media,
+            payload=payload,
+            previous_outputs=input_data.get("previous_outputs", {}),
+            materialized_artifacts=materialized_artifacts,
+            metadata={"resolved_artifact_ids": resolved_artifact_ids},
         )
 
     def _get_task_metadata(self, task_id: str) -> dict[str, Any]:
@@ -695,7 +727,7 @@ class EngineRunner:
         self,
         task_id: str,
         job_id: str,
-        output: TaskOutput,
+        output: EngineOutput,
         processing_time: float,
     ) -> None:
         """Save task output to S3.
@@ -715,17 +747,44 @@ class EngineRunner:
             "data": output.to_dict(),
         }
 
-        # Upload any additional artifacts
-        if output.artifacts:
-            artifacts_uploaded: dict[str, str] = {}
-            for name, path in output.artifacts.items():
-                artifact_uri = f"s3://{self.s3_bucket}/jobs/{job_id}/tasks/{task_id}/artifacts/{name}"
-                io.upload_file(path, artifact_uri)
-                artifacts_uploaded[name] = artifact_uri
-            output_data["artifacts"] = artifacts_uploaded
+        task_stage = self._get_task_metadata(task_id).get("stage")
+        if task_stage == "merge":
+            canonical_uri = f"s3://{self.s3_bucket}/jobs/{job_id}/transcript.json"
+            io.upload_json(output.to_dict(), canonical_uri)
+            output_data["canonical_transcript_uri"] = canonical_uri
+
+        persisted_artifacts = self._materializer.persist_produced(
+            job_id=job_id,
+            task_id=task_id,
+            stage=task_stage,
+            produced_artifacts=output.produced_artifacts,
+        )
+        output_data["produced_artifacts"] = [
+            artifact.model_dump(mode="json", exclude_none=True)
+            for artifact in persisted_artifacts
+        ]
+        output_data["produced_artifact_ids"] = [
+            artifact.artifact_id for artifact in persisted_artifacts
+        ]
 
         io.upload_json(output_data, output_uri)
         logger.info("output_uploaded", output_uri=output_uri)
+
+        if persisted_artifacts:
+            metadata_key = f"dalston:task:{task_id}"
+            produced_ids = [artifact.artifact_id for artifact in persisted_artifacts]
+            self.redis_client.hset(
+                metadata_key,
+                mapping={"produced_artifact_ids_json": json.dumps(produced_ids)},
+            )
+
+            artifact_key = f"dalston:job:{job_id}:artifacts"
+            for artifact in persisted_artifacts:
+                self.redis_client.hset(
+                    artifact_key,
+                    artifact.artifact_id,
+                    artifact.model_dump_json(exclude_none=True),
+                )
 
     def _publish_task_started(self, task_id: str, job_id: str) -> None:
         """Publish task.started event to Redis pub/sub and durable stream.

@@ -17,6 +17,7 @@ from collections import defaultdict
 from typing import Any
 
 from dalston.engine_sdk import (
+    BatchTaskContext,
     Engine,
     PIIDetectOutput,
     PIIEntity,
@@ -255,7 +256,9 @@ class PIIDetectionEngine(Engine):
         except Exception as e:
             self.logger.warning("gliner_load_failed", error=str(e))
 
-    def process(self, input: TaskInput) -> TaskOutput:
+    def process(
+        self, input: TaskInput, ctx: BatchTaskContext | None = None
+    ) -> TaskOutput:
         """Detect PII entities in transcript.
 
         Args:

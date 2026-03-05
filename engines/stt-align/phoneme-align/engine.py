@@ -20,6 +20,7 @@ from model_loader import AlignModelMetadata, is_language_supported, load_align_m
 from dalston.engine_sdk import (
     AlignmentMethod,
     AlignOutput,
+    BatchTaskContext,
     Engine,
     Segment,
     TaskInput,
@@ -84,7 +85,9 @@ class PhonemeAlignEngine(Engine):
             )
             return None
 
-    def process(self, input: TaskInput) -> TaskOutput:
+    def process(
+        self, input: TaskInput, ctx: BatchTaskContext | None = None
+    ) -> TaskOutput:
         """Align transcription segments to produce word-level timestamps."""
         audio_path = input.audio_path
 
