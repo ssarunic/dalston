@@ -1,6 +1,6 @@
 """Tests for the catalog generation script.
 
-M36: Updated for runtime/model catalog structure.
+M46: Updated after models moved to database. Catalog now only contains engines.
 """
 
 from __future__ import annotations
@@ -69,30 +69,6 @@ def valid_runtime_yaml() -> dict:
     }
 
 
-@pytest.fixture
-def valid_model_yaml() -> dict:
-    """A valid model YAML structure."""
-    return {
-        "id": "test-model-1b",
-        "runtime": "test-runtime",
-        "runtime_model_id": "org/test-model-1b",
-        "name": "Test Model 1B",
-        "source": "https://huggingface.co/org/test-model-1b",
-        "size_gb": 2.5,
-        "stage": "transcribe",
-        "languages": ["en"],
-        "capabilities": {
-            "word_timestamps": True,
-            "punctuation": True,
-            "capitalization": True,
-        },
-        "hardware": {
-            "min_vram_gb": 4,
-            "supports_cpu": False,
-        },
-    }
-
-
 class TestDeriveImageName:
     """Tests for derive_image_name function."""
 
@@ -115,7 +91,7 @@ class TestTransformRuntimeToEntry:
         entry = transform_runtime_to_entry(valid_runtime_yaml, Path("test.yaml"))
 
         assert entry["id"] == "test-runtime"
-        assert entry["engine_id"] == "test-engine"
+        assert entry["runtime"] == "test-engine"
         assert entry["name"] == "Test Runtime"
         assert entry["version"] == "1.2.0"
         assert entry["stage"] == "transcribe"
@@ -164,44 +140,40 @@ class TestGenerateCatalog:
     """Tests for generate_catalog function."""
 
     def test_generate_catalog_from_dirs(self) -> None:
-        """Should generate catalog from engines and models directories."""
+        """Should generate catalog from engines directory."""
         engines_dir = Path(__file__).parent.parent.parent / "engines"
-        models_dir = Path(__file__).parent.parent.parent / "models"
         if not engines_dir.exists():
             pytest.skip("Engines directory not found")
 
-        catalog = generate_catalog(engines_dir, models_dir)
+        catalog = generate_catalog(engines_dir)
 
         assert "generated_at" in catalog
-        assert catalog["schema_version"] == "2.0"
-        assert catalog["runtime_count"] >= 5
-        assert "runtimes" in catalog
-        assert "models" in catalog
-        assert "engines" in catalog  # Backward compatibility
+        assert catalog["schema_version"] == "3.0"  # M46: models removed
+        assert catalog["engine_count"] >= 5
+        assert "engines" in catalog
 
     def test_catalog_structure(self) -> None:
         """Catalog should have correct structure."""
         engines_dir = Path(__file__).parent.parent.parent / "engines"
-        models_dir = Path(__file__).parent.parent.parent / "models"
         if not engines_dir.exists():
             pytest.skip("Engines directory not found")
 
-        catalog = generate_catalog(engines_dir, models_dir)
+        catalog = generate_catalog(engines_dir)
 
-        # Check a known runtime
-        if "nemo" in catalog["runtimes"]:
-            runtime = catalog["runtimes"]["nemo"]
-            assert runtime["id"] == "nemo"
-            assert runtime["stage"] == "transcribe"
-            assert "capabilities" in runtime
-            assert "hardware" in runtime
-            assert "performance" in runtime
+        # Check a known runtime/engine
+        if "nemo" in catalog["engines"]:
+            engine = catalog["engines"]["nemo"]
+            assert engine["id"] == "nemo"
+            assert engine["stage"] == "transcribe"
+            assert "capabilities" in engine
+            assert "hardware" in engine
+            assert "performance" in engine
 
     def test_generate_catalog_empty_dir_raises(self) -> None:
         """Should raise error for empty directory."""
         with tempfile.TemporaryDirectory() as tmpdir:
             with pytest.raises(ValueError, match="No engine.yaml files found"):
-                generate_catalog(Path(tmpdir), Path(tmpdir))
+                generate_catalog(Path(tmpdir))
 
     def test_generate_catalog_with_temp_engine(self, valid_runtime_yaml: dict) -> None:
         """Should generate catalog from temp directory with engine."""
@@ -211,15 +183,11 @@ class TestGenerateCatalog:
             with open(engine_dir / "engine.yaml", "w") as f:
                 yaml.dump(valid_runtime_yaml, f)
 
-            # Create empty models dir
-            models_dir = Path(tmpdir) / "models"
-            models_dir.mkdir()
+            catalog = generate_catalog(Path(tmpdir))
 
-            catalog = generate_catalog(Path(tmpdir), models_dir)
-
-            assert catalog["runtime_count"] == 1
-            assert "test-runtime" in catalog["runtimes"]
-            assert catalog["runtimes"]["test-runtime"]["version"] == "1.2.0"
+            assert catalog["engine_count"] == 1
+            assert "test-runtime" in catalog["engines"]
+            assert catalog["engines"]["test-runtime"]["version"] == "1.2.0"
 
 
 class TestCatalogJsonOutput:
@@ -228,11 +196,10 @@ class TestCatalogJsonOutput:
     def test_catalog_is_valid_json(self) -> None:
         """Generated catalog should be valid JSON."""
         engines_dir = Path(__file__).parent.parent.parent / "engines"
-        models_dir = Path(__file__).parent.parent.parent / "models"
         if not engines_dir.exists():
             pytest.skip("Engines directory not found")
 
-        catalog = generate_catalog(engines_dir, models_dir)
+        catalog = generate_catalog(engines_dir)
         json_str = json.dumps(catalog)
         reparsed = json.loads(json_str)
 
@@ -251,4 +218,4 @@ class TestCatalogJsonOutput:
         with open(catalog_path) as f:
             catalog = json.load(f)
 
-        assert catalog["runtime_count"] >= 5
+        assert catalog["engine_count"] >= 5

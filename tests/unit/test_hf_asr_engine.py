@@ -76,22 +76,22 @@ class TestHFASREngine:
             engine = HFASREngine()
             assert engine._default_model_id == "facebook/wav2vec2-large-960h"
 
-    def test_engine_id_from_env(self):
-        """Engine should respect DALSTON_ENGINE_ID env var."""
+    def test_runtime_from_env(self):
+        """Engine should respect DALSTON_RUNTIME env var."""
         with patch.dict(
-            os.environ, {"DALSTON_ENGINE_ID": "custom-hf-asr", "DALSTON_DEVICE": "cpu"}
+            os.environ, {"DALSTON_RUNTIME": "custom-hf-asr", "DALSTON_DEVICE": "cpu"}
         ):
             with patch("torch.cuda.is_available", return_value=False):
                 HFASREngine = load_hf_asr_engine()
                 engine = HFASREngine()
-                assert engine._engine_id == "custom-hf-asr"
+                assert engine._runtime == "custom-hf-asr"
 
     def test_health_check(self, engine):
         """Health check should return healthy status."""
         health = engine.health_check()
 
         assert health["status"] == "healthy"
-        assert health["engine_id"] == "hf-asr"
+        assert health["runtime"] == "hf-asr"
         assert health["device"] == "cpu"
         assert health["cuda_available"] is False
 
@@ -213,13 +213,13 @@ class TestHFASREngineNormalizeOutput:
 
         assert output.channel == 0
 
-    def test_normalize_output_engine_id(self, engine):
+    def test_normalize_output_runtime(self, engine):
         """Engine ID should be set."""
         result = {"text": "test"}
 
         output = engine._normalize_output(result, "test/model", "en", None)
 
-        assert output.engine_id == "hf-asr"
+        assert output.runtime == "hf-asr"
 
     def test_normalize_output_skips_empty_chunks(self, engine):
         """Empty chunk text should be skipped."""
@@ -366,7 +366,7 @@ class TestHFASREngineProcess:
         output_dict = result.to_dict()
         assert output_dict["text"] == "Hello world"
         assert len(output_dict["segments"]) == 1
-        assert output_dict["engine_id"] == "hf-asr"
+        assert output_dict["runtime"] == "hf-asr"
 
     def test_process_releases_model_on_error(self, engine, tmp_path):
         """Process should release model even if pipeline raises."""

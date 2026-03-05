@@ -485,6 +485,67 @@ class TestAlignEndToEnd:
         # depending on synthetic emissions, but structure should be correct)
         assert isinstance(seg.words, list)
 
+    def test_align_timestamps_bounded_by_audio_duration(self, align_module):
+        """Word timestamps must be in seconds, not sample indices.
+
+        Regression test for a bug where timestamps were multiplied by the
+        number of audio samples, producing values like 5838 instead of 0.14.
+        """
+        from model_loader import AlignModelMetadata
+
+        vocab_size = 30
+        num_frames = 50
+        audio_duration = 2.44  # seconds (non-integer to catch off-by-one issues)
+
+        mock_model = MagicMock()
+        mock_model.return_value = MagicMock(
+            logits=torch.randn(1, num_frames, vocab_size)
+        )
+
+        dictionary = {chr(ord("a") + i): i + 1 for i in range(26)}
+        dictionary["|"] = 27
+        dictionary["<pad>"] = 0
+
+        metadata = AlignModelMetadata(
+            language="en",
+            dictionary=dictionary,
+            pipeline_type="huggingface",
+        )
+
+        # 16 kHz audio matching audio_duration
+        audio = np.random.randn(int(16000 * audio_duration)).astype(np.float32)
+        transcript = [
+            align_module.InputSegment(
+                start=0.0, end=audio_duration, text="hello world"
+            ),
+        ]
+
+        result = align_module.align(
+            transcript=transcript,
+            model=mock_model,
+            metadata=metadata,
+            audio=audio,
+            device="cpu",
+        )
+
+        seg = result.segments[0]
+        # Allow a small tolerance (one frame ≈ 20ms) beyond the segment boundary.
+        # The bug being tested produced values 1000x the audio duration (e.g. 5838s
+        # for a 2.44s clip), so this 2x bound is more than enough to catch it while
+        # not failing on legitimate off-by-one frame rounding.
+        max_allowed = audio_duration * 2
+        for word in seg.words:
+            if word.start is not None:
+                assert word.start <= max_allowed, (
+                    f"word '{word.word}' start={word.start} >> audio_duration={audio_duration}; "
+                    "timestamps are likely in sample indices instead of seconds"
+                )
+            if word.end is not None:
+                assert word.end <= max_allowed, (
+                    f"word '{word.word}' end={word.end} >> audio_duration={audio_duration}; "
+                    "timestamps are likely in sample indices instead of seconds"
+                )
+
     def test_align_fallback_for_empty_segment(self, align_module):
         """Segment with no alignable characters should fall back gracefully."""
         from model_loader import AlignModelMetadata
@@ -655,7 +716,7 @@ class TestPhonemeAlignEngineFallback:
         assert output.skipped is True
         assert output.skip_reason == "test fallback"
         assert output.word_timestamps is False
-        assert output.engine_id == "phoneme-align"
+        assert output.runtime == "phoneme-align"
         assert len(output.segments) == 1
         assert output.segments[0].text == "hello world"
 

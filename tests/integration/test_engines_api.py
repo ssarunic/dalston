@@ -27,10 +27,10 @@ def mock_catalog() -> EngineCatalog:
     """Create a mock engine catalog."""
     entries = {
         "faster-whisper": CatalogEntry(
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
             image="dalston/stt-batch-transcribe-whisper:1.0.0",
             capabilities=EngineCapabilities(
-                engine_id="faster-whisper",
+                runtime="faster-whisper",
                 version="1.0.0",
                 stages=["transcribe"],
                 languages=None,  # All languages
@@ -46,10 +46,10 @@ def mock_catalog() -> EngineCatalog:
             ),
         ),
         "parakeet": CatalogEntry(
-            engine_id="parakeet",
+            runtime="parakeet",
             image="dalston/stt-batch-transcribe-parakeet:1.0.0",
             capabilities=EngineCapabilities(
-                engine_id="parakeet",
+                runtime="parakeet",
                 version="1.0.0",
                 stages=["transcribe"],
                 languages=["en"],
@@ -63,10 +63,10 @@ def mock_catalog() -> EngineCatalog:
             ),
         ),
         "pyannote-4.0": CatalogEntry(
-            engine_id="pyannote-4.0",
+            runtime="pyannote-4.0",
             image="dalston/stt-batch-diarize-pyannote-4.0:1.0.0",
             capabilities=EngineCapabilities(
-                engine_id="pyannote-4.0",
+                runtime="pyannote-4.0",
                 version="1.0.0",
                 stages=["diarize"],
                 languages=None,
@@ -88,8 +88,8 @@ def mock_running_engines() -> list[BatchEngineState]:
     """Create mock running engine states."""
     return [
         BatchEngineState(
-            engine_id="faster-whisper",
-            instance_id="faster-whisper-test-instance",
+            runtime="faster-whisper",
+            instance="faster-whisper-test-instance",
             stage="transcribe",
             stream_name="dalston:stream:faster-whisper",
             status="idle",
@@ -97,7 +97,7 @@ def mock_running_engines() -> list[BatchEngineState]:
             last_heartbeat=datetime.now(UTC),
             registered_at=datetime.now(UTC),
             capabilities=EngineCapabilities(
-                engine_id="faster-whisper",
+                runtime="faster-whisper",
                 version="1.0.0",
                 stages=["transcribe"],
                 languages=None,
@@ -132,9 +132,15 @@ def mock_redis():
 
 
 @pytest.fixture
-def app(mock_api_key, mock_redis):
+def mock_db():
+    """Create a mock database session."""
+    return AsyncMock()
+
+
+@pytest.fixture
+def app(mock_api_key, mock_redis, mock_db):
     """Create test FastAPI application with mocked dependencies."""
-    from dalston.gateway.dependencies import get_redis, require_auth
+    from dalston.gateway.dependencies import get_db, get_redis, require_auth
 
     test_app = FastAPI()
     test_app.include_router(router, prefix="/v1")
@@ -142,6 +148,7 @@ def app(mock_api_key, mock_redis):
     # Override dependencies
     test_app.dependency_overrides[require_auth] = lambda: mock_api_key
     test_app.dependency_overrides[get_redis] = lambda: mock_redis
+    test_app.dependency_overrides[get_db] = lambda: mock_db
 
     return test_app
 
@@ -162,6 +169,9 @@ class TestListEngines:
         mock_registry = AsyncMock()
         mock_registry.get_engines = AsyncMock(return_value=mock_running_engines)
 
+        mock_model_service = AsyncMock()
+        mock_model_service.list_models = AsyncMock(return_value=[])
+
         with (
             patch(
                 "dalston.gateway.api.v1.engines.get_catalog", return_value=mock_catalog
@@ -169,6 +179,10 @@ class TestListEngines:
             patch(
                 "dalston.gateway.api.v1.engines.BatchEngineRegistry",
                 return_value=mock_registry,
+            ),
+            patch(
+                "dalston.gateway.api.v1.engines.ModelRegistryService",
+                return_value=mock_model_service,
             ),
         ):
             response = client.get("/v1/engines")
@@ -199,6 +213,9 @@ class TestListEngines:
         mock_registry = AsyncMock()
         mock_registry.get_engines = AsyncMock(return_value=mock_running_engines)
 
+        mock_model_service = AsyncMock()
+        mock_model_service.list_models = AsyncMock(return_value=[])
+
         with (
             patch(
                 "dalston.gateway.api.v1.engines.get_catalog", return_value=mock_catalog
@@ -206,6 +223,10 @@ class TestListEngines:
             patch(
                 "dalston.gateway.api.v1.engines.BatchEngineRegistry",
                 return_value=mock_registry,
+            ),
+            patch(
+                "dalston.gateway.api.v1.engines.ModelRegistryService",
+                return_value=mock_model_service,
             ),
         ):
             response = client.get("/v1/engines")
@@ -226,6 +247,9 @@ class TestListEngines:
         mock_registry = AsyncMock()
         mock_registry.get_engines = AsyncMock(return_value=mock_running_engines)
 
+        mock_model_service = AsyncMock()
+        mock_model_service.list_models = AsyncMock(return_value=[])
+
         with (
             patch(
                 "dalston.gateway.api.v1.engines.get_catalog", return_value=mock_catalog
@@ -233,6 +257,10 @@ class TestListEngines:
             patch(
                 "dalston.gateway.api.v1.engines.BatchEngineRegistry",
                 return_value=mock_registry,
+            ),
+            patch(
+                "dalston.gateway.api.v1.engines.ModelRegistryService",
+                return_value=mock_model_service,
             ),
         ):
             response = client.get("/v1/engines")

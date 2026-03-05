@@ -62,6 +62,7 @@ from dalston.gateway.dependencies import (
     get_redis,
     get_security_manager,
     get_settings,
+    get_storage_service,
 )
 from dalston.gateway.models.responses import (
     AudioUrlResponse,
@@ -218,6 +219,7 @@ async def create_transcription(
     audit_service: AuditService = Depends(get_audit_service),
     ingestion_service: AudioIngestionService = Depends(get_ingestion_service),
     export_service: ExportService = Depends(get_export_service),
+    storage: StorageService = Depends(get_storage_service),
 ) -> JobCreatedResponse | Response | dict[str, Any]:
     """Create a new transcription job.
 
@@ -304,7 +306,7 @@ async def create_transcription(
         # Dalston native mode
         # If model is "auto", let orchestrator select engine based on capabilities
         # Otherwise, pass the engine ID directly
-        parameters: dict = {
+        parameters = {
             "language": language or "auto",
             "speaker_detection": speaker_detection,
             "num_speakers": num_speakers,
@@ -373,7 +375,6 @@ async def create_transcription(
     job_id = uuid4()
 
     # Upload audio to S3
-    storage = StorageService(settings)
     audio_uri = await storage.upload_audio(
         job_id=job_id,
         file_content=ingested.content,
@@ -449,7 +450,6 @@ async def create_transcription(
         )
 
     # OpenAI mode: wait for completion and return result
-    storage = StorageService(settings)
     result = await wait_for_job_completion(db, job)
 
     if result.completed:
@@ -493,8 +493,8 @@ async def get_transcription(
     principal: Annotated[Principal, Depends(get_principal)],
     security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
+    storage: StorageService = Depends(get_storage_service),
 ) -> JobResponse:
     """Get job status and transcript if complete.
 
@@ -518,7 +518,7 @@ async def get_transcription(
             StageResponse(
                 stage=task.stage,
                 task_id=task.id,
-                engine_id=task.engine_id,
+                runtime=task.runtime,
                 status=task.status,
                 required=task.required,
                 started_at=task.started_at,
@@ -577,7 +577,6 @@ async def get_transcription(
 
     # If completed, fetch transcript from S3
     if job.status == JobStatus.COMPLETED.value:
-        storage = StorageService(settings)
         transcript = await storage.get_transcript(job.id)
 
         if transcript:
@@ -762,9 +761,9 @@ async def export_transcription(
         int, Query(ge=1, le=10, description="Max lines per subtitle block")
     ] = 2,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
     export_service: ExportService = Depends(get_export_service),
+    storage: StorageService = Depends(get_storage_service),
 ) -> Response:
     """Export transcript in specified format.
 
@@ -790,7 +789,6 @@ async def export_transcription(
         )
 
     # Fetch transcript from S3
-    storage = StorageService(settings)
     transcript = await storage.get_transcript(job.id)
 
     # Generate and return export response
@@ -822,6 +820,7 @@ async def get_job_audio(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
+    storage: StorageService = Depends(get_storage_service),
 ) -> AudioUrlResponse:
     """Get presigned URL for original job audio.
 
@@ -859,7 +858,6 @@ async def get_job_audio(
         )
 
     # Parse and validate S3 URI
-    storage = StorageService(settings)
     try:
         bucket, key = storage.parse_s3_uri(job.audio_uri or "")
     except ValueError:
@@ -929,6 +927,7 @@ async def get_job_audio_redacted(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
+    storage: StorageService = Depends(get_storage_service),
 ) -> AudioUrlResponse:
     """Get presigned URL for PII-redacted job audio.
 
@@ -975,7 +974,6 @@ async def get_job_audio_redacted(
 
     # Get redacted audio URI from transcript's pii_metadata (matches UI availability flag)
     # This ensures consistency with the UI's redacted_audio_available indicator
-    storage = StorageService(settings)
     transcript = await storage.get_transcript(job.id)
 
     if not transcript:
@@ -1133,9 +1131,9 @@ async def delete_audio(
     security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     _rate_limited: Annotated[None, Depends(check_request_rate_limit)],
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
     audit_service: AuditService = Depends(get_audit_service),
+    storage: StorageService = Depends(get_storage_service),
 ) -> Response:
     """Delete audio while preserving transcript.
 
@@ -1170,7 +1168,6 @@ async def delete_audio(
         )
 
     # Check if audio already purged
-    storage = StorageService(settings)
     if not await storage.has_audio(job_id):
         raise HTTPException(status_code=410, detail="Audio already purged")
 
@@ -1209,9 +1206,9 @@ async def delete_transcription(
     security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     _rate_limited: Annotated[None, Depends(check_request_rate_limit)],
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
     audit_service: AuditService = Depends(get_audit_service),
+    storage: StorageService = Depends(get_storage_service),
 ) -> Response:
     """Delete a job and all associated artifacts.
 
@@ -1244,7 +1241,6 @@ async def delete_transcription(
 
     # Clean up S3 artifacts (best-effort; DB record is already gone)
     try:
-        storage = StorageService(settings)
         await storage.delete_job_artifacts(job_id)
     except Exception:
         logger.warning(

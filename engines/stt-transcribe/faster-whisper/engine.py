@@ -10,7 +10,7 @@ Features:
     - Multi-model support on single GPU
 
 Environment variables:
-    DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "faster-whisper")
+    DALSTON_RUNTIME: Runtime engine ID for registration (default: "faster-whisper")
     DALSTON_DEFAULT_MODEL_ID: Default model ID (default: "large-v3-turbo")
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
     DALSTON_MODEL_TTL_SECONDS: Evict models idle longer than this (default: 3600)
@@ -60,7 +60,7 @@ class WhisperEngine(Engine):
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
         )
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "faster-whisper")
+        self._runtime = os.environ.get("DALSTON_RUNTIME", "faster-whisper")
 
         # Auto-detect device and compute type
         self._device, self._compute_type = self._detect_device()
@@ -86,7 +86,7 @@ class WhisperEngine(Engine):
 
         self.logger.info(
             "engine_init",
-            engine_id=self._engine_id,
+            runtime=self._runtime,
             default_model=self._default_model_id,
             device=self._device,
             compute_type=self._compute_type,
@@ -255,7 +255,7 @@ class WhisperEngine(Engine):
                     AlignmentMethod.ATTENTION if has_word_timestamps else None
                 ),
                 channel=channel,
-                engine_id=self._engine_id,
+                runtime=self._runtime,
                 skipped=False,
                 skip_reason=None,
                 warnings=[],
@@ -285,7 +285,7 @@ class WhisperEngine(Engine):
 
         return {
             "status": "healthy",
-            "engine_id": self._engine_id,
+            "runtime": self._runtime,
             "device": self._device,
             "compute_type": self._compute_type,
             "cuda_available": cuda_available,

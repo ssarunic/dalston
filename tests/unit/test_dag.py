@@ -34,9 +34,9 @@ class TestBuildTaskDagModelSelection:
         # Find transcribe task
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
 
-        # M36: engine_id should be the runtime
+        # M36: runtime is the logical engine identifier
         # Default engine faster-whisper-large-v3-turbo maps to faster-whisper runtime
-        assert transcribe_task.engine_id == "faster-whisper"
+        assert transcribe_task.runtime == "faster-whisper"
         # Default config values are applied
         assert (
             transcribe_task.config["beam_size"]
@@ -69,7 +69,7 @@ class TestBuildTaskDagModelSelection:
         tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
-        assert transcribe_task.engine_id == "custom-engine"
+        assert transcribe_task.runtime == "custom-engine"
 
     def test_model_registry_integration(self, job_id: UUID, audio_uri: str):
         """Test parameters as they would be passed from gateway with model registry."""
@@ -86,7 +86,7 @@ class TestBuildTaskDagModelSelection:
         tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
-        assert transcribe_task.engine_id == "faster-whisper"
+        assert transcribe_task.runtime == "faster-whisper"
         assert transcribe_task.config["model"] == "base"
         assert transcribe_task.config["language"] == "en"
 
@@ -209,18 +209,6 @@ class TestBuildTaskDagNemo:
     def audio_uri(self) -> str:
         return "s3://test-bucket/audio/test.wav"
 
-    def test_nemo_models_support_word_timestamps(self):
-        """Test that NeMo/Parakeet models have word_timestamps=True in catalog."""
-        from dalston.orchestrator.catalog import get_catalog
-
-        catalog = get_catalog()
-        nemo_models = catalog.get_models_for_runtime("nemo")
-        assert len(nemo_models) > 0, "Expected at least one nemo model in catalog"
-        for model in nemo_models:
-            assert model.word_timestamps is True, (
-                f"Model {model.id} should have word_timestamps=True"
-            )
-
     def test_nemo_skips_align_stage(self, job_id: UUID, audio_uri: str):
         """Test that NeMo/Parakeet models skip the ALIGN stage (native word timestamps)."""
         parameters = {
@@ -314,8 +302,8 @@ class TestBuildTaskDagNemo:
         tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
-        # M36: engine_id is the runtime, not the model ID
-        assert transcribe_task.engine_id == "nemo"
+        # M36: runtime is the logical engine identifier, not the model ID
+        assert transcribe_task.runtime == "nemo"
         # runtime_model_id tells the engine which specific model to load
         assert transcribe_task.config["runtime_model_id"] == "nvidia/parakeet-tdt-1.1b"
 

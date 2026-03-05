@@ -35,14 +35,11 @@ from .client import AsyncDalston, Dalston
 from .exceptions import (
     AuthenticationError,
     ConnectError,
-    ConnectionError,  # Deprecated alias for ConnectError
     DalstonError,
     ForbiddenError,
     NotFoundError,
-    PermissionError,  # Deprecated alias for ForbiddenError
     RateLimitError,
     ServerError,
-    TimeoutError,  # Deprecated alias for TimeoutException
     TimeoutException,
     ValidationError,
     WebhookVerificationError,

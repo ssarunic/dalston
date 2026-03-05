@@ -19,9 +19,9 @@ logger = structlog.get_logger()
 
 
 # Redis key patterns (shared with session_router)
-WORKER_SET_KEY = "dalston:realtime:workers"
-WORKER_KEY_PREFIX = "dalston:realtime:worker:"
-WORKER_SESSIONS_SUFFIX = ":sessions"
+INSTANCE_SET_KEY = "dalston:realtime:instances"
+INSTANCE_KEY_PREFIX = "dalston:realtime:instance:"
+INSTANCE_SESSIONS_SUFFIX = ":sessions"
 SESSION_KEY_PREFIX = "dalston:realtime:session:"
 EVENTS_CHANNEL = "dalston:realtime:events"
 
@@ -31,26 +31,24 @@ class WorkerInfo:
     """Worker registration information.
 
     Attributes:
-        worker_id: Unique identifier for this worker
+        instance: Unique instance identifier
         endpoint: WebSocket endpoint URL (e.g., "ws://localhost:9000")
         capacity: Maximum concurrent sessions this worker can handle
         models: List of model names this worker supports (e.g., ["faster-whisper-large-v3"])
         languages: List of language codes supported (e.g., ["en", "es", "auto"])
-        engine: Engine type identifier (e.g., "parakeet", "whisper")
+        runtime: The inference framework (e.g., "faster-whisper", "parakeet")
         supports_vocabulary: Whether this engine supports vocabulary boosting
         capabilities: Structured engine capabilities from engine.yaml (M50)
-        runtime: Runtime identifier for model management (M50)
     """
 
-    worker_id: str
+    instance: str
     endpoint: str
     capacity: int
     models: list[str]
     languages: list[str]
-    engine: str = "unknown"
+    runtime: str = "unknown"
     supports_vocabulary: bool = False
     capabilities: EngineCapabilities | None = None
-    runtime: str | None = None
 
 
 class WorkerRegistry:
@@ -67,7 +65,7 @@ class WorkerRegistry:
 
         # Register on startup
         await registry.register(WorkerInfo(
-            worker_id="stt-rt-transcribe-whisper-1",
+            instance="stt-rt-transcribe-whisper-1",
             endpoint="ws://localhost:9000",
             capacity=2,
             models=["faster-whisper-large-v3"],
@@ -76,7 +74,7 @@ class WorkerRegistry:
 
         # Send heartbeats periodically
         await registry.heartbeat(
-            worker_id="stt-rt-transcribe-whisper-1",
+            instance="stt-rt-transcribe-whisper-1",
             active_sessions=2,
             gpu_memory_used="4.2GB"
         )
@@ -120,7 +118,7 @@ class WorkerRegistry:
             info: Worker registration information
         """
         r = await self._get_redis()
-        worker_key = f"{WORKER_KEY_PREFIX}{info.worker_id}"
+        worker_key = f"{INSTANCE_KEY_PREFIX}{info.instance}"
 
         # Build registration mapping
         mapping = {
@@ -132,7 +130,7 @@ class WorkerRegistry:
             "gpu_memory_total": "0GB",
             "models_loaded": json.dumps(info.models),
             "languages_supported": json.dumps(info.languages),
-            "engine": info.engine,
+            "runtime": info.runtime,
             "supports_vocabulary": "true" if info.supports_vocabulary else "false",
             "last_heartbeat": datetime.now(UTC).isoformat(),
             "started_at": datetime.now(UTC).isoformat(),
@@ -141,18 +139,15 @@ class WorkerRegistry:
         # M50: Add structured capabilities if available
         if info.capabilities is not None:
             mapping["capabilities"] = info.capabilities.model_dump_json()
-            mapping["engine_id"] = info.capabilities.engine_id
-        if info.runtime is not None:
-            mapping["runtime"] = info.runtime
 
         # Set worker state
         await r.hset(worker_key, mapping=mapping)
 
         # Add to worker set
-        await r.sadd(WORKER_SET_KEY, info.worker_id)
+        await r.sadd(INSTANCE_SET_KEY, info.instance)
 
         # Store registration info for re-registration if key is deleted
-        self._registered_workers[info.worker_id] = info
+        self._registered_workers[info.instance] = info
 
         # Publish registration event
         await r.publish(
@@ -160,7 +155,7 @@ class WorkerRegistry:
             json.dumps(
                 {
                     "type": "worker.registered",
-                    "worker_id": info.worker_id,
+                    "instance": info.instance,
                     "endpoint": info.endpoint,
                     "capacity": info.capacity,
                     "timestamp": datetime.now(UTC).isoformat(),
@@ -168,13 +163,11 @@ class WorkerRegistry:
             ),
         )
 
-        logger.info(
-            "worker_registered", worker_id=info.worker_id, capacity=info.capacity
-        )
+        logger.info("worker_registered", instance=info.instance, capacity=info.capacity)
 
     async def heartbeat(
         self,
-        worker_id: str,
+        instance: str,
         active_sessions: int,
         gpu_memory_used: str,
         status: str = "ready",
@@ -187,23 +180,23 @@ class WorkerRegistry:
         registration fields from stored info.
 
         Args:
-            worker_id: Worker identifier
+            instance: Worker identifier
             active_sessions: Current number of active sessions
             gpu_memory_used: GPU memory usage string (e.g., "4.2GB")
             status: Worker status ("ready", "busy", "draining")
             loaded_models: List of currently loaded model IDs (M43: dynamic models)
         """
         r = await self._get_redis()
-        worker_key = f"{WORKER_KEY_PREFIX}{worker_id}"
+        worker_key = f"{INSTANCE_KEY_PREFIX}{instance}"
         now = datetime.now(UTC).isoformat()
 
         # Check if key is missing or incomplete
         existing_data = await r.hget(worker_key, "endpoint")
         needs_reregistration = existing_data is None
 
-        if needs_reregistration and worker_id in self._registered_workers:
+        if needs_reregistration and instance in self._registered_workers:
             # Re-populate all registration fields
-            info = self._registered_workers[worker_id]
+            info = self._registered_workers[instance]
             # M43: Use dynamic loaded_models if provided, otherwise use static models
             models_to_report = (
                 loaded_models if loaded_models is not None else info.models
@@ -217,7 +210,7 @@ class WorkerRegistry:
                 "gpu_memory_total": "0GB",
                 "models_loaded": json.dumps(models_to_report),
                 "languages_supported": json.dumps(info.languages),
-                "engine": info.engine,
+                "runtime": info.runtime,
                 "last_heartbeat": now,
                 "started_at": now,
             }
@@ -225,18 +218,15 @@ class WorkerRegistry:
             # M50: Include capabilities on re-registration
             if info.capabilities is not None:
                 mapping["capabilities"] = info.capabilities.model_dump_json()
-                mapping["engine_id"] = info.capabilities.engine_id
-            if info.runtime is not None:
-                mapping["runtime"] = info.runtime
 
             await r.hset(worker_key, mapping=mapping)
 
             # Re-add to worker set (idempotent)
-            await r.sadd(WORKER_SET_KEY, worker_id)
+            await r.sadd(INSTANCE_SET_KEY, instance)
 
             logger.info(
                 "worker_reregistered",
-                worker_id=worker_id,
+                instance=instance,
                 endpoint=info.endpoint,
                 reason="key_missing",
             )
@@ -255,12 +245,12 @@ class WorkerRegistry:
 
         logger.debug(
             "heartbeat",
-            worker_id=worker_id,
+            instance=instance,
             active_sessions=active_sessions,
             loaded_models=loaded_models,
         )
 
-    async def session_started(self, worker_id: str, session_id: str) -> None:
+    async def session_started(self, instance: str, session_id: str) -> None:
         """Notify that a session has started on this worker.
 
         Note: The session set is managed exclusively by the Gateway's
@@ -268,18 +258,18 @@ class WorkerRegistry:
         only logs for observability.
 
         Args:
-            worker_id: Worker identifier
+            instance: Worker identifier
             session_id: Session identifier
         """
         # Note: Session set management is handled by Gateway's SessionAllocator
         # to avoid race conditions during Gateway crash recovery.
         # See: dalston/session_router/allocator.py
 
-        logger.debug("session_started", worker_id=worker_id, session_id=session_id)
+        logger.debug("session_started", instance=instance, session_id=session_id)
 
     async def session_ended(
         self,
-        worker_id: str,
+        instance: str,
         session_id: str,
         duration: float,
         status: str,
@@ -291,7 +281,7 @@ class WorkerRegistry:
         reconciliation.
 
         Args:
-            worker_id: Worker identifier
+            instance: Worker identifier
             session_id: Session identifier
             duration: Session duration in seconds
             status: End status ("completed" or "error")
@@ -308,7 +298,7 @@ class WorkerRegistry:
             json.dumps(
                 {
                     "type": "session.ended",
-                    "worker_id": worker_id,
+                    "instance": instance,
                     "session_id": session_id,
                     "duration": duration,
                     "status": status,
@@ -319,26 +309,26 @@ class WorkerRegistry:
 
         logger.debug(
             "session_ended",
-            worker_id=worker_id,
+            instance=instance,
             session_id=session_id,
             duration=round(duration, 1),
             status=status,
         )
 
-    async def unregister(self, worker_id: str) -> None:
+    async def unregister(self, instance: str) -> None:
         """Unregister worker on shutdown.
 
         Removes worker from registry and cleans up related keys.
 
         Args:
-            worker_id: Worker identifier
+            instance: Worker identifier
         """
         r = await self._get_redis()
-        worker_key = f"{WORKER_KEY_PREFIX}{worker_id}"
-        sessions_key = f"{WORKER_KEY_PREFIX}{worker_id}{WORKER_SESSIONS_SUFFIX}"
+        worker_key = f"{INSTANCE_KEY_PREFIX}{instance}"
+        sessions_key = f"{INSTANCE_KEY_PREFIX}{instance}{INSTANCE_SESSIONS_SUFFIX}"
 
         # Remove from worker set
-        await r.srem(WORKER_SET_KEY, worker_id)
+        await r.srem(INSTANCE_SET_KEY, instance)
 
         # Delete worker state
         await r.delete(worker_key)
@@ -347,7 +337,7 @@ class WorkerRegistry:
         await r.delete(sessions_key)
 
         # Remove from local cache
-        self._registered_workers.pop(worker_id, None)
+        self._registered_workers.pop(instance, None)
 
         # Publish unregistration event
         await r.publish(
@@ -355,13 +345,13 @@ class WorkerRegistry:
             json.dumps(
                 {
                     "type": "worker.unregistered",
-                    "worker_id": worker_id,
+                    "instance": instance,
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
             ),
         )
 
-        logger.info("worker_unregistered", worker_id=worker_id)
+        logger.info("worker_unregistered", instance=instance)
 
     async def close(self) -> None:
         """Close Redis connection."""

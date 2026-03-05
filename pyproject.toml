@@ -5,45 +5,45 @@ description = "Modular, self-hosted audio transcription server"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.0.0",
-    "pydantic-settings>=2.0.0",
+    "pydantic-settings>=2.13.0",
     "structlog>=24.0.0",
     # OpenTelemetry core (M19 distributed tracing)
-    "opentelemetry-api>=1.20.0,<2.0.0",
-    "opentelemetry-sdk>=1.20.0,<2.0.0",
-    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0,<2.0.0",
+    "opentelemetry-api>=1.39.0,<2.0.0",
+    "opentelemetry-sdk>=1.39.0,<2.0.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.39.0,<2.0.0",
     # Prometheus metrics (M20)
     "prometheus-client>=0.19.0",
 ]
 
 [project.optional-dependencies]
 gateway = [
-    "fastapi>=0.109.0",
-    "uvicorn>=0.27.0",
+    "fastapi>=0.135.0",
+    "uvicorn>=0.41.0",
     "python-multipart>=0.0.6",
-    "redis>=5.0.0",
+    "redis>=7.0.0",
     "httpx>=0.26.0",
     "pyyaml>=6.0",  # For engine catalog (M31)
     "sqlalchemy[asyncio]>=2.0.0",
     "asyncpg>=0.29.0",
-    "greenlet>=3.0.0",
+    "greenlet>=3.3.0",
     "aioboto3>=13.0.0",
     "types-aiobotocore-s3>=2.13.0",
     "websockets>=12.0",  # For realtime WebSocket proxy
     "tinytag>=2.0.0",  # Audio metadata extraction
-    "huggingface_hub>=0.20.0",  # For HF card routing (M40.5)
+    "huggingface_hub>=1.0.0",  # For HF card routing (M40.5)
     # OpenTelemetry auto-instrumentation (M19)
-    "opentelemetry-instrumentation-fastapi>=0.41b0,<1.0.0",
-    "opentelemetry-instrumentation-redis>=0.41b0,<1.0.0",
-    "opentelemetry-instrumentation-httpx>=0.41b0,<1.0.0",
-    "opentelemetry-instrumentation-sqlalchemy>=0.41b0,<1.0.0",
+    "opentelemetry-instrumentation-fastapi>=0.60b0,<1.0.0",
+    "opentelemetry-instrumentation-redis>=0.60b0,<1.0.0",
+    "opentelemetry-instrumentation-httpx>=0.60b0,<1.0.0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.60b0,<1.0.0",
 ]
 orchestrator = [
-    "redis>=5.0.0",
+    "redis>=7.0.0",
     "sqlalchemy[asyncio]>=2.0.0",
     "asyncpg>=0.29.0",
     "aioboto3>=13.0.0",
     "httpx>=0.26.0",
-    "fastapi>=0.109.0",  # Required for importing gateway.services
+    "fastapi>=0.135.0",  # Required for importing gateway.services
     "python-multipart>=0.0.6",  # Required by FastAPI for form data
     "websockets>=12.0",  # Required by gateway module
     "tinytag>=2.0.0",  # Required by gateway.services.audio_probe
@@ -51,16 +51,16 @@ orchestrator = [
     "pyyaml>=6.0",  # For engine catalog YAML parsing (M29)
 ]
 engine-sdk = [
-    "redis>=5.0.0",
+    "redis>=7.0.0",
     "boto3>=1.34.0",
     "pyyaml>=6.0",  # For engine.yaml loading (M30)
     # OpenTelemetry instrumentation (M19)
-    "opentelemetry-instrumentation-redis>=0.41b0,<1.0.0",
-    "opentelemetry-instrumentation-boto3sqs>=0.41b0,<1.0.0",
+    "opentelemetry-instrumentation-redis>=0.60b0,<1.0.0",
+    "opentelemetry-instrumentation-boto3sqs>=0.60b0,<1.0.0",
 ]
 realtime-sdk = [
     "websockets>=12.0",
-    "redis>=5.0.0",
+    "redis>=7.0.0",
     "numpy>=1.24.0",
     "torch>=2.0.0",
     "aioboto3>=13.0.0",  # S3 storage for audio/transcript persistence
@@ -68,21 +68,21 @@ realtime-sdk = [
     "audioop-lts>=0.2.1;python_version>='3.13'",  # audioop removed in Python 3.13
 ]
 session-router = [
-    "redis>=5.0.0",
+    "redis>=7.0.0",
 ]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-httpx>=0.30.0",
     "httpx>=0.26.0",
-    "redis>=5.0.0",
+    "redis>=7.0.0",
     "alembic>=1.13.0",
     "ruff>=0.9.0",
     "pre-commit>=4.0.0",
     "numpy>=1.24.0",  # For VAD tests
     "jsonschema>=4.0.0",  # For engine YAML validation (M30)
     # OpenTelemetry test utilities (M19)
-    "opentelemetry-test-utils>=0.41b0,<1.0.0",
+    "opentelemetry-test-utils>=0.60b0,<1.0.0",
 ]
 
 [build-system]
@@ -123,3 +123,47 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = ["e2e: end-to-end tests requiring live Docker stack"]
 addopts = "-m 'not e2e'"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = false
+warn_unused_ignores = false
+disallow_untyped_defs = false
+ignore_missing_imports = true
+exclude = [
+    "alembic/",
+    "engines/",
+]
+
+# Ignore errors in tools (scaffold has dynamic typing)
+[[tool.mypy.overrides]]
+module = "dalston.tools.*"
+ignore_errors = true
+
+# Redis async client typing: redis-py uses union types (Awaitable[T] | T)
+# that confuse mypy. Ignore errors in Redis-heavy modules.
+# TODO: Gradually enable type checking as modules are fixed
+[[tool.mypy.overrides]]
+module = [
+    "dalston.session_router.*",
+    "dalston.realtime_sdk.*",
+    "dalston.orchestrator.*",
+    "dalston.engine_sdk.*",
+    "dalston.common.streams",
+    "dalston.common.streams_sync",
+    "dalston.common.durable_events",
+    "dalston.common.s3",
+    "dalston.metrics_exporter",
+    "dalston.logging",
+]
+ignore_errors = true
+
+# Gateway modules with typing issues (mostly arg-type from optional params)
+[[tool.mypy.overrides]]
+module = [
+    "dalston.gateway.api.*",
+    "dalston.gateway.services.*",
+    "dalston.gateway.main",
+    "dalston.gateway.dependencies",
+]
+ignore_errors = true

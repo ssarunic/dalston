@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
-"""Generate engine catalog from engine.yaml and model files.
-
-M36: This script now generates a two-catalog output:
-- runtimes: Engine runtimes that can load models (from engines/*/engine.yaml)
-- models: Model variants with runtime mappings (from models/*.yaml)
+"""Generate engine catalog from engine.yaml files.
 
 The catalog enables:
 - Runtime discovery: What engine runtimes can handle each pipeline stage
-- Model routing: Which runtime loads each model variant
-- Backward compatibility: Combined 'engines' section for existing code
+- Capability validation: Check job requirements before engines are running
+
+M46: Model metadata has moved to the database (ModelRegistryModel). Models are
+seeded from YAMLs at gateway startup, not via this catalog. This script now
+only generates the engines section.
 
 Sources:
     engines/**/engine.yaml  - Runtime metadata (all engines have runtime: field)
-    models/*.yaml           - Model variant metadata with runtime_model_id
 
 Usage:
     python scripts/generate_catalog.py
-    python scripts/generate_catalog.py --engines-dir engines/ --models-dir models/ --output dalston/orchestrator/generated_catalog.json
+    python scripts/generate_catalog.py --engines-dir engines/ --output dalston/orchestrator/generated_catalog.json
 """
 
 from __future__ import annotations
@@ -31,11 +29,7 @@ import yaml
 
 
 def find_runtime_yamls(engines_dir: Path) -> list[Path]:
-    """Find all engine.yaml files (runtime definitions).
-
-    M36: All engines now have a runtime: field in their engine.yaml.
-    We read the runtime-level YAML, not the variants.
-    """
+    """Find all engine.yaml files (runtime definitions)."""
     yamls: list[Path] = []
 
     for yaml_path in engines_dir.glob("**/engine.yaml"):
@@ -45,13 +39,6 @@ def find_runtime_yamls(engines_dir: Path) -> list[Path]:
         yamls.append(yaml_path)
 
     return sorted(yamls)
-
-
-def find_model_yamls(models_dir: Path) -> list[Path]:
-    """Find all model YAML files in the models directory."""
-    if not models_dir.exists():
-        return []
-    return sorted(models_dir.glob("*.yaml"))
 
 
 def load_yaml(path: Path) -> dict:
@@ -68,7 +55,7 @@ def derive_image_name(runtime_id: str, stage: str, version: str) -> str:
 def transform_runtime_to_entry(data: dict, yaml_path: Path) -> dict:
     """Transform engine.yaml data into runtime catalog entry format."""
     runtime_id = data.get("runtime", data.get("id"))
-    engine_id = data.get("id")
+    engine_file_id = data.get("id")
     version = data.get("version", "1.0.0")
     stage = data.get("stage")
 
@@ -94,7 +81,7 @@ def transform_runtime_to_entry(data: dict, yaml_path: Path) -> dict:
 
     entry = {
         "id": runtime_id,
-        "engine_id": engine_id,  # Original engine ID
+        "runtime": engine_file_id,  # Engine file ID for capability routing
         "name": data.get("name", runtime_id),
         "version": version,
         "stage": stage,
@@ -127,114 +114,44 @@ def transform_runtime_to_entry(data: dict, yaml_path: Path) -> dict:
     return entry
 
 
-def transform_model_to_entry(data: dict) -> dict:
-    """Transform model YAML data into model catalog entry format."""
-    model_id = data["id"]
+def generate_catalog(engines_dir: Path) -> dict:
+    """Generate catalog from engine.yaml files.
 
-    # Normalize languages
-    languages = data.get("languages")
-    if languages == ["all"]:
-        languages = None
-
-    # Extract capabilities
-    caps = data.get("capabilities", {})
-    hardware = data.get("hardware", {})
-    performance = data.get("performance", {})
-
-    entry = {
-        "id": model_id,
-        "runtime": data["runtime"],
-        "runtime_model_id": data["runtime_model_id"],
-        "name": data.get("name", model_id),
-        "source": data.get("source"),
-        "size_gb": data.get("size_gb"),
-        "stage": data.get("stage"),
-        "description": data.get("description", "").strip(),
-        "languages": languages,
-        "capabilities": {
-            "word_timestamps": caps.get("word_timestamps", False),
-            "punctuation": caps.get("punctuation", False),
-            "capitalization": caps.get("capitalization", False),
-            "streaming": caps.get("streaming", False),
-            "max_audio_duration": caps.get("max_audio_duration"),
-        },
-        "hardware": {
-            "min_vram_gb": hardware.get("min_vram_gb"),
-            "supports_cpu": hardware.get("supports_cpu", False),
-            "min_ram_gb": hardware.get("min_ram_gb"),
-        },
-        "performance": {
-            "rtf_gpu": performance.get("rtf_gpu"),
-            "rtf_cpu": performance.get("rtf_cpu"),
-        },
-    }
-
-    return entry
-
-
-def generate_catalog(engines_dir: Path, models_dir: Path) -> dict:
-    """Generate catalog from engine.yaml and model YAML files.
-
-    M36: Generates a two-catalog structure:
-    - runtimes: Engine runtime definitions
-    - models: Model variant definitions with runtime mappings
-    - engines: Combined for backward compatibility
+    M46: Only generates engine entries. Model metadata has moved to the database.
     """
     # Load runtime definitions from engine.yaml files
     runtime_yamls = find_runtime_yamls(engines_dir)
     if not runtime_yamls:
         raise ValueError(f"No engine.yaml files found in {engines_dir}")
 
-    runtimes = {}
+    engines = {}
     for yaml_path in runtime_yamls:
         try:
             data = load_yaml(yaml_path)
             entry = transform_runtime_to_entry(data, yaml_path)
-            runtimes[entry["id"]] = entry
+            runtime_id = entry["id"]
+            # Build engine entry
+            engines[runtime_id] = {
+                "id": runtime_id,
+                "name": entry["name"],
+                "version": entry["version"],
+                "stage": entry["stage"],
+                "type": None,
+                "description": entry["description"],
+                "image": entry["image"],
+                "capabilities": entry["capabilities"],
+                "hardware": entry["hardware"],
+                "performance": entry["performance"],
+            }
         except Exception as e:
             print(f"Warning: Failed to process {yaml_path}: {e}", file=sys.stderr)
             continue
-
-    # Load model definitions from models/*.yaml
-    model_yamls = find_model_yamls(models_dir)
-    models = {}
-    for yaml_path in model_yamls:
-        try:
-            data = load_yaml(yaml_path)
-            entry = transform_model_to_entry(data)
-            models[entry["id"]] = entry
-        except Exception as e:
-            print(f"Warning: Failed to process {yaml_path}: {e}", file=sys.stderr)
-            continue
-
-    # Build backward-compatible engines section
-    # Utility engines (non-transcription) go directly
-    # Transcription engines are represented by their runtime
-    engines = {}
-    for runtime_id, runtime in runtimes.items():
-        # Copy runtime entry as engine entry for compatibility
-        engines[runtime_id] = {
-            "id": runtime_id,
-            "name": runtime["name"],
-            "version": runtime["version"],
-            "stage": runtime["stage"],
-            "type": None,
-            "description": runtime["description"],
-            "image": runtime["image"],
-            "capabilities": runtime["capabilities"],
-            "hardware": runtime["hardware"],
-            "performance": runtime["performance"],
-        }
 
     catalog = {
         "generated_at": datetime.now(UTC).isoformat(),
-        "schema_version": "2.0",
-        "runtime_count": len(runtimes),
-        "model_count": len(models),
+        "schema_version": "3.0",  # M46: models removed
         "engine_count": len(engines),
-        "runtimes": runtimes,
-        "models": models,
-        "engines": engines,  # Backward compatibility
+        "engines": engines,
     }
 
     return catalog
@@ -243,19 +160,13 @@ def generate_catalog(engines_dir: Path, models_dir: Path) -> dict:
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Generate engine catalog from engine.yaml and model files"
+        description="Generate engine catalog from engine.yaml files"
     )
     parser.add_argument(
         "--engines-dir",
         type=Path,
         default=Path(__file__).parent.parent / "engines",
         help="Directory containing engine subdirectories",
-    )
-    parser.add_argument(
-        "--models-dir",
-        type=Path,
-        default=Path(__file__).parent.parent / "models",
-        help="Directory containing model YAML files",
     )
     parser.add_argument(
         "--output",
@@ -275,7 +186,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        catalog = generate_catalog(args.engines_dir, args.models_dir)
+        catalog = generate_catalog(args.engines_dir)
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -289,10 +200,7 @@ def main() -> int:
         with open(args.output, "w") as f:
             f.write(output_json)
             f.write("\n")
-        print(
-            f"Generated catalog: {catalog['runtime_count']} runtimes, "
-            f"{catalog['model_count']} models: {args.output}"
-        )
+        print(f"Generated catalog: {catalog['engine_count']} engines: {args.output}")
 
     return 0
 

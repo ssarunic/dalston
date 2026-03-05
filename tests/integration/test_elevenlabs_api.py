@@ -180,9 +180,7 @@ class TestCreateTranscriptionEndpoint:
         """Test async transcription returns immediately with job ID."""
         mock_jobs_service.create_job.return_value = mock_job
 
-        with patch(
-            "dalston.gateway.api.v1.speech_to_text.StorageService"
-        ) as MockStorage:
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
             MockStorage.return_value.upload_audio = AsyncMock(
                 return_value="s3://bucket/audio.mp3"
             )
@@ -213,9 +211,7 @@ class TestCreateTranscriptionEndpoint:
         """Test that any model_id is accepted (validated at orchestrator level)."""
         mock_jobs_service.create_job.return_value = mock_job
 
-        with patch(
-            "dalston.gateway.api.v1.speech_to_text.StorageService"
-        ) as MockStorage:
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
             MockStorage.return_value.upload_audio = AsyncMock(
                 return_value="s3://bucket/audio.mp3"
             )
@@ -262,9 +258,7 @@ class TestCreateTranscriptionEndpoint:
         """Test that ElevenLabs model IDs are mapped correctly."""
         mock_jobs_service.create_job.return_value = mock_job
 
-        with patch(
-            "dalston.gateway.api.v1.speech_to_text.StorageService"
-        ) as MockStorage:
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
             MockStorage.return_value.upload_audio = AsyncMock(
                 return_value="s3://bucket/audio.mp3"
             )
@@ -296,9 +290,7 @@ class TestCreateTranscriptionEndpoint:
         """Test that diarization parameter is passed correctly."""
         mock_jobs_service.create_job.return_value = mock_job
 
-        with patch(
-            "dalston.gateway.api.v1.speech_to_text.StorageService"
-        ) as MockStorage:
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
             MockStorage.return_value.upload_audio = AsyncMock(
                 return_value="s3://bucket/audio.mp3"
             )
@@ -334,9 +326,7 @@ class TestCreateTranscriptionEndpoint:
         """Test that keyterms are mapped to vocabulary in job parameters."""
         mock_jobs_service.create_job.return_value = mock_job
 
-        with patch(
-            "dalston.gateway.api.v1.speech_to_text.StorageService"
-        ) as MockStorage:
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
             MockStorage.return_value.upload_audio = AsyncMock(
                 return_value="s3://bucket/audio.mp3"
             )
@@ -374,9 +364,7 @@ class TestCreateTranscriptionEndpoint:
         """Test that vocabulary is not in parameters when keyterms is omitted."""
         mock_jobs_service.create_job.return_value = mock_job
 
-        with patch(
-            "dalston.gateway.api.v1.speech_to_text.StorageService"
-        ) as MockStorage:
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
             MockStorage.return_value.upload_audio = AsyncMock(
                 return_value="s3://bucket/audio.mp3"
             )
@@ -406,9 +394,7 @@ class TestCreateTranscriptionEndpoint:
         """Test that empty keyterms array does not set vocabulary."""
         mock_jobs_service.create_job.return_value = mock_job
 
-        with patch(
-            "dalston.gateway.api.v1.speech_to_text.StorageService"
-        ) as MockStorage:
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
             MockStorage.return_value.upload_audio = AsyncMock(
                 return_value="s3://bucket/audio.mp3"
             )
@@ -604,9 +590,7 @@ class TestGetTranscriptEndpoint:
 
         mock_jobs_service.get_job_authorized.return_value = job
 
-        with patch(
-            "dalston.gateway.api.v1.speech_to_text.StorageService"
-        ) as MockStorage:
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
             MockStorage.return_value.get_transcript = AsyncMock(
                 return_value={
                     "text": "Hello world",

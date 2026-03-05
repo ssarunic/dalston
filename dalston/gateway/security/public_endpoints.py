@@ -66,12 +66,10 @@ def is_optional_auth_endpoint(path: str) -> bool:
 
     # Pattern matching for parameterized paths - be restrictive to avoid
     # accidentally matching protected endpoints like /v1/models/sync,
-    # /v1/models/registry, /v1/models/{model_id}/pull
+    # /v1/models/{model_id}/pull
     if path.startswith("/v1/models/"):
         # Exclude known protected paths
         if "/pull" in path:
-            return False
-        if "/registry" in path:
             return False
         if path == "/v1/models/sync":
             return False

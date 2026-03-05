@@ -265,7 +265,7 @@ def pull_model(
         console.print("To download manually, run:")
         console.print()
         console.print("  [cyan]pip install huggingface_hub[/cyan]")
-        console.print(f"  [cyan]huggingface-cli download {hf_model_id}[/cyan]")
+        console.print(f"  [cyan]hf download {hf_model_id}[/cyan]")
         console.print()
 
         # Try to use huggingface_hub if available

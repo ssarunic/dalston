@@ -96,7 +96,7 @@ output_schema:
     exclusive_mode:
       type: boolean
       description: Whether exclusive diarization mode was used
-    engine_id:
+    runtime:
       type: string
       description: Engine identifier
     skipped:

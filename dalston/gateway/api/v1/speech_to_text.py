@@ -43,6 +43,7 @@ from dalston.gateway.dependencies import (
     get_redis,
     get_security_manager,
     get_settings,
+    get_storage_service,
 )
 from dalston.gateway.security.manager import SecurityManager
 from dalston.gateway.security.permissions import Permission
@@ -191,6 +192,7 @@ async def create_transcription(
     ingestion_service: AudioIngestionService = Depends(get_ingestion_service),
     rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
     audit_service: AuditService = Depends(get_audit_service),
+    storage: StorageService = Depends(get_storage_service),
 ) -> ElevenLabsTranscript | ElevenLabsAsyncResponse:
     """Create a transcription using ElevenLabs-compatible API.
 
@@ -259,7 +261,6 @@ async def create_transcription(
     job_id = uuid4()
 
     # Upload audio to S3
-    storage = StorageService(settings)
     audio_uri = await storage.upload_audio(
         job_id=job_id,
         file_content=ingested.content,
@@ -351,8 +352,8 @@ async def get_transcript(
     principal: Annotated[Principal, Depends(get_principal)],
     security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
+    storage: StorageService = Depends(get_storage_service),
 ) -> ElevenLabsTranscript | ElevenLabsProcessingResponse:
     """Get transcription result in ElevenLabs format.
 
@@ -381,7 +382,6 @@ async def get_transcript(
         )
 
     # Fetch transcript from storage
-    storage = StorageService(settings)
     transcript = await storage.get_transcript(transcription_id)
 
     return _format_elevenlabs_response(transcription_id, transcript)
@@ -478,9 +478,9 @@ async def export_transcript(
         int, Query(ge=1, le=10, description="Max lines per subtitle block")
     ] = 2,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
     export_service: ExportService = Depends(get_export_service),
+    storage: StorageService = Depends(get_storage_service),
 ) -> Response:
     """Export transcript in specified format (ElevenLabs compatible).
 
@@ -513,7 +513,6 @@ async def export_transcript(
         )
 
     # Fetch transcript from S3
-    storage = StorageService(settings)
     transcript = await storage.get_transcript(job.id)
 
     # Generate and return export response

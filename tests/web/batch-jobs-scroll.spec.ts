@@ -64,8 +64,8 @@ test.describe('Batch Jobs', () => {
     const firstIdCell = page.locator('tbody tr').first().locator('td').first()
     await expect(firstIdCell).toContainText('job-00000001')
 
-    await page.getByRole('button', { name: 'Filters' }).click()
-    await page.getByRole('button', { name: 'created_desc' }).click()
+    // Click on the sort dropdown trigger button (shows "Newest first" by default)
+    await page.getByRole('button', { name: 'Newest first' }).click()
     await page.getByRole('option', { name: 'Oldest first' }).click()
 
     await expect(page).toHaveURL(/\/console\/jobs\?(?=.*sort=created_asc)/)
@@ -135,16 +135,16 @@ test.describe('Batch Jobs', () => {
     // Verify more rows are shown
     await expect(page.getByText('Showing 40 jobs')).toBeVisible()
 
-    // Apply status filter and verify URL reflects selected filter
-    await page.getByRole('button', { name: 'Filters' }).click()
-    await page.getByRole('button', { name: 'All Statuses' }).click()
+    // Apply status filter (click the status dropdown showing "All")
+    await page.getByRole('button', { name: 'All' }).click()
     await page.getByRole('option', { name: 'Running' }).click()
     await expect(page.getByText('Showing 2 jobs')).toBeVisible()
 
-    // Change sort and limit controls and verify all params are URL-synced
-    await page.getByRole('button', { name: 'created_desc' }).click()
+    // Change sort dropdown
+    await page.getByRole('button', { name: 'Newest first' }).click()
     await page.getByRole('option', { name: 'Oldest first' }).click()
 
+    // Change limit dropdown
     await page.getByRole('button', { name: '20' }).click()
     await page.getByRole('option', { name: '50' }).click()
 

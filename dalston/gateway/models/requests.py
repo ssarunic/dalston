@@ -1,5 +1,7 @@
 """Pydantic request schemas for Gateway API."""
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -79,9 +81,9 @@ class TranscriptionCreateParams(BaseModel):
         description="Audio redaction mode: 'silence', 'beep'",
     )
 
-    def to_job_parameters(self) -> dict:
+    def to_job_parameters(self) -> dict[str, Any]:
         """Convert to job parameters dict for storage."""
-        params = {
+        params: dict[str, Any] = {
             "language": self.language,
             "speaker_detection": self.speaker_detection,
             "num_speakers": self.num_speakers,

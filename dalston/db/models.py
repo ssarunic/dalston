@@ -213,7 +213,7 @@ class TaskModel(Base):
         index=True,
     )
     stage: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    engine_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    runtime: Mapped[str] = mapped_column(String(100), nullable=False)
     status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
@@ -573,7 +573,7 @@ class RealtimeSessionModel(Base):
     # Parameters (immutable after creation)
     language: Mapped[str | None] = mapped_column(String(10), nullable=True)
     model: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    engine: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    runtime: Mapped[str | None] = mapped_column(String(50), nullable=True)
     encoding: Mapped[str | None] = mapped_column(String(20), nullable=True)
     sample_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
@@ -595,7 +595,7 @@ class RealtimeSessionModel(Base):
     word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # Tracking
-    worker_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    instance: Mapped[str | None] = mapped_column(String(100), nullable=True)
     client_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
     previous_session_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -700,6 +700,12 @@ class ModelRegistryModel(Base):
     # Metadata cache (HuggingFace card data, download stats, etc.)
     model_metadata: Mapped[dict] = mapped_column(
         JSONB, nullable=False, server_default="{}"
+    )
+
+    # Provenance tracking - where did this model's metadata come from?
+    # Values: "yaml" (from YAML files), "user" (manually enriched), "hf" (HuggingFace)
+    metadata_source: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="yaml"
     )
 
     # Usage tracking

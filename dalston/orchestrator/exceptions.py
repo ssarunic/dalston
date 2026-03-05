@@ -53,12 +53,12 @@ class EngineUnavailableError(Exception):
     def __init__(
         self,
         message: str,
-        engine_id: str,
+        runtime: str,
         stage: str,
         details: ErrorDetails | None = None,
     ) -> None:
         super().__init__(message)
-        self.engine_id = engine_id
+        self.runtime = runtime
         self.stage = stage
         self.details = details
 
@@ -67,7 +67,7 @@ class EngineUnavailableError(Exception):
         result: dict[str, Any] = {
             "error": "engine_unavailable",
             "message": str(self),
-            "engine_id": self.engine_id,
+            "runtime": self.runtime,
             "stage": self.stage,
         }
         if self.details:
@@ -88,13 +88,13 @@ class EngineCapabilityError(Exception):
     def __init__(
         self,
         message: str,
-        engine_id: str,
+        runtime: str,
         stage: str,
         language: str | None = None,
         details: ErrorDetails | None = None,
     ) -> None:
         super().__init__(message)
-        self.engine_id = engine_id
+        self.runtime = runtime
         self.stage = stage
         self.language = language
         self.details = details
@@ -104,7 +104,7 @@ class EngineCapabilityError(Exception):
         result: dict[str, Any] = {
             "error": "engine_capability_mismatch",
             "message": str(self),
-            "engine_id": self.engine_id,
+            "runtime": self.runtime,
             "stage": self.stage,
         }
         if self.language:

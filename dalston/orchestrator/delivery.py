@@ -5,6 +5,7 @@ with retry logic. This provides crash-resilient webhook delivery.
 """
 
 import asyncio
+import time
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -13,6 +14,8 @@ from sqlalchemy import and_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import dalston.metrics
+import dalston.telemetry
 from dalston.config import Settings
 from dalston.db.models import WebhookDeliveryModel, WebhookEndpointModel
 from dalston.gateway.services.webhook import WebhookService
@@ -174,14 +177,32 @@ class DeliveryWorker:
 
         log.info("delivering_webhook")
 
-        # Attempt delivery (single attempt, no retries - we handle retries via the table)
-        success, status_code, error = await self._webhook_service.deliver(
-            url=url,
-            payload=delivery.payload,
-            max_retries=0,  # No in-memory retries, we use the delivery table
-            secret=secret,
-            delivery_id=delivery.id,
-        )
+        # Attempt delivery with tracing and metrics
+        deliver_start = time.monotonic()
+        with dalston.telemetry.create_span(
+            "webhook.deliver",
+            attributes={
+                "dalston.job_id": str(delivery.job_id),
+                "dalston.webhook.endpoint": url,
+                "dalston.webhook.event": delivery.event_type,
+                "dalston.webhook.attempt": delivery.attempts + 1,
+            },
+        ):
+            success, status_code, error = await self._webhook_service.deliver(
+                url=url,
+                payload=delivery.payload,
+                max_retries=0,  # No in-memory retries, we use the delivery table
+                secret=secret,
+                delivery_id=delivery.id,
+            )
+            dalston.telemetry.set_span_attribute(
+                "dalston.webhook.status_code", status_code or 0
+            )
+            if error:
+                dalston.telemetry.set_span_attribute("dalston.error", error)
+
+        deliver_duration = time.monotonic() - deliver_start
+        dalston.metrics.observe_webhook_delivery_duration(deliver_duration)
 
         # Update delivery record
         delivery.attempts += 1
@@ -192,6 +213,7 @@ class DeliveryWorker:
         if success:
             delivery.status = "success"
             delivery.next_retry_at = None
+            dalston.metrics.inc_webhook_deliveries("success")
             log.info("webhook_delivered_successfully", status_code=status_code)
 
             # Reset endpoint failure tracking on success (atomic update to prevent races)
@@ -208,6 +230,7 @@ class DeliveryWorker:
         elif delivery.attempts >= MAX_ATTEMPTS:
             delivery.status = "failed"
             delivery.next_retry_at = None
+            dalston.metrics.inc_webhook_deliveries("failed")
             log.warning(
                 "webhook_delivery_exhausted",
                 total_attempts=delivery.attempts,
@@ -232,6 +255,7 @@ class DeliveryWorker:
             # Schedule retry
             delay = RETRY_DELAYS[min(delivery.attempts, len(RETRY_DELAYS) - 1)]
             delivery.next_retry_at = datetime.now(UTC) + timedelta(seconds=delay)
+            dalston.metrics.inc_webhook_deliveries("retried")
             log.info(
                 "webhook_retry_scheduled",
                 next_attempt=delivery.attempts + 1,

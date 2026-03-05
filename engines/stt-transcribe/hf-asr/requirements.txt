@@ -4,8 +4,8 @@
 torch>=2.2.0
 torchaudio>=2.2.0
 
-# HuggingFace Transformers for ASR pipeline
-transformers>=4.37.0
+# HuggingFace Transformers for ASR pipeline (5.x required for huggingface_hub 1.x)
+transformers>=5.0.0
 
 # Model loading acceleration
 accelerate>=0.26.0

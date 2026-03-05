@@ -85,7 +85,7 @@ ENV TORCH_HOME=/models/torch
 RUN mkdir -p /models/huggingface /models/torch
 
 # Default environment variables
-ENV DALSTON_WORKER_ID=stt-rt-transcribe-voxtral
+ENV DALSTON_INSTANCE=stt-rt-transcribe-voxtral
 ENV DALSTON_WORKER_PORT=9000
 ENV DALSTON_MAX_SESSIONS=4
 ENV REDIS_URL=redis://redis:6379

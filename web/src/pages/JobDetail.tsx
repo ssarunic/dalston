@@ -140,7 +140,7 @@ function parseJobError(rawError: string): ParsedJobError {
     message: asString(parsed.message) ?? trimmed,
     engine:
       asString(parsed.engine) ??
-      asString(parsed.engine_id) ??
+      asString(parsed.runtime) ??
       asString(parsed.engineId),
     stage:
       asString(parsed.stage) ??

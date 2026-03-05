@@ -15,7 +15,7 @@ Features:
     - GPU-only inference (vLLM requires CUDA)
 
 Environment variables:
-    DALSTON_ENGINE_ID: Engine ID for registration (default: "vllm-asr")
+    DALSTON_RUNTIME: Engine ID for registration (default: "vllm-asr")
     DALSTON_DEFAULT_MODEL_ID: Default HF model ID (default: "mistralai/Voxtral-Mini-3B-2507")
     DALSTON_MODEL_TTL_SECONDS: Evict models idle longer than this (default: 7200)
     DALSTON_MAX_LOADED_MODELS: Maximum models to keep loaded (default: 1)
@@ -77,7 +77,7 @@ class VLLMASREngine(Engine):
         self._tokenizer = None
         self._model_storage: S3ModelStorage | None = None
 
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "vllm-asr")
+        self._runtime = os.environ.get("DALSTON_RUNTIME", "vllm-asr")
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
         )
@@ -104,7 +104,7 @@ class VLLMASREngine(Engine):
 
         self.logger.info(
             "engine_init",
-            engine_id=self._engine_id,
+            runtime=self._runtime,
             default_model=self._default_model_id,
             gpu_memory_utilization=self._gpu_memory_utilization,
             max_model_len=self._max_model_len,
@@ -283,8 +283,8 @@ class VLLMASREngine(Engine):
             # Parse output using adapter
             result = adapter.parse_output(raw_text, language)
 
-            # Override engine_id and add channel/warnings
-            result.engine_id = self._engine_id
+            # Override runtime and add channel/warnings
+            result.runtime = self._runtime
             result.channel = channel
             result.warnings = warnings + (result.warnings or [])
 
@@ -306,7 +306,7 @@ class VLLMASREngine(Engine):
 
         return {
             "status": "healthy",
-            "engine_id": self._engine_id,
+            "runtime": self._runtime,
             "model_loaded": self._llm is not None,
             "loaded_model_id": self._loaded_model_id,
             "loaded_model_path": self._loaded_model_path,
@@ -322,7 +322,7 @@ class VLLMASREngine(Engine):
     def get_capabilities(self) -> EngineCapabilities:
         """Return vLLM-ASR engine capabilities."""
         return EngineCapabilities(
-            engine_id=self._engine_id,
+            runtime=self._runtime,
             version="1.0.0",
             stages=["transcribe"],
             languages=None,  # Multilingual (model-dependent)
@@ -334,7 +334,6 @@ class VLLMASREngine(Engine):
             supports_cpu=False,
             min_ram_gb=16,
             rtf_gpu=0.15,
-            runtime="vllm-asr",
         )
 
     def shutdown(self) -> None:

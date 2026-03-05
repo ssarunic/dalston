@@ -13,7 +13,7 @@ Used by:
 import os
 import re
 from enum import Enum
-from typing import Any
+from typing import Any, NoReturn
 
 from fastapi import HTTPException, Response
 from pydantic import BaseModel, Field
@@ -144,9 +144,9 @@ def is_openai_response_format(response_format: str | None) -> bool:
 
 
 def map_openai_model(model: str) -> str:
-    """Map OpenAI model ID to Dalston engine ID.
+    """Map OpenAI model ID to Dalston runtime.
 
-    Returns: engine_id
+    Returns: runtime identifier
 
     Uses explicit mappings from OPENAI_MODEL_MAP if available,
     otherwise falls back to DEFAULT_OPENAI_ENGINE.
@@ -160,7 +160,7 @@ def raise_openai_error(
     error_type: str = "invalid_request_error",
     param: str | None = None,
     code: str = "invalid_request",
-) -> None:
+) -> NoReturn:
     """Raise HTTPException with OpenAI error format."""
     raise HTTPException(
         status_code=status_code,

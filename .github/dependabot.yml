@@ -1,0 +1,58 @@
+version: 2
+updates:
+  # Python dependencies
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      # Group minor and patch updates to reduce PR noise
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+
+  # Web console (npm)
+  - package-ecosystem: npm
+    directory: "/web"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - javascript
+
+  # Docker base images
+  - package-ecosystem: docker
+    directory: "/docker"
+    schedule:
+      interval: monthly
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - docker
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - ci

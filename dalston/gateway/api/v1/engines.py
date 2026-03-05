@@ -11,11 +11,18 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from dalston.gateway.dependencies import get_principal, get_redis, get_security_manager
+from dalston.gateway.dependencies import (
+    get_db,
+    get_principal,
+    get_redis,
+    get_security_manager,
+)
 from dalston.gateway.security.manager import SecurityManager
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
+from dalston.gateway.services.model_registry import ModelRegistryService
 from dalston.orchestrator.catalog import get_catalog
 from dalston.orchestrator.registry import BatchEngineRegistry
 
@@ -106,6 +113,7 @@ async def list_engines(
     principal: Annotated[Principal, Depends(get_principal)],
     security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db),
 ) -> EnginesListResponse:
     """List all engines with status.
 
@@ -115,23 +123,32 @@ async def list_engines(
     security_manager.require_permission(principal, Permission.MODEL_READ)
     catalog = get_catalog()
     registry = BatchEngineRegistry(redis)
+    model_service = ModelRegistryService()
+
+    # Load all models from DB, group by runtime for efficient lookup
+    all_models = await model_service.list_models(db)
+    models_by_runtime: dict[str, list[str]] = {}
+    for m in all_models:
+        if m.runtime not in models_by_runtime:
+            models_by_runtime[m.runtime] = []
+        models_by_runtime[m.runtime].append(m.id)
 
     # Get running engines from registry
     running_engines = await registry.get_engines()
-    running_map = {e.engine_id: e for e in running_engines}
+    running_map = {e.runtime: e for e in running_engines}
 
     engines: list[EngineResponse] = []
 
     # Process all engines from catalog
     for entry in catalog.get_all_engines():
-        engine_id = entry.engine_id
+        runtime = entry.runtime
         caps = entry.capabilities
 
         # Determine status and runtime state from registry
         loaded_model: str | None = None
 
-        if engine_id in running_map:
-            reg_engine = running_map[engine_id]
+        if runtime in running_map:
+            reg_engine = running_map[runtime]
             if reg_engine.is_available:
                 status: Literal["running", "available", "unhealthy"] = "running"
             else:
@@ -141,13 +158,12 @@ async def list_engines(
         else:
             status = "available"
 
-        # M36: Get available models for this runtime from catalog
-        runtime_models = catalog.get_models_for_runtime(engine_id)
-        available_models = [m.id for m in runtime_models] if runtime_models else None
+        # M36/M46: Get available models for this runtime from DB
+        available_models = models_by_runtime.get(runtime) or None
 
         engines.append(
             EngineResponse(
-                id=engine_id,
+                id=runtime,
                 name=None,  # Could be added to catalog if needed
                 stage=caps.stages[0] if caps.stages else "unknown",
                 version=caps.version,
@@ -204,7 +220,7 @@ async def get_capabilities(
 
     # Get running engines from registry
     running_engines = await registry.get_engines()
-    running_ids = {e.engine_id for e in running_engines if e.is_available}
+    running_ids = {e.runtime for e in running_engines if e.is_available}
 
     # Aggregate capabilities from running engines
     all_languages: set[str] = set()
@@ -212,7 +228,7 @@ async def get_capabilities(
     max_duration: int | None = None
 
     for entry in catalog.get_all_engines():
-        if entry.engine_id not in running_ids:
+        if entry.runtime not in running_ids:
             continue
 
         caps = entry.capabilities
@@ -236,7 +252,7 @@ async def get_capabilities(
                 )
 
             stage_caps = stages[stage]
-            stage_caps.engines.append(entry.engine_id)
+            stage_caps.engines.append(entry.runtime)
 
             # Merge capabilities (union for booleans, intersection for languages)
             if caps.supports_word_timestamps:

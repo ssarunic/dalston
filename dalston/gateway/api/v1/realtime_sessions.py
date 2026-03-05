@@ -24,7 +24,11 @@ from dalston.common.timeouts import S3_PRESIGNED_URL_EXPIRY_SECONDS
 from dalston.config import get_settings
 from dalston.db.models import RealtimeSessionModel
 from dalston.db.session import get_db
-from dalston.gateway.dependencies import get_principal, get_security_manager
+from dalston.gateway.dependencies import (
+    get_principal,
+    get_security_manager,
+    get_storage_service,
+)
 from dalston.gateway.security.exceptions import ResourceNotFoundError
 from dalston.gateway.security.manager import SecurityManager
 from dalston.gateway.security.principal import Principal
@@ -49,7 +53,7 @@ class SessionSummary(BaseModel):
     status: str
     language: str | None
     model: str | None
-    engine: str | None
+    runtime: str | None
     audio_duration_seconds: float
     segment_count: int
     word_count: int
@@ -65,7 +69,7 @@ class SessionDetail(BaseModel):
     status: str
     language: str | None
     model: str | None
-    engine: str | None
+    runtime: str | None
     encoding: str | None
     sample_rate: int | None
     audio_duration_seconds: float
@@ -76,7 +80,7 @@ class SessionDetail(BaseModel):
     purged_at: str | None
     audio_uri: str | None
     transcript_uri: str | None
-    worker_id: str | None
+    instance: str | None
     client_ip: str | None
     previous_session_id: str | None
     started_at: str
@@ -174,7 +178,7 @@ async def list_realtime_sessions(
             status=s.status,
             language=s.language,
             model=s.model,
-            engine=s.engine,
+            runtime=s.runtime,
             audio_duration_seconds=s.audio_duration_seconds,
             segment_count=s.segment_count,
             word_count=s.word_count,
@@ -219,7 +223,7 @@ async def get_realtime_session(
         status=session.status,
         language=session.language,
         model=session.model,
-        engine=session.engine,
+        runtime=session.runtime,
         encoding=session.encoding,
         sample_rate=session.sample_rate,
         audio_duration_seconds=session.audio_duration_seconds,
@@ -230,7 +234,7 @@ async def get_realtime_session(
         purged_at=session.purged_at.isoformat() if session.purged_at else None,
         audio_uri=session.audio_uri,
         transcript_uri=session.transcript_uri,
-        worker_id=session.worker_id,
+        instance=session.instance,
         client_ip=session.client_ip,
         previous_session_id=str(session.previous_session_id)
         if session.previous_session_id
@@ -291,6 +295,7 @@ async def get_session_transcript(
     principal: Annotated[Principal, Depends(get_principal)],
     security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    storage: StorageService = Depends(get_storage_service),
 ):
     """Get transcript JSON for a session."""
     settings = get_settings()
@@ -307,7 +312,6 @@ async def get_session_transcript(
         raise HTTPException(status_code=404, detail="Transcript not available")
 
     # Parse S3 URI and fetch transcript
-    storage = StorageService(settings)
     try:
         bucket, key = storage.parse_s3_uri(session.transcript_uri)
     except ValueError:
@@ -387,6 +391,7 @@ async def export_session_transcript(
     max_lines: Annotated[
         int, Query(ge=1, le=10, description="Max lines per subtitle block")
     ] = 2,
+    storage: StorageService = Depends(get_storage_service),
 ) -> Response:
     """Export realtime session transcript in specified format.
 
@@ -412,7 +417,6 @@ async def export_session_transcript(
         raise HTTPException(status_code=404, detail="Transcript not available")
 
     # Parse S3 URI and fetch transcript
-    storage = StorageService(settings)
     try:
         bucket, key = storage.parse_s3_uri(session.transcript_uri)
     except ValueError:
@@ -460,6 +464,7 @@ async def get_session_audio(
     principal: Annotated[Principal, Depends(get_principal)],
     security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    storage: StorageService = Depends(get_storage_service),
 ):
     """Get presigned URL for session audio."""
     settings = get_settings()
@@ -476,7 +481,6 @@ async def get_session_audio(
         raise HTTPException(status_code=404, detail="Audio not available")
 
     # Generate presigned URL from S3 URI
-    storage = StorageService(settings)
     try:
         url = await storage.generate_presigned_url_from_uri(
             session.audio_uri,

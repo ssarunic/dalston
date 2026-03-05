@@ -90,7 +90,7 @@ ENV NEMO_CACHE=/models/nemo
 RUN mkdir -p /models/huggingface /models/torch /models/nemo
 
 # Default environment variables
-ENV DALSTON_WORKER_ID=stt-rt-transcribe-parakeet
+ENV DALSTON_INSTANCE=stt-rt-transcribe-parakeet
 ENV DALSTON_WORKER_PORT=9000
 ENV DALSTON_MAX_SESSIONS=4
 ENV REDIS_URL=redis://redis:6379

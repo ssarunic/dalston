@@ -250,11 +250,11 @@
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "dalston_queue_depth",
-          "legendFormat": "{{ engine_id }}",
+          "legendFormat": "{{ runtime }}",
           "refId": "A"
         }
       ],
-      "title": "Queue Depth by Engine",
+      "title": "Queue Depth by Runtime",
       "type": "timeseries"
     },
     {
@@ -297,7 +297,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "dalston_queue_oldest_task_age_seconds",
-          "legendFormat": "{{ engine_id }}",
+          "legendFormat": "{{ runtime }}",
           "refId": "A"
         }
       ],
@@ -343,18 +343,18 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.50, sum(rate(dalston_engine_task_duration_seconds_bucket[5m])) by (le, engine_id))",
-          "legendFormat": "p50 {{ engine_id }}",
+          "expr": "histogram_quantile(0.50, sum(rate(dalston_engine_task_duration_seconds_bucket[5m])) by (le, runtime, model))",
+          "legendFormat": "p50 {{ runtime }}/{{ model }}",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum(rate(dalston_engine_task_duration_seconds_bucket[5m])) by (le, engine_id))",
-          "legendFormat": "p95 {{ engine_id }}",
+          "expr": "histogram_quantile(0.95, sum(rate(dalston_engine_task_duration_seconds_bucket[5m])) by (le, runtime, model))",
+          "legendFormat": "p95 {{ runtime }}/{{ model }}",
           "refId": "B"
         }
       ],
-      "title": "Engine Processing Time",
+      "title": "Processing Time by Runtime/Model",
       "type": "timeseries"
     },
     {
@@ -396,18 +396,18 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(dalston_engine_tasks_processed_total{status=\"success\"}[5m])) by (engine_id)",
-          "legendFormat": "{{ engine_id }} (success)",
+          "expr": "sum(rate(dalston_engine_tasks_processed_total{status=\"success\"}[5m])) by (runtime, model)",
+          "legendFormat": "{{ runtime }}/{{ model }} ok",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(dalston_engine_tasks_processed_total{status=\"failure\"}[5m])) by (engine_id)",
-          "legendFormat": "{{ engine_id }} (failure)",
+          "expr": "sum(rate(dalston_engine_tasks_processed_total{status=\"failure\"}[5m])) by (runtime, model)",
+          "legendFormat": "{{ runtime }}/{{ model }} err",
           "refId": "B"
         }
       ],
-      "title": "Task Throughput by Engine",
+      "title": "Task Throughput by Runtime/Model",
       "type": "timeseries"
     },
     {
@@ -574,14 +574,14 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.50, sum(rate(dalston_realtime_session_duration_seconds_bucket[5m])) by (le))",
-          "legendFormat": "p50",
+          "expr": "histogram_quantile(0.50, sum(rate(dalston_realtime_session_duration_seconds_bucket[5m])) by (le, runtime, model))",
+          "legendFormat": "p50 {{ runtime }}/{{ model }}",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum(rate(dalston_realtime_session_duration_seconds_bucket[5m])) by (le))",
-          "legendFormat": "p95",
+          "expr": "histogram_quantile(0.95, sum(rate(dalston_realtime_session_duration_seconds_bucket[5m])) by (le, runtime, model))",
+          "legendFormat": "p95 {{ runtime }}/{{ model }}",
           "refId": "B"
         }
       ],
@@ -795,5 +795,5 @@
   "timezone": "",
   "title": "Dalston Overview",
   "uid": "dalston-overview",
-  "version": 3
+  "version": 4
 }

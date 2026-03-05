@@ -28,7 +28,7 @@ from dalston.orchestrator.registry import BatchEngineState
 
 
 def make_capabilities(
-    engine_id: str = "test-engine",
+    runtime: str = "test-engine",
     languages: list[str] | None = None,
     supports_word_timestamps: bool = False,
     includes_diarization: bool = False,
@@ -37,7 +37,7 @@ def make_capabilities(
 ) -> EngineCapabilities:
     """Create EngineCapabilities for testing."""
     return EngineCapabilities(
-        engine_id=engine_id,
+        runtime=runtime,
         version="1.0.0",
         stages=["transcribe"],
         languages=languages,
@@ -49,8 +49,8 @@ def make_capabilities(
 
 
 def make_engine_state(
-    engine_id: str = "test-engine",
-    instance_id: str | None = None,
+    runtime: str = "test-engine",
+    instance: str | None = None,
     stage: str = "transcribe",
     capabilities: EngineCapabilities | None = None,
     is_available: bool = True,
@@ -58,10 +58,10 @@ def make_engine_state(
     """Create BatchEngineState for testing."""
     now = datetime.now(UTC)
     state = BatchEngineState(
-        engine_id=engine_id,
-        instance_id=instance_id or f"{engine_id}-abc123",
+        runtime=runtime,
+        instance=instance or f"{runtime}-abc123",
         stage=stage,
-        stream_name=f"dalston:stream:{engine_id}",
+        stream_name=f"dalston:stream:{runtime}",
         status="idle" if is_available else "offline",
         current_task=None,
         last_heartbeat=now,
@@ -72,14 +72,14 @@ def make_engine_state(
 
 
 def make_catalog_entry(
-    engine_id: str = "test-engine",
+    runtime: str = "test-engine",
     languages: list[str] | None = None,
 ) -> CatalogEntry:
     """Create CatalogEntry for testing."""
     return CatalogEntry(
-        engine_id=engine_id,
-        image=f"dalston/{engine_id}:latest",
-        capabilities=make_capabilities(engine_id=engine_id, languages=languages),
+        runtime=runtime,
+        image=f"dalston/{runtime}:latest",
+        capabilities=make_capabilities(runtime=runtime, languages=languages),
     )
 
 
@@ -165,7 +165,7 @@ class TestRankAndSelect:
             ),
         ]
         result = _rank_and_select(engines, {})
-        assert result.engine_id == "fast"
+        assert result.runtime == "fast"
         assert "native word timestamps" in result.selection_reason
 
     def test_prefers_native_diarization(self):
@@ -180,7 +180,7 @@ class TestRankAndSelect:
             ),
         ]
         result = _rank_and_select(engines, {})
-        assert result.engine_id == "has-diar"
+        assert result.runtime == "has-diar"
         assert "native diarization" in result.selection_reason
 
     def test_prefers_faster_rtf(self):
@@ -195,7 +195,7 @@ class TestRankAndSelect:
             ),
         ]
         result = _rank_and_select(engines, {})
-        assert result.engine_id == "fast"
+        assert result.runtime == "fast"
 
     def test_prefers_language_specific_over_universal(self):
         """When language is specified, prefer language-specific engines."""
@@ -211,7 +211,7 @@ class TestRankAndSelect:
         ]
         # Specify English - should prefer the English-specific engine
         result = _rank_and_select(engines, {"language": "en"})
-        assert result.engine_id == "english-only"
+        assert result.runtime == "english-only"
 
     def test_prefers_universal_for_auto_detection(self):
         """When no language specified (auto), prefer universal engines for safety."""
@@ -227,7 +227,7 @@ class TestRankAndSelect:
         ]
         # No language specified - should prefer universal for safety
         result = _rank_and_select(engines, {})
-        assert result.engine_id == "universal"
+        assert result.runtime == "universal"
 
 
 # =============================================================================
@@ -245,7 +245,6 @@ class TestSelectEngine:
     def mock_catalog(self):
         catalog = MagicMock(spec=EngineCatalog)
         catalog.find_engines.return_value = []
-        catalog.get_model.return_value = None  # Default: not a model ID
         return catalog
 
     @pytest.mark.asyncio
@@ -259,7 +258,7 @@ class TestSelectEngine:
             "transcribe", {"language": "en"}, mock_registry, mock_catalog
         )
 
-        assert result.engine_id == "only-one"
+        assert result.runtime == "only-one"
         assert result.selection_reason == "only capable engine"
 
     @pytest.mark.asyncio
@@ -297,7 +296,7 @@ class TestSelectEngine:
             user_preference="preferred",
         )
 
-        assert result.engine_id == "preferred"
+        assert result.runtime == "preferred"
         assert result.selection_reason == "user preference"
 
     @pytest.mark.asyncio
@@ -326,7 +325,7 @@ class TestSelectEngine:
 class TestShouldAddAlignment:
     def test_needs_alignment_when_no_native_timestamps(self):
         selection = EngineSelectionResult(
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
             capabilities=make_capabilities(supports_word_timestamps=False),
             selection_reason="test",
         )
@@ -334,7 +333,7 @@ class TestShouldAddAlignment:
 
     def test_skip_alignment_when_native_timestamps(self):
         selection = EngineSelectionResult(
-            engine_id="parakeet",
+            runtime="parakeet",
             capabilities=make_capabilities(supports_word_timestamps=True),
             selection_reason="test",
         )
@@ -342,7 +341,7 @@ class TestShouldAddAlignment:
 
     def test_skip_alignment_when_disabled_by_params(self):
         selection = EngineSelectionResult(
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
             capabilities=make_capabilities(supports_word_timestamps=False),
             selection_reason="test",
         )
@@ -350,7 +349,7 @@ class TestShouldAddAlignment:
 
     def test_skip_alignment_when_segment_granularity(self):
         selection = EngineSelectionResult(
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
             capabilities=make_capabilities(supports_word_timestamps=False),
             selection_reason="test",
         )
@@ -363,7 +362,7 @@ class TestShouldAddAlignment:
 class TestShouldAddDiarization:
     def test_needs_diarization_when_requested_no_native(self):
         selection = EngineSelectionResult(
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
             capabilities=make_capabilities(includes_diarization=False),
             selection_reason="test",
         )
@@ -373,7 +372,7 @@ class TestShouldAddDiarization:
 
     def test_skip_diarization_when_native(self):
         selection = EngineSelectionResult(
-            engine_id="whisperx-full",
+            runtime="whisperx-full",
             capabilities=make_capabilities(includes_diarization=True),
             selection_reason="test",
         )
@@ -384,7 +383,7 @@ class TestShouldAddDiarization:
 
     def test_skip_diarization_when_not_requested(self):
         selection = EngineSelectionResult(
-            engine_id="faster-whisper",
+            runtime="faster-whisper",
             capabilities=make_capabilities(includes_diarization=False),
             selection_reason="test",
         )
@@ -457,7 +456,6 @@ class TestSelectPipelineEngines:
     def mock_catalog(self):
         catalog = MagicMock(spec=EngineCatalog)
         catalog.find_engines.return_value = []
-        catalog.get_model.return_value = None  # Default: not a model ID
         return catalog
 
     @pytest.mark.asyncio
@@ -477,7 +475,7 @@ class TestSelectPipelineEngines:
                 caps.stages = [stage]
                 return [
                     make_engine_state(
-                        engine_id=caps.engine_id, stage=stage, capabilities=caps
+                        runtime=caps.runtime, stage=stage, capabilities=caps
                     )
                 ]
             return []
@@ -510,7 +508,7 @@ class TestSelectPipelineEngines:
                 caps.stages = [stage]
                 return [
                     make_engine_state(
-                        engine_id=caps.engine_id, stage=stage, capabilities=caps
+                        runtime=caps.runtime, stage=stage, capabilities=caps
                     )
                 ]
             return []
@@ -541,7 +539,7 @@ class TestSelectPipelineEngines:
                 caps.stages = [stage]
                 return [
                     make_engine_state(
-                        engine_id=caps.engine_id, stage=stage, capabilities=caps
+                        runtime=caps.runtime, stage=stage, capabilities=caps
                     )
                 ]
             return []
@@ -553,4 +551,4 @@ class TestSelectPipelineEngines:
         )
 
         assert "diarize" in selections
-        assert selections["diarize"].engine_id == "pyannote-4.0"
+        assert selections["diarize"].runtime == "pyannote-4.0"

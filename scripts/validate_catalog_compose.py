@@ -57,9 +57,9 @@ def collect_batch_ids(services: dict) -> set[str]:
         if not service_name.startswith("stt-batch-"):
             continue
         env = parse_environment(service.get("environment"))
-        engine_id = env.get("DALSTON_ENGINE_ID")
-        if engine_id:
-            batch_ids.add(engine_id)
+        runtime_id = env.get("DALSTON_RUNTIME")
+        if runtime_id:
+            batch_ids.add(runtime_id)
     return batch_ids
 
 
@@ -69,10 +69,10 @@ def collect_realtime_ids(services: dict) -> set[str]:
     for service_name in services:
         if not service_name.startswith(prefix):
             continue
-        engine_id = service_name[len(prefix) :]
-        if engine_id.endswith("-cpu"):
-            engine_id = engine_id[: -len("-cpu")]
-        rt_ids.add(engine_id)
+        runtime_id = service_name[len(prefix) :]
+        if runtime_id.endswith("-cpu"):
+            runtime_id = runtime_id[: -len("-cpu")]
+        rt_ids.add(runtime_id)
     return rt_ids
 
 
@@ -91,16 +91,16 @@ def main() -> int:
 
     missing: list[str] = []
     for entry in engines.values():
-        engine_id = entry.get("id")
-        if not engine_id:
+        runtime_id = entry.get("id")
+        if not runtime_id:
             continue
 
         if entry.get("type") == "realtime":
-            if engine_id not in realtime_ids:
-                missing.append(f"realtime:{engine_id}")
+            if runtime_id not in realtime_ids:
+                missing.append(f"realtime:{runtime_id}")
         else:
-            if engine_id not in batch_ids:
-                missing.append(f"batch:{engine_id}")
+            if runtime_id not in batch_ids:
+                missing.append(f"batch:{runtime_id}")
 
     if missing:
         print("Catalog entries missing from docker-compose mapping:")

@@ -412,7 +412,7 @@ class PrepareOutput(BaseModel):
     )
 
     # Standard output fields
-    engine_id: str = Field(..., description="Engine identifier")
+    runtime: str = Field(..., description="Runtime identifier")
     skipped: bool = Field(default=False, description="Whether processing was skipped")
     skip_reason: str | None = Field(default=None, description="Reason if skipped")
     warnings: list[str] = Field(default_factory=list, description="Any warnings")
@@ -449,7 +449,7 @@ class TranscribeOutput(BaseModel):
     )
 
     # Standard output fields
-    engine_id: str = Field(..., description="Engine identifier")
+    runtime: str = Field(..., description="Runtime identifier")
     skipped: bool = Field(default=False, description="Whether processing was skipped")
     skip_reason: str | None = Field(default=None, description="Reason if skipped")
     warnings: list[str] = Field(default_factory=list, description="Any warnings")
@@ -484,7 +484,7 @@ class AlignOutput(BaseModel):
     )
 
     # Standard output fields
-    engine_id: str = Field(..., description="Engine identifier")
+    runtime: str = Field(..., description="Runtime identifier")
     skipped: bool = Field(default=False, description="Whether alignment was skipped")
     skip_reason: str | None = Field(default=None, description="Reason if skipped")
     warnings: list[str] = Field(default_factory=list, description="Any warnings")
@@ -508,7 +508,7 @@ class DiarizeOutput(BaseModel):
     )
 
     # Standard output fields
-    engine_id: str = Field(..., description="Engine identifier")
+    runtime: str = Field(..., description="Runtime identifier")
     skipped: bool = Field(default=False, description="Whether diarization was skipped")
     skip_reason: str | None = Field(default=None, description="Reason if skipped")
     warnings: list[str] = Field(default_factory=list, description="Any warnings")
@@ -647,7 +647,7 @@ class PIIDetectOutput(BaseModel):
     processing_time_ms: int = Field(..., ge=0, description="Processing time in ms")
 
     # Standard output fields
-    engine_id: str = Field(..., description="Engine identifier")
+    runtime: str = Field(..., description="Runtime identifier")
     skipped: bool = Field(default=False, description="Whether detection was skipped")
     skip_reason: str | None = Field(default=None, description="Reason if skipped")
     warnings: list[str] = Field(default_factory=list, description="Any warnings")
@@ -668,7 +668,7 @@ class AudioRedactOutput(BaseModel):
     )
 
     # Standard output fields
-    engine_id: str = Field(..., description="Engine identifier")
+    runtime: str = Field(..., description="Runtime identifier")
     skipped: bool = Field(default=False, description="Whether redaction was skipped")
     skip_reason: str | None = Field(default=None, description="Reason if skipped")
     warnings: list[str] = Field(default_factory=list, description="Any warnings")

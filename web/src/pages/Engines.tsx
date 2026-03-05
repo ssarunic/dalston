@@ -250,7 +250,7 @@ function EngineCard({ engine, models }: { engine: BatchEngine; models: ModelRegi
 
   return (
     <Link
-      to={`/engines/${encodeURIComponent(engine.engine_id)}`}
+      to={`/engines/${encodeURIComponent(engine.runtime)}`}
       className={cn(
         'block p-4 rounded-lg border transition-all',
         'hover:border-primary/50 hover:bg-accent/30',
@@ -262,7 +262,7 @@ function EngineCard({ engine, models }: { engine: BatchEngine; models: ModelRegi
         <div className="flex items-center gap-3 min-w-0">
           <StatusDot status={dot} />
           <div className="flex items-center gap-2 min-w-0">
-            <span className="font-medium truncate">{engine.engine_id}</span>
+            <span className="font-medium truncate">{engine.runtime}</span>
             <span className="text-sm text-muted-foreground">·</span>
             <span className="text-sm text-muted-foreground shrink-0">{engineStatusLabel(engine.status)}</span>
           </div>
@@ -307,9 +307,9 @@ function StageAccordion({
         <div className="p-4 space-y-2">
           {stageStatus.engines.map((engine) => (
             <EngineCard
-              key={engine.engine_id}
+              key={engine.runtime}
               engine={engine}
-              models={modelsByRuntime.get(engine.engine_id) ?? []}
+              models={modelsByRuntime.get(engine.runtime) ?? []}
             />
           ))}
         </div>
@@ -343,7 +343,7 @@ function RealtimeWorkerCard({ worker, models }: { worker: WorkerStatus; models: 
 
   return (
     <Link
-      to={`/realtime/workers/${encodeURIComponent(worker.worker_id)}`}
+      to={`/realtime/workers/${encodeURIComponent(worker.instance)}`}
       className={cn(
         'block p-4 rounded-lg border transition-all',
         'hover:border-primary/50 hover:bg-accent/30',
@@ -356,7 +356,7 @@ function RealtimeWorkerCard({ worker, models }: { worker: WorkerStatus; models: 
           <StatusDot status={isReady ? 'healthy' : 'unhealthy'} />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="font-medium truncate">{worker.worker_id}</span>
+              <span className="font-medium truncate">{worker.instance}</span>
               {worker.runtime && (
                 <Badge variant="outline" className="text-xs shrink-0">
                   {worker.runtime}
@@ -624,7 +624,7 @@ export function Engines() {
             <div className="space-y-2">
               {realtimeWorkers.map((worker) => (
                 <RealtimeWorkerCard
-                  key={worker.worker_id}
+                  key={worker.instance}
                   worker={worker}
                   models={modelsByRuntime.get(worker.runtime ?? '') ?? []}
                 />
