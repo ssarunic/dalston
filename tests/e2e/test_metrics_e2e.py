@@ -1,11 +1,11 @@
 """End-to-end tests for Prometheus metrics (M20).
 
 These tests verify metrics collection works across services.
-They require the Docker Compose stack with monitoring profile.
+They require the Docker Compose stack with observability profile.
 
 Run with:
-    docker compose --profile monitoring up -d
-    METRICS_ENABLED=true pytest -m e2e tests/e2e/test_metrics_e2e.py -v
+    docker compose --profile observability up -d
+    DALSTON_METRICS_ENABLED=true pytest -m e2e tests/e2e/test_metrics_e2e.py -v
 """
 
 import os
@@ -34,8 +34,8 @@ class TestMetricsEndpointsE2E:
         return os.environ.get("ORCHESTRATOR_METRICS_URL", "http://localhost:8001")
 
     @pytest.mark.skipif(
-        os.environ.get("METRICS_ENABLED") != "true",
-        reason="Metrics not enabled - set METRICS_ENABLED=true",
+        os.environ.get("DALSTON_METRICS_ENABLED") != "true",
+        reason="Metrics not enabled - set DALSTON_METRICS_ENABLED=true",
     )
     async def test_gateway_metrics_endpoint(self, gateway_url):
         """Gateway /metrics endpoint returns Prometheus format."""
@@ -50,8 +50,8 @@ class TestMetricsEndpointsE2E:
             assert "# HELP" in content or "# TYPE" in content
 
     @pytest.mark.skipif(
-        os.environ.get("METRICS_ENABLED") != "true",
-        reason="Metrics not enabled - set METRICS_ENABLED=true",
+        os.environ.get("DALSTON_METRICS_ENABLED") != "true",
+        reason="Metrics not enabled - set DALSTON_METRICS_ENABLED=true",
     )
     async def test_gateway_metrics_contain_request_metrics(self, gateway_url):
         """Gateway metrics include HTTP request counters after requests."""
@@ -71,8 +71,8 @@ class TestMetricsEndpointsE2E:
             assert "dalston_gateway_request_duration_seconds" in content
 
     @pytest.mark.skipif(
-        os.environ.get("METRICS_ENABLED") != "true",
-        reason="Metrics not enabled - set METRICS_ENABLED=true",
+        os.environ.get("DALSTON_METRICS_ENABLED") != "true",
+        reason="Metrics not enabled - set DALSTON_METRICS_ENABLED=true",
     )
     async def test_gateway_metrics_include_method_and_path(self, gateway_url):
         """Gateway metrics include method and path labels."""
@@ -100,8 +100,8 @@ class TestPrometheusScrapingE2E:
         return os.environ.get("PROMETHEUS_URL", "http://localhost:9090")
 
     @pytest.mark.skipif(
-        os.environ.get("METRICS_ENABLED") != "true",
-        reason="Metrics not enabled - set METRICS_ENABLED=true",
+        os.environ.get("DALSTON_METRICS_ENABLED") != "true",
+        reason="Metrics not enabled - set DALSTON_METRICS_ENABLED=true",
     )
     async def test_prometheus_is_running(self, prometheus_url):
         """Prometheus server is running and accessible."""
@@ -110,11 +110,13 @@ class TestPrometheusScrapingE2E:
                 response = await client.get(f"{prometheus_url}/-/ready")
                 assert response.status_code == 200
             except httpx.ConnectError:
-                pytest.skip("Prometheus not running - start with --profile monitoring")
+                pytest.skip(
+                    "Prometheus not running - start with --profile observability"
+                )
 
     @pytest.mark.skipif(
-        os.environ.get("METRICS_ENABLED") != "true",
-        reason="Metrics not enabled - set METRICS_ENABLED=true",
+        os.environ.get("DALSTON_METRICS_ENABLED") != "true",
+        reason="Metrics not enabled - set DALSTON_METRICS_ENABLED=true",
     )
     async def test_prometheus_scrapes_gateway(self, prometheus_url):
         """Prometheus successfully scrapes gateway metrics."""
@@ -127,7 +129,9 @@ class TestPrometheusScrapingE2E:
                 if ready.status_code != 200:
                     pytest.skip("Prometheus not ready")
             except httpx.ConnectError:
-                pytest.skip("Prometheus not running - start with --profile monitoring")
+                pytest.skip(
+                    "Prometheus not running - start with --profile observability"
+                )
 
             # Wait for scrape
             await asyncio.sleep(5)
@@ -144,8 +148,8 @@ class TestPrometheusScrapingE2E:
                 assert data["status"] == "success"
 
     @pytest.mark.skipif(
-        os.environ.get("METRICS_ENABLED") != "true",
-        reason="Metrics not enabled - set METRICS_ENABLED=true",
+        os.environ.get("DALSTON_METRICS_ENABLED") != "true",
+        reason="Metrics not enabled - set DALSTON_METRICS_ENABLED=true",
     )
     async def test_prometheus_targets_up(self, prometheus_url):
         """Prometheus targets are up and being scraped."""
@@ -157,7 +161,9 @@ class TestPrometheusScrapingE2E:
                 if ready.status_code != 200:
                     pytest.skip("Prometheus not ready")
             except httpx.ConnectError:
-                pytest.skip("Prometheus not running - start with --profile monitoring")
+                pytest.skip(
+                    "Prometheus not running - start with --profile observability"
+                )
 
             # Wait for initial scrape
             await asyncio.sleep(5)
@@ -185,7 +191,7 @@ class TestPrometheusScrapingE2E:
                 # If no targets found or none healthy, it might just need more time
                 if not gateway_targets:
                     pytest.skip(
-                        "No gateway targets found - monitoring may not be fully started"
+                        "No gateway targets found - observability stack may not be fully started"
                     )
 
 
@@ -199,7 +205,7 @@ class TestMetricsDisabledE2E:
         return os.environ.get("GATEWAY_URL", "http://localhost:8000")
 
     @pytest.mark.skipif(
-        os.environ.get("METRICS_ENABLED") == "true",
+        os.environ.get("DALSTON_METRICS_ENABLED") == "true",
         reason="Metrics is enabled - these tests require disabled metrics",
     )
     async def test_gateway_works_without_metrics(self, gateway_url):
@@ -211,7 +217,7 @@ class TestMetricsDisabledE2E:
             assert data["status"] == "healthy"
 
     @pytest.mark.skipif(
-        os.environ.get("METRICS_ENABLED") == "true",
+        os.environ.get("DALSTON_METRICS_ENABLED") == "true",
         reason="Metrics is enabled - these tests require disabled metrics",
     )
     async def test_metrics_endpoint_returns_404_when_disabled(self, gateway_url):
@@ -231,8 +237,8 @@ class TestQueueMetricsE2E:
         return os.environ.get("METRICS_EXPORTER_URL", "http://localhost:9100")
 
     @pytest.mark.skipif(
-        os.environ.get("METRICS_ENABLED") != "true",
-        reason="Metrics not enabled - set METRICS_ENABLED=true",
+        os.environ.get("DALSTON_METRICS_ENABLED") != "true",
+        reason="Metrics not enabled - set DALSTON_METRICS_ENABLED=true",
     )
     async def test_queue_metrics_exporter_running(self, metrics_exporter_url):
         """Queue metrics exporter is running and returning metrics."""
@@ -245,12 +251,12 @@ class TestQueueMetricsE2E:
                     assert "dalston_queue_depth" in content or "# HELP" in content
             except httpx.ConnectError:
                 pytest.skip(
-                    "Metrics exporter not running - start with --profile monitoring"
+                    "Metrics exporter not running - start with --profile observability"
                 )
 
     @pytest.mark.skipif(
-        os.environ.get("METRICS_ENABLED") != "true",
-        reason="Metrics not enabled - set METRICS_ENABLED=true",
+        os.environ.get("DALSTON_METRICS_ENABLED") != "true",
+        reason="Metrics not enabled - set DALSTON_METRICS_ENABLED=true",
     )
     async def test_redis_connectivity_metric(self, metrics_exporter_url):
         """Queue metrics exporter reports Redis connectivity."""
@@ -263,7 +269,7 @@ class TestQueueMetricsE2E:
                     assert "dalston_redis_connected" in content
             except httpx.ConnectError:
                 pytest.skip(
-                    "Metrics exporter not running - start with --profile monitoring"
+                    "Metrics exporter not running - start with --profile observability"
                 )
 
 
@@ -277,8 +283,8 @@ class TestGrafanaE2E:
         return os.environ.get("GRAFANA_URL", "http://localhost:3001")
 
     @pytest.mark.skipif(
-        os.environ.get("METRICS_ENABLED") != "true",
-        reason="Metrics not enabled - set METRICS_ENABLED=true",
+        os.environ.get("DALSTON_METRICS_ENABLED") != "true",
+        reason="Metrics not enabled - set DALSTON_METRICS_ENABLED=true",
     )
     async def test_grafana_is_running(self, grafana_url):
         """Grafana server is running and accessible."""
@@ -289,11 +295,11 @@ class TestGrafanaE2E:
                     data = response.json()
                     assert data.get("database") == "ok"
             except httpx.ConnectError:
-                pytest.skip("Grafana not running - start with --profile monitoring")
+                pytest.skip("Grafana not running - start with --profile observability")
 
     @pytest.mark.skipif(
-        os.environ.get("METRICS_ENABLED") != "true",
-        reason="Metrics not enabled - set METRICS_ENABLED=true",
+        os.environ.get("DALSTON_METRICS_ENABLED") != "true",
+        reason="Metrics not enabled - set DALSTON_METRICS_ENABLED=true",
     )
     async def test_grafana_has_prometheus_datasource(self, grafana_url):
         """Grafana has Prometheus datasource configured."""
@@ -315,11 +321,11 @@ class TestGrafanaE2E:
                     # Authentication required but not configured
                     pytest.skip("Grafana requires authentication")
             except httpx.ConnectError:
-                pytest.skip("Grafana not running - start with --profile monitoring")
+                pytest.skip("Grafana not running - start with --profile observability")
 
     @pytest.mark.skipif(
-        os.environ.get("METRICS_ENABLED") != "true",
-        reason="Metrics not enabled - set METRICS_ENABLED=true",
+        os.environ.get("DALSTON_METRICS_ENABLED") != "true",
+        reason="Metrics not enabled - set DALSTON_METRICS_ENABLED=true",
     )
     async def test_grafana_dashboard_provisioned(self, grafana_url):
         """Grafana has dalston dashboard provisioned."""
@@ -341,4 +347,4 @@ class TestGrafanaE2E:
                 elif response.status_code == 401:
                     pytest.skip("Grafana requires authentication")
             except httpx.ConnectError:
-                pytest.skip("Grafana not running - start with --profile monitoring")
+                pytest.skip("Grafana not running - start with --profile observability")

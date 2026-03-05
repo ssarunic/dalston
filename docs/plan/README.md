@@ -14,7 +14,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 
 ## Status Overview
 
-### Completed (16)
+### Completed (19)
 
 | # | Milestone | Completed |
 |---|-----------|-----------|
@@ -30,6 +30,9 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M21](milestones/M21-admin-webhooks.md) | Admin Webhooks | February 2026 |
 | [M25](milestones/M25-data-retention.md) | Data Retention & Audit | February 2026 |
 | [M26](milestones/M26-pii-detection-redaction.md) | PII Detection & Audio Redaction | February 2026 |
+| [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | 2026-02-11 |
+| [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | 2026-02-12 |
+| [M38](milestones/M38-openai-compat.md) | OpenAI Compatibility | 2026-03-01 |
 | [M36](milestones/M36-runtime-model-management.md) | Runtime Model Management | March 2026 |
 | [M39](milestones/M39-model-cache-ttl.md) | Model Cache & TTL | March 2026 |
 | [M40](milestones/M40-model-registry.md) | Model Registry & HF Integration | March 2026 |
@@ -48,14 +51,11 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Audio/transcript S3 storage working; session resume pending |
 
-### Not Started (8)
+### Not Started (5)
 
 | # | Milestone | Goal |
 |---|-----------|------|
 | [M9](milestones/M09-enrichment.md) | Enrichment | Emotions, events, LLM cleanup |
-| [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | OpenTelemetry spans |
-| [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | Prometheus + Grafana |
-| [M38](milestones/M38-openai-compat.md) | OpenAI Compatibility | Drop-in OpenAI Audio API replacement |
 | [M52](milestones/M52-engine-sdk-local-runner-dx-clean-cut.md) | Engine SDK Local Runner DX (Clean-Cut) | File-based local runner workflow (`audio + config.json -> output.json`) plus legacy compatibility cleanup |
 | [M53](milestones/M53-realtime-latency-budget-clean-cut.md) | Realtime Latency Budget and Explicit Backpressure (Clean-Cut) | Explicit lag warning + termination budget with clean-cut removal of legacy realtime compatibility paths |
 | [M54](milestones/M54-event-dlq-poison-pill-isolation-clean-cut.md) | Event DLQ and Poison-Pill Isolation (Clean-Cut) | Delivery-count retry ceiling + DLQ quarantine for durable orchestrator events |
@@ -106,14 +106,15 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | # | Milestone | Goal | Days | Status |
 |---|-----------|------|------|--------|
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | Structlog everywhere, correlation IDs, JSON output | 3-4 | In Progress |
-| [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | OpenTelemetry spans across all services | 3-4 | Not Started |
-| [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | Prometheus metrics, Grafana dashboards | 3-4 | Not Started |
+| [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | OpenTelemetry spans across all services | 3-4 | Completed |
+| [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | Prometheus metrics, Grafana dashboards | 3-4 | Completed |
 
 ## API Feature Milestones
 
 | # | Milestone | Goal | Days | Status |
 |---|-----------|------|------|--------|
 | [M21](milestones/M21-admin-webhooks.md) | Admin Webhooks | Admin-registered webhook endpoints with persistent delivery | 3-4 | Completed |
+| [M38](milestones/M38-openai-compat.md) | OpenAI Compatibility | Drop-in OpenAI Audio API replacement | 3-4 | Completed |
 
 ## Engine Milestones
 

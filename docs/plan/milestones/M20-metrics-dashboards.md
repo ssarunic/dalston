@@ -26,7 +26,7 @@ dalston/metrics.py
 
 - `configure_metrics(service_name: str)` function that initializes Prometheus client
 - Metrics endpoint exposed at `/metrics` on each service (standard Prometheus scrape target)
-- `METRICS_ENABLED` environment variable to enable/disable (default: `true`)
+- `DALSTON_METRICS_ENABLED` environment variable to enable/disable (default: `true`)
 - Metric naming convention: `dalston_{service}_{metric_name}_{unit}`
 - Common labels on all metrics: `service`, `instance`
 
@@ -168,7 +168,7 @@ docker/grafana/
 
 - Prometheus container scraping all Dalston services
 - Grafana container with auto-provisioned Prometheus datasource
-- Services behind Docker Compose profile (`--profile monitoring`)
+- Services behind Docker Compose profile (`--profile observability`)
 - Prometheus UI at port 9090, Grafana UI at port 3001 (avoids conflict with web console on 3000)
 
 **Docker Compose Addition:**
@@ -181,7 +181,7 @@ prometheus:
   ports:
     - "9090:9090"
   profiles:
-    - monitoring
+    - observability
 
 grafana:
   image: grafana/grafana:10.3.0
@@ -195,7 +195,7 @@ grafana:
     - GF_AUTH_ANONYMOUS_ENABLED=true
     - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
   profiles:
-    - monitoring
+    - observability
 ```
 
 ---
@@ -227,9 +227,8 @@ grafana:
 ## Verification
 
 ```bash
-# Start services with monitoring
-docker compose --profile monitoring up -d
-METRICS_ENABLED=true docker compose up -d
+# Start services with observability stack and metrics enabled
+DALSTON_METRICS_ENABLED=true docker compose --profile observability up -d
 
 # Verify metrics endpoints
 curl http://localhost:8000/metrics | head -20
@@ -266,7 +265,7 @@ curl -s http://localhost:9090/api/v1/query?query=dalston_queue_depth | jq '.data
 - [x] **Redis queue exporter** reports queue depth and oldest task age
 - [x] **Prometheus** scrapes all services and shows targets as "UP"
 - [x] **Grafana** dashboard shows request rates, engine performance, queue depths, and session counts
-- [x] **Monitoring disabled by default** — no overhead when `--profile monitoring` is not used
+- [x] **Monitoring disabled by default** — no overhead when `--profile observability` is not used
 - [x] **No code changes** required in engine `process()` methods
 
 **Previous**: [M19: Distributed Tracing](M19-distributed-tracing.md)
