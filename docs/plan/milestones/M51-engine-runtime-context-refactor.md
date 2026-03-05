@@ -6,7 +6,7 @@
 | **Duration** | 12-16 days |
 | **Dependencies** | M43 (RT model loading), M48 (RT routing alignment), M49 (terminology unification) |
 | **Deliverable** | Clean-break engine SDK contract (`process(input, ctx)`), runner-side artifact materializer, artifact-reference internal schemas, local runner, RT side-effect adapters |
-| **Status** | Planned |
+| **Status** | Core Complete — engine migration sweep and DX cleanup carried forward to M52 |
 
 ## User Story
 

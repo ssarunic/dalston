@@ -262,6 +262,7 @@ GET /v1/audio/transcriptions/job_xyz789
 | **Session Router** | Worker pool management, allocation | [Session Router](./SESSION_ROUTER.md) |
 | **Realtime Workers** | Streaming transcription | [Realtime Engines](./REALTIME_ENGINES.md) |
 | **Session Persistence** | Audio/transcript storage, session history | [Session Persistence](./SESSION_PERSISTENCE.md) |
+| **Lag Budget (M53 Planned)** | Explicit lag monitoring, warning, and hard termination policy | [Latency Budget & Backpressure](./LATENCY_BUDGET_BACKPRESSURE.md) |
 
 ---
 

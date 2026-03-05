@@ -104,6 +104,10 @@ docs/
 
 - [Plan Overview](plan/README.md) — Timeline, principles, milestone summary
 - [M1: Hello World](plan/milestones/M01-hello-world.md) — First working end-to-end flow
+- [M51: Engine Runtime Context Refactor](plan/milestones/M51-engine-runtime-context-refactor.md) — Stateless URI-free engine contract and artifact materialization
+- [M52: Engine SDK Local Runner DX (Clean-Cut)](plan/milestones/M52-engine-sdk-local-runner-dx-clean-cut.md) — File-based local runner workflow and compatibility cleanup plan
+- [M53: Realtime Latency Budget and Explicit Backpressure (Clean-Cut)](plan/milestones/M53-realtime-latency-budget-clean-cut.md) — Deterministic lag budget enforcement and explicit realtime shutdown semantics
+- [M54: Event DLQ and Poison-Pill Isolation (Clean-Cut)](plan/milestones/M54-event-dlq-poison-pill-isolation-clean-cut.md) — Delivery-count retry ceilings and DLQ quarantine for durable orchestrator events
 
 ## Key Concepts
 

@@ -48,7 +48,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Audio/transcript S3 storage working; session resume pending |
 
-### Not Started (5)
+### Not Started (7)
 
 | # | Milestone | Goal |
 |---|-----------|------|
@@ -56,7 +56,9 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | OpenTelemetry spans |
 | [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | Prometheus + Grafana |
 | [M38](milestones/M38-openai-compat.md) | OpenAI Compatibility | Drop-in OpenAI Audio API replacement |
-| [M51](milestones/M51-engine-runtime-context-refactor.md) | Engine Runtime Context Refactor | Stateless URI-free engine contract with runner-side artifact materialization |
+| [M52](milestones/M52-engine-sdk-local-runner-dx-clean-cut.md) | Engine SDK Local Runner DX (Clean-Cut) | File-based local runner workflow (`audio + config.json -> output.json`) plus legacy compatibility cleanup |
+| [M53](milestones/M53-realtime-latency-budget-clean-cut.md) | Realtime Latency Budget and Explicit Backpressure (Clean-Cut) | Explicit lag warning + termination budget with clean-cut removal of legacy realtime compatibility paths |
+| [M54](milestones/M54-event-dlq-poison-pill-isolation-clean-cut.md) | Event DLQ and Poison-Pill Isolation (Clean-Cut) | Delivery-count retry ceiling + DLQ quarantine for durable orchestrator events |
 
 ---
 
@@ -123,6 +125,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | # | Milestone | Goal | Days | Status |
 |---|-----------|------|------|--------|
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Session DB, audio/transcript S3 storage, console visibility | 3-4 | Nearly Complete |
+| [M53](milestones/M53-realtime-latency-budget-clean-cut.md) | Realtime Latency Budget and Explicit Backpressure (Clean-Cut) | Enforce explicit lag budget with `processing_lag` warning and lag-exceeded close semantics | 3-5 | Planned |
 
 ## Data Management Milestones
 
@@ -145,7 +148,9 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M30](milestones/M30-engine-metadata-evolution.md) | Engine Metadata Evolution | Single source of truth for engine metadata; discovery API | 8-10 | Complete |
 | [M31](milestones/M31-capability-driven-routing.md) | Capability-Driven Routing | Route jobs based on engine capabilities | 2-3 | Complete |
 | [M32](milestones/M32-engine-variant-structure.md) | Engine Variant Structure | Model sizes as separate deployable engines | 1.5-2 | Superseded by M36 |
-| [M51](milestones/M51-engine-runtime-context-refactor.md) | Engine Runtime Context Refactor | Stateless URI-free engine contract with runner-side artifact materialization | 12-16 | Planned |
+| [M51](milestones/M51-engine-runtime-context-refactor.md) | Engine Runtime Context Refactor | Stateless URI-free engine contract with runner-side artifact materialization | 12-16 | Core Complete (engine migration → M52) |
+| [M52](milestones/M52-engine-sdk-local-runner-dx-clean-cut.md) | Engine SDK Local Runner DX (Clean-Cut) | File-based local runner command and no-compat cleanup before remaining stage refactors | 5-7 | Planned |
+| [M54](milestones/M54-event-dlq-poison-pill-isolation-clean-cut.md) | Event DLQ and Poison-Pill Isolation (Clean-Cut) | Delivery-count retry ceiling + DLQ quarantine for durable orchestrator events; remove infinite replay legacy behavior | 3-5 | Planned |
 
 ## Model Management Milestones
 
@@ -257,7 +262,10 @@ M28 ──► M29 ──► M30 ──► M31 ──► M36 (runtime model manag
                                              │
                                              └──► M46 (model registry as source of truth)
 
-M43 + M48 + M49 ──► M51 (engine runtime context refactor)
+M43 + M48 + M49 ──► M51 (engine runtime context refactor) ──► M52 (local runner DX clean-cut)
+
+M6 + M8 ──► M53 (realtime latency budget + explicit backpressure)
+M33 ──► M54 (event DLQ + poison-pill isolation)
 
 M10 + M11 + M15 ──► M35
 ```
@@ -272,10 +280,13 @@ M10 + M11 + M15 ──► M35
 - **M21**: Admin Webhooks (needs M5 webhooks, M11 auth)
 - **M22**: Parakeet Engine (needs M2 batch, M6 real-time, M14 model selection)
 - **M24**: Realtime Session Persistence (needs M6 real-time, prerequisite for M7 hybrid)
+- **M53**: Realtime Latency Budget and Explicit Backpressure (needs M6 realtime path and M8 translation endpoints)
+- **M54**: Durable orchestrator event reliability cutover with max-delivery DLQ policy, malformed-event quarantine, and legacy infinite-replay cleanup
 - **M25**: Data Retention & Audit (needs M11 auth, M21 webhooks for purge events)
 - **M26**: PII Detection & Audio Redaction (needs M3 word timestamps, M4 diarization, M25 retention)
 - **M28-M32**: Engine infrastructure (M28 registry → M29 capabilities → M30 metadata → M31 routing → M32 variants)
 - **M51**: Stateless engine contract + artifact materialization refactor (batch + realtime side-effect boundaries, local runner)
+- **M52**: Local runner DX clean-cut (`audio + config.json -> output.json`), then use that harness for diarize/align/PII refactor sweep and remove remaining compatibility bridges
 - **M35**: Settings Page (needs M10 console, M11 auth, M15 console auth)
 - **M36**: Runtime Model Management (needs M31 routing; enables dynamic model loading)
 - **M39-M46**: Model management (M36 → M39 cache TTL → M40 registry → M41 new engines, M42 console, M46 DB source of truth)
@@ -321,3 +332,5 @@ Each milestone has a verification section. Key checkpoints:
 | M42 | Models page shows registry with download/remove actions; Add from HF dialog works |
 | M46 | Models auto-seeded on startup; PATCH updates metadata; user edits preserved across restarts |
 | M51 | Batch engines are URI-free/stateless (`process(input, ctx)`), orchestrator passes artifact refs, runner materializes/persists artifacts, and local runner works without Redis/S3 |
+| M52 | Developer can run `python -m dalston.engine_sdk.local_runner run` with local `audio + config.json` and get canonical `output.json` without Redis/S3; legacy compatibility bridges removed |
+| M54 | Poison or malformed durable events are quarantined in `dalston:events:dlq` after policy thresholds; main stream entries are ACKed and healthy events continue processing |

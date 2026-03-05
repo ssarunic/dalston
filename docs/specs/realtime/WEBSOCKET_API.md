@@ -9,6 +9,8 @@ Dalston provides real-time streaming transcription via WebSocket with two endpoi
 
 Both provide sub-500ms latency for real-time transcription.
 
+Planned M53 behavior changes (explicit lag budget, `processing_lag` warning, and lag-exceeded close semantics) are specified in [Latency Budget & Backpressure](./LATENCY_BUDGET_BACKPRESSURE.md).
+
 ---
 
 # ElevenLabs Compatible WebSocket
@@ -236,6 +238,7 @@ When `include_language_detection=true`, language info is included:
 | `language_unsupported` | Requested language not available |
 | `no_capacity` | No workers available |
 | `session_timeout` | Session exceeded maximum duration |
+| `lag_exceeded` | Realtime lag budget exceeded (M53 planned) |
 
 ---
 
@@ -599,12 +602,14 @@ When a session ends unexpectedly (worker crash, network issue, resource exhausti
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `reason` | string | `worker_crash`, `worker_maintenance`, `resource_exhaustion`, `session_timeout` |
+| `reason` | string | `worker_crash`, `worker_maintenance`, `resource_exhaustion`, `session_timeout`, `lag_exceeded` |
 | `last_transcript_offset_ms` | integer | Last confirmed transcript position in milliseconds |
 | `recoverable` | boolean | Whether recovery is possible |
 | `recovery_hint.action` | string | `reconnect_with_replay` or `start_fresh` |
 | `recovery_hint.buffer_window_ms` | integer | How much audio the client should replay |
 | `recovery_hint.retry_after_ms` | integer | Suggested wait before reconnecting |
+
+For `reason="lag_exceeded"` (M53 planned), `recoverable=false` and no `recovery_hint` is sent.
 
 ## Reconnection Protocol
 
@@ -752,5 +757,6 @@ When a rate limit is exceeded:
 | `4003` | Missing required scope |
 | `4029` | Rate limit exceeded |
 | `4008` | Session timeout |
+| `4010` | Realtime lag budget exceeded (M53 planned) |
 | `4500` | Internal server error |
 | `4503` | Service unavailable (no workers) |
