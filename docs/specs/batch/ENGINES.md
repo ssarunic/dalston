@@ -324,7 +324,14 @@ All engines use the `dalston-engine-sdk` package for communication with the orch
 ### Base Engine Class
 
 ```python
-from dalston.engine_sdk import Engine, TaskInput
+from dalston.engine_sdk import (
+    BatchTaskContext,
+    Engine,
+    EngineInput,
+    EngineOutput,
+    Segment,
+    TranscribeOutput,
+)
 from dalston.engine_sdk.model_manager import ModelManager
 
 class MyTranscribeEngine(Engine):
@@ -337,18 +344,26 @@ class MyTranscribeEngine(Engine):
             ttl_seconds=int(os.environ.get("DALSTON_MODEL_TTL_SECONDS", "3600")),
         )
 
-    def process(self, task: TaskInput) -> dict:
+    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Process a single task."""
+        del ctx
         # Get model ID from task config
-        model_id = task.config.get("runtime_model_id")
+        model_id = input.config.get("runtime_model_id")
         if not model_id:
             model_id = os.environ.get("DALSTON_DEFAULT_MODEL_ID")
 
         # Acquire model (loads if needed)
         with self.model_manager.acquire(model_id) as model:
-            result = model.transcribe(task.audio_path)
+            result = model.transcribe(input.audio_path)
 
-        return {"segments": result.segments, "language": result.language}
+        return EngineOutput(
+            data=TranscribeOutput(
+                segments=[Segment(**s) for s in result.segments],
+                text=result.text,
+                language=result.language,
+                runtime="my-runtime",
+            )
+        )
 
 
 if __name__ == "__main__":
@@ -402,16 +417,43 @@ if storage.is_cached("nvidia/parakeet-tdt-1.1b"):
     path = storage.get_local_path("nvidia/parakeet-tdt-1.1b")
 ```
 
-### TaskInput
+### EngineInput
 
 ```python
 @dataclass
-class TaskInput:
+class EngineInput:
     task_id: str
     job_id: str
-    audio_path: Path                    # Primary audio file
-    previous_outputs: dict[str, Any]    # Results from dependency tasks
-    config: dict[str, Any]              # Engine-specific config
+    stage: str
+    config: dict[str, Any]
+    payload: dict[str, Any] | None
+    previous_outputs: dict[str, Any]
+    audio_path: Path | None             # Derived from materialized artifacts when present
+    materialized_artifacts: dict[str, MaterializedArtifact]
+```
+
+M52 local runner command contract:
+
+```bash
+python -m dalston.engine_sdk.local_runner run \
+  --engine engines.stt-transcribe.faster-whisper.engine:FasterWhisperEngine \
+  --stage transcribe \
+  --audio ./fixtures/audio.wav \
+  --config ./fixtures/transcribe-config.json \
+  --output ./tmp/output.json
+```
+
+`output.json` is always written with this envelope:
+
+```json
+{
+  "task_id": "task-local",
+  "job_id": "job-local",
+  "stage": "transcribe",
+  "data": {},
+  "produced_artifacts": [],
+  "produced_artifact_ids": []
+}
 ```
 
 The `config` dict includes:

@@ -13,9 +13,9 @@ from dalston.engine_sdk import (
     AudioMedia,
     BatchTaskContext,
     Engine,
+    EngineInput,
+    EngineOutput,
     PrepareOutput,
-    TaskInput,
-    TaskOutput,
 )
 
 
@@ -59,16 +59,16 @@ class AudioPrepareEngine(Engine):
 
     def process(
         self,
-        input: TaskInput,
+        input: EngineInput,
         ctx: BatchTaskContext,
-    ) -> TaskOutput:
+    ) -> EngineOutput:
         """Convert audio to standardized format.
 
         Args:
             input: Task input with audio file path
 
         Returns:
-            TaskOutput with PrepareOutput containing artifact IDs and metadata
+            EngineOutput with PrepareOutput containing artifact IDs and metadata
         """
         audio_path = input.audio_path
         config = input.config
@@ -144,7 +144,7 @@ class AudioPrepareEngine(Engine):
             runtime="audio-prepare",
         )
 
-        return TaskOutput(data=output, produced_artifacts=[produced])
+        return EngineOutput(data=output, produced_artifacts=[produced])
 
     def _process_split_channels(
         self,
@@ -154,7 +154,7 @@ class AudioPrepareEngine(Engine):
         target_sample_rate: int,
         task_id: str,
         ctx: BatchTaskContext,
-    ) -> TaskOutput:
+    ) -> EngineOutput:
         """Process audio by splitting into separate channel files.
 
         Used for per_channel speaker detection where each channel
@@ -168,7 +168,7 @@ class AudioPrepareEngine(Engine):
             ctx: Task execution context
 
         Returns:
-            TaskOutput with PrepareOutput containing channel_files array
+            EngineOutput with PrepareOutput containing channel_files array
         """
         num_channels = original_metadata["channels"]
         if num_channels > 2:
@@ -229,7 +229,7 @@ class AudioPrepareEngine(Engine):
             runtime="audio-prepare",
         )
 
-        return TaskOutput(data=output, produced_artifacts=produced_artifacts)
+        return EngineOutput(data=output, produced_artifacts=produced_artifacts)
 
     def _extract_channel(
         self,

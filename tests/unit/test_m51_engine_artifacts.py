@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from dalston.common.artifacts import MaterializedArtifact
 from dalston.engine_sdk.context import BatchTaskContext
-from dalston.engine_sdk.types import TaskInput
+from dalston.engine_sdk.types import EngineInput
 
 
 def _ctx(task_id: str = "task-123", job_id: str = "job-456") -> BatchTaskContext:
@@ -57,7 +57,7 @@ def test_prepare_engine_declares_prepared_audio_artifact(tmp_path: Path) -> None
         b"prepared"
     )
 
-    task_input = TaskInput(
+    task_input = EngineInput(
         task_id="task-prepare",
         job_id="job-1",
         stage="prepare",
@@ -89,7 +89,7 @@ def test_audio_redactor_declares_redacted_artifact_id(tmp_path: Path) -> None:
     source.write_bytes(b"mono-audio")
 
     engine = AudioRedactionEngine()
-    task_input = TaskInput(
+    task_input = EngineInput(
         task_id="task-redact",
         job_id="job-2",
         stage="audio_redact",
@@ -100,7 +100,16 @@ def test_audio_redactor_declares_redacted_artifact_id(tmp_path: Path) -> None:
                 local_path=source,
             )
         },
-        previous_outputs={"pii_detect": {"entities": []}},
+        previous_outputs={
+            "pii_detect": {
+                "entities": [],
+                "redacted_text": "",
+                "entity_count_by_type": {},
+                "entity_count_by_category": {},
+                "processing_time_ms": 1,
+                "runtime": "pii-presidio",
+            }
+        },
         config={"redaction_mode": "silence", "buffer_ms": 25},
     )
 
@@ -122,7 +131,7 @@ def test_merge_engine_declares_transcript_artifact(tmp_path: Path) -> None:
     input_audio.write_bytes(b"audio")
 
     engine = FinalMergerEngine()
-    task_input = TaskInput(
+    task_input = EngineInput(
         task_id="task-merge",
         job_id="job-3",
         stage="merge",

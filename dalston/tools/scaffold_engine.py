@@ -286,8 +286,8 @@ from dalston.engine_sdk import (
     Engine,
     EngineCapabilities,
     BatchTaskContext,
-    TaskInput,
-    TaskOutput,
+    EngineInput,
+    EngineOutput,
 )
 
 
@@ -316,14 +316,14 @@ class {class_name}(Engine):
         self._model = "placeholder"
         self.logger.info("model_loaded")
 
-    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
+    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Process audio input.
 
         Args:
             input: Task input with audio file path and config
 
         Returns:
-            TaskOutput with processing results
+            EngineOutput with processing results
         """
         audio_path = input.audio_path
         config = input.config
@@ -339,7 +339,7 @@ class {class_name}(Engine):
 
         self.logger.info("processing_complete")
 
-        return TaskOutput(data=result)
+        return EngineOutput(data=result)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status."""
@@ -631,8 +631,8 @@ from typing import Any
 from dalston.engine_sdk import (
     Engine,
     BatchTaskContext,
-    TaskInput,
-    TaskOutput,
+    EngineInput,
+    EngineOutput,
 )
 
 
@@ -664,14 +664,14 @@ class {class_name}(Engine):
         self._model = "placeholder"
         self.logger.info("model_loaded", model_variant=self._model_variant)
 
-    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
+    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Process audio input.
 
         Args:
             input: Task input with audio file path and config
 
         Returns:
-            TaskOutput with processing results
+            EngineOutput with processing results
         """
         audio_path = input.audio_path
 
@@ -686,7 +686,7 @@ class {class_name}(Engine):
 
         self.logger.info("processing_complete")
 
-        return TaskOutput(data=result)
+        return EngineOutput(data=result)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status."""

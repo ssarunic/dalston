@@ -34,9 +34,9 @@ def test_runtime_engines_have_new_process_signature() -> None:
         text = file_path.read_text(encoding="utf-8")
         has_signature = (
             "def process(" in text
-            and "input: TaskInput" in text
+            and "input: EngineInput" in text
             and "ctx: BatchTaskContext" in text
-            and "-> TaskOutput" in text
+            and "-> EngineOutput" in text
         )
         if not has_signature:
             missing.append(str(file_path))

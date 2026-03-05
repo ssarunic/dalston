@@ -15,9 +15,9 @@ from dalston.engine_sdk import (
     AudioRedactOutput,
     BatchTaskContext,
     Engine,
+    EngineInput,
+    EngineOutput,
     PIIRedactionMode,
-    TaskInput,
-    TaskOutput,
 )
 
 
@@ -28,16 +28,16 @@ class AudioRedactionEngine(Engine):
 
     def process(
         self,
-        input: TaskInput,
+        input: EngineInput,
         ctx: BatchTaskContext,
-    ) -> TaskOutput:
+    ) -> EngineOutput:
         """Redact PII from audio file.
 
         Args:
             input: Task input with PII detection output
 
         Returns:
-            TaskOutput with AudioRedactOutput containing redacted audio artifact ID
+            EngineOutput with AudioRedactOutput containing redacted audio artifact ID
         """
         config = input.config
         audio_path = input.audio_path
@@ -102,7 +102,7 @@ class AudioRedactionEngine(Engine):
                 skip_reason=None,
                 warnings=[],
             )
-            return TaskOutput(data=output, produced_artifacts=[produced])
+            return EngineOutput(data=output, produced_artifacts=[produced])
 
         # Extract time ranges from entities
         ranges = self._extract_time_ranges(entities, buffer_ms)
@@ -150,7 +150,7 @@ class AudioRedactionEngine(Engine):
             warnings=[],
         )
 
-        return TaskOutput(data=output, produced_artifacts=[produced])
+        return EngineOutput(data=output, produced_artifacts=[produced])
 
     def _extract_time_ranges(
         self, entities: list[dict], buffer_ms: int

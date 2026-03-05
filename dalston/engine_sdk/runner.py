@@ -327,58 +327,38 @@ class EngineRunner:
         message: StreamMessage | None = None
         stream_id: str | None = None
 
-        # Primary stream is engine-specific; fallback to legacy stage stream for
-        # mixed-version rollouts where producers/consumers might briefly diverge.
-        stream_ids = self._candidate_stream_ids()
+        stream_id = self.runtime
 
         # 1. Try to claim stale tasks from DEAD engines only
         # Use instance_id as consumer to ensure spot replacements don't mask old tasks
-        for candidate_stream_id in stream_ids:
-            stale = claim_stale_from_dead_engines(
-                self.redis_client,
-                stage=candidate_stream_id,
-                consumer=self.instance,
-                min_idle_ms=STALE_THRESHOLD_MS,
-                count=1,
+        stale = claim_stale_from_dead_engines(
+            self.redis_client,
+            stage=stream_id,
+            consumer=self.instance,
+            min_idle_ms=STALE_THRESHOLD_MS,
+            count=1,
+        )
+        if stale:
+            message = stale[0]
+            logger.info(
+                "claimed_stale_task",
+                task_id=message.task_id,
+                delivery_count=message.delivery_count,
+                previous_consumer=message.id,  # Actually message ID, consumer tracked in PEL
+                stream_id=stream_id,
             )
-            if stale:
-                message = stale[0]
-                stream_id = candidate_stream_id
-                logger.info(
-                    "claimed_stale_task",
-                    task_id=message.task_id,
-                    delivery_count=message.delivery_count,
-                    previous_consumer=message.id,  # Actually message ID, consumer tracked in PEL
-                    stream_id=stream_id,
-                )
-                # Track redelivery for observability
-                dalston.metrics.inc_task_redelivery(self._stage, reason="engine_crash")
-                break
+            # Track redelivery for observability
+            dalston.metrics.inc_task_redelivery(self._stage, reason="engine_crash")
 
         if message is None:
             # 2. No stale tasks - read new ones
             # Use instance_id as consumer for proper PEL tracking
-            # Block only on primary stream to preserve previous latency profile.
-            primary_stream_id = stream_ids[0]
             message = read_task(
                 self.redis_client,
-                stage=primary_stream_id,
+                stage=stream_id,
                 consumer=self.instance,
                 block_ms=self.STREAM_POLL_TIMEOUT * 1000,
             )
-            if message is not None:
-                stream_id = primary_stream_id
-            elif len(stream_ids) > 1:
-                # Non-blocking legacy fallback check.
-                fallback_stream_id = stream_ids[1]
-                message = read_task(
-                    self.redis_client,
-                    stage=fallback_stream_id,
-                    consumer=self.instance,
-                    block_ms=1,
-                )
-                if message is not None:
-                    stream_id = fallback_stream_id
 
         if message is None:
             # Timeout, no task available
@@ -465,13 +445,6 @@ class EngineRunner:
                 )
                 self._current_message_id = None
                 self._current_stream_id = None
-
-    def _candidate_stream_ids(self) -> list[str]:
-        """Return stream IDs to poll (engine stream first, legacy stage fallback)."""
-        stream_ids = [self.runtime]
-        if self._stage and self._stage != "unknown" and self._stage != self.runtime:
-            stream_ids.append(self._stage)
-        return stream_ids
 
     def _clear_waiting_engine_marker(self, task_id: str) -> None:
         """Clear wait-for-engine markers once a task is claimed."""

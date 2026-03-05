@@ -9,11 +9,11 @@ Before M51, many tests verified URI-based behavior (`audio_uri`, S3 helper usage
 After M51, tests should verify:
 
 1. Engines are stateless compute units:
-   - `def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput`
+   - `def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput`
 2. Engines consume local materialized files:
    - `input.audio_path` / `input.materialized_artifacts`
 3. Engines declare outputs as produced artifacts:
-   - `TaskOutput(..., produced_artifacts=[...])`
+   - `EngineOutput(..., produced_artifacts=[...])`
 4. Orchestrator/scheduler resolve dependencies via artifact selectors/bindings:
    - `InputBinding` + `ArtifactSelector`
 5. Runtime infra (runner/materializer), not engines, handles storage I/O.
@@ -27,6 +27,8 @@ After M51, tests should verify:
 | DAG/binding tests | Validate selector-based task wiring and channel-aware bindings | `tests/unit/test_m51_orchestrator_bindings.py` |
 | Engine artifact tests | Verify stage engines declare produced artifacts correctly | `tests/unit/test_m51_engine_artifacts.py` |
 | Local runner tests | Verify no-Redis/no-S3 execution path | `tests/unit/test_m51_local_runner.py` |
+| Local runner CLI tests (M52) | Verify file-based command contract + output envelope | `tests/unit/test_m52_local_runner_cli.py`, `tests/unit/test_m52_local_runner_contract.py` |
+| SDK hardening tests (M52) | Enforce no alias exports + fail-closed typed parsing + runtime-only stream polling | `tests/unit/test_m52_sdk_surface.py`, `tests/unit/test_m52_engine_input_contract.py`, `tests/unit/test_m52_runner_stream_contract.py` |
 | Realtime side-effect boundary tests | Verify `SessionStorage` adapter behavior | `tests/unit/test_m51_realtime_storage.py` |
 | Static guardrails | Enforce signature + no URI/storage coupling in engines | `tests/unit/test_m51_enforcement.py` |
 
@@ -54,14 +56,14 @@ from pathlib import Path
 
 from dalston.common.artifacts import MaterializedArtifact
 from dalston.engine_sdk.context import BatchTaskContext
-from dalston.engine_sdk.types import TaskInput
+from dalston.engine_sdk.types import EngineInput
 
 
 def test_engine_process_contract(tmp_path: Path) -> None:
     audio = tmp_path / "in.wav"
     audio.write_bytes(b"audio")
 
-    task_input = TaskInput(
+    task_input = EngineInput(
         task_id="task-1",
         job_id="job-1",
         stage="transcribe",
@@ -103,6 +105,11 @@ pytest \
   tests/unit/test_m51_orchestrator_bindings.py \
   tests/unit/test_m51_engine_artifacts.py \
   tests/unit/test_m51_local_runner.py \
+  tests/unit/test_m52_local_runner_cli.py \
+  tests/unit/test_m52_local_runner_contract.py \
+  tests/unit/test_m52_sdk_surface.py \
+  tests/unit/test_m52_engine_input_contract.py \
+  tests/unit/test_m52_runner_stream_contract.py \
   tests/unit/test_m51_realtime_storage.py \
   tests/unit/test_m51_enforcement.py -q
 ```
@@ -123,3 +130,4 @@ pytest \
 3. Stage output still uses old URI field names (`redacted_audio_uri`, `AudioMedia.uri`).
 4. Engine creates files but forgets to declare them in `produced_artifacts`.
 5. DAG lacks correct `input_bindings`, causing missing materialized slots at runtime.
+6. Tests still import deprecated `TaskInput` / `TaskOutput` aliases instead of `EngineInput` / `EngineOutput`.

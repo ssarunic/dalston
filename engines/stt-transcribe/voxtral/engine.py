@@ -21,9 +21,9 @@ from dalston.engine_sdk import (
     BatchTaskContext,
     Engine,
     EngineCapabilities,
+    EngineInput,
+    EngineOutput,
     Segment,
-    TaskInput,
-    TaskOutput,
     TimestampGranularity,
     TranscribeOutput,
 )
@@ -146,14 +146,14 @@ class VoxtralEngine(Engine):
 
         self.logger.info("model_loaded_successfully", model_name=model_name)
 
-    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
+    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Transcribe audio using Voxtral.
 
         Args:
             input: Task input with audio file path and config
 
         Returns:
-            TaskOutput with TranscribeOutput containing text and segments
+            EngineOutput with TranscribeOutput containing text and segments
         """
         audio_path = input.audio_path
         config = input.config
@@ -239,7 +239,7 @@ class VoxtralEngine(Engine):
             warnings=warnings,
         )
 
-        return TaskOutput(data=output)
+        return EngineOutput(data=output)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status including GPU availability."""

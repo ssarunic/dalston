@@ -400,7 +400,7 @@ class TestVLLMASREngine:
         engine._llm = mock_llm
         engine._loaded_model_id = "mistralai/Voxtral-Mini-3B-2507"
 
-        # Create mock TaskInput
+        # Create mock EngineInput
         mock_input = MagicMock()
         mock_input.audio_path = audio_file
         mock_input.config = {

@@ -51,7 +51,7 @@ class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
                     self.model = load_model(input.config.get("model", "large-v3"))
 
                 result = self.model.transcribe(input.audio_path)
-                return TaskOutput(data={"text": result.text, "segments": result.segments})
+                return EngineOutput(data={"text": result.text, "segments": result.segments})
 
         if __name__ == "__main__":
             engine = MyTranscriptionEngine()

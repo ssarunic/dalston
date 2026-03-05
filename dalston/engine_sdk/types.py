@@ -70,9 +70,6 @@ class EngineInput(Generic[PayloadT]):
                 self.audio_path = next(
                     iter(self.materialized_artifacts.values())
                 ).local_path
-        if self.audio_path is None:
-            # Keep a predictable placeholder for test-only construction paths.
-            self.audio_path = Path("/tmp/dalston-empty-audio")
 
     @property
     def media(self) -> dict[str, Any] | None:
@@ -112,11 +109,7 @@ class EngineInput(Generic[PayloadT]):
         data = self.previous_outputs.get(key)
         if data is None:
             return None
-
-        try:
-            return model.model_validate(data)
-        except Exception:
-            return None
+        return model.model_validate(data)
 
     def get_raw_output(self, key: str) -> dict[str, Any] | None:
         return self.previous_outputs.get(key)
@@ -133,8 +126,3 @@ class EngineOutput(Generic[OutputT]):
         if isinstance(self.data, BaseModel):
             return self.data.model_dump(mode="json", exclude_none=False)
         return self.data
-
-
-# Transitional aliases used by existing tests/importers while signature has moved
-TaskInput = EngineInput
-TaskOutput = EngineOutput

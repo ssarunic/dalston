@@ -32,9 +32,9 @@ from dalston.engine_sdk import (
     AlignmentMethod,
     BatchTaskContext,
     Engine,
+    EngineInput,
+    EngineOutput,
     Segment,
-    TaskInput,
-    TaskOutput,
     TimestampGranularity,
     TranscribeOutput,
     Word,
@@ -130,14 +130,14 @@ class HFASREngine(Engine):
         )
         return "cpu", torch.float32
 
-    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
+    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Transcribe audio using a HuggingFace ASR pipeline.
 
         Args:
             input: Task input with audio file path and config
 
         Returns:
-            TaskOutput with TranscribeOutput containing text, segments, and language
+            EngineOutput with TranscribeOutput containing text, segments, and language
         """
         config = input.config
 
@@ -189,7 +189,7 @@ class HFASREngine(Engine):
                 char_count=len(output.text),
             )
 
-            return TaskOutput(data=output)
+            return EngineOutput(data=output)
 
         finally:
             # Always release the model reference

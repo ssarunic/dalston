@@ -21,9 +21,9 @@ from dalston.engine_sdk import (
     BatchTaskContext,
     DiarizeOutput,
     Engine,
+    EngineInput,
+    EngineOutput,
     SpeakerTurn,
-    TaskInput,
-    TaskOutput,
 )
 
 # NeMo diarization config based on diar_infer_telephonic.yaml
@@ -304,7 +304,7 @@ class NemoMSDDEngine(Engine):
         info = sf.info(str(audio_path))
         return info.duration
 
-    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
+    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Run speaker diarization on audio file."""
         if self._disabled:
             self.logger.info("diarization_disabled_returning_mock_output")
@@ -387,9 +387,9 @@ class NemoMSDDEngine(Engine):
             warnings=[],
         )
 
-        return TaskOutput(data=output)
+        return EngineOutput(data=output)
 
-    def _mock_output(self) -> TaskOutput:
+    def _mock_output(self) -> EngineOutput:
         """Return mock output when diarization is disabled."""
         output = DiarizeOutput(
             speakers=["SPEAKER_00"],
@@ -402,7 +402,7 @@ class NemoMSDDEngine(Engine):
             skip_reason="DIARIZATION_DISABLED=true",
             warnings=["Diarization disabled via environment variable"],
         )
-        return TaskOutput(data=output)
+        return EngineOutput(data=output)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status."""

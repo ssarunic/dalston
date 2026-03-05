@@ -13,9 +13,9 @@ from dalston.engine_sdk import (
     BatchTaskContext,
     DiarizeOutput,
     Engine,
+    EngineInput,
+    EngineOutput,
     SpeakerTurn,
-    TaskInput,
-    TaskOutput,
 )
 
 
@@ -157,14 +157,14 @@ class PyannoteEngine(Engine):
         self.logger.info("pyannote_4_0_pipeline_loaded_successfully")
         return self._pipeline
 
-    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
+    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Run speaker diarization on audio file.
 
         Args:
             input: Task input with audio path and config
 
         Returns:
-            TaskOutput with DiarizeOutput containing speakers and turns
+            EngineOutput with DiarizeOutput containing speakers and turns
         """
         # Check if diarization is disabled (for local dev/testing)
         if self._disabled:
@@ -232,7 +232,7 @@ class PyannoteEngine(Engine):
             warnings=[],
         )
 
-        return TaskOutput(data=output)
+        return EngineOutput(data=output)
 
     def _convert_annotation(self, diarization) -> tuple[list[str], list[SpeakerTurn]]:
         """Convert pyannote diarization output to speakers list and turns.
@@ -311,7 +311,7 @@ class PyannoteEngine(Engine):
             self.logger.warning("failed_to_calculate_overlap", error=str(e))
             return 0.0, 0.0
 
-    def _mock_output(self) -> TaskOutput:
+    def _mock_output(self) -> EngineOutput:
         """Return mock output when diarization is disabled.
 
         Useful for testing the pipeline without running actual diarization.
@@ -328,7 +328,7 @@ class PyannoteEngine(Engine):
             warnings=["Diarization disabled via environment variable"],
         )
 
-        return TaskOutput(data=output)
+        return EngineOutput(data=output)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status including device and model info."""

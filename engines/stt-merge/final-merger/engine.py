@@ -18,6 +18,8 @@ from dalston.common.artifacts import build_task_artifact_id
 from dalston.engine_sdk import (
     BatchTaskContext,
     Engine,
+    EngineInput,
+    EngineOutput,
     MergedSegment,
     MergeOutput,
     PIIEntity,
@@ -25,8 +27,6 @@ from dalston.engine_sdk import (
     Speaker,
     SpeakerDetectionMode,
     SpeakerTurn,
-    TaskInput,
-    TaskOutput,
     TranscriptMetadata,
     Word,
 )
@@ -49,9 +49,9 @@ class FinalMergerEngine(Engine):
 
     def process(
         self,
-        input: TaskInput,
+        input: EngineInput,
         ctx: BatchTaskContext,
-    ) -> TaskOutput:
+    ) -> EngineOutput:
         """Merge upstream outputs into final transcript.
 
         Args:
@@ -59,7 +59,7 @@ class FinalMergerEngine(Engine):
                    and optionally align stages
 
         Returns:
-            TaskOutput with MergeOutput containing the final transcript
+            EngineOutput with MergeOutput containing the final transcript
         """
         job_id = input.job_id
         config = input.config
@@ -322,14 +322,14 @@ class FinalMergerEngine(Engine):
             ctx=ctx,
             transcript=transcript,
         )
-        return TaskOutput(data=transcript, produced_artifacts=[transcript_artifact])
+        return EngineOutput(data=transcript, produced_artifacts=[transcript_artifact])
 
     def _merge_per_channel(
         self,
-        input: TaskInput,
+        input: EngineInput,
         config: dict,
         ctx: BatchTaskContext,
-    ) -> TaskOutput:
+    ) -> EngineOutput:
         """Merge transcripts from per-channel processing.
 
         Interleaves segments from multiple channel transcripts by timestamp,
@@ -344,7 +344,7 @@ class FinalMergerEngine(Engine):
             config: Merge task config
 
         Returns:
-            TaskOutput with MergeOutput containing merged transcript
+            EngineOutput with MergeOutput containing merged transcript
         """
         job_id = input.job_id
         word_timestamps = config.get("word_timestamps", False)
@@ -690,7 +690,7 @@ class FinalMergerEngine(Engine):
             transcript=transcript,
         )
         produced_artifacts.append(transcript_artifact)
-        return TaskOutput(data=transcript, produced_artifacts=produced_artifacts)
+        return EngineOutput(data=transcript, produced_artifacts=produced_artifacts)
 
     def _assemble_stereo_audio(
         self,
