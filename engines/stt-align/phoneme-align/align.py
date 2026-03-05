@@ -190,9 +190,12 @@ def align(
 
         char_segments = merge_repeats(path, text_clean)
 
-        # Convert frame indices to absolute timestamps
+        # Convert frame indices to absolute timestamps.
+        # ratio maps a frame index (0..trellis.size(0)-1) to seconds within
+        # the segment. Multiplying by waveform.size(1) was a bug that produced
+        # timestamps in units of samples instead of seconds.
         duration = t2 - t1
-        ratio = duration * waveform.size(1) / (trellis.size(0) - 1)
+        ratio = duration / (trellis.size(0) - 1)
 
         char_timings = _assign_char_timestamps(text, sd, char_segments, ratio, t1, lang)
 

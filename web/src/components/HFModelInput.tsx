@@ -38,6 +38,7 @@ export function HFModelInput({ onResolve, isLoading, result, error, autoFocus }:
   useEffect(() => {
     const query = modelId.trim()
     if (query.length < 2) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSuggestions([])
       return
     }

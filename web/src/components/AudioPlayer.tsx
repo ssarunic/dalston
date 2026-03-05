@@ -94,7 +94,9 @@ export function AudioPlayer({
   // Keep it alive across source switches to avoid teardown/re-init races.
   useEffect(() => {
     if (!hasActiveSource) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsReady(false)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDuration(0)
       return
     }
