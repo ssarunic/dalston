@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from dalston.engine_sdk.model_storage import S3ModelStorage
 
 from dalston.engine_sdk import (
+    BatchTaskContext,
     Engine,
     EngineCapabilities,
     TaskInput,
@@ -206,7 +207,7 @@ class VLLMASREngine(Engine):
             model_path=model_path,
         )
 
-    def process(self, input: TaskInput) -> TaskOutput:
+    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
         """Transcribe audio using a vLLM audio LLM.
 
         Args:

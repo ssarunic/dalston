@@ -232,6 +232,7 @@ class Task(BaseModel):
     runtime: str
     status: TaskStatus = TaskStatus.PENDING
     dependencies: list[UUID] = Field(default_factory=list)
+    input_bindings: list[dict[str, Any]] = Field(default_factory=list)
     config: dict[str, Any] = Field(default_factory=dict)
     input_uri: str | None = None
     output_uri: str | None = None

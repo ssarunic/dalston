@@ -213,6 +213,9 @@ async def handle_job_created(
     # Wrap in try/except to handle race condition with other orchestrators
     try:
         for task in tasks:
+            task_config = dict(task.config)
+            if task.input_bindings:
+                task_config["input_bindings"] = task.input_bindings
             log.info(
                 "creating_task",
                 task_id=str(task.id),
@@ -226,7 +229,7 @@ async def handle_job_created(
                 runtime=task.runtime,
                 status=task.status.value,
                 dependencies=list(task.dependencies),
-                config=task.config,
+                config=task_config,
                 input_uri=task.input_uri,
                 output_uri=task.output_uri,
                 retries=task.retries,
@@ -524,20 +527,6 @@ async def handle_task_completed(
                 task_by_id=task_by_id,
                 settings=settings,
             )
-
-            # Determine input_uri from prepare output
-            if not dependent.input_uri:
-                audio_uri = _resolve_audio_uri_from_prepare(
-                    dependent.stage, previous_outputs
-                )
-                if audio_uri:
-                    dependent.input_uri = audio_uri
-                else:
-                    # Fallback to original audio (shouldn't happen normally)
-                    job = await db.get(JobModel, job_id)
-                    if job:
-                        dependent.input_uri = job.audio_uri
-                await db.commit()
 
             # Convert to Pydantic model for queue_task
             from dalston.common.models import Task
@@ -1151,35 +1140,6 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
         await publish_job_failed(redis, job_id, job.error or "Unknown error")
     else:
         await publish_job_completed(redis, job_id)
-
-
-def _resolve_audio_uri_from_prepare(
-    stage: str, previous_outputs: dict[str, Any]
-) -> str | None:
-    """Resolve audio URI from prepare output.
-
-    For per-channel stages (transcribe_ch0, align_ch0), returns the matching
-    channel's audio URI. For regular stages, returns channel_files[0].
-
-    Returns:
-        The audio URI from prepare output, or None if not available.
-    """
-    prepare_output = previous_outputs.get("prepare", {})
-    channel_files = prepare_output.get("channel_files", [])
-
-    if not channel_files:
-        return None
-
-    # Check for per-channel stage (e.g., transcribe_ch0, align_ch1)
-    match = re.match(r"(?:transcribe|align)_ch(\d+)", stage)
-    if match:
-        channel = int(match.group(1))
-        if channel < len(channel_files):
-            return channel_files[channel].get("uri")
-        return None
-
-    # Regular stage - use first (and only) channel file
-    return channel_files[0].get("uri")
 
 
 async def handle_job_cancel_requested(

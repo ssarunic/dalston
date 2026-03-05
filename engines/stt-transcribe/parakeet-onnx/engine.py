@@ -30,6 +30,7 @@ from typing import Any
 
 from dalston.engine_sdk import (
     AlignmentMethod,
+    BatchTaskContext,
     Engine,
     EngineCapabilities,
     Segment,
@@ -219,7 +220,7 @@ class ParakeetOnnxEngine(Engine):
             device=self._device,
         )
 
-    def process(self, input: TaskInput) -> TaskOutput:
+    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
         """Transcribe audio using Parakeet CTC via ONNX Runtime.
 
         Args:

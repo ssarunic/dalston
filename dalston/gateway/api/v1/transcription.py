@@ -596,8 +596,10 @@ async def get_transcription(
                     enabled=True,
                     entities_detected=pii_meta.get("entities_detected", 0),
                     entity_summary=pii_meta.get("entity_count_by_type"),
-                    redacted_audio_available=pii_meta.get("redacted_audio_uri")
-                    is not None,
+                    redacted_audio_available=(
+                        pii_meta.get("redacted_audio_artifact_id") is not None
+                        or pii_meta.get("redacted_audio_uri") is not None
+                    ),
                 )
 
     return response
@@ -938,7 +940,7 @@ async def get_job_audio_redacted(
     4. Audio must not have been purged by retention policy
     5. Redacted audio must actually exist in S3
 
-    Note: Uses transcript's pii_metadata.redacted_audio_uri as source of truth,
+    Note: Uses transcript's pii_metadata redacted audio reference as source of truth,
     matching the UI's redacted_audio_available flag behavior.
     """
     job = await jobs_service.get_job_authorized(db, job_id, principal, security_manager)
@@ -990,6 +992,14 @@ async def get_job_audio_redacted(
         )
 
     redacted_audio_uri = pii_metadata.get("redacted_audio_uri")
+    if not redacted_audio_uri:
+        redacted_audio_artifact_id = pii_metadata.get("redacted_audio_artifact_id")
+        if redacted_audio_artifact_id:
+            logical_name = redacted_audio_artifact_id.split(":", 1)[-1]
+            redacted_audio_uri = (
+                f"s3://{settings.s3_bucket}/jobs/{job.id}/artifacts/"
+                f"{redacted_audio_artifact_id}/{logical_name}.wav"
+            )
     if not redacted_audio_uri:
         raise HTTPException(
             status_code=404,

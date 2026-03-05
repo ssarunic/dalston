@@ -1,14 +1,17 @@
 """Abstract Engine base class for batch processing engines."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 import structlog
 import yaml
 
-from dalston.engine_sdk.types import EngineCapabilities, TaskInput, TaskOutput
+from dalston.engine_sdk.context import BatchTaskContext
+from dalston.engine_sdk.types import EngineCapabilities, EngineInput, EngineOutput
 
 # Paths for engine.yaml (container path first, local fallback second)
 ENGINE_YAML_PATHS = [
@@ -17,7 +20,11 @@ ENGINE_YAML_PATHS = [
 ]
 
 
-class Engine(ABC):
+InputPayloadT = TypeVar("InputPayloadT")
+OutputPayloadT = TypeVar("OutputPayloadT")
+
+
+class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
     """Abstract base class for Dalston batch processing engines.
 
     Engines implement the `process` method to handle specific pipeline stages.
@@ -34,7 +41,11 @@ class Engine(ABC):
                 super().__init__()
                 self.model = None
 
-            def process(self, input: TaskInput) -> TaskOutput:
+            def process(
+                self,
+                input: EngineInput,
+                ctx: BatchTaskContext,
+            ) -> EngineOutput:
                 # Load model lazily
                 if self.model is None:
                     self.model = load_model(input.config.get("model", "large-v3"))
@@ -63,7 +74,11 @@ class Engine(ABC):
         self._runtime_state: dict[str, Any] = {"loaded_model": None, "status": "idle"}
 
     @abstractmethod
-    def process(self, input: TaskInput) -> TaskOutput:
+    def process(
+        self,
+        input: EngineInput[InputPayloadT],
+        ctx: BatchTaskContext,
+    ) -> EngineOutput[OutputPayloadT]:
         """Process a single task.
 
         This method should be implemented by concrete engine classes.
@@ -71,10 +86,11 @@ class Engine(ABC):
         and handles uploading results afterward.
 
         Args:
-            input: Task input containing audio path, config, and previous outputs
+            input: Engine input containing typed payload and materialized artifacts
+            ctx: Runtime context for tracing/logging metadata helpers
 
         Returns:
-            TaskOutput containing the processing results
+            EngineOutput containing typed payload and produced artifacts
 
         Raises:
             Exception: Any exception will be caught by the runner and reported

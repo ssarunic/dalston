@@ -30,6 +30,7 @@ import torch
 
 from dalston.engine_sdk import (
     AlignmentMethod,
+    BatchTaskContext,
     Engine,
     Segment,
     TaskInput,
@@ -129,7 +130,7 @@ class HFASREngine(Engine):
         )
         return "cpu", torch.float32
 
-    def process(self, input: TaskInput) -> TaskOutput:
+    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
         """Transcribe audio using a HuggingFace ASR pipeline.
 
         Args:

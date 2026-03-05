@@ -8,7 +8,7 @@ Example usage:
     from dalston.engine_sdk import PrepareOutput, TranscribeOutput, Segment, Word
 
     class MyTranscriptionEngine(Engine):
-        def process(self, input: TaskInput) -> TaskOutput:
+        def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
             # Get typed input from previous stage
             prepare = input.get_prepare_output()
             audio_duration = prepare.duration if prepare else 0.0
@@ -66,17 +66,29 @@ from dalston.common.pipeline_types import (
     Word,
 )
 from dalston.engine_sdk.base import Engine
+from dalston.engine_sdk.context import BatchTaskContext
+from dalston.engine_sdk.local_runner import LocalRunner
 from dalston.engine_sdk.model_manager import LoadedModel, ModelManager
 from dalston.engine_sdk.runner import EngineRunner
-from dalston.engine_sdk.types import EngineCapabilities, TaskInput, TaskOutput
+from dalston.engine_sdk.types import (
+    EngineCapabilities,
+    EngineInput,
+    EngineOutput,
+    TaskInput,
+    TaskOutput,
+)
 
 __all__ = [
     # Core SDK
     "Engine",
     "EngineCapabilities",
     "EngineRunner",
+    "LocalRunner",
+    "EngineInput",
+    "EngineOutput",
     "TaskInput",
     "TaskOutput",
+    "BatchTaskContext",
     # Model management (M39.2)
     "LoadedModel",
     "ModelManager",

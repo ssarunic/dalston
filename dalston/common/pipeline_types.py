@@ -17,6 +17,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from dalston.common.artifacts import ArtifactReference, InputBinding
 from dalston.common.audio_defaults import DEFAULT_SAMPLE_RATE
 
 logger = logging.getLogger(__name__)
@@ -178,13 +179,13 @@ class SpeechRegion(BaseModel):
 class AudioMedia(BaseModel):
     """Audio file with metadata.
 
-    Groups URI with its audio properties for self-describing media references.
+    Groups artifact reference with audio properties for self-describing media.
     Used for both input (original audio) and output (prepared/channel files).
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    uri: str = Field(..., description="S3 URI to audio file")
+    artifact_id: str = Field(..., description="Artifact reference ID")
     format: str = Field(..., description="Audio format (e.g., 'wav', 'mp3')")
     duration: float = Field(..., ge=0, description="Duration in seconds")
     sample_rate: int = Field(..., gt=0, description="Sample rate in Hz")
@@ -205,12 +206,19 @@ class TaskInputData(BaseModel):
     task_id: str = Field(..., description="Task identifier")
     job_id: str = Field(..., description="Parent job identifier")
 
-    # Audio source - one of these is set
-    media: AudioMedia | None = Field(
-        default=None, description="Input audio with metadata (prepare stage)"
+    payload: dict[str, Any] | None = Field(
+        default=None, description="Typed stage payload data"
     )
-    audio_uri: str | None = Field(
-        default=None, description="Audio URI (non-prepare stages)"
+    input_bindings: list[InputBinding] = Field(
+        default_factory=list, description="Declared input-slot artifact bindings"
+    )
+    resolved_artifact_ids: dict[str, str] = Field(
+        default_factory=dict,
+        description="Resolved artifact IDs keyed by input slot",
+    )
+    artifact_index: dict[str, ArtifactReference] = Field(
+        default_factory=dict,
+        description="Task-local artifact reference index for materialization",
     )
 
     previous_outputs: dict[str, Any] = Field(
@@ -625,8 +633,8 @@ class PIIMetadata(BaseModel):
     entity_count_by_category: dict[str, int] = Field(
         default_factory=dict, description="Count per category"
     )
-    redacted_audio_uri: str | None = Field(
-        default=None, description="URI to redacted audio file"
+    redacted_audio_artifact_id: str | None = Field(
+        default=None, description="Artifact ID of redacted audio file"
     )
     processing_time_ms: int = Field(..., ge=0, description="Processing time in ms")
 
@@ -658,7 +666,9 @@ class AudioRedactOutput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    redacted_audio_uri: str = Field(..., description="URI to redacted audio file")
+    redacted_audio_artifact_id: str = Field(
+        ..., description="Artifact ID of redacted audio file"
+    )
     redaction_mode: PIIRedactionMode = Field(..., description="Redaction mode used")
     buffer_ms: int = Field(..., ge=0, description="Buffer padding in milliseconds")
     entities_redacted: int = Field(..., ge=0, description="Number of entities redacted")

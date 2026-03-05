@@ -42,7 +42,11 @@ from dalston.common.ws_close_codes import (
 from dalston.engine_sdk.types import EngineCapabilities
 from dalston.realtime_sdk.assembler import TranscribeResult
 from dalston.realtime_sdk.model_manager import AsyncModelManager
-from dalston.realtime_sdk.registry import WorkerInfo, WorkerRegistry
+from dalston.realtime_sdk.registry import (
+    WorkerInfo,
+    WorkerPresenceRegistry,
+    WorkerRegistry,
+)
 from dalston.realtime_sdk.session import SessionConfig, SessionHandler
 
 logger = structlog.get_logger()
@@ -138,7 +142,7 @@ class RealtimeEngine(ABC):
             self._worker_endpoint = f"ws://{hostname}:{self.port}"
 
         self._sessions: dict[str, SessionHandler] = {}
-        self._registry: WorkerRegistry | None = None
+        self._registry: WorkerPresenceRegistry | None = None
         self._running = False
         self._server = None
         self._metrics_runner: web.AppRunner | None = None

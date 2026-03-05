@@ -227,7 +227,7 @@ class TestGenerateEnginePy:
         """Should include all required Engine methods."""
         content = generate_engine_py(basic_config)
 
-        assert "def process(self, input: TaskInput)" in content
+        assert "def process(self, input: TaskInput, ctx: BatchTaskContext)" in content
         assert "def health_check(self)" in content
         assert "def get_capabilities(self)" in content
 

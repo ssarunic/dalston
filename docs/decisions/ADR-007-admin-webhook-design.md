@@ -27,10 +27,12 @@ API keys are stored in Redis for O(1) lookup on every request (hot path). Webhoo
 endpoints could follow the same pattern.
 
 **Pros:**
+
 - Consistent with API key storage pattern
 - Fast lookups
 
 **Cons:**
+
 - Delivery logs grow unbounded — Redis has no good story for paginated range queries
   over structured data
 - No relational integrity (can't CASCADE delete deliveries when endpoint deleted)
@@ -42,12 +44,14 @@ endpoints could follow the same pattern.
 Store both endpoints and delivery logs as relational tables.
 
 **Pros:**
+
 - Queryable delivery logs with pagination, filtering, ordering
 - Foreign key constraints (endpoint → tenant, delivery → endpoint with CASCADE)
 - Consistent with how jobs/tasks are stored (durable business data)
 - Alembic migrations for schema changes
 
 **Cons:**
+
 - Adds PostgreSQL dependency to orchestrator's webhook dispatch path (already exists
   for job lookups)
 
@@ -58,10 +62,12 @@ Store both endpoints and delivery logs as relational tables.
 One env var, all webhooks signed with the same key.
 
 **Pros:**
+
 - Simple configuration
 - Already implemented
 
 **Cons:**
+
 - Compromising one receiver's secret compromises all endpoints
 - Cannot rotate for one endpoint without affecting all others
 - Receivers cannot independently verify they are the intended recipient
@@ -72,12 +78,14 @@ Each registered endpoint gets its own `signing_secret`, generated server-side at
 creation time.
 
 **Pros:**
+
 - Secret compromise is isolated to one endpoint
 - Independent rotation per endpoint
 - Follows industry convention (Stripe, GitHub, Svix all use per-endpoint secrets)
 - `whsec_` prefix makes secrets identifiable
 
 **Cons:**
+
 - Must look up endpoint to retrieve secret at delivery time (mitigated: we already
   look up the endpoint for the URL)
 - Admin must store the secret when first shown (one-time display, like API keys)
@@ -89,10 +97,12 @@ creation time.
 Orchestrator holds pending retries in memory with `asyncio.sleep` delays.
 
 **Pros:**
+
 - Simple implementation
 - Low latency for transient failures
 
 **Cons:**
+
 - Orchestrator crash loses all pending retries silently
 - Retry window limited to seconds (current: 1s, 2s, 4s) — misses longer outages
 - No visibility into retry state
@@ -103,10 +113,12 @@ Orchestrator holds pending retries in memory with `asyncio.sleep` delays.
 Push failed deliveries to a Redis list, pop and retry on a timer.
 
 **Pros:**
+
 - Survives orchestrator restart (if Redis persists)
 - Decouples dispatch from delivery
 
 **Cons:**
+
 - Redis persistence is not guaranteed (RDB/AOF tradeoffs)
 - No structured querying of delivery history
 - Duplicates the problem: crashes can still lose in-flight items
@@ -117,6 +129,7 @@ Insert delivery rows with `status` and `next_retry_at`. Worker polls for pending
 rows using `SELECT ... FOR UPDATE SKIP LOCKED`.
 
 **Pros:**
+
 - Fully durable — survives any component crash
 - Queryable delivery log for free (same table)
 - Manual retry is a simple UPDATE
@@ -124,6 +137,7 @@ rows using `SELECT ... FOR UPDATE SKIP LOCKED`.
 - Retry window can span hours (immediate → 30s → 2m → 10m → 1h)
 
 **Cons:**
+
 - Polling adds ~2 second latency to first delivery (acceptable — HTTP call itself
   takes hundreds of milliseconds)
 - More rows in PostgreSQL (mitigated: retention cleanup as future follow-up)

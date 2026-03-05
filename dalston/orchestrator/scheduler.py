@@ -17,6 +17,7 @@ import structlog.contextvars
 from redis.asyncio import Redis
 
 import dalston.telemetry
+from dalston.common.artifacts import ArtifactReference, ArtifactSelector, InputBinding
 from dalston.common.events import publish_engine_needed
 from dalston.common.models import Task
 from dalston.common.pipeline_types import AudioMedia, TaskInputData
@@ -170,6 +171,64 @@ def calculate_task_timeout(
     return max(int(estimated_s), MIN_TIMEOUT_S)
 
 
+async def _load_job_artifact_index(
+    redis: Redis,
+    job_id: str,
+) -> dict[str, ArtifactReference]:
+    """Load the job-scoped artifact index from Redis."""
+    raw = await redis.hgetall(f"dalston:job:{job_id}:artifacts")
+    index: dict[str, ArtifactReference] = {}
+    for artifact_id, metadata_json in raw.items():
+        try:
+            index[artifact_id] = ArtifactReference.model_validate_json(metadata_json)
+        except Exception:
+            logger.warning(
+                "invalid_artifact_metadata_in_index",
+                job_id=job_id,
+                artifact_id=artifact_id,
+            )
+    return index
+
+
+def _matches_selector(
+    ref: ArtifactReference,
+    selector: ArtifactSelector,
+) -> bool:
+    if ref.producer_stage != selector.producer_stage:
+        return False
+    if ref.kind != selector.kind:
+        return False
+    if selector.channel is not None and ref.channel != selector.channel:
+        return False
+    if selector.role is not None and ref.role != selector.role:
+        return False
+    return True
+
+
+def _resolve_input_bindings(
+    *,
+    bindings: list[InputBinding],
+    artifact_index: dict[str, ArtifactReference],
+) -> dict[str, str]:
+    """Resolve slot bindings to concrete artifact IDs."""
+    resolved: dict[str, str] = {}
+    for binding in bindings:
+        match_id = None
+        for artifact_id, ref in artifact_index.items():
+            if _matches_selector(ref, binding.selector):
+                match_id = artifact_id
+                break
+
+        if match_id is None and binding.selector.required:
+            raise ValueError(
+                f"Required artifact binding missing for slot={binding.slot} "
+                f"selector={binding.selector.model_dump(exclude_none=True)}"
+            )
+        if match_id is not None:
+            resolved[binding.slot] = match_id
+    return resolved
+
+
 async def queue_task(
     redis: Redis,
     task: Task,
@@ -209,6 +268,10 @@ async def queue_task(
     task_id_str = str(task.id)
     job_id_str = str(task.job_id)
     queue_id = task.runtime
+    if not task.input_bindings and isinstance(task.config, dict):
+        bindings_from_config = task.config.get("input_bindings")
+        if isinstance(bindings_from_config, list):
+            task = task.model_copy(update={"input_bindings": bindings_from_config})
 
     # Get language from task config (if present)
     # Normalize "auto" to None - it means auto-detect, not a language requirement
@@ -379,11 +442,28 @@ async def queue_task(
     )
 
     # 2. Write task input.json to S3
-    await write_task_input(
+    input_doc = await write_task_input(
+        redis=redis,
         task=task,
         settings=settings,
         previous_outputs=previous_outputs or {},
         audio_metadata=audio_metadata,
+    )
+    if isinstance(input_doc, dict):
+        input_bindings_json = json.dumps(input_doc.get("input_bindings", []))
+        resolved_artifact_ids_json = json.dumps(
+            input_doc.get("resolved_artifact_ids", {})
+        )
+    else:
+        input_bindings_json = "[]"
+        resolved_artifact_ids_json = "{}"
+
+    await redis.hset(
+        metadata_key,
+        mapping={
+            "input_bindings_json": input_bindings_json,
+            "resolved_artifact_ids_json": resolved_artifact_ids_json,
+        },
     )
 
     # 3. Add task to stream (replaces lpush to queue)
@@ -418,11 +498,12 @@ async def queue_task(
 
 
 async def write_task_input(
+    redis: Redis,
     task: Task,
     settings: Settings,
     previous_outputs: dict[str, Any],
     audio_metadata: dict[str, Any] | None = None,
-) -> str:
+) -> dict[str, Any]:
     """Write task input.json to S3.
 
     Args:
@@ -432,31 +513,52 @@ async def write_task_input(
         audio_metadata: Audio file metadata (for prepare stage)
 
     Returns:
-        S3 URI of the written input.json
+        Dict containing S3 URI and resolved artifact metadata used in input.json
     """
     task_id_str = str(task.id)
     job_id_str = str(task.job_id)
+    bindings = [InputBinding.model_validate(binding) for binding in task.input_bindings]
+    artifact_index = await _load_job_artifact_index(redis, job_id_str)
+    payload: dict[str, Any] | None = None
 
-    # Build typed input document
-    if audio_metadata:
-        # Prepare stage: include full media object
-        media = AudioMedia(uri=task.input_uri, **audio_metadata)
-        input_data = TaskInputData(
-            task_id=task_id_str,
-            job_id=job_id_str,
-            media=media,
-            previous_outputs=previous_outputs,
-            config=task.config,
+    # Prepare is the root stage: resolve original upload as an artifact reference.
+    if task.stage == "prepare":
+        source_artifact_id = f"{job_id_str}:source:audio"
+        if not task.input_uri:
+            raise ValueError("prepare task missing input_uri")
+        artifact_index[source_artifact_id] = ArtifactReference(
+            artifact_id=source_artifact_id,
+            kind="audio",
+            storage_locator=task.input_uri,
+            media_type=None,
+            role="source",
+            producer_stage="gateway",
         )
+        resolved_artifact_ids = {"audio": source_artifact_id}
+
+        if audio_metadata:
+            media = AudioMedia(artifact_id=source_artifact_id, **audio_metadata)
+            payload = {"media": media.model_dump(mode="json", exclude_none=True)}
     else:
-        # Non-prepare stages: just audio_uri
-        input_data = TaskInputData(
-            task_id=task_id_str,
-            job_id=job_id_str,
-            audio_uri=task.input_uri,
-            previous_outputs=previous_outputs,
-            config=task.config,
+        resolved_artifact_ids = _resolve_input_bindings(
+            bindings=bindings,
+            artifact_index=artifact_index,
         )
+
+    effective_config = {
+        key: value for key, value in task.config.items() if key != "input_bindings"
+    }
+
+    input_data = TaskInputData(
+        task_id=task_id_str,
+        job_id=job_id_str,
+        payload=payload,
+        previous_outputs=previous_outputs,
+        config=effective_config,
+        input_bindings=bindings,
+        resolved_artifact_ids=resolved_artifact_ids,
+        artifact_index=artifact_index,
+    )
 
     # S3 path: jobs/{job_id}/tasks/{task_id}/input.json
     s3_key = f"jobs/{job_id_str}/tasks/{task_id_str}/input.json"
@@ -479,7 +581,13 @@ async def write_task_input(
         s3_uri=s3_uri,
     )
 
-    return s3_uri
+    return {
+        "s3_uri": s3_uri,
+        "input_bindings": [
+            binding.model_dump(mode="json", exclude_none=True) for binding in bindings
+        ],
+        "resolved_artifact_ids": resolved_artifact_ids,
+    }
 
 
 async def get_task_output(

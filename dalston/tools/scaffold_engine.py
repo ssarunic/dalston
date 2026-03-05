@@ -285,6 +285,7 @@ from typing import Any
 from dalston.engine_sdk import (
     Engine,
     EngineCapabilities,
+    BatchTaskContext,
     TaskInput,
     TaskOutput,
 )
@@ -315,7 +316,7 @@ class {class_name}(Engine):
         self._model = "placeholder"
         self.logger.info("model_loaded")
 
-    def process(self, input: TaskInput) -> TaskOutput:
+    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
         """Process audio input.
 
         Args:
@@ -629,6 +630,7 @@ from typing import Any
 
 from dalston.engine_sdk import (
     Engine,
+    BatchTaskContext,
     TaskInput,
     TaskOutput,
 )
@@ -662,7 +664,7 @@ class {class_name}(Engine):
         self._model = "placeholder"
         self.logger.info("model_loaded", model_variant=self._model_variant)
 
-    def process(self, input: TaskInput) -> TaskOutput:
+    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
         """Process audio input.
 
         Args:

@@ -8,13 +8,15 @@ For per_channel mode with PII and audio redaction, also combines:
 - Redacted mono WAVs into stereo output (using FFmpeg)
 """
 
-import os
+import json
 import subprocess
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+from dalston.common.artifacts import build_task_artifact_id
 from dalston.engine_sdk import (
+    BatchTaskContext,
     Engine,
     MergedSegment,
     MergeOutput,
@@ -27,7 +29,6 @@ from dalston.engine_sdk import (
     TaskOutput,
     TranscriptMetadata,
     Word,
-    io,
 )
 
 
@@ -46,7 +47,11 @@ class FinalMergerEngine(Engine):
     - Speaker assignments based on diarization overlap
     """
 
-    def process(self, input: TaskInput) -> TaskOutput:
+    def process(
+        self,
+        input: TaskInput,
+        ctx: BatchTaskContext,
+    ) -> TaskOutput:
         """Merge upstream outputs into final transcript.
 
         Args:
@@ -67,7 +72,7 @@ class FinalMergerEngine(Engine):
 
         # Handle per_channel mode separately
         if speaker_detection == SpeakerDetectionMode.PER_CHANNEL:
-            return self._merge_per_channel(input, config)
+            return self._merge_per_channel(input, config, ctx)
 
         # Get typed outputs from upstream stages
         prepare_output = input.get_prepare_output()
@@ -232,23 +237,25 @@ class FinalMergerEngine(Engine):
                 pii_entities = pii_detect_output.entities
 
                 # Build PII metadata
-                redacted_audio_uri = None
+                redacted_audio_artifact_id = None
                 if audio_redact_output:
                     pipeline_stages.append("audio_redact")
-                    redacted_audio_uri = audio_redact_output.redacted_audio_uri
+                    redacted_audio_artifact_id = (
+                        audio_redact_output.redacted_audio_artifact_id
+                    )
 
                 pii_metadata = PIIMetadata(
                     entities_detected=len(pii_detect_output.entities),
                     entity_count_by_type=pii_detect_output.entity_count_by_type,
                     entity_count_by_category=pii_detect_output.entity_count_by_category,
-                    redacted_audio_uri=redacted_audio_uri,
+                    redacted_audio_artifact_id=redacted_audio_artifact_id,
                     processing_time_ms=pii_detect_output.processing_time_ms,
                 )
 
                 self.logger.info(
                     "pii_detection_integrated",
                     entities_detected=len(pii_entities),
-                    redacted_audio=redacted_audio_uri is not None,
+                    redacted_audio=redacted_audio_artifact_id is not None,
                 )
 
                 # Compute per-segment redacted text for mono audio
@@ -311,18 +318,17 @@ class FinalMergerEngine(Engine):
             speaker_count=len(speakers),
         )
 
-        # Write to the canonical transcript location for the Gateway
-        s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
-        transcript_uri = f"s3://{s3_bucket}/jobs/{job_id}/transcript.json"
-        io.upload_json(transcript.model_dump(mode="json"), transcript_uri)
-        self.logger.info("uploaded_transcript", transcript_uri=transcript_uri)
-
-        return TaskOutput(data=transcript)
+        transcript_artifact = self._write_transcript_artifact(
+            ctx=ctx,
+            transcript=transcript,
+        )
+        return TaskOutput(data=transcript, produced_artifacts=[transcript_artifact])
 
     def _merge_per_channel(
         self,
         input: TaskInput,
         config: dict,
+        ctx: BatchTaskContext,
     ) -> TaskOutput:
         """Merge transcripts from per-channel processing.
 
@@ -386,7 +392,8 @@ class FinalMergerEngine(Engine):
         # Collect segments and PII data from all channels
         all_segments: list[dict] = []
         all_pii_entities: list[PIIEntity] = []
-        redacted_audio_uris: list[str] = []
+        redacted_audio_artifact_ids: list[str] = []
+        redacted_audio_paths: list[Path] = []
         pipeline_warnings: list = []
         language = "en"
         language_confidence = 1.0
@@ -518,12 +525,22 @@ class FinalMergerEngine(Engine):
             # Collect audio redaction output for this channel
             if redact_pii_audio:
                 audio_redact_output = input.get_audio_redact_output(audio_redact_key)
-                if audio_redact_output and audio_redact_output.redacted_audio_uri:
-                    redacted_audio_uris.append(audio_redact_output.redacted_audio_uri)
+                if (
+                    audio_redact_output
+                    and audio_redact_output.redacted_audio_artifact_id
+                ):
+                    redacted_audio_artifact_ids.append(
+                        audio_redact_output.redacted_audio_artifact_id
+                    )
+                    slot = f"redacted_audio_ch{channel}"
+                    if slot in input.materialized_artifacts:
+                        redacted_audio_paths.append(
+                            input.materialized_artifacts[slot].local_path
+                        )
                     self.logger.info(
                         "collected_redacted_audio_from_channel",
                         channel=channel,
-                        uri=audio_redact_output.redacted_audio_uri,
+                        artifact_id=audio_redact_output.redacted_audio_artifact_id,
                     )
 
         # Sort all segments by start time (interleave)
@@ -591,16 +608,30 @@ class FinalMergerEngine(Engine):
         pipeline_stages.append("merge")
 
         # Assemble redacted stereo audio if we have redacted mono files
-        redacted_stereo_uri: str | None = None
-        if redact_pii_audio and len(redacted_audio_uris) == channel_count:
-            redacted_stereo_uri = self._assemble_stereo_audio(
-                job_id=str(job_id),
-                channel_uris=redacted_audio_uris,
+        produced_artifacts = []
+        redacted_stereo_artifact_id: str | None = None
+        if redact_pii_audio and len(redacted_audio_paths) == channel_count:
+            redacted_stereo_path = self._assemble_stereo_audio(
+                channel_paths=redacted_audio_paths,
                 sample_rate=sample_rate,
             )
-            if redacted_stereo_uri:
+            if redacted_stereo_path:
+                logical_name = "redacted_stereo_audio"
+                redacted_stereo_artifact_id = build_task_artifact_id(
+                    input.task_id, logical_name
+                )
+                produced_artifacts.append(
+                    ctx.describe_artifact(
+                        logical_name=logical_name,
+                        local_path=redacted_stereo_path,
+                        kind="audio",
+                        role="redacted_stereo",
+                        media_type="audio/wav",
+                    )
+                )
                 self.logger.info(
-                    "assembled_stereo_audio", stereo_uri=redacted_stereo_uri
+                    "assembled_stereo_audio",
+                    artifact_id=redacted_stereo_artifact_id,
                 )
 
         # Build PII metadata if detection was enabled
@@ -610,7 +641,7 @@ class FinalMergerEngine(Engine):
                 entities_detected=len(all_pii_entities),
                 entity_count_by_type=total_entity_count_by_type or None,
                 entity_count_by_category=total_entity_count_by_category or None,
-                redacted_audio_uri=redacted_stereo_uri,
+                redacted_audio_artifact_id=redacted_stereo_artifact_id,
                 processing_time_ms=total_pii_processing_time_ms or None,
             )
 
@@ -651,80 +682,53 @@ class FinalMergerEngine(Engine):
             segment_count=len(segments),
             speaker_count=len(speakers),
             pii_entities_count=len(all_pii_entities) if all_pii_entities else 0,
-            redacted_stereo_audio=redacted_stereo_uri is not None,
+            redacted_stereo_audio=redacted_stereo_artifact_id is not None,
         )
 
-        # Upload to S3
-        s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
-        transcript_uri = f"s3://{s3_bucket}/jobs/{job_id}/transcript.json"
-        io.upload_json(transcript.model_dump(mode="json"), transcript_uri)
-        self.logger.info("uploaded_transcript", transcript_uri=transcript_uri)
-
-        return TaskOutput(data=transcript)
+        transcript_artifact = self._write_transcript_artifact(
+            ctx=ctx,
+            transcript=transcript,
+        )
+        produced_artifacts.append(transcript_artifact)
+        return TaskOutput(data=transcript, produced_artifacts=produced_artifacts)
 
     def _assemble_stereo_audio(
         self,
-        job_id: str,
-        channel_uris: list[str],
+        channel_paths: list[Path],
         sample_rate: int = 16000,
-    ) -> str | None:
+    ) -> Path | None:
         """Assemble multiple mono WAV files into a stereo WAV file using FFmpeg.
 
-        Downloads channel audio files from S3, uses FFmpeg to merge them into
-        stereo, and uploads the result back to S3.
-
         Args:
-            job_id: Job ID for output path
-            channel_uris: List of S3 URIs for mono channel files (ch0, ch1, ...)
+            channel_paths: Local mono channel files (ch0, ch1, ...)
             sample_rate: Target sample rate
 
         Returns:
-            S3 URI of the assembled stereo file, or None on failure
+            Local path of assembled stereo file, or None on failure
         """
-        if len(channel_uris) < 2:
+        if len(channel_paths) < 2:
             self.logger.warning(
                 "insufficient_channels_for_stereo",
-                channel_count=len(channel_uris),
+                channel_count=len(channel_paths),
             )
             return None
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmppath = Path(tmpdir)
-
-            # Download channel files
-            local_channels: list[Path] = []
-            for idx, uri in enumerate(channel_uris):
-                local_path = tmppath / f"channel_{idx}.wav"
-                try:
-                    io.download_file(uri, local_path)
-                    local_channels.append(local_path)
-                    self.logger.info(
-                        "downloaded_channel_audio",
-                        channel=idx,
-                        local_path=str(local_path),
-                    )
-                except Exception as e:
-                    self.logger.error(
-                        "failed_to_download_channel", channel=idx, uri=uri, error=str(e)
-                    )
-                    return None
-
-            # Build FFmpeg command to merge mono files into stereo
-            # Using amerge filter to combine channels
             output_path = tmppath / "redacted_stereo.wav"
 
             # For 2 channels: merge left and right
             # FFmpeg command: ffmpeg -i ch0.wav -i ch1.wav -filter_complex amerge=inputs=2 -ac 2 output.wav
             cmd = ["ffmpeg", "-y"]
-            for ch_path in local_channels:
+            for ch_path in channel_paths:
                 cmd.extend(["-i", str(ch_path)])
 
             cmd.extend(
                 [
                     "-filter_complex",
-                    f"amerge=inputs={len(local_channels)}",
+                    f"amerge=inputs={len(channel_paths)}",
                     "-ac",
-                    str(len(local_channels)),
+                    str(len(channel_paths)),
                     "-ar",
                     str(sample_rate),
                     str(output_path),
@@ -760,17 +764,33 @@ class FinalMergerEngine(Engine):
                 self.logger.error("ffmpeg_stereo_assembly_error", error=str(e))
                 return None
 
-            # Upload stereo file to S3
-            s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
-            stereo_uri = f"s3://{s3_bucket}/jobs/{job_id}/redacted_stereo.wav"
+            persisted = Path(
+                tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
+            )
+            persisted.write_bytes(output_path.read_bytes())
+            return persisted
 
-            try:
-                io.upload_file(str(output_path), stereo_uri)
-                self.logger.info("uploaded_stereo_audio", uri=stereo_uri)
-                return stereo_uri
-            except Exception as e:
-                self.logger.error("failed_to_upload_stereo", error=str(e))
-                return None
+    def _write_transcript_artifact(
+        self,
+        *,
+        ctx: BatchTaskContext,
+        transcript: MergeOutput,
+    ):
+        logical_name = "transcript"
+        output_path = Path(
+            tempfile.NamedTemporaryFile(suffix=".json", delete=False).name
+        )
+        output_path.write_text(
+            json.dumps(transcript.model_dump(mode="json"), ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return ctx.describe_artifact(
+            logical_name=logical_name,
+            local_path=output_path,
+            kind="transcript",
+            role="final",
+            media_type="application/json",
+        )
 
     def _redact_segment_text(
         self,

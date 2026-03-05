@@ -11,7 +11,19 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from dalston.engine_sdk.context import BatchTaskContext
+
 HAS_TORCH = importlib.util.find_spec("torch") is not None
+
+
+def _ctx(input_obj) -> BatchTaskContext:
+    return BatchTaskContext(
+        runtime="vllm-asr",
+        instance="test-instance",
+        task_id=getattr(input_obj, "task_id", "test-task"),
+        job_id=getattr(input_obj, "job_id", "test-job"),
+        stage=getattr(input_obj, "stage", "transcribe"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -401,7 +413,7 @@ class TestVLLMASREngine:
         with patch.dict(
             sys.modules, {"vllm": MagicMock(SamplingParams=mock_sampling_params)}
         ):
-            result = engine.process(mock_input)
+            result = engine.process(mock_input, _ctx(mock_input))
 
         assert result.data.text == "Hello, this is a test transcription."
         assert result.data.runtime == "vllm-asr"
@@ -435,7 +447,7 @@ class TestVLLMASREngine:
         with patch.dict(
             sys.modules, {"vllm": MagicMock(SamplingParams=mock_sampling_params)}
         ):
-            result = engine.process(mock_input)
+            result = engine.process(mock_input, _ctx(mock_input))
 
         assert len(result.data.warnings) > 0
         assert "not supported" in result.data.warnings[0].lower()

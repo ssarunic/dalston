@@ -162,9 +162,9 @@ output_schema:
           type: object
         entity_count_by_category:
           type: object
-        redacted_audio_uri:
+        redacted_audio_artifact_id:
           type: string
-          description: S3 URI for redacted stereo audio (per_channel + audio redaction)
+          description: Artifact ID for redacted stereo audio (per_channel + audio redaction)
         processing_time_ms:
           type: integer
 

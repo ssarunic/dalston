@@ -79,6 +79,10 @@ def __getattr__(name: str):
         from dalston.realtime_sdk.registry import WorkerInfo
 
         return WorkerInfo
+    elif name == "WorkerPresenceRegistry":
+        from dalston.realtime_sdk.registry import WorkerPresenceRegistry
+
+        return WorkerPresenceRegistry
     elif name == "SessionHandler":
         from dalston.realtime_sdk.session import SessionHandler
 
@@ -87,6 +91,14 @@ def __getattr__(name: str):
         from dalston.realtime_sdk.session import SessionConfig
 
         return SessionConfig
+    elif name == "SessionStorage":
+        from dalston.realtime_sdk.context import SessionStorage
+
+        return SessionStorage
+    elif name == "SessionStorageResult":
+        from dalston.realtime_sdk.context import SessionStorageResult
+
+        return SessionStorageResult
     elif name == "AudioBuffer":
         from dalston.realtime_sdk.session import AudioBuffer
 
@@ -135,7 +147,10 @@ __all__ = [
     "Word",
     # Worker registry (lazy)
     "WorkerRegistry",
+    "WorkerPresenceRegistry",
     "WorkerInfo",
+    "SessionStorage",
+    "SessionStorageResult",
     # Protocol messages
     "SessionBeginMessage",
     "SessionEndMessage",

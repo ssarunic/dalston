@@ -89,15 +89,17 @@ This report analyzes: (1) whether changes have broken real-time engines, (2) whe
 
 ## 2. Question 1: Have Changes Inadvertently Broken Real-Time Engines?
 
-### Answer: No, but they have been left behind.
+### Answer: No, but they have been left behind
 
 The batch and real-time subsystems are **cleanly separated** at every level:
 
 **Redis namespace isolation:**
+
 - Batch: `dalston:batch:engines`, `dalston:batch:engine:{id}`, `dalston:stream:{id}`
 - Real-time: `dalston:realtime:workers`, `dalston:realtime:worker:{id}`, `dalston:realtime:session:{id}`
 
 **SDK isolation:**
+
 - Batch: `dalston/engine_sdk/` — `Engine` base class, `EngineRunner`, sync Redis
 - Real-time: `dalston/realtime_sdk/` — `RealtimeEngine` base class, WebSocket server, async Redis
 
@@ -119,7 +121,7 @@ The batch and real-time subsystems are **cleanly separated** at every level:
 
 ## 3. Question 2: Is the Same Approach Applicable to Real-Time?
 
-### Answer: Largely yes, with adaptations for the streaming lifecycle.
+### Answer: Largely yes, with adaptations for the streaming lifecycle
 
 The core batch innovations can be mapped to real-time:
 
@@ -151,6 +153,7 @@ The key difference: **batch refs are seconds, RT refs are minutes to hours**. Th
 
 **Challenge: Model swap latency during active sessions.**
 If a worker is serving 3 sessions on `model-A` and a new session requests `model-B`, the worker must either:
+
 - (a) Load `model-B` alongside `model-A` (requires VRAM headroom) — `max_loaded=2` handles this
 - (b) Reject the session and let the allocator find another worker — current behavior, fine
 - (c) Wait for `model-A` sessions to drain — too slow for real-time
@@ -173,6 +176,7 @@ Batch heartbeats include `loaded_model` and `local_cache`. RT heartbeats would a
 ### Pros and cons of applying the batch approach to RT
 
 **Pros:**
+
 - Unified model naming: users use the same model IDs for batch and RT
 - Dynamic model loading: deploy a generic RT container, load models on-demand from S3
 - Capability validation: reject unsupported model/language combos at the Gateway, not silently at the worker
@@ -180,6 +184,7 @@ Batch heartbeats include `loaded_model` and `local_cache`. RT heartbeats would a
 - Cost reduction: fewer specialized Docker images, share GPU across models via TTL eviction
 
 **Cons:**
+
 - First-session latency: if the model isn't preloaded, the first session waits for model download + load (seconds to minutes)
 - VRAM pressure: multiple models loaded on one GPU increases OOM risk for RT (where latency matters more)
 - Complexity: RT engines are currently simple (`load_models()` + `transcribe()`); adding ModelManager, S3 storage, and capabilities adds moving parts
@@ -200,11 +205,13 @@ Batch heartbeats include `loaded_model` and `local_cache`. RT heartbeats would a
 **Impact:** Users use one model name everywhere. The same `model=parakeet-tdt-1.1b` works in both `POST /v1/audio/transcriptions` and `WS /v1/audio/transcriptions/stream`.
 
 **Pros:**
+
 - No SDK changes needed — just naming convention
 - Eliminates user confusion
 - Enables hybrid mode (RT → batch enhancement) with consistent model references
 
 **Cons:**
+
 - Requires updating RT engine code to use catalog names
 - Minor: RT workers would need catalog awareness to validate model names
 
@@ -217,17 +224,20 @@ Batch heartbeats include `loaded_model` and `local_cache`. RT heartbeats would a
 **Impact:** Session Router gains structured capability data for smarter allocation. Gateway can validate language/model support before proxying.
 
 **Pros:**
+
 - Reuses existing `EngineCapabilities` schema (already has `supports_streaming`, `max_concurrency`)
 - Enables capability validation at the Gateway (reject bad requests early)
 - Operational visibility: same capability schema in monitoring for both batch and RT
 
 **Cons:**
+
 - `engine.yaml` for RT engines is partially redundant (RT capabilities are simpler)
 - Session Router needs to parse capabilities (currently uses flat strings)
 
 #### C. Shared `ModelManager` for RT engines (Medium effort, high impact)
 
 **Current state:** RT engines hardcode models in `load_models()`:
+
 ```python
 # engines/stt-rt/faster-whisper/engine.py
 MODELS = {
@@ -240,6 +250,7 @@ def load_models(self):
 ```
 
 **Proposal:** RT engines use `FasterWhisperModelManager` (or equivalent) to load models on-demand:
+
 ```python
 def load_models(self):
     self._manager = FasterWhisperModelManager.from_env()
@@ -260,12 +271,14 @@ def transcribe(self, audio, language, model_variant, vocabulary=None):
 **Impact:** Same model management for batch and RT. Models loaded/evicted dynamically. One container image serves any model variant.
 
 **Pros:**
+
 - Eliminates per-model RT Docker images (currently: `stt-rt-transcribe-parakeet-rnnt-0.6b`, `stt-rt-transcribe-parakeet-rnnt-1.1b`, etc.)
 - Reference counting already handles concurrent sessions perfectly
 - TTL eviction frees VRAM when a model is no longer requested
 - Enables warm model routing: Session Router checks `loaded_model` in heartbeat
 
 **Cons:**
+
 - First-request latency for cold models (mitigated by `DALSTON_MODEL_PRELOAD`)
 - Batch `ModelManager` is sync (threading), RT is async (asyncio) — need async wrapper or `asyncio.to_thread()`
 - Multiple models on one GPU increases VRAM pressure (manageable via `max_loaded`)
@@ -291,15 +304,18 @@ class TranscriptionModel(Protocol):
 ```
 
 Then:
+
 - Batch `Engine.process()` calls `model.transcribe(audio_path, ...)`
 - RT `RealtimeEngine.transcribe()` calls `model.transcribe(audio_array, ...)`
 
 **Pros:**
+
 - One model implementation works for both batch and RT
 - Ensures identical transcription results regardless of access mode
 - Reduces code duplication in engine implementations
 
 **Cons:**
+
 - **High coupling between subsystems** — changes to the shared interface affect both
 - Batch and RT have legitimately different input types (`Path` vs `np.ndarray`)
 - Batch engines do more than transcribe (alignment, diarization, PII) — the shared interface only covers transcription
@@ -311,6 +327,7 @@ Then:
 ### 4.2 Recommended approach
 
 **Phase 1 (Quick wins — minimal code changes):**
+
 1. Add `engine.yaml` to all RT engines in `engines/stt-rt/*/`
 2. Standardize model names to use catalog IDs
 3. RT heartbeats include `EngineCapabilities` JSON (same schema as batch)
@@ -341,6 +358,7 @@ For reference, here are the current runtimes and their batch/RT coverage:
 | `vllm-asr` | `engines/stt-transcribe/vllm-asr/` | `engines/stt-rt/voxtral/` | Audio LLMs (Voxtral, Qwen2-Audio), GPU required |
 
 **Observations:**
+
 - `faster-whisper`, `nemo`, and `nemo-onnx` have both batch and RT implementations — these are the prime candidates for unification
 - `hf-asr` is batch-only — adding RT support would be straightforward with the unified model manager
 - `vllm-asr` has limited RT applicability due to high latency (5s warm start) and no streaming support

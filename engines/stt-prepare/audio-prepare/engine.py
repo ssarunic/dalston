@@ -5,12 +5,13 @@ Extracts duration and metadata using ffprobe.
 """
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
+from dalston.common.artifacts import build_task_artifact_id
 from dalston.engine_sdk import (
     AudioMedia,
+    BatchTaskContext,
     Engine,
     PrepareOutput,
     TaskInput,
@@ -56,17 +57,20 @@ class AudioPrepareEngine(Engine):
                 "Install with: apt-get install ffmpeg"
             ) from e
 
-    def process(self, input: TaskInput) -> TaskOutput:
+    def process(
+        self,
+        input: TaskInput,
+        ctx: BatchTaskContext,
+    ) -> TaskOutput:
         """Convert audio to standardized format.
 
         Args:
             input: Task input with audio file path
 
         Returns:
-            TaskOutput with PrepareOutput containing audio URI and metadata
+            TaskOutput with PrepareOutput containing artifact IDs and metadata
         """
         audio_path = input.audio_path
-        job_id = input.job_id
         config = input.config
 
         # Get config options with defaults
@@ -79,8 +83,6 @@ class AudioPrepareEngine(Engine):
         original_metadata = self._probe_audio(audio_path)
         self.logger.info("original_audio_metadata", metadata=original_metadata)
 
-        s3_bucket = os.environ.get("S3_BUCKET", "dalston-artifacts")
-
         # Handle channel splitting for per_channel speaker detection
         if split_channels:
             if original_metadata["channels"] < 2:
@@ -92,10 +94,10 @@ class AudioPrepareEngine(Engine):
         if split_channels and original_metadata["channels"] >= 2:
             return self._process_split_channels(
                 audio_path=audio_path,
-                job_id=job_id,
                 original_metadata=original_metadata,
                 target_sample_rate=target_sample_rate,
-                s3_bucket=s3_bucket,
+                task_id=input.task_id,
+                ctx=ctx,
             )
 
         # Standard processing: convert to mono
@@ -115,25 +117,20 @@ class AudioPrepareEngine(Engine):
         prepared_metadata = self._probe_audio(prepared_path)
         self.logger.info("prepared_audio_metadata", metadata=prepared_metadata)
 
-        # Step 4: Upload prepared audio to S3
-        from dalston.engine_sdk import io as s3_io
-
-        audio_uri = f"s3://{s3_bucket}/jobs/{job_id}/audio/prepared.wav"
-        s3_io.upload_file(prepared_path, audio_uri)
-        self.logger.info("uploaded_prepared_audio", audio_uri=audio_uri)
-
-        # Step 5: Clean up local temp file to prevent accumulation
-        try:
-            prepared_path.unlink()
-            self.logger.debug("cleaned_up_temporary_file", path=str(prepared_path))
-        except OSError as e:
-            self.logger.warning(
-                "failed_to_clean_up_temp_file", path=str(prepared_path), error=str(e)
-            )
+        logical_name = "prepared_audio"
+        artifact_id = build_task_artifact_id(input.task_id, logical_name)
+        produced = ctx.describe_artifact(
+            logical_name=logical_name,
+            local_path=prepared_path,
+            kind="audio",
+            channel=0,
+            role="prepared",
+            media_type="audio/wav",
+        )
 
         # Build typed output with AudioMedia (single-element array for mono)
         prepared = AudioMedia(
-            uri=audio_uri,
+            artifact_id=artifact_id,
             format="wav",
             duration=prepared_metadata["duration"],
             sample_rate=prepared_metadata["sample_rate"],
@@ -147,16 +144,16 @@ class AudioPrepareEngine(Engine):
             runtime="audio-prepare",
         )
 
-        return TaskOutput(data=output)
+        return TaskOutput(data=output, produced_artifacts=[produced])
 
     def _process_split_channels(
         self,
         *,
         audio_path: Path,
-        job_id: str,
         original_metadata: dict,
         target_sample_rate: int,
-        s3_bucket: str,
+        task_id: str,
+        ctx: BatchTaskContext,
     ) -> TaskOutput:
         """Process audio by splitting into separate channel files.
 
@@ -165,16 +162,14 @@ class AudioPrepareEngine(Engine):
 
         Args:
             audio_path: Path to input audio
-            job_id: Job identifier
             original_metadata: Metadata from original audio probe
             target_sample_rate: Target sample rate for output
-            s3_bucket: S3 bucket for uploads
+            task_id: Task identifier
+            ctx: Task execution context
 
         Returns:
             TaskOutput with PrepareOutput containing channel_files array
         """
-        from dalston.engine_sdk import io as s3_io
-
         num_channels = original_metadata["channels"]
         if num_channels > 2:
             raise ValueError(
@@ -184,6 +179,7 @@ class AudioPrepareEngine(Engine):
         self.logger.info("splitting_audio_into_channels", num_channels=num_channels)
 
         channel_files: list[AudioMedia] = []
+        produced_artifacts = []
 
         for channel_idx in range(num_channels):
             # Extract single channel to mono WAV
@@ -201,18 +197,23 @@ class AudioPrepareEngine(Engine):
                 "channel_metadata", channel=channel_idx, metadata=channel_metadata
             )
 
-            # Upload to S3
-            audio_uri = (
-                f"s3://{s3_bucket}/jobs/{job_id}/audio/prepared_ch{channel_idx}.wav"
+            logical_name = f"prepared_audio_ch{channel_idx}"
+            artifact_id = build_task_artifact_id(task_id, logical_name)
+            produced_artifacts.append(
+                ctx.describe_artifact(
+                    logical_name=logical_name,
+                    local_path=channel_path,
+                    kind="audio",
+                    channel=channel_idx,
+                    role="prepared",
+                    media_type="audio/wav",
+                )
             )
-            s3_io.upload_file(channel_path, audio_uri)
-            self.logger.info(
-                "uploaded_channel", channel=channel_idx, audio_uri=audio_uri
-            )
+            self.logger.info("prepared_channel_file", channel=channel_idx)
 
             channel_files.append(
                 AudioMedia(
-                    uri=audio_uri,
+                    artifact_id=artifact_id,
                     format="wav",
                     duration=channel_metadata["duration"],
                     sample_rate=channel_metadata["sample_rate"],
@@ -221,16 +222,6 @@ class AudioPrepareEngine(Engine):
                 )
             )
 
-            # Clean up temp file
-            try:
-                channel_path.unlink()
-            except OSError as e:
-                self.logger.warning(
-                    "failed_to_clean_up_channel_file",
-                    path=str(channel_path),
-                    error=str(e),
-                )
-
         # Build typed output
         output = PrepareOutput(
             channel_files=channel_files,
@@ -238,7 +229,7 @@ class AudioPrepareEngine(Engine):
             runtime="audio-prepare",
         )
 
-        return TaskOutput(data=output)
+        return TaskOutput(data=output, produced_artifacts=produced_artifacts)
 
     def _extract_channel(
         self,
