@@ -153,8 +153,8 @@ class PhonemeAlignEngine(Engine):
 
         model, metadata = model_result
 
+        self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
         try:
-            self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
             audio = self._load_audio(audio_path)
 
             result = align(
@@ -192,7 +192,6 @@ class PhonemeAlignEngine(Engine):
                 aligned_words=aligned_count,
                 unaligned_words=unaligned_count,
             )
-            self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
 
             output = AlignOutput(
                 text=text,
@@ -223,6 +222,8 @@ class PhonemeAlignEngine(Engine):
                 language,
                 reason=f"Alignment failed: {e}",
             )
+        finally:
+            self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
 
     def _load_audio(self, audio_path: Path) -> np.ndarray:
         """Load audio file as 16 kHz mono numpy array."""

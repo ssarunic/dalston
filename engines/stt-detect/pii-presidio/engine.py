@@ -308,82 +308,85 @@ class PIIDetectionEngine(Engine):
         self._load_presidio()
         self._load_gliner(runtime_model_id)
         self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
+        try:
+            # Get transcript data from previous stages
+            align_output = input.get_align_output()
+            transcribe_output = input.get_transcribe_output()
 
-        # Get transcript data from previous stages
-        align_output = input.get_align_output()
-        transcribe_output = input.get_transcribe_output()
+            # Extract language from transcription
+            language = "en"  # Default fallback
+            if transcribe_output and transcribe_output.language:
+                language = transcribe_output.language
+            elif (
+                align_output
+                and hasattr(align_output, "language")
+                and align_output.language
+            ):
+                language = align_output.language
 
-        # Extract language from transcription
-        language = "en"  # Default fallback
-        if transcribe_output and transcribe_output.language:
-            language = transcribe_output.language
-        elif (
-            align_output and hasattr(align_output, "language") and align_output.language
-        ):
-            language = align_output.language
+            if align_output and not align_output.skipped:
+                segments = align_output.segments
+                text = align_output.text
+            elif transcribe_output:
+                segments = transcribe_output.segments
+                text = transcribe_output.text
+            else:
+                # Fallback to raw output
+                raw_transcribe = input.get_raw_output("transcribe") or {}
+                text = raw_transcribe.get("text", "")
+                language = raw_transcribe.get("language", "en")
+                segments = []
 
-        if align_output and not align_output.skipped:
-            segments = align_output.segments
-            text = align_output.text
-        elif transcribe_output:
-            segments = transcribe_output.segments
-            text = transcribe_output.text
-        else:
-            # Fallback to raw output
-            raw_transcribe = input.get_raw_output("transcribe") or {}
-            text = raw_transcribe.get("text", "")
-            language = raw_transcribe.get("language", "en")
-            segments = []
+            self.logger.info("detected_language_for_pii", language=language)
 
-        self.logger.info("detected_language_for_pii", language=language)
+            # Get diarization for speaker assignment
+            diarize_output = input.get_diarize_output()
+            speaker_turns = diarize_output.turns if diarize_output else []
 
-        # Get diarization for speaker assignment
-        diarize_output = input.get_diarize_output()
-        speaker_turns = diarize_output.turns if diarize_output else []
+            # Detect entities
+            entities = self._detect_entities(
+                text=text,
+                segments=segments,
+                entity_types=entity_types,
+                confidence_threshold=confidence_threshold,
+                speaker_turns=speaker_turns,
+                language=language,
+            )
 
-        # Detect entities
-        entities = self._detect_entities(
-            text=text,
-            segments=segments,
-            entity_types=entity_types,
-            confidence_threshold=confidence_threshold,
-            speaker_turns=speaker_turns,
-            language=language,
-        )
+            # Generate redacted text
+            redacted_text = self._generate_redacted_text(text, entities)
 
-        # Generate redacted text
-        redacted_text = self._generate_redacted_text(text, entities)
+            # Count entities by type and category
+            entity_count_by_type: dict[str, int] = defaultdict(int)
+            entity_count_by_category: dict[str, int] = defaultdict(int)
+            for entity in entities:
+                entity_count_by_type[entity.entity_type] += 1
+                entity_count_by_category[entity.category.value] += 1
 
-        # Count entities by type and category
-        entity_count_by_type: dict[str, int] = defaultdict(int)
-        entity_count_by_category: dict[str, int] = defaultdict(int)
-        for entity in entities:
-            entity_count_by_type[entity.entity_type] += 1
-            entity_count_by_category[entity.category.value] += 1
+            processing_time_ms = int((time.time() - start_time) * 1000)
 
-        processing_time_ms = int((time.time() - start_time) * 1000)
+            self.logger.info(
+                "pii_detection_complete",
+                job_id=job_id,
+                entities_found=len(entities),
+                processing_time_ms=processing_time_ms,
+            )
 
-        self.logger.info(
-            "pii_detection_complete",
-            job_id=job_id,
-            entities_found=len(entities),
-            processing_time_ms=processing_time_ms,
-        )
-        self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
+            output = PIIDetectOutput(
+                entities=entities,
+                redacted_text=redacted_text,
+                entity_count_by_type=dict(entity_count_by_type),
+                entity_count_by_category=dict(entity_count_by_category),
+                processing_time_ms=processing_time_ms,
+                runtime="pii-presidio",
+                skipped=False,
+                skip_reason=None,
+                warnings=[],
+            )
 
-        output = PIIDetectOutput(
-            entities=entities,
-            redacted_text=redacted_text,
-            entity_count_by_type=dict(entity_count_by_type),
-            entity_count_by_category=dict(entity_count_by_category),
-            processing_time_ms=processing_time_ms,
-            runtime="pii-presidio",
-            skipped=False,
-            skip_reason=None,
-            warnings=[],
-        )
-
-        return EngineOutput(data=output)
+            return EngineOutput(data=output)
+        finally:
+            self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
 
     # Languages supported by Presidio's default NLP models
     PRESIDIO_SUPPORTED_LANGUAGES = {"en", "de", "es", "fr", "it", "pt", "nl", "he"}

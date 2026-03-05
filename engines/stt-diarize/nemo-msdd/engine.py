@@ -374,59 +374,60 @@ class NemoMSDDEngine(Engine):
         out_dir.mkdir(exist_ok=True)
         manifest_path = self._create_manifest(audio_path, duration, out_dir)
 
+        self._active_runtime_model_id = runtime_model_id
+        self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
         try:
-            # Create diarizer with this specific config
-            diarizer = self._create_diarizer(
-                manifest_path=str(manifest_path),
-                out_dir=str(out_dir),
-                max_speakers=max_speakers,
-                runtime_model_id=runtime_model_id,
-            )
-
-            self._active_runtime_model_id = runtime_model_id
-            self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
-            self.logger.info("running_nemo_diarization")
-            diarizer.diarize()
-
-            # Find RTTM output
-            rttm_path = out_dir / "pred_rttms" / f"{audio_path.stem}.rttm"
-            if not rttm_path.exists():
-                rttm_path = out_dir / f"{audio_path.stem}.rttm"
-
-            if not rttm_path.exists():
-                raise RuntimeError(
-                    f"RTTM output not found. Checked: {out_dir}/pred_rttms/ and {out_dir}/"
+            try:
+                # Create diarizer with this specific config
+                diarizer = self._create_diarizer(
+                    manifest_path=str(manifest_path),
+                    out_dir=str(out_dir),
+                    max_speakers=max_speakers,
+                    runtime_model_id=runtime_model_id,
                 )
 
-            speakers, turns = self._parse_rttm(rttm_path)
-            overlap_duration, overlap_ratio = self._calculate_overlap_stats(
-                turns, duration
+                self.logger.info("running_nemo_diarization")
+                diarizer.diarize()
+
+                # Find RTTM output
+                rttm_path = out_dir / "pred_rttms" / f"{audio_path.stem}.rttm"
+                if not rttm_path.exists():
+                    rttm_path = out_dir / f"{audio_path.stem}.rttm"
+
+                if not rttm_path.exists():
+                    raise RuntimeError(
+                        f"RTTM output not found. Checked: {out_dir}/pred_rttms/ and {out_dir}/"
+                    )
+
+                speakers, turns = self._parse_rttm(rttm_path)
+                overlap_duration, overlap_ratio = self._calculate_overlap_stats(
+                    turns, duration
+                )
+            finally:
+                manifest_path.unlink(missing_ok=True)
+
+            self.logger.info(
+                "diarization_complete",
+                speaker_count=len(speakers),
+                turn_count=len(turns),
+                overlap_ratio=overlap_ratio,
             )
 
+            output = DiarizeOutput(
+                speakers=speakers,
+                turns=turns,
+                num_speakers=len(speakers),
+                overlap_duration=overlap_duration,
+                overlap_ratio=overlap_ratio,
+                runtime="nemo-msdd",
+                skipped=False,
+                skip_reason=None,
+                warnings=[],
+            )
+
+            return EngineOutput(data=output)
         finally:
-            manifest_path.unlink(missing_ok=True)
-
-        self.logger.info(
-            "diarization_complete",
-            speaker_count=len(speakers),
-            turn_count=len(turns),
-            overlap_ratio=overlap_ratio,
-        )
-        self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
-
-        output = DiarizeOutput(
-            speakers=speakers,
-            turns=turns,
-            num_speakers=len(speakers),
-            overlap_duration=overlap_duration,
-            overlap_ratio=overlap_ratio,
-            runtime="nemo-msdd",
-            skipped=False,
-            skip_reason=None,
-            warnings=[],
-        )
-
-        return EngineOutput(data=output)
+            self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
 
     def _mock_output(self) -> EngineOutput:
         """Return mock output when diarization is disabled."""

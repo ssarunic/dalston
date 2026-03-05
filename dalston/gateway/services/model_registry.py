@@ -28,6 +28,7 @@ import structlog
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dalston.common.model_selection_keys import ACTIVE_MODEL_SELECTOR_KEYS
 from dalston.common.s3 import get_s3_client
 from dalston.config import get_settings
 from dalston.db.models import JobModel, ModelRegistryModel
@@ -464,15 +465,9 @@ class ModelRegistryService:
         # any stage-level model selector parameter.
         from sqlalchemy import func, or_
 
-        model_param_keys = (
-            "engine_transcribe",  # legacy + current transcribe selection key
-            "model_transcribe",
-            "model_diarize",
-            "model_align",
-            "model_pii_detect",
-        )
         model_filters = [
-            JobModel.parameters[key].astext == model_id for key in model_param_keys
+            JobModel.parameters[key].astext == model_id
+            for key in ACTIVE_MODEL_SELECTOR_KEYS
         ]
 
         result = await db.execute(

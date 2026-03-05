@@ -14,6 +14,7 @@ from dalston.orchestrator.engine_selector import (
     EngineSelectionResult,
     ModelSelectionError,
     NoCapableEngineError,
+    NoDownloadedModelError,
     _meets_requirements,
     _rank_and_select,
     _should_add_alignment,
@@ -272,6 +273,43 @@ class TestSelectEngine:
 
         assert result.runtime == "only-one"
         assert result.selection_reason == "only capable engine"
+
+    @pytest.mark.asyncio
+    async def test_no_downloaded_model_error_reports_attempted_runtimes(
+        self, mock_registry, mock_catalog, monkeypatch
+    ):
+        runtime_a_caps = make_capabilities("runtime-a")
+        runtime_b_caps = make_capabilities("runtime-b")
+        runtime_a = make_engine_state(
+            "runtime-a", stage="align", capabilities=runtime_a_caps
+        )
+        runtime_b = make_engine_state(
+            "runtime-b", stage="align", capabilities=runtime_b_caps
+        )
+
+        mock_registry.get_engines_for_stage.return_value = [runtime_a, runtime_b]
+
+        async def _mock_find_best_downloaded_model(*args, **kwargs):
+            return None
+
+        monkeypatch.setattr(
+            "dalston.orchestrator.engine_selector._find_best_downloaded_model",
+            _mock_find_best_downloaded_model,
+        )
+
+        with pytest.raises(NoDownloadedModelError) as exc_info:
+            await select_engine(
+                "align",
+                {},
+                mock_registry,
+                mock_catalog,
+                db=AsyncMock(),
+            )
+
+        error = exc_info.value
+        assert error.runtime == "runtime-a"
+        assert error.attempted_runtimes == ["runtime-a", "runtime-b"]
+        assert "Attempted runtimes: runtime-a, runtime-b." in str(error)
 
     @pytest.mark.asyncio
     async def test_raises_when_no_capable_engine(self, mock_registry, mock_catalog):

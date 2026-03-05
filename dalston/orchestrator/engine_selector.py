@@ -20,6 +20,13 @@ from typing import TYPE_CHECKING
 import structlog
 
 import dalston.telemetry
+from dalston.common.model_selection_keys import (
+    ENGINE_PARAM_TRANSCRIBE,
+    MODEL_PARAM_ALIGN,
+    MODEL_PARAM_DIARIZE,
+    MODEL_PARAM_PII_DETECT,
+    MODEL_PARAM_TRANSCRIBE,
+)
 from dalston.db.models import ModelRegistryModel
 from dalston.engine_sdk.types import EngineCapabilities
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog
@@ -41,12 +48,24 @@ class NoDownloadedModelError(Exception):
     for the selected transcription runtime.
     """
 
-    def __init__(self, runtime: str, stage: str = "transcribe") -> None:
+    def __init__(
+        self,
+        runtime: str,
+        stage: str = "transcribe",
+        attempted_runtimes: list[str] | None = None,
+    ) -> None:
         self.runtime = runtime
         self.stage = stage
+        self.attempted_runtimes = attempted_runtimes or [runtime]
+        attempted_suffix = (
+            f" Attempted runtimes: {', '.join(self.attempted_runtimes)}."
+            if len(self.attempted_runtimes) > 1
+            else ""
+        )
         super().__init__(
             f"No downloaded models available for runtime '{runtime}'. "
             f"Please download a model from the Models page or specify a model explicitly."
+            f"{attempted_suffix}"
         )
 
 
@@ -635,7 +654,9 @@ async def select_engine(
 
     if stage in MODEL_BACKED_STAGES and db is not None:
         selected_model: ModelRegistryModel | None = None
+        attempted_runtimes: list[str] = []
         for idx, candidate in enumerate(ranked_capable):
+            attempted_runtimes.append(candidate.runtime)
             model = await _find_best_downloaded_model(
                 runtime=candidate.runtime,
                 stage=stage,
@@ -656,7 +677,11 @@ async def select_engine(
             break
 
         if selected_model is None:
-            raise NoDownloadedModelError(runtime=engine.runtime, stage=stage)
+            raise NoDownloadedModelError(
+                runtime=ranked_capable[0].runtime,
+                stage=stage,
+                attempted_runtimes=attempted_runtimes,
+            )
 
         auto_model_id = _resolve_runtime_model_id(selected_model, stage)
 
@@ -784,8 +809,8 @@ async def select_pipeline_engines(
             requirements,
             registry,
             catalog,
-            user_preference=parameters.get("engine_transcribe")
-            or parameters.get("model_transcribe"),
+            user_preference=parameters.get(ENGINE_PARAM_TRANSCRIBE)
+            or parameters.get(MODEL_PARAM_TRANSCRIBE),
             db=db,
         )
 
@@ -802,7 +827,7 @@ async def select_pipeline_engines(
                 align_requirements,
                 registry,
                 catalog,
-                user_preference=parameters.get("model_align"),
+                user_preference=parameters.get(MODEL_PARAM_ALIGN),
                 db=db,
                 user_preference_is_model=True,
             )
@@ -814,7 +839,7 @@ async def select_pipeline_engines(
                 {},  # No special requirements for diarize
                 registry,
                 catalog,
-                user_preference=parameters.get("model_diarize"),
+                user_preference=parameters.get(MODEL_PARAM_DIARIZE),
                 db=db,
                 user_preference_is_model=True,
             )
@@ -827,7 +852,7 @@ async def select_pipeline_engines(
                 {},  # No special requirements for PII detection
                 registry,
                 catalog,
-                user_preference=parameters.get("model_pii_detect"),
+                user_preference=parameters.get(MODEL_PARAM_PII_DETECT),
                 db=db,
                 user_preference_is_model=True,
             )
