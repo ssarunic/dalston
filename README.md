@@ -3,7 +3,13 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
-Self-hosted audio transcription server with ElevenLabs-compatible API.
+**Ollama for ASR.** Run open-source speech recognition models on your machine or private cloud. Freedom from proprietary APIs, full privacy, no quality compromise.
+
+## Why Dalston
+
+**Pluggable and extensible** — Mix and match transcription, alignment, diarization, and PII detection models. Swap components without breaking your pipeline. Completely open source and free.
+
+**Drop-in integration** — OpenAI and ElevenLabs compatible APIs mean you can point your existing code at Dalston and it just works. Need more power? The native Dalston API unlocks advanced functionality like multi-engine routing, pipeline customization, and detailed engine metadata.
 
 ## What It Does
 
@@ -41,8 +47,9 @@ The API is available at `http://localhost:8000`. See the [deployment guide](docs
 - **Batch & Real-time** — File uploads or WebSocket streaming
 - **Speaker Diarization** — Identify who said what
 - **Word Timestamps** — Precise timing for every word
-- **ElevenLabs Compatible** — Drop-in replacement for `/v1/speech-to-text`
+- **OpenAI & ElevenLabs Compatible** — Drop-in replacement for existing integrations
 - **Modular Engines** — Faster Whisper, WhisperX, Pyannote, and more
+- **Private by Default** — Runs entirely on your infrastructure, no data leaves your environment
 
 ## Documentation
 
