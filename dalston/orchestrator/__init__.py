@@ -9,6 +9,7 @@ The orchestrator listens to Redis pub/sub events and:
 
 from dalston.orchestrator.dag import build_task_dag
 from dalston.orchestrator.engine_selector import (
+    ModelSelectionError,
     NoCapableEngineError,
     NoDownloadedModelError,
 )
@@ -26,5 +27,6 @@ __all__ = [
     "handle_task_failed",
     "NoCapableEngineError",
     "NoDownloadedModelError",
+    "ModelSelectionError",
     "queue_task",
 ]

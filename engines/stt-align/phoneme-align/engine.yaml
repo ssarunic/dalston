@@ -34,6 +34,9 @@ input:
 config_schema:
   type: object
   properties:
+    runtime_model_id:
+      type: string
+      description: Runtime model identifier for explicit wav2vec2 model selection
     return_char_alignments:
       type: boolean
       default: false

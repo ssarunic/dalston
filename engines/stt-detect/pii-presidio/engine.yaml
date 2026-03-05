@@ -21,6 +21,9 @@ capabilities:
 config_schema:
   type: object
   properties:
+    runtime_model_id:
+      type: string
+      description: Runtime model identifier for GLiNER backbone selection
     entity_types:
       type: array
       items:

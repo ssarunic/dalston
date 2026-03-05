@@ -1,0 +1,31 @@
+schema_version: "1.1"
+id: nvidia/diar-msdd-telephonic
+runtime: nemo-msdd
+runtime_model_id: nvidia/diar-msdd-telephonic
+
+name: NVIDIA NeMo MSDD Telephonic
+source: nvidia/diar-msdd-telephonic
+size_gb: 1.4
+stage: diarize
+
+description: |
+  NeMo MSDD diarization model set tuned for telephonic-style speech.
+  Resolved to component models inside the nemo-msdd runtime.
+
+languages: null
+
+capabilities:
+  word_timestamps: false
+  punctuation: false
+  capitalization: false
+  streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  min_vram_gb: 4
+  supports_cpu: true
+  min_ram_gb: 8
+
+performance:
+  rtf_gpu: 0.05
+  rtf_cpu: 2.0
