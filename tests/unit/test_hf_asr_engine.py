@@ -13,12 +13,12 @@ import pytest
 
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.managers.hf_transformers import HFTransformersModelManager
-from dalston.engine_sdk.types import TaskInput
+from dalston.engine_sdk.types import EngineInput
 
 HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 
-def _ctx(task_input: TaskInput) -> BatchTaskContext:
+def _ctx(task_input: EngineInput) -> BatchTaskContext:
     return BatchTaskContext(
         runtime="hf-asr",
         instance="test-instance",
@@ -270,7 +270,7 @@ class TestHFASREngineProcess:
         engine._manager.acquire = MagicMock(return_value=mock_pipe)
         engine._manager.release = MagicMock()
 
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="test-task",
             job_id="test-job",
             audio_path=audio_file,
@@ -292,7 +292,7 @@ class TestHFASREngineProcess:
         engine._manager.acquire = MagicMock(return_value=mock_pipe)
         engine._manager.release = MagicMock()
 
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="test-task",
             job_id="test-job",
             audio_path=audio_file,
@@ -313,7 +313,7 @@ class TestHFASREngineProcess:
         engine._manager.acquire = MagicMock(return_value=mock_pipe)
         engine._manager.release = MagicMock()
 
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="test-task",
             job_id="test-job",
             audio_path=audio_file,
@@ -336,7 +336,7 @@ class TestHFASREngineProcess:
         engine._manager.acquire = MagicMock(return_value=mock_pipe)
         engine._manager.release = MagicMock()
 
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="test-task",
             job_id="test-job",
             audio_path=audio_file,
@@ -349,7 +349,7 @@ class TestHFASREngineProcess:
         assert "generate_kwargs" not in call_kwargs
 
     def test_process_returns_task_output(self, engine, tmp_path):
-        """Process should return valid TaskOutput."""
+        """Process should return valid EngineOutput."""
         audio_file = tmp_path / "test.wav"
         audio_file.touch()
 
@@ -364,7 +364,7 @@ class TestHFASREngineProcess:
         engine._manager.acquire = MagicMock(return_value=mock_pipe)
         engine._manager.release = MagicMock()
 
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="test-task",
             job_id="test-job",
             audio_path=audio_file,
@@ -389,7 +389,7 @@ class TestHFASREngineProcess:
         engine._manager.acquire = MagicMock(return_value=mock_pipe)
         engine._manager.release = MagicMock()
 
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="test-task",
             job_id="test-job",
             audio_path=audio_file,

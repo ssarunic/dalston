@@ -1,9 +1,12 @@
-"""Unit tests for engine SDK types (TaskInput, TaskOutput).
+"""Unit tests for engine SDK types (EngineInput, EngineOutput).
 
 Tests the typed accessors for previous stage outputs and serialization.
 """
 
 from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
 
 from dalston.common.artifacts import ProducedArtifact
 from dalston.common.pipeline_types import (
@@ -17,15 +20,15 @@ from dalston.common.pipeline_types import (
     TranscribeOutput,
     Word,
 )
-from dalston.engine_sdk.types import TaskInput, TaskOutput
+from dalston.engine_sdk.types import EngineInput, EngineOutput
 
 
 class TestTaskInputBasics:
-    """Tests for basic TaskInput functionality."""
+    """Tests for basic EngineInput functionality."""
 
     def test_create_task_input(self):
-        """Test creating a TaskInput."""
-        task_input = TaskInput(
+        """Test creating a EngineInput."""
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -35,8 +38,8 @@ class TestTaskInputBasics:
         assert task_input.audio_path == Path("/tmp/audio.wav")
 
     def test_task_input_with_config(self):
-        """Test TaskInput with configuration."""
-        task_input = TaskInput(
+        """Test EngineInput with configuration."""
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -46,8 +49,8 @@ class TestTaskInputBasics:
         assert task_input.config["language"] == "en"
 
     def test_task_input_with_previous_outputs(self):
-        """Test TaskInput with previous outputs dict."""
-        task_input = TaskInput(
+        """Test EngineInput with previous outputs dict."""
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -59,11 +62,11 @@ class TestTaskInputBasics:
 
 
 class TestTaskInputGetPrepareOutput:
-    """Tests for TaskInput.get_prepare_output()."""
+    """Tests for EngineInput.get_prepare_output()."""
 
     def test_get_prepare_output_valid(self):
         """Test getting valid prepare output."""
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -94,7 +97,7 @@ class TestTaskInputGetPrepareOutput:
 
     def test_get_prepare_output_missing(self):
         """Test getting prepare output when not present."""
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -104,8 +107,8 @@ class TestTaskInputGetPrepareOutput:
         assert output is None
 
     def test_get_prepare_output_invalid_data(self):
-        """Test getting prepare output with invalid data returns None."""
-        task_input = TaskInput(
+        """Test getting prepare output with invalid data raises validation error."""
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -113,12 +116,12 @@ class TestTaskInputGetPrepareOutput:
                 "prepare": {"invalid": "data"},  # Missing required fields
             },
         )
-        output = task_input.get_prepare_output()
-        assert output is None
+        with pytest.raises(ValidationError):
+            task_input.get_prepare_output()
 
     def test_get_prepare_output_with_split_channels(self):
         """Test getting prepare output with split channel data."""
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -154,11 +157,11 @@ class TestTaskInputGetPrepareOutput:
 
 
 class TestTaskInputGetTranscribeOutput:
-    """Tests for TaskInput.get_transcribe_output()."""
+    """Tests for EngineInput.get_transcribe_output()."""
 
     def test_get_transcribe_output_valid(self):
         """Test getting valid transcribe output."""
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -183,7 +186,7 @@ class TestTaskInputGetTranscribeOutput:
 
     def test_get_transcribe_output_with_words(self):
         """Test getting transcribe output with word timestamps."""
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -215,7 +218,7 @@ class TestTaskInputGetTranscribeOutput:
 
     def test_get_transcribe_output_per_channel(self):
         """Test getting transcribe output for specific channel."""
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -243,7 +246,7 @@ class TestTaskInputGetTranscribeOutput:
 
     def test_get_transcribe_output_missing(self):
         """Test getting transcribe output when not present."""
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -254,11 +257,11 @@ class TestTaskInputGetTranscribeOutput:
 
 
 class TestTaskInputGetAlignOutput:
-    """Tests for TaskInput.get_align_output()."""
+    """Tests for EngineInput.get_align_output()."""
 
     def test_get_align_output_valid(self):
         """Test getting valid align output."""
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -298,7 +301,7 @@ class TestTaskInputGetAlignOutput:
 
     def test_get_align_output_skipped(self):
         """Test getting align output when skipped."""
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -322,7 +325,7 @@ class TestTaskInputGetAlignOutput:
 
     def test_get_align_output_per_channel(self):
         """Test getting align output for specific channel."""
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -342,11 +345,11 @@ class TestTaskInputGetAlignOutput:
 
 
 class TestTaskInputGetDiarizeOutput:
-    """Tests for TaskInput.get_diarize_output()."""
+    """Tests for EngineInput.get_diarize_output()."""
 
     def test_get_diarize_output_valid(self):
         """Test getting valid diarize output."""
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -373,7 +376,7 @@ class TestTaskInputGetDiarizeOutput:
 
     def test_get_diarize_output_with_overlap(self):
         """Test getting diarize output with overlapping speech."""
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -403,7 +406,7 @@ class TestTaskInputGetDiarizeOutput:
 
     def test_get_diarize_output_skipped(self):
         """Test getting diarize output when skipped."""
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -424,11 +427,11 @@ class TestTaskInputGetDiarizeOutput:
 
 
 class TestTaskInputGetRawOutput:
-    """Tests for TaskInput.get_raw_output()."""
+    """Tests for EngineInput.get_raw_output()."""
 
     def test_get_raw_output(self):
         """Test getting raw output dict."""
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -447,7 +450,7 @@ class TestTaskInputGetRawOutput:
 
     def test_get_raw_output_missing(self):
         """Test getting raw output when not present."""
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
@@ -458,11 +461,11 @@ class TestTaskInputGetRawOutput:
 
 
 class TestTaskOutput:
-    """Tests for TaskOutput class."""
+    """Tests for EngineOutput class."""
 
     def test_create_task_output_with_dict(self):
-        """Test creating TaskOutput with dict data."""
-        output = TaskOutput(
+        """Test creating EngineOutput with dict data."""
+        output = EngineOutput(
             data={
                 "text": "Hello world",
                 "language": "en",
@@ -471,18 +474,18 @@ class TestTaskOutput:
         assert output.data["text"] == "Hello world"
 
     def test_create_task_output_with_pydantic_model(self):
-        """Test creating TaskOutput with Pydantic model."""
+        """Test creating EngineOutput with Pydantic model."""
         transcribe_output = TranscribeOutput(
             segments=[Segment(start=0.0, end=1.0, text="Hello")],
             text="Hello",
             language="en",
             runtime="test",
         )
-        output = TaskOutput(data=transcribe_output)
+        output = EngineOutput(data=transcribe_output)
         assert isinstance(output.data, TranscribeOutput)
 
     def test_task_output_to_dict_from_pydantic(self):
-        """Test TaskOutput.to_dict() with Pydantic model."""
+        """Test EngineOutput.to_dict() with Pydantic model."""
         transcribe_output = TranscribeOutput(
             segments=[
                 Segment(
@@ -497,7 +500,7 @@ class TestTaskOutput:
             timestamp_granularity_actual=TimestampGranularity.WORD,
             runtime="test",
         )
-        output = TaskOutput(data=transcribe_output)
+        output = EngineOutput(data=transcribe_output)
         data = output.to_dict()
 
         assert isinstance(data, dict)
@@ -508,8 +511,8 @@ class TestTaskOutput:
         assert data["segments"][0]["words"][0]["text"] == "Hello"
 
     def test_task_output_to_dict_from_dict(self):
-        """Test TaskOutput.to_dict() with dict data."""
-        output = TaskOutput(
+        """Test EngineOutput.to_dict() with dict data."""
+        output = EngineOutput(
             data={
                 "text": "Hello",
                 "custom": "value",
@@ -520,8 +523,8 @@ class TestTaskOutput:
         assert data["custom"] == "value"
 
     def test_task_output_with_produced_artifacts(self):
-        """Test TaskOutput with produced artifact descriptors."""
-        output = TaskOutput(
+        """Test EngineOutput with produced artifact descriptors."""
+        output = EngineOutput(
             data={"result": "success"},
             produced_artifacts=[
                 ProducedArtifact(
@@ -555,7 +558,7 @@ class TestTaskInputTypedOutputIntegration:
         )
 
         # Create task input for align stage with serialized transcribe output
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="align-task",
             job_id="job-123",
             audio_path=Path("/tmp/audio.wav"),
@@ -619,7 +622,7 @@ class TestTaskInputTypedOutputIntegration:
         )
 
         # Create merge task input
-        task_input = TaskInput(
+        task_input = EngineInput(
             task_id="merge-task",
             job_id="job-123",
             audio_path=Path("/tmp/audio.wav"),

@@ -22,9 +22,9 @@ from dalston.engine_sdk import (
     AlignOutput,
     BatchTaskContext,
     Engine,
+    EngineInput,
+    EngineOutput,
     Segment,
-    TaskInput,
-    TaskOutput,
     TimestampGranularity,
     Word,
 )
@@ -85,7 +85,7 @@ class PhonemeAlignEngine(Engine):
             )
             return None
 
-    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
+    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Align transcription segments to produce word-level timestamps."""
         audio_path = input.audio_path
 
@@ -189,7 +189,7 @@ class PhonemeAlignEngine(Engine):
                 warnings=[],
             )
 
-            return TaskOutput(data=output)
+            return EngineOutput(data=output)
 
         except Exception as e:
             self.logger.error("alignment_failed", error=str(e), exc_info=True)
@@ -261,7 +261,7 @@ class PhonemeAlignEngine(Engine):
         segments: list[InputSegment],
         language: str,
         reason: str,
-    ) -> TaskOutput:
+    ) -> EngineOutput:
         """Return original timestamps when alignment is not possible."""
         self.logger.warning(
             "alignment_fallback", reason=reason, segment_count=len(segments)
@@ -283,7 +283,7 @@ class PhonemeAlignEngine(Engine):
             skip_reason=reason,
             warnings=[reason],
         )
-        return TaskOutput(data=output)
+        return EngineOutput(data=output)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status including device info."""

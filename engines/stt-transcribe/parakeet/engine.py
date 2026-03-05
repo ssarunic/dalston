@@ -40,9 +40,9 @@ from dalston.engine_sdk import (
     BatchTaskContext,
     Engine,
     EngineCapabilities,
+    EngineInput,
+    EngineOutput,
     Segment,
-    TaskInput,
-    TaskOutput,
     TimestampGranularity,
     TranscribeOutput,
     Word,
@@ -345,14 +345,14 @@ class ParakeetEngine(Engine):
                 error=str(e),
             )
 
-    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
+    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Transcribe audio using Parakeet CTC or TDT.
 
         Args:
             input: Task input with audio file path and config
 
         Returns:
-            TaskOutput with TranscribeOutput containing text, segments, and words
+            EngineOutput with TranscribeOutput containing text, segments, and words
         """
         audio_path = input.audio_path
         config = input.config
@@ -411,7 +411,7 @@ class ParakeetEngine(Engine):
 
         # Process the hypothesis
         if not transcriptions:
-            return TaskOutput(
+            return EngineOutput(
                 data=TranscribeOutput(
                     text="",
                     segments=[],
@@ -581,7 +581,7 @@ class ParakeetEngine(Engine):
             warnings=warnings,
         )
 
-        return TaskOutput(data=output)
+        return EngineOutput(data=output)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status including GPU availability."""

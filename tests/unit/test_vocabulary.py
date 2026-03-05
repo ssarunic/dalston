@@ -149,11 +149,11 @@ class TestWhisperEngineVocabulary:
 
     def test_vocabulary_passed_as_hotwords(self, engine_with_mock_model):
         """Test that vocabulary is passed to transcribe as hotwords."""
-        from dalston.engine_sdk import TaskInput
+        from dalston.engine_sdk import EngineInput
 
         engine, mock_model = engine_with_mock_model
 
-        input_data = TaskInput(
+        input_data = EngineInput(
             task_id=str(uuid4()),
             job_id=str(uuid4()),
             audio_path=Path("/tmp/test.wav"),
@@ -169,11 +169,11 @@ class TestWhisperEngineVocabulary:
 
     def test_vocabulary_not_passed_when_none(self, engine_with_mock_model):
         """Test that hotwords is not passed when vocabulary is None."""
-        from dalston.engine_sdk import TaskInput
+        from dalston.engine_sdk import EngineInput
 
         engine, mock_model = engine_with_mock_model
 
-        input_data = TaskInput(
+        input_data = EngineInput(
             task_id=str(uuid4()),
             job_id=str(uuid4()),
             audio_path=Path("/tmp/test.wav"),
@@ -188,11 +188,11 @@ class TestWhisperEngineVocabulary:
 
     def test_vocabulary_empty_list_not_passed(self, engine_with_mock_model):
         """Test that hotwords is not passed for empty vocabulary."""
-        from dalston.engine_sdk import TaskInput
+        from dalston.engine_sdk import EngineInput
 
         engine, mock_model = engine_with_mock_model
 
-        input_data = TaskInput(
+        input_data = EngineInput(
             task_id=str(uuid4()),
             job_id=str(uuid4()),
             audio_path=Path("/tmp/test.wav"),
@@ -289,11 +289,11 @@ class TestParakeetEngineVocabulary:
 
     def test_vocabulary_boosting_enabled_no_warning(self, engine_with_mock_model):
         """Test that vocabulary boosting is enabled without warning when successful."""
-        from dalston.engine_sdk import TaskInput
+        from dalston.engine_sdk import EngineInput
 
         engine = engine_with_mock_model
 
-        input_data = TaskInput(
+        input_data = EngineInput(
             task_id=str(uuid4()),
             job_id=str(uuid4()),
             audio_path=Path("/tmp/test.wav"),
@@ -308,11 +308,11 @@ class TestParakeetEngineVocabulary:
 
     def test_vocabulary_none_no_warning(self, engine_with_mock_model):
         """Test that no vocabulary produces no warning."""
-        from dalston.engine_sdk import TaskInput
+        from dalston.engine_sdk import EngineInput
 
         engine = engine_with_mock_model
 
-        input_data = TaskInput(
+        input_data = EngineInput(
             task_id=str(uuid4()),
             job_id=str(uuid4()),
             audio_path=Path("/tmp/test.wav"),

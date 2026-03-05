@@ -19,12 +19,12 @@ from typing import Any
 from dalston.engine_sdk import (
     BatchTaskContext,
     Engine,
+    EngineInput,
+    EngineOutput,
     PIIDetectOutput,
     PIIEntity,
     PIIEntityCategory,
     Segment,
-    TaskInput,
-    TaskOutput,
 )
 
 # Entity type to category mapping
@@ -256,14 +256,14 @@ class PIIDetectionEngine(Engine):
         except Exception as e:
             self.logger.warning("gliner_load_failed", error=str(e))
 
-    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
+    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Detect PII entities in transcript.
 
         Args:
             input: Task input containing transcript from transcribe/align stages
 
         Returns:
-            TaskOutput with PIIDetectOutput containing detected entities
+            EngineOutput with PIIDetectOutput containing detected entities
         """
         start_time = time.time()
         config = input.config
@@ -356,7 +356,7 @@ class PIIDetectionEngine(Engine):
             warnings=[],
         )
 
-        return TaskOutput(data=output)
+        return EngineOutput(data=output)
 
     # Languages supported by Presidio's default NLP models
     PRESIDIO_SUPPORTED_LANGUAGES = {"en", "de", "es", "fr", "it", "pt", "nl", "he"}

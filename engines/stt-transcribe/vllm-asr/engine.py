@@ -42,8 +42,8 @@ from dalston.engine_sdk import (
     BatchTaskContext,
     Engine,
     EngineCapabilities,
-    TaskInput,
-    TaskOutput,
+    EngineInput,
+    EngineOutput,
 )
 
 # Add engine directory to path for adapter imports
@@ -207,14 +207,14 @@ class VLLMASREngine(Engine):
             model_path=model_path,
         )
 
-    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
+    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Transcribe audio using a vLLM audio LLM.
 
         Args:
             input: Task input with audio file path and config
 
         Returns:
-            TaskOutput with TranscribeOutput containing text and segments
+            EngineOutput with TranscribeOutput containing text and segments
         """
         audio_path = input.audio_path
         config = input.config
@@ -289,7 +289,7 @@ class VLLMASREngine(Engine):
             result.channel = channel
             result.warnings = warnings + (result.warnings or [])
 
-            return TaskOutput(data=result)
+            return EngineOutput(data=result)
 
         finally:
             self._set_runtime_state(loaded_model=runtime_model_id, status="idle")

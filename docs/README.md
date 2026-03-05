@@ -99,6 +99,7 @@ docs/
 ### Testing Guides
 
 - [M51 Engine Testing Playbook](testing/M51-engine-testing-playbook.md) — Stage-by-stage testing changes after stateless engine + artifact materialization refactor
+- [M52 Local Runner Readiness](reports/M52-local-runner-readiness.md) — Readiness gate summary for align/diarize/pii_detect local-run workflow
 
 ### Implementation Plan
 

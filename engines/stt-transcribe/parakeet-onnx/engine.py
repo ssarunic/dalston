@@ -33,9 +33,9 @@ from dalston.engine_sdk import (
     BatchTaskContext,
     Engine,
     EngineCapabilities,
+    EngineInput,
+    EngineOutput,
     Segment,
-    TaskInput,
-    TaskOutput,
     TimestampGranularity,
     TranscribeOutput,
     Word,
@@ -220,14 +220,14 @@ class ParakeetOnnxEngine(Engine):
             device=self._device,
         )
 
-    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
+    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Transcribe audio using Parakeet CTC via ONNX Runtime.
 
         Args:
             input: Task input with audio file path and config
 
         Returns:
-            TaskOutput with TranscribeOutput containing text, segments, and words
+            EngineOutput with TranscribeOutput containing text, segments, and words
         """
         audio_path = input.audio_path
         config = input.config
@@ -277,7 +277,7 @@ class ParakeetOnnxEngine(Engine):
             warnings=[],
         )
 
-        return TaskOutput(data=output)
+        return EngineOutput(data=output)
 
     @staticmethod
     def _get_decoder_type(runtime_model_id: str) -> str:

@@ -87,9 +87,9 @@ from dalston.engine_sdk import (
     AlignmentMethod,
     BatchTaskContext,
     Engine,
+    EngineInput,
+    EngineOutput,
     Segment,
-    TaskInput,
-    TaskOutput,
     TimestampGranularity,
     TranscribeOutput,
     Word,
@@ -106,7 +106,7 @@ class MyAsrEngine(Engine):
             # load your runtime model here
             self._model = object()
 
-    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
+    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         self._load_model(input.config)
 
         audio_path = input.audio_path
@@ -146,7 +146,7 @@ class MyAsrEngine(Engine):
             timestamp_granularity_actual=TimestampGranularity.WORD,
             alignment_method=AlignmentMethod.ATTENTION,
         )
-        return TaskOutput(data=out)
+        return EngineOutput(data=out)
 ```
 
 Notes:
@@ -163,14 +163,14 @@ from pathlib import Path
 
 from dalston.common.artifacts import MaterializedArtifact
 from dalston.engine_sdk.context import BatchTaskContext
-from dalston.engine_sdk.types import TaskInput
+from dalston.engine_sdk.types import EngineInput
 
 
 def test_my_asr_process_returns_transcribe_output(tmp_path: Path) -> None:
     audio = tmp_path / "audio.wav"
     audio.write_bytes(b"fake")
 
-    task_input = TaskInput(
+    task_input = EngineInput(
         task_id="task-1",
         job_id="job-1",
         stage="transcribe",
@@ -198,32 +198,53 @@ def test_my_asr_process_returns_transcribe_output(tmp_path: Path) -> None:
 
 ## 5. Quick Local Execution Without Redis/S3
 
-Use `LocalRunner` to exercise contract behavior quickly:
+Use the M52 file-based local runner command as the default developer loop:
 
-```python
-from dalston.engine_sdk.local_runner import LocalRunner
+```bash
+python -m dalston.engine_sdk.local_runner run \
+  --engine engines.stt-transcribe.faster-whisper.engine:FasterWhisperEngine \
+  --stage transcribe \
+  --audio ./fixtures/audio.wav \
+  --config ./fixtures/transcribe-config.json \
+  --output ./tmp/output.json
+```
 
-runner = LocalRunner(output_dir=tmp_path / "out")
-result = runner.run(
-    engine=engine,
-    task_id="task-local",
-    job_id="job-local",
-    stage="transcribe",
-    config={},
-    previous_outputs={},
-    payload={},
-    artifacts={"audio": source_audio_path},
-)
+Advanced stages can include optional JSON inputs:
+
+```bash
+python -m dalston.engine_sdk.local_runner run \
+  --engine engines.stt-align.phoneme-align.engine:PhonemeAlignEngine \
+  --stage align \
+  --config ./fixtures/align-config.json \
+  --payload ./fixtures/align-payload.json \
+  --previous-outputs ./fixtures/previous-outputs.json \
+  --artifacts ./fixtures/artifacts.json \
+  --output ./tmp/output.json
+```
+
+`output.json` always uses the canonical envelope:
+
+```json
+{
+  "task_id": "task-local",
+  "job_id": "job-local",
+  "stage": "transcribe",
+  "data": {},
+  "produced_artifacts": [],
+  "produced_artifact_ids": []
+}
 ```
 
 ## 6. Validation Commands
 
-Run your engine tests + M51 guardrails:
+Run your engine tests + M51/M52 guardrails:
 
 ```bash
 pytest tests/unit/test_m51_enforcement.py -q
 pytest tests/unit/test_engine_capabilities.py -q
 pytest tests/unit/test_engine_sdk_types.py -q
+pytest tests/unit/test_m52_local_runner_cli.py -q
+pytest tests/unit/test_m52_engine_input_contract.py -q
 pytest tests/integration/test_engine_typed_outputs.py -q
 ```
 

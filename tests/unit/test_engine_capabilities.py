@@ -20,7 +20,7 @@ from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.registry import BatchEngineInfo
 from dalston.engine_sdk.registry import BatchEngineRegistry as ClientRegistry
-from dalston.engine_sdk.types import EngineCapabilities, TaskInput, TaskOutput
+from dalston.engine_sdk.types import EngineCapabilities, EngineInput, EngineOutput
 from dalston.orchestrator.catalog import EngineCatalog
 from dalston.orchestrator.exceptions import (
     CatalogValidationError,
@@ -102,7 +102,9 @@ class TestEngineGetCapabilities:
         """Test default capabilities from base Engine."""
 
         class TestEngine(Engine):
-            def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
+            def process(
+                self, input: EngineInput, ctx: BatchTaskContext
+            ) -> EngineOutput:
                 pass
 
         engine = TestEngine()
@@ -116,7 +118,9 @@ class TestEngineGetCapabilities:
         """Test overriding get_capabilities in subclass."""
 
         class CustomEngine(Engine):
-            def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
+            def process(
+                self, input: EngineInput, ctx: BatchTaskContext
+            ) -> EngineOutput:
                 pass
 
             def get_capabilities(self) -> EngineCapabilities:

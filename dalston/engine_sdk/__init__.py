@@ -4,11 +4,11 @@ This SDK provides the foundation for building batch processing engines
 that integrate with the Dalston transcription pipeline.
 
 Example usage:
-    from dalston.engine_sdk import Engine, TaskInput, TaskOutput
+    from dalston.engine_sdk import Engine, EngineInput, EngineOutput
     from dalston.engine_sdk import PrepareOutput, TranscribeOutput, Segment, Word
 
     class MyTranscriptionEngine(Engine):
-        def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
+        def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
             # Get typed input from previous stage
             prepare = input.get_prepare_output()
             audio_duration = prepare.duration if prepare else 0.0
@@ -17,7 +17,7 @@ Example usage:
             result = transcribe(input.audio_path)
 
             # Return typed output
-            return TaskOutput(data=TranscribeOutput(
+            return EngineOutput(data=TranscribeOutput(
                 text=result.text,
                 segments=[Segment(start=0.0, end=1.0, text="hello")],
                 language="en",
@@ -74,8 +74,6 @@ from dalston.engine_sdk.types import (
     EngineCapabilities,
     EngineInput,
     EngineOutput,
-    TaskInput,
-    TaskOutput,
 )
 
 __all__ = [
@@ -86,8 +84,6 @@ __all__ = [
     "LocalRunner",
     "EngineInput",
     "EngineOutput",
-    "TaskInput",
-    "TaskOutput",
     "BatchTaskContext",
     # Model management (M39.2)
     "LoadedModel",

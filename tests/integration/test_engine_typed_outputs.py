@@ -20,10 +20,10 @@ from dalston.common.pipeline_types import (
     Word,
 )
 from dalston.engine_sdk.context import BatchTaskContext
-from dalston.engine_sdk.types import TaskInput, TaskOutput
+from dalston.engine_sdk.types import EngineInput, EngineOutput
 
 
-def _ctx(task_input: TaskInput) -> BatchTaskContext:
+def _ctx(task_input: EngineInput) -> BatchTaskContext:
     return BatchTaskContext(
         runtime="test-runtime",
         instance="test-instance",
@@ -53,16 +53,22 @@ class TestFinalMergerEngineOutput:
             audio_file = tmp_path / "test.wav"
             audio_file.write_bytes(b"fake audio data")
 
-            task_input = TaskInput(
+            task_input = EngineInput(
                 task_id="test-task",
                 job_id="job-123",
                 audio_path=audio_file,
                 previous_outputs={
                     "prepare": {
-                        "audio_uri": "s3://bucket/audio.wav",
-                        "duration": 10.0,
-                        "sample_rate": 16000,
-                        "channels": 1,
+                        "channel_files": [
+                            {
+                                "artifact_id": "task-prepare:prepared_audio",
+                                "format": "wav",
+                                "duration": 10.0,
+                                "sample_rate": 16000,
+                                "channels": 1,
+                            }
+                        ],
+                        "split_channels": False,
                         "runtime": "audio-prepare",
                     },
                     "transcribe": {
@@ -116,7 +122,7 @@ class TestFinalMergerEngineOutput:
             result = engine.process(task_input, _ctx(task_input))
 
             # Verify output structure
-            assert isinstance(result, TaskOutput)
+            assert isinstance(result, EngineOutput)
             assert isinstance(result.data, MergeOutput)
 
             output = result.data
@@ -152,16 +158,22 @@ class TestFinalMergerEngineOutput:
             audio_file = tmp_path / "test.wav"
             audio_file.write_bytes(b"fake audio data")
 
-            task_input = TaskInput(
+            task_input = EngineInput(
                 task_id="test-task",
                 job_id="job-123",
                 audio_path=audio_file,
                 previous_outputs={
                     "prepare": {
-                        "audio_uri": "s3://bucket/audio.wav",
-                        "duration": 10.0,
-                        "sample_rate": 16000,
-                        "channels": 1,
+                        "channel_files": [
+                            {
+                                "artifact_id": "task-prepare:prepared_audio",
+                                "format": "wav",
+                                "duration": 10.0,
+                                "sample_rate": 16000,
+                                "channels": 1,
+                            }
+                        ],
+                        "split_channels": False,
                         "runtime": "audio-prepare",
                     },
                     "transcribe": {
@@ -211,7 +223,7 @@ class TestFinalMergerEngineOutput:
             audio_file = tmp_path / "test.wav"
             audio_file.write_bytes(b"fake audio data")
 
-            task_input = TaskInput(
+            task_input = EngineInput(
                 task_id="test-task",
                 job_id="job-123",
                 audio_path=audio_file,
@@ -219,21 +231,21 @@ class TestFinalMergerEngineOutput:
                     "prepare": {
                         "channel_files": [
                             {
-                                "channel": 0,
-                                "audio_uri": "s3://bucket/ch0.wav",
+                                "artifact_id": "task-prepare:channel_0_audio",
+                                "format": "wav",
                                 "duration": 10.0,
+                                "sample_rate": 16000,
+                                "channels": 1,
                             },
                             {
-                                "channel": 1,
-                                "audio_uri": "s3://bucket/ch1.wav",
+                                "artifact_id": "task-prepare:channel_1_audio",
+                                "format": "wav",
                                 "duration": 10.0,
+                                "sample_rate": 16000,
+                                "channels": 1,
                             },
                         ],
                         "split_channels": True,
-                        "duration": 10.0,
-                        "sample_rate": 16000,
-                        "channels": 1,
-                        "original_channels": 2,
                         "runtime": "audio-prepare",
                     },
                     "transcribe_ch0": {
@@ -293,16 +305,22 @@ class TestFinalMergerEngineOutput:
             audio_file = tmp_path / "test.wav"
             audio_file.write_bytes(b"fake audio data")
 
-            task_input = TaskInput(
+            task_input = EngineInput(
                 task_id="test-task",
                 job_id="job-123",
                 audio_path=audio_file,
                 previous_outputs={
                     "prepare": {
-                        "audio_uri": "s3://bucket/audio.wav",
-                        "duration": 10.0,
-                        "sample_rate": 16000,
-                        "channels": 1,
+                        "channel_files": [
+                            {
+                                "artifact_id": "task-prepare:prepared_audio",
+                                "format": "wav",
+                                "duration": 10.0,
+                                "sample_rate": 16000,
+                                "channels": 1,
+                            }
+                        ],
+                        "split_channels": False,
                         "runtime": "audio-prepare",
                     },
                     "transcribe": {
