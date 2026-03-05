@@ -29,6 +29,20 @@ docker run -d -p 6379:6379 redis:7-alpine
 
 Pre-commit hooks will run automatically on `git commit`.
 
+## Web Console Tests
+
+Run Playwright tests:
+
+```bash
+npx playwright test tests/web
+```
+
+By default tests target `http://localhost:8000`. Override with:
+
+```bash
+PLAYWRIGHT_BASE_URL=http://localhost:3000 npx playwright test tests/web
+```
+
 ## Pull Requests
 
 - Create a branch from `main`
