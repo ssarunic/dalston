@@ -91,7 +91,7 @@ class TestVoxtralEngine:
         """Engine capabilities should be correct."""
         caps = engine.get_capabilities()
 
-        assert caps.engine_id == "voxtral-mini-3b"
+        assert caps.runtime == "voxtral-mini-3b"
         assert caps.version == "1.0.0"
         assert caps.stages == ["transcribe"]
         assert caps.languages == ["en", "es", "fr", "pt", "hi", "de", "nl", "it"]

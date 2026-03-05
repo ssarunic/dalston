@@ -15,6 +15,9 @@ This directory contains Architecture Decision Records (ADRs) documenting signifi
 | [ADR-007](ADR-007-admin-webhook-design.md) | Admin Webhook Design (Storage, Signing, Delivery) | Proposed |
 | [ADR-008](ADR-008-data-retention-strategy.md) | Data Retention Strategy (Named Policies, Audit Logging) | Proposed |
 | [ADR-009](ADR-009-pii-detection-architecture.md) | PII Detection & Audio Redaction Architecture | Accepted |
+| [ADR-010](ADR-010-engine-variant-structure.md) | Engine Variant Structure | Accepted |
+| [ADR-011](ADR-011-security-architecture.md) | Security Architecture | Proposed |
+| [ADR-012](ADR-012-unified-engine-terminology.md) | Unified Engine Terminology (runtime, model, instance) | Proposed |
 
 ## ADR Template
 

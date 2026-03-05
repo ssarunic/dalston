@@ -76,7 +76,7 @@ class ReconciliationSweeper:
         db_session_factory,
         settings: Settings,
         reconcile_interval_seconds: int = DEFAULT_RECONCILE_INTERVAL_SECONDS,
-        instance_id: str | None = None,
+        instance: str | None = None,
     ):
         """Initialize the reconciliation sweeper.
 
@@ -85,7 +85,7 @@ class ReconciliationSweeper:
             db_session_factory: Async context manager factory for DB sessions
             settings: Application settings
             reconcile_interval_seconds: How often to run reconciliation
-            instance_id: Unique identifier for this instance
+            instance: Unique identifier for this instance
         """
         self._redis = redis
         self._db_session_factory = db_session_factory
@@ -93,7 +93,7 @@ class ReconciliationSweeper:
         self._reconcile_interval = reconcile_interval_seconds
         self._running = False
         self._task: asyncio.Task | None = None
-        self._instance_id = instance_id or f"{os.uname().nodename}:{os.getpid()}"
+        self._instance = instance or f"{os.uname().nodename}:{os.getpid()}"
         self._is_leader = False
         self._consecutive_errors = 0
 
@@ -108,7 +108,7 @@ class ReconciliationSweeper:
         logger.info(
             "reconciliation_sweeper_started",
             reconcile_interval_seconds=self._reconcile_interval,
-            instance_id=self._instance_id,
+            instance=self._instance,
         )
 
     async def stop(self) -> None:
@@ -124,13 +124,13 @@ class ReconciliationSweeper:
         if self._is_leader:
             await self._release_leader_lock()
 
-        logger.info("reconciliation_sweeper_stopped", instance_id=self._instance_id)
+        logger.info("reconciliation_sweeper_stopped", instance=self._instance)
 
     async def _acquire_leader_lock(self) -> bool:
         """Try to acquire the leader lock."""
         acquired = await self._redis.set(
             RECONCILER_LOCK_KEY,
-            self._instance_id,
+            self._instance,
             nx=True,
             ex=RECONCILER_LOCK_TTL_SECONDS,
         )
@@ -146,7 +146,7 @@ class ReconciliationSweeper:
         end
         """
         try:
-            await self._redis.eval(script, 1, RECONCILER_LOCK_KEY, self._instance_id)
+            await self._redis.eval(script, 1, RECONCILER_LOCK_KEY, self._instance)
         except Exception:
             logger.debug("reconciler_lock_release_failed", exc_info=True)
 
@@ -158,9 +158,7 @@ class ReconciliationSweeper:
 
                 if await self._acquire_leader_lock():
                     if not self._is_leader:
-                        logger.info(
-                            "reconciler_became_leader", instance_id=self._instance_id
-                        )
+                        logger.info("reconciler_became_leader", instance=self._instance)
                         self._is_leader = True
 
                     await self._reconcile()
@@ -171,10 +169,10 @@ class ReconciliationSweeper:
                 else:
                     if self._is_leader:
                         logger.info(
-                            "reconciler_lost_leadership", instance_id=self._instance_id
+                            "reconciler_lost_leadership", instance=self._instance
                         )
                         self._is_leader = False
-                    logger.debug("reconciler_not_leader", instance_id=self._instance_id)
+                    logger.debug("reconciler_not_leader", instance=self._instance)
 
             except asyncio.CancelledError:
                 break
@@ -190,7 +188,7 @@ class ReconciliationSweeper:
                     logger.critical(
                         "reconciler_circuit_breaker_tripped",
                         consecutive_errors=self._consecutive_errors,
-                        instance_id=self._instance_id,
+                        instance=self._instance,
                     )
                     raise
 
@@ -637,8 +635,8 @@ class ReconciliationSweeper:
             queue_id = (
                 metadata.get("queue_id")
                 or metadata.get("stage")
-                or metadata.get("engine_id")
-                or task.engine_id
+                or metadata.get("runtime")
+                or task.runtime
             )
             if not queue_id:
                 continue
@@ -746,51 +744,51 @@ class ReconciliationSweeper:
 
         Handles the case where engines crash without calling unregister():
         - Engine's Redis hash key expires (TTL)
-        - But ENGINE_INSTANCES_PREFIX{engine_id} set still contains the instance_id
-        - And ENGINE_SET_KEY still contains the engine_id
+        - But ENGINE_INSTANCES_PREFIX{runtime} set still contains the instance
+        - And ENGINE_SET_KEY still contains the runtime
 
         Action:
-        1. For each engine_id in ENGINE_SET_KEY, check its instances
-        2. Remove instance_ids from instance set if their hash key doesn't exist
-        3. Remove engine_id from ENGINE_SET_KEY if it has no remaining instances
+        1. For each runtime in ENGINE_SET_KEY, check its instances
+        2. Remove instances from instance set if their hash key doesn't exist
+        3. Remove runtime from ENGINE_SET_KEY if it has no remaining instances
         """
         cleaned_count = 0
 
-        # Get all logical engine IDs
-        engine_ids = await self._redis.smembers(ENGINE_SET_KEY)
+        # Get all logical runtimes
+        runtimes = await self._redis.smembers(ENGINE_SET_KEY)
 
-        for engine_id in engine_ids:
-            instances_key = f"{ENGINE_INSTANCES_PREFIX}{engine_id}"
-            instance_ids = await self._redis.smembers(instances_key)
+        for runtime in runtimes:
+            instances_key = f"{ENGINE_INSTANCES_PREFIX}{runtime}"
+            instances = await self._redis.smembers(instances_key)
 
             # Check each instance
             stale_instances = []
-            for instance_id in instance_ids:
-                engine_key = f"{ENGINE_KEY_PREFIX}{instance_id}"
+            for instance in instances:
+                instance_key = f"{ENGINE_KEY_PREFIX}{instance}"
                 # Check if the hash key exists (TTL not expired)
-                exists = await self._redis.exists(engine_key)
+                exists = await self._redis.exists(instance_key)
                 if not exists:
-                    stale_instances.append(instance_id)
+                    stale_instances.append(instance)
 
             # Remove stale instances from the set
-            for instance_id in stale_instances:
-                await self._redis.srem(instances_key, instance_id)
+            for instance in stale_instances:
+                await self._redis.srem(instances_key, instance)
                 cleaned_count += 1
                 logger.info(
                     "cleaned_stale_engine_instance",
-                    engine_id=engine_id,
-                    instance_id=instance_id,
+                    runtime=runtime,
+                    instance=instance,
                 )
 
-            # If no instances remain, remove the engine_id from the main set
+            # If no instances remain, remove the runtime from the main set
             remaining = await self._redis.scard(instances_key)
             if remaining == 0:
-                await self._redis.srem(ENGINE_SET_KEY, engine_id)
+                await self._redis.srem(ENGINE_SET_KEY, runtime)
                 # Also delete the now-empty instances set
                 await self._redis.delete(instances_key)
                 logger.info(
-                    "cleaned_stale_engine_type",
-                    engine_id=engine_id,
+                    "cleaned_stale_runtime",
+                    runtime=runtime,
                     reason="no_remaining_instances",
                 )
 

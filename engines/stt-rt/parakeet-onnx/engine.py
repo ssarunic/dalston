@@ -13,7 +13,7 @@ M44: Uses NeMoOnnxModelManager for dynamic model loading. A single container
 can serve any Parakeet ONNX model variant without rebuild.
 
 Environment variables:
-    DALSTON_WORKER_ID: Unique identifier for this worker (required)
+    DALSTON_INSTANCE: Unique identifier for this worker (required)
     DALSTON_WORKER_PORT: WebSocket server port (default: 9000)
     DALSTON_MAX_SESSIONS: Maximum concurrent sessions (default: 4)
     REDIS_URL: Redis connection URL (default: redis://localhost:6379)
@@ -54,7 +54,7 @@ class ParakeetOnnxStreamingEngine(RealtimeEngine):
     Supports CTC, TDT, and RNNT decoder variants.
 
     Environment variables:
-        DALSTON_WORKER_ID: Unique identifier for this worker (required)
+        DALSTON_INSTANCE: Unique identifier for this worker (required)
         DALSTON_WORKER_PORT: WebSocket server port (default: 9000)
         DALSTON_MAX_SESSIONS: Maximum concurrent sessions (default: 4)
         REDIS_URL: Redis connection URL (default: redis://localhost:6379)
@@ -294,8 +294,8 @@ class ParakeetOnnxStreamingEngine(RealtimeEngine):
         """Return list of supported languages."""
         return ["en"]
 
-    def get_engine(self) -> str:
-        """Return engine type identifier."""
+    def get_runtime(self) -> str:
+        """Return the inference framework identifier."""
         return "nemo-onnx"
 
     def get_supports_vocabulary(self) -> bool:

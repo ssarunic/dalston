@@ -388,7 +388,7 @@ class RealtimeSessionInfo:
     status: RealtimeSessionStatus
     language: str | None
     model: str | None
-    engine: str | None
+    runtime: str | None
     audio_duration_seconds: float
     segment_count: int
     word_count: int

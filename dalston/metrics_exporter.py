@@ -33,7 +33,7 @@ dalston.logging.configure("metrics-exporter")
 logger = structlog.get_logger()
 
 # Known engine stream patterns
-STREAM_KEY_PATTERN = "dalston:stream:{engine_id}"
+STREAM_KEY_PATTERN = "dalston:stream:{runtime}"
 KNOWN_ENGINES = [
     "audio-prepare",
     "faster-whisper",
@@ -164,16 +164,16 @@ async def collect_queue_metrics() -> None:
         dalston.metrics.set_redis_connected(True)
 
         # Collect stream depths for known engines
-        for engine_id in KNOWN_ENGINES:
-            stream_key = STREAM_KEY_PATTERN.format(engine_id=engine_id)
+        for runtime in KNOWN_ENGINES:
+            stream_key = STREAM_KEY_PATTERN.format(runtime=runtime)
             depth, last_delivered_id = await _get_stream_backlog_state(stream_key)
-            dalston.metrics.set_queue_depth(engine_id, depth)
+            dalston.metrics.set_queue_depth(runtime, depth)
 
             # Calculate oldest task age from enqueued_at timestamp (M20)
             oldest_age = await _get_oldest_task_age(
                 stream_key, depth=depth, last_delivered_id=last_delivered_id
             )
-            dalston.metrics.set_queue_oldest_task_age(engine_id, oldest_age)
+            dalston.metrics.set_queue_oldest_task_age(runtime, oldest_age)
 
     except Exception as e:
         logger.error("redis_error", error=str(e))

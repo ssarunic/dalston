@@ -11,13 +11,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.utils import compute_duration_ms
-from dalston.config import Settings
 from dalston.gateway.dependencies import (
     get_db,
     get_jobs_service,
     get_principal,
     get_security_manager,
-    get_settings,
+    get_storage_service,
 )
 from dalston.gateway.models.responses import (
     TaskArtifactResponse,
@@ -65,7 +64,7 @@ async def list_job_tasks(
             TaskResponse(
                 task_id=task.id,
                 stage=task.stage,
-                engine_id=task.engine_id,
+                runtime=task.runtime,
                 status=task.status,
                 required=task.required,
                 dependencies=list(task.dependencies) if task.dependencies else [],
@@ -96,8 +95,8 @@ async def get_task_artifacts(
     principal: Annotated[Principal, Depends(get_principal)],
     security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
+    storage: StorageService = Depends(get_storage_service),
 ) -> TaskArtifactResponse:
     """Get the input and output artifacts for a specific task.
 
@@ -130,7 +129,6 @@ async def get_task_artifacts(
         )
 
     # Fetch artifacts from S3
-    storage = StorageService(settings)
     input_data = await storage.get_task_input(job_id, task_id)
     output_data = await storage.get_task_output(job_id, task_id)
 
@@ -138,7 +136,7 @@ async def get_task_artifacts(
         task_id=task.id,
         job_id=job_id,
         stage=task.stage,
-        engine_id=task.engine_id,
+        runtime=task.runtime,
         status=task.status,
         input=input_data,
         output=output_data,

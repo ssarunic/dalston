@@ -55,7 +55,7 @@ def derive_image_name(runtime_id: str, stage: str, version: str) -> str:
 def transform_runtime_to_entry(data: dict, yaml_path: Path) -> dict:
     """Transform engine.yaml data into runtime catalog entry format."""
     runtime_id = data.get("runtime", data.get("id"))
-    engine_id = data.get("id")
+    engine_file_id = data.get("id")
     version = data.get("version", "1.0.0")
     stage = data.get("stage")
 
@@ -81,7 +81,7 @@ def transform_runtime_to_entry(data: dict, yaml_path: Path) -> dict:
 
     entry = {
         "id": runtime_id,
-        "engine_id": engine_id,  # Original engine ID
+        "runtime": engine_file_id,  # Engine file ID for capability routing
         "name": data.get("name", runtime_id),
         "version": version,
         "stage": stage,

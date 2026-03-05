@@ -119,7 +119,7 @@ class VoxtralAdapter(AudioLLMAdapter):
             language_confidence=0.9,
             timestamp_granularity_requested=TimestampGranularity.SEGMENT,
             timestamp_granularity_actual=TimestampGranularity.SEGMENT,
-            engine_id="vllm-asr",
+            runtime="vllm-asr",
             skipped=False,
             skip_reason=None,
             warnings=[],

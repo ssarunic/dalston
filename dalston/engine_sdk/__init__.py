@@ -21,7 +21,7 @@ Example usage:
                 text=result.text,
                 segments=[Segment(start=0.0, end=1.0, text="hello")],
                 language="en",
-                engine_id="my-engine",
+                runtime="my-engine",
             ))
 
     if __name__ == "__main__":

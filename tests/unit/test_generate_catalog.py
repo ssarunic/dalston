@@ -91,7 +91,7 @@ class TestTransformRuntimeToEntry:
         entry = transform_runtime_to_entry(valid_runtime_yaml, Path("test.yaml"))
 
         assert entry["id"] == "test-runtime"
-        assert entry["engine_id"] == "test-engine"
+        assert entry["runtime"] == "test-engine"
         assert entry["name"] == "Test Runtime"
         assert entry["version"] == "1.2.0"
         assert entry["stage"] == "transcribe"

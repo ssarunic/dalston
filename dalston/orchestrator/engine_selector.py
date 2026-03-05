@@ -8,7 +8,7 @@ This module replaces hardcoded engine defaults with dynamic selection based on:
 Example:
     requirements = extract_requirements(job_parameters)
     selection = await select_engine("transcribe", requirements, registry, catalog)
-    # selection.engine_id = "parakeet"
+    # selection.runtime = "parakeet"
     # selection.capabilities.supports_word_timestamps = True
 """
 
@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+import dalston.telemetry
 from dalston.db.models import ModelRegistryModel
 from dalston.engine_sdk.types import EngineCapabilities
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog
@@ -51,14 +52,14 @@ class EngineSelectionResult:
     """Result of engine selection.
 
     Attributes:
-        engine_id: Selected engine identifier (runtime ID, e.g., "nemo", "faster-whisper")
+        runtime: Selected engine identifier (runtime ID, e.g., "nemo", "faster-whisper")
         capabilities: Engine's declared capabilities
         selection_reason: Human-readable explanation of why this engine was selected
         runtime_model_id: Model ID to pass to the engine (e.g., "nvidia/parakeet-tdt-1.1b")
                          Only set when user requested a specific model variant.
     """
 
-    engine_id: str
+    runtime: str
     capabilities: EngineCapabilities
     selection_reason: str
     runtime_model_id: str | None = None
@@ -107,7 +108,7 @@ class NoCapableEngineError(Exception):
             lines.append(f"  Running engines for '{self.stage}':")
             for engine in self.candidates:
                 mismatch = self._explain_mismatch(engine)
-                lines.append(f"    - {engine.engine_id}: {mismatch}")
+                lines.append(f"    - {engine.runtime}: {mismatch}")
         else:
             lines.append(f"  No engines running for stage '{self.stage}'.")
 
@@ -115,9 +116,9 @@ class NoCapableEngineError(Exception):
             lines.append("")
             lines.append("  Available in catalog (not running):")
             for alt in self.catalog_alternatives:
-                lines.append(f"    - {alt.engine_id}")
+                lines.append(f"    - {alt.runtime}")
                 lines.append(
-                    f"      Start: docker compose up stt-batch-{self.stage}-{alt.engine_id}"
+                    f"      Start: docker compose up stt-batch-{self.stage}-{alt.runtime}"
                 )
 
         return "\n".join(lines)
@@ -150,11 +151,11 @@ class NoCapableEngineError(Exception):
             "stage": self.stage,
             "requirements": self.requirements,
             "running_engines": [
-                {"id": e.engine_id, "reason": self._explain_mismatch(e)}
+                {"id": e.runtime, "reason": self._explain_mismatch(e)}
                 for e in self.candidates
             ],
             "catalog_alternatives": [
-                {"id": a.engine_id, "languages": a.capabilities.languages}
+                {"id": a.runtime, "languages": a.capabilities.languages}
                 for a in self.catalog_alternatives
             ],
         }
@@ -361,10 +362,10 @@ def _rank_and_select(
         reasons.append(f"ranked first of {len(capable)}")
 
     return EngineSelectionResult(
-        engine_id=winner.engine_id,
+        runtime=winner.runtime,
         capabilities=winner.capabilities
         or EngineCapabilities(
-            engine_id=winner.engine_id, version="unknown", stages=[winner.stage]
+            runtime=winner.runtime, version="unknown", stages=[winner.stage]
         ),
         selection_reason=", ".join(reasons) or "best available",
     )
@@ -459,10 +460,10 @@ async def select_engine(
             )
 
             return EngineSelectionResult(
-                engine_id=runtime_id,
+                runtime=runtime_id,
                 capabilities=engine.capabilities
                 or EngineCapabilities(
-                    engine_id=runtime_id, version="unknown", stages=[stage]
+                    runtime=runtime_id, version="unknown", stages=[stage]
                 ),
                 selection_reason="database model lookup",
                 runtime_model_id=runtime_model_id,
@@ -493,10 +494,10 @@ async def select_engine(
             )
 
         return EngineSelectionResult(
-            engine_id=engine.engine_id,
+            runtime=engine.runtime,
             capabilities=engine.capabilities
             or EngineCapabilities(
-                engine_id=engine.engine_id, version="unknown", stages=[stage]
+                runtime=engine.runtime, version="unknown", stages=[stage]
             ),
             selection_reason="user preference",
         )
@@ -530,25 +531,25 @@ async def select_engine(
         selection_reason = "only capable engine"
     else:
         ranked_result = _rank_and_select(capable, requirements)
-        engine = next(e for e in capable if e.engine_id == ranked_result.engine_id)
+        engine = next(e for e in capable if e.runtime == ranked_result.runtime)
         selection_reason = ranked_result.selection_reason
 
     # 6. For transcribe stage with no user model preference, find best downloaded model
     auto_model_id: str | None = None
     if stage == "transcribe" and db is not None:
         auto_model_id = await _find_best_downloaded_model(
-            runtime=engine.engine_id,
+            runtime=engine.runtime,
             requirements=requirements,
             db=db,
         )
         if auto_model_id is None:
             # No downloaded models for this runtime
-            raise NoDownloadedModelError(runtime=engine.engine_id, stage=stage)
+            raise NoDownloadedModelError(runtime=engine.runtime, stage=stage)
 
     logger.info(
         "engine_selected",
         stage=stage,
-        selected_engine=engine.engine_id,
+        selected_engine=engine.runtime,
         runtime_model_id=auto_model_id,
         selection_reason=selection_reason,
         candidates_evaluated=len(candidates),
@@ -557,10 +558,10 @@ async def select_engine(
     )
 
     return EngineSelectionResult(
-        engine_id=engine.engine_id,
+        runtime=engine.runtime,
         capabilities=engine.capabilities
         or EngineCapabilities(
-            engine_id=engine.engine_id, version="unknown", stages=[stage]
+            runtime=engine.runtime, version="unknown", stages=[stage]
         ),
         selection_reason=selection_reason,
         runtime_model_id=auto_model_id,
@@ -646,91 +647,111 @@ async def select_pipeline_engines(
     requirements = extract_requirements(parameters)
     selections: dict[str, EngineSelectionResult] = {}
 
-    # Prepare (always required)
-    selections["prepare"] = await select_engine(
-        "prepare",
-        {},  # No special requirements for prepare
-        registry,
-        catalog,
-        user_preference=parameters.get("engine_prepare"),
-        db=db,
-    )
-
-    # Transcription (always required)
-    selections["transcribe"] = await select_engine(
-        "transcribe",
-        requirements,
-        registry,
-        catalog,
-        user_preference=parameters.get("engine_transcribe"),
-        db=db,
-    )
-
-    # Alignment (conditional on transcriber capabilities)
-    if _should_add_alignment(parameters, selections["transcribe"]):
-        # Alignment only needs language requirement
-        align_requirements = (
-            {"language": requirements.get("language")}
-            if requirements.get("language")
-            else {}
-        )
-        selections["align"] = await select_engine(
-            "align",
-            align_requirements,
+    with dalston.telemetry.create_span(
+        "orchestrator.engine_selection",
+        attributes={
+            "dalston.language": requirements.get("language", ""),
+            "dalston.model": parameters.get("model", ""),
+        },
+    ):
+        # Prepare (always required)
+        selections["prepare"] = await select_engine(
+            "prepare",
+            {},  # No special requirements for prepare
             registry,
             catalog,
-            user_preference=parameters.get("engine_align"),
+            user_preference=parameters.get("engine_prepare"),
             db=db,
         )
 
-    # Diarization (conditional on parameters and transcriber capabilities)
-    if _should_add_diarization(parameters, selections["transcribe"]):
-        selections["diarize"] = await select_engine(
-            "diarize",
-            {},  # No special requirements for diarize
+        # Transcription (always required)
+        selections["transcribe"] = await select_engine(
+            "transcribe",
+            requirements,
             registry,
             catalog,
-            user_preference=parameters.get("engine_diarize"),
+            user_preference=parameters.get("engine_transcribe"),
             db=db,
         )
 
-    # PII detection (conditional on parameters)
-    pii_detection_enabled = parameters.get("pii_detection", False)
-    if pii_detection_enabled:
-        selections["pii_detect"] = await select_engine(
-            "pii_detect",
-            {},  # No special requirements for PII detection
-            registry,
-            catalog,
-            user_preference=parameters.get("engine_pii_detect"),
-            db=db,
-        )
-
-        # Audio redaction (conditional on parameters, requires PII detection)
-        if parameters.get("redact_pii_audio", False):
-            selections["audio_redact"] = await select_engine(
-                "audio_redact",
-                {},  # No special requirements for audio redaction
+        # Alignment (conditional on transcriber capabilities)
+        if _should_add_alignment(parameters, selections["transcribe"]):
+            # Alignment only needs language requirement
+            align_requirements = (
+                {"language": requirements.get("language")}
+                if requirements.get("language")
+                else {}
+            )
+            selections["align"] = await select_engine(
+                "align",
+                align_requirements,
                 registry,
                 catalog,
-                user_preference=parameters.get("engine_audio_redact"),
+                user_preference=parameters.get("engine_align"),
                 db=db,
             )
 
-    # Merge (always required)
-    selections["merge"] = await select_engine(
-        "merge",
-        {},  # No special requirements for merge
-        registry,
-        catalog,
-        user_preference=parameters.get("engine_merge"),
-        db=db,
-    )
+        # Diarization (conditional on parameters and transcriber capabilities)
+        if _should_add_diarization(parameters, selections["transcribe"]):
+            selections["diarize"] = await select_engine(
+                "diarize",
+                {},  # No special requirements for diarize
+                registry,
+                catalog,
+                user_preference=parameters.get("engine_diarize"),
+                db=db,
+            )
+
+        # PII detection (conditional on parameters)
+        pii_detection_enabled = parameters.get("pii_detection", False)
+        if pii_detection_enabled:
+            selections["pii_detect"] = await select_engine(
+                "pii_detect",
+                {},  # No special requirements for PII detection
+                registry,
+                catalog,
+                user_preference=parameters.get("engine_pii_detect"),
+                db=db,
+            )
+
+            # Audio redaction (conditional on parameters, requires PII detection)
+            if parameters.get("redact_pii_audio", False):
+                selections["audio_redact"] = await select_engine(
+                    "audio_redact",
+                    {},  # No special requirements for audio redaction
+                    registry,
+                    catalog,
+                    user_preference=parameters.get("engine_audio_redact"),
+                    db=db,
+                )
+
+        # Merge (always required)
+        selections["merge"] = await select_engine(
+            "merge",
+            {},  # No special requirements for merge
+            registry,
+            catalog,
+            user_preference=parameters.get("engine_merge"),
+            db=db,
+        )
+
+        # Record selection results on span
+        transcribe_sel = selections["transcribe"]
+        dalston.telemetry.set_span_attribute("dalston.runtime", transcribe_sel.runtime)
+        dalston.telemetry.set_span_attribute(
+            "dalston.model", transcribe_sel.runtime_model_id or ""
+        )
+        dalston.telemetry.set_span_attribute(
+            "dalston.selection.reason", transcribe_sel.selection_reason
+        )
+        dalston.telemetry.set_span_attribute(
+            "dalston.dag.stages", list(selections.keys())
+        )
 
     logger.info(
         "pipeline_engines_selected",
         stages=list(selections.keys()),
-        engines={stage: sel.engine_id for stage, sel in selections.items()},
+        engines={stage: sel.runtime for stage, sel in selections.items()},
         alignment_included="align" in selections,
         diarization_included="diarize" in selections,
         pii_detection_included="pii_detect" in selections,
