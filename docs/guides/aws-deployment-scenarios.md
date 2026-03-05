@@ -634,6 +634,7 @@ docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
 ```
 
 Then access:
+
 - **Grafana**: `http://<host>:3001` (admin/dalston, anonymous viewer enabled)
 - **Prometheus**: `http://<host>:9090`
 - **Jaeger**: `http://<host>:16686` (requires `OTEL_ENABLED=true`)
@@ -806,6 +807,7 @@ That's `g5.xlarge` GPU transcription for the price of a `t3.xlarge` CPU instance
 `g5.xlarge` in `eu-west-2` has historically low interruption rates (<5%). GPU instances generally have lower interruption rates than popular CPU instances because the spot pool is larger relative to demand.
 
 You can further reduce interruptions by:
+
 - Using **capacity-optimized** allocation strategy (picks the pool least likely to be interrupted)
 - Allowing multiple instance types: `g5.xlarge`, `g5.2xlarge`, `g6.xlarge` — the fleet picks whichever has capacity
 - Choosing availability zones with more capacity
@@ -920,6 +922,7 @@ For your use case (primarily batch with occasional realtime), approach 1 is fine
 If using `instance_interruption_behavior = "stop"` (Option A), the EBS volume persists. Model cache is intact. Boot → Docker starts → engines load cached models → ready in ~60-90 seconds.
 
 If using fleet replacement (Option B), the new instance needs the EBS volume. Options:
+
 - **Shared EBS**: Not possible across AZs. Only works if fleet is pinned to one AZ.
 - **EFS for model cache**: Mount an EFS volume at `/data/models`. Slightly slower than EBS but survives instance replacement. ~$0.30/GB/month for infrequent access tier.
 - **S3 model storage**: Already implemented in `S3ModelStorage`. Engines download from S3 on first use. Adds 1-5 minutes cold start for model download, but subsequent tasks use the local cache.

@@ -146,6 +146,7 @@ These use Whisper as the backbone but add streaming policies on top.
 - Our existing WebSocket protocol (`transcript.partial` / `transcript.final`) already supports interim results
 
 **Integration path:**
+
 1. Add `whisper-streaming` / `SimulStreaming` as a dependency to the realtime engine
 2. Replace the current `_transcribe_and_send()` flow with the AlignAtt streaming policy
 3. Emit `transcript.partial` messages as the policy produces incremental output
