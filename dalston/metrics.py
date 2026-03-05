@@ -156,6 +156,12 @@ def _init_orchestrator_metrics() -> None:
         ["event_type"],
     )
 
+    _orchestrator_metrics["event_decisions_total"] = Counter(
+        "dalston_orchestrator_event_decisions_total",
+        "Durable event processing decisions (ack/retry/dlq)",
+        ["decision", "failure_reason", "event_type"],
+    )
+
     _orchestrator_metrics["dag_build_duration_seconds"] = Histogram(
         "dalston_orchestrator_dag_build_duration_seconds",
         "DAG construction time",
@@ -489,6 +495,27 @@ def inc_orchestrator_events(event_type: str) -> None:
     if not _metrics_enabled or "events_processed_total" not in _orchestrator_metrics:
         return
     _orchestrator_metrics["events_processed_total"].labels(event_type=event_type).inc()
+
+
+def inc_orchestrator_event_decision(
+    decision: str,
+    failure_reason: str,
+    event_type: str,
+) -> None:
+    """Increment durable event decision counter.
+
+    Args:
+        decision: Decision type ("ack", "retry", "dlq")
+        failure_reason: Reason associated with decision ("none" when acked)
+        event_type: Durable event type
+    """
+    if not _metrics_enabled or "event_decisions_total" not in _orchestrator_metrics:
+        return
+    _orchestrator_metrics["event_decisions_total"].labels(
+        decision=decision,
+        failure_reason=failure_reason,
+        event_type=event_type,
+    ).inc()
 
 
 def observe_orchestrator_dag_build(duration: float) -> None:

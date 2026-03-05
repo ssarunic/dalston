@@ -6,7 +6,7 @@
 | **Duration** | 3-5 days |
 | **Dependencies** | M33 (Reliable Task Queues), current durable-events stream path |
 | **Deliverable** | Redis Streams DLQ (`dalston:events:dlq`), delivery-count-aware failure policy, immediate quarantine for malformed events, and legacy replay cleanup |
-| **Status** | Planned |
+| **Status** | Complete (2026-03-05) |
 
 ## Desired Outcomes
 

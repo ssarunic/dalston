@@ -27,6 +27,29 @@ class Settings(BaseSettings):
         default="redis://localhost:6379",
         alias="REDIS_URL",
     )
+    events_max_deliveries: int = Field(
+        default=5,
+        ge=1,
+        alias="DALSTON_EVENTS_MAX_DELIVERIES",
+        description=(
+            "Maximum number of delivery attempts for durable orchestrator events "
+            "before they are moved to the DLQ"
+        ),
+    )
+    events_dlq_stream: str = Field(
+        default="dalston:events:dlq",
+        alias="DALSTON_EVENTS_DLQ_STREAM",
+        description="Redis stream key for dead-letter durable orchestrator events",
+    )
+    events_dlq_maxlen: int = Field(
+        default=10000,
+        ge=1,
+        alias="DALSTON_EVENTS_DLQ_MAXLEN",
+        description=(
+            "Approximate maximum length for the durable events DLQ stream "
+            "(uses XADD MAXLEN ~)"
+        ),
+    )
 
     # S3 Storage
     s3_bucket: str = Field(default="dalston-artifacts", alias="DALSTON_S3_BUCKET")
