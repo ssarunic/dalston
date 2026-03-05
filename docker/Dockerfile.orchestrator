@@ -5,7 +5,7 @@
 # Build from repo root:
 #   docker build -f docker/Dockerfile.orchestrator -t dalston/orchestrator:latest .
 
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 
