@@ -325,8 +325,6 @@ class EngineRunner:
         3. Always ACK after processing (success or failure)
         """
         message: StreamMessage | None = None
-        stream_id: str | None = None
-
         stream_id = self.runtime
 
         # 1. Try to claim stale tasks from DEAD engines only
@@ -375,7 +373,7 @@ class EngineRunner:
 
         # Store message ID for ack in finally block
         self._current_message_id = message.id
-        self._current_stream_id = stream_id or self.runtime
+        self._current_stream_id = stream_id
 
         # 3. Check if job is cancelled before processing
         if is_job_cancelled(self.redis_client, message.job_id):
