@@ -11,10 +11,21 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.managers.hf_transformers import HFTransformersModelManager
 from dalston.engine_sdk.types import TaskInput
 
 HAS_TORCH = importlib.util.find_spec("torch") is not None
+
+
+def _ctx(task_input: TaskInput) -> BatchTaskContext:
+    return BatchTaskContext(
+        runtime="hf-asr",
+        instance="test-instance",
+        task_id=task_input.task_id,
+        job_id=task_input.job_id,
+        stage=task_input.stage,
+    )
 
 
 def load_hf_asr_engine():
@@ -266,7 +277,7 @@ class TestHFASREngineProcess:
             config={"runtime_model_id": "facebook/wav2vec2-large-960h"},
         )
 
-        engine.process(task_input)
+        engine.process(task_input, _ctx(task_input))
 
         engine._manager.acquire.assert_called_once_with("facebook/wav2vec2-large-960h")
         engine._manager.release.assert_called_once_with("facebook/wav2vec2-large-960h")
@@ -288,7 +299,7 @@ class TestHFASREngineProcess:
             config={},
         )
 
-        engine.process(task_input)
+        engine.process(task_input, _ctx(task_input))
 
         engine._manager.acquire.assert_called_once_with("openai/whisper-large-v3")
 
@@ -309,7 +320,7 @@ class TestHFASREngineProcess:
             config={"language": "fr"},
         )
 
-        engine.process(task_input)
+        engine.process(task_input, _ctx(task_input))
 
         # Verify pipeline was called with language
         call_kwargs = mock_pipe.call_args[1]
@@ -332,7 +343,7 @@ class TestHFASREngineProcess:
             config={"language": "auto"},
         )
 
-        engine.process(task_input)
+        engine.process(task_input, _ctx(task_input))
 
         call_kwargs = mock_pipe.call_args[1]
         assert "generate_kwargs" not in call_kwargs
@@ -360,7 +371,7 @@ class TestHFASREngineProcess:
             config={},
         )
 
-        result = engine.process(task_input)
+        result = engine.process(task_input, _ctx(task_input))
 
         assert result.data is not None
         output_dict = result.to_dict()
@@ -386,7 +397,7 @@ class TestHFASREngineProcess:
         )
 
         with pytest.raises(RuntimeError, match="inference failed"):
-            engine.process(task_input)
+            engine.process(task_input, _ctx(task_input))
 
         engine._manager.release.assert_called_once_with("openai/whisper-large-v3")
 

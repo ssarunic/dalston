@@ -256,9 +256,7 @@ class PIIDetectionEngine(Engine):
         except Exception as e:
             self.logger.warning("gliner_load_failed", error=str(e))
 
-    def process(
-        self, input: TaskInput, ctx: BatchTaskContext | None = None
-    ) -> TaskOutput:
+    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
         """Detect PII entities in transcript.
 
         Args:

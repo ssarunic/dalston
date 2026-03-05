@@ -157,9 +157,7 @@ class PyannoteEngine(Engine):
         self.logger.info("pyannote_4_0_pipeline_loaded_successfully")
         return self._pipeline
 
-    def process(
-        self, input: TaskInput, ctx: BatchTaskContext | None = None
-    ) -> TaskOutput:
+    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
         """Run speaker diarization on audio file.
 
         Args:

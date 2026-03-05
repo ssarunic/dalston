@@ -28,7 +28,7 @@ class AudioRedactionEngine(Engine):
     def process(
         self,
         input: TaskInput,
-        ctx: BatchTaskContext | None = None,
+        ctx: BatchTaskContext,
     ) -> TaskOutput:
         """Redact PII from audio file.
 
@@ -38,15 +38,6 @@ class AudioRedactionEngine(Engine):
         Returns:
             TaskOutput with AudioRedactOutput containing redacted audio artifact ID
         """
-        if ctx is None:
-            ctx = BatchTaskContext(
-                runtime="local",
-                instance="local",
-                task_id=input.task_id,
-                job_id=input.job_id,
-                stage=input.stage,
-            )
-
         config = input.config
         audio_path = input.audio_path
 

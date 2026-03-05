@@ -146,9 +146,7 @@ class VoxtralEngine(Engine):
 
         self.logger.info("model_loaded_successfully", model_name=model_name)
 
-    def process(
-        self, input: TaskInput, ctx: BatchTaskContext | None = None
-    ) -> TaskOutput:
+    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
         """Transcribe audio using Voxtral.
 
         Args:

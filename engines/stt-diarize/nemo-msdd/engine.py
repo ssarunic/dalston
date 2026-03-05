@@ -304,9 +304,7 @@ class NemoMSDDEngine(Engine):
         info = sf.info(str(audio_path))
         return info.duration
 
-    def process(
-        self, input: TaskInput, ctx: BatchTaskContext | None = None
-    ) -> TaskOutput:
+    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
         """Run speaker diarization on audio file."""
         if self._disabled:
             self.logger.info("diarization_disabled_returning_mock_output")

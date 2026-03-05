@@ -345,9 +345,7 @@ class ParakeetEngine(Engine):
                 error=str(e),
             )
 
-    def process(
-        self, input: TaskInput, ctx: BatchTaskContext | None = None
-    ) -> TaskOutput:
+    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
         """Transcribe audio using Parakeet CTC or TDT.
 
         Args:

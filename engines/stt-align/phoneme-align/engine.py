@@ -85,9 +85,7 @@ class PhonemeAlignEngine(Engine):
             )
             return None
 
-    def process(
-        self, input: TaskInput, ctx: BatchTaskContext | None = None
-    ) -> TaskOutput:
+    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
         """Align transcription segments to produce word-level timestamps."""
         audio_path = input.audio_path
 

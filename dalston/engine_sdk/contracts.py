@@ -1,4 +1,10 @@
-"""Stage payload contracts for M51 engine input/output typing."""
+"""Stage payload contracts for M51 engine input/output typing.
+
+These models are forward-declared stage envelopes for stricter typed engine
+inputs/outputs. Current runtime engines still consume/emit the shared
+`dalston.common.pipeline_types` models directly; wiring these contracts into
+all engines is an incremental follow-up.
+"""
 
 from __future__ import annotations
 

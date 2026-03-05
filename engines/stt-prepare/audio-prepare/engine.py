@@ -59,7 +59,7 @@ class AudioPrepareEngine(Engine):
     def process(
         self,
         input: TaskInput,
-        ctx: BatchTaskContext | None = None,
+        ctx: BatchTaskContext,
     ) -> TaskOutput:
         """Convert audio to standardized format.
 
@@ -69,15 +69,6 @@ class AudioPrepareEngine(Engine):
         Returns:
             TaskOutput with PrepareOutput containing artifact IDs and metadata
         """
-        if ctx is None:
-            ctx = BatchTaskContext(
-                runtime="local",
-                instance="local",
-                task_id=input.task_id,
-                job_id=input.job_id,
-                stage=input.stage,
-            )
-
         audio_path = input.audio_path
         config = input.config
 

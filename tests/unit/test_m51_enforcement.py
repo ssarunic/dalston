@@ -29,6 +29,7 @@ FORBIDDEN_CALL_PATTERNS = (
 
 def test_runtime_engines_have_new_process_signature() -> None:
     missing = []
+    optional_ctx = []
     for file_path in ENGINE_RUNTIME_FILES:
         text = file_path.read_text(encoding="utf-8")
         has_signature = (
@@ -39,7 +40,12 @@ def test_runtime_engines_have_new_process_signature() -> None:
         )
         if not has_signature:
             missing.append(str(file_path))
+        if "BatchTaskContext | None" in text:
+            optional_ctx.append(str(file_path))
     assert not missing, f"Engines missing M51 process signature: {missing}"
+    assert not optional_ctx, (
+        f"Engines still using optional ctx signature: {optional_ctx}"
+    )
 
 
 def test_runtime_engines_do_not_import_storage_clients_or_helpers() -> None:

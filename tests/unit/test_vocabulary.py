@@ -11,6 +11,19 @@ from uuid import uuid4
 
 import pytest
 
+from dalston.engine_sdk.context import BatchTaskContext
+
+
+def _ctx(task_id: str, job_id: str, stage: str = "transcribe") -> BatchTaskContext:
+    return BatchTaskContext(
+        runtime="test-runtime",
+        instance="test-instance",
+        task_id=task_id,
+        job_id=job_id,
+        stage=stage,
+    )
+
+
 # =============================================================================
 # Pipeline Types Tests
 # =============================================================================
@@ -147,7 +160,7 @@ class TestWhisperEngineVocabulary:
             config={"vocabulary": ["Dalston", "FastAPI", "Redis"]},
         )
 
-        engine.process(input_data)
+        engine.process(input_data, _ctx(input_data.task_id, input_data.job_id))
 
         # Verify transcribe was called with hotwords
         call_kwargs = mock_model.transcribe.call_args.kwargs
@@ -167,7 +180,7 @@ class TestWhisperEngineVocabulary:
             config={},
         )
 
-        engine.process(input_data)
+        engine.process(input_data, _ctx(input_data.task_id, input_data.job_id))
 
         # Verify hotwords was not passed
         call_kwargs = mock_model.transcribe.call_args.kwargs
@@ -186,7 +199,7 @@ class TestWhisperEngineVocabulary:
             config={"vocabulary": []},
         )
 
-        engine.process(input_data)
+        engine.process(input_data, _ctx(input_data.task_id, input_data.job_id))
 
         # Verify hotwords was not passed (empty list is falsy)
         call_kwargs = mock_model.transcribe.call_args.kwargs
@@ -287,7 +300,7 @@ class TestParakeetEngineVocabulary:
             config={"vocabulary": ["term1", "term2", "term3"]},
         )
 
-        output = engine.process(input_data)
+        output = engine.process(input_data, _ctx(input_data.task_id, input_data.job_id))
 
         # No warnings when vocabulary boosting succeeds
         # (Parakeet now supports vocabulary via GPU-PB)
@@ -306,7 +319,7 @@ class TestParakeetEngineVocabulary:
             config={},
         )
 
-        output = engine.process(input_data)
+        output = engine.process(input_data, _ctx(input_data.task_id, input_data.job_id))
 
         # No warnings when vocabulary not provided
         assert output.data.warnings == []

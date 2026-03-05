@@ -123,7 +123,7 @@ class S3SessionStorage(SessionStorage):
         )
 
     async def abort(self) -> None:
-        if self._audio_recorder and not self._audio_recorder._finalized:
+        if self._audio_recorder:
             try:
                 await self._audio_recorder.abort()
             except Exception:

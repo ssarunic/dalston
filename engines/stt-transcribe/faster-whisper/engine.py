@@ -134,9 +134,7 @@ class WhisperEngine(Engine):
         )
         return "cpu", "int8"
 
-    def process(
-        self, input: TaskInput, ctx: BatchTaskContext | None = None
-    ) -> TaskOutput:
+    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
         """Transcribe audio using Faster-Whisper.
 
         Args:

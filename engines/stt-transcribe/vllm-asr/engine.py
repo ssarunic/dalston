@@ -207,9 +207,7 @@ class VLLMASREngine(Engine):
             model_path=model_path,
         )
 
-    def process(
-        self, input: TaskInput, ctx: BatchTaskContext | None = None
-    ) -> TaskOutput:
+    def process(self, input: TaskInput, ctx: BatchTaskContext) -> TaskOutput:
         """Transcribe audio using a vLLM audio LLM.
 
         Args:

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from dalston.common.artifacts import ArtifactReference, ProducedArtifact
+from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.materializer import (
     ArtifactMaterializer,
@@ -30,7 +31,7 @@ class LocalRunner:
     def run(
         self,
         *,
-        engine,
+        engine: Engine[Any, Any],
         task_id: str,
         job_id: str,
         stage: str,

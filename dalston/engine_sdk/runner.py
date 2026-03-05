@@ -667,26 +667,6 @@ class EngineRunner:
         for artifact_id, metadata in artifact_index_data.items():
             artifact_index[artifact_id] = ArtifactReference.model_validate(metadata)
 
-        # Temporary migration bridge for tasks that still send URI-centric shape.
-        if not resolved_artifact_ids:
-            media = input_data.get("media")
-            legacy_audio_uri = (
-                media.get("uri")
-                if isinstance(media, dict)
-                else input_data.get("audio_uri")
-            )
-            if legacy_audio_uri:
-                legacy_artifact_id = "legacy:audio"
-                resolved_artifact_ids = {"audio": legacy_artifact_id}
-                artifact_index[legacy_artifact_id] = ArtifactReference(
-                    artifact_id=legacy_artifact_id,
-                    kind="audio",
-                    storage_locator=legacy_audio_uri,
-                    media_type="audio/wav",
-                )
-                if payload is None and media:
-                    payload = {"media": media}
-
         materialized_artifacts = self._materializer.materialize(
             resolved_artifact_ids=resolved_artifact_ids,
             artifact_index=artifact_index,

@@ -49,7 +49,7 @@ class FinalMergerEngine(Engine):
     def process(
         self,
         input: TaskInput,
-        ctx: BatchTaskContext | None = None,
+        ctx: BatchTaskContext,
     ) -> TaskOutput:
         """Merge upstream outputs into final transcript.
 
@@ -60,15 +60,6 @@ class FinalMergerEngine(Engine):
         Returns:
             TaskOutput with MergeOutput containing the final transcript
         """
-        if ctx is None:
-            ctx = BatchTaskContext(
-                runtime="local",
-                instance="local",
-                task_id=input.task_id,
-                job_id=input.job_id,
-                stage=input.stage,
-            )
-
         job_id = input.job_id
         config = input.config
 

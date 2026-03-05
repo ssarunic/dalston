@@ -19,7 +19,18 @@ from dalston.common.pipeline_types import (
     TranscribeOutput,
     Word,
 )
+from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.types import TaskInput, TaskOutput
+
+
+def _ctx(task_input: TaskInput) -> BatchTaskContext:
+    return BatchTaskContext(
+        runtime="test-runtime",
+        instance="test-instance",
+        task_id=task_input.task_id,
+        job_id=task_input.job_id,
+        stage=task_input.stage,
+    )
 
 
 class TestFinalMergerEngineOutput:
@@ -102,7 +113,7 @@ class TestFinalMergerEngineOutput:
                 config={"speaker_detection": "none", "word_timestamps": True},
             )
 
-            result = engine.process(task_input)
+            result = engine.process(task_input, _ctx(task_input))
 
             # Verify output structure
             assert isinstance(result, TaskOutput)
@@ -175,7 +186,7 @@ class TestFinalMergerEngineOutput:
                 config={"speaker_detection": "diarize"},
             )
 
-            result = engine.process(task_input)
+            result = engine.process(task_input, _ctx(task_input))
 
             output = result.data
             assert output.metadata.speaker_detection == SpeakerDetectionMode.DIARIZE
@@ -250,7 +261,7 @@ class TestFinalMergerEngineOutput:
                 },
             )
 
-            result = engine.process(task_input)
+            result = engine.process(task_input, _ctx(task_input))
 
             output = result.data
             assert output.metadata.speaker_detection == SpeakerDetectionMode.PER_CHANNEL
@@ -314,7 +325,7 @@ class TestFinalMergerEngineOutput:
                 config={"speaker_detection": "none"},
             )
 
-            result = engine.process(task_input)
+            result = engine.process(task_input, _ctx(task_input))
 
             output = result.data
             # Should still produce valid output
