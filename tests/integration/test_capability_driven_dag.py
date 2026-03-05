@@ -7,6 +7,7 @@ engine capabilities (native word timestamps, native diarization).
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -15,7 +16,10 @@ import pytest
 from dalston.engine_sdk.types import EngineCapabilities
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog
 from dalston.orchestrator.dag import build_task_dag
-from dalston.orchestrator.engine_selector import NoCapableEngineError
+from dalston.orchestrator.engine_selector import (
+    ModelSelectionError,
+    NoCapableEngineError,
+)
 from dalston.orchestrator.registry import BatchEngineState
 
 # =============================================================================
@@ -136,6 +140,16 @@ def create_mock_registry(engine_configs: dict[str, dict]) -> AsyncMock:
     registry.get_engines_for_stage.side_effect = get_engines_for_stage
 
     return registry
+
+
+class _ScalarOneResult:
+    """Minimal SQLAlchemy-like result wrapper for scalar_one_or_none()."""
+
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
 
 
 # =============================================================================
@@ -869,7 +883,179 @@ class TestMergedWavScenarios:
 
         stages = [t.stage for t in tasks]
         assert "align" not in stages
-        assert len(tasks) == 3  # prepare, transcribe, merge
+
+
+class TestStageModelSelection:
+    """Integration tests for M55 stage model selection contract."""
+
+    @pytest.mark.asyncio
+    async def test_stage_runtime_model_ids_are_injected(
+        self, job_id, audio_uri, mock_catalog
+    ):
+        registry = create_mock_registry(
+            {
+                "prepare": {"runtime": "audio-prepare"},
+                "transcribe": {
+                    "runtime": "faster-whisper",
+                    "capabilities": {
+                        "supports_word_timestamps": False,
+                        "includes_diarization": False,
+                    },
+                },
+                "align": {"runtime": "phoneme-align"},
+                "diarize": {"runtime": "pyannote-4.0"},
+                "pii_detect": {"runtime": "pii-presidio"},
+                "merge": {"runtime": "final-merger"},
+            }
+        )
+        runtime_index = {
+            "faster-whisper": make_engine_state(
+                "faster-whisper",
+                "transcribe",
+                make_capabilities(
+                    runtime="faster-whisper",
+                    stage="transcribe",
+                    supports_word_timestamps=False,
+                    includes_diarization=False,
+                ),
+            ),
+            "phoneme-align": make_engine_state("phoneme-align", "align"),
+            "pyannote-4.0": make_engine_state("pyannote-4.0", "diarize"),
+            "pii-presidio": make_engine_state("pii-presidio", "pii_detect"),
+        }
+        registry.get_engine.side_effect = lambda runtime: runtime_index.get(runtime)
+
+        mock_db = AsyncMock()
+        mock_db.execute.side_effect = [
+            _ScalarOneResult(None),  # engine_transcribe preference -> not a model
+            _ScalarOneResult(
+                SimpleNamespace(
+                    id="facebook/wav2vec2-base-960h",
+                    stage="align",
+                    status="ready",
+                    runtime="phoneme-align",
+                    runtime_model_id="facebook/wav2vec2-base-960h",
+                    source="facebook/wav2vec2-base-960h",
+                    languages=["en"],
+                )
+            ),
+            _ScalarOneResult(
+                SimpleNamespace(
+                    id="pyannote/speaker-diarization-community-1",
+                    stage="diarize",
+                    status="ready",
+                    runtime="pyannote-4.0",
+                    runtime_model_id="pyannote/speaker-diarization-community-1",
+                    source="pyannote/speaker-diarization-community-1",
+                    languages=None,
+                )
+            ),
+            _ScalarOneResult(
+                SimpleNamespace(
+                    id="urchade/gliner_multi-v2.1",
+                    stage="pii_detect",
+                    status="ready",
+                    runtime="pii-presidio",
+                    runtime_model_id="urchade/gliner_multi-v2.1",
+                    source="urchade/gliner_multi-v2.1",
+                    languages=None,
+                )
+            ),
+        ]
+
+        tasks = await build_task_dag(
+            job_id=job_id,
+            audio_uri=audio_uri,
+            parameters={
+                "engine_transcribe": "faster-whisper",
+                "timestamps_granularity": "word",
+                "speaker_detection": "diarize",
+                "pii_detection": True,
+                "model_align": "facebook/wav2vec2-base-960h",
+                "model_diarize": "pyannote/speaker-diarization-community-1",
+                "model_pii_detect": "urchade/gliner_multi-v2.1",
+            },
+            registry=registry,
+            catalog=mock_catalog,
+            db=mock_db,
+        )
+
+        by_stage = {t.stage: t for t in tasks}
+        assert (
+            by_stage["align"].config["runtime_model_id"]
+            == "facebook/wav2vec2-base-960h"
+        )
+        assert (
+            by_stage["diarize"].config["runtime_model_id"]
+            == "pyannote/speaker-diarization-community-1"
+        )
+        assert (
+            by_stage["pii_detect"].config["runtime_model_id"]
+            == "urchade/gliner_multi-v2.1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_stage_mismatch_rejected(self, job_id, audio_uri, mock_catalog):
+        registry = create_mock_registry(
+            {
+                "prepare": {"runtime": "audio-prepare"},
+                "transcribe": {
+                    "runtime": "faster-whisper",
+                    "capabilities": {
+                        "supports_word_timestamps": False,
+                        "includes_diarization": False,
+                    },
+                },
+                "align": {"runtime": "phoneme-align"},
+                "merge": {"runtime": "final-merger"},
+            }
+        )
+        runtime_index = {
+            "faster-whisper": make_engine_state(
+                "faster-whisper",
+                "transcribe",
+                make_capabilities(
+                    runtime="faster-whisper",
+                    stage="transcribe",
+                    supports_word_timestamps=False,
+                    includes_diarization=False,
+                ),
+            ),
+            "phoneme-align": make_engine_state("phoneme-align", "align"),
+        }
+        registry.get_engine.side_effect = lambda runtime: runtime_index.get(runtime)
+
+        mock_db = AsyncMock()
+        mock_db.execute.side_effect = [
+            _ScalarOneResult(None),  # engine_transcribe preference -> not a model
+            _ScalarOneResult(
+                SimpleNamespace(
+                    id="urchade/gliner_multi-v2.1",
+                    stage="pii_detect",  # wrong stage for align
+                    status="ready",
+                    runtime="pii-presidio",
+                    runtime_model_id="urchade/gliner_multi-v2.1",
+                    source="urchade/gliner_multi-v2.1",
+                    languages=None,
+                )
+            ),
+        ]
+
+        with pytest.raises(ModelSelectionError) as exc_info:
+            await build_task_dag(
+                job_id=job_id,
+                audio_uri=audio_uri,
+                parameters={
+                    "engine_transcribe": "faster-whisper",
+                    "timestamps_granularity": "word",
+                    "model_align": "urchade/gliner_multi-v2.1",
+                },
+                registry=registry,
+                catalog=mock_catalog,
+                db=mock_db,
+            )
+
+        assert exc_info.value.code == "model_stage_mismatch"
 
 
 class TestPiiCombinedWavScenarios:

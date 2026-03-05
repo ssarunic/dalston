@@ -15,7 +15,7 @@ import soundfile as sf
 import torch
 import torchaudio
 from align import AlignedSegment, InputSegment, align
-from model_loader import AlignModelMetadata, is_language_supported, load_align_model
+from model_loader import AlignModelMetadata, load_align_model
 
 from dalston.engine_sdk import (
     AlignmentMethod,
@@ -58,30 +58,43 @@ class PhonemeAlignEngine(Engine):
             return "mps", "float32"
         return "cpu", "float32"
 
-    def _get_align_model(self, language: str) -> tuple[Any, AlignModelMetadata] | None:
-        """Load or retrieve a cached alignment model for a language."""
-        if language in self._align_models:
-            self.logger.debug("using_cached_alignment_model", language=language)
-            return self._align_models[language]
-
-        if not is_language_supported(language):
-            self.logger.warning("unsupported_alignment_language", language=language)
-            return None
+    def _get_align_model(
+        self, language: str, runtime_model_id: str
+    ) -> tuple[Any, AlignModelMetadata] | None:
+        """Load or retrieve a cached alignment model by runtime_model_id."""
+        if runtime_model_id in self._align_models:
+            self.logger.debug(
+                "using_cached_alignment_model",
+                language=language,
+                runtime_model_id=runtime_model_id,
+            )
+            return self._align_models[runtime_model_id]
 
         self.logger.info(
-            "loading_alignment_model", language=language, device=self._device
+            "loading_alignment_model",
+            language=language,
+            device=self._device,
+            runtime_model_id=runtime_model_id,
         )
         try:
             model, metadata = load_align_model(
                 language_code=language,
                 device=self._device,
+                model_name=runtime_model_id,
             )
-            self._align_models[language] = (model, metadata)
-            self.logger.info("alignment_model_loaded", language=language)
+            self._align_models[runtime_model_id] = (model, metadata)
+            self.logger.info(
+                "alignment_model_loaded",
+                language=language,
+                runtime_model_id=runtime_model_id,
+            )
             return model, metadata
         except Exception as e:
             self.logger.warning(
-                "failed_to_load_alignment_model", language=language, error=str(e)
+                "failed_to_load_alignment_model",
+                language=language,
+                runtime_model_id=runtime_model_id,
+                error=str(e),
             )
             return None
 
@@ -119,19 +132,29 @@ class PhonemeAlignEngine(Engine):
             language=language,
         )
 
+        runtime_model_id = input.config.get("runtime_model_id")
+        if not runtime_model_id:
+            raise ValueError(
+                "Missing required config field 'runtime_model_id' for align stage."
+            )
+
         # Load alignment model
-        model_result = self._get_align_model(language)
+        model_result = self._get_align_model(language, runtime_model_id)
         if model_result is None:
             return self._fallback_output(
                 text,
                 raw_segments,
                 language,
-                reason=f"No alignment model available for language '{language}'",
+                reason=(
+                    f"Failed to load alignment model '{runtime_model_id}' "
+                    f"for language '{language}'"
+                ),
             )
 
         model, metadata = model_result
 
         try:
+            self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
             audio = self._load_audio(audio_path)
 
             result = align(
@@ -169,6 +192,7 @@ class PhonemeAlignEngine(Engine):
                 aligned_words=aligned_count,
                 unaligned_words=unaligned_count,
             )
+            self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
 
             output = AlignOutput(
                 text=text,
@@ -267,7 +291,12 @@ class PhonemeAlignEngine(Engine):
             "alignment_fallback", reason=reason, segment_count=len(segments)
         )
         typed_segments = [
-            Segment(start=s["start"], end=s["end"], text=s["text"]) for s in segments
+            Segment(
+                start=s.start if hasattr(s, "start") else s["start"],
+                end=s.end if hasattr(s, "end") else s["end"],
+                text=s.text if hasattr(s, "text") else s["text"],
+            )
+            for s in segments
         ]
         output = AlignOutput(
             text=text,
@@ -298,7 +327,7 @@ class PhonemeAlignEngine(Engine):
             "cuda_available": cuda_available,
             "cuda_device_count": cuda_device_count,
             "mps_available": mps_available,
-            "cached_languages": list(self._align_models.keys()),
+            "cached_models": sorted(self._align_models.keys()),
         }
 
 

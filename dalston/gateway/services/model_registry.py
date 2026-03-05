@@ -461,15 +461,26 @@ class ModelRegistryService:
             Number of pending/processing jobs using this model
         """
         # Query jobs where status is pending/processing and model matches
-        # Model is stored in parameters->>'engine_transcribe'
-        from sqlalchemy import func
+        # any stage-level model selector parameter.
+        from sqlalchemy import func, or_
+
+        model_param_keys = (
+            "engine_transcribe",  # legacy + current transcribe selection key
+            "model_transcribe",
+            "model_diarize",
+            "model_align",
+            "model_pii_detect",
+        )
+        model_filters = [
+            JobModel.parameters[key].astext == model_id for key in model_param_keys
+        ]
 
         result = await db.execute(
             select(func.count())
             .select_from(JobModel)
             .where(
                 JobModel.status.in_(["pending", "processing"]),
-                JobModel.parameters["engine_transcribe"].astext == model_id,
+                or_(*model_filters),
             )
         )
         return result.scalar() or 0

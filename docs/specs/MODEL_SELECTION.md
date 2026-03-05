@@ -297,6 +297,35 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -F "model=nvidia/parakeet-tdt-1.1b"
 ```
 
+### Stage-Specific Model Selection (M55)
+
+Non-transcribe stages use dedicated model parameters:
+
+- `model_diarize`
+- `model_align`
+- `model_pii_detect`
+
+Example:
+
+```bash
+curl -X POST http://localhost:8000/v1/audio/transcriptions \
+  -H "Authorization: Bearer $API_KEY" \
+  -F "file=@audio.wav" \
+  -F "model=auto" \
+  -F "speaker_detection=diarize" \
+  -F "pii_detection=true" \
+  -F "model_diarize=pyannote/speaker-diarization-community-1" \
+  -F "model_align=facebook/wav2vec2-base-960h" \
+  -F "model_pii_detect=urchade/gliner_multi-v2.1"
+```
+
+Selection rules:
+
+1. Stage model IDs must exist in the model registry.
+2. `model.stage` must match the requested stage (`model_stage_mismatch` on mismatch).
+3. Model status must be `ready` (`model_not_ready` otherwise).
+4. Selected runtime must be available (`runtime_unavailable` otherwise).
+
 ### Auto-Selection
 
 Omit the model parameter or use `auto` for capability-driven selection:

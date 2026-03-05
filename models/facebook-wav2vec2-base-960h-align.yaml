@@ -1,0 +1,32 @@
+schema_version: "1.1"
+id: facebook/wav2vec2-base-960h
+runtime: phoneme-align
+runtime_model_id: facebook/wav2vec2-base-960h
+
+name: Wav2Vec2 Base 960h (Alignment)
+source: facebook/wav2vec2-base-960h
+size_gb: 0.4
+stage: align
+
+description: |
+  English wav2vec2 CTC model for forced alignment.
+  Used by phoneme-align for explicit word-level timestamping.
+
+languages:
+  - en
+
+capabilities:
+  word_timestamps: true
+  punctuation: false
+  capitalization: false
+  streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  min_vram_gb: 2
+  supports_cpu: true
+  min_ram_gb: 4
+
+performance:
+  rtf_gpu: 0.02
+  rtf_cpu: 0.3

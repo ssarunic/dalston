@@ -120,6 +120,8 @@ class PIIDetectionEngine(Engine):
         self._analyzer = None
         self._anonymizer = None
         self._gliner_model = None
+        self._gliner_models: dict[str, Any] = {}
+        self._active_gliner_model_id: str | None = None
         self._device = self._resolve_device()
         self.logger.info("pii_detection_engine_initialized", device=self._device)
 
@@ -228,33 +230,50 @@ class PIIDetectionEngine(Engine):
         )
         self._analyzer.registry.add_recognizer(oib_recognizer)
 
-    def _load_gliner(self) -> None:
+    def _load_gliner(self, runtime_model_id: str) -> None:
         """Load GLiNER model for ML-based entity recognition."""
-        if self._gliner_model is not None:
+        if runtime_model_id in self._gliner_models:
+            self._gliner_model = self._gliner_models[runtime_model_id]
+            self._active_gliner_model_id = runtime_model_id
             return
 
         try:
             from gliner import GLiNER
 
-            self.logger.info("loading_gliner_model", device=self._device)
+            self.logger.info(
+                "loading_gliner_model",
+                device=self._device,
+                runtime_model_id=runtime_model_id,
+            )
             try:
-                self._gliner_model = GLiNER.from_pretrained(
-                    "urchade/gliner_multi-v2.1",
+                model = GLiNER.from_pretrained(
+                    runtime_model_id,
                     device=self._device,
                 )
             except TypeError:
                 # Backward compatibility for GLiNER versions without device kwarg.
-                self._gliner_model = GLiNER.from_pretrained("urchade/gliner_multi-v2.1")
-                if hasattr(self._gliner_model, "to"):
-                    moved = self._gliner_model.to(self._device)
+                model = GLiNER.from_pretrained(runtime_model_id)
+                if hasattr(model, "to"):
+                    moved = model.to(self._device)
                     if moved is not None:
-                        self._gliner_model = moved
+                        model = moved
 
-            self.logger.info("gliner_model_loaded", device=self._device)
+            self._gliner_model = model
+            self._gliner_models[runtime_model_id] = model
+            self._active_gliner_model_id = runtime_model_id
+            self.logger.info(
+                "gliner_model_loaded",
+                device=self._device,
+                runtime_model_id=runtime_model_id,
+            )
         except ImportError:
             self.logger.warning("gliner_not_available")
         except Exception as e:
-            self.logger.warning("gliner_load_failed", error=str(e))
+            self.logger.warning(
+                "gliner_load_failed",
+                runtime_model_id=runtime_model_id,
+                error=str(e),
+            )
 
     def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Detect PII entities in transcript.
@@ -272,16 +291,23 @@ class PIIDetectionEngine(Engine):
         # Get entity types to detect
         entity_types = config.get("entity_types") or DEFAULT_ENTITY_TYPES
         confidence_threshold = config.get("confidence_threshold", 0.5)
+        runtime_model_id = config.get("runtime_model_id")
+        if not runtime_model_id:
+            raise ValueError(
+                "Missing required config field 'runtime_model_id' for pii_detect stage."
+            )
 
         self.logger.info(
             "pii_detection_starting",
             job_id=job_id,
             entity_types=entity_types,
+            runtime_model_id=runtime_model_id,
         )
 
         # Always load both: Presidio for checksum-validated patterns, GLiNER for NER
         self._load_presidio()
-        self._load_gliner()
+        self._load_gliner(runtime_model_id)
+        self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
 
         # Get transcript data from previous stages
         align_output = input.get_align_output()
@@ -343,6 +369,7 @@ class PIIDetectionEngine(Engine):
             entities_found=len(entities),
             processing_time_ms=processing_time_ms,
         )
+        self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
 
         output = PIIDetectOutput(
             entities=entities,
@@ -778,6 +805,8 @@ class PIIDetectionEngine(Engine):
             "status": "healthy",
             "presidio_loaded": self._analyzer is not None,
             "gliner_loaded": self._gliner_model is not None,
+            "gliner_model_id": self._active_gliner_model_id,
+            "loaded_gliner_models": sorted(self._gliner_models.keys()),
         }
 
 

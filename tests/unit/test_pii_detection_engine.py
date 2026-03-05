@@ -3,7 +3,9 @@
 import importlib
 import importlib.util
 import sys
+import types
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -83,3 +85,36 @@ class TestPIINameFalsePositiveFiltering:
         assert len(entities) == 1
         assert entities[0].entity_type == "name"
         assert entities[0].original_text == "Alice"
+
+
+class TestPIIRuntimeModelSelection:
+    """Tests for runtime_model_id-driven GLiNER loading."""
+
+    def test_gliner_cache_is_keyed_by_runtime_model_id(self):
+        PIIDetectionEngine = load_pii_engine()
+
+        class _DummyModel:
+            def __init__(self, model_id: str):
+                self.model_id = model_id
+
+            def to(self, device: str):
+                return self
+
+        class _DummyGLiNER:
+            calls: list[tuple[str, str | None]] = []
+
+            @classmethod
+            def from_pretrained(cls, model_id: str, device: str | None = None):
+                cls.calls.append((model_id, device))
+                return _DummyModel(model_id)
+
+        fake_gliner = types.SimpleNamespace(GLiNER=_DummyGLiNER)
+        with patch.dict(sys.modules, {"gliner": fake_gliner}):
+            engine = PIIDetectionEngine()
+            engine._load_gliner("model/a")
+            engine._load_gliner("model/a")  # Cached
+            engine._load_gliner("model/b")
+
+        assert _DummyGLiNER.calls[0][0] == "model/a"
+        assert _DummyGLiNER.calls[1][0] == "model/b"
+        assert len(_DummyGLiNER.calls) == 2
