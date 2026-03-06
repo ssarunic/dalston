@@ -177,8 +177,8 @@ Expected files:
 ### Phase 4: Lite End-to-End Batch Slice
 
 1. Freeze lite orchestrator design at phase start:
-   - either a dedicated lite entrypoint (`orchestrator_lite`) with in-memory queue poller, or
-   - a clearly separated mode branch with equivalent behavior for the scoped path.
+   - dedicated lite entrypoint `dalston/orchestrator/lite_main.py` with in-memory queue poller
+   - `dalston/orchestrator/main.py` remains mode dispatch only
 2. Implement lite orchestration loop for the scoped batch path without Redis Streams consumer groups/DLQ/reconciler coupling.
 3. Wire lite backend providers in gateway/orchestrator startup.
 4. Validate one canonical lite DAG path:
@@ -191,7 +191,7 @@ Expected files:
 
 - `dalston/gateway/main.py`
 - `dalston/orchestrator/main.py`
-- `dalston/orchestrator/lite_main.py` (new, if dedicated entrypoint is chosen)
+- `dalston/orchestrator/lite_main.py` (new)
 - `dalston/orchestrator/dag.py` (if lite-stage constraints need explicit gating)
 - `tests/integration/test_lite_transcribe_e2e.py` (new)
 

@@ -54,7 +54,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Audio/transcript S3 storage working; session resume pending |
 
-### Not Started (4)
+### Not Started (7)
 
 | # | Milestone | Goal |
 |---|-----------|------|
@@ -62,6 +62,9 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M55](milestones/M55-non-transcribe-runtime-model-management-clean-cut.md) | Non-Transcribe Runtime Model Management (Clean-Cut) | Runtime model selection and registry-backed lifecycle for diarize, align, and PII stages |
 | [M56](milestones/M56-lite-mode-infra-backends-clean-cut.md) | Lite Mode Infra Backends (Clean-Cut) | Mode-aware backend abstraction for DB/queue/storage with SQLite, in-memory queue, and local filesystem storage |
 | [M57](milestones/M57-ghost-server-zero-config-cli-bootstrap.md) | Ghost Server + Zero-Config CLI Bootstrap (Clean-Cut) | One-command transcribe UX with automatic local server boot and model auto-ensure |
+| [M58](milestones/M58-lite-pipeline-expansion-capability-parity.md) | Lite Pipeline Expansion and Capability Parity (Clean-Cut) | Expand lite-mode profiles/features with explicit capability matrix and deterministic unsupported-feature behavior |
+| [M59](milestones/M59-runtime-isolation-profiles-clean-cut.md) | Runtime Isolation Profiles (In-Proc / Venv / Container, Clean-Cut) | Profile-based runtime isolation to handle incompatible dependencies under one control plane |
+| [M60](milestones/M60-one-line-distribution-packaging-clean-cut.md) | One-Line Distribution and Packaging (Clean-Cut) | Cross-platform distribution channels and install/release pipeline for zero-config onboarding |
 
 ---
 
@@ -274,7 +277,10 @@ M6 + M8 ──► M53 (realtime latency budget + explicit backpressure)
 M33 ──► M54 (event DLQ + poison-pill isolation)
 M36 + M40 + M46 ──► M55 (non-transcribe runtime model management)
 M47 + M52 ──► M56 (lite mode infra backends)
-M56 + M13 + M40 ──► M57 (ghost server + zero-config CLI bootstrap)
+M56 + M13 + M36 + M40 ──► M57 (ghost server + zero-config CLI bootstrap)
+M56 + M57 ──► M58 (lite pipeline expansion + capability parity)
+M58 + M36 + M40 ──► M59 (runtime isolation profiles)
+M57 + M59 ──► M60 (one-line distribution + packaging)
 
 M10 + M11 + M15 ──► M35
 ```
@@ -293,6 +299,9 @@ M10 + M11 + M15 ──► M35
 - **M54**: Durable orchestrator event reliability cutover with max-delivery DLQ policy, malformed-event quarantine, and legacy infinite-replay cleanup
 - **M56**: Mode-aware infra abstraction (`lite` vs `distributed`) for DB, queue, and storage, with one validated lite batch path and no distributed regressions
 - **M57**: Zero-config CLI bootstrap (`dalston transcribe`) with automatic local server startup and default-model auto-ensure for first-run success
+- **M58**: Lite profile/feature expansion with explicit capability matrix and deterministic unsupported-feature semantics
+- **M59**: Runtime isolation profiles (`inproc`/`venv`/`container`) for dependency-conflict-safe execution
+- **M60**: One-line distribution, packaging channels, and release-gated install/first-run smoke validation
 - **M47**: SQL layer separation complete; M56 builds on those service boundaries to swap backend implementations with minimal handler impact
 - **M25**: Data Retention & Audit (needs M11 auth, M21 webhooks for purge events)
 - **M26**: PII Detection & Audio Redaction (needs M3 word timestamps, M4 diarization, M25 retention)
@@ -351,3 +360,6 @@ Each milestone has a verification section. Key checkpoints:
 | M55 | Diarize, align, and PII stages accept `runtime_model_id`; models registered in registry with explicit stage; per-stage model selection works in standard and per-channel DAGs |
 | M56 | `DALSTON_MODE=lite` runs scoped batch transcription without Postgres/Redis/MinIO using SQLite + in-memory queue + localfs artifacts; distributed mode remains stable |
 | M57 | `dalston transcribe <file>` auto-starts local server when needed, auto-ensures default model, and returns transcript in one command |
+| M58 | Lite mode supports explicit profiles/capability matrix and fails unsupported combinations deterministically with actionable guidance |
+| M59 | Runtimes execute through declared isolation profiles (`inproc`/`venv`/`container`) while preserving shared task/output contracts |
+| M60 | Documented one-line install channels pass cross-platform install + first-run smoke gates before release publication |
