@@ -8,7 +8,23 @@ from __future__ import annotations
 import queue
 from typing import Any
 
-import sounddevice as sd
+_IMPORT_ERROR: Exception | None = None
+try:
+    import sounddevice as sd
+except Exception as exc:  # pragma: no cover - environment-dependent import
+    sd = None  # type: ignore[assignment]
+    _IMPORT_ERROR = exc
+
+
+def _require_sounddevice() -> Any:
+    """Return the sounddevice module or raise a runtime error with context."""
+    if sd is None:
+        detail = str(_IMPORT_ERROR) if _IMPORT_ERROR else "sounddevice unavailable"
+        raise RuntimeError(
+            "Microphone capture is unavailable because PortAudio could not be loaded "
+            f"({detail}). Install PortAudio to use `dalston listen`."
+        )
+    return sd
 
 
 class MicrophoneStream:
@@ -47,7 +63,8 @@ class MicrophoneStream:
 
     def __enter__(self) -> MicrophoneStream:
         """Start audio capture."""
-        self._stream = sd.InputStream(
+        sounddevice = _require_sounddevice()
+        self._stream = sounddevice.InputStream(
             device=self.device,
             samplerate=self.sample_rate,
             channels=1,
@@ -105,6 +122,9 @@ class MicrophoneStream:
             - channels: Number of input channels
             - sample_rate: Default sample rate
         """
+        if sd is None:
+            return []
+
         devices = sd.query_devices()
         return [
             {
@@ -124,6 +144,9 @@ class MicrophoneStream:
         Returns:
             Device info dictionary, or None if no default device.
         """
+        if sd is None:
+            return None
+
         try:
             idx = sd.default.device[0]
             if idx is not None:
