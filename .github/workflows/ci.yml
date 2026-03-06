@@ -115,9 +115,11 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv venv && uv pip install -e ".[gateway,orchestrator,dev]"
+        run: |
+          uv venv
+          uv pip install -e ".[gateway,orchestrator,dev]" -e ./sdk -e ./cli
 
       - name: Run tests
-        run: uv run pytest
+        run: uv run --no-sync pytest
         env:
           REDIS_URL: redis://localhost:6379
