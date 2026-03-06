@@ -22,6 +22,8 @@ Spot instances save ~65% on GPU instances. See [Spot Instances](#spot-instances)
 
 Runtimes are inference engines that load models dynamically. Each runtime is a Docker container that can serve multiple models from the same family.
 
+**Batch runtimes** (queue-based, file I/O):
+
 | Runtime | Stage | Languages | GPU required | Key models |
 |---------|-------|-----------|-------------|------------|
 | **nemo** | transcribe | EN | No (slow on CPU) | parakeet-tdt-1.1b, parakeet-ctc-0.6b |
@@ -36,6 +38,16 @@ Runtimes are inference engines that load models dynamically. Each runtime is a D
 | **audio-redactor** | audio_redact | N/A | No | FFmpeg silence/beep replacement |
 | **audio-prepare** | prepare | N/A | No | FFmpeg format conversion |
 | **final-merger** | merge | N/A | No | Transcript assembly |
+
+**Realtime runtimes** (WebSocket streaming, low-latency):
+
+| Runtime | Languages | GPU required | Latency | Key detail |
+|---------|-----------|-------------|---------|------------|
+| **parakeet** (RNNT 0.6B) | EN | **Yes** | Sub-200ms | True streaming via cache-aware encoder |
+| **parakeet** (RNNT 1.1B) | EN | **Yes** | ~120ms | Higher accuracy, ~6 GB VRAM |
+| **parakeet-onnx** (TDT/CTC/RNNT) | EN | No | ~50ms warm | VAD-chunked (not true streaming), CPU-friendly |
+| **faster-whisper** | 99 langs | No (slow) | ~200ms | VAD-chunked, multilingual, distil-whisper for speed |
+| **voxtral** (Mini 4B) | 13 langs | **Yes** | <500ms | Native streaming LLM, ~16 GB VRAM |
 
 The engine selector automatically picks the best runtime for each pipeline stage based on job language, requested model, and what's currently running. See `dalston/orchestrator/engine_selector.py`.
 
@@ -75,8 +87,8 @@ The engine selector automatically picks the best runtime for each pipeline stage
 
 - **English**: nemo-onnx with parakeet-tdt-0.6b-v3 — native word timestamps, punctuation + capitalization, ~8x realtime on CPU (RTF 0.12). The ~1 GB container image starts in seconds vs ~12 GB for full NeMo.
 - **Multilingual**: faster-whisper with large-v3-turbo — 99 languages, ~3.3x realtime on CPU (RTF 0.3)
-- **No realtime streaming** (CPU too slow for streaming inference)
-- Batch-only, sequential processing
+- **Realtime (limited)**: parakeet-onnx realtime works on CPU (VAD-chunked, not true streaming) — usable for single-session English. faster-whisper realtime works on CPU for multilingual but is slow (RTF 0.5).
+- Batch-only for throughput; realtime is single-session and latency-sensitive on CPU
 - The engine selector auto-routes: English jobs → nemo-onnx, non-English → faster-whisper
 
 **nemo-onnx model choices** (all English, all have native word timestamps):
@@ -180,7 +192,18 @@ When faster-whisper actively processes a task, it loads the model (~8 GB peak). 
 
 - **English batch**: Parakeet TDT 1.1B via NeMo — best English accuracy (<7% avg WER), native word timestamps, RTF 0.0006 (~1667x realtime on GPU)
 - **Multilingual batch**: faster-whisper large-v3-turbo — 99 languages, RTF 0.03 (~33x realtime on GPU)
-- **English realtime**: Parakeet RNNT 0.6B streaming — sub-200ms latency
+- **Realtime streaming** — multiple options depending on needs:
+
+  | Realtime engine | Languages | VRAM | Latency | Notes |
+  |-----------------|-----------|------|---------|-------|
+  | parakeet RNNT 0.6B | EN | ~2 GB | <200ms | True streaming, lightweight |
+  | parakeet RNNT 1.1B | EN | ~6 GB | ~120ms | Higher accuracy |
+  | parakeet-onnx TDT 0.6B v3 | EN | ~2 GB | ~50ms | VAD-chunked, punctuation |
+  | faster-whisper | 99 langs | ~6 GB | ~200ms | Multilingual realtime |
+  | voxtral Mini 4B | 13 langs | ~16 GB | <500ms | LLM streaming (uses most of the VRAM budget) |
+
+  Default recommendation: **parakeet RNNT 0.6B** for English (true streaming, small VRAM footprint). Add **faster-whisper RT** if you need multilingual realtime.
+
 - **Diarization**: pyannote 4.0 (RTF 0.08) or nemo-msdd (RTF 0.05, no HF_TOKEN needed)
 - **Full pipeline**: prepare → transcribe → align → diarize → merge
 - **Auto-routing**: The engine selector picks the best runtime per job — English → nemo, non-English → faster-whisper. Parakeet's native word timestamps skip the align stage entirely.
@@ -201,7 +224,9 @@ The key constraint. Runtimes load models on demand and report loaded state via h
 
 All four fit simultaneously on 24 GB — comfortable. Adding phoneme-align GPU (~2 GB) or nemo-msdd (~4 GB) still fits.
 
-**If you only run English** (nemo for batch + RT parakeet + diarization): ~10-12 GB used, 12-14 GB free. Plenty of room to experiment with additional models.
+**If you only run English** (nemo for batch + RT parakeet-rnnt-0.6b + diarization): ~10-12 GB used, 12-14 GB free. Plenty of room to experiment with additional models.
+
+**Realtime VRAM trade-offs**: If you add faster-whisper RT for multilingual streaming (+6 GB) or voxtral Mini 4B for LLM streaming (+16 GB), the budget gets tighter. voxtral RT alone would consume ~16 GB, leaving only ~6 GB for batch — enough for one transcription runtime but not both nemo and faster-whisper simultaneously. For voxtral RT + full batch, Scenario 3 (g5.2xlarge) gives more CPU/RAM headroom, or Scenario 4 with dedicated GPUs.
 
 **Lighter alternative**: Use nemo-onnx instead of full NeMo — same Parakeet models, ~2 GB VRAM, ~12x smaller container image. Slightly slower on GPU but negligible for single-file workloads. Frees VRAM for other runtimes.
 
@@ -302,12 +327,16 @@ Everything else is identical to Scenario 2. Only worth it if you're hitting CPU/
 │                                                               │
 │  GPU 1 (24 GB): Realtime + diarization                       │
 │  ┌─────────────────────────┐  ┌────────────────────────────┐  │
-│  │ RT parakeet-rnnt-0.6b   │  │ nemo-msdd (diarize)        │  │
+│  │ RT parakeet-rnnt (EN)   │  │ RT faster-whisper (multi)  │  │
 │  └─────────────────────────┘  └────────────────────────────┘  │
+│  ┌─────────────────────────┐                                  │
+│  │ nemo-msdd (diarize)     │                                  │
+│  └─────────────────────────┘                                  │
 │                                                               │
-│  GPU 2 (24 GB): Audio LLM (vllm-asr)                        │
+│  GPU 2 (24 GB): Audio LLM — batch + realtime                │
 │  ┌──────────────────────────────────────────────────────────┐ │
-│  │ vllm-asr (Voxtral-Mini-3B or Qwen2-Audio-7B)           │ │
+│  │ vllm-asr batch (Voxtral-Mini-3B or Qwen2-Audio-7B)     │ │
+│  │ + voxtral RT (Mini 4B, 13-lang streaming)               │ │
 │  └──────────────────────────────────────────────────────────┘ │
 │                                                               │
 │  GPU 3 (24 GB): Alignment + PII + spare                      │
@@ -322,7 +351,7 @@ Everything else is identical to Scenario 2. Only worth it if you're hitting CPU/
 ### What this enables
 
 - **True parallel pipeline**: Transcribe job N while aligning job N-1 and diarizing job N-2
-- **Multiple realtime sessions**: Dedicated GPU for streaming, no batch contention
+- **Multiple concurrent realtime sessions**: Dedicated GPU for streaming (EN + multilingual), no batch contention. Parakeet RNNT for English, faster-whisper RT for multilingual, voxtral RT for 13-language LLM streaming.
 - **Audio LLMs via vllm-asr**: Highest-accuracy transcription for supported languages. Three model options:
 
   | Model | VRAM | Languages | RTF (GPU) | Notes |
@@ -443,19 +472,42 @@ Significant infrastructure complexity increase. Only worth it when you need mult
 
 ---
 
-## Recommendation: Start with Scenario 2
+## Recommendation
 
-For Parakeet for English + faster-whisper for other languages:
+The right scenario depends on whether you need realtime streaming and for which languages.
 
-**`g5.xlarge`** is the right answer. Here's why:
+### Batch-only: Scenario 2 (`g5.xlarge`)
 
-1. **All runtimes fit in 24 GB VRAM** — nemo + faster-whisper + diarization + realtime with 8 GB headroom
+If you primarily do batch transcription with occasional realtime English streaming:
+
+**`g5.xlarge`** is the sweet spot. Here's why:
+
+1. **All batch runtimes + English RT fit in 24 GB VRAM** — nemo + faster-whisper + diarization + parakeet-rnnt-0.6b with 8 GB headroom
 2. **Engine selector auto-routing** — submit a job and the orchestrator picks the best downloaded model. English → nemo (parakeet-tdt-1.1b), non-English → faster-whisper. Or pin a specific model per request.
-3. **`dalston model pull`** downloads any compatible model from HuggingFace without rebuilding images
+3. **Model registry** — `curl -X POST .../models/{id}/pull` downloads any compatible model from HuggingFace without rebuilding images
 4. **~$100/month** at 8h/day usage (~$35 with spot)
 5. **Upgrade path is clear**: bump to g5.2xlarge (same Terraform, one variable) or add vllm-asr for audio LLMs on g5.12xlarge
 
-### Concrete config
+### Multilingual realtime: Scenario 2 still works
+
+If you need multilingual realtime streaming, add faster-whisper RT (~6 GB VRAM). Total VRAM for batch + multilingual RT: ~20 GB of 24 GB. Tight but it fits. The faster-whisper RT engine supports distil-whisper for low-latency and large-v3 for accuracy.
+
+### LLM-class realtime: Scenario 3 or 4
+
+If you want voxtral Mini 4B for 13-language LLM streaming (~16 GB VRAM), Scenario 2's VRAM budget gets too tight for batch + RT simultaneously. Options:
+- **Scenario 3** (g5.2xlarge): Same GPU, more CPU/RAM. voxtral RT fits alongside one batch runtime but not all.
+- **Scenario 4** (g5.12xlarge): Dedicated GPU per function. voxtral RT gets its own A10G. Overkill unless you also need parallel pipeline.
+
+### English-only on a budget: Scenario 1 (`t3.xlarge`)
+
+If it's only English and batch latency is acceptable:
+- nemo-onnx with parakeet-tdt-0.6b-v3 transcribes at ~8x realtime on CPU with punctuation — a 10-minute file takes ~75 seconds
+- parakeet-onnx RT handles single-session English realtime on CPU (VAD-chunked)
+- ~$35/month. No GPU needed.
+
+This is surprisingly capable for low-volume English workloads.
+
+### Concrete config (Scenario 2)
 
 ```hcl
 # terraform.tfvars
@@ -559,18 +611,25 @@ The `/data/models` volume needs enough space for downloaded weights. Sizes from 
 ## Upgrade Path
 
 ```
-Scenario 1 (CPU)          → Just works, slow
+Scenario 1 (CPU)          → EN batch + basic RT, ~$35/mo
     ↓ change instance_type
-Scenario 2 (g5.xlarge)    → Your target: Parakeet + faster-whisper + realtime
+Scenario 2 (g5.xlarge)    → Full batch + EN RT + diarization, ~$100/mo (~$35 spot)
     ↓ change instance_type
-Scenario 3 (g5.2xlarge)   → More CPU headroom, same GPU
+Scenario 3 (g5.2xlarge)   → + voxtral RT or heavy concurrent load, ~$150/mo
     ↓ new terraform module
-Scenario 4 (g5.12xlarge)  → Parallel pipeline, Voxtral, multi-RT
+Scenario 4 (g5.12xlarge)  → Parallel pipeline, audio LLMs, multi-lang RT, ~$500/mo
     ↓ architecture change
 Scenario 5 (ECS split)    → Auto-scaling, managed services, production
 ```
 
-Each step is additive. Scenarios 1→3 are literally a one-line Terraform variable change. Scenario 4 needs a compose override for GPU pinning. Scenario 5 is a new Terraform module.
+Each step is additive. Scenarios 1→3 are a one-line Terraform variable change. Scenario 4 needs a compose override for GPU pinning. Scenario 5 is a new Terraform module.
+
+**Decision axes**:
+- Batch only, English? → Scenario 1 (CPU) is fine
+- Batch + English RT? → Scenario 2
+- Multilingual RT or voxtral RT? → Scenario 2-3
+- Parallel pipeline + audio LLMs? → Scenario 4
+- Multi-user, scale-to-zero? → Scenario 5
 
 ---
 
