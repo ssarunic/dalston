@@ -12,7 +12,7 @@ Design principles:
 """
 
 import logging
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
-class TimestampGranularity(str, Enum):
+class TimestampGranularity(StrEnum):
     """Timestamp precision levels.
 
     Hierarchy: phoneme > character > word > segment > none
@@ -41,7 +41,7 @@ class TimestampGranularity(str, Enum):
     PHONEME = "phoneme"
 
 
-class AlignmentMethod(str, Enum):
+class AlignmentMethod(StrEnum):
     """How word/character timestamps were produced."""
 
     ATTENTION = "attention"  # Cross-attention alignment (Whisper)
@@ -55,7 +55,7 @@ class AlignmentMethod(str, Enum):
     UNKNOWN = "unknown"  # Not specified
 
 
-class SpeakerDetectionMode(str, Enum):
+class SpeakerDetectionMode(StrEnum):
     """Speaker detection mode for transcription jobs."""
 
     NONE = "none"  # No speaker detection
@@ -585,7 +585,7 @@ class MergeOutput(BaseModel):
 # =============================================================================
 
 
-class PIIEntityCategory(str, Enum):
+class PIIEntityCategory(StrEnum):
     """PII entity category for compliance classification."""
 
     PII = "pii"  # Personal: name, email, phone, SSN, etc.
@@ -593,7 +593,7 @@ class PIIEntityCategory(str, Enum):
     PHI = "phi"  # Health: MRN, conditions, medications, etc.
 
 
-class PIIRedactionMode(str, Enum):
+class PIIRedactionMode(StrEnum):
     """Audio redaction mode."""
 
     SILENCE = "silence"  # Replace with silence (volume=0)

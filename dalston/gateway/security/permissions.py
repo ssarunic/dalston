@@ -7,10 +7,10 @@ ownership-based access control.
 Scope to Permission mapping is defined in the SecurityManager.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 
-class Permission(str, Enum):
+class Permission(StrEnum):
     """Fine-grained permissions for resource operations.
 
     Permissions follow the pattern: {resource}:{action}

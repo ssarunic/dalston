@@ -5,11 +5,11 @@ It provides a unified interface for both API keys and session tokens.
 """
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 
-class PrincipalType(str, Enum):
+class PrincipalType(StrEnum):
     """Type of authenticated principal."""
 
     API_KEY = "api_key"

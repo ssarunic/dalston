@@ -2,13 +2,13 @@
 
 import json
 import textwrap
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from fastapi import HTTPException, Response
 
 
-class ExportFormat(str, Enum):
+class ExportFormat(StrEnum):
     """Supported export formats."""
 
     SRT = "srt"

@@ -11,7 +11,7 @@ import hashlib
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID, uuid4
 
 from redis.asyncio import Redis
@@ -40,7 +40,7 @@ RATE_LIMIT_WINDOW = 60
 DEFAULT_EXPIRES_AT = datetime(2099, 12, 31, 23, 59, 59, tzinfo=UTC)
 
 
-class Scope(str, Enum):
+class Scope(StrEnum):
     """API key permission scopes."""
 
     JOBS_READ = "jobs:read"

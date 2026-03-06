@@ -12,7 +12,7 @@ Used by:
 
 import os
 import re
-from enum import Enum
+from enum import StrEnum
 from typing import Any, NoReturn
 
 from fastapi import HTTPException, Response
@@ -48,7 +48,7 @@ OPENAI_MODEL_PATTERNS = [
 OPENAI_MODEL_MAP: dict[str, str] = {}
 
 
-class OpenAIResponseFormat(str, Enum):
+class OpenAIResponseFormat(StrEnum):
     """OpenAI response format options."""
 
     JSON = "json"

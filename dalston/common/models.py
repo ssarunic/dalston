@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -78,7 +78,7 @@ def format_retention_display(retention_days: int) -> str:
 # =============================================================================
 
 
-class ArtifactType(str, Enum):
+class ArtifactType(StrEnum):
     """Standard artifact types for retention V2."""
 
     AUDIO_SOURCE = "audio.source"
@@ -89,7 +89,7 @@ class ArtifactType(str, Enum):
     PIPELINE_INTERMEDIATE = "pipeline.intermediate"
 
 
-class ArtifactSensitivity(str, Enum):
+class ArtifactSensitivity(StrEnum):
     """Sensitivity classification for artifacts."""
 
     RAW_PII = "raw_pii"  # Contains unredacted PII
@@ -97,7 +97,7 @@ class ArtifactSensitivity(str, Enum):
     METADATA = "metadata"  # No PII content (e.g., stats, counts)
 
 
-class ArtifactOwnerType(str, Enum):
+class ArtifactOwnerType(StrEnum):
     """Owner type for artifacts."""
 
     JOB = "job"
@@ -126,14 +126,14 @@ class ResolvedRetention:
 # =============================================================================
 
 
-class PIIRedactionMode(str, Enum):
+class PIIRedactionMode(StrEnum):
     """Audio redaction mode."""
 
     SILENCE = "silence"  # Replace with silence (volume=0)
     BEEP = "beep"  # Replace with 1kHz tone
 
 
-class PIIEntityCategory(str, Enum):
+class PIIEntityCategory(StrEnum):
     """PII entity category for compliance classification."""
 
     PII = "pii"  # Personal: name, email, phone, SSN, etc.
@@ -172,7 +172,7 @@ class PIIDetectionResult:
 # =============================================================================
 
 
-class JobStatus(str, Enum):
+class JobStatus(StrEnum):
     """Job lifecycle states."""
 
     PENDING = "pending"
@@ -183,7 +183,7 @@ class JobStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     """Task lifecycle states."""
 
     PENDING = "pending"
