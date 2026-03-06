@@ -76,7 +76,6 @@ async def _ensure_sqlite_columns(
     if table_name not in _SQLITE_BOOTSTRAP_TABLES:
         raise ValueError(f"Unsupported SQLite bootstrap table: {table_name}")
 
-    existing = await _sqlite_table_columns(conn, table_name)
     for column_name, column_ddl in required_columns.items():
         if not _SQLITE_IDENTIFIER_RE.fullmatch(column_name):
             raise ValueError(f"Unsafe SQLite column identifier: {column_name}")
@@ -84,6 +83,9 @@ async def _ensure_sqlite_columns(
             raise ValueError(
                 f"Unsafe SQLite DDL for column {column_name}: {column_ddl}"
             )
+
+    existing = await _sqlite_table_columns(conn, table_name)
+    for column_name, column_ddl in required_columns.items():
         if column_name not in existing:
             await conn.execute(
                 text(
