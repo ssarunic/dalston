@@ -40,6 +40,11 @@ async def test_require_auth_none_creates_dev_key_record(monkeypatch) -> None:
         "_get_security_manager",
         lambda: type("SM", (), {"mode": "none"})(),
     )
+    monkeypatch.setattr(
+        deps,
+        "_get_settings",
+        lambda: type("Settings", (), {"runtime_mode": "distributed"})(),
+    )
 
     api_key = await deps.require_auth(request=_request(), db=db)
 
@@ -60,6 +65,11 @@ async def test_require_auth_none_skips_dev_key_insert_when_present(monkeypatch) 
         deps,
         "_get_security_manager",
         lambda: type("SM", (), {"mode": "none"})(),
+    )
+    monkeypatch.setattr(
+        deps,
+        "_get_settings",
+        lambda: type("Settings", (), {"runtime_mode": "distributed"})(),
     )
 
     await deps.require_auth(request=_request(), db=db)

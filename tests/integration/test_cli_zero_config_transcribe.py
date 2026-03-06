@@ -165,3 +165,99 @@ def test_local_managed_lite_server_keeps_auto_model(
     assert _FakeDalston.instances[0].transcribe_models == ["auto"]
     mock_preflight.assert_called_once()
     mock_model_ready.assert_not_called()
+
+
+def test_bootstrap_disabled_keeps_auto_model_without_model_registry_check(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    audio_file = tmp_path / "sample.wav"
+    audio_file.write_bytes(b"RIFF....WAVEfmt ")
+
+    _FakeDalston.instances.clear()
+    monkeypatch.setattr(cli_main, "Dalston", _FakeDalston)
+    monkeypatch.setenv("DALSTON_BOOTSTRAP", "false")
+
+    mock_preflight = Mock(return_value=None)
+    mock_server_ready = Mock(return_value=None)
+    mock_read_model_status = Mock(return_value=None)
+    monkeypatch.setattr(cli_main.transcribe, "run_preflight", mock_preflight)
+    monkeypatch.setattr(
+        cli_main.transcribe,
+        "ensure_local_server_ready",
+        mock_server_ready,
+    )
+    monkeypatch.setattr(
+        cli_main.transcribe,
+        "read_model_status",
+        mock_read_model_status,
+    )
+
+    result = runner.invoke(
+        cli_main.app,
+        [
+            "--server",
+            "http://127.0.0.1:8000",
+            "--quiet",
+            "transcribe",
+            str(audio_file),
+            "--no-wait",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert len(_FakeDalston.instances) == 1
+    assert _FakeDalston.instances[0].transcribe_models == ["auto"]
+    mock_preflight.assert_called_once()
+    mock_server_ready.assert_not_called()
+    mock_read_model_status.assert_not_called()
+
+
+def test_bootstrap_disabled_validates_explicit_model_readiness(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    audio_file = tmp_path / "sample.wav"
+    audio_file.write_bytes(b"RIFF....WAVEfmt ")
+
+    _FakeDalston.instances.clear()
+    monkeypatch.setattr(cli_main, "Dalston", _FakeDalston)
+    monkeypatch.setenv("DALSTON_BOOTSTRAP", "false")
+
+    mock_preflight = Mock(return_value=None)
+    mock_server_ready = Mock(return_value=None)
+    mock_read_model_status = Mock(
+        return_value=type("ModelStatus", (), {"status": "ready", "error": None})()
+    )
+    monkeypatch.setattr(cli_main.transcribe, "run_preflight", mock_preflight)
+    monkeypatch.setattr(
+        cli_main.transcribe,
+        "ensure_local_server_ready",
+        mock_server_ready,
+    )
+    monkeypatch.setattr(
+        cli_main.transcribe,
+        "read_model_status",
+        mock_read_model_status,
+    )
+
+    result = runner.invoke(
+        cli_main.app,
+        [
+            "--server",
+            "http://127.0.0.1:8000",
+            "--quiet",
+            "transcribe",
+            str(audio_file),
+            "--model",
+            "distil-small",
+            "--no-wait",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert len(_FakeDalston.instances) == 1
+    assert _FakeDalston.instances[0].transcribe_models == ["distil-small"]
+    mock_preflight.assert_called_once()
+    mock_server_ready.assert_not_called()
+    mock_read_model_status.assert_called_once()

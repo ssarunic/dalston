@@ -75,6 +75,10 @@ def _assert_prerequisites_when_bootstrap_disabled(
             ),
         )
 
+    if model_id.strip().lower() == "auto":
+        # Server-side engine selection remains authoritative for auto model.
+        return
+
     model_status = read_model_status(
         base_url=client.base_url,
         api_key=client.api_key,

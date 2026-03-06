@@ -42,6 +42,17 @@ def test_probe_local_server_ready(monkeypatch, tmp_path: Path) -> None:
     assert result.state == sm.ServerProbeState.READY
 
 
+def test_is_dalston_healthy_handles_non_json_response(monkeypatch) -> None:
+    class _Response:
+        status_code = 200
+
+        def json(self):
+            raise ValueError("not json")
+
+    monkeypatch.setattr(sm.httpx, "get", lambda *_args, **_kwargs: _Response())
+    assert sm._is_dalston_healthy("http://127.0.0.1:8000") is False
+
+
 def test_probe_local_server_port_conflict(monkeypatch, tmp_path: Path) -> None:
     settings = _settings_for(tmp_path, monkeypatch)
     monkeypatch.setattr(sm, "_is_dalston_healthy", lambda _url: False)
@@ -113,6 +124,46 @@ def test_ensure_local_server_ready_restarts_when_idle_expired(
 
     assert result.started is True
     mock_kill.assert_called_once_with(777)
+
+
+def test_ensure_local_server_ready_restarts_when_idle_expired_and_probe_stays_ready(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = _settings_for(tmp_path, monkeypatch)
+    settings = settings.__class__(
+        **{**settings.__dict__, "ghost_idle_timeout_seconds": 30}
+    )
+    metadata = sm.GhostPidMetadata(
+        pid=778,
+        base_url="http://127.0.0.1:8000",
+        started_at="",
+        mode="lite",
+        security_mode="none",
+        idle_timeout_seconds=30,
+        last_used_at="2020-01-01T00:00:00+00:00",
+    )
+    sm._write_pid_metadata(settings.pid_file, metadata)
+
+    states = [
+        sm.ServerProbeResult(sm.ServerProbeState.READY),
+        sm.ServerProbeResult(sm.ServerProbeState.READY),
+    ]
+    monkeypatch.setattr(sm, "probe_local_server", lambda **_: states.pop(0))
+    mock_kill = Mock(return_value=None)
+    monkeypatch.setattr(sm, "_kill_pid", mock_kill)
+    monkeypatch.setattr(sm, "_pid_exists", lambda _pid: True)
+    monkeypatch.setattr(sm, "_process_looks_like_ghost", lambda _pid: True)
+    monkeypatch.setattr(sm, "_start_detached_server", lambda *_args, **_kwargs: 1234)
+    monkeypatch.setattr(sm, "_wait_for_server_ready", lambda **_: None)
+
+    result = sm.ensure_local_server_ready(
+        target_url="http://127.0.0.1:8000",
+        settings=settings,
+    )
+
+    assert result.started is True
+    mock_kill.assert_called_once_with(778)
 
 
 def test_ensure_local_server_ready_raises_port_conflict(

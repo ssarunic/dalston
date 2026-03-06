@@ -144,7 +144,10 @@ def _is_dalston_healthy(base_url: str) -> bool:
         return False
     if response.status_code != 200:
         return False
-    payload = response.json()
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
     return payload.get("status") == "healthy"
 
 
@@ -425,7 +428,13 @@ def ensure_local_server_ready(
             and _pid_exists(metadata.pid)
             and _process_looks_like_ghost(metadata.pid)
         )
-        if probe.state == ServerProbeState.READY:
+        if (
+            probe.state == ServerProbeState.READY
+            and managed
+            and _is_idle_expired(metadata, settings.ghost_idle_timeout_seconds)
+        ):
+            probe = ServerProbeResult(ServerProbeState.DALSTON_UNHEALTHY)
+        elif probe.state == ServerProbeState.READY:
             if metadata and managed:
                 _touch_pid_metadata(settings.pid_file, metadata)
             elif metadata and not _pid_exists(metadata.pid):

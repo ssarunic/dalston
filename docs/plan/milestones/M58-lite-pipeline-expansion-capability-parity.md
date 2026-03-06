@@ -4,7 +4,7 @@
 |---|---|
 | **Goal** | Expand `lite` mode from minimal first-success path to a broader, explicit capability set with deterministic parity and fallback behavior |
 | **Duration** | 8-10 days |
-| **Dependencies** | M56 (lite infra backends), M57 (zero-config bootstrap UX), existing batch pipeline contracts |
+| **Dependencies** | M56 (lite infra backends), M57 (zero-config bootstrap UX), M57.1 (lite SQLite migration track), existing batch pipeline contracts |
 | **Deliverable** | Lite capability matrix, profile-aware lite pipeline planner, explicit unsupported-feature semantics, and expanded integration coverage across selected stages/options |
 | **Status** | Planned |
 
@@ -12,7 +12,8 @@ Dependency clarification:
 
 1. M56 provides the runtime substrate (`sqlite + in-memory queue + localfs`) that M58 expands functionally.
 2. M57 ensures users can access lite mode through one-command UX, which M58 broadens in scope.
-3. M58 does not introduce runtime-isolation redesign; M59 remains responsible for dependency isolation profiles.
+3. M57.1 stabilizes schema evolution and upgrade safety so expanded M58 capabilities do not rely on ad hoc lite schema mutation paths.
+4. M58 does not introduce runtime-isolation redesign; M59 remains responsible for dependency isolation profiles.
 
 ## Intended Outcomes
 

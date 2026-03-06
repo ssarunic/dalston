@@ -113,6 +113,9 @@ docs/
 - [M53: Realtime Latency Budget and Explicit Backpressure (Clean-Cut)](plan/milestones/M53-realtime-latency-budget-clean-cut.md) — Deterministic lag budget enforcement and explicit realtime shutdown semantics
 - [M54: Event DLQ and Poison-Pill Isolation (Clean-Cut)](plan/milestones/M54-event-dlq-poison-pill-isolation-clean-cut.md) — Delivery-count retry ceilings and DLQ quarantine for durable orchestrator events
 - [M55: Non-Transcribe Runtime Model Management (Clean-Cut)](plan/milestones/M55-non-transcribe-runtime-model-management-clean-cut.md) — Runtime model selection and registry lifecycle for diarize, align, and PII stages
+- [M56: Lite Mode Infra Backends (Clean-Cut)](plan/milestones/M56-lite-mode-infra-backends-clean-cut.md) — Mode-aware backend abstraction for DB/queue/storage with SQLite, in-memory queue, and local filesystem adapters
+- [M57: Ghost Server + Zero-Config CLI Bootstrap (Clean-Cut)](plan/milestones/M57-ghost-server-zero-config-cli-bootstrap.md) — First-run local bootstrap state machine for one-command transcription
+- [M57.1: Lite SQLite Migration Track and Schema Compatibility (Clean-Cut)](plan/milestones/M57-1-lite-sqlite-migration-track-clean-cut.md) — Versioned lite schema migrations, legacy DB upgrades, and migration-gated startup contract
 
 ## Key Concepts
 

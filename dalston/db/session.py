@@ -56,6 +56,24 @@ def _ensure_sqlite_parent_dir(database_url: str) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
 
+async def _sqlite_table_columns(conn, table_name: str) -> set[str]:
+    result = await conn.execute(text(f"PRAGMA table_info({table_name})"))
+    return {str(row[1]) for row in result.fetchall()}
+
+
+async def _ensure_sqlite_columns(
+    conn,
+    table_name: str,
+    required_columns: dict[str, str],
+) -> None:
+    existing = await _sqlite_table_columns(conn, table_name)
+    for column_name, column_ddl in required_columns.items():
+        if column_name not in existing:
+            await conn.execute(
+                text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_ddl}")
+            )
+
+
 def _build_engine() -> tuple[AsyncEngine, str]:
     settings = get_settings()
     mode = settings.runtime_mode
@@ -117,7 +135,7 @@ async def init_db() -> None:
 
 
 async def _init_lite_schema() -> None:
-    """Bootstrap lite schema subset for batch path without Postgres-specific features."""
+    """Bootstrap lite schema compatible with current ORM-backed gateway paths."""
     statements = [
         """
         CREATE TABLE IF NOT EXISTS tenants (
@@ -133,10 +151,32 @@ async def _init_lite_schema() -> None:
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
             status TEXT NOT NULL,
+            display_name TEXT NOT NULL DEFAULT '',
             audio_uri TEXT NOT NULL,
+            audio_format TEXT,
+            audio_duration REAL,
+            audio_sample_rate INTEGER,
+            audio_channels INTEGER,
+            audio_bit_depth INTEGER,
             parameters TEXT NOT NULL DEFAULT '{}',
+            started_at TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             completed_at TEXT,
+            retention INTEGER NOT NULL DEFAULT 30,
+            purge_after TEXT,
+            purged_at TEXT,
+            result_language_code TEXT,
+            result_word_count INTEGER,
+            result_segment_count INTEGER,
+            result_speaker_count INTEGER,
+            result_character_count INTEGER,
+            pii_detection_enabled INTEGER NOT NULL DEFAULT 0,
+            pii_entity_types TEXT,
+            pii_redact_audio INTEGER NOT NULL DEFAULT 0,
+            pii_redaction_mode TEXT,
+            pii_entities_detected INTEGER,
+            pii_redacted_audio_uri TEXT,
+            created_by_key_id TEXT,
             error TEXT,
             FOREIGN KEY(tenant_id) REFERENCES tenants(id)
         )
@@ -148,15 +188,158 @@ async def _init_lite_schema() -> None:
             stage TEXT NOT NULL,
             status TEXT NOT NULL,
             runtime TEXT NOT NULL,
+            dependencies TEXT NOT NULL DEFAULT '[]',
             config TEXT NOT NULL DEFAULT '{}',
+            input_uri TEXT,
             output_uri TEXT,
+            retries INTEGER NOT NULL DEFAULT 0,
+            max_retries INTEGER NOT NULL DEFAULT 2,
+            required INTEGER NOT NULL DEFAULT 1,
+            error TEXT,
+            started_at TEXT,
+            completed_at TEXT,
             FOREIGN KEY(job_id) REFERENCES jobs(id)
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS models (
+            id TEXT PRIMARY KEY,
+            name TEXT,
+            runtime TEXT NOT NULL,
+            runtime_model_id TEXT NOT NULL,
+            stage TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'not_downloaded',
+            download_path TEXT,
+            size_bytes INTEGER,
+            downloaded_at TEXT,
+            source TEXT,
+            library_name TEXT,
+            languages TEXT,
+            word_timestamps INTEGER NOT NULL DEFAULT 0,
+            punctuation INTEGER NOT NULL DEFAULT 0,
+            capitalization INTEGER NOT NULL DEFAULT 0,
+            streaming INTEGER NOT NULL DEFAULT 0,
+            min_vram_gb REAL,
+            min_ram_gb REAL,
+            supports_cpu INTEGER NOT NULL DEFAULT 1,
+            model_metadata TEXT NOT NULL DEFAULT '{}',
+            metadata_source TEXT NOT NULL DEFAULT 'yaml',
+            last_used_at TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS api_keys (
+            id TEXT PRIMARY KEY,
+            key_hash TEXT NOT NULL UNIQUE,
+            prefix TEXT NOT NULL,
+            name TEXT NOT NULL,
+            tenant_id TEXT NOT NULL,
+            scopes TEXT NOT NULL,
+            rate_limit INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            last_used_at TEXT,
+            expires_at TEXT,
+            revoked_at TEXT,
+            created_by_key_id TEXT
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS ix_jobs_tenant_id ON jobs (tenant_id)",
+        "CREATE INDEX IF NOT EXISTS ix_jobs_status ON jobs (status)",
+        "CREATE INDEX IF NOT EXISTS ix_jobs_created_at ON jobs (created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_tasks_job_id ON tasks (job_id)",
+        "CREATE INDEX IF NOT EXISTS ix_tasks_stage ON tasks (stage)",
+        "CREATE INDEX IF NOT EXISTS ix_tasks_status ON tasks (status)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_tasks_job_id_stage ON tasks (job_id, stage)",
+        "CREATE INDEX IF NOT EXISTS ix_models_runtime ON models (runtime)",
+        "CREATE INDEX IF NOT EXISTS ix_models_stage ON models (stage)",
+        "CREATE INDEX IF NOT EXISTS ix_models_status ON models (status)",
     ]
+
+    jobs_required_columns = {
+        "display_name": "TEXT NOT NULL DEFAULT ''",
+        "audio_format": "TEXT",
+        "audio_duration": "REAL",
+        "audio_sample_rate": "INTEGER",
+        "audio_channels": "INTEGER",
+        "audio_bit_depth": "INTEGER",
+        "started_at": "TEXT",
+        "retention": "INTEGER NOT NULL DEFAULT 30",
+        "purge_after": "TEXT",
+        "purged_at": "TEXT",
+        "result_language_code": "TEXT",
+        "result_word_count": "INTEGER",
+        "result_segment_count": "INTEGER",
+        "result_speaker_count": "INTEGER",
+        "result_character_count": "INTEGER",
+        "pii_detection_enabled": "INTEGER NOT NULL DEFAULT 0",
+        "pii_entity_types": "TEXT",
+        "pii_redact_audio": "INTEGER NOT NULL DEFAULT 0",
+        "pii_redaction_mode": "TEXT",
+        "pii_entities_detected": "INTEGER",
+        "pii_redacted_audio_uri": "TEXT",
+        "created_by_key_id": "TEXT",
+    }
+
+    tasks_required_columns = {
+        "dependencies": "TEXT NOT NULL DEFAULT '[]'",
+        "input_uri": "TEXT",
+        "retries": "INTEGER NOT NULL DEFAULT 0",
+        "max_retries": "INTEGER NOT NULL DEFAULT 2",
+        "required": "INTEGER NOT NULL DEFAULT 1",
+        "error": "TEXT",
+        "started_at": "TEXT",
+        "completed_at": "TEXT",
+    }
+
+    models_required_columns = {
+        "name": "TEXT",
+        "runtime": "TEXT NOT NULL DEFAULT ''",
+        "runtime_model_id": "TEXT NOT NULL DEFAULT ''",
+        "stage": "TEXT NOT NULL DEFAULT ''",
+        "status": "TEXT NOT NULL DEFAULT 'not_downloaded'",
+        "download_path": "TEXT",
+        "size_bytes": "INTEGER",
+        "downloaded_at": "TEXT",
+        "source": "TEXT",
+        "library_name": "TEXT",
+        "languages": "TEXT",
+        "word_timestamps": "INTEGER NOT NULL DEFAULT 0",
+        "punctuation": "INTEGER NOT NULL DEFAULT 0",
+        "capitalization": "INTEGER NOT NULL DEFAULT 0",
+        "streaming": "INTEGER NOT NULL DEFAULT 0",
+        "min_vram_gb": "REAL",
+        "min_ram_gb": "REAL",
+        "supports_cpu": "INTEGER NOT NULL DEFAULT 1",
+        "model_metadata": "TEXT NOT NULL DEFAULT '{}'",
+        "metadata_source": "TEXT NOT NULL DEFAULT 'yaml'",
+        "last_used_at": "TEXT",
+        "created_at": "TEXT DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TEXT DEFAULT CURRENT_TIMESTAMP",
+    }
+
+    api_keys_required_columns = {
+        "key_hash": "TEXT NOT NULL DEFAULT ''",
+        "prefix": "TEXT NOT NULL DEFAULT ''",
+        "name": "TEXT NOT NULL DEFAULT ''",
+        "tenant_id": "TEXT NOT NULL DEFAULT ''",
+        "scopes": "TEXT NOT NULL DEFAULT ''",
+        "rate_limit": "INTEGER",
+        "created_at": "TEXT DEFAULT CURRENT_TIMESTAMP",
+        "last_used_at": "TEXT",
+        "expires_at": "TEXT",
+        "revoked_at": "TEXT",
+        "created_by_key_id": "TEXT",
+    }
+
     async with get_engine().begin() as conn:
         for stmt in statements:
             await conn.execute(text(stmt))
+        await _ensure_sqlite_columns(conn, "jobs", jobs_required_columns)
+        await _ensure_sqlite_columns(conn, "tasks", tasks_required_columns)
+        await _ensure_sqlite_columns(conn, "models", models_required_columns)
+        await _ensure_sqlite_columns(conn, "api_keys", api_keys_required_columns)
 
 
 async def _ensure_default_tenant() -> None:
