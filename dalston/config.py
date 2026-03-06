@@ -16,10 +16,20 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
+    runtime_mode: Literal["distributed", "lite"] = Field(
+        default="distributed",
+        alias="DALSTON_MODE",
+        description="Runtime mode. Explicit process-wide immutable mode switch.",
+    )
+
     # PostgreSQL
     database_url: str = Field(
         default="postgresql+asyncpg://dalston:password@localhost:5432/dalston",
         alias="DATABASE_URL",
+    )
+    lite_database_url: str = Field(
+        default="sqlite+aiosqlite:///./.dalston/lite.db",
+        alias="DALSTON_LITE_DATABASE_URL",
     )
 
     # Redis
@@ -68,6 +78,10 @@ class Settings(BaseSettings):
     aws_access_key_id: str | None = Field(default=None, alias="AWS_ACCESS_KEY_ID")
     aws_secret_access_key: str | None = Field(
         default=None, alias="AWS_SECRET_ACCESS_KEY"
+    )
+    lite_artifacts_dir: str = Field(
+        default="./.dalston/artifacts",
+        alias="DALSTON_LITE_ARTIFACTS_DIR",
     )
 
     # Webhooks

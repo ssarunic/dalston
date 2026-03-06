@@ -85,7 +85,7 @@ async def test_poison_event_quarantined_while_healthy_event_continues():
             new=AsyncMock(side_effect=[HandlerExecutionError("forced failure"), None]),
         ),
         patch(
-            "dalston.orchestrator.main.dalston.metrics.inc_orchestrator_event_decision",
+            "dalston.orchestrator.distributed_main.dalston.metrics.inc_orchestrator_event_decision",
             new=MagicMock(),
         ),
     ):
@@ -136,7 +136,7 @@ async def test_malformed_event_is_dlqd_without_dispatch_attempt():
             "dalston.orchestrator.main._dispatch_event_dict", new=AsyncMock()
         ) as mock_dispatch,
         patch(
-            "dalston.orchestrator.main.dalston.metrics.inc_orchestrator_event_decision",
+            "dalston.orchestrator.distributed_main.dalston.metrics.inc_orchestrator_event_decision",
             new=MagicMock(),
         ),
     ):

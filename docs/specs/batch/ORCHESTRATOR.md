@@ -2,6 +2,11 @@
 
 ## Overview
 
+### Mode Entrypoints
+
+- `dalston/orchestrator/main.py`: runtime mode dispatch only.
+- `dalston/orchestrator/lite_main.py`: dedicated lite orchestrator path for scoped batch execution.
+
 The Orchestrator is a background service responsible for expanding jobs into task DAGs, scheduling tasks, and managing the job lifecycle.
 
 ### Storage Architecture

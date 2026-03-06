@@ -125,3 +125,5 @@ docs/
 | **Worker** | Real-time engine instance handling sessions |
 
 See [GLOSSARY.md](GLOSSARY.md) for complete terminology.
+
+- Lite mode foundation (M56): see `docs/reports/M56-lite-mode-foundation.md`.
