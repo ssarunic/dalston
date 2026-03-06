@@ -13,6 +13,7 @@ the request is handled in OpenAI mode with synchronous response and OpenAI respo
 """
 
 import json
+from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
@@ -452,6 +453,72 @@ async def create_transcription(
         # Ownership tracking (M45)
         created_by_key_id=principal.id,
     )
+
+    # Lite mode runs the scoped pipeline inline (no Redis/orchestrator dependency).
+    if settings.runtime_mode == "lite":
+        from dalston.orchestrator.lite_main import build_default_pipeline
+
+        request_id = getattr(request.state, "request_id", None)
+        try:
+            job.status = JobStatus.RUNNING.value
+            job.started_at = datetime.now(UTC)
+            await db.commit()
+
+            pipeline = build_default_pipeline()
+            await pipeline.run_job(ingested.content, job_id=str(job.id))
+
+            job.status = JobStatus.COMPLETED.value
+            job.completed_at = datetime.now(UTC)
+            await db.commit()
+            await db.refresh(job)
+        except Exception as e:
+            job.status = JobStatus.FAILED.value
+            job.error = str(e)
+            job.completed_at = datetime.now(UTC)
+            await db.commit()
+            await db.refresh(job)
+            if openai_mode:
+                raise_openai_error(
+                    500,
+                    f"Transcription failed: {job.error or 'Unknown error'}",
+                    error_type="server_error",
+                    code="processing_failed",
+                )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Lite transcription failed: {e}",
+            ) from e
+
+        await audit_service.log_job_created(
+            job_id=job.id,
+            tenant_id=principal.tenant_id,
+            actor_type=principal.actor_type,
+            actor_id=principal.actor_id,
+            correlation_id=request_id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+
+        if not openai_mode:
+            response.status_code = 201
+            return JobCreatedResponse(
+                id=job.id,
+                status=JobStatus(job.status),
+                display_name=job.display_name,
+                created_at=job.created_at,
+            )
+
+        transcript = await storage.get_transcript(job.id)
+        if transcript is None:
+            raise_openai_error(
+                500,
+                "Transcription completed but transcript could not be loaded.",
+                error_type="server_error",
+                code="processing_failed",
+            )
+        return format_openai_response(
+            transcript, response_format, timestamp_granularities, export_service
+        )
 
     # Publish event for orchestrator (include request_id for correlation)
     request_id = getattr(request.state, "request_id", None)

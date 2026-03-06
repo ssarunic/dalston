@@ -16,10 +16,10 @@
 Transcribe audio files or live streams with speaker diarization, word-level timestamps, and GPU acceleration. Run it on your own infrastructure.
 
 ```bash
-# Transcribe a file
-curl -X POST http://localhost:8000/v1/audio/transcriptions \
-  -F "file=@meeting.mp3" \
-  -F "speaker_detection=diarize"
+# One-command local transcription (M57 zero-config bootstrap)
+# - auto-starts local server if missing
+# - auto-ensures default model (distil-small)
+DALSTON_SECURITY_MODE=none dalston transcribe tests/audio/test_merged.wav --format json
 ```
 
 ```json
@@ -37,10 +37,12 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 ```bash
 git clone https://github.com/ssarunic/dalston.git
 cd dalston
-docker compose --profile local-infra --profile local-object-storage up -d
+pip install -e ".[gateway,orchestrator,dev]"
+pip install -e ./sdk -e ./cli
+DALSTON_SECURITY_MODE=none dalston transcribe tests/audio/test_merged.wav --format json
 ```
 
-The API is available at `http://localhost:8000`. See the [deployment guide](docs/guides/self-hosted-deployment-tutorial.md) for production setup.
+For distributed Docker deployments, see the [deployment guide](docs/guides/self-hosted-deployment-tutorial.md).
 
 ## Features
 

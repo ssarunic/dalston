@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -38,12 +40,29 @@ class _EngineProxy:
 engine = _EngineProxy()
 
 
+def _ensure_sqlite_parent_dir(database_url: str) -> None:
+    """Create parent directory for SQLite file-backed URLs if needed."""
+    url = make_url(database_url)
+    if not url.drivername.startswith("sqlite"):
+        return
+
+    db_name = url.database
+    if not db_name or db_name == ":memory:" or db_name.startswith("file:"):
+        return
+
+    db_path = Path(db_name).expanduser()
+    if not db_path.is_absolute():
+        db_path = Path.cwd() / db_path
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+
 def _build_engine() -> tuple[AsyncEngine, str]:
     settings = get_settings()
     mode = settings.runtime_mode
     database_url = (
         settings.database_url if mode == "distributed" else settings.lite_database_url
     )
+    _ensure_sqlite_parent_dir(database_url)
     created_engine = create_async_engine(
         database_url,
         echo=False,

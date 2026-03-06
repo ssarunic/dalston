@@ -51,3 +51,6 @@ tests/audio/large/
 
 # Temporary files
 tmp/
+
+# Local runtime state
+.dalston/

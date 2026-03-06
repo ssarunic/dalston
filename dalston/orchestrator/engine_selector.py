@@ -822,15 +822,30 @@ async def select_pipeline_engines(
                 if requirements.get("language")
                 else {}
             )
-            selections["align"] = await select_engine(
-                "align",
-                align_requirements,
-                registry,
-                catalog,
-                user_preference=parameters.get(MODEL_PARAM_ALIGN),
-                db=db,
-                user_preference_is_model=True,
-            )
+            align_model_preference = parameters.get(MODEL_PARAM_ALIGN)
+            try:
+                selections["align"] = await select_engine(
+                    "align",
+                    align_requirements,
+                    registry,
+                    catalog,
+                    user_preference=align_model_preference,
+                    db=db,
+                    user_preference_is_model=True,
+                )
+            except NoDownloadedModelError:
+                # Keep explicit align-model pinning strict; otherwise degrade
+                # to segment timestamps to preserve zero-config usability.
+                if align_model_preference:
+                    raise
+
+                parameters["word_timestamps"] = False
+                parameters["timestamps_granularity"] = "segment"
+                logger.warning(
+                    "align_model_missing_fallback_to_segment_timestamps",
+                    reason="no_downloaded_align_model",
+                    transcribe_runtime=selections["transcribe"].runtime,
+                )
 
         # Diarization (conditional on parameters and transcriber capabilities)
         if _should_add_diarization(parameters, selections["transcribe"]):

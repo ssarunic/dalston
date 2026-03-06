@@ -145,7 +145,7 @@ test.describe('Mobile Responsive Overflow Menu', () => {
     })
 
     // 2. Navigate to the job detail page using the same mock setup from layout.spec.ts
-    await page.goto(`http://localhost:3000/jobs/${jobId}`)
+    await page.goto(`/console/jobs/${jobId}`)
 
     // 3. Wait for the audio player to be ready (wait for the Transcript section to appear)
     await expect(page.getByRole('heading', { name: 'Transcript' }).first()).toBeVisible()

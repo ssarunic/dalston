@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -734,3 +734,108 @@ class TestSelectPipelineEngines:
 
         assert "diarize" in selections
         assert selections["diarize"].runtime == "pyannote-4.0"
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_segment_when_align_model_not_downloaded_default(
+        self, mock_registry, mock_catalog
+    ):
+        parameters: dict = {}
+
+        with patch(
+            "dalston.orchestrator.engine_selector.select_engine", new_callable=AsyncMock
+        ) as mock_select_engine:
+            mock_select_engine.side_effect = [
+                EngineSelectionResult(
+                    runtime="audio-prepare",
+                    capabilities=make_capabilities("audio-prepare"),
+                    selection_reason="prepare",
+                ),
+                EngineSelectionResult(
+                    runtime="faster-whisper",
+                    capabilities=make_capabilities(
+                        "faster-whisper", supports_word_timestamps=False
+                    ),
+                    selection_reason="transcribe",
+                ),
+                NoDownloadedModelError(runtime="phoneme-align", stage="align"),
+                EngineSelectionResult(
+                    runtime="final-merger",
+                    capabilities=make_capabilities("final-merger"),
+                    selection_reason="merge",
+                ),
+            ]
+
+            selections = await select_pipeline_engines(
+                parameters, mock_registry, mock_catalog
+            )
+
+        assert "align" not in selections
+        assert selections["transcribe"].runtime == "faster-whisper"
+        assert selections["merge"].runtime == "final-merger"
+        assert parameters["timestamps_granularity"] == "segment"
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_segment_when_word_timestamps_requested(
+        self, mock_registry, mock_catalog
+    ):
+        parameters = {"timestamps_granularity": "word"}
+
+        with patch(
+            "dalston.orchestrator.engine_selector.select_engine", new_callable=AsyncMock
+        ) as mock_select_engine:
+            mock_select_engine.side_effect = [
+                EngineSelectionResult(
+                    runtime="audio-prepare",
+                    capabilities=make_capabilities("audio-prepare"),
+                    selection_reason="prepare",
+                ),
+                EngineSelectionResult(
+                    runtime="faster-whisper",
+                    capabilities=make_capabilities(
+                        "faster-whisper", supports_word_timestamps=False
+                    ),
+                    selection_reason="transcribe",
+                ),
+                NoDownloadedModelError(runtime="phoneme-align", stage="align"),
+                EngineSelectionResult(
+                    runtime="final-merger",
+                    capabilities=make_capabilities("final-merger"),
+                    selection_reason="merge",
+                ),
+            ]
+
+            selections = await select_pipeline_engines(
+                parameters, mock_registry, mock_catalog
+            )
+
+        assert "align" not in selections
+        assert parameters["timestamps_granularity"] == "segment"
+        assert parameters["word_timestamps"] is False
+
+    @pytest.mark.asyncio
+    async def test_keeps_pinned_align_model_request_strict(
+        self, mock_registry, mock_catalog
+    ):
+        parameters = {"model_align": "facebook/wav2vec2-base-960h"}
+
+        with patch(
+            "dalston.orchestrator.engine_selector.select_engine", new_callable=AsyncMock
+        ) as mock_select_engine:
+            mock_select_engine.side_effect = [
+                EngineSelectionResult(
+                    runtime="audio-prepare",
+                    capabilities=make_capabilities("audio-prepare"),
+                    selection_reason="prepare",
+                ),
+                EngineSelectionResult(
+                    runtime="faster-whisper",
+                    capabilities=make_capabilities(
+                        "faster-whisper", supports_word_timestamps=False
+                    ),
+                    selection_reason="transcribe",
+                ),
+                NoDownloadedModelError(runtime="phoneme-align", stage="align"),
+            ]
+
+            with pytest.raises(NoDownloadedModelError):
+                await select_pipeline_engines(parameters, mock_registry, mock_catalog)

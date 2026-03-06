@@ -131,6 +131,7 @@ from dalston_cli.commands import (  # noqa: E402
     jobs,
     listen,
     models,
+    server,
     sessions,
     status,
     transcribe,
@@ -143,6 +144,7 @@ app.add_typer(sessions.app, name="sessions")
 app.command()(export.export)
 app.command()(status.status)
 app.add_typer(models.app, name="models")
+app.add_typer(server.app, name="server")
 app.command()(engines.engines)
 
 

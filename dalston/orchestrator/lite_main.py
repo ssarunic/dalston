@@ -26,8 +26,8 @@ class LitePipeline:
         self._queue = InMemoryQueue()
         self._artifacts = artifacts
 
-    async def run_job(self, audio_bytes: bytes) -> dict:
-        job_id = str(uuid4())
+    async def run_job(self, audio_bytes: bytes, job_id: str | None = None) -> dict:
+        job_id = job_id or str(uuid4())
         await self._artifacts.write_bytes(
             f"jobs/{job_id}/audio/original.wav", audio_bytes
         )

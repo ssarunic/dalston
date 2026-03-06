@@ -8,11 +8,14 @@ from typing import TYPE_CHECKING
 import structlog
 from fastapi import Depends, HTTPException, Request
 from redis.asyncio import Redis
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.redis import get_redis as _get_redis_client
 from dalston.config import Settings
 from dalston.config import get_settings as _get_settings
+from dalston.db.models import APIKeyModel
 from dalston.db.session import async_session
 from dalston.gateway.middleware.auth import authenticate_request
 from dalston.gateway.security.manager import SecurityManager
@@ -27,7 +30,7 @@ from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.ingestion import AudioIngestionService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.pii_entity_types import PIIEntityTypeService
-from dalston.gateway.services.rate_limiter import RedisRateLimiter
+from dalston.gateway.services.rate_limiter import RateLimitResult, RedisRateLimiter
 from dalston.gateway.services.storage import StorageService
 
 if TYPE_CHECKING:
@@ -35,6 +38,22 @@ if TYPE_CHECKING:
     from dalston.session_router import SessionRouter
 
 logger = structlog.get_logger()
+
+
+class _NoopRedis:
+    """Minimal async no-op Redis client for lite mode endpoints."""
+
+    async def publish(self, *_args, **_kwargs) -> int:
+        return 0
+
+    async def close(self) -> None:
+        return None
+
+    def __getattr__(self, _name: str):
+        async def _noop(*_args, **_kwargs):
+            return None
+
+        return _noop
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -48,6 +67,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def get_redis() -> Redis:
     """Get async Redis client."""
+    if _get_settings().runtime_mode == "lite":
+        return _NoopRedis()  # type: ignore[return-value]
     return await _get_redis_client()
 
 
@@ -187,7 +208,7 @@ def _get_dev_api_key() -> APIKey:
     return APIKey(
         id=DEV_KEY_ID,
         key_hash="dev_key_hash",
-        prefix="dk_dev00000",
+        prefix="dk_dev0000",
         name="Development Key",
         tenant_id=DEFAULT_TENANT_ID,
         scopes=[Scope.ADMIN],  # Full access in dev mode
@@ -199,9 +220,38 @@ def _get_dev_api_key() -> APIKey:
     )
 
 
+async def _ensure_dev_api_key_record(db: AsyncSession, api_key: APIKey) -> None:
+    """Ensure the development key exists in DB for FK-backed job writes."""
+    stmt = select(APIKeyModel.id).where(APIKeyModel.id == api_key.id)
+    existing = await db.execute(stmt)
+    if existing.scalar_one_or_none() is not None:
+        return
+
+    db.add(
+        APIKeyModel(
+            id=api_key.id,
+            key_hash=api_key.key_hash,
+            prefix=api_key.prefix,
+            name=api_key.name,
+            tenant_id=api_key.tenant_id,
+            scopes=",".join(scope.value for scope in api_key.scopes),
+            rate_limit=api_key.rate_limit,
+            created_at=api_key.created_at,
+            last_used_at=api_key.last_used_at,
+            expires_at=api_key.expires_at,
+            revoked_at=api_key.revoked_at,
+        )
+    )
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Another concurrent request inserted the dev key first.
+        await db.rollback()
+
+
 async def require_auth(
     request: Request,
-    auth_service: AuthService = Depends(get_auth_service),
+    db: AsyncSession = Depends(get_db),
 ) -> APIKey:
     """Dependency that requires a valid API key.
 
@@ -222,10 +272,14 @@ async def require_auth(
     if security_manager.mode == "none":
         # Development mode: return dev API key with admin access
         dev_key = _get_dev_api_key()
+        if _get_settings().runtime_mode != "lite":
+            await _ensure_dev_api_key_record(db, dev_key)
         request.state.api_key = dev_key
         request.state.tenant_id = dev_key.tenant_id
         return dev_key
 
+    redis = await _get_redis_client()
+    auth_service = AuthService(db, redis)
     return await authenticate_request(request, auth_service)
 
 
@@ -257,6 +311,58 @@ async def get_principal(
 # =============================================================================
 # Rate limiter singleton
 _rate_limiter: RedisRateLimiter | None = None
+_lite_rate_limiter: _NoopRateLimiter | None = None
+
+
+class _NoopRateLimiter:
+    """Rate limiter that always allows requests (lite mode)."""
+
+    def __init__(
+        self,
+        requests_per_minute: int,
+        max_concurrent_jobs: int,
+        max_concurrent_sessions: int,
+    ) -> None:
+        self._requests_per_minute = requests_per_minute
+        self._max_concurrent_jobs = max_concurrent_jobs
+        self._max_concurrent_sessions = max_concurrent_sessions
+
+    async def check_request_rate(self, _tenant_id) -> RateLimitResult:
+        return RateLimitResult(
+            allowed=True,
+            limit=self._requests_per_minute,
+            remaining=self._requests_per_minute,
+            reset_seconds=60,
+        )
+
+    async def check_concurrent_jobs(self, _tenant_id) -> RateLimitResult:
+        return RateLimitResult(
+            allowed=True,
+            limit=self._max_concurrent_jobs,
+            remaining=self._max_concurrent_jobs,
+        )
+
+    async def check_concurrent_sessions(self, _tenant_id) -> RateLimitResult:
+        return RateLimitResult(
+            allowed=True,
+            limit=self._max_concurrent_sessions,
+            remaining=self._max_concurrent_sessions,
+        )
+
+    async def increment_concurrent_jobs(self, _tenant_id) -> None:
+        return None
+
+    async def decrement_concurrent_jobs(self, _tenant_id) -> None:
+        return None
+
+    async def decrement_concurrent_jobs_once(self, _job_id, _tenant_id) -> bool:
+        return True
+
+    async def increment_concurrent_sessions(self, _tenant_id) -> None:
+        return None
+
+    async def decrement_concurrent_sessions(self, _tenant_id) -> None:
+        return None
 
 
 def set_rate_limiter(limiter: RedisRateLimiter | None) -> None:
@@ -267,12 +373,12 @@ def set_rate_limiter(limiter: RedisRateLimiter | None) -> None:
 
 def reset_rate_limiter() -> None:
     """Reset the rate limiter singleton (for testing)."""
-    global _rate_limiter
+    global _rate_limiter, _lite_rate_limiter
     _rate_limiter = None
+    _lite_rate_limiter = None
 
 
 async def get_rate_limiter(
-    redis: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
     db: AsyncSession = Depends(get_db),
 ) -> RedisRateLimiter:
@@ -281,7 +387,18 @@ async def get_rate_limiter(
     Creates a singleton rate limiter with Redis backend.
     On each request, limits are refreshed from DB overrides (5s TTL cache).
     """
-    global _rate_limiter
+    global _rate_limiter, _lite_rate_limiter
+
+    if settings.runtime_mode == "lite":
+        if _lite_rate_limiter is None:
+            _lite_rate_limiter = _NoopRateLimiter(
+                requests_per_minute=settings.rate_limit_requests_per_minute,
+                max_concurrent_jobs=settings.rate_limit_concurrent_jobs,
+                max_concurrent_sessions=settings.rate_limit_concurrent_sessions,
+            )
+        return _lite_rate_limiter
+
+    redis = await _get_redis_client()
     if _rate_limiter is None:
         _rate_limiter = RedisRateLimiter(
             redis=redis,

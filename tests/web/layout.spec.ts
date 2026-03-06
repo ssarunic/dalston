@@ -142,7 +142,7 @@ test.describe('3-Zone Header Layout', () => {
     })
 
     // 2. Navigate to a mocked job detail page with completed status, audio, and transcript
-    await page.goto(`http://localhost:3000/jobs/${jobId}`)
+    await page.goto(`/console/jobs/${jobId}`)
 
     // 3. Locate the Transcript section on the job detail page
     // Wait for the transcript card to render with the "Transcript" heading (Card title only)

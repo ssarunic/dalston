@@ -10,6 +10,31 @@ Step-by-step guide to deploy Dalston on your own server using Docker Compose.
 - (Optional) NVIDIA GPU with CUDA for accelerated transcription
 - (Optional) HuggingFace account for speaker diarization
 
+## Zero-Config Local CLI (M57)
+
+For local-first usage without manual server startup, install CLI + SDK and run:
+
+```bash
+pip install -e ".[gateway,orchestrator,dev]"
+pip install -e ./sdk -e ./cli
+DALSTON_SECURITY_MODE=none dalston transcribe tests/audio/test_merged.wav --format json
+```
+
+Bootstrap controls:
+
+- `DALSTON_BOOTSTRAP=true|false` (default `true`)
+- `DALSTON_DEFAULT_MODEL=distil-small`
+- `DALSTON_LOCAL_SERVER_URL=http://127.0.0.1:8000`
+- `DALSTON_SERVER_START_TIMEOUT_SECONDS=30`
+- `DALSTON_MODEL_ENSURE_TIMEOUT_SECONDS=900`
+- `DALSTON_GHOST_IDLE_TIMEOUT_SECONDS=900`
+
+Ghost server artifacts:
+
+- PID metadata: `~/.dalston/run/ghost-server.pid`
+- Bootstrap lock: `~/.dalston/run/bootstrap.lock`
+- Logs: `~/.dalston/logs/ghost-server.log`
+
 ## 1. Server Setup
 
 ### Install Docker
@@ -230,6 +255,19 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 curl http://localhost:8000/v1/audio/transcriptions/JOB_ID \
   -H "Authorization: Bearer dk_YOUR_API_KEY"
 ```
+
+### 8.1 Bootstrap Troubleshooting (`dalston transcribe`)
+
+- `Bootstrap failed: Local port is occupied by a non-Dalston process`
+  - free port `8000` or use `--server` with a different endpoint.
+- `Bootstrap failed: Local Dalston server exited during startup`
+  - inspect `~/.dalston/logs/ghost-server.log` and retry.
+- `Bootstrap failed` with model readiness/download error
+  - run `dalston models pull <model>` manually, then retry.
+- `DALSTON_BOOTSTRAP=false` fails immediately
+  - expected behavior; manually start server and pre-pull model before running `dalston transcribe`.
+- Stop ghost server explicitly:
+  - `dalston server stop`
 
 ## 9. Scaling for Production
 

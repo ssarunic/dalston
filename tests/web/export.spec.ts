@@ -67,7 +67,7 @@ test.describe('Export Dropdown', () => {
       pii: { enabled: false, redacted_audio_available: false },
     }
 
-    // 1. Navigate to http://localhost:3000/jobs/{jobId} using the same mock setup from layout.spec.ts
+    // 1. Navigate to /console/jobs/{jobId} using the same mock setup from layout.spec.ts
     await page.addInitScript(() => {
       sessionStorage.setItem('dalston_api_key', 'test-admin-key')
     })
@@ -141,7 +141,7 @@ test.describe('Export Dropdown', () => {
       })
     })
 
-    await page.goto(`http://localhost:3000/jobs/${jobId}`)
+    await page.goto(`/console/jobs/${jobId}`)
 
     // 2. Wait for the page to load
     await expect(page.getByRole('button', { name: /Export/ })).toBeVisible()
