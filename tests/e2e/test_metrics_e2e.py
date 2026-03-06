@@ -205,8 +205,8 @@ class TestMetricsDisabledE2E:
         return os.environ.get("GATEWAY_URL", "http://localhost:8000")
 
     @pytest.mark.skipif(
-        os.environ.get("DALSTON_METRICS_ENABLED") == "true",
-        reason="Metrics is enabled - these tests require disabled metrics",
+        os.environ.get("DALSTON_METRICS_ENABLED") != "false",
+        reason="Metrics not explicitly disabled - set DALSTON_METRICS_ENABLED=false",
     )
     async def test_gateway_works_without_metrics(self, gateway_url):
         """Gateway works correctly when metrics is disabled."""
@@ -217,8 +217,8 @@ class TestMetricsDisabledE2E:
             assert data["status"] == "healthy"
 
     @pytest.mark.skipif(
-        os.environ.get("DALSTON_METRICS_ENABLED") == "true",
-        reason="Metrics is enabled - these tests require disabled metrics",
+        os.environ.get("DALSTON_METRICS_ENABLED") != "false",
+        reason="Metrics not explicitly disabled - set DALSTON_METRICS_ENABLED=false",
     )
     async def test_metrics_endpoint_returns_404_when_disabled(self, gateway_url):
         """Gateway /metrics endpoint returns 404 when metrics disabled."""
