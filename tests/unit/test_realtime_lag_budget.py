@@ -27,6 +27,20 @@ class _FakeWebSocket:
         self.closed.append((code, reason))
 
 
+class _ScriptedWebSocket(_FakeWebSocket):
+    def __init__(self, messages: list[str]) -> None:
+        super().__init__()
+        self._messages = list(messages)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self._messages:
+            raise StopAsyncIteration
+        return self._messages.pop(0)
+
+
 def _transcribe_stub(*_args, **_kwargs) -> TranscribeResult:
     return TranscribeResult(
         text="stub",
@@ -177,3 +191,27 @@ async def test_debug_chunk_sleep_is_progressive(monkeypatch):
 
     assert sleep_calls == pytest.approx([0.1, 0.15, 0.2])
     assert handler._next_debug_chunk_sleep_seconds == pytest.approx(0.25)
+
+
+@pytest.mark.asyncio
+async def test_run_does_not_double_cleanup_after_end_message():
+    ws = _ScriptedWebSocket(messages=['{"type":"end"}'])
+    _, handler = _build_handler()
+    handler.websocket = ws
+
+    cleanup_calls = 0
+    original_cleanup = handler._cleanup_storage
+
+    async def _wrapped_cleanup() -> None:
+        nonlocal cleanup_calls
+        cleanup_calls += 1
+        await original_cleanup()
+
+    handler._cleanup_storage = _wrapped_cleanup  # type: ignore[method-assign]
+
+    await handler.run()
+
+    assert cleanup_calls == 1
+    message_types = [msg.get("type") for msg in _decoded_messages(ws)]
+    assert "session.begin" in message_types
+    assert "session.end" in message_types

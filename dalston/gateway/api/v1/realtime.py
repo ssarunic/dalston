@@ -35,10 +35,16 @@ from dalston.common.ws_close_codes import (
 from dalston.config import get_settings
 from dalston.db.session import get_db as _get_db
 from dalston.gateway.api.v1._realtime_common import (
+    RealtimeLagExceededError,
+)
+from dalston.gateway.api.v1._realtime_common import (
     decrement_realtime_session_count as _decrement_session_count,
 )
 from dalston.gateway.api.v1._realtime_common import (
     get_realtime_auth_service as _get_auth_service,
+)
+from dalston.gateway.api.v1._realtime_common import (
+    get_worker_close_code as _get_worker_close_code,
 )
 from dalston.gateway.api.v1._realtime_common import (
     keep_session_alive as _keep_session_alive,
@@ -53,10 +59,6 @@ from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.realtime_sessions import RealtimeSessionService
 
 logger = structlog.get_logger()
-
-
-class RealtimeLagExceededError(RuntimeError):
-    """Raised when worker closes a session due to lag budget exceedance."""
 
 
 async def _check_realtime_rate_limits(
@@ -878,7 +880,7 @@ async def _proxy_to_worker(
 
         if (
             session_end_data is None
-            and getattr(worker_ws, "close_code", None) == WS_CLOSE_LAG_EXCEEDED
+            and _get_worker_close_code(worker_ws) == WS_CLOSE_LAG_EXCEEDED
         ):
             raise RealtimeLagExceededError("lag_exceeded")
 

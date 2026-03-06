@@ -21,6 +21,30 @@ logger = structlog.get_logger()
 
 
 # ---------------------------------------------------------------------------
+# Shared realtime exceptions/helpers
+# ---------------------------------------------------------------------------
+
+
+class RealtimeLagExceededError(RuntimeError):
+    """Raised when worker closes a session due to lag budget exceedance."""
+
+
+def get_worker_close_code(worker_ws: Any) -> int | None:
+    """Best-effort extraction of close code across websocket client variants."""
+    close_code = getattr(worker_ws, "close_code", None)
+    if close_code is not None:
+        return close_code
+
+    close = getattr(worker_ws, "close", None)
+    if close is not None:
+        nested_close_code = getattr(close, "code", None)
+        if nested_close_code is not None:
+            return nested_close_code
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
 

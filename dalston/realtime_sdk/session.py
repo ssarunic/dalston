@@ -406,8 +406,10 @@ class SessionHandler:
                     await self._send_session_end()
                 except Exception as e:
                     logger.error("session_end_failed", error=str(e))
-            # Ensure cleanup always runs (session.end path already finalizes storage)
-            await self._cleanup_storage()
+            # Avoid duplicate cleanup on normal session.end path, but still
+            # cleanup on early termination (e.g., lag) or send_session_end failure.
+            if self._session_storage is not None:
+                await self._cleanup_storage()
 
         # Notify callback
         if self._on_session_end:
