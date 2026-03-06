@@ -6,7 +6,7 @@
 | **Duration** | 1-2 days |
 | **Dependencies** | None |
 | **Deliverable** | New services for console/audit/pii, refactored API handlers with no SQL |
-| **Status** | Planned |
+| **Status** | Complete |
 
 ## Problem Statement
 
