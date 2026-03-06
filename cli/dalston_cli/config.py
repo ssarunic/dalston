@@ -36,7 +36,7 @@ def load_config() -> dict[str, Any]:
         Configuration dictionary.
     """
     config: dict[str, Any] = {
-        "server": "http://localhost:8000",
+        "server": "http://127.0.0.1:8000",
         "api_key": None,
         "defaults": {
             "language": "auto",

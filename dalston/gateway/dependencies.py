@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import structlog
 from fastapi import Depends, HTTPException, Request
@@ -314,6 +314,26 @@ _rate_limiter: RedisRateLimiter | None = None
 _lite_rate_limiter: _NoopRateLimiter | None = None
 
 
+class RateLimiter(Protocol):
+    """Shared rate limiter interface used by both Redis and lite no-op impls."""
+
+    async def check_request_rate(self, tenant_id) -> RateLimitResult: ...
+
+    async def check_concurrent_jobs(self, tenant_id) -> RateLimitResult: ...
+
+    async def check_concurrent_sessions(self, tenant_id) -> RateLimitResult: ...
+
+    async def increment_concurrent_jobs(self, tenant_id) -> None: ...
+
+    async def decrement_concurrent_jobs(self, tenant_id) -> None: ...
+
+    async def decrement_concurrent_jobs_once(self, job_id, tenant_id) -> bool: ...
+
+    async def increment_concurrent_sessions(self, tenant_id) -> None: ...
+
+    async def decrement_concurrent_sessions(self, tenant_id) -> None: ...
+
+
 class _NoopRateLimiter:
     """Rate limiter that always allows requests (lite mode)."""
 
@@ -381,7 +401,7 @@ def reset_rate_limiter() -> None:
 async def get_rate_limiter(
     settings: Settings = Depends(get_settings),
     db: AsyncSession = Depends(get_db),
-) -> RedisRateLimiter:
+) -> RateLimiter:
     """Get RateLimiter instance.
 
     Creates a singleton rate limiter with Redis backend.
@@ -434,7 +454,7 @@ async def get_rate_limiter(
 
 async def check_request_rate_limit(
     api_key: APIKey = Depends(require_auth),
-    rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> APIKey:
     """Dependency that checks request rate limit.
 
@@ -456,7 +476,7 @@ async def check_request_rate_limit(
 
 async def check_concurrent_jobs_limit(
     api_key: APIKey = Depends(require_auth),
-    rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> APIKey:
     """Dependency that checks concurrent jobs limit.
 
@@ -477,7 +497,7 @@ async def check_concurrent_jobs_limit(
 
 async def check_concurrent_sessions_limit(
     api_key: APIKey = Depends(require_auth),
-    rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> APIKey:
     """Dependency that checks concurrent sessions limit.
 
@@ -503,7 +523,7 @@ async def check_concurrent_sessions_limit(
 
 async def get_principal_with_job_rate_limit(
     principal: Principal = Depends(get_principal),
-    rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> Principal:
     """Get authenticated Principal with job rate limit checks.
 

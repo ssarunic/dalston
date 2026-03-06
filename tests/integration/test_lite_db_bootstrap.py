@@ -87,6 +87,17 @@ async def test_lite_db_bootstrap_upgrades_minimal_legacy_schema(
         assert "started_at" in jobs_cols
         assert "created_by_key_id" in jobs_cols
 
+        tasks_cols_result = await session.execute(text("PRAGMA table_info(tasks)"))
+        tasks_cols = {str(row[1]) for row in tasks_cols_result.fetchall()}
+        assert "dependencies" in tasks_cols
+        assert "input_uri" in tasks_cols
+        assert "retries" in tasks_cols
+        assert "max_retries" in tasks_cols
+        assert "required" in tasks_cols
+        assert "error" in tasks_cols
+        assert "started_at" in tasks_cols
+        assert "completed_at" in tasks_cols
+
         models_table_result = await session.execute(
             text("SELECT name FROM sqlite_master WHERE type='table' AND name='models'")
         )

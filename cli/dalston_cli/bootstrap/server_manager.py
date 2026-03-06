@@ -68,6 +68,15 @@ class GhostPidMetadata:
     last_used_at: str
 
 
+@dataclass(frozen=True)
+class _ServerStateClassification:
+    """Normalized local server ownership/health snapshot."""
+
+    probe: ServerProbeResult
+    metadata: GhostPidMetadata | None
+    managed: bool
+
+
 class _BootstrapLock:
     """Filesystem lock using O_EXCL create semantics."""
 
@@ -76,11 +85,21 @@ class _BootstrapLock:
         self._timeout_seconds = timeout_seconds
         self._acquired = False
 
-    def _is_stale(self) -> bool:
-        if not self._path.exists():
+    def _reclaim_stale_lock(self) -> bool:
+        """Attempt to reclaim a stale lock file."""
+        try:
+            age = time.time() - self._path.stat().st_mtime
+        except FileNotFoundError:
             return False
-        age = time.time() - self._path.stat().st_mtime
-        return age > self._timeout_seconds
+
+        if age <= self._timeout_seconds:
+            return False
+
+        try:
+            self._path.unlink()
+        except FileNotFoundError:
+            return False
+        return True
 
     def __enter__(self) -> _BootstrapLock:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -94,8 +113,7 @@ class _BootstrapLock:
                     0o600,
                 )
             except FileExistsError:
-                if self._is_stale():
-                    self._path.unlink(missing_ok=True)
+                if self._reclaim_stale_lock():
                     continue
                 if time.monotonic() >= deadline:
                     raise ServerBootstrapError(
@@ -248,13 +266,31 @@ def _pid_exists(pid: int) -> bool:
 
 
 def _process_looks_like_ghost(pid: int) -> bool:
-    cmd = subprocess.run(
-        ["ps", "-p", str(pid), "-o", "command="],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    command = (cmd.stdout or "").strip()
+    command = ""
+
+    # Linux provides full argv via procfs, which is more reliable than `ps` output.
+    if sys.platform.startswith("linux"):
+        cmdline_path = Path(f"/proc/{pid}/cmdline")
+        try:
+            raw_cmdline = cmdline_path.read_bytes()
+        except OSError:
+            raw_cmdline = b""
+        if raw_cmdline:
+            command = " ".join(
+                part.decode("utf-8", errors="ignore")
+                for part in raw_cmdline.split(b"\x00")
+                if part
+            ).strip()
+
+    if not command:
+        cmd = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "args="],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        command = (cmd.stdout or "").strip()
+
     if not command:
         return False
     return "uvicorn" in command and "dalston.gateway.main:app" in command
@@ -386,6 +422,49 @@ def probe_local_server(
     return ServerProbeResult(ServerProbeState.NOT_RUNNING)
 
 
+def _classify_server_state(
+    *, target_url: str, settings: BootstrapSettings
+) -> _ServerStateClassification:
+    probe = probe_local_server(base_url=target_url, settings=settings)
+    metadata = _read_pid_metadata(settings.pid_file)
+    managed = bool(
+        metadata
+        and _pid_exists(metadata.pid)
+        and _process_looks_like_ghost(metadata.pid)
+    )
+
+    if (
+        probe.state == ServerProbeState.READY
+        and managed
+        and metadata
+        and _is_idle_expired(metadata, settings.ghost_idle_timeout_seconds)
+    ):
+        probe = ServerProbeResult(ServerProbeState.DALSTON_UNHEALTHY)
+
+    return _ServerStateClassification(probe=probe, metadata=metadata, managed=managed)
+
+
+def _resolve_terminal_state(
+    *,
+    state: _ServerStateClassification,
+    settings: BootstrapSettings,
+) -> ServerReadyResult | None:
+    if state.probe.state == ServerProbeState.READY:
+        if state.metadata and state.managed:
+            _touch_pid_metadata(settings.pid_file, state.metadata)
+        elif state.metadata and not _pid_exists(state.metadata.pid):
+            settings.pid_file.unlink(missing_ok=True)
+        return ServerReadyResult(started=False, skipped=False, managed=state.managed)
+
+    if state.probe.state == ServerProbeState.PORT_CONFLICT:
+        raise ServerBootstrapError(
+            state.probe.detail or "Local port is occupied by a non-Dalston process.",
+            remediation="Use --server for a different endpoint or free the local port.",
+        )
+
+    return None
+
+
 def ensure_local_server_ready(
     *,
     target_url: str,
@@ -395,59 +474,23 @@ def ensure_local_server_ready(
     if not settings.target_is_local(target_url):
         return ServerReadyResult(started=False, skipped=True, managed=False)
 
-    probe = probe_local_server(base_url=target_url, settings=settings)
-    metadata = _read_pid_metadata(settings.pid_file)
-    managed = bool(
-        metadata
-        and _pid_exists(metadata.pid)
-        and _process_looks_like_ghost(metadata.pid)
-    )
-    if (
-        probe.state == ServerProbeState.READY
-        and managed
-        and _is_idle_expired(metadata, settings.ghost_idle_timeout_seconds)
-    ):
-        probe = ServerProbeResult(ServerProbeState.DALSTON_UNHEALTHY)
-    elif probe.state == ServerProbeState.READY:
-        if metadata and managed:
-            _touch_pid_metadata(settings.pid_file, metadata)
-        elif metadata and not _pid_exists(metadata.pid):
-            settings.pid_file.unlink(missing_ok=True)
-        return ServerReadyResult(started=False, skipped=False, managed=managed)
-    if probe.state == ServerProbeState.PORT_CONFLICT:
-        raise ServerBootstrapError(
-            probe.detail or "Local port is occupied by a non-Dalston process.",
-            remediation="Use --server for a different endpoint or free the local port.",
-        )
+    state = _classify_server_state(target_url=target_url, settings=settings)
+    terminal_result = _resolve_terminal_state(state=state, settings=settings)
+    if terminal_result is not None:
+        return terminal_result
 
     with _BootstrapLock(settings.lock_file, settings.bootstrap_lock_timeout_seconds):
-        probe = probe_local_server(base_url=target_url, settings=settings)
-        metadata = _read_pid_metadata(settings.pid_file)
-        managed = bool(
-            metadata
-            and _pid_exists(metadata.pid)
-            and _process_looks_like_ghost(metadata.pid)
-        )
-        if (
-            probe.state == ServerProbeState.READY
-            and managed
-            and _is_idle_expired(metadata, settings.ghost_idle_timeout_seconds)
-        ):
-            probe = ServerProbeResult(ServerProbeState.DALSTON_UNHEALTHY)
-        elif probe.state == ServerProbeState.READY:
-            if metadata and managed:
-                _touch_pid_metadata(settings.pid_file, metadata)
-            elif metadata and not _pid_exists(metadata.pid):
-                settings.pid_file.unlink(missing_ok=True)
-            return ServerReadyResult(started=False, skipped=False, managed=managed)
-        if probe.state == ServerProbeState.PORT_CONFLICT:
-            raise ServerBootstrapError(
-                probe.detail or "Local port is occupied by a non-Dalston process.",
-                remediation="Use --server for a different endpoint or free the local port.",
-            )
+        state = _classify_server_state(target_url=target_url, settings=settings)
+        terminal_result = _resolve_terminal_state(state=state, settings=settings)
+        if terminal_result is not None:
+            return terminal_result
 
-        if metadata and _pid_exists(metadata.pid):
-            _kill_pid(metadata.pid)
+        if (
+            state.metadata
+            and _pid_exists(state.metadata.pid)
+            and _process_looks_like_ghost(state.metadata.pid)
+        ):
+            _kill_pid(state.metadata.pid)
         settings.pid_file.unlink(missing_ok=True)
 
         pid = _start_detached_server(target_url, settings)

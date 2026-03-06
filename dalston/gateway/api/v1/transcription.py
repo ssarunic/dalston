@@ -58,6 +58,7 @@ from dalston.gateway.api.v1.openai_audio import (
     validate_openai_request,
 )
 from dalston.gateway.dependencies import (
+    RateLimiter,
     check_request_rate_limit,
     get_audit_service,
     get_db,
@@ -91,7 +92,6 @@ from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.ingestion import AudioIngestionService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.polling import wait_for_job_completion
-from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.storage import StorageService
 
 router = APIRouter(prefix="/audio/transcriptions", tags=["transcriptions"])
@@ -241,7 +241,7 @@ async def create_transcription(
     redis: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
-    rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
     audit_service: AuditService = Depends(get_audit_service),
     ingestion_service: AudioIngestionService = Depends(get_ingestion_service),
     export_service: ExportService = Depends(get_export_service),
@@ -454,11 +454,21 @@ async def create_transcription(
         created_by_key_id=principal.id,
     )
 
+    request_id = getattr(request.state, "request_id", None)
+    await audit_service.log_job_created(
+        job_id=job.id,
+        tenant_id=principal.tenant_id,
+        actor_type=principal.actor_type,
+        actor_id=principal.actor_id,
+        correlation_id=request_id,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
     # Lite mode runs the scoped pipeline inline (no Redis/orchestrator dependency).
     if settings.runtime_mode == "lite":
         from dalston.orchestrator.lite_main import build_default_pipeline
 
-        request_id = getattr(request.state, "request_id", None)
         try:
             job.status = JobStatus.RUNNING.value
             job.started_at = datetime.now(UTC)
@@ -489,16 +499,6 @@ async def create_transcription(
                 detail=f"Lite transcription failed: {e}",
             ) from e
 
-        await audit_service.log_job_created(
-            job_id=job.id,
-            tenant_id=principal.tenant_id,
-            actor_type=principal.actor_type,
-            actor_id=principal.actor_id,
-            correlation_id=request_id,
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-        )
-
         if not openai_mode:
             response.status_code = 201
             return JobCreatedResponse(
@@ -521,23 +521,11 @@ async def create_transcription(
         )
 
     # Publish event for orchestrator (include request_id for correlation)
-    request_id = getattr(request.state, "request_id", None)
     structlog.contextvars.bind_contextvars(job_id=str(job.id))
     await publish_job_created(redis, job.id, request_id=request_id)
 
     # Track concurrent job for rate limiting
     await rate_limiter.increment_concurrent_jobs(principal.tenant_id)
-
-    # Audit log job creation
-    await audit_service.log_job_created(
-        job_id=job.id,
-        tenant_id=principal.tenant_id,
-        actor_type=principal.actor_type,
-        actor_id=principal.actor_id,
-        correlation_id=request_id,
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-    )
 
     # For Dalston native mode, return job ID immediately
     if not openai_mode:
@@ -1188,7 +1176,7 @@ async def cancel_transcription(
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     jobs_service: JobsService = Depends(get_jobs_service),
-    rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> JobCancelledResponse:
     """Cancel a transcription job.
 

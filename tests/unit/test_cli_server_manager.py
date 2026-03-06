@@ -33,6 +33,21 @@ def test_bootstrap_lock_reclaims_stale_file(tmp_path: Path) -> None:
     assert not lock_path.exists()
 
 
+def test_bootstrap_lock_times_out_when_contended(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock_path = tmp_path / "bootstrap.lock"
+    lock_path.write_text("active", encoding="utf-8")
+
+    monotonic_values = iter([100.0, 100.0, 101.1, 101.1])
+    monkeypatch.setattr(sm.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(sm.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(sm.ServerBootstrapError, match="Timed out waiting"):
+        with sm._BootstrapLock(lock_path, timeout_seconds=1):
+            pass
+
+
 def test_probe_local_server_ready(monkeypatch, tmp_path: Path) -> None:
     settings = _settings_for(tmp_path, monkeypatch)
     monkeypatch.setattr(sm, "_is_dalston_healthy", lambda _url: True)
@@ -166,6 +181,80 @@ def test_ensure_local_server_ready_restarts_when_idle_expired_and_probe_stays_re
     mock_kill.assert_called_once_with(778)
 
 
+def test_ensure_local_server_ready_restarts_from_initial_unhealthy_probe(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = _settings_for(tmp_path, monkeypatch)
+    metadata = sm.GhostPidMetadata(
+        pid=880,
+        base_url="http://127.0.0.1:8000",
+        started_at="",
+        mode="lite",
+        security_mode="none",
+        idle_timeout_seconds=900,
+        last_used_at="",
+    )
+    sm._write_pid_metadata(settings.pid_file, metadata)
+
+    states = [
+        sm.ServerProbeResult(sm.ServerProbeState.DALSTON_UNHEALTHY),
+        sm.ServerProbeResult(sm.ServerProbeState.NOT_RUNNING),
+    ]
+    monkeypatch.setattr(sm, "probe_local_server", lambda **_: states.pop(0))
+    monkeypatch.setattr(sm, "_pid_exists", lambda _pid: True)
+    monkeypatch.setattr(sm, "_process_looks_like_ghost", lambda _pid: True)
+    mock_kill = Mock(return_value=None)
+    monkeypatch.setattr(sm, "_kill_pid", mock_kill)
+    monkeypatch.setattr(sm, "_start_detached_server", lambda *_args, **_kwargs: 1234)
+    monkeypatch.setattr(sm, "_wait_for_server_ready", lambda **_: None)
+
+    result = sm.ensure_local_server_ready(
+        target_url="http://127.0.0.1:8000",
+        settings=settings,
+    )
+
+    assert result.started is True
+    mock_kill.assert_called_once_with(880)
+
+
+def test_ensure_local_server_ready_does_not_kill_non_ghost_process(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = _settings_for(tmp_path, monkeypatch)
+    metadata = sm.GhostPidMetadata(
+        pid=881,
+        base_url="http://127.0.0.1:8000",
+        started_at="",
+        mode="lite",
+        security_mode="none",
+        idle_timeout_seconds=900,
+        last_used_at="",
+    )
+    sm._write_pid_metadata(settings.pid_file, metadata)
+
+    states = [
+        sm.ServerProbeResult(sm.ServerProbeState.NOT_RUNNING),
+        sm.ServerProbeResult(sm.ServerProbeState.NOT_RUNNING),
+    ]
+    monkeypatch.setattr(sm, "probe_local_server", lambda **_: states.pop(0))
+    monkeypatch.setattr(sm, "_pid_exists", lambda _pid: True)
+    monkeypatch.setattr(sm, "_process_looks_like_ghost", lambda _pid: False)
+    mock_kill = Mock(return_value=None)
+    monkeypatch.setattr(sm, "_kill_pid", mock_kill)
+    monkeypatch.setattr(sm, "_start_detached_server", lambda *_args, **_kwargs: 1234)
+    monkeypatch.setattr(sm, "_wait_for_server_ready", lambda **_: None)
+
+    result = sm.ensure_local_server_ready(
+        target_url="http://127.0.0.1:8000",
+        settings=settings,
+    )
+
+    assert result.started is True
+    mock_kill.assert_not_called()
+
+
 def test_ensure_local_server_ready_raises_port_conflict(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -210,3 +299,14 @@ def test_stop_local_server_noop_without_pid(monkeypatch, tmp_path: Path) -> None
     settings = _settings_for(tmp_path, monkeypatch)
     stopped = sm.stop_local_server(settings=settings)
     assert stopped is False
+
+
+def test_process_looks_like_ghost_uses_linux_procfs(monkeypatch) -> None:
+    monkeypatch.setattr(sm.sys, "platform", "linux")
+    monkeypatch.setattr(
+        sm.Path,
+        "read_bytes",
+        lambda _self: b"python\x00-m\x00uvicorn\x00dalston.gateway.main:app\x00",
+    )
+
+    assert sm._process_looks_like_ghost(12345) is True

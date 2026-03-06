@@ -214,6 +214,12 @@ class TestOpenAITranscriptionEndpoint:
         return MagicMock(spec=ExportService)
 
     @pytest.fixture
+    def mock_audit_service(self):
+        service = AsyncMock()
+        service.log_job_created = AsyncMock()
+        return service
+
+    @pytest.fixture
     def api_key(self):
         return APIKey(
             id=UUID("12345678-1234-1234-1234-123456789abc"),
@@ -239,9 +245,11 @@ class TestOpenAITranscriptionEndpoint:
         mock_ingestion_service,
         mock_rate_limiter,
         mock_export_service,
+        mock_audit_service,
         api_key,
     ):
         from dalston.gateway.dependencies import (
+            get_audit_service,
             get_db,
             get_export_service,
             get_ingestion_service,
@@ -261,6 +269,7 @@ class TestOpenAITranscriptionEndpoint:
         app.dependency_overrides[get_settings] = lambda: mock_settings
         app.dependency_overrides[get_ingestion_service] = lambda: mock_ingestion_service
         app.dependency_overrides[get_rate_limiter] = lambda: mock_rate_limiter
+        app.dependency_overrides[get_audit_service] = lambda: mock_audit_service
         app.dependency_overrides[get_export_service] = lambda: mock_export_service
         app.dependency_overrides[require_auth] = lambda: api_key
 
@@ -402,6 +411,42 @@ class TestOpenAITranscriptionEndpoint:
         assert data["task"] == "transcribe"
         assert data["language"] == "en"
         assert "segments" in data
+
+    def test_lite_mode_logs_audit_even_when_pipeline_fails(
+        self,
+        client,
+        mock_jobs_service,
+        mock_job,
+        mock_settings,
+        mock_audit_service,
+    ):
+        mock_settings.runtime_mode = "lite"
+        mock_job.status = JobStatus.PENDING.value
+        mock_jobs_service.create_job.return_value = mock_job
+
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
+            MockStorage.return_value.upload_audio = AsyncMock(
+                return_value="s3://bucket/audio.mp3"
+            )
+            mock_pipeline = AsyncMock()
+            mock_pipeline.run_job = AsyncMock(
+                side_effect=RuntimeError("pipeline failed")
+            )
+
+            with patch(
+                "dalston.orchestrator.lite_main.build_default_pipeline",
+                return_value=mock_pipeline,
+            ):
+                audio_content = b"fake audio content"
+                files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+                response = client.post(
+                    "/v1/audio/transcriptions",
+                    files=files,
+                    data={"model": "auto"},
+                )
+
+        assert response.status_code == 500
+        mock_audit_service.log_job_created.assert_awaited_once()
 
     # NOTE: test_openai_mode_rejects_invalid_model was removed because:
     # OpenAI mode is only activated when model is a known OpenAI model ID (whisper-1, etc.)

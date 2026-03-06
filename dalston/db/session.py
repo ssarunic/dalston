@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from uuid import UUID
@@ -25,6 +26,10 @@ DEFAULT_TENANT_NAME = "default"
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 _mode: str | None = None
+
+_SQLITE_BOOTSTRAP_TABLES = frozenset({"jobs", "tasks", "models", "api_keys"})
+_SQLITE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SQLITE_COLUMN_DDL_RE = re.compile(r"^[A-Za-z0-9_ (),.'\[\]{}+-]+$")
 
 
 class _EngineProxy:
@@ -57,7 +62,9 @@ def _ensure_sqlite_parent_dir(database_url: str) -> None:
 
 
 async def _sqlite_table_columns(conn, table_name: str) -> set[str]:
-    result = await conn.execute(text(f"PRAGMA table_info({table_name})"))
+    if table_name not in _SQLITE_BOOTSTRAP_TABLES:
+        raise ValueError(f"Unsupported SQLite bootstrap table: {table_name}")
+    result = await conn.execute(text(f'PRAGMA table_info("{table_name}")'))
     return {str(row[1]) for row in result.fetchall()}
 
 
@@ -66,11 +73,22 @@ async def _ensure_sqlite_columns(
     table_name: str,
     required_columns: dict[str, str],
 ) -> None:
+    if table_name not in _SQLITE_BOOTSTRAP_TABLES:
+        raise ValueError(f"Unsupported SQLite bootstrap table: {table_name}")
+
     existing = await _sqlite_table_columns(conn, table_name)
     for column_name, column_ddl in required_columns.items():
+        if not _SQLITE_IDENTIFIER_RE.fullmatch(column_name):
+            raise ValueError(f"Unsafe SQLite column identifier: {column_name}")
+        if not _SQLITE_COLUMN_DDL_RE.fullmatch(column_ddl):
+            raise ValueError(
+                f"Unsafe SQLite DDL for column {column_name}: {column_ddl}"
+            )
         if column_name not in existing:
             await conn.execute(
-                text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_ddl}")
+                text(
+                    f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" {column_ddl}'
+                )
             )
 
 

@@ -139,7 +139,8 @@ async def build_task_dag(
     from dalston.orchestrator.engine_selector import select_pipeline_engines
 
     # Select engines for all required stages
-    selections = await select_pipeline_engines(parameters, registry, catalog, db=db)
+    selection = await select_pipeline_engines(parameters, registry, catalog, db=db)
+    selections = selection.stages
 
     # Build engines dict from selections
     engines = {stage: sel.runtime for stage, sel in selections.items()}
@@ -184,7 +185,7 @@ async def build_task_dag(
         tasks = _build_dag_with_engines(
             job_id=job_id,
             audio_uri=audio_uri,
-            parameters=parameters,
+            parameters=selection.effective_parameters,
             engines=engines,
             skip_alignment=skip_alignment,
             skip_diarization=skip_diarization,

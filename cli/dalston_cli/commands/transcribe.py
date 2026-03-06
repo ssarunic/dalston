@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 import typer
 from dalston_sdk import (
@@ -24,6 +24,7 @@ from dalston_cli.bootstrap import (
 )
 from dalston_cli.bootstrap.server_manager import (
     ServerBootstrapError,
+    ServerReadyResult,
     ensure_local_server_ready,
 )
 from dalston_cli.main import state
@@ -33,6 +34,9 @@ from dalston_cli.output import (
     output_transcript,
     wait_with_progress,
 )
+
+if TYPE_CHECKING:
+    from dalston_sdk import Dalston
 
 FormatType = Literal["txt", "json", "srt", "vtt"]
 SpeakerMode = Literal["none", "diarize", "per-channel"]
@@ -52,7 +56,7 @@ def _emit_bootstrap_step(
 
 def _assert_prerequisites_when_bootstrap_disabled(
     *,
-    client,
+    client: Dalston,
     model_id: str,
 ) -> None:
     try:
@@ -93,6 +97,28 @@ def _assert_prerequisites_when_bootstrap_disabled(
                 "DALSTON_BOOTSTRAP=true."
             ),
         )
+
+
+def _resolve_effective_model(
+    *,
+    requested_model: str,
+    server_ready: ServerReadyResult,
+    bootstrap_default_model: str,
+    runtime_mode: str,
+) -> str:
+    """Resolve auto model for bootstrap-managed local flows.
+
+    In distributed CLI mode, managed local bootstrap should pin the default model
+    to avoid remote auto-selection variability. In lite runtime, the local server
+    is authoritative for model auto-selection.
+    """
+    if requested_model.strip().lower() != "auto":
+        return requested_model
+    if not server_ready.managed:
+        return requested_model
+    if runtime_mode == "lite":
+        return requested_model
+    return resolve_bootstrap_model(requested_model, bootstrap_default_model)
 
 
 def transcribe(
@@ -346,21 +372,12 @@ def transcribe(
                     target_url=client.base_url,
                     settings=bootstrap_settings,
                 )
-                if model.strip().lower() == "auto":
-                    # Preserve existing server-side auto behavior unless this
-                    # endpoint is managed by the local ghost bootstrap flow.
-                    if server_ready.managed:
-                        if runtime_mode == "lite":
-                            effective_model = model
-                        else:
-                            effective_model = resolve_bootstrap_model(
-                                model,
-                                bootstrap_settings.default_model,
-                            )
-                    else:
-                        effective_model = model
-                else:
-                    effective_model = model
+                effective_model = _resolve_effective_model(
+                    requested_model=model,
+                    server_ready=server_ready,
+                    bootstrap_default_model=bootstrap_settings.default_model,
+                    runtime_mode=runtime_mode,
+                )
 
                 if effective_model.lower() == "auto":
                     _emit_bootstrap_step(
