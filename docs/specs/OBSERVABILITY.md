@@ -439,3 +439,46 @@ One minor addition to support clean stage naming for per-channel pipelines:
 5. **Tenant isolation**: Attempt to access tasks from a job belonging to a different tenant. Verify 404 response.
 6. **Per-channel**: Submit a per-channel job. Verify stage names include channel suffixes (`transcribe_ch0`, `transcribe_ch1`).
 7. **Console**: Navigate to a completed job in the web console. Verify pipeline timeline renders. Click a stage. Verify artifact viewer shows input and output.
+
+---
+
+## M54 Durable Event DLQ Observability
+
+M54 adds explicit durable-event reliability visibility for orchestrator Redis Stream
+consumption.
+
+### Metrics
+
+- `dalston_orchestrator_event_decisions_total{decision,event_type,failure_reason}`
+  - `decision="ack"`: successfully dispatched and ACKed
+  - `decision="retry"`: retryable failure below delivery threshold (left pending)
+  - `decision="dlq"`: quarantined into DLQ (non-retryable or max deliveries exceeded)
+
+### Structured Logs
+
+Durable event decision logs include:
+
+- `message_id`
+- `event_type`
+- `delivery_count`
+- `source` (`live_consumer` or `crash_recovery`)
+- `decision`
+- `failure_reason` (for retry/dlq)
+- `error` (when present)
+
+### Operational DLQ Runbook
+
+```bash
+# Newest DLQ entries first
+redis-cli XREVRANGE dalston:events:dlq + - COUNT 20
+
+# Oldest DLQ entries first
+redis-cli XRANGE dalston:events:dlq - + COUNT 20
+
+# Durable stream pending summary
+redis-cli XPENDING dalston:events:stream orchestrators
+```
+
+DLQ entries include source message id, failure reason, delivery count, consumer id,
+raw fields/payload, and parseable payload (when available). M54 does not include
+automatic DLQ replay; replay is manual/operator-driven only.

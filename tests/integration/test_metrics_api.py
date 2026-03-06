@@ -378,7 +378,44 @@ class TestServiceMetricsConfiguration:
             dalston.metrics.inc_orchestrator_tasks_scheduled("whisper", "transcribe")
             dalston.metrics.inc_orchestrator_tasks_completed("whisper", "success")
             dalston.metrics.inc_orchestrator_events("job.created")
+            dalston.metrics.inc_orchestrator_event_decision(
+                "ack", "none", "job.created"
+            )
             dalston.metrics.observe_orchestrator_dag_build(0.025)
+
+    def test_orchestrator_event_decision_metric_emitted(self):
+        """Decision metrics should expose ack/retry/dlq labels for durable events."""
+        with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
+            dalston.metrics.configure_metrics("orchestrator")
+
+            dalston.metrics.inc_orchestrator_event_decision(
+                "ack", "none", "task.completed"
+            )
+            dalston.metrics.inc_orchestrator_event_decision(
+                "retry", "handler_exception", "task.completed"
+            )
+            dalston.metrics.inc_orchestrator_event_decision(
+                "dlq", "invalid_payload_json", "task.completed"
+            )
+
+            app = FastAPI()
+
+            @app.get("/metrics")
+            async def metrics_endpoint():
+                from fastapi.responses import Response
+                from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+                return Response(
+                    content=generate_latest(), media_type=CONTENT_TYPE_LATEST
+                )
+
+            client = TestClient(app)
+            content = client.get("/metrics").text
+
+            assert "dalston_orchestrator_event_decisions_total" in content
+            assert 'decision="ack"' in content
+            assert 'decision="retry"' in content
+            assert 'decision="dlq"' in content
 
     def test_engine_metrics_isolation(self):
         """Engine metrics should work independently."""

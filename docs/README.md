@@ -100,6 +100,7 @@ docs/
 
 - [M51 Engine Testing Playbook](testing/M51-engine-testing-playbook.md) — Stage-by-stage testing changes after stateless engine + artifact materialization refactor
 - [M52 Local Runner Readiness](reports/M52-local-runner-readiness.md) — Readiness gate summary for align/diarize/pii_detect local-run workflow
+- [M54 Event DLQ Implementation](reports/M54-event-dlq-implementation.md) — Durable orchestrator event retry ceiling, DLQ policy, and operational runbook
 - [M55 Runtime Model Management Implementation](reports/M55-non-transcribe-runtime-model-management-implementation.md) — Implementation notes for diarize/align/pii stage model selection and runtime model propagation
 
 ### Implementation Plan
