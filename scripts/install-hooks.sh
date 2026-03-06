@@ -41,7 +41,6 @@ fi
 # Some unit tests assume S3/AWS env vars are unset unless explicitly provided.
 TEST_ENV=(
     env
-    PYTHON_DOTENV_DISABLED=1
     -u DALSTON_S3_BUCKET
     -u DALSTON_S3_ENDPOINT_URL
     -u DALSTON_S3_PUBLIC_ENDPOINT_URL
@@ -53,6 +52,7 @@ TEST_ENV=(
     -u AWS_DEFAULT_PROFILE
     -u AWS_REGION
     -u AWS_DEFAULT_REGION
+    PYTHON_DOTENV_DISABLED=1
 )
 
 echo "→ Checking linter..."
