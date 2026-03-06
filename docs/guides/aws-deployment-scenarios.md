@@ -432,13 +432,16 @@ This is serious money. Only justified for production workloads with throughput r
 │  └────────────┘  └──────────────┘       │     │  │ faster-whisper (lg-v3-turbo)    │  │
 │                                         │     │  └─────────────────────────────────┘  │
 │  CPU engines:                           │     │  ┌─────────────────────────────────┐  │
-│  ┌──────────┐  ┌────────┐  ┌─────────┐  │     │  │ pyannote-4.0 / nemo-msdd       │  │
-│  │ prepare  │  │ align  │  │  merge  │  │     │  └─────────────────────────────────┘  │
-│  └──────────┘  └────────┘  └─────────┘  │     │  ┌─────────────────────────────────┐  │
-│  ┌─────────────┐  ┌───────────────────┐ │     │  │ RT parakeet-rnnt (streaming)    │  │
+│  ┌──────────┐  ┌─────────┐              │     │  │ phoneme-align (GPU)             │  │
+│  │ prepare  │  │  merge  │              │     │  └─────────────────────────────────┘  │
+│  └──────────┘  └─────────┘              │     │  ┌─────────────────────────────────┐  │
+│  ┌─────────────┐  ┌───────────────────┐ │     │  │ pyannote-4.0 / nemo-msdd       │  │
 │  │ nemo-onnx   │  │ pii-presidio      │ │     │  └─────────────────────────────────┘  │
-│  │ (CPU batch) │  │ (CPU detection)   │ │     │                                      │
-│  └─────────────┘  └───────────────────┘ │     │  REDIS_URL=redis://<ctrl-plane>:6379 │
+│  │ (CPU batch) │  │ (CPU detection)   │ │     │  ┌─────────────────────────────────┐  │
+│  └─────────────┘  └───────────────────┘ │     │  │ RT parakeet-rnnt (streaming)    │  │
+│  ┌───────────────────┐                  │     │  └─────────────────────────────────┘  │
+│  │ audio-redactor    │                  │     │                                      │
+│  └───────────────────┘                  │     │  REDIS_URL=redis://<ctrl-plane>:6379 │
 │                                         │     │                                      │
 │  + Tailscale                            │     │  + Tailscale                          │
 └─────────────────────────────────────────┘     └──────────────────────────────────────┘
@@ -448,12 +451,23 @@ This is serious money. Only justified for production workloads with throughput r
 
 ### Why split
 
-The control plane (Gateway, Orchestrator, Redis, Postgres) and CPU engines (prepare, merge, align, PII) need to be always-on to accept API requests and manage jobs. But they barely need any compute. Meanwhile the GPU is expensive and only needed during actual transcription/diarization.
+The control plane (Gateway, Orchestrator, Redis, Postgres) and CPU engines (prepare, merge, PII, audio-redact) need to be always-on to accept API requests and manage jobs. But they barely need any compute. Meanwhile the GPU is expensive and only needed during actual transcription/diarization/alignment.
+
+**Align and diarize belong on the GPU instance.** Both are 15x faster on GPU:
+
+| Stage | GPU (T4/A10G) | CPU | Speedup |
+|-------|---------------|-----|---------|
+| phoneme-align | RTF 0.02 (~12s for 10-min file) | RTF 0.3 (~3 min) | 15x |
+| pyannote-4.0 | RTF 0.08 (~48s for 10-min file) | RTF 1.2 (~12 min) | 15x |
+| nemo-msdd | RTF 0.05 (~30s for 10-min file) | RTF 2.0 (~20 min) | 40x |
+
+Running diarize on CPU means a 1-hour audio file takes **72 minutes** to diarize. On the GPU that's already there, it takes **5 minutes**. Same story for alignment. Since you're paying for the GPU anyway, there's no cost benefit to running these stages on CPU — only a massive performance penalty.
 
 Splitting lets you:
 - **Run the control plane 24/7 on a ~$30/month t3.medium** — Gateway accepts uploads, Orchestrator queues tasks
 - **Start/stop the GPU instance on demand** — or use spot ($0.35/hr vs $1.01/hr)
-- **CPU-side processing continues while GPU is off** — prepare, PII detection, merge, and nemo-onnx transcription (English, ~8x realtime) all run on the control plane
+- **All model-heavy stages on GPU** — transcribe, align, diarize run where they're 15-40x faster
+- **CPU-side processing continues while GPU is off** — prepare, PII detection, audio-redact, merge, and nemo-onnx transcription (English, ~8x realtime) all run on the control plane
 - **Queue buffering** — if the GPU is off, tasks sit in Redis queues. Start the GPU instance, engines drain the backlog automatically
 
 ### How it works
@@ -466,19 +480,19 @@ docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
   --env-file .env.aws --profile local-infra up -d \
   gateway orchestrator \
   stt-batch-prepare stt-batch-merge \
-  stt-batch-align-phoneme-cpu \
   stt-batch-pii-detect-presidio \
+  stt-batch-audio-redact-audio \
   stt-batch-transcribe-nemo-onnx
 
 # On the GPU instance (g5.xlarge)
-# .env.gpu points REDIS_URL to the control plane
+# .env.gpu points REDIS_URL and DATABASE_URL to the control plane
 REDIS_URL=redis://10.0.1.10:6379 \
 docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
-  --env-file .env.gpu up -d \
+  --env-file .env.gpu --profile gpu up -d \
   stt-batch-transcribe-nemo \
   stt-batch-transcribe-faster-whisper \
-  stt-batch-diarize-nemo-msdd \
   stt-batch-align-phoneme \
+  stt-batch-diarize-nemo-msdd \
   stt-rt-transcribe-parakeet-rnnt-0.6b
 ```
 
@@ -519,8 +533,8 @@ Compare to Scenario 2 (single g5.xlarge 24/7): ~$300/month. The split saves mone
 
 The split pattern extends naturally:
 - **Multiple GPU workers**: Launch 2-3 spot g5.xlarge instances, all pointing at the same Redis. Tasks distribute automatically via consumer groups. Drain the queue faster.
-- **Heterogeneous workers**: One g5.xlarge for transcription, one with nemo-msdd for diarization. Each engine type on the right hardware.
-- **GPU for diarization only**: If nemo-onnx handles transcription on CPU fast enough, the GPU worker only runs diarization engines. Smaller GPU instance (g4dn.xlarge, ~$0.53/hr).
+- **Heterogeneous workers**: One g5.xlarge for transcription, one focused on align+diarize. Each engine type on the right hardware.
+- **Smaller GPU for align+diarize only**: If nemo-onnx handles transcription on CPU fast enough, the GPU worker only runs align + diarize engines. A smaller g4dn.xlarge (~$0.53/hr) is sufficient — align needs ~2 GB VRAM and diarize needs 2-4 GB.
 
 ---
 
@@ -624,7 +638,8 @@ If your workload is sporadic — uploads come in throughout the day but processi
 
 - Control plane on t3.medium (~$30/mo) keeps API, Redis, and CPU engines always available
 - GPU worker (g5.xlarge spot) starts when you have a queue to drain
-- Diarization tasks queue on the control plane, process when GPU is up
+- All model-heavy stages (transcribe, align, diarize) run on GPU where they're 15-40x faster
+- Align and diarize tasks queue until the GPU starts — don't bother running them on CPU (too slow)
 - For light English-only work, nemo-onnx on the control plane handles transcription without GPU
 
 ### English-only on a budget: Scenario 1 (`t3.xlarge`)
@@ -761,7 +776,7 @@ On GPU, diarization adds seconds. On CPU, it adds **minutes** — pyannote runs 
 | **2 (g5.xlarge)** | Sweet spot. Both diarizers fit in VRAM alongside transcription. Processing time is seconds, not minutes. |
 | **3 (g5.2xlarge)** | Same GPU — no VRAM benefit. Extra CPU helps if running align on CPU while GPU diarizes. |
 | **4 (g5.12xlarge)** | Diarization gets its own GPU. Transcribe + diarize run in parallel on different files. |
-| **5 (Split CPU/GPU)** | Run diarization on GPU worker. If GPU is off, diarization tasks queue (don't run CPU diarize — too slow). |
+| **5 (Split CPU/GPU)** | Run align + diarize on GPU worker (15x faster). If GPU is off, tasks queue in Redis until the GPU starts — don't bother with CPU diarize/align. |
 
 **Bottom line**: If you need diarization on every job, you need GPU (Scenario 2+). If diarization is occasional, CPU works but plan for 10-20 min per file.
 
@@ -780,7 +795,7 @@ On GPU, diarization adds seconds. On CPU, it adds **minutes** — pyannote runs 
 
 **nemo-msdd**: Slightly faster on GPU, better overlap detection, fully open license. Uses more VRAM (4 GB vs 2 GB).
 
-For Scenario 5 (split), pyannote is better on the CPU side (if you ever fall back to CPU diarization). For pure GPU workloads, nemo-msdd's speed and open license make it the simpler choice.
+For Scenario 5 (split), diarization runs on the GPU worker — so pick based on GPU performance and license. nemo-msdd's speed (RTF 0.05) and open CC-BY-4.0 license make it the simpler choice. pyannote is battle-tested but requires `HF_TOKEN` for gated model access.
 
 ### Whisper + diarization: the alignment tax
 
