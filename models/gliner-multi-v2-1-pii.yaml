@@ -1,0 +1,31 @@
+schema_version: "1.1"
+id: urchade/gliner_multi-v2.1
+runtime: pii-presidio
+runtime_model_id: urchade/gliner_multi-v2.1
+
+name: GLiNER Multi v2.1 (PII)
+source: urchade/gliner_multi-v2.1
+size_gb: 0.5
+stage: pii_detect
+
+description: |
+  Multilingual GLiNER NER backbone used by pii-presidio for entity detection.
+  Presidio recognizers remain enabled for checksum-validated patterns.
+
+languages: null
+
+capabilities:
+  word_timestamps: false
+  punctuation: false
+  capitalization: false
+  streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  min_vram_gb: 0
+  supports_cpu: true
+  min_ram_gb: 4
+
+performance:
+  rtf_gpu: 0.01
+  rtf_cpu: 0.05

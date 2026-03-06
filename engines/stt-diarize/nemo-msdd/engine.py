@@ -93,6 +93,16 @@ diarizer:
       asr_based_vad: False
 """
 
+# Runtime model definitions for NeMo MSDD diarization.
+# Each runtime_model_id maps to the component model paths used by NeuralDiarizer.
+MODEL_COMPONENTS = {
+    "nvidia/diar-msdd-telephonic": {
+        "vad_model_path": "vad_multilingual_marblenet",
+        "speaker_embeddings_model_path": "titanet_large",
+        "msdd_model_path": "diar_msdd_telephonic",
+    },
+}
+
 
 class NemoMSDDEngine(Engine):
     """NeMo MSDD speaker diarization engine.
@@ -109,6 +119,7 @@ class NemoMSDDEngine(Engine):
     def __init__(self) -> None:
         super().__init__()
         self._diarizer = None
+        self._active_runtime_model_id: str | None = None
         self._device = self._detect_device()
         self._disabled = (
             os.environ.get("DALSTON_DIARIZATION_DISABLED", "").lower() == "true"
@@ -176,7 +187,11 @@ class NemoMSDDEngine(Engine):
         )
 
     def _create_diarizer(
-        self, manifest_path: str, out_dir: str, max_speakers: int | None
+        self,
+        manifest_path: str,
+        out_dir: str,
+        max_speakers: int | None,
+        runtime_model_id: str,
     ) -> Any:
         """Create NeuralDiarizer with configured paths.
 
@@ -185,6 +200,12 @@ class NemoMSDDEngine(Engine):
         """
         from nemo.collections.asr.models.msdd_models import NeuralDiarizer
 
+        if runtime_model_id not in MODEL_COMPONENTS:
+            raise ValueError(
+                "Unsupported runtime_model_id for nemo-msdd: "
+                f"{runtime_model_id}. Known values: {sorted(MODEL_COMPONENTS.keys())}"
+            )
+
         # Load base config
         cfg = OmegaConf.create(DIAR_CONFIG)
 
@@ -192,6 +213,13 @@ class NemoMSDDEngine(Engine):
         cfg.diarizer.manifest_filepath = manifest_path
         cfg.diarizer.out_dir = out_dir
         cfg.device = self._device
+
+        components = MODEL_COMPONENTS[runtime_model_id]
+        cfg.diarizer.vad.model_path = components["vad_model_path"]
+        cfg.diarizer.speaker_embeddings.model_path = components[
+            "speaker_embeddings_model_path"
+        ]
+        cfg.diarizer.msdd_model.model_path = components["msdd_model_path"]
 
         # Apply max_speakers if provided
         if max_speakers is not None:
@@ -202,6 +230,7 @@ class NemoMSDDEngine(Engine):
             manifest=manifest_path,
             out_dir=out_dir,
             device=self._device,
+            runtime_model_id=runtime_model_id,
         )
 
         diarizer = NeuralDiarizer(cfg=cfg)
@@ -326,12 +355,18 @@ class NemoMSDDEngine(Engine):
             duration = self._get_audio_duration(audio_path)
 
         max_speakers = config.get("max_speakers")
+        runtime_model_id = config.get("runtime_model_id")
+        if not runtime_model_id:
+            raise ValueError(
+                "Missing required config field 'runtime_model_id' for diarize stage."
+            )
 
         self.logger.info(
             "processing_diarization",
             audio_path=str(audio_path),
             duration=round(duration, 2),
             max_speakers=max_speakers,
+            runtime_model_id=runtime_model_id,
         )
 
         # Create output directory and manifest
@@ -339,55 +374,60 @@ class NemoMSDDEngine(Engine):
         out_dir.mkdir(exist_ok=True)
         manifest_path = self._create_manifest(audio_path, duration, out_dir)
 
+        self._active_runtime_model_id = runtime_model_id
+        self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
         try:
-            # Create diarizer with this specific config
-            diarizer = self._create_diarizer(
-                manifest_path=str(manifest_path),
-                out_dir=str(out_dir),
-                max_speakers=max_speakers,
-            )
-
-            self.logger.info("running_nemo_diarization")
-            diarizer.diarize()
-
-            # Find RTTM output
-            rttm_path = out_dir / "pred_rttms" / f"{audio_path.stem}.rttm"
-            if not rttm_path.exists():
-                rttm_path = out_dir / f"{audio_path.stem}.rttm"
-
-            if not rttm_path.exists():
-                raise RuntimeError(
-                    f"RTTM output not found. Checked: {out_dir}/pred_rttms/ and {out_dir}/"
+            try:
+                # Create diarizer with this specific config
+                diarizer = self._create_diarizer(
+                    manifest_path=str(manifest_path),
+                    out_dir=str(out_dir),
+                    max_speakers=max_speakers,
+                    runtime_model_id=runtime_model_id,
                 )
 
-            speakers, turns = self._parse_rttm(rttm_path)
-            overlap_duration, overlap_ratio = self._calculate_overlap_stats(
-                turns, duration
+                self.logger.info("running_nemo_diarization")
+                diarizer.diarize()
+
+                # Find RTTM output
+                rttm_path = out_dir / "pred_rttms" / f"{audio_path.stem}.rttm"
+                if not rttm_path.exists():
+                    rttm_path = out_dir / f"{audio_path.stem}.rttm"
+
+                if not rttm_path.exists():
+                    raise RuntimeError(
+                        f"RTTM output not found. Checked: {out_dir}/pred_rttms/ and {out_dir}/"
+                    )
+
+                speakers, turns = self._parse_rttm(rttm_path)
+                overlap_duration, overlap_ratio = self._calculate_overlap_stats(
+                    turns, duration
+                )
+            finally:
+                manifest_path.unlink(missing_ok=True)
+
+            self.logger.info(
+                "diarization_complete",
+                speaker_count=len(speakers),
+                turn_count=len(turns),
+                overlap_ratio=overlap_ratio,
             )
 
+            output = DiarizeOutput(
+                speakers=speakers,
+                turns=turns,
+                num_speakers=len(speakers),
+                overlap_duration=overlap_duration,
+                overlap_ratio=overlap_ratio,
+                runtime="nemo-msdd",
+                skipped=False,
+                skip_reason=None,
+                warnings=[],
+            )
+
+            return EngineOutput(data=output)
         finally:
-            manifest_path.unlink(missing_ok=True)
-
-        self.logger.info(
-            "diarization_complete",
-            speaker_count=len(speakers),
-            turn_count=len(turns),
-            overlap_ratio=overlap_ratio,
-        )
-
-        output = DiarizeOutput(
-            speakers=speakers,
-            turns=turns,
-            num_speakers=len(speakers),
-            overlap_duration=overlap_duration,
-            overlap_ratio=overlap_ratio,
-            runtime="nemo-msdd",
-            skipped=False,
-            skip_reason=None,
-            warnings=[],
-        )
-
-        return EngineOutput(data=output)
+            self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
 
     def _mock_output(self) -> EngineOutput:
         """Return mock output when diarization is disabled."""
@@ -419,6 +459,8 @@ class NemoMSDDEngine(Engine):
             "device": getattr(self, "_device", "unknown"),
             "cuda_available": cuda_available,
             "diarization_disabled": self._disabled,
+            "active_model_id": self._active_runtime_model_id,
+            "available_runtime_models": sorted(MODEL_COMPONENTS.keys()),
         }
 
 

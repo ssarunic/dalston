@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -11,7 +12,9 @@ from dalston.engine_sdk.types import EngineCapabilities
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog
 from dalston.orchestrator.engine_selector import (
     EngineSelectionResult,
+    ModelSelectionError,
     NoCapableEngineError,
+    NoDownloadedModelError,
     _meets_requirements,
     _rank_and_select,
     _should_add_alignment,
@@ -81,6 +84,16 @@ def make_catalog_entry(
         image=f"dalston/{runtime}:latest",
         capabilities=make_capabilities(runtime=runtime, languages=languages),
     )
+
+
+class _ScalarOneResult:
+    """Minimal SQLAlchemy-like result wrapper for scalar_one_or_none()."""
+
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
 
 
 # =============================================================================
@@ -262,6 +275,43 @@ class TestSelectEngine:
         assert result.selection_reason == "only capable engine"
 
     @pytest.mark.asyncio
+    async def test_no_downloaded_model_error_reports_attempted_runtimes(
+        self, mock_registry, mock_catalog, monkeypatch
+    ):
+        runtime_a_caps = make_capabilities("runtime-a")
+        runtime_b_caps = make_capabilities("runtime-b")
+        runtime_a = make_engine_state(
+            "runtime-a", stage="align", capabilities=runtime_a_caps
+        )
+        runtime_b = make_engine_state(
+            "runtime-b", stage="align", capabilities=runtime_b_caps
+        )
+
+        mock_registry.get_engines_for_stage.return_value = [runtime_a, runtime_b]
+
+        async def _mock_find_best_downloaded_model(*args, **kwargs):
+            return None
+
+        monkeypatch.setattr(
+            "dalston.orchestrator.engine_selector._find_best_downloaded_model",
+            _mock_find_best_downloaded_model,
+        )
+
+        with pytest.raises(NoDownloadedModelError) as exc_info:
+            await select_engine(
+                "align",
+                {},
+                mock_registry,
+                mock_catalog,
+                db=AsyncMock(),
+            )
+
+        error = exc_info.value
+        assert error.runtime == "runtime-a"
+        assert error.attempted_runtimes == ["runtime-a", "runtime-b"]
+        assert "Attempted runtimes: runtime-a, runtime-b." in str(error)
+
+    @pytest.mark.asyncio
     async def test_raises_when_no_capable_engine(self, mock_registry, mock_catalog):
         # Engine only supports English
         caps = make_capabilities("parakeet", languages=["en"])
@@ -315,6 +365,138 @@ class TestSelectEngine:
                 mock_catalog,
                 user_preference="english-only",
             )
+
+    @pytest.mark.asyncio
+    async def test_stage_model_preference_success(self, mock_registry, mock_catalog):
+        db_model = SimpleNamespace(
+            id="pyannote/speaker-diarization-community-1",
+            stage="diarize",
+            status="ready",
+            runtime="pyannote-4.0",
+            runtime_model_id="pyannote/speaker-diarization-community-1",
+            source="pyannote/speaker-diarization-community-1",
+            languages=None,
+        )
+        mock_db = AsyncMock()
+        mock_db.execute.return_value = _ScalarOneResult(db_model)
+
+        runtime = make_engine_state("pyannote-4.0", stage="diarize")
+        mock_registry.get_engine.return_value = runtime
+
+        result = await select_engine(
+            "diarize",
+            {},
+            mock_registry,
+            mock_catalog,
+            user_preference="pyannote/speaker-diarization-community-1",
+            db=mock_db,
+            user_preference_is_model=True,
+        )
+
+        assert result.runtime == "pyannote-4.0"
+        # Non-transcribe stages use explicit runtime_model_id from registry.
+        assert result.runtime_model_id == "pyannote/speaker-diarization-community-1"
+
+    @pytest.mark.asyncio
+    async def test_stage_model_not_found(self, mock_registry, mock_catalog):
+        mock_db = AsyncMock()
+        mock_db.execute.return_value = _ScalarOneResult(None)
+
+        with pytest.raises(ModelSelectionError) as exc_info:
+            await select_engine(
+                "align",
+                {},
+                mock_registry,
+                mock_catalog,
+                user_preference="missing-align-model",
+                db=mock_db,
+                user_preference_is_model=True,
+            )
+
+        assert exc_info.value.code == "model_not_found"
+        assert exc_info.value.stage == "align"
+
+    @pytest.mark.asyncio
+    async def test_stage_model_stage_mismatch(self, mock_registry, mock_catalog):
+        db_model = SimpleNamespace(
+            id="urchade/gliner_multi-v2.1",
+            stage="pii_detect",
+            status="ready",
+            runtime="pii-presidio",
+            runtime_model_id="urchade/gliner_multi-v2.1",
+            source="urchade/gliner_multi-v2.1",
+            languages=None,
+        )
+        mock_db = AsyncMock()
+        mock_db.execute.return_value = _ScalarOneResult(db_model)
+
+        with pytest.raises(ModelSelectionError) as exc_info:
+            await select_engine(
+                "align",
+                {},
+                mock_registry,
+                mock_catalog,
+                user_preference="urchade/gliner_multi-v2.1",
+                db=mock_db,
+                user_preference_is_model=True,
+            )
+
+        assert exc_info.value.code == "model_stage_mismatch"
+
+    @pytest.mark.asyncio
+    async def test_stage_model_not_ready(self, mock_registry, mock_catalog):
+        db_model = SimpleNamespace(
+            id="jonatasgrosman/wav2vec2-large-xlsr-53-japanese",
+            stage="align",
+            status="not_downloaded",
+            runtime="phoneme-align",
+            runtime_model_id="jonatasgrosman/wav2vec2-large-xlsr-53-japanese",
+            source="jonatasgrosman/wav2vec2-large-xlsr-53-japanese",
+            languages=["ja"],
+        )
+        mock_db = AsyncMock()
+        mock_db.execute.return_value = _ScalarOneResult(db_model)
+
+        with pytest.raises(ModelSelectionError) as exc_info:
+            await select_engine(
+                "align",
+                {},
+                mock_registry,
+                mock_catalog,
+                user_preference="jonatasgrosman/wav2vec2-large-xlsr-53-japanese",
+                db=mock_db,
+                user_preference_is_model=True,
+            )
+
+        assert exc_info.value.code == "model_not_ready"
+
+    @pytest.mark.asyncio
+    async def test_stage_model_runtime_unavailable(self, mock_registry, mock_catalog):
+        db_model = SimpleNamespace(
+            id="urchade/gliner_multi-v2.1",
+            stage="pii_detect",
+            status="ready",
+            runtime="pii-presidio",
+            runtime_model_id="urchade/gliner_multi-v2.1",
+            source="urchade/gliner_multi-v2.1",
+            languages=None,
+        )
+        mock_db = AsyncMock()
+        mock_db.execute.return_value = _ScalarOneResult(db_model)
+        mock_registry.get_engine.return_value = None
+
+        with pytest.raises(ModelSelectionError) as exc_info:
+            await select_engine(
+                "pii_detect",
+                {},
+                mock_registry,
+                mock_catalog,
+                user_preference="urchade/gliner_multi-v2.1",
+                db=mock_db,
+                user_preference_is_model=True,
+            )
+
+        assert exc_info.value.code == "runtime_unavailable"
 
 
 # =============================================================================

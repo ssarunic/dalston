@@ -170,6 +170,17 @@ class TestPIIDAGBuilder:
         pii_task = next(t for t in tasks if t.stage == "pii_detect")
         assert pii_task.config["entity_types"] == ["credit_card_number", "phone_number"]
 
+    def test_pii_runtime_model_id_config(self, job_id, audio_uri):
+        """Test that selected PII runtime_model_id is passed to config."""
+        parameters = {
+            "pii_detection": True,
+            "model_pii_detect": "urchade/gliner_multi-v2.1",
+        }
+
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
+        pii_task = next(t for t in tasks if t.stage == "pii_detect")
+        assert pii_task.config["runtime_model_id"] == "urchade/gliner_multi-v2.1"
+
     def test_audio_redaction_mode_config(self, job_id, audio_uri):
         """Test that audio redaction mode is passed to config."""
         parameters = {

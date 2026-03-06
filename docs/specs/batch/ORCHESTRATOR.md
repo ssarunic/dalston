@@ -675,3 +675,73 @@ The orchestrator exposes metrics for monitoring:
 - `dalston_queue_depth` — Current stream backlog per engine
 - `dalston_task_duration_seconds` — Task execution duration histogram
 - `dalston_job_duration_seconds` — Job total duration histogram
+- `dalston_orchestrator_event_decisions_total` — Durable event decisions (`ack`, `retry`, `dlq`) with failure reason labels
+
+---
+
+## Durable Event Reliability (M54)
+
+Durable orchestrator events are consumed from Redis stream `dalston:events:stream`
+using consumer group `orchestrators`.
+
+### Policy
+
+1. `delivery_count` is first-class:
+   - `read_new_events` treats `XREADGROUP ... >` as `delivery_count=1`
+   - stale claims use `XAUTOCLAIM` and resolve `times_delivered` via `XPENDING` fallback
+2. Non-retryable events are quarantined immediately to DLQ:
+   - `invalid_payload_json`
+   - `invalid_event_schema`
+   - `unknown_event_type`
+3. Retryable failures:
+   - `handler_exception`
+   - `dispatch_error`
+4. Retry ceiling:
+   - `delivery_count < DALSTON_EVENTS_MAX_DELIVERIES` -> leave pending for retry
+   - `delivery_count >= DALSTON_EVENTS_MAX_DELIVERIES` -> move to DLQ
+
+### DLQ Contract
+
+DLQ stream key (default): `dalston:events:dlq`
+
+Each DLQ message includes:
+
+- `source_stream`
+- `source_group`
+- `source_message_id`
+- `event_type`
+- `failure_reason`
+- `error`
+- `delivery_count`
+- `consumer_id`
+- `failed_at`
+- `payload` (when parseable)
+- `raw_payload` and `raw_fields` (for malformed payload/schema cases)
+
+### Loss-Averse Ordering
+
+DLQ transfer ordering is strict:
+
+1. `XADD` to DLQ
+2. `XACK` in source stream
+
+This favors no-loss semantics. Duplicate DLQ entries are acceptable if ACK fails after DLQ write.
+
+### Runtime Configuration
+
+- `DALSTON_EVENTS_MAX_DELIVERIES` (default: `5`)
+- `DALSTON_EVENTS_DLQ_STREAM` (default: `dalston:events:dlq`)
+- `DALSTON_EVENTS_DLQ_MAXLEN` (default: `10000`, applied as `MAXLEN ~`)
+
+### Ops Commands
+
+```bash
+# View newest DLQ entries
+redis-cli XREVRANGE dalston:events:dlq + - COUNT 20
+
+# View oldest DLQ entries
+redis-cli XRANGE dalston:events:dlq - + COUNT 20
+
+# Inspect durable stream pending summary
+redis-cli XPENDING dalston:events:stream orchestrators
+```

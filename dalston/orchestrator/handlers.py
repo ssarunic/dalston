@@ -39,6 +39,7 @@ from dalston.gateway.services.rate_limiter import (
 from dalston.orchestrator.catalog import get_catalog
 from dalston.orchestrator.dag import build_task_dag
 from dalston.orchestrator.engine_selector import (
+    ModelSelectionError,
     NoCapableEngineError,
     NoDownloadedModelError,
 )
@@ -208,6 +209,21 @@ async def handle_job_created(
         await db.commit()
         await _decrement_concurrent_jobs(redis, job_id, job.tenant_id)
         await publish_job_failed(redis, job_id, job.error)
+        return
+    except ModelSelectionError as e:
+        # Explicit stage model selection failed deterministically.
+        log.warning(
+            "model_selection_failed",
+            code=e.code,
+            stage=e.stage,
+            model_id=e.model_id,
+            runtime=e.runtime,
+            error=str(e),
+        )
+        job.status = JobStatus.FAILED.value
+        job.error = str(e)
+        job.completed_at = datetime.now(UTC)
+        await db.commit()
         return
     dalston.metrics.observe_orchestrator_dag_build(time.perf_counter() - dag_start)
 

@@ -38,6 +38,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M40](milestones/M40-model-registry.md) | Model Registry & HF Integration | March 2026 |
 | [M42](milestones/M42-console-model-management.md) | Console Model Management | March 2026 |
 | [M53](milestones/M53-realtime-latency-budget-clean-cut.md) | Realtime Latency Budget and Explicit Backpressure (Clean-Cut) | 2026-03-05 |
+| [M54](milestones/M54-event-dlq-poison-pill-isolation-clean-cut.md) | Event DLQ and Poison-Pill Isolation (Clean-Cut) | 2026-03-05 |
 
 ### In Progress (8)
 
@@ -52,13 +53,12 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Audio/transcript S3 storage working; session resume pending |
 
-### Not Started (4)
+### Not Started (3)
 
 | # | Milestone | Goal |
 |---|-----------|------|
 | [M9](milestones/M09-enrichment.md) | Enrichment | Emotions, events, LLM cleanup |
 | [M52](milestones/M52-engine-sdk-local-runner-dx-clean-cut.md) | Engine SDK Local Runner DX (Clean-Cut) | File-based local runner workflow (`audio + config.json -> output.json`) plus legacy compatibility cleanup |
-| [M54](milestones/M54-event-dlq-poison-pill-isolation-clean-cut.md) | Event DLQ and Poison-Pill Isolation (Clean-Cut) | Delivery-count retry ceiling + DLQ quarantine for durable orchestrator events |
 | [M55](milestones/M55-non-transcribe-runtime-model-management-clean-cut.md) | Non-Transcribe Runtime Model Management (Clean-Cut) | Runtime model selection and registry-backed lifecycle for diarize, align, and PII stages |
 
 ---
@@ -152,7 +152,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M32](milestones/M32-engine-variant-structure.md) | Engine Variant Structure | Model sizes as separate deployable engines | 1.5-2 | Superseded by M36 |
 | [M51](milestones/M51-engine-runtime-context-refactor.md) | Engine Runtime Context Refactor | Stateless URI-free engine contract with runner-side artifact materialization | 12-16 | Core Complete (engine migration → M52) |
 | [M52](milestones/M52-engine-sdk-local-runner-dx-clean-cut.md) | Engine SDK Local Runner DX (Clean-Cut) | File-based local runner command and no-compat cleanup before remaining stage refactors | 5-7 | Complete |
-| [M54](milestones/M54-event-dlq-poison-pill-isolation-clean-cut.md) | Event DLQ and Poison-Pill Isolation (Clean-Cut) | Delivery-count retry ceiling + DLQ quarantine for durable orchestrator events; remove infinite replay legacy behavior | 3-5 | Planned |
+| [M54](milestones/M54-event-dlq-poison-pill-isolation-clean-cut.md) | Event DLQ and Poison-Pill Isolation (Clean-Cut) | Delivery-count retry ceiling + DLQ quarantine for durable orchestrator events; remove infinite replay legacy behavior | 3-5 | Complete |
 
 ## Model Management Milestones
 
@@ -164,7 +164,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M41](milestones/M41-new-engine-types.md) | New Engine Types | Parakeet ONNX, HF-ASR, vLLM-ASR engine containers | 5-7 | Planned |
 | [M42](milestones/M42-console-model-management.md) | Console Model Management | Web UI for model registry, download, and selection | 5-7 | Complete |
 | [M46](milestones/M46-model-registry-as-source-of-truth.md) | Model Registry as Source of Truth | DB as single source, auto-seeding, user enrichment API | 3-4 | Planned |
-| [M55](milestones/M55-non-transcribe-runtime-model-management-clean-cut.md) | Non-Transcribe Runtime Model Management (Clean-Cut) | Runtime model selection and registry lifecycle for diarize, align, and PII stages | 8-12 | Planned |
+| [M55](milestones/M55-non-transcribe-runtime-model-management-clean-cut.md) | Non-Transcribe Runtime Model Management (Clean-Cut) | Runtime model selection and registry lifecycle for diarize, align, and PII stages | 8-12 | Complete |
 
 ---
 

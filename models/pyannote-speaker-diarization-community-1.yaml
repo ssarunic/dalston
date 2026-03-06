@@ -1,0 +1,31 @@
+schema_version: "1.1"
+id: pyannote/speaker-diarization-community-1
+runtime: pyannote-4.0
+runtime_model_id: pyannote/speaker-diarization-community-1
+
+name: Pyannote Speaker Diarization Community-1
+source: pyannote/speaker-diarization-community-1
+size_gb: 1.0
+stage: diarize
+
+description: |
+  Speaker diarization pipeline for pyannote-audio.
+  Used by the pyannote-4.0 runtime for batch diarization.
+
+languages: null
+
+capabilities:
+  word_timestamps: false
+  punctuation: false
+  capitalization: false
+  streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  min_vram_gb: 2
+  supports_cpu: true
+  min_ram_gb: 6
+
+performance:
+  rtf_gpu: 0.08
+  rtf_cpu: 1.2

@@ -144,9 +144,14 @@ async def build_task_dag(
     # Build engines dict from selections
     engines = {stage: sel.runtime for stage, sel in selections.items()}
 
-    # Extract runtime_model_id from transcribe selection (if user requested a specific model)
+    # Extract stage runtime model IDs from selections.
     transcribe_selection = selections["transcribe"]
-    runtime_model_id = transcribe_selection.runtime_model_id
+    stage_runtime_model_ids = {
+        stage: sel.runtime_model_id
+        for stage, sel in selections.items()
+        if sel.runtime_model_id is not None
+    }
+    runtime_model_id = stage_runtime_model_ids.get("transcribe")
 
     # Determine DAG shape from capabilities
     skip_alignment = "align" not in selections
@@ -157,7 +162,7 @@ async def build_task_dag(
         "dag_shape_decided",
         job_id=str(job_id),
         transcriber=transcribe_selection.runtime,
-        runtime_model_id=runtime_model_id,
+        stage_runtime_model_ids=stage_runtime_model_ids,
         alignment_included=not skip_alignment,
         diarization_included=not skip_diarization,
         stages=list(selections.keys()),
@@ -184,6 +189,7 @@ async def build_task_dag(
             skip_alignment=skip_alignment,
             skip_diarization=skip_diarization,
             runtime_model_id=runtime_model_id,
+            stage_runtime_model_ids=stage_runtime_model_ids,
         )
         dalston.telemetry.set_span_attribute("dalston.dag.task_count", len(tasks))
         return tasks
@@ -197,6 +203,7 @@ def _build_dag_with_engines(
     skip_alignment: bool,
     skip_diarization: bool,
     runtime_model_id: str | None = None,
+    stage_runtime_model_ids: dict[str, str] | None = None,
 ) -> list[Task]:
     """Build DAG with pre-selected engines.
 
@@ -212,6 +219,8 @@ def _build_dag_with_engines(
         skip_diarization: Whether to skip diarization even if requested
         runtime_model_id: Model ID to pass to the transcription engine
                          (e.g., "nvidia/parakeet-tdt-1.1b"). Already resolved by selector.
+        stage_runtime_model_ids: Runtime model IDs keyed by stage
+            (e.g., {"transcribe": "...", "align": "..."}).
 
     Returns:
         List of Task objects with dependencies wired
@@ -283,8 +292,11 @@ def _build_dag_with_engines(
 
     # M36: Set runtime_model_id if user requested a specific model variant
     # The selector already resolved model ID → (runtime, runtime_model_id)
-    if runtime_model_id is not None:
-        transcribe_config["runtime_model_id"] = runtime_model_id
+    stage_runtime_model_ids = dict(stage_runtime_model_ids or {})
+    if runtime_model_id is not None and "transcribe" not in stage_runtime_model_ids:
+        stage_runtime_model_ids["transcribe"] = runtime_model_id
+    if "transcribe" in stage_runtime_model_ids:
+        transcribe_config["runtime_model_id"] = stage_runtime_model_ids["transcribe"]
 
     tasks: list[Task] = []
     diarize_task = None
@@ -325,10 +337,13 @@ def _build_dag_with_engines(
             skip_alignment=skip_alignment,
             num_channels=num_channels,
             parameters=parameters,
+            stage_runtime_model_ids=stage_runtime_model_ids,
         )
 
     # Diarization (if requested and not skipped due to native support)
     if speaker_detection == "diarize" and not skip_diarization:
+        if "diarize" in stage_runtime_model_ids:
+            diarize_config["runtime_model_id"] = stage_runtime_model_ids["diarize"]
         diarize_task = Task(
             id=uuid4(),
             job_id=job_id,
@@ -367,6 +382,9 @@ def _build_dag_with_engines(
     # Alignment (if word timestamps wanted and engine doesn't have native support)
     align_task = None
     if word_timestamps and not skip_alignment:
+        align_config = {"word_timestamps": True}
+        if "align" in stage_runtime_model_ids:
+            align_config["runtime_model_id"] = stage_runtime_model_ids["align"]
         align_task = Task(
             id=uuid4(),
             job_id=job_id,
@@ -375,7 +393,7 @@ def _build_dag_with_engines(
             status=TaskStatus.PENDING,
             dependencies=[transcribe_task.id],
             input_bindings=_audio_input_binding(),
-            config={"word_timestamps": True},
+            config=align_config,
             input_uri=None,
             output_uri=None,
             retries=0,
@@ -402,6 +420,10 @@ def _build_dag_with_engines(
                 "pii_confidence_threshold", DEFAULT_PII_CONFIDENCE_THRESHOLD
             ),
         }
+        if "pii_detect" in stage_runtime_model_ids:
+            pii_detect_config["runtime_model_id"] = stage_runtime_model_ids[
+                "pii_detect"
+            ]
 
         pii_detect_task = Task(
             id=uuid4(),
@@ -500,6 +522,7 @@ def _build_per_channel_dag_with_engines(
     skip_alignment: bool,
     num_channels: int = 2,
     parameters: dict | None = None,
+    stage_runtime_model_ids: dict[str, str] | None = None,
 ) -> list[Task]:
     """Build per-channel DAG with pre-selected engines (M31).
 
@@ -525,6 +548,7 @@ def _build_per_channel_dag_with_engines(
         Complete task list including merge
     """
     parameters = parameters or {}
+    stage_runtime_model_ids = stage_runtime_model_ids or {}
     all_channel_tasks: list[Task] = []
     last_channel_tasks: list[Task] = []
 
@@ -560,6 +584,9 @@ def _build_per_channel_dag_with_engines(
 
         # Alignment task for this channel
         if word_timestamps and not skip_alignment:
+            align_config = {"word_timestamps": True, "channel": channel}
+            if "align" in stage_runtime_model_ids:
+                align_config["runtime_model_id"] = stage_runtime_model_ids["align"]
             align_task = Task(
                 id=uuid4(),
                 job_id=job_id,
@@ -568,7 +595,7 @@ def _build_per_channel_dag_with_engines(
                 status=TaskStatus.PENDING,
                 dependencies=[transcribe_task.id],
                 input_bindings=_audio_input_binding(channel=channel),
-                config={"word_timestamps": True, "channel": channel},
+                config=align_config,
                 input_uri=None,
                 output_uri=None,
                 retries=0,
@@ -588,6 +615,10 @@ def _build_per_channel_dag_with_engines(
                 ),
                 "channel": channel,
             }
+            if "pii_detect" in stage_runtime_model_ids:
+                pii_detect_config["runtime_model_id"] = stage_runtime_model_ids[
+                    "pii_detect"
+                ]
 
             pii_detect_task = Task(
                 id=uuid4(),

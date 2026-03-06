@@ -1,11 +1,4 @@
-"""Orchestrator entry point.
-
-Runs the main event loop that:
-1. Replays pending durable events on startup (crash recovery)
-2. Subscribes to Redis pub/sub channel 'dalston:events'
-3. Dispatches events to appropriate handlers
-4. Manages graceful shutdown
-"""
+"""Orchestrator entry point for durable event consumption and dispatch."""
 
 import asyncio
 import json
@@ -13,6 +6,7 @@ import os
 import signal
 import sys
 import time
+from typing import Any
 from uuid import UUID, uuid4
 
 import structlog
@@ -26,14 +20,20 @@ from dalston.common.audit import AuditService
 from dalston.common.durable_events import (
     EVENTS_CONSUMER_GROUP,
     EVENTS_STREAM,
+    FAILURE_REASON_DISPATCH_ERROR,
+    FAILURE_REASON_HANDLER_EXCEPTION,
+    FAILURE_REASON_INVALID_EVENT_SCHEMA,
+    FAILURE_REASON_UNKNOWN_EVENT_TYPE,
+    DurableEventEnvelope,
     ack_event,
     claim_stale_pending_events,
     ensure_events_stream_group,
+    move_event_to_dlq,
     read_new_events,
 )
 
 # Note: We now consume from durable stream, not pub/sub EVENTS_CHANNEL
-from dalston.config import get_settings
+from dalston.config import Settings, get_settings
 from dalston.db.models import JobModel
 from dalston.db.session import async_session, init_db
 from dalston.gateway.services.storage import StorageService
@@ -73,6 +73,18 @@ _stale_task_scanner: StaleTaskScanner | None = None
 _reconciliation_sweeper: ReconciliationSweeper | None = None
 _metrics_app: web.Application | None = None
 _metrics_runner: web.AppRunner | None = None
+
+
+class EventSchemaError(Exception):
+    """Raised when event payload does not match expected schema."""
+
+
+class UnknownEventTypeError(Exception):
+    """Raised for event types not handled by this orchestrator."""
+
+
+class HandlerExecutionError(Exception):
+    """Raised when a handler fails for a syntactically valid event."""
 
 
 async def _handle_metrics_endpoint(request: web.Request) -> web.Response:
@@ -117,6 +129,24 @@ async def _stop_metrics_server() -> None:
     if _metrics_runner:
         await _metrics_runner.cleanup()
         _metrics_runner = None
+
+
+def _require_uuid_field(event: dict[str, Any], key: str) -> UUID:
+    """Extract a required UUID field from event payload."""
+    value = event.get(key)
+    if value is None:
+        raise EventSchemaError(f"missing_required_field:{key}")
+
+    if isinstance(value, UUID):
+        return value
+
+    if not isinstance(value, str):
+        raise EventSchemaError(f"invalid_uuid_field_type:{key}")
+
+    try:
+        return UUID(value)
+    except ValueError as exc:
+        raise EventSchemaError(f"invalid_uuid_value:{key}") from exc
 
 
 async def orchestrator_loop() -> None:
@@ -263,23 +293,22 @@ async def orchestrator_loop() -> None:
                     continue
 
                 for event in events:
-                    message_id = event.get("id")
-                    log = logger.bind(
-                        event_type=event.get("type"),
-                        message_id=message_id,
-                    )
-
                     try:
-                        await _dispatch_event_dict(
-                            event, redis, settings, batch_registry
+                        await _process_durable_event(
+                            event,
+                            redis,
+                            settings,
+                            batch_registry,
+                            consumer_id=consumer_id,
+                            source="live_consumer",
                         )
-                        # ACK the event after successful processing
-                        if message_id:
-                            await ack_event(redis, message_id)
                     except Exception as e:
-                        log.exception("event_processing_error", error=str(e))
-                        # Don't ACK failed events - they'll be retried
-                        # by claim_stale_pending_events on next startup
+                        logger.exception(
+                            "event_processing_error",
+                            error=str(e),
+                            message_id=event.message_id,
+                            event_type=event.event_type or "unknown",
+                        )
 
             except Exception as e:
                 logger.exception("stream_read_error", error=str(e))
@@ -314,7 +343,7 @@ async def orchestrator_loop() -> None:
 async def _claim_and_replay_stale_events(
     redis: aioredis.Redis,
     consumer_id: str,
-    settings,
+    settings: Settings,
     batch_registry: BatchEngineRegistry,
     *,
     is_startup: bool = False,
@@ -363,36 +392,130 @@ async def _claim_and_replay_stale_events(
     logger.info("claimed_stale_events", count=len(stale_events))
 
     for event in stale_events:
-        message_id = event.get("id")
-        event_type = event.get("type")
-        log = logger.bind(
-            event_type=event_type,
-            message_id=message_id,
-            source="crash_recovery",
-        )
-
-        log.info("replaying_claimed_event")
-
         try:
-            # Dispatch the event (event dict already has the payload fields merged)
-            await _dispatch_event_dict(event, redis, settings, batch_registry)
-
-            # ACK the event after successful processing
-            if message_id:
-                await ack_event(redis, message_id)
-                log.debug("claimed_event_acked")
-
+            await _process_durable_event(
+                event,
+                redis,
+                settings,
+                batch_registry,
+                consumer_id=consumer_id,
+                source="crash_recovery",
+            )
         except Exception as e:
-            log.exception("claimed_event_replay_failed", error=str(e))
-            # Don't ACK failed events - they'll be retried on next startup
+            logger.exception(
+                "claimed_event_replay_failed",
+                error=str(e),
+                message_id=event.message_id,
+                event_type=event.event_type or "unknown",
+            )
 
     logger.info("stale_event_replay_complete", replayed=len(stale_events))
 
 
-async def _dispatch_event_dict(
-    event: dict,
+async def _process_durable_event(
+    envelope: DurableEventEnvelope,
     redis: aioredis.Redis,
-    settings,
+    settings: Settings,
+    batch_registry: BatchEngineRegistry,
+    *,
+    consumer_id: str,
+    source: str,
+) -> None:
+    """Apply M54 decision policy for one durable event."""
+    event_type = envelope.event_type or "unknown"
+    log = logger.bind(
+        message_id=envelope.message_id,
+        event_type=event_type,
+        delivery_count=envelope.delivery_count,
+        source=source,
+    )
+
+    failure_reason: str | None = None
+    error: str | None = None
+    retryable = False
+
+    if not envelope.is_valid:
+        failure_reason = envelope.failure_reason or FAILURE_REASON_INVALID_EVENT_SCHEMA
+        error = envelope.error or "invalid_durable_event"
+        retryable = False
+    else:
+        try:
+            await _dispatch_event_dict(
+                envelope.to_event_dict(),
+                redis,
+                settings,
+                batch_registry,
+            )
+        except UnknownEventTypeError as exc:
+            failure_reason = FAILURE_REASON_UNKNOWN_EVENT_TYPE
+            error = str(exc)
+            retryable = False
+        except EventSchemaError as exc:
+            failure_reason = FAILURE_REASON_INVALID_EVENT_SCHEMA
+            error = str(exc)
+            retryable = False
+        except HandlerExecutionError as exc:
+            failure_reason = FAILURE_REASON_HANDLER_EXCEPTION
+            error = str(exc)
+            retryable = True
+        except Exception as exc:
+            failure_reason = FAILURE_REASON_DISPATCH_ERROR
+            error = str(exc)
+            retryable = True
+
+    if failure_reason is None:
+        await ack_event(redis, envelope.message_id)
+        dalston.metrics.inc_orchestrator_event_decision(
+            decision="ack",
+            failure_reason="none",
+            event_type=event_type,
+        )
+        log.info("durable_event_decision", decision="ack")
+        return
+
+    if retryable and envelope.delivery_count < settings.events_max_deliveries:
+        dalston.metrics.inc_orchestrator_event_decision(
+            decision="retry",
+            failure_reason=failure_reason,
+            event_type=event_type,
+        )
+        log.warning(
+            "durable_event_decision",
+            decision="retry",
+            failure_reason=failure_reason,
+            error=error,
+            max_deliveries=settings.events_max_deliveries,
+        )
+        return
+
+    dlq_message_id = await move_event_to_dlq(
+        redis,
+        envelope,
+        failure_reason=failure_reason,
+        error=error,
+        consumer_id=consumer_id,
+        dlq_stream=settings.events_dlq_stream,
+        dlq_maxlen=settings.events_dlq_maxlen,
+    )
+    dalston.metrics.inc_orchestrator_event_decision(
+        decision="dlq",
+        failure_reason=failure_reason,
+        event_type=event_type,
+    )
+    log.warning(
+        "durable_event_decision",
+        decision="dlq",
+        failure_reason=failure_reason,
+        error=error,
+        dlq_message_id=dlq_message_id,
+        max_deliveries=settings.events_max_deliveries,
+    )
+
+
+async def _dispatch_event_dict(
+    event: dict[str, Any],
+    redis: aioredis.Redis,
+    settings: Settings,
     batch_registry: BatchEngineRegistry,
 ) -> None:
     """Dispatch a pre-parsed event dict to the appropriate handler.
@@ -405,7 +528,11 @@ async def _dispatch_event_dict(
         settings: Application settings
         batch_registry: Batch engine registry for availability checks
     """
-    event_type = event.get("type")
+    raw_event_type = event.get("type")
+    if not isinstance(raw_event_type, str) or not raw_event_type:
+        raise EventSchemaError("missing_or_invalid_type")
+
+    event_type = raw_event_type
     log = logger.bind(event_type=event_type)
 
     # Record event metric (M20)
@@ -419,7 +546,10 @@ async def _dispatch_event_dict(
     log.debug("received_event", payload=event)
 
     # Extract trace context from event (M19)
-    trace_context = event.pop("_trace_context", {}) if "_trace_context" in event else {}
+    trace_context_raw = (
+        event.pop("_trace_context", {}) if "_trace_context" in event else {}
+    )
+    trace_context = trace_context_raw if isinstance(trace_context_raw, dict) else {}
 
     # Create span for event handling, linked to parent trace if available
     with dalston.telemetry.span_from_context(
@@ -434,14 +564,14 @@ async def _dispatch_event_dict(
         async with async_session() as db:
             try:
                 if event_type == "job.created":
-                    job_id = UUID(event["job_id"])
+                    job_id = _require_uuid_field(event, "job_id")
                     dalston.telemetry.set_span_attribute("dalston.job_id", str(job_id))
                     await handle_job_created(
                         job_id, db, redis, settings, batch_registry
                     )
 
                 elif event_type == "task.started":
-                    task_id = UUID(event["task_id"])
+                    task_id = _require_uuid_field(event, "task_id")
                     runtime = event.get("runtime")
                     dalston.telemetry.set_span_attribute(
                         "dalston.task_id", str(task_id)
@@ -449,7 +579,7 @@ async def _dispatch_event_dict(
                     await handle_task_started(task_id, db, runtime)
 
                 elif event_type == "task.completed":
-                    task_id = UUID(event["task_id"])
+                    task_id = _require_uuid_field(event, "task_id")
                     dalston.telemetry.set_span_attribute(
                         "dalston.task_id", str(task_id)
                     )
@@ -458,8 +588,8 @@ async def _dispatch_event_dict(
                     )
 
                 elif event_type == "task.failed":
-                    task_id = UUID(event["task_id"])
-                    error = event.get("error", "Unknown error")
+                    task_id = _require_uuid_field(event, "task_id")
+                    error = str(event.get("error", "Unknown error"))
                     dalston.telemetry.set_span_attribute(
                         "dalston.task_id", str(task_id)
                     )
@@ -469,8 +599,8 @@ async def _dispatch_event_dict(
                     )
 
                 elif event_type == "task.wait_timeout":
-                    task_id = UUID(event["task_id"])
-                    error = event.get("error", "Engine wait timeout")
+                    task_id = _require_uuid_field(event, "task_id")
+                    error = str(event.get("error", "Engine wait timeout"))
                     dalston.telemetry.set_span_attribute(
                         "dalston.task_id", str(task_id)
                     )
@@ -480,41 +610,43 @@ async def _dispatch_event_dict(
                     )
 
                 elif event_type == "job.completed":
-                    job_id = UUID(event["job_id"])
+                    job_id = _require_uuid_field(event, "job_id")
                     dalston.telemetry.set_span_attribute("dalston.job_id", str(job_id))
                     await _handle_job_webhook(job_id, "completed", db, settings)
 
                 elif event_type == "job.failed":
-                    job_id = UUID(event["job_id"])
-                    error = event.get("error", "Unknown error")
+                    job_id = _require_uuid_field(event, "job_id")
+                    error = str(event.get("error", "Unknown error"))
                     dalston.telemetry.set_span_attribute("dalston.job_id", str(job_id))
                     dalston.telemetry.set_span_attribute("dalston.error", error)
                     await _handle_job_webhook(job_id, "failed", db, settings, error)
 
                 elif event_type == "job.cancel_requested":
-                    job_id = UUID(event["job_id"])
+                    job_id = _require_uuid_field(event, "job_id")
                     dalston.telemetry.set_span_attribute("dalston.job_id", str(job_id))
                     await handle_job_cancel_requested(job_id, db, redis)
 
                 elif event_type == "job.cancelled":
-                    job_id = UUID(event["job_id"])
+                    job_id = _require_uuid_field(event, "job_id")
                     dalston.telemetry.set_span_attribute("dalston.job_id", str(job_id))
                     await _handle_job_webhook(job_id, "cancelled", db, settings)
 
                 else:
-                    log.debug("unknown_event_type")
+                    raise UnknownEventTypeError(event_type)
 
+            except (UnknownEventTypeError, EventSchemaError):
+                raise
             except Exception as e:
                 dalston.telemetry.record_exception(e)
                 dalston.telemetry.set_span_status_error(str(e))
                 log.exception("handler_error", error=str(e))
-                raise  # Re-raise for durable event replay to handle
+                raise HandlerExecutionError(str(e)) from e
 
 
 async def _dispatch_event(
     data: str,
     redis: aioredis.Redis,
-    settings,
+    settings: Settings,
     batch_registry: BatchEngineRegistry,
 ) -> None:
     """Parse and dispatch an event to the appropriate handler.
@@ -529,6 +661,10 @@ async def _dispatch_event(
         event = json.loads(data)
     except json.JSONDecodeError as e:
         logger.error("invalid_event_json", error=str(e), data=data[:100])
+        return
+
+    if not isinstance(event, dict):
+        logger.error("invalid_event_json_schema", reason="root_must_be_object")
         return
 
     try:
