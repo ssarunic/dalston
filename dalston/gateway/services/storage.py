@@ -13,6 +13,10 @@ from fastapi import UploadFile
 from dalston.common.s3 import get_s3_client
 from dalston.common.timeouts import S3_PRESIGNED_URL_EXPIRY_SECONDS
 from dalston.config import Settings
+from dalston.gateway.services.artifact_store import (
+    LocalFilesystemArtifactStoreAdapter,
+    build_artifact_store,
+)
 
 
 class StorageService:
@@ -21,6 +25,7 @@ class StorageService:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.bucket = settings.s3_bucket
+        self.artifact_store = build_artifact_store(settings)
 
     async def upload_audio(
         self,
@@ -71,16 +76,11 @@ class StorageService:
         else:
             raise ValueError("Either file or file_content must be provided")
 
-        # Upload to S3
-        async with get_s3_client(self.settings) as s3:
-            await s3.put_object(
-                Bucket=self.bucket,
-                Key=key,
-                Body=content,
-                ContentType=resolved_content_type,
-            )
-
-        return f"s3://{self.bucket}/{key}"
+        return await self.artifact_store.write_bytes(
+            key=key,
+            payload=content,
+            content_type=resolved_content_type,
+        )
 
     async def get_transcript(self, job_id: UUID) -> dict[str, Any] | None:
         """Fetch transcript JSON from S3 if it exists.
@@ -92,7 +92,16 @@ class StorageService:
             Parsed transcript dict or None if not found
         """
         key = f"jobs/{job_id}/transcript.json"
-
+        if self.settings.runtime_mode == "lite":
+            store = self.artifact_store
+            if not isinstance(store, LocalFilesystemArtifactStoreAdapter):
+                return None
+            try:
+                uri = f"file://{Path(self.settings.lite_artifacts_dir).resolve() / key}"
+                body = await store.read_bytes(uri)
+                return json.loads(body.decode("utf-8"))
+            except FileNotFoundError:
+                return None
         async with get_s3_client(self.settings) as s3:
             try:
                 response = await s3.get_object(Bucket=self.bucket, Key=key)

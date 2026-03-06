@@ -57,6 +57,11 @@ async def _ensure_admin_key_exists() -> None:
     """
     from dalston.db.session import async_session
 
+    settings = get_settings()
+    if settings.runtime_mode == "lite":
+        logger.info("skip_admin_key_bootstrap_lite_mode")
+        return
+
     try:
         redis = await get_redis()
         async with async_session() as db:
@@ -117,51 +122,57 @@ async def lifespan(app: FastAPI):
 
     logger.info("Starting Dalston Gateway...")
 
-    # Initialize Redis provider and store on app.state for DI
     settings = get_settings()
-    redis_provider = LocalRedisProvider(settings)
-    set_provider(redis_provider)
-    app.state.redis_provider = redis_provider
-    logger.info("Redis provider initialized")
+
+    # Initialize Redis provider only in distributed mode
+    if settings.runtime_mode == "distributed":
+        redis_provider = LocalRedisProvider(settings)
+        set_provider(redis_provider)
+        app.state.redis_provider = redis_provider
+        logger.info("Redis provider initialized")
+    else:
+        logger.info("lite_mode_startup", mode=settings.runtime_mode)
 
     # Initialize database
     logger.info("Initializing database...")
     await init_db()
 
     # Seed model registry from YAML files
-    logger.info("Seeding model registry from YAMLs...")
-    try:
-        from dalston.db.session import async_session
-        from dalston.gateway.services.model_registry import ModelRegistryService
+    if settings.runtime_mode == "distributed":
+        logger.info("Seeding model registry from YAMLs...")
+        try:
+            from dalston.db.session import async_session
+            from dalston.gateway.services.model_registry import ModelRegistryService
 
-        async with async_session() as db:
-            service = ModelRegistryService()
-            result = await service.seed_from_yamls(db)
-            logger.info(
-                "model_registry_seeded",
-                created=result["created"],
-                updated=result["updated"],
-                preserved=result["preserved"],
-            )
-    except FileNotFoundError:
-        # Models directory doesn't exist - skip seeding (e.g., in tests)
-        logger.warning("models_directory_not_found", msg="Skipping model seeding")
-    except Exception as e:
-        logger.error("model_seeding_failed", error=str(e))
-        raise
+            async with async_session() as db:
+                service = ModelRegistryService()
+                result = await service.seed_from_yamls(db)
+                logger.info(
+                    "model_registry_seeded",
+                    created=result["created"],
+                    updated=result["updated"],
+                    preserved=result["preserved"],
+                )
+        except FileNotFoundError:
+            # Models directory doesn't exist - skip seeding (e.g., in tests)
+            logger.warning("models_directory_not_found", msg="Skipping model seeding")
+        except Exception as e:
+            logger.error("model_seeding_failed", error=str(e))
+            raise
 
-    # Ensure S3 bucket exists
-    logger.info("Ensuring S3 bucket exists...")
-    try:
-        await ensure_bucket_exists()
-    except Exception as e:
-        logger.error("S3 bucket check failed: %s", e)
-        raise
+    if settings.runtime_mode == "distributed":
+        # Ensure S3 bucket exists
+        logger.info("Ensuring S3 bucket exists...")
+        try:
+            await ensure_bucket_exists()
+        except Exception as e:
+            logger.error("S3 bucket check failed: %s", e)
+            raise
 
-    # Start Session Router for real-time transcription
-    logger.info("Starting Session Router...")
-    session_router = SessionRouter(redis_url=settings.redis_url)
-    await session_router.start()
+        # Start Session Router for real-time transcription
+        logger.info("Starting Session Router...")
+        session_router = SessionRouter(redis_url=settings.redis_url)
+        await session_router.start()
 
     # Auto-bootstrap admin key if no keys exist
     await _ensure_admin_key_exists()
@@ -178,7 +189,8 @@ async def lifespan(app: FastAPI):
         await session_router.stop()
 
     # Close Redis provider
-    await reset_provider()
+    if settings.runtime_mode == "distributed":
+        await reset_provider()
     await engine.dispose()
     dalston.telemetry.shutdown_tracing()
     logger.info("Dalston Gateway shutdown complete")

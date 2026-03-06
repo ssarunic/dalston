@@ -56,6 +56,7 @@ class TestDeleteTranscription:
     @pytest.fixture
     def mock_settings(self):
         settings = MagicMock(spec=Settings)
+        settings.runtime_mode = "distributed"
         settings.s3_bucket = "test-bucket"
         return settings
 

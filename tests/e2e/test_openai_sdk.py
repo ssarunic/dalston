@@ -23,8 +23,14 @@ def test_transcription_with_openai_sdk():
         base_url="http://localhost:8000/v1",
     )
 
-    # Use test fixture
-    audio_file = Path(__file__).parent.parent / "fixtures" / "test_audio.wav"
+    # Use a spoken-audio fixture that reliably yields non-empty transcript text.
+    candidate_files = [
+        Path(__file__).parent.parent / "audio" / "test_merged.wav",
+        Path(__file__).parent.parent / "fixtures" / "test_audio.wav",
+    ]
+    audio_file = next((p for p in candidate_files if p.exists()), None)
+    if audio_file is None:
+        raise RuntimeError("No test audio fixture found for OpenAI SDK e2e test")
 
     print(f"Using audio file: {audio_file}")
 

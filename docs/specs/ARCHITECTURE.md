@@ -396,3 +396,9 @@ For detailed rationale on architectural decisions, see [Architecture Decision Re
 - [DAG Builder](./implementations/dag-builder.md) — Task DAG construction with optional/parallel tasks
 - [Enrichment Engines](./implementations/enrichment-engines.md) — Emotion, events, LLM cleanup patterns
 - [Console API](./implementations/console-api.md) — Dashboard aggregation, React Query integration
+
+### Runtime Modes
+
+- `distributed` (default): Postgres + Redis + S3/MinIO.
+- `lite`: SQLite + in-memory queue + local filesystem artifacts.
+- Mode is selected once at startup via `DALSTON_MODE` and does not fallback at runtime.

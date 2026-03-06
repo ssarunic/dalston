@@ -39,6 +39,7 @@ class TestAudioUrlTranscription:
     def mock_settings(self):
         """Create mock settings."""
         settings = MagicMock()
+        settings.runtime_mode = "distributed"
         settings.audio_url_max_size_gb = 3.0
         settings.audio_url_timeout_seconds = 300
         settings.s3_bucket = "test-bucket"
@@ -158,7 +159,7 @@ class TestAudioUrlTranscription:
 
     @patch("dalston.gateway.services.ingestion.download_audio_from_url")
     @patch("dalston.gateway.services.ingestion.probe_audio")
-    @patch("dalston.gateway.services.storage.get_s3_client")
+    @patch("dalston.gateway.services.artifact_store.get_s3_client")
     @patch("dalston.common.events.publish_job_created")
     def test_transcription_with_audio_url_success(
         self,

@@ -358,7 +358,7 @@ Each milestone has a verification section. Key checkpoints:
 | M52 | Developer can run `python -m dalston.engine_sdk.local_runner run` with local `audio + config.json` and get canonical `output.json` without Redis/S3; legacy compatibility bridges removed |
 | M54 | Poison or malformed durable events are quarantined in `dalston:events:dlq` after policy thresholds; main stream entries are ACKed and healthy events continue processing |
 | M55 | Diarize, align, and PII stages accept `runtime_model_id`; models registered in registry with explicit stage; per-stage model selection works in standard and per-channel DAGs |
-| M56 | `DALSTON_MODE=lite` runs scoped batch transcription without Postgres/Redis/MinIO using SQLite + in-memory queue + localfs artifacts; distributed mode remains stable |
+| M56 | `DALSTON_MODE`-driven mode binding with SQLite/in-memory/localfs backends and validated lite batch slice (`prepare -> transcribe -> merge`); `DALSTON_MODE=lite` runs scoped batch transcription without Postgres/Redis/MinIO while distributed mode remains stable |
 | M57 | `dalston transcribe <file>` auto-starts local server when needed, auto-ensures default model, and returns transcript in one command |
 | M58 | Lite mode supports explicit profiles/capability matrix and fails unsupported combinations deterministically with actionable guidance |
 | M59 | Runtimes execute through declared isolation profiles (`inproc`/`venv`/`container`) while preserving shared task/output contracts |
