@@ -32,6 +32,7 @@ WS_CLOSE_TRY_AGAIN_LATER = 1013  # Server at capacity, try later
 # =============================================================================
 # Custom codes for application-specific errors
 
+WS_CLOSE_LAG_EXCEEDED = 4010  # Realtime lag budget exceeded
 WS_CLOSE_INVALID_REQUEST = 4400  # Invalid parameters / unsupported intent
 WS_CLOSE_UNAUTHORIZED = 4401  # Authentication required / invalid credentials
 WS_CLOSE_FORBIDDEN = 4403  # Access denied

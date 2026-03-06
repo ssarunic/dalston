@@ -10,10 +10,13 @@ from dalston.realtime_sdk.protocol import (
     ErrorCode,
     ErrorMessage,
     FlushMessage,
+    ProcessingLagWarningMessage,
+    RecoveryHint,
     SegmentInfo,
     SessionBeginMessage,
     SessionConfigInfo,
     SessionEndMessage,
+    SessionTerminatedMessage,
     TranscriptFinalMessage,
     TranscriptPartialMessage,
     VADSpeechEndMessage,
@@ -269,7 +272,58 @@ class TestErrorMessage:
         assert ErrorCode.INVALID_MESSAGE == "invalid_message"
         assert ErrorCode.NO_CAPACITY == "no_capacity"
         assert ErrorCode.SESSION_TIMEOUT == "session_timeout"
+        assert ErrorCode.LAG_EXCEEDED == "lag_exceeded"
         assert ErrorCode.INTERNAL_ERROR == "internal_error"
+
+
+class TestLagBudgetMessages:
+    """Tests for lag warning and session termination messages."""
+
+    def test_processing_lag_warning_message(self):
+        msg = ProcessingLagWarningMessage(
+            lag_seconds=3.7,
+            warning_threshold_seconds=3.0,
+            hard_threshold_seconds=5.0,
+        )
+        result = msg.to_dict()
+
+        assert result["type"] == "warning"
+        assert result["code"] == "processing_lag"
+        assert result["lag_seconds"] == 3.7
+        assert result["warning_threshold_seconds"] == 3.0
+        assert result["hard_threshold_seconds"] == 5.0
+
+    def test_session_terminated_message_without_recovery_hint(self):
+        msg = SessionTerminatedMessage(
+            session_id="sess_abc123",
+            reason="lag_exceeded",
+            recoverable=False,
+        )
+        result = msg.to_dict()
+
+        assert result["type"] == "session.terminated"
+        assert result["session_id"] == "sess_abc123"
+        assert result["reason"] == "lag_exceeded"
+        assert result["recoverable"] is False
+        assert "recovery_hint" not in result
+
+    def test_session_terminated_message_with_recovery_hint(self):
+        msg = SessionTerminatedMessage(
+            session_id="sess_abc123",
+            reason="worker_crash",
+            recoverable=True,
+            recovery_hint=RecoveryHint(
+                action="reconnect_with_replay",
+                buffer_window_ms=10000,
+                retry_after_ms=500,
+            ),
+            last_transcript_offset_ms=45600,
+        )
+        result = msg.to_dict()
+
+        assert result["recovery_hint"]["action"] == "reconnect_with_replay"
+        assert result["recovery_hint"]["buffer_window_ms"] == 10000
+        assert result["last_transcript_offset_ms"] == 45600
 
 
 class TestParseClientMessage:

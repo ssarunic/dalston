@@ -197,6 +197,8 @@ async def handle_job_created(
         job.error = str(e)
         job.completed_at = datetime.now(UTC)
         await db.commit()
+        await _decrement_concurrent_jobs(redis, job_id, job.tenant_id)
+        await publish_job_failed(redis, job_id, job.error)
         return
     except NoCapableEngineError as e:
         # No running engine can handle the job requirements
@@ -205,6 +207,8 @@ async def handle_job_created(
         job.error = str(e)
         job.completed_at = datetime.now(UTC)
         await db.commit()
+        await _decrement_concurrent_jobs(redis, job_id, job.tenant_id)
+        await publish_job_failed(redis, job_id, job.error)
         return
     except ModelSelectionError as e:
         # Explicit stage model selection failed deterministically.

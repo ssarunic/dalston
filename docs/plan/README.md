@@ -37,6 +37,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M39](milestones/M39-model-cache-ttl.md) | Model Cache & TTL | March 2026 |
 | [M40](milestones/M40-model-registry.md) | Model Registry & HF Integration | March 2026 |
 | [M42](milestones/M42-console-model-management.md) | Console Model Management | March 2026 |
+| [M53](milestones/M53-realtime-latency-budget-clean-cut.md) | Realtime Latency Budget and Explicit Backpressure (Clean-Cut) | 2026-03-05 |
 | [M54](milestones/M54-event-dlq-poison-pill-isolation-clean-cut.md) | Event DLQ and Poison-Pill Isolation (Clean-Cut) | 2026-03-05 |
 
 ### In Progress (8)
@@ -58,7 +59,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 |---|-----------|------|
 | [M9](milestones/M09-enrichment.md) | Enrichment | Emotions, events, LLM cleanup |
 | [M52](milestones/M52-engine-sdk-local-runner-dx-clean-cut.md) | Engine SDK Local Runner DX (Clean-Cut) | File-based local runner workflow (`audio + config.json -> output.json`) plus legacy compatibility cleanup |
-| [M53](milestones/M53-realtime-latency-budget-clean-cut.md) | Realtime Latency Budget and Explicit Backpressure (Clean-Cut) | Explicit lag warning + termination budget with clean-cut removal of legacy realtime compatibility paths |
+| [M55](milestones/M55-non-transcribe-runtime-model-management-clean-cut.md) | Non-Transcribe Runtime Model Management (Clean-Cut) | Runtime model selection and registry-backed lifecycle for diarize, align, and PII stages |
 
 ---
 
@@ -126,7 +127,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | # | Milestone | Goal | Days | Status |
 |---|-----------|------|------|--------|
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Session DB, audio/transcript S3 storage, console visibility | 3-4 | Nearly Complete |
-| [M53](milestones/M53-realtime-latency-budget-clean-cut.md) | Realtime Latency Budget and Explicit Backpressure (Clean-Cut) | Enforce explicit lag budget with `processing_lag` warning and lag-exceeded close semantics | 3-5 | Planned |
+| [M53](milestones/M53-realtime-latency-budget-clean-cut.md) | Realtime Latency Budget and Explicit Backpressure (Clean-Cut) | Enforce explicit lag budget with `processing_lag` warning and lag-exceeded close semantics | 3-5 | Complete |
 
 ## Data Management Milestones
 

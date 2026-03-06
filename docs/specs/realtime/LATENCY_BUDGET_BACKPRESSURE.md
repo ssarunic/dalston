@@ -1,14 +1,14 @@
-# Realtime Latency Budget and Backpressure (M53 Planned)
+# Realtime Latency Budget and Backpressure
 
 ## Status
 
 - **Milestone:** M53
-- **State:** Planned (not implemented yet)
+- **State:** Implemented (2026-03-05)
 - **Scope:** Realtime worker session pipeline, gateway realtime translation, protocol close/error semantics
 
 ---
 
-## Problem
+## Problem (Pre-M53)
 
 The current realtime pipeline relies on implicit transport backpressure (`await send`) and has no explicit lag budget enforcement. Under CPU contention or slow inference, sessions can degrade into high latency without deterministic warning/termination behavior.
 
@@ -73,7 +73,7 @@ The current realtime pipeline relies on implicit transport backpressure (`await 
 
 ---
 
-## Protocol Additions (Planned)
+## Protocol Additions
 
 ### WebSocket close code
 
@@ -108,7 +108,7 @@ The current realtime pipeline relies on implicit transport backpressure (`await 
 - Internal warning/error signals are mapped to endpoint-specific message shapes below.
 - No legacy branch for pre-M53 worker behavior is kept.
 
-#### ElevenLabs warning mapping (planned)
+#### ElevenLabs warning mapping
 
 ```json
 {
@@ -121,7 +121,7 @@ The current realtime pipeline relies on implicit transport backpressure (`await 
 }
 ```
 
-#### ElevenLabs terminal mapping (planned)
+#### ElevenLabs terminal mapping
 
 ```json
 {
@@ -132,7 +132,7 @@ The current realtime pipeline relies on implicit transport backpressure (`await 
 }
 ```
 
-#### OpenAI terminal mapping (planned)
+#### OpenAI terminal mapping
 
 ```json
 {
@@ -164,7 +164,7 @@ OpenAI warning mapping reuses a warning envelope:
 
 ---
 
-## Configuration Surface (Planned)
+## Configuration Surface
 
 Expose lag budget knobs via realtime worker config (environment and/or session config parsing in SDK):
 
@@ -172,11 +172,19 @@ Expose lag budget knobs via realtime worker config (environment and/or session c
 - `DALSTON_REALTIME_LAG_HARD_SECONDS`
 - `DALSTON_REALTIME_LAG_HARD_GRACE_SECONDS`
 
+For deterministic local testing, the worker also supports progressive per-chunk delay knobs (default-off):
+
+- `DALSTON_REALTIME_DEBUG_CHUNK_SLEEP_INITIAL_SECONDS`
+- `DALSTON_REALTIME_DEBUG_CHUNK_SLEEP_INCREMENT_SECONDS`
+
+These debug knobs are intended only for local/e2e lag-path verification.
+
 Validation rules:
 
 - `warning > 0`
 - `hard > warning`
 - `grace > 0`
+- `debug sleep values >= 0`
 
 Invalid values fail closed at startup/connection parse.
 

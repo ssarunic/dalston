@@ -24,6 +24,14 @@ def format_duration(seconds: float) -> str:
     return f"{mins}m {secs}s"
 
 
+def get_session_runtime(session: object) -> str | None:
+    """Return runtime, with engine as fallback for older SDK objects."""
+    runtime = getattr(session, "runtime", None)
+    if runtime is not None:
+        return runtime
+    return getattr(session, "engine", None)
+
+
 @app.command("list")
 def list_sessions(
     status: Annotated[
@@ -77,7 +85,7 @@ def list_sessions(
                     "status": s.status.value,
                     "language": s.language,
                     "model": s.model,
-                    "engine": s.engine,
+                    "runtime": get_session_runtime(s),
                     "audio_duration_seconds": s.audio_duration_seconds,
                     "segment_count": s.segment_count,
                     "word_count": s.word_count,
@@ -94,7 +102,7 @@ def list_sessions(
             table.add_column("ID", style="cyan", no_wrap=True)
             table.add_column("Status")
             table.add_column("Model")
-            table.add_column("Engine")
+            table.add_column("Runtime")
             table.add_column("Duration", justify="right")
             table.add_column("Segments", justify="right")
             table.add_column("Started")
@@ -115,7 +123,7 @@ def list_sessions(
                     s.id[:12] + "...",
                     f"[{status_color}]{s.status.value}[/{status_color}]",
                     s.model or "-",
-                    s.engine or "-",
+                    get_session_runtime(s) or "-",
                     format_duration(s.audio_duration_seconds),
                     str(s.segment_count),
                     started,
@@ -164,7 +172,7 @@ def get_session(
                 "status": session.status.value,
                 "language": session.language,
                 "model": session.model,
-                "engine": session.engine,
+                "runtime": get_session_runtime(session),
                 "audio_duration_seconds": session.audio_duration_seconds,
                 "segment_count": session.segment_count,
                 "word_count": session.word_count,
@@ -199,7 +207,7 @@ def get_session(
             )
             table.add_row("Language", session.language or "-")
             table.add_row("Model", session.model or "-")
-            table.add_row("Engine", session.engine or "-")
+            table.add_row("Runtime", get_session_runtime(session) or "-")
             table.add_row("Duration", format_duration(session.audio_duration_seconds))
             table.add_row("Segments", str(session.segment_count))
             table.add_row("Words", str(session.word_count))
