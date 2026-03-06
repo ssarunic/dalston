@@ -101,6 +101,7 @@ docs/
 - [M51 Engine Testing Playbook](testing/M51-engine-testing-playbook.md) — Stage-by-stage testing changes after stateless engine + artifact materialization refactor
 - [M52 Local Runner Readiness](reports/M52-local-runner-readiness.md) — Readiness gate summary for align/diarize/pii_detect local-run workflow
 - [M54 Event DLQ Implementation](reports/M54-event-dlq-implementation.md) — Durable orchestrator event retry ceiling, DLQ policy, and operational runbook
+- [M55 Runtime Model Management Implementation](reports/M55-non-transcribe-runtime-model-management-implementation.md) — Implementation notes for diarize/align/pii stage model selection and runtime model propagation
 
 ### Implementation Plan
 
@@ -110,6 +111,7 @@ docs/
 - [M52: Engine SDK Local Runner DX (Clean-Cut)](plan/milestones/M52-engine-sdk-local-runner-dx-clean-cut.md) — File-based local runner workflow and compatibility cleanup plan
 - [M53: Realtime Latency Budget and Explicit Backpressure (Clean-Cut)](plan/milestones/M53-realtime-latency-budget-clean-cut.md) — Deterministic lag budget enforcement and explicit realtime shutdown semantics
 - [M54: Event DLQ and Poison-Pill Isolation (Clean-Cut)](plan/milestones/M54-event-dlq-poison-pill-isolation-clean-cut.md) — Delivery-count retry ceilings and DLQ quarantine for durable orchestrator events
+- [M55: Non-Transcribe Runtime Model Management (Clean-Cut)](plan/milestones/M55-non-transcribe-runtime-model-management-clean-cut.md) — Runtime model selection and registry lifecycle for diarize, align, and PII stages
 
 ## Key Concepts
 

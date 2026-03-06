@@ -544,6 +544,18 @@ When `vocabulary_boost` is provided to a model that only supports `initial_promp
 | Omnilingual | ✓ | ✗ | Error if translate |
 | All others | ✓ | ✗ | Error if translate |
 
+### Stage Model Parameters (M55)
+
+| Request Parameter | Stage | Meaning |
+|-------------------|-------|---------|
+| `model` | transcribe | Transcribe-stage model registry ID (or `auto`) |
+| `model_diarize` | diarize | Diarization model registry ID |
+| `model_align` | align | Alignment model registry ID |
+| `model_pii_detect` | pii_detect | PII detection model registry ID |
+
+All stage model parameters resolve to `(runtime, runtime_model_id)` via the model registry.
+The DAG passes `runtime_model_id` directly into task config for each model-backed stage.
+
 ### Timestamp Granularity Parameter
 
 | Model | none | segment | word | character | phoneme |

@@ -460,7 +460,7 @@ The `config` dict includes:
 
 | Key | Description |
 |-----|-------------|
-| `runtime_model_id` | HuggingFace model ID to load |
+| `runtime_model_id` | Runtime model identifier for the selected stage model |
 | `language` | Language code or "auto" |
 | `beam_size` | Beam search width |
 | Other | Model-specific parameters |
@@ -674,6 +674,7 @@ State-of-the-art speaker diarization.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
+| `runtime_model_id` | string | required | Model registry runtime ID for diarization |
 | `min_speakers` | int | `null` | Minimum speakers |
 | `max_speakers` | int | `null` | Maximum speakers |
 | `hf_token` | string | env | HuggingFace token |

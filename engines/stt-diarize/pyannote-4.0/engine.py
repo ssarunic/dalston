@@ -36,12 +36,10 @@ class PyannoteEngine(Engine):
         DEVICE: Device to use ("cuda", "mps", "cpu", or unset for auto-detect)
     """
 
-    # Pyannote 4.0 community-1 pipeline
-    MODEL_ID = "pyannote/speaker-diarization-community-1"
-
     def __init__(self) -> None:
         super().__init__()
-        self._pipeline = None
+        self._pipelines: dict[str, Any] = {}
+        self._active_model_id: str | None = None
         self._device = self._detect_device()
         self._disabled = (
             os.environ.get("DALSTON_DIARIZATION_DISABLED", "").lower() == "true"
@@ -124,26 +122,27 @@ class PyannoteEngine(Engine):
             )
         return token
 
-    def _load_pipeline(self, hf_token: str | None) -> Any:
+    def _load_pipeline(self, model_id: str, hf_token: str | None) -> Any:
         """Load pyannote pipeline lazily.
 
         Args:
+            model_id: Runtime model identifier to load
             hf_token: HuggingFace token for authentication
 
         Returns:
             Loaded pyannote Pipeline instance
         """
-        if self._pipeline is not None:
-            return self._pipeline
+        if model_id in self._pipelines:
+            return self._pipelines[model_id]
 
-        self.logger.info("loading_pyannote_pipeline", model_id=self.MODEL_ID)
+        self.logger.info("loading_pyannote_pipeline", model_id=model_id)
 
         from pyannote.audio import Pipeline
 
         # Pyannote 4.0 uses 'token' parameter and requires 'revision' keyword
         # Use 'main' revision for latest stable version
-        self._pipeline = Pipeline.from_pretrained(
-            self.MODEL_ID,
+        pipeline = Pipeline.from_pretrained(
+            model_id,
             token=hf_token,
             revision="main",
         )
@@ -152,10 +151,11 @@ class PyannoteEngine(Engine):
         if self._device in ("cuda", "mps"):
             import torch
 
-            self._pipeline = self._pipeline.to(torch.device(self._device))
+            pipeline = pipeline.to(torch.device(self._device))
 
+        self._pipelines[model_id] = pipeline
         self.logger.info("pyannote_4_0_pipeline_loaded_successfully")
-        return self._pipeline
+        return pipeline
 
     def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Run speaker diarization on audio file.
@@ -176,6 +176,12 @@ class PyannoteEngine(Engine):
 
         self.logger.info("processing_diarization", audio_path=str(audio_path))
 
+        runtime_model_id = config.get("runtime_model_id")
+        if not runtime_model_id:
+            raise ValueError(
+                "Missing required config field 'runtime_model_id' for diarize stage."
+            )
+
         # Get speaker count hints
         min_speakers = config.get("min_speakers")
         max_speakers = config.get("max_speakers")
@@ -190,49 +196,53 @@ class PyannoteEngine(Engine):
 
         # Load pipeline (lazy)
         hf_token = self._get_hf_token(config)
-        pipeline = self._load_pipeline(hf_token)
+        pipeline = self._load_pipeline(runtime_model_id, hf_token)
+        self._active_model_id = runtime_model_id
+        self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
+        try:
+            # Build diarization parameters
+            diarization_params = {}
+            if min_speakers is not None:
+                diarization_params["min_speakers"] = min_speakers
+            if max_speakers is not None:
+                diarization_params["max_speakers"] = max_speakers
 
-        # Build diarization parameters
-        diarization_params = {}
-        if min_speakers is not None:
-            diarization_params["min_speakers"] = min_speakers
-        if max_speakers is not None:
-            diarization_params["max_speakers"] = max_speakers
+            self.logger.info("running_diarization")
+            diarization = pipeline(str(audio_path), **diarization_params)
 
-        self.logger.info("running_diarization")
-        diarization = pipeline(str(audio_path), **diarization_params)
+            # Apply exclusive mode if requested (new in pyannote 4.0)
+            # This provides single-speaker output per segment for easier Whisper alignment
+            if exclusive and hasattr(diarization, "exclusive_speaker_diarization"):
+                diarization = diarization.exclusive_speaker_diarization
 
-        # Apply exclusive mode if requested (new in pyannote 4.0)
-        # This provides single-speaker output per segment for easier Whisper alignment
-        if exclusive and hasattr(diarization, "exclusive_speaker_diarization"):
-            diarization = diarization.exclusive_speaker_diarization
+            # Convert pyannote output to our format
+            speakers, turns = self._convert_annotation(diarization)
 
-        # Convert pyannote output to our format
-        speakers, turns = self._convert_annotation(diarization)
+            # Calculate overlap statistics using pyannote's native overlap detection
+            overlap_duration, overlap_ratio = self._calculate_overlap_stats(diarization)
 
-        # Calculate overlap statistics using pyannote's native overlap detection
-        overlap_duration, overlap_ratio = self._calculate_overlap_stats(diarization)
+            self.logger.info(
+                "diarization_complete",
+                speaker_count=len(speakers),
+                segment_count=len(turns),
+                overlap_ratio=round(overlap_ratio, 3),
+            )
 
-        self.logger.info(
-            "diarization_complete",
-            speaker_count=len(speakers),
-            segment_count=len(turns),
-            overlap_ratio=round(overlap_ratio, 3),
-        )
+            output = DiarizeOutput(
+                speakers=speakers,
+                turns=turns,
+                num_speakers=len(speakers),
+                overlap_duration=round(overlap_duration, 3),
+                overlap_ratio=round(overlap_ratio, 3),
+                runtime="pyannote-4.0",
+                skipped=False,
+                skip_reason=None,
+                warnings=[],
+            )
 
-        output = DiarizeOutput(
-            speakers=speakers,
-            turns=turns,
-            num_speakers=len(speakers),
-            overlap_duration=round(overlap_duration, 3),
-            overlap_ratio=round(overlap_ratio, 3),
-            runtime="pyannote-4.0",
-            skipped=False,
-            skip_reason=None,
-            warnings=[],
-        )
-
-        return EngineOutput(data=output)
+            return EngineOutput(data=output)
+        finally:
+            self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
 
     def _convert_annotation(self, diarization) -> tuple[list[str], list[SpeakerTurn]]:
         """Convert pyannote diarization output to speakers list and turns.
@@ -348,9 +358,10 @@ class PyannoteEngine(Engine):
             "device": self._device,
             "cuda_available": cuda_available,
             "mps_available": mps_available,
-            "pipeline_loaded": self._pipeline is not None,
+            "pipeline_loaded": bool(self._pipelines),
+            "loaded_models": sorted(self._pipelines.keys()),
+            "active_model_id": self._active_model_id,
             "diarization_disabled": self._disabled,
-            "model_id": self.MODEL_ID,
             "version": "4.0",
         }
 

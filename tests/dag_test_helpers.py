@@ -43,9 +43,9 @@ def build_task_dag_for_test(
         if override_key in parameters:
             engines[stage] = parameters[override_key]
 
-    # Determine runtime_model_id from engine_transcribe override
-    # In real usage, this comes from EngineSelectionResult after catalog lookup
-    runtime_model_id = None
+    # Determine runtime_model_id values by stage.
+    # In real usage, these come from EngineSelectionResult after registry lookup.
+    stage_runtime_model_ids: dict[str, str] = {}
     transcribe_engine = engines.get("transcribe", DEFAULT_ENGINES["transcribe"])
 
     # For testing: map known model IDs to their runtime + runtime_model_id
@@ -74,6 +74,14 @@ def build_task_dag_for_test(
     if transcribe_engine in MODEL_TO_RUNTIME:
         runtime, runtime_model_id = MODEL_TO_RUNTIME[transcribe_engine]
         engines["transcribe"] = runtime
+        stage_runtime_model_ids["transcribe"] = runtime_model_id
+
+    if parameters.get("model_diarize"):
+        stage_runtime_model_ids["diarize"] = parameters["model_diarize"]
+    if parameters.get("model_align"):
+        stage_runtime_model_ids["align"] = parameters["model_align"]
+    if parameters.get("model_pii_detect"):
+        stage_runtime_model_ids["pii_detect"] = parameters["model_pii_detect"]
 
     # Determine skip flags based on parameters and engine capabilities
     # NeMo and NeMo-ONNX models have native word timestamps, so skip alignment
@@ -93,5 +101,6 @@ def build_task_dag_for_test(
         engines=engines,
         skip_alignment=skip_alignment,
         skip_diarization=skip_diarization,
-        runtime_model_id=runtime_model_id,
+        runtime_model_id=stage_runtime_model_ids.get("transcribe"),
+        stage_runtime_model_ids=stage_runtime_model_ids,
     )

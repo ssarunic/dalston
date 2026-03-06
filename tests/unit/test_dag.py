@@ -170,6 +170,40 @@ class TestBuildTaskDagPipeline:
         stages = [t.stage for t in tasks]
         assert "diarize" in stages
 
+    def test_diarize_runtime_model_id_propagated(self, job_id: UUID, audio_uri: str):
+        """Diarize config should include selected runtime_model_id."""
+        tasks = build_task_dag_for_test(
+            job_id,
+            audio_uri,
+            {
+                "speaker_detection": "diarize",
+                "model_diarize": "pyannote/speaker-diarization-community-1",
+            },
+        )
+
+        diarize_task = next(t for t in tasks if t.stage == "diarize")
+        assert (
+            diarize_task.config["runtime_model_id"]
+            == "pyannote/speaker-diarization-community-1"
+        )
+
+    def test_align_runtime_model_id_propagated(self, job_id: UUID, audio_uri: str):
+        """Align config should include selected runtime_model_id."""
+        tasks = build_task_dag_for_test(
+            job_id,
+            audio_uri,
+            {
+                "timestamps_granularity": "word",
+                "model_align": "jonatasgrosman/wav2vec2-large-xlsr-53-japanese",
+            },
+        )
+
+        align_task = next(t for t in tasks if t.stage == "align")
+        assert (
+            align_task.config["runtime_model_id"]
+            == "jonatasgrosman/wav2vec2-large-xlsr-53-japanese"
+        )
+
     def test_task_dependencies_correct(self, job_id: UUID, audio_uri: str):
         """Test that task dependencies are wired correctly."""
         tasks = build_task_dag_for_test(
@@ -325,6 +359,7 @@ class TestBuildTaskDagPerChannelPII:
             "speaker_detection": "per_channel",
             "num_channels": 2,
             "pii_detection": True,
+            "model_pii_detect": "urchade/gliner_multi-v2.1",
         }
 
         tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
@@ -335,6 +370,10 @@ class TestBuildTaskDagPerChannelPII:
         assert "pii_detect_ch1" in stages
         # Should NOT have single pii_detect stage
         assert "pii_detect" not in stages
+        pii_ch0 = next(t for t in tasks if t.stage == "pii_detect_ch0")
+        pii_ch1 = next(t for t in tasks if t.stage == "pii_detect_ch1")
+        assert pii_ch0.config.get("runtime_model_id") == "urchade/gliner_multi-v2.1"
+        assert pii_ch1.config.get("runtime_model_id") == "urchade/gliner_multi-v2.1"
 
     def test_per_channel_audio_redact_stages_created(
         self, job_id: UUID, audio_uri: str

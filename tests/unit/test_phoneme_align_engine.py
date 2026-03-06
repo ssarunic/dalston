@@ -677,8 +677,8 @@ class TestPhonemeAlignEngineHealthCheck:
         assert health["device"] == "cpu"
         assert "cuda_available" in health
         assert "mps_available" in health
-        assert "cached_languages" in health
-        assert isinstance(health["cached_languages"], list)
+        assert "cached_models" in health
+        assert isinstance(health["cached_models"], list)
 
     def test_health_check_no_cached_models_initially(self, engine_module):
         with (
@@ -689,7 +689,7 @@ class TestPhonemeAlignEngineHealthCheck:
 
         health = engine.health_check()
 
-        assert health["cached_languages"] == []
+        assert health["cached_models"] == []
 
 
 class TestPhonemeAlignEngineFallback:
@@ -721,14 +721,19 @@ class TestPhonemeAlignEngineFallback:
         assert output.segments[0].text == "hello world"
 
     def test_fallback_for_unsupported_language(self, engine_module):
-        """Engine should fall back gracefully for unsupported languages."""
+        """Engine should return None when explicit model loading fails."""
         with (
             patch.object(torch.cuda, "is_available", return_value=False),
             patch.object(torch.backends.mps, "is_available", return_value=False),
         ):
             engine = engine_module.PhonemeAlignEngine()
 
-        model_result = engine._get_align_model("xx")
+        with patch.object(
+            engine_module,
+            "load_align_model",
+            side_effect=ValueError("load failed"),
+        ):
+            model_result = engine._get_align_model("xx", "nonexistent/model")
 
         assert model_result is None
 

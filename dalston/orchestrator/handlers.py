@@ -39,6 +39,7 @@ from dalston.gateway.services.rate_limiter import (
 from dalston.orchestrator.catalog import get_catalog
 from dalston.orchestrator.dag import build_task_dag
 from dalston.orchestrator.engine_selector import (
+    ModelSelectionError,
     NoCapableEngineError,
     NoDownloadedModelError,
 )
@@ -200,6 +201,21 @@ async def handle_job_created(
     except NoCapableEngineError as e:
         # No running engine can handle the job requirements
         log.warning("no_capable_engine", stage=e.stage, error=str(e))
+        job.status = JobStatus.FAILED.value
+        job.error = str(e)
+        job.completed_at = datetime.now(UTC)
+        await db.commit()
+        return
+    except ModelSelectionError as e:
+        # Explicit stage model selection failed deterministically.
+        log.warning(
+            "model_selection_failed",
+            code=e.code,
+            stage=e.stage,
+            model_id=e.model_id,
+            runtime=e.runtime,
+            error=str(e),
+        )
         job.status = JobStatus.FAILED.value
         job.error = str(e)
         job.completed_at = datetime.now(UTC)

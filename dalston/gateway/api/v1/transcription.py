@@ -33,6 +33,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_cancel_requested, publish_job_created
+from dalston.common.model_selection_keys import (
+    ENGINE_PARAM_TRANSCRIBE,
+    MODEL_PARAM_ALIGN,
+    MODEL_PARAM_DIARIZE,
+    MODEL_PARAM_PII_DETECT,
+    MODEL_PARAM_TRANSCRIBE,
+)
 from dalston.common.models import (
     JobStatus,
     validate_retention,
@@ -130,6 +137,24 @@ async def create_transcription(
             description="Engine ID (e.g., faster-whisper-base) or OpenAI model (whisper-1, gpt-4o-transcribe)"
         ),
     ] = "auto",
+    model_diarize: Annotated[
+        str | None,
+        Form(
+            description="Optional model registry ID for diarization stage (stage must be diarize)"
+        ),
+    ] = None,
+    model_align: Annotated[
+        str | None,
+        Form(
+            description="Optional model registry ID for alignment stage (stage must be align)"
+        ),
+    ] = None,
+    model_pii_detect: Annotated[
+        str | None,
+        Form(
+            description="Optional model registry ID for PII detection stage (stage must be pii_detect)"
+        ),
+    ] = None,
     language: Annotated[
         str | None, Form(description="Language code or 'auto' for detection")
     ] = None,
@@ -292,7 +317,7 @@ async def create_transcription(
         # OpenAI mode: use default model (ignore OpenAI model parameter)
         parameters: dict = {
             "language": language or "auto",
-            "engine_transcribe": settings.default_model,
+            ENGINE_PARAM_TRANSCRIBE: settings.default_model,
             "timestamps_granularity": "word"
             if timestamp_granularities and "word" in timestamp_granularities
             else "segment",
@@ -315,7 +340,15 @@ async def create_transcription(
             "timestamps_granularity": timestamps_granularity,
         }
         if model.lower() != "auto":
-            parameters["engine_transcribe"] = model
+            parameters[ENGINE_PARAM_TRANSCRIBE] = model
+
+        # Stage-specific model overrides (M55)
+        if model_diarize and model_diarize.strip():
+            parameters[MODEL_PARAM_DIARIZE] = model_diarize.strip()
+        if model_align and model_align.strip():
+            parameters[MODEL_PARAM_ALIGN] = model_align.strip()
+        if model_pii_detect and model_pii_detect.strip():
+            parameters[MODEL_PARAM_PII_DETECT] = model_pii_detect.strip()
     # Parse and validate vocabulary (Dalston native mode only)
     if not openai_mode and vocabulary is not None:
         try:
@@ -552,7 +585,11 @@ async def get_transcription(
     )
 
     # Extract model from parameters (set when user specifies a model)
-    model = job.parameters.get("engine_transcribe") if job.parameters else None
+    model = None
+    if job.parameters:
+        model = job.parameters.get(ENGINE_PARAM_TRANSCRIBE) or job.parameters.get(
+            MODEL_PARAM_TRANSCRIBE
+        )
 
     # Build response
     response = JobResponse(
@@ -711,7 +748,11 @@ async def update_transcription(
     )
 
     # Extract model from parameters
-    model = job.parameters.get("engine_transcribe") if job.parameters else None
+    model = None
+    if job.parameters:
+        model = job.parameters.get(ENGINE_PARAM_TRANSCRIBE) or job.parameters.get(
+            MODEL_PARAM_TRANSCRIBE
+        )
 
     return JobResponse(
         id=job.id,

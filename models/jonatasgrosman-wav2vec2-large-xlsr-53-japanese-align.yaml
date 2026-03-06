@@ -1,0 +1,32 @@
+schema_version: "1.1"
+id: jonatasgrosman/wav2vec2-large-xlsr-53-japanese
+runtime: phoneme-align
+runtime_model_id: jonatasgrosman/wav2vec2-large-xlsr-53-japanese
+
+name: Wav2Vec2 XLSR Japanese (Alignment)
+source: jonatasgrosman/wav2vec2-large-xlsr-53-japanese
+size_gb: 1.2
+stage: align
+
+description: |
+  Japanese wav2vec2 CTC model used for forced alignment.
+  Enables language-specific alignment selection for phoneme-align.
+
+languages:
+  - ja
+
+capabilities:
+  word_timestamps: true
+  punctuation: false
+  capitalization: false
+  streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  min_vram_gb: 2
+  supports_cpu: true
+  min_ram_gb: 4
+
+performance:
+  rtf_gpu: 0.03
+  rtf_cpu: 0.4
