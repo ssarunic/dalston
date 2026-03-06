@@ -2,6 +2,8 @@
 # Install git hooks for Dalston development
 # Run: ./scripts/install-hooks.sh
 
+set -euo pipefail
+
 HOOKS_DIR=".git/hooks"
 
 # Pre-push hook
@@ -10,18 +12,39 @@ cat > "$HOOKS_DIR/pre-push" << 'EOF'
 # Pre-push hook: runs linter and tests before pushing
 # Skip with: git push --no-verify
 
+set -euo pipefail
+
 echo "Running pre-push checks..."
 
-# Run linter
+if command -v uv >/dev/null 2>&1; then
+    RUFF_CMD=(uv run --python 3.11 ruff check . --quiet)
+    TEST_CMD=(uv run --python 3.11 pytest --quiet --tb=line)
+else
+    PYTHON_BIN=".venv/bin/python"
+    if [ ! -x "$PYTHON_BIN" ]; then
+        echo "❌ Missing Python runner. Install uv or create .venv with Python 3.11."
+        echo "Example: uv venv --python 3.11"
+        exit 1
+    fi
+
+    if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'; then
+        echo "❌ .venv is using Python < 3.11."
+        echo "Recreate it with Python 3.11 (example: rm -rf .venv && uv venv --python 3.11)."
+        exit 1
+    fi
+
+    RUFF_CMD=("$PYTHON_BIN" -m ruff check . --quiet)
+    TEST_CMD=("$PYTHON_BIN" -m pytest --quiet --tb=line)
+fi
+
 echo "→ Checking linter..."
-if ! ruff check . --quiet; then
+if ! "${RUFF_CMD[@]}"; then
     echo "❌ Linter failed. Fix errors before pushing."
     exit 1
 fi
 
-# Run tests
 echo "→ Running tests..."
-if ! pytest --quiet --tb=line 2>/dev/null; then
+if ! "${TEST_CMD[@]}" 2>/dev/null; then
     echo "❌ Tests failed. Fix failures before pushing."
     exit 1
 fi
