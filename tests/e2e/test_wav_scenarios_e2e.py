@@ -201,7 +201,7 @@ class TestWavSuccessStereoFile:
             "--timestamps",
             "word",
             "--model",
-            "faster-whisper-base",
+            "Systran/faster-whisper-base",
         )
 
         assert result["status"] == "completed"
@@ -272,7 +272,7 @@ class TestWavSuccessDiarization:
         result = transcribe_json(
             audio_dir / "test_merged.wav",
             "--model",
-            "faster-whisper-base",
+            "Systran/faster-whisper-base",
             "--speakers",
             "diarize",
         )
@@ -285,7 +285,7 @@ class TestWavSuccessDiarization:
         result = transcribe_json(
             audio_dir / "test_stereo_speakers.wav",
             "--model",
-            "faster-whisper-base",
+            "Systran/faster-whisper-base",
             "--speakers",
             "diarize",
         )
@@ -365,7 +365,7 @@ class TestWavSuccessPiiDetection:
         result = transcribe_json(
             audio_dir / "test_merged.wav",
             "--model",
-            "faster-whisper-base",
+            "Systran/faster-whisper-base",
             "--pii",
         )
 
@@ -379,7 +379,7 @@ class TestWavSuccessPiiDetection:
         result = transcribe_json(
             audio_dir / "test_merged.wav",
             "--model",
-            "faster-whisper-base",
+            "Systran/faster-whisper-base",
             "--pii",
             "--pii-entities",
             "PERSON,EMAIL,PHONE_NUMBER",
@@ -404,7 +404,7 @@ class TestWavSuccessPiiDetection:
         result = transcribe_json(
             audio_dir / "test_stereo_speakers.wav",
             "--model",
-            "faster-whisper-base",
+            "Systran/faster-whisper-base",
             "--speakers",
             "per-channel",
             "--pii",
@@ -430,7 +430,7 @@ class TestWavSuccessAudioRedaction:
         result = transcribe_json(
             audio_dir / "test_merged.wav",
             "--model",
-            "faster-whisper-base",
+            "Systran/faster-whisper-base",
             "--pii",
             "--redact-audio",
             "--redaction-mode",
@@ -447,7 +447,7 @@ class TestWavSuccessAudioRedaction:
         result = transcribe_json(
             audio_dir / "test_merged.wav",
             "--model",
-            "faster-whisper-base",
+            "Systran/faster-whisper-base",
             "--pii",
             "--redact-audio",
             "--redaction-mode",

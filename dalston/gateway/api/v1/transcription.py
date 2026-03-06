@@ -13,6 +13,7 @@ the request is handled in OpenAI mode with synchronous response and OpenAI respo
 """
 
 import json
+from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
@@ -57,6 +58,7 @@ from dalston.gateway.api.v1.openai_audio import (
     validate_openai_request,
 )
 from dalston.gateway.dependencies import (
+    RateLimiter,
     check_request_rate_limit,
     get_audit_service,
     get_db,
@@ -90,7 +92,6 @@ from dalston.gateway.services.export import ExportService
 from dalston.gateway.services.ingestion import AudioIngestionService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.polling import wait_for_job_completion
-from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.storage import StorageService
 
 router = APIRouter(prefix="/audio/transcriptions", tags=["transcriptions"])
@@ -240,7 +241,7 @@ async def create_transcription(
     redis: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
-    rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
     audit_service: AuditService = Depends(get_audit_service),
     ingestion_service: AudioIngestionService = Depends(get_ingestion_service),
     export_service: ExportService = Depends(get_export_service),
@@ -453,15 +454,7 @@ async def create_transcription(
         created_by_key_id=principal.id,
     )
 
-    # Publish event for orchestrator (include request_id for correlation)
     request_id = getattr(request.state, "request_id", None)
-    structlog.contextvars.bind_contextvars(job_id=str(job.id))
-    await publish_job_created(redis, job.id, request_id=request_id)
-
-    # Track concurrent job for rate limiting
-    await rate_limiter.increment_concurrent_jobs(principal.tenant_id)
-
-    # Audit log job creation
     await audit_service.log_job_created(
         job_id=job.id,
         tenant_id=principal.tenant_id,
@@ -471,6 +464,68 @@ async def create_transcription(
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
+
+    # Lite mode runs the scoped pipeline inline (no Redis/orchestrator dependency).
+    if settings.runtime_mode == "lite":
+        from dalston.orchestrator.lite_main import build_default_pipeline
+
+        try:
+            job.status = JobStatus.RUNNING.value
+            job.started_at = datetime.now(UTC)
+            await db.commit()
+
+            pipeline = build_default_pipeline()
+            await pipeline.run_job(ingested.content, job_id=str(job.id))
+
+            job.status = JobStatus.COMPLETED.value
+            job.completed_at = datetime.now(UTC)
+            await db.commit()
+            await db.refresh(job)
+        except Exception as e:
+            job.status = JobStatus.FAILED.value
+            job.error = str(e)
+            job.completed_at = datetime.now(UTC)
+            await db.commit()
+            await db.refresh(job)
+            if openai_mode:
+                raise_openai_error(
+                    500,
+                    f"Transcription failed: {job.error or 'Unknown error'}",
+                    error_type="server_error",
+                    code="processing_failed",
+                )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Lite transcription failed: {e}",
+            ) from e
+
+        if not openai_mode:
+            response.status_code = 201
+            return JobCreatedResponse(
+                id=job.id,
+                status=JobStatus(job.status),
+                display_name=job.display_name,
+                created_at=job.created_at,
+            )
+
+        transcript = await storage.get_transcript(job.id)
+        if transcript is None:
+            raise_openai_error(
+                500,
+                "Transcription completed but transcript could not be loaded.",
+                error_type="server_error",
+                code="processing_failed",
+            )
+        return format_openai_response(
+            transcript, response_format, timestamp_granularities, export_service
+        )
+
+    # Publish event for orchestrator (include request_id for correlation)
+    structlog.contextvars.bind_contextvars(job_id=str(job.id))
+    await publish_job_created(redis, job.id, request_id=request_id)
+
+    # Track concurrent job for rate limiting
+    await rate_limiter.increment_concurrent_jobs(principal.tenant_id)
 
     # For Dalston native mode, return job ID immediately
     if not openai_mode:
@@ -1121,7 +1176,7 @@ async def cancel_transcription(
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     jobs_service: JobsService = Depends(get_jobs_service),
-    rate_limiter: RedisRateLimiter = Depends(get_rate_limiter),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> JobCancelledResponse:
     """Cancel a transcription job.
 

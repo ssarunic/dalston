@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 import typer
 from dalston_sdk import (
@@ -12,6 +13,20 @@ from dalston_sdk import (
     TimestampGranularity,
 )
 
+from dalston_cli.bootstrap import (
+    ModelBootstrapError,
+    PreflightError,
+    ensure_model_ready,
+    load_bootstrap_settings,
+    read_model_status,
+    resolve_bootstrap_model,
+    run_preflight,
+)
+from dalston_cli.bootstrap.server_manager import (
+    ServerBootstrapError,
+    ServerReadyResult,
+    ensure_local_server_ready,
+)
 from dalston_cli.main import state
 from dalston_cli.output import (
     error_console,
@@ -20,10 +35,90 @@ from dalston_cli.output import (
     wait_with_progress,
 )
 
+if TYPE_CHECKING:
+    from dalston_sdk import Dalston
+
 FormatType = Literal["txt", "json", "srt", "vtt"]
 SpeakerMode = Literal["none", "diarize", "per-channel"]
 TimestampMode = Literal["none", "segment", "word"]
 PIIRedactMode = Literal["silence", "beep"]
+
+
+def _emit_bootstrap_step(
+    *,
+    quiet: bool,
+    json_output: bool,
+    message: str,
+) -> None:
+    if not quiet and not json_output:
+        error_console.print(f"[dim]{message}[/dim]")
+
+
+def _assert_prerequisites_when_bootstrap_disabled(
+    *,
+    client: Dalston,
+    model_id: str,
+) -> None:
+    try:
+        health = client.health()
+    except Exception as exc:
+        raise ServerBootstrapError(
+            "Local server is not reachable while DALSTON_BOOTSTRAP=false.",
+            remediation=(
+                "Start the server manually or set DALSTON_BOOTSTRAP=true for "
+                "automatic local startup."
+            ),
+        ) from exc
+
+    if getattr(health, "status", "") != "healthy":
+        raise ServerBootstrapError(
+            "Local server is not healthy while DALSTON_BOOTSTRAP=false.",
+            remediation=(
+                "Run `dalston status` for diagnostics, or set DALSTON_BOOTSTRAP=true "
+                "for automatic recovery."
+            ),
+        )
+
+    if model_id.strip().lower() == "auto":
+        # Server-side engine selection remains authoritative for auto model.
+        return
+
+    model_status = read_model_status(
+        base_url=client.base_url,
+        api_key=client.api_key,
+        model_id=model_id,
+    )
+    if model_status.status != "ready":
+        error_detail = f": {model_status.error}" if model_status.error else ""
+        raise ModelBootstrapError(
+            f"Model '{model_id}' is not ready while DALSTON_BOOTSTRAP=false{error_detail}",
+            remediation=(
+                f"Run `dalston models pull {model_id}` and retry, or set "
+                "DALSTON_BOOTSTRAP=true."
+            ),
+        )
+
+
+def _resolve_effective_model(
+    *,
+    requested_model: str,
+    server_ready: ServerReadyResult,
+    bootstrap_default_model: str,
+    runtime_mode: str,
+) -> str:
+    """Resolve auto model for bootstrap-managed local flows.
+
+    In distributed CLI mode, managed local bootstrap should pin the default model
+    to avoid remote auto-selection variability. In lite runtime, the local server
+    is authoritative for model auto-selection.
+    """
+    if requested_model.strip().lower() != "auto":
+        return requested_model
+    if not server_ready.managed:
+        return requested_model
+    if runtime_mode == "lite":
+        return requested_model
+    return resolve_bootstrap_model(requested_model, bootstrap_default_model)
 
 
 def transcribe(
@@ -239,6 +334,76 @@ def transcribe(
         )
         raise typer.Exit(code=1)
 
+    bootstrap_settings = load_bootstrap_settings(server_url=client.base_url)
+    effective_model = model
+    local_target = bootstrap_settings.target_is_local(client.base_url)
+    runtime_mode = os.getenv("DALSTON_MODE", "distributed").strip().lower()
+
+    # Pre-bootstrap for local zero-config flow
+    try:
+        if local_target:
+            _emit_bootstrap_step(
+                quiet=quiet,
+                json_output=json_output,
+                message="Bootstrap: preflight checks",
+            )
+            run_preflight(
+                files=list(files or []),
+                settings=bootstrap_settings,
+            )
+
+            if not bootstrap_settings.enabled:
+                _emit_bootstrap_step(
+                    quiet=quiet,
+                    json_output=json_output,
+                    message="Bootstrap: disabled, validating manual prerequisites",
+                )
+                _assert_prerequisites_when_bootstrap_disabled(
+                    client=client,
+                    model_id=effective_model,
+                )
+            else:
+                _emit_bootstrap_step(
+                    quiet=quiet,
+                    json_output=json_output,
+                    message="Bootstrap: ensuring local server",
+                )
+                server_ready = ensure_local_server_ready(
+                    target_url=client.base_url,
+                    settings=bootstrap_settings,
+                )
+                effective_model = _resolve_effective_model(
+                    requested_model=model,
+                    server_ready=server_ready,
+                    bootstrap_default_model=bootstrap_settings.default_model,
+                    runtime_mode=runtime_mode,
+                )
+
+                if effective_model.lower() == "auto":
+                    _emit_bootstrap_step(
+                        quiet=quiet,
+                        json_output=json_output,
+                        message="Bootstrap: using server-side model auto-selection",
+                    )
+                else:
+                    _emit_bootstrap_step(
+                        quiet=quiet,
+                        json_output=json_output,
+                        message=f"Bootstrap: ensuring model '{effective_model}'",
+                    )
+                    ensure_model_ready(
+                        base_url=client.base_url,
+                        api_key=client.api_key,
+                        model_id=effective_model,
+                        timeout_seconds=bootstrap_settings.model_ensure_timeout_seconds,
+                    )
+    except (PreflightError, ServerBootstrapError, ModelBootstrapError) as exc:
+        error_console.print(f"[red]Bootstrap failed:[/red] {exc}")
+        remediation = getattr(exc, "remediation", None)
+        if remediation:
+            error_console.print(f"[yellow]How to fix:[/yellow] {remediation}")
+        raise typer.Exit(code=1) from None
+
     # Map speaker detection string to enum
     speaker_detection_map = {
         "none": SpeakerDetection.NONE,
@@ -297,7 +462,7 @@ def transcribe(
             job = client.transcribe(
                 file=file_path,
                 audio_url=audio_url,
-                model=model,
+                model=effective_model,
                 language=language,
                 vocabulary=vocabulary,
                 speaker_detection=speaker_detection,

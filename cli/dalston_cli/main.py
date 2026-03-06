@@ -47,7 +47,7 @@ def main(
             "--server",
             "-s",
             envvar="DALSTON_SERVER",
-            help="Server URL (default: http://localhost:8000).",
+            help="Server URL (default: http://127.0.0.1:8000).",
         ),
     ] = None,
     api_key: Annotated[
@@ -111,7 +111,7 @@ def main(
     config = load_config()
 
     # Apply CLI overrides
-    final_server = server or config.get("server", "http://localhost:8000")
+    final_server = server or config.get("server", "http://127.0.0.1:8000")
     final_api_key = api_key or config.get("api_key")
 
     # Create client
@@ -131,6 +131,7 @@ from dalston_cli.commands import (  # noqa: E402
     jobs,
     listen,
     models,
+    server,
     sessions,
     status,
     transcribe,
@@ -143,6 +144,7 @@ app.add_typer(sessions.app, name="sessions")
 app.command()(export.export)
 app.command()(status.status)
 app.add_typer(models.app, name="models")
+app.add_typer(server.app, name="server")
 app.command()(engines.engines)
 
 

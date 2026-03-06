@@ -211,7 +211,7 @@ def _get_dev_api_key_for_websocket() -> APIKey:
     return APIKey(
         id=dev_key_id,
         key_hash="dev_key_hash",
-        prefix="dk_dev00000",
+        prefix="dk_dev0000",
         name="Development Key",
         tenant_id=DEFAULT_TENANT_ID,
         scopes=[Scope.ADMIN],  # Full access in dev mode

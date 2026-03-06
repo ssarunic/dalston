@@ -123,6 +123,14 @@ class EngineSelectionResult:
     runtime_model_id: str | None = None
 
 
+@dataclass
+class PipelineEngineSelection:
+    """Pipeline engine selection plus effective parameters used downstream."""
+
+    stages: dict[str, EngineSelectionResult]
+    effective_parameters: dict
+
+
 class NoCapableEngineError(Exception):
     """No running engine can handle job requirements.
 
@@ -764,7 +772,7 @@ async def select_pipeline_engines(
     registry: BatchEngineRegistry,
     catalog: EngineCatalog,
     db: AsyncSession | None = None,
-) -> dict[str, EngineSelectionResult]:
+) -> PipelineEngineSelection:
     """Select engines for all required pipeline stages.
 
     This is the main entry point for capability-driven engine selection.
@@ -772,25 +780,26 @@ async def select_pipeline_engines(
     engine capabilities.
 
     Args:
-        parameters: Job parameters from API request
+        parameters: Job parameters from API request (never mutated)
         registry: Batch engine registry (running engines)
         catalog: Engine catalog (all available engines)
         db: Optional database session for HF model lookup
 
     Returns:
-        Dict mapping stage names to EngineSelectionResult
+        PipelineEngineSelection with selected stages and effective parameters
 
     Raises:
         NoCapableEngineError: If any required stage has no capable engine
     """
-    requirements = extract_requirements(parameters)
+    effective_parameters = dict(parameters)
+    requirements = extract_requirements(effective_parameters)
     selections: dict[str, EngineSelectionResult] = {}
 
     with dalston.telemetry.create_span(
         "orchestrator.engine_selection",
         attributes={
             "dalston.language": requirements.get("language", ""),
-            "dalston.model": parameters.get("model", ""),
+            "dalston.model": effective_parameters.get("model", ""),
         },
     ):
         # Prepare (always required)
@@ -799,7 +808,7 @@ async def select_pipeline_engines(
             {},  # No special requirements for prepare
             registry,
             catalog,
-            user_preference=parameters.get("engine_prepare"),
+            user_preference=effective_parameters.get("engine_prepare"),
             db=db,
         )
 
@@ -809,62 +818,81 @@ async def select_pipeline_engines(
             requirements,
             registry,
             catalog,
-            user_preference=parameters.get(ENGINE_PARAM_TRANSCRIBE)
-            or parameters.get(MODEL_PARAM_TRANSCRIBE),
+            user_preference=effective_parameters.get(ENGINE_PARAM_TRANSCRIBE)
+            or effective_parameters.get(MODEL_PARAM_TRANSCRIBE),
             db=db,
         )
 
         # Alignment (conditional on transcriber capabilities)
-        if _should_add_alignment(parameters, selections["transcribe"]):
+        if _should_add_alignment(effective_parameters, selections["transcribe"]):
             # Alignment only needs language requirement
             align_requirements = (
                 {"language": requirements.get("language")}
                 if requirements.get("language")
                 else {}
             )
-            selections["align"] = await select_engine(
-                "align",
-                align_requirements,
-                registry,
-                catalog,
-                user_preference=parameters.get(MODEL_PARAM_ALIGN),
-                db=db,
-                user_preference_is_model=True,
-            )
+            align_model_preference = effective_parameters.get(MODEL_PARAM_ALIGN)
+            try:
+                selections["align"] = await select_engine(
+                    "align",
+                    align_requirements,
+                    registry,
+                    catalog,
+                    user_preference=align_model_preference,
+                    db=db,
+                    user_preference_is_model=True,
+                )
+            except (NoDownloadedModelError, NoCapableEngineError) as exc:
+                # Keep explicit align-model pinning strict; otherwise degrade
+                # to segment timestamps to preserve zero-config usability.
+                if align_model_preference:
+                    raise
+
+                effective_parameters["word_timestamps"] = False
+                effective_parameters["timestamps_granularity"] = "segment"
+                logger.warning(
+                    "align_model_missing_fallback_to_segment_timestamps",
+                    reason=(
+                        "no_downloaded_align_model"
+                        if isinstance(exc, NoDownloadedModelError)
+                        else "no_capable_align_engine"
+                    ),
+                    transcribe_runtime=selections["transcribe"].runtime,
+                )
 
         # Diarization (conditional on parameters and transcriber capabilities)
-        if _should_add_diarization(parameters, selections["transcribe"]):
+        if _should_add_diarization(effective_parameters, selections["transcribe"]):
             selections["diarize"] = await select_engine(
                 "diarize",
                 {},  # No special requirements for diarize
                 registry,
                 catalog,
-                user_preference=parameters.get(MODEL_PARAM_DIARIZE),
+                user_preference=effective_parameters.get(MODEL_PARAM_DIARIZE),
                 db=db,
                 user_preference_is_model=True,
             )
 
         # PII detection (conditional on parameters)
-        pii_detection_enabled = parameters.get("pii_detection", False)
+        pii_detection_enabled = effective_parameters.get("pii_detection", False)
         if pii_detection_enabled:
             selections["pii_detect"] = await select_engine(
                 "pii_detect",
                 {},  # No special requirements for PII detection
                 registry,
                 catalog,
-                user_preference=parameters.get(MODEL_PARAM_PII_DETECT),
+                user_preference=effective_parameters.get(MODEL_PARAM_PII_DETECT),
                 db=db,
                 user_preference_is_model=True,
             )
 
             # Audio redaction (conditional on parameters, requires PII detection)
-            if parameters.get("redact_pii_audio", False):
+            if effective_parameters.get("redact_pii_audio", False):
                 selections["audio_redact"] = await select_engine(
                     "audio_redact",
                     {},  # No special requirements for audio redaction
                     registry,
                     catalog,
-                    user_preference=parameters.get("engine_audio_redact"),
+                    user_preference=effective_parameters.get("engine_audio_redact"),
                     db=db,
                 )
 
@@ -874,7 +902,7 @@ async def select_pipeline_engines(
             {},  # No special requirements for merge
             registry,
             catalog,
-            user_preference=parameters.get("engine_merge"),
+            user_preference=effective_parameters.get("engine_merge"),
             db=db,
         )
 
@@ -901,4 +929,7 @@ async def select_pipeline_engines(
         audio_redaction_included="audio_redact" in selections,
     )
 
-    return selections
+    return PipelineEngineSelection(
+        stages=selections,
+        effective_parameters=effective_parameters,
+    )

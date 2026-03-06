@@ -1,6 +1,16 @@
 """CLI commands for Dalston."""
 
-from . import engines, export, jobs, listen, models, sessions, status, transcribe
+from . import (
+    engines,
+    export,
+    jobs,
+    listen,
+    models,
+    server,
+    sessions,
+    status,
+    transcribe,
+)
 
 __all__ = [
     "transcribe",
@@ -9,6 +19,7 @@ __all__ = [
     "sessions",
     "export",
     "status",
+    "server",
     "models",
     "engines",
 ]

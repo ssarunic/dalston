@@ -41,7 +41,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M53](milestones/M53-realtime-latency-budget-clean-cut.md) | Realtime Latency Budget and Explicit Backpressure (Clean-Cut) | 2026-03-05 |
 | [M54](milestones/M54-event-dlq-poison-pill-isolation-clean-cut.md) | Event DLQ and Poison-Pill Isolation (Clean-Cut) | 2026-03-05 |
 
-### In Progress (8)
+### In Progress (9)
 
 | # | Milestone | Notes |
 |---|-----------|-------|
@@ -53,6 +53,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M16](milestones/M16-aws-deployment.md) | AWS Deployment | `infra/terraform/` |
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Audio/transcript S3 storage working; session resume pending |
+| [M57](milestones/M57-ghost-server-zero-config-cli-bootstrap.md) | Ghost Server + Zero-Config CLI Bootstrap (Clean-Cut) | CLI bootstrap state machine and ghost server lifecycle implementation in progress |
 
 ### Not Started (7)
 
@@ -61,7 +62,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M9](milestones/M09-enrichment.md) | Enrichment | Emotions, events, LLM cleanup |
 | [M55](milestones/M55-non-transcribe-runtime-model-management-clean-cut.md) | Non-Transcribe Runtime Model Management (Clean-Cut) | Runtime model selection and registry-backed lifecycle for diarize, align, and PII stages |
 | [M56](milestones/M56-lite-mode-infra-backends-clean-cut.md) | Lite Mode Infra Backends (Clean-Cut) | Mode-aware backend abstraction for DB/queue/storage with SQLite, in-memory queue, and local filesystem storage |
-| [M57](milestones/M57-ghost-server-zero-config-cli-bootstrap.md) | Ghost Server + Zero-Config CLI Bootstrap (Clean-Cut) | One-command transcribe UX with automatic local server boot and model auto-ensure |
+| [M57.1](milestones/M57-1-lite-sqlite-migration-track-clean-cut.md) | Lite SQLite Migration Track and Schema Compatibility (Clean-Cut) | Versioned lite schema migrations, legacy DB upgrades, migration-gated startup reliability, plus targeted M57 carry-forward hardening closures |
 | [M58](milestones/M58-lite-pipeline-expansion-capability-parity.md) | Lite Pipeline Expansion and Capability Parity (Clean-Cut) | Expand lite-mode profiles/features with explicit capability matrix and deterministic unsupported-feature behavior |
 | [M59](milestones/M59-runtime-isolation-profiles-clean-cut.md) | Runtime Isolation Profiles (In-Proc / Venv / Container, Clean-Cut) | Profile-based runtime isolation to handle incompatible dependencies under one control plane |
 | [M60](milestones/M60-one-line-distribution-packaging-clean-cut.md) | One-Line Distribution and Packaging (Clean-Cut) | Cross-platform distribution channels and install/release pipeline for zero-config onboarding |
@@ -278,8 +279,9 @@ M33 ──► M54 (event DLQ + poison-pill isolation)
 M36 + M40 + M46 ──► M55 (non-transcribe runtime model management)
 M47 + M52 ──► M56 (lite mode infra backends)
 M56 + M13 + M36 + M40 ──► M57 (ghost server + zero-config CLI bootstrap)
-M56 + M57 ──► M58 (lite pipeline expansion + capability parity)
-M58 + M36 + M40 ──► M59 (runtime isolation profiles)
+M56 + M57 + M47 ──► M57.1 (lite SQLite migration track + schema compatibility)
+M56 + M57 + M57.1 ──► M58 (lite pipeline expansion + capability parity)
+M57.1 + M58 + M36 + M40 ──► M59 (runtime isolation profiles)
 M57 + M59 ──► M60 (one-line distribution + packaging)
 
 M10 + M11 + M15 ──► M35
@@ -299,6 +301,7 @@ M10 + M11 + M15 ──► M35
 - **M54**: Durable orchestrator event reliability cutover with max-delivery DLQ policy, malformed-event quarantine, and legacy infinite-replay cleanup
 - **M56**: Mode-aware infra abstraction (`lite` vs `distributed`) for DB, queue, and storage, with one validated lite batch path and no distributed regressions
 - **M57**: Zero-config CLI bootstrap (`dalston transcribe`) with automatic local server startup and default-model auto-ensure for first-run success
+- **M57.1**: Versioned lite SQLite migration track, legacy lite DB upgrade safety, migration-gated startup behavior, and targeted M57 carry-forward hardening closures (#2, #3, #6, #7, #10, #12)
 - **M58**: Lite profile/feature expansion with explicit capability matrix and deterministic unsupported-feature semantics
 - **M59**: Runtime isolation profiles (`inproc`/`venv`/`container`) for dependency-conflict-safe execution
 - **M60**: One-line distribution, packaging channels, and release-gated install/first-run smoke validation
