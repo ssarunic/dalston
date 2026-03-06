@@ -5,7 +5,7 @@
 | **Goal** | Replace ad hoc lite SQLite schema drift handling with a versioned migration track and deterministic upgrade contract |
 | **Duration** | 4-7 days |
 | **Dependencies** | M56 (lite infra backends), M57 (zero-config bootstrap), M47 (SQL layer separation) |
-| **Deliverable** | SQLite migration strategy (Alembic-backed or equivalent versioned runner), startup migration gate for `DALSTON_MODE=lite`, legacy DB upgrade path, and CI drift/upgrade coverage |
+| **Deliverable** | SQLite migration strategy (Alembic-backed or equivalent versioned runner), startup migration gate for `DALSTON_MODE=lite`, legacy DB upgrade path, CI drift/upgrade coverage, and closure of M57 carry-forward safety/type issues (#2, #3, #6, #7, #10, #12) |
 | **Status** | Planned |
 
 Dependency clarification:
@@ -41,12 +41,25 @@ Dependency clarification:
 2. No hidden schema mutations outside the migration path.
 3. No requirement to manually delete local DB state as a standard upgrade step.
 
+### M57 carry-forward closure outcomes
+
+1. Bootstrap lock stale-reclaim path is race-safe under concurrent local invocations (#2).
+2. Lite SQLite DDL helper path is constrained to explicit allowlists/validated identifiers (#3).
+3. Lite inline pipeline execution path avoids event-loop blocking behavior (#6).
+4. Lite-mode job creation always emits an audit record, including failure paths (#7).
+5. CLI bootstrap-disabled prerequisite helper uses explicit client typing (#10).
+6. Gateway rate limiter dependency exposes an accurate shared return type without suppression (#12).
+
 ### Success criteria
 
 1. Fresh lite DB initializes to latest lite schema revision through migration entrypoint.
 2. Legacy minimal lite DB upgrades to current revision and passes lite transcribe integration tests.
 3. CI includes migration upgrade tests (baseline, N-1, legacy minimal fixture).
 4. M57 zero-config path remains green after migration-track integration.
+5. Lock stale-reclaim behavior is covered by contention-focused unit tests.
+6. Lite DDL helper safeguards are covered by unit tests for rejected unsafe identifiers/DDL.
+7. Lite transcription failure path still records `log_job_created` audit event.
+8. Type-check/lint passes without return-type suppression in rate limiter dependency flow.
 
 ---
 
@@ -78,7 +91,7 @@ Add automated checks that compare expected lite schema contract against migrated
 
 1. Do not port every historical Postgres migration 1:1 to SQLite.
 2. Do not redesign distributed migration tooling.
-3. Do not expand lite feature scope beyond schema/migration reliability.
+3. Do not expand lite feature scope beyond schema/migration reliability, except targeted M57 carry-forward closures (#2, #3, #6, #7, #10, #12).
 4. Do not change API request/response contracts in this milestone.
 5. Do not bundle runtime-isolation or packaging scope (M59/M60).
 
@@ -128,6 +141,27 @@ Expected files:
 - `dalston/gateway/main.py`
 - `dalston/orchestrator/lite_main.py`
 
+### Phase 2B: M57 Carry-Forward Hardening Closures
+
+1. Close bootstrap lock stale-reclaim race window and verify contention timeout behavior (#2).
+2. Remove unsafe SQLite DDL composition patterns with explicit table/identifier/DDL guards (#3).
+3. Ensure lite inline execution path is non-blocking in async request flow (thread offload where required) (#6).
+4. Ensure audit logging parity for lite success/failure branches (#7).
+5. Type the CLI bootstrap-disabled prerequisite client surface explicitly (#10).
+6. Introduce shared rate-limiter typing contract and remove return-type suppression (#12).
+
+Expected files:
+
+- `cli/dalston_cli/bootstrap/server_manager.py`
+- `dalston/db/session.py`
+- `dalston/gateway/api/v1/transcription.py`
+- `dalston/gateway/dependencies.py`
+- `cli/dalston_cli/commands/transcribe.py`
+- `tests/unit/test_cli_server_manager.py`
+- `tests/unit/test_db_session_sqlite_guards.py`
+- `tests/unit/test_gateway_dependencies_auth_none.py`
+- `tests/integration/test_openai_api.py`
+
 ### Phase 3: Tooling and Diagnostics
 
 1. Add developer/operator command(s) for lite migration status/check.
@@ -156,8 +190,10 @@ pytest tests/integration/test_lite_db_bootstrap.py \
 
 ```bash
 pytest -q tests/unit/test_cli_server_manager.py \
+          tests/unit/test_db_session_sqlite_guards.py \
           tests/unit/test_gateway_dependencies_auth_none.py \
-          tests/unit/test_engine_selector.py
+          tests/unit/test_engine_selector.py \
+          tests/integration/test_openai_api.py
 ```
 
 ---
