@@ -56,7 +56,7 @@ async def test_retryable_failure_below_threshold_remains_pending():
             "dalston.orchestrator.main.move_event_to_dlq", new=AsyncMock()
         ) as mock_move_to_dlq,
         patch(
-            "dalston.orchestrator.main.dalston.metrics.inc_orchestrator_event_decision",
+            "dalston.orchestrator.distributed_main.dalston.metrics.inc_orchestrator_event_decision",
             new=MagicMock(),
         ) as mock_decision_metric,
     ):
@@ -94,7 +94,7 @@ async def test_retryable_failure_at_threshold_moves_to_dlq():
             new=AsyncMock(return_value="dlq-1"),
         ) as mock_move_to_dlq,
         patch(
-            "dalston.orchestrator.main.dalston.metrics.inc_orchestrator_event_decision",
+            "dalston.orchestrator.distributed_main.dalston.metrics.inc_orchestrator_event_decision",
             new=MagicMock(),
         ) as mock_decision_metric,
     ):
@@ -206,7 +206,7 @@ async def test_successful_event_is_acked():
             "dalston.orchestrator.main.move_event_to_dlq", new=AsyncMock()
         ) as mock_move_to_dlq,
         patch(
-            "dalston.orchestrator.main.dalston.metrics.inc_orchestrator_event_decision",
+            "dalston.orchestrator.distributed_main.dalston.metrics.inc_orchestrator_event_decision",
             new=MagicMock(),
         ) as mock_decision_metric,
     ):

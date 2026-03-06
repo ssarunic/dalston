@@ -48,13 +48,23 @@ class LocalFilesystemArtifactStoreAdapter:
         self._root = Path(root_dir).expanduser().resolve()
         self._root.mkdir(parents=True, exist_ok=True)
 
+    def _ensure_within_root(self, path: Path, source: str) -> Path:
+        resolved = path.expanduser().resolve()
+        try:
+            resolved.relative_to(self._root)
+        except ValueError as exc:
+            raise ValueError(f"{source} escapes artifact root: {path!s}") from exc
+        return resolved
+
     def _path_for_key(self, key: str) -> Path:
-        return (self._root / key).resolve()
+        return self._ensure_within_root(self._root / key, "Artifact key")
 
     def _path_for_uri(self, uri: str) -> Path:
         if not uri.startswith("file://"):
             raise ValueError("Unsupported local artifact URI")
-        return Path(uri.removeprefix("file://"))
+        return self._ensure_within_root(
+            Path(uri.removeprefix("file://")), "Artifact URI"
+        )
 
     async def write_bytes(
         self, key: str, payload: bytes, content_type: str | None = None
