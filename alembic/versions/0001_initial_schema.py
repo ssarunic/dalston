@@ -4,7 +4,12 @@ All previous migrations (0001–0038) have been archived and consolidated
 into this single migration. It creates the full current schema from
 scratch using only dialect-portable types.
 
-Revision ID: 0001
+For fresh installations this is the sole migration that runs.
+Existing databases that traversed the legacy chain (0001–0038) reach
+the same schema state via 0039_squash_merge, which merges this branch
+with the legacy chain tail (0038).
+
+Revision ID: squash_0038
 Revises: None
 Create Date: 2026-03-07
 """
@@ -18,7 +23,7 @@ from alembic import op
 
 from dalston.db.types import UUIDType
 
-revision: str = "0001"
+revision: str = "squash_0038"
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -395,7 +400,7 @@ def upgrade() -> None:
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
         sa.Column("timestamp", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("correlation_id", sa.String(36), nullable=True),
-        sa.Column("tenant_id", sa.Text(), nullable=True),
+        sa.Column("tenant_id", UUIDType, nullable=True),
         sa.Column("actor_type", sa.String(20), nullable=False),
         sa.Column("actor_id", sa.Text(), nullable=False),
         sa.Column("action", sa.String(50), nullable=False),

@@ -492,10 +492,20 @@ class WebhookEndpointService:
             events: List of event type strings
 
         Raises:
-            WebhookValidationError: If any event type is invalid
+            WebhookValidationError: If any event type is invalid or duplicated
         """
         if not events:
             raise WebhookValidationError("At least one event type is required")
+
+        seen: set[str] = set()
+        duplicates: set[str] = set()
+        for e in events:
+            (duplicates if e in seen else seen).add(e)
+        if duplicates:
+            raise WebhookValidationError(
+                f"Duplicate event types: {', '.join(sorted(duplicates))}. "
+                "Each event type may appear at most once."
+            )
 
         invalid = set(events) - ALLOWED_EVENTS
         if invalid:

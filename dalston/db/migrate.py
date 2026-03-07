@@ -24,6 +24,22 @@ log = structlog.get_logger()
 
 _SQLITE_MIN_VERSION = (3, 35, 0)  # Minimum for RETURNING support
 
+# ---------------------------------------------------------------------------
+# Legacy migration chain support
+# ---------------------------------------------------------------------------
+
+# The revision ID of the consolidated squash migration.  Any database stamped
+# at a legacy revision (0001–0038, see below) will be re-stamped here so that
+# ``alembic upgrade head`` can proceed without traversing the old chain.
+_SQUASH_REVISION = "squash_0038"
+
+# Exhaustive set of revision IDs from the pre-squash migration chain.
+# Includes every numeric revision (0001–0038) plus the non-numeric data
+# migration that was inserted mid-chain.
+_LEGACY_REVISIONS: frozenset[str] = frozenset(
+    {f"{i:04d}" for i in range(1, 39)} | {"729dffbba68f"}
+)
+
 
 # ---------------------------------------------------------------------------
 # Typed result / exceptions
@@ -102,11 +118,22 @@ def _check_sqlite_preflight(database_url: str) -> None:
         if db_path.exists():
             wal_path = db_path.with_suffix(db_path.suffix + "-wal")
             if wal_path.exists():
-                raise MigrationLockError(
-                    f"SQLite WAL journal detected ({wal_path}). "
-                    "Another process may be using the database. "
-                    "Stop other processes and retry."
-                )
+                # WAL files can legitimately survive a clean shutdown or crash
+                # recovery; their mere existence is not a reliable lock signal.
+                # Verify by attempting BEGIN EXCLUSIVE with timeout=0 — this
+                # fails immediately only when another process truly holds the
+                # database open.
+                try:
+                    with sqlite3.connect(str(db_path), timeout=0) as _conn:
+                        _conn.execute("BEGIN EXCLUSIVE")
+                        _conn.execute("ROLLBACK")
+                except sqlite3.OperationalError as exc:
+                    raise MigrationLockError(
+                        f"SQLite WAL journal detected ({wal_path}) and an "
+                        "exclusive lock could not be acquired — another "
+                        "process is using the database. "
+                        "Stop other processes and retry."
+                    ) from exc
 
 
 async def _get_current_head(alembic_cfg) -> str:
@@ -228,6 +255,20 @@ async def _run_alembic_upgrade(alembic_cfg, url: str, head: str) -> MigrationRes
     try:
         current = await _get_current_revision(engine)
         log.info("alembic_upgrade_start", current_revision=current, target=head)
+
+        # Legacy-chain bridge: if the DB is stamped at any pre-squash revision
+        # (0001–0038 or the data migration), re-stamp it at the squash head.
+        # The schema is already correct because those revisions applied all the
+        # same DDL incrementally; we just need Alembic's version table to agree
+        # with the new consolidated chain before running ``upgrade head``.
+        if current in _LEGACY_REVISIONS:
+            log.info(
+                "legacy_revision_detected_restamping",
+                from_revision=current,
+                to_revision=_SQUASH_REVISION,
+            )
+            await asyncio.to_thread(_stamp_sync, alembic_cfg, _SQUASH_REVISION)
+
         await asyncio.to_thread(_run_upgrade_sync, alembic_cfg)
         current_after = await _get_current_revision(engine)
     finally:
@@ -239,6 +280,13 @@ async def _run_alembic_upgrade(alembic_cfg, url: str, head: str) -> MigrationRes
         current_revision=current_after or head,
         applied_count=applied,
     )
+
+
+def _stamp_sync(cfg, revision: str) -> None:
+    """Synchronous Alembic stamp (runs in thread)."""
+    from alembic import command
+
+    command.stamp(cfg, revision)
 
 
 def _run_upgrade_sync(cfg) -> None:
