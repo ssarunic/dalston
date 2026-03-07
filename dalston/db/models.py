@@ -433,6 +433,13 @@ class WebhookEndpointModel(Base):
         """Backward-compatible list of subscribed event type strings."""
         return [e.event_type for e in self.endpoint_events]
 
+    @events.setter
+    def events(self, event_types: list[str]) -> None:
+        """Populate endpoint_events from a list of event type strings."""
+        self.endpoint_events = [
+            WebhookEndpointEvent(event_type=et) for et in event_types
+        ]
+
 
 class WebhookEndpointEvent(Base):
     """Junction table: event types subscribed by a webhook endpoint."""
