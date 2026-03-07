@@ -138,7 +138,8 @@ class TestValidateRequest:
     def test_speaker_rejects_per_channel(self) -> None:
         with pytest.raises(LiteUnsupportedFeatureError) as exc_info:
             validate_request(LiteProfile.SPEAKER, {"speaker_detection": "per_channel"})
-        assert "per_channel" in exc_info.value.feature
+        assert exc_info.value.feature == "speaker_detection"
+        assert "per_channel" in exc_info.value.remediation
 
     def test_speaker_rejects_pii_detection(self) -> None:
         with pytest.raises(LiteUnsupportedFeatureError) as exc_info:

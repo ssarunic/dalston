@@ -25,6 +25,12 @@ from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.model_registry import ModelRegistryService
 from dalston.orchestrator.catalog import get_catalog
+from dalston.orchestrator.lite_capabilities import (
+    LiteProfile,
+    check_prerequisites,
+    get_active_profile_name,
+    get_matrix_as_dict,
+)
 from dalston.orchestrator.registry import BatchEngineRegistry
 
 router = APIRouter(prefix="/engines", tags=["engines"])
@@ -339,13 +345,6 @@ async def get_lite_capabilities() -> LiteCapabilitiesResponse:
     both distributed and lite runtime modes.  It is the primary discovery
     surface for tooling, dashboards, and documentation generators.
     """
-    from dalston.orchestrator.lite_capabilities import (
-        LiteProfile,
-        check_prerequisites,
-        get_active_profile_name,
-        get_matrix_as_dict,
-    )
-
     matrix = get_matrix_as_dict()
     active = get_active_profile_name()
 

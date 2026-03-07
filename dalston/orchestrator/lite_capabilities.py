@@ -40,6 +40,9 @@ DEFAULT_PROFILE = "core"
 # Checked via importlib at runtime; absent packages disable the profile.
 _COMPLIANCE_PREREQS = ("presidio_analyzer", "presidio_anonymizer")
 
+# Speaker detection mode values.
+_PER_CHANNEL = "per_channel"
+
 
 class LiteProfile(str, Enum):
     CORE = "core"
@@ -254,8 +257,8 @@ def get_active_profile() -> ProfileCapability:
 def validate_request(profile: LiteProfile, parameters: dict) -> None:
     """Validate job parameters against the lite capability matrix.
 
-    Checked options: ``speaker_detection``, ``pii_detection``,
-    ``redact_pii_audio``.  Unknown options are ignored (forward-compat).
+    Checks all options declared in the matrix as unsupported for *profile*.
+    Raises on the first violation with an actionable remediation hint.
 
     Args:
         profile: The active lite profile.
@@ -277,12 +280,14 @@ def validate_request(profile: LiteProfile, parameters: dict) -> None:
                     "or switch to distributed mode for full diarisation support."
                 ),
             )
-        if speaker_detection == "per_channel":
+        # per_channel is not supported by any lite profile; the specificity
+        # belongs in the remediation string, not the feature key.
+        if speaker_detection == _PER_CHANNEL:
             raise LiteUnsupportedFeatureError(
-                feature="speaker_detection=per_channel",
+                feature="speaker_detection",
                 profile=profile,
                 remediation=(
-                    "Per-channel speaker detection is not supported in lite mode. "
+                    "per_channel speaker detection is not supported in lite mode. "
                     "Use speaker_detection=diarize with the speaker profile, "
                     "or switch to distributed mode."
                 ),
@@ -309,6 +314,28 @@ def validate_request(profile: LiteProfile, parameters: dict) -> None:
                     "in lite mode."
                 ),
             )
+
+    if parameters.get("pii_entity_types") and not caps.supported_options.get(
+        "pii_entity_types", False
+    ):
+        raise LiteUnsupportedFeatureError(
+            feature="pii_entity_types",
+            profile=profile,
+            remediation=(
+                "Use --profile compliance to enable PII entity filtering in lite mode."
+            ),
+        )
+
+    if parameters.get("pii_redaction_mode") and not caps.supported_options.get(
+        "pii_redaction_mode", False
+    ):
+        raise LiteUnsupportedFeatureError(
+            feature="pii_redaction_mode",
+            profile=profile,
+            remediation=(
+                "Use --profile compliance to enable PII redaction mode in lite mode."
+            ),
+        )
 
 
 def check_prerequisites(profile: LiteProfile) -> list[str]:

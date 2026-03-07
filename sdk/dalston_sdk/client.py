@@ -393,10 +393,7 @@ class Dalston:
         data["retention"] = retention
 
         # Lite mode profile selection (M58). Ignored by distributed servers.
-        if lite_profile and lite_profile != "core":
-            data["lite_profile"] = lite_profile
-        else:
-            data["lite_profile"] = "core"
+        data["lite_profile"] = lite_profile or "core"
 
         # Handle file upload
         files: dict[str, Any] | None = None

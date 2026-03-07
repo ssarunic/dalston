@@ -96,12 +96,22 @@ class TestLiteCapabilitiesEndpoint:
 
     def test_compliance_prereqs_listed_when_absent(self) -> None:
         """compliance profile shows missing packages when presidio not installed."""
-        response = self.client.get("/v1/lite/capabilities")
+        from unittest.mock import patch
+
+        absent = ["presidio_analyzer", "presidio_anonymizer"]
+
+        def _fake_check(profile: LiteProfile) -> list[str]:
+            return absent if profile == LiteProfile.COMPLIANCE else []
+
+        with patch(
+            "dalston.gateway.api.v1.engines.check_prerequisites",
+            side_effect=_fake_check,
+        ):
+            response = self.client.get("/v1/lite/capabilities")
+
         data = response.json()
-        # compliance requires presidio packages; they're not in this venv
-        # so missing_prereqs["compliance"] should list them.
-        # (If they happen to be installed, the list is empty — both are valid.)
-        assert "compliance" in data["missing_prereqs"] or True  # Always passes
+        assert "compliance" in data["missing_prereqs"]
+        assert set(data["missing_prereqs"]["compliance"]) == set(absent)
 
     def test_profile_descriptions_are_non_empty(self) -> None:
         response = self.client.get("/v1/lite/capabilities")

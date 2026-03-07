@@ -423,6 +423,7 @@ async def create_transcription(
             LitePrerequisiteMissingError,
             LiteProfileNotFoundError,
             LiteUnsupportedFeatureError,
+            check_prerequisites,
             resolve_profile,
             validate_request,
         )
@@ -431,6 +432,13 @@ async def create_transcription(
             cap = resolve_profile(lite_profile)
         except LiteProfileNotFoundError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        missing = check_prerequisites(cap.profile)
+        if missing:
+            raise HTTPException(
+                status_code=422,
+                detail=LitePrerequisiteMissingError(cap.profile, missing).to_dict(),
+            )
 
         try:
             validate_request(cap.profile, parameters)
