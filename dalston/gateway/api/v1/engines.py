@@ -2,6 +2,7 @@
 
 GET /v1/engines - List all engines with status
 GET /v1/capabilities - Aggregate capabilities of running engines
+GET /v1/lite/capabilities - Machine-readable lite capability matrix (M58)
 """
 
 from __future__ import annotations
@@ -27,6 +28,9 @@ from dalston.orchestrator.catalog import get_catalog
 from dalston.orchestrator.registry import BatchEngineRegistry
 
 router = APIRouter(prefix="/engines", tags=["engines"])
+
+# Lite-mode capability discovery router (no prefix; mounted at /v1/lite)
+lite_router = APIRouter(prefix="/lite", tags=["lite"])
 
 
 # Response models
@@ -280,4 +284,87 @@ async def get_capabilities(
         stages=stages,
         max_audio_duration_s=max_duration,
         supported_formats=["wav", "flac", "mp3", "m4a", "ogg", "webm"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Lite capability discovery (M58)
+# ---------------------------------------------------------------------------
+
+
+class LiteProfileSummary(BaseModel):
+    """Single profile entry in the lite capability matrix."""
+
+    profile: str
+    version: str
+    description: str
+    stages: list[str]
+    supported_options: dict[str, bool]
+    requires_prereqs: list[str]
+
+
+class LiteCapabilitiesResponse(BaseModel):
+    """Machine-readable lite capability matrix.
+
+    Derived entirely from ``dalston.orchestrator.lite_capabilities`` — the
+    single source of truth.  CLI output, this endpoint, and the docs all
+    read from that module, never duplicate it.
+    """
+
+    schema_version: str
+    default_profile: str
+    profile_precedence: list[str]
+    profiles: dict[str, LiteProfileSummary]
+    active_profile: str
+    """Profile currently active in this process (env-var or default)."""
+    missing_prereqs: dict[str, list[str]]
+    """Per-profile list of prerequisite packages that are not installed."""
+
+
+@lite_router.get(
+    "/capabilities",
+    response_model=LiteCapabilitiesResponse,
+    summary="Get lite mode capability matrix",
+    description=(
+        "Return the versioned lite capability matrix derived from the single "
+        "source of truth in ``dalston.orchestrator.lite_capabilities``. "
+        "Available in all runtime modes; the ``active_profile`` field reflects "
+        "the profile currently configured via env or default."
+    ),
+)
+async def get_lite_capabilities() -> LiteCapabilitiesResponse:
+    """Return the full lite capability matrix.
+
+    This endpoint is always available (no Redis/DB dependency) and works in
+    both distributed and lite runtime modes.  It is the primary discovery
+    surface for tooling, dashboards, and documentation generators.
+    """
+    from dalston.orchestrator.lite_capabilities import (
+        LiteProfile,
+        check_prerequisites,
+        get_active_profile_name,
+        get_matrix_as_dict,
+    )
+
+    matrix = get_matrix_as_dict()
+    active = get_active_profile_name()
+
+    # Check prereqs for each profile so callers know what is actually usable.
+    missing: dict[str, list[str]] = {}
+    for profile in LiteProfile:
+        absent = check_prerequisites(profile)
+        if absent:
+            missing[profile.value] = absent
+
+    profiles = {
+        name: LiteProfileSummary(**data) for name, data in matrix["profiles"].items()
+    }
+
+    return LiteCapabilitiesResponse(
+        schema_version=matrix["schema_version"],
+        default_profile=matrix["default_profile"],
+        profile_precedence=matrix["profile_precedence"],
+        profiles=profiles,
+        active_profile=active,
+        missing_prereqs=missing,
     )

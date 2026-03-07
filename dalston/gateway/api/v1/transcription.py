@@ -237,6 +237,16 @@ async def create_transcription(
             description="Retention in days: 0 (transient), -1 (permanent), 1-3650 (days), or omit for server default"
         ),
     ] = None,
+    # Lite mode profile selection (M58). Ignored in distributed mode.
+    lite_profile: Annotated[
+        str,
+        Form(
+            description=(
+                "Lite mode pipeline profile: 'core' (default), 'speaker', 'compliance'. "
+                "Ignored when DALSTON_MODE=distributed."
+            )
+        ),
+    ] = "core",
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
@@ -405,6 +415,31 @@ async def create_transcription(
             parameters["redact_pii_audio"] = True
             parameters["pii_redaction_mode"] = pii_redaction_mode
 
+    # Lite mode: validate profile and parameters before any I/O (M58).
+    # This is the fail-fast guardrail — unsupported features return actionable
+    # errors before a job record is written to the database.
+    if settings.runtime_mode == "lite":
+        from dalston.orchestrator.lite_capabilities import (
+            LitePrerequisiteMissingError,
+            LiteProfileNotFoundError,
+            LiteUnsupportedFeatureError,
+            resolve_profile,
+            validate_request,
+        )
+
+        try:
+            cap = resolve_profile(lite_profile)
+        except LiteProfileNotFoundError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        try:
+            validate_request(cap.profile, parameters)
+        except LiteUnsupportedFeatureError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=exc.to_dict(),
+            ) from exc
+
     # Generate job ID upfront so we can upload to the correct S3 path
     job_id = uuid4()
 
@@ -467,20 +502,31 @@ async def create_transcription(
 
     # Lite mode runs the scoped pipeline inline (no Redis/orchestrator dependency).
     if settings.runtime_mode == "lite":
-        from dalston.orchestrator.lite_main import build_default_pipeline
+        from dalston.orchestrator.lite_capabilities import LitePrerequisiteMissingError
+        from dalston.orchestrator.lite_main import build_pipeline
 
         try:
             job.status = JobStatus.RUNNING.value
             job.started_at = datetime.now(UTC)
             await db.commit()
 
-            pipeline = build_default_pipeline()
-            await pipeline.run_job(ingested.content, job_id=str(job.id))
+            pipeline = build_pipeline(profile=lite_profile)
+            await pipeline.run_job(
+                ingested.content,
+                job_id=str(job.id),
+                parameters=parameters,
+            )
 
             job.status = JobStatus.COMPLETED.value
             job.completed_at = datetime.now(UTC)
             await db.commit()
             await db.refresh(job)
+        except LitePrerequisiteMissingError as exc:
+            job.status = JobStatus.FAILED.value
+            job.error = str(exc)
+            job.completed_at = datetime.now(UTC)
+            await db.commit()
+            raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
         except Exception as e:
             job.status = JobStatus.FAILED.value
             job.error = str(e)
