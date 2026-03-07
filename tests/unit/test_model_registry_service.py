@@ -324,10 +324,11 @@ class TestRegisterModel:
             model_metadata={"author": "nvidia"},
         )
 
-        mock_db.add.assert_called_once()
+        # register_model calls db.add() once for the model, then once per language
+        assert mock_db.add.call_count >= 1
 
-        # Verify the model was created with correct attributes
-        added_model = mock_db.add.call_args[0][0]
+        # Verify the model was created with correct attributes (first add call)
+        added_model = mock_db.add.call_args_list[0][0][0]
         assert added_model.id == "nvidia/parakeet-tdt-1.1b"
         assert added_model.name == "Parakeet TDT 1.1B"
         assert added_model.runtime == "nemo"

@@ -1,10 +1,10 @@
 """Artifact lifecycle management service."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import structlog
-from sqlalchemy import text, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.models import ArtifactOwnerType
@@ -40,41 +40,31 @@ class ArtifactService:
         if available_at is None:
             available_at = datetime.now(UTC)
 
-        # Update all artifacts for this owner
-        # Set available_at and compute purge_after = available_at + ttl_seconds
+        # Update available_at for all unprocessed artifacts for this owner
         stmt = (
             update(ArtifactObjectModel)
             .where(ArtifactObjectModel.owner_type == owner_type.value)
             .where(ArtifactObjectModel.owner_id == owner_id)
-            .where(ArtifactObjectModel.purge_after.is_(None))  # Only unprocessed
-            .values(
-                available_at=available_at,
-                # purge_after is computed from ttl_seconds if set
-                # This is handled per-row below since we can't use column in values
-            )
+            .where(ArtifactObjectModel.purge_after.is_(None))
+            .values(available_at=available_at)
         )
         result = await db.execute(stmt)
         count = result.rowcount
 
-        # Now update purge_after for artifacts with ttl_seconds
-        # purge_after = available_at + ttl_seconds
-        # Use raw SQL to compute interval to avoid Python/SQL datetime mixing issues
-        # Note: Use CAST() instead of :: to avoid conflict with SQLAlchemy named params
-        await db.execute(
-            text("""
-                UPDATE artifact_objects
-                SET purge_after = CAST(:available_at AS TIMESTAMPTZ) + CAST(ttl_seconds || ' seconds' AS INTERVAL)
-                WHERE owner_type = :owner_type
-                  AND owner_id = :owner_id
-                  AND ttl_seconds IS NOT NULL
-                  AND purge_after IS NULL
-            """),
-            {
-                "available_at": available_at,
-                "owner_type": owner_type.value,
-                "owner_id": owner_id,
-            },
+        # Compute purge_after in Python to avoid dialect-specific INTERVAL arithmetic.
+        # Load only artifacts with a TTL that still need purge_after set.
+        artifacts_result = await db.execute(
+            select(ArtifactObjectModel).where(
+                ArtifactObjectModel.owner_type == owner_type.value,
+                ArtifactObjectModel.owner_id == owner_id,
+                ArtifactObjectModel.ttl_seconds.is_not(None),
+                ArtifactObjectModel.purge_after.is_(None),
+            )
         )
+        for artifact in artifacts_result.scalars().all():
+            artifact.purge_after = available_at + timedelta(
+                seconds=artifact.ttl_seconds
+            )
 
         if count > 0:
             logger.debug(

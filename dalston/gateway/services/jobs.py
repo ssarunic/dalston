@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from dalston.common.audit import AuditService
 from dalston.common.models import JobStatus, TaskStatus
 from dalston.common.retention import RETENTION_DEFAULT_DAYS
-from dalston.db.models import JobModel, TaskModel
+from dalston.db.models import JobModel, JobPIIEntityType, TaskModel
 from dalston.gateway.security.exceptions import ResourceNotFoundError
 from dalston.gateway.security.permissions import Permission
 
@@ -92,6 +92,7 @@ class JobsService:
         Returns:
             Created JobModel instance
         """
+        p = parameters or {}
         job = JobModel(
             id=job_id,
             tenant_id=tenant_id,
@@ -106,12 +107,30 @@ class JobsService:
             audio_bit_depth=audio_bit_depth,
             retention=retention,
             pii_detection_enabled=pii_detection_enabled,
-            pii_entity_types=pii_entity_types,
             pii_redact_audio=pii_redact_audio,
             pii_redaction_mode=pii_redaction_mode,
             created_by_key_id=created_by_key_id,
+            # Typed parameter columns (M57.0 Phase 3)
+            param_language=p.get("language"),
+            param_model=p.get("model"),
+            param_word_timestamps=p.get("word_timestamps"),
+            param_timestamps_granularity=p.get("timestamps_granularity"),
+            param_speaker_detection=p.get("speaker_detection"),
+            param_num_speakers=p.get("num_speakers"),
+            param_min_speakers=p.get("min_speakers"),
+            param_max_speakers=p.get("max_speakers"),
+            param_beam_size=p.get("beam_size"),
+            param_vad_filter=p.get("vad_filter"),
+            param_exclusive=p.get("exclusive"),
+            param_num_channels=p.get("num_channels"),
+            param_pii_confidence_threshold=p.get("pii_confidence_threshold"),
+            param_pii_buffer_ms=p.get("pii_buffer_ms"),
+            param_transcribe_config=p.get("transcribe_config"),
         )
         db.add(job)
+        if pii_entity_types:
+            for entity_type in pii_entity_types:
+                db.add(JobPIIEntityType(job_id=job_id, entity_type_id=entity_type))
         await db.commit()
         await db.refresh(job)
         return job
