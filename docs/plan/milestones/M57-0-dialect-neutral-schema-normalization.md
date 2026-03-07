@@ -30,22 +30,137 @@ maintaining two.
 
 ---
 
+## Approach: Dialect-Adaptive Types via `TypeDecorator`
+
+Rather than downgrading every column to the lowest common denominator (e.g.,
+replacing UUID with `String(36)` everywhere), we use SQLAlchemy's
+`TypeDecorator` with `load_dialect_impl()` to get the best of both worlds:
+
+- **Postgres keeps native types** — real `UUID` (16-byte storage), `JSONB`
+  (indexable if ever needed), `INET` (validated network addresses).
+- **SQLite gets portable fallbacks** — `CHAR(36)`, `TEXT`, `VARCHAR(45)`.
+- **Models reference one type name** — no dialect imports in `models.py`.
+- **Alembic renders the right DDL per dialect** — `TypeDecorator` is
+  dialect-aware at DDL generation time.
+
+### Core type adapters (`dalston/db/types.py`)
+
+```python
+"""Dialect-adaptive column types for Postgres/SQLite portability."""
+
+import json
+import uuid
+from typing import Any
+
+from sqlalchemy import String, Text, TypeDecorator
+from sqlalchemy.dialects.postgresql import INET, JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+
+
+class UUIDType(TypeDecorator):
+    """UUID: native on Postgres, CHAR(36) on SQLite."""
+
+    impl = String(36)
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(PG_UUID(as_uuid=True))
+        return dialect.type_descriptor(String(36))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if dialect.name == "postgresql":
+            return value if isinstance(value, uuid.UUID) else uuid.UUID(value)
+        return str(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        return value if isinstance(value, uuid.UUID) else uuid.UUID(value)
+
+
+class JSONType(TypeDecorator):
+    """JSONB on Postgres, TEXT with JSON serialization on SQLite."""
+
+    impl = Text
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(JSONB)
+        return dialect.type_descriptor(Text)
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if dialect.name == "postgresql":
+            return value  # asyncpg handles dict → JSONB natively
+        return json.dumps(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return json.loads(value)
+        return value  # already a dict (Postgres)
+
+
+class InetType(TypeDecorator):
+    """INET on Postgres, VARCHAR(45) on SQLite."""
+
+    impl = String(45)
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(INET)
+        return dialect.type_descriptor(String(45))
+
+    def process_bind_param(self, value, dialect):
+        return value  # both store as string
+
+    def process_result_value(self, value, dialect):
+        return value
+```
+
+With these adapters, model definitions become dialect-agnostic:
+
+```python
+# Before (Postgres-coupled)
+from sqlalchemy.dialects.postgresql import JSONB, PG_UUID
+id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), server_default=func.gen_random_uuid())
+parameters: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
+
+# After (portable)
+from dalston.db.types import UUIDType, JSONType
+id: Mapped[UUID] = mapped_column(UUIDType, default=uuid4)
+parameters: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+```
+
+Postgres-dialect imports move from `models.py` (used everywhere) to
+`dalston/db/types.py` (one file, three classes, never touched by feature work).
+
+---
+
 ## Intended Outcomes
 
 ### Functional outcomes
 
-1. All ORM models use only ANSI SQL–portable column types.
+1. All ORM models use dialect-adaptive types — no direct Postgres imports.
 2. A single `alembic upgrade head` works against both Postgres and SQLite.
-3. Existing API request/response contracts are unchanged.
-4. Distributed-mode behavior and performance are unchanged.
+3. Postgres retains native type performance (UUID, JSONB, INET).
+4. Existing API request/response contracts are unchanged.
+5. Distributed-mode behavior and performance are unchanged.
 
 ### Architecture outcomes
 
 1. One model definition, one migration chain, two dialects — no fork.
 2. ARRAY columns are replaced by proper junction tables (standard relational design).
 3. JSONB columns with known schemas are normalized into typed columns or key/value rows.
-4. Remaining schemaless JSONB columns become `Text` storing JSON strings, with
-   serialization handled in a thin accessor layer.
+4. Remaining schemaless JSONB columns use `JSONType` — renders as `JSONB` on Postgres,
+   `TEXT` on SQLite, with automatic serialization in both directions.
 5. Postgres-specific query patterns (`.any()`, `on_conflict_do_nothing`,
    `.returning()`, `FOR UPDATE SKIP LOCKED`, raw `INTERVAL` casts) are replaced
    with portable equivalents or wrapped in dialect helpers.
@@ -59,7 +174,7 @@ maintaining two.
 
 ### Clean-start outcomes
 
-1. No `from sqlalchemy.dialects.postgresql` imports remain in `models.py`.
+1. No direct `from sqlalchemy.dialects.postgresql` imports remain in `models.py`.
 2. No parallel DDL maintenance path for lite mode.
 3. No silent type mismatch between distributed and lite schemas.
 
@@ -73,23 +188,28 @@ maintaining two.
 
 All primary keys and foreign keys use Postgres-native UUID with `server_default=func.gen_random_uuid()`.
 
-| Replacement | `String(36)` |
+| Replacement | `UUIDType` (dialect-adaptive `TypeDecorator`) |
 |---|---|
-| Default generation | App-side `str(uuid4())` via column `default` |
-| Impact | Mechanical — find-and-replace across models, no query changes |
+| Postgres behavior | Native `UUID` column (16-byte binary storage) |
+| SQLite behavior | `CHAR(36)` storing string representation |
+| Default generation | App-side `default=uuid4` — works on both dialects |
+| Impact | Mechanical — replace type + remove `server_default` across models |
 
 #### A2. `JSONB` — 8 columns
 
 | Table | Column | Schema known? | Action |
 |-------|--------|--------------|--------|
 | `jobs` | `parameters` | **Yes** — finite keys used in `dag.py` | **Flatten** into typed columns on `jobs` |
-| `tenants` | `settings` | Yes — tenant config | Keep as `Text` (JSON string) — rarely queried, no indexed access |
-| `tasks` | `config` | Partially — varies per engine | Keep as `Text` (JSON string) — opaque blob passed to engines |
-| `audit_log` | `detail` | No — intentionally schemaless | Keep as `Text` (JSON string) |
-| `webhook_deliveries` | `payload` | No — mirrors API response shape | Keep as `Text` (JSON string) |
-| `settings` | `value` | Yes — single typed value | Change to `Text` — the table is already key/value structured |
+| `tenants` | `settings` | Yes — tenant config | `JSONType` — `JSONB` on Postgres, `TEXT` on SQLite |
+| `tasks` | `config` | Partially — varies per engine | `JSONType` — opaque blob passed to engines |
+| `audit_log` | `detail` | No — intentionally schemaless | `JSONType` |
+| `webhook_deliveries` | `payload` | No — mirrors API response shape | `JSONType` |
+| `settings` | `value` | Yes — single typed value | `JSONType` |
 | `models` | `languages` | **Yes** — list of language codes | **Normalize** into `model_languages` junction table |
-| `models` | `model_metadata` | No — external HuggingFace schema | Keep as `Text` (JSON string) |
+| `models` | `model_metadata` | No — external HuggingFace schema | `JSONType` |
+
+Columns kept as `JSONType` retain `JSONB` on Postgres (preserving indexability
+if ever needed) while transparently serializing to `TEXT` on SQLite.
 
 #### A3. `ARRAY(...)` — 4 columns
 
@@ -106,7 +226,7 @@ All four are textbook junction-table candidates. Using ARRAY was a Postgres shor
 
 | Table | Column | Replacement |
 |-------|--------|-------------|
-| `audit_log` | `ip_address` | `String(45)` — covers IPv4, IPv6, and mapped addresses |
+| `audit_log` | `ip_address` | `InetType` — `INET` on Postgres (validated), `VARCHAR(45)` on SQLite |
 
 #### A5. `CREATE RULE` — 2 rules on `audit_log`
 
@@ -231,20 +351,28 @@ unforeseen keys, remove in a follow-up once confirmed empty.
 
 ## Tactical Plan
 
-### Phase 1: Replace Primitive Types (UUID, INET)
+### Phase 1: Dialect-Adaptive Type Layer and Primitive Type Migration
 
-1. Replace all `PG_UUID(as_uuid=True)` with `String(36)`.
-2. Replace `server_default=func.gen_random_uuid()` with `default=lambda: str(uuid4())`.
-3. Replace `INET` with `String(45)`.
-4. Remove `from sqlalchemy.dialects.postgresql import INET, JSONB, UUID as PG_UUID`.
-5. Update Alembic `env.py` to support both `asyncpg` and `aiosqlite` engines.
-6. Generate Alembic migration for type changes.
+1. Create `dalston/db/types.py` with three `TypeDecorator` classes:
+   - `UUIDType` — `PG_UUID(as_uuid=True)` on Postgres, `String(36)` on SQLite
+   - `JSONType` — `JSONB` on Postgres, `Text` with JSON serde on SQLite
+   - `InetType` — `INET` on Postgres, `String(45)` on SQLite
+2. Replace all `PG_UUID(as_uuid=True)` references in `models.py` with `UUIDType`.
+3. Replace `server_default=func.gen_random_uuid()` with `default=uuid4`.
+4. Replace `INET` with `InetType`.
+5. Replace remaining `JSONB` references (columns not being flattened or normalized
+   in later phases) with `JSONType`.
+6. Remove `from sqlalchemy.dialects.postgresql import ...` from `models.py`.
+7. Update Alembic `env.py` to support both `asyncpg` and `aiosqlite` engines,
+   and to render `TypeDecorator` subclasses correctly in autogenerated migrations.
+8. Generate Alembic migration for type changes.
 
 Expected files:
 
+- `dalston/db/types.py` (new — ~80 lines)
 - `dalston/db/models.py`
 - `alembic/env.py`
-- `alembic/versions/NNNN_normalize_uuid_inet_types.py`
+- `alembic/versions/NNNN_dialect_adaptive_types.py`
 
 ### Phase 2: Normalize ARRAY Columns into Junction Tables
 
@@ -291,15 +419,18 @@ Expected files:
    - `pii_buffer_ms` → `Integer`
    - `transcribe_config` → `Text` (JSON string — engine-specific opaque blob)
 2. **Normalize `models.languages`** — create `model_languages(model_id, language_code)`.
-3. **Convert remaining JSONB to Text:**
-   - `tenants.settings` → `Text` (JSON string)
-   - `tasks.config` → `Text` (JSON string)
-   - `audit_log.detail` → `Text` (JSON string)
-   - `webhook_deliveries.payload` → `Text` (JSON string)
-   - `settings.value` → `Text` (JSON string)
-   - `models.model_metadata` → `Text` (JSON string)
-4. Add thin property accessors or helper for JSON serialization/deserialization
-   on models that use `Text` for structured data.
+3. **Convert remaining JSONB to `JSONType`** (already done in Phase 1 for most;
+   verify completeness):
+   - `tenants.settings` → `JSONType` (JSONB on Postgres, TEXT on SQLite)
+   - `tasks.config` → `JSONType`
+   - `audit_log.detail` → `JSONType`
+   - `webhook_deliveries.payload` → `JSONType`
+   - `settings.value` → `JSONType`
+   - `models.model_metadata` → `JSONType`
+   - `jobs.param_transcribe_config` → `JSONType` (the one flattened field that remains JSON)
+
+   No manual serialization helpers needed — `JSONType.process_bind_param()` and
+   `process_result_value()` handle dict↔string conversion transparently.
 5. Write Alembic migration with data backfill for `jobs.parameters` extraction.
 6. Update `dalston/orchestrator/dag.py` to read from new columns instead of `parameters` dict.
 
@@ -418,9 +549,9 @@ vs the old `parameters["pii_detection"]`).  After migration and code update, the
      Python 3.10 ships 3.37.2.  Both satisfy the requirement.  Add a startup
      check that validates SQLite version.
 
-5. **Risk:** Text-stored JSON loses indexed query capability on Postgres.
-   - **Mitigation:** The codebase performs zero JSONB index queries today (confirmed
-     by grep).  No functional regression.
+5. **Risk:** ~~Text-stored JSON loses indexed query capability on Postgres.~~
+   **Eliminated** — `JSONType` renders as `JSONB` on Postgres, so native indexing
+   remains available.  No capability regression on either dialect.
 
 ---
 
@@ -437,9 +568,11 @@ vs the old `parameters["pii_detection"]`).  After migration and code update, the
 
 ## Exit Criteria
 
-1. `dalston/db/models.py` contains zero imports from `sqlalchemy.dialects.postgresql`.
+1. `dalston/db/models.py` contains zero direct imports from `sqlalchemy.dialects.postgresql`.
+   All dialect-specific types are isolated in `dalston/db/types.py`.
 2. `alembic upgrade head` succeeds on both Postgres and SQLite from an empty database.
-3. All existing tests pass without modification (beyond adapting to new column names).
-4. CI includes a SQLite migration smoke test.
-5. The four ARRAY columns are replaced by junction tables with proper foreign keys.
-6. `jobs.parameters` JSONB is replaced by typed columns; `dag.py` reads columns directly.
+3. Postgres retains native column types (UUID, JSONB, INET) via `TypeDecorator` dispatch.
+4. All existing tests pass without modification (beyond adapting to new column names).
+5. CI includes a SQLite migration smoke test.
+6. The four ARRAY columns are replaced by junction tables with proper foreign keys.
+7. `jobs.parameters` JSONB is replaced by typed columns; `dag.py` reads columns directly.
