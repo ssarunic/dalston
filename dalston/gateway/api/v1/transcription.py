@@ -418,6 +418,8 @@ async def create_transcription(
     # Lite mode: validate profile and parameters before any I/O (M58).
     # This is the fail-fast guardrail — unsupported features return actionable
     # errors before a job record is written to the database.
+    # Imports are deferred to avoid loading the lite subsystem in distributed-mode
+    # processes, where these modules are never needed.
     if settings.runtime_mode == "lite":
         from dalston.orchestrator.lite_capabilities import (
             LitePrerequisiteMissingError,
