@@ -14,7 +14,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 
 ## Status Overview
 
-### Completed (22)
+### Completed (25)
 
 | # | Milestone | Completed |
 |---|-----------|-----------|
@@ -40,8 +40,11 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M47](milestones/M47-sql-layer-separation.md) | SQL Layer Separation | March 2026 |
 | [M53](milestones/M53-realtime-latency-budget-clean-cut.md) | Realtime Latency Budget and Explicit Backpressure (Clean-Cut) | 2026-03-05 |
 | [M54](milestones/M54-event-dlq-poison-pill-isolation-clean-cut.md) | Event DLQ and Poison-Pill Isolation (Clean-Cut) | 2026-03-05 |
+| [M55](milestones/M55-non-transcribe-runtime-model-management-clean-cut.md) | Non-Transcribe Runtime Model Management (Clean-Cut) | 2026-03-06 |
+| [M56](milestones/M56-lite-mode-infra-backends-clean-cut.md) | Lite Mode Infra Backends (Clean-Cut) | 2026-03-06 |
+| [M57](milestones/M57-ghost-server-zero-config-cli-bootstrap.md) | Ghost Server + Zero-Config CLI Bootstrap (Clean-Cut) | 2026-03-06 |
 
-### In Progress (9)
+### In Progress (8)
 
 | # | Milestone | Notes |
 |---|-----------|-------|
@@ -53,15 +56,12 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M16](milestones/M16-aws-deployment.md) | AWS Deployment | `infra/terraform/` |
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Audio/transcript S3 storage working; session resume pending |
-| [M57](milestones/M57-ghost-server-zero-config-cli-bootstrap.md) | Ghost Server + Zero-Config CLI Bootstrap (Clean-Cut) | CLI bootstrap state machine and ghost server lifecycle implementation in progress |
 
-### Not Started (7)
+### Not Started (5)
 
 | # | Milestone | Goal |
 |---|-----------|------|
 | [M9](milestones/M09-enrichment.md) | Enrichment | Emotions, events, LLM cleanup |
-| [M55](milestones/M55-non-transcribe-runtime-model-management-clean-cut.md) | Non-Transcribe Runtime Model Management (Clean-Cut) | Runtime model selection and registry-backed lifecycle for diarize, align, and PII stages |
-| [M56](milestones/M56-lite-mode-infra-backends-clean-cut.md) | Lite Mode Infra Backends (Clean-Cut) | Mode-aware backend abstraction for DB/queue/storage with SQLite, in-memory queue, and local filesystem storage |
 | [M57.1](milestones/M57-1-lite-sqlite-migration-track-clean-cut.md) | Lite SQLite Migration Track and Schema Compatibility (Clean-Cut) | Versioned lite schema migrations, legacy DB upgrades, migration-gated startup reliability, plus targeted M57 carry-forward hardening closures |
 | [M58](milestones/M58-lite-pipeline-expansion-capability-parity.md) | Lite Pipeline Expansion and Capability Parity (Clean-Cut) | Expand lite-mode profiles/features with explicit capability matrix and deterministic unsupported-feature behavior |
 | [M59](milestones/M59-runtime-isolation-profiles-clean-cut.md) | Runtime Isolation Profiles (In-Proc / Venv / Container, Clean-Cut) | Profile-based runtime isolation to handle incompatible dependencies under one control plane |
@@ -171,7 +171,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M41](milestones/M41-new-engine-types.md) | New Engine Types | Parakeet ONNX, HF-ASR, vLLM-ASR engine containers | 5-7 | Planned |
 | [M42](milestones/M42-console-model-management.md) | Console Model Management | Web UI for model registry, download, and selection | 5-7 | Complete |
 | [M46](milestones/M46-model-registry-as-source-of-truth.md) | Model Registry as Source of Truth | DB as single source, auto-seeding, user enrichment API | 3-4 | Planned |
-| [M55](milestones/M55-non-transcribe-runtime-model-management-clean-cut.md) | Non-Transcribe Runtime Model Management (Clean-Cut) | Runtime model selection and registry lifecycle for diarize, align, and PII stages | 8-12 | Planned |
+| [M55](milestones/M55-non-transcribe-runtime-model-management-clean-cut.md) | Non-Transcribe Runtime Model Management (Clean-Cut) | Runtime model selection and registry lifecycle for diarize, align, and PII stages | 8-12 | Completed |
 
 ---
 

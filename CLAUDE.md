@@ -350,6 +350,28 @@ are enforced by `ruff` and `mypy` — run `make lint` before committing.
 - No test should depend on another test's state.
 - New endpoints require contract tests.
 
+## Shell & Permissions
+
+When running commands that require environment variables (API keys, feature
+flags, mode overrides), always set them via `export` in a prior step rather
+than inline prefixes. For example:
+
+✅ Preferred:
+
+```bash
+export DALSTON_API_KEY=...
+dalston transcribe ...
+```
+
+❌ Avoid:
+
+```bash
+DALSTON_API_KEY=... dalston transcribe ...
+```
+
+This keeps the permissions allow-list clean. Never request approval for
+env-var-prefixed command variants — use a standalone export instead.
+
 ### Code Review Checklist
 
 - Flag any function doing more than one thing.
