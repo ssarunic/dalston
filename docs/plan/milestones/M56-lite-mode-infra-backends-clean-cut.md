@@ -6,7 +6,7 @@
 | **Duration** | 7-10 days |
 | **Dependencies** | M47 (service-layer SQL separation and injection points), M51/M52 (engine runtime contract + local runner), existing batch gateway/orchestrator flow |
 | **Deliverable** | Mode-aware backend interfaces with `distributed` and `lite` implementations, SQLite support, in-memory queue, local filesystem storage, and one validated lite batch transcription path |
-| **Status** | Planned |
+| **Status** | Completed |
 
 Dependency clarification:
 

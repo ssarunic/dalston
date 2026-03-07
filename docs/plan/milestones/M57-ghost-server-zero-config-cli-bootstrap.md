@@ -6,7 +6,7 @@
 | **Duration** | 5-8 days |
 | **Dependencies** | M56 (lite infra backends), M13 (CLI baseline), M36/M40 (runtime model management + model registry) |
 | **Deliverable** | CLI bootstrap state machine that auto-checks/starts local server, auto-ensures default model, runs transcription immediately, and presents clear progress/error UX |
-| **Status** | Planned |
+| **Status** | Completed |
 
 Dependency clarification:
 

@@ -6,7 +6,7 @@
 | **Duration** | 8-12 days |
 | **Dependencies** | M36 (runtime model management), M40 (model registry), M46 (registry as source of truth) |
 | **Deliverable** | Stage model selection contract (`model_diarize`, `model_align`, `model_pii_detect`), stage-aware orchestrator routing, refactored engines consuming `runtime_model_id`, and removal of legacy transcribe-only assumptions |
-| **Status** | Planned |
+| **Status** | Completed |
 
 ## Intended Outcomes
 
