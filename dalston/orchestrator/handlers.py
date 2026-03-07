@@ -29,7 +29,7 @@ from dalston.common.models import ArtifactOwnerType, JobStatus, TaskStatus
 from dalston.common.s3 import get_s3_client
 from dalston.common.streams import mark_job_cancelled
 from dalston.config import Settings, get_settings
-from dalston.db.models import JobModel, TaskModel
+from dalston.db.models import JobModel, TaskDependency, TaskModel
 from dalston.gateway.services.artifacts import ArtifactService
 from dalston.gateway.services.rate_limiter import (
     CONCURRENT_COUNTER_TTL_SECONDS,
@@ -229,7 +229,7 @@ async def handle_job_created(
 
     log.info("built_task_dag", task_count=len(tasks))
 
-    # 3. Save all tasks to PostgreSQL
+    # 3. Save all tasks to the database.
     # Wrap in try/except to handle race condition with other orchestrators
     try:
         for task in tasks:
@@ -248,7 +248,6 @@ async def handle_job_created(
                 stage=task.stage,
                 runtime=task.runtime,
                 status=task.status.value,
-                dependencies=list(task.dependencies),
                 config=task_config,
                 input_uri=task.input_uri,
                 output_uri=task.output_uri,
@@ -257,6 +256,13 @@ async def handle_job_created(
                 required=task.required,
             )
             db.add(task_model)
+
+        # Flush so task PKs are visible before inserting FK-referencing dependencies.
+        await db.flush()
+
+        for task in tasks:
+            for dep_id in task.dependencies:
+                db.add(TaskDependency(task_id=task.id, depends_on_id=dep_id))
 
         # 4. Update job status to 'running'
         job.status = JobStatus.RUNNING.value

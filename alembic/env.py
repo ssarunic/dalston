@@ -1,4 +1,14 @@
-"""Alembic migration environment configuration."""
+"""Alembic migration environment configuration.
+
+Supports both PostgreSQL (asyncpg driver) and SQLite (aiosqlite driver).
+The DATABASE_URL environment variable selects the dialect; plain scheme
+prefixes are automatically promoted to their async equivalents.
+
+SQLite notes:
+- Minimum version 3.35.0 required for RETURNING support (Python 3.11+ ships 3.39+).
+- render_as_batch=True enables ALTER TABLE emulation for SQLite, which does not
+  support ADD/DROP COLUMN directly on existing tables.
+"""
 
 import asyncio
 import os
@@ -23,13 +33,36 @@ if config.config_file_name is not None:
 # Model metadata for autogenerate
 target_metadata = Base.metadata
 
-# Override sqlalchemy.url from environment variable if set
-database_url = os.getenv("DATABASE_URL")
-if database_url:
-    # Ensure we use asyncpg driver
-    if database_url.startswith("postgresql://"):
-        database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    config.set_main_option("sqlalchemy.url", database_url)
+# ---------------------------------------------------------------------------
+# URL normalisation: promote plain scheme → async driver
+# ---------------------------------------------------------------------------
+# Only apply the DATABASE_URL env-var when running the alembic CLI directly.
+# When migrate.py calls command.upgrade() programmatically it sets the URL via
+# cfg.set_main_option() and marks cfg.attributes["_dalston_url_set"] = True so
+# we know NOT to override it here.
+if not config.attributes.get("_dalston_url_set"):
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        if database_url.startswith("postgresql://"):
+            database_url = database_url.replace(
+                "postgresql://", "postgresql+asyncpg://", 1
+            )
+        elif database_url.startswith("sqlite://"):
+            database_url = database_url.replace("sqlite://", "sqlite+aiosqlite://", 1)
+        config.set_main_option("sqlalchemy.url", database_url)
+
+# Detect the configured dialect so we can set render_as_batch for SQLite.
+_configured_url: str = config.get_main_option("sqlalchemy.url") or ""
+_is_sqlite = "sqlite" in _configured_url
+
+
+def _make_context_kwargs() -> dict:
+    """Return context.configure() kwargs appropriate for the active dialect."""
+    kwargs: dict = {"target_metadata": target_metadata}
+    if _is_sqlite:
+        # SQLite requires batch mode to emulate ALTER TABLE operations.
+        kwargs["render_as_batch"] = True
+    return kwargs
 
 
 def run_migrations_offline() -> None:
@@ -41,9 +74,9 @@ def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
-        target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        **_make_context_kwargs(),
     )
 
     with context.begin_transaction():
@@ -52,7 +85,7 @@ def run_migrations_offline() -> None:
 
 def do_run_migrations(connection: Connection) -> None:
     """Run migrations with the given connection."""
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(connection=connection, **_make_context_kwargs())
 
     with context.begin_transaction():
         context.run_migrations()

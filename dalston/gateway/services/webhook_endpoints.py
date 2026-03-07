@@ -14,7 +14,11 @@ from uuid import UUID
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dalston.db.models import WebhookDeliveryModel, WebhookEndpointModel
+from dalston.db.models import (
+    WebhookDeliveryModel,
+    WebhookEndpointEvent,
+    WebhookEndpointModel,
+)
 from dalston.gateway.security.exceptions import ResourceNotFoundError
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.services.webhook import (
@@ -79,12 +83,14 @@ class WebhookEndpointService:
             tenant_id=tenant_id,
             url=url,
             description=description,
-            events=events,
             signing_secret=raw_secret,
             is_active=True,
             created_by_key_id=created_by_key_id,
         )
         db.add(endpoint)
+        await db.flush()
+        for event_type in events:
+            db.add(WebhookEndpointEvent(endpoint_id=endpoint.id, event_type=event_type))
         await db.commit()
         await db.refresh(endpoint)
         return endpoint, raw_secret
@@ -200,7 +206,18 @@ class WebhookEndpointService:
 
         if events is not None:
             self._validate_events(events)
-            endpoint.events = events
+            # Replace junction rows atomically
+            from sqlalchemy import delete as sa_delete
+
+            await db.execute(
+                sa_delete(WebhookEndpointEvent).where(
+                    WebhookEndpointEvent.endpoint_id == endpoint_id
+                )
+            )
+            for event_type in events:
+                db.add(
+                    WebhookEndpointEvent(endpoint_id=endpoint.id, event_type=event_type)
+                )
 
         if description is not None:
             endpoint.description = description
@@ -443,13 +460,26 @@ class WebhookEndpointService:
         Returns:
             List of matching active endpoints
         """
-        # Match endpoints where events array contains the event type or wildcard
+        # Match endpoints where junction table contains the event type or wildcard
+        from sqlalchemy import exists
+
+        has_event = exists(
+            select(WebhookEndpointEvent.endpoint_id).where(
+                WebhookEndpointEvent.endpoint_id == WebhookEndpointModel.id,
+                WebhookEndpointEvent.event_type == event_type,
+            )
+        )
+        has_wildcard = exists(
+            select(WebhookEndpointEvent.endpoint_id).where(
+                WebhookEndpointEvent.endpoint_id == WebhookEndpointModel.id,
+                WebhookEndpointEvent.event_type == "*",
+            )
+        )
         query = select(WebhookEndpointModel).where(
             and_(
                 WebhookEndpointModel.tenant_id == tenant_id,
                 WebhookEndpointModel.is_active == True,  # noqa: E712
-                WebhookEndpointModel.events.any(event_type)
-                | WebhookEndpointModel.events.any("*"),
+                has_event | has_wildcard,
             )
         )
         result = await db.execute(query)

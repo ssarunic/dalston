@@ -11,12 +11,15 @@ from uuid import UUID
 
 import structlog
 from sqlalchemy import and_, select, update
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import dalston.metrics
 import dalston.telemetry
 from dalston.config import Settings
+from dalston.db.dialect_helpers import (
+    apply_for_update_with_dialect,
+    build_insert_or_ignore,
+)
 from dalston.db.models import WebhookDeliveryModel, WebhookEndpointModel
 from dalston.gateway.services.webhook import WebhookService
 
@@ -84,7 +87,8 @@ class DeliveryWorker:
         async with self._session_factory() as db:
             # Select pending deliveries that are due for retry
             # Use FOR UPDATE SKIP LOCKED to prevent duplicate processing
-            query = (
+            dialect_name = db.get_bind().dialect.name
+            query = apply_for_update_with_dialect(
                 select(WebhookDeliveryModel)
                 .where(
                     and_(
@@ -93,8 +97,9 @@ class DeliveryWorker:
                     )
                 )
                 .order_by(WebhookDeliveryModel.next_retry_at)
-                .limit(MAX_CONCURRENT)
-                .with_for_update(skip_locked=True)
+                .limit(MAX_CONCURRENT),
+                dialect_name,
+                skip_locked=True,
             )
 
             result = await db.execute(query)
@@ -340,14 +345,12 @@ async def create_webhook_delivery(
     # Conflict-safe insert:
     # - Before migration with unique constraints, this behaves like a plain insert.
     # - After migration, duplicate replay inserts are dropped and we fetch existing row.
-    stmt = (
-        insert(WebhookDeliveryModel)
-        .values(**values)
-        .on_conflict_do_nothing()
-        .returning(WebhookDeliveryModel.id)
+    delivery_id = await build_insert_or_ignore(
+        db,
+        WebhookDeliveryModel,
+        values,
+        returning=WebhookDeliveryModel.id,
     )
-    result = await db.execute(stmt)
-    delivery_id = result.scalar_one_or_none()
 
     if delivery_id is not None:
         delivery = await db.get(WebhookDeliveryModel, delivery_id)

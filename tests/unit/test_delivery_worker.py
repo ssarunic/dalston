@@ -48,7 +48,6 @@ def mock_endpoint():
         id=uuid4(),
         tenant_id=uuid4(),
         url="https://example.com/webhook",
-        events=["transcription.completed"],
         signing_secret="whsec_test123",
         is_active=True,
         consecutive_failures=0,
@@ -218,7 +217,6 @@ class TestReEnabling:
             id=endpoint_id,
             tenant_id=tenant_id,
             url="https://example.com/webhook",
-            events=["transcription.completed"],
             signing_secret="whsec_test123",
             is_active=False,
             consecutive_failures=10,
@@ -273,6 +271,9 @@ class TestCreateWebhookDelivery:
         )
 
         mock_db = AsyncMock()
+        mock_db.get_bind = MagicMock(
+            return_value=MagicMock(dialect=MagicMock(name="postgresql"))
+        )
         mock_db.execute = AsyncMock(return_value=inserted)
         mock_db.get = AsyncMock(return_value=mock_delivery)
 
@@ -311,6 +312,9 @@ class TestCreateWebhookDelivery:
         select_result.scalar_one_or_none.return_value = existing_delivery
 
         mock_db = AsyncMock()
+        mock_db.get_bind = MagicMock(
+            return_value=MagicMock(dialect=MagicMock(name="postgresql"))
+        )
         mock_db.execute = AsyncMock(side_effect=[insert_result, select_result])
         mock_db.get = AsyncMock()
 
@@ -349,6 +353,9 @@ class TestCreateWebhookDelivery:
         select_result.scalar_one_or_none.return_value = existing_delivery
 
         mock_db = AsyncMock()
+        mock_db.get_bind = MagicMock(
+            return_value=MagicMock(dialect=MagicMock(name="postgresql"))
+        )
         mock_db.execute = AsyncMock(side_effect=[insert_result, select_result])
         mock_db.get = AsyncMock()
 

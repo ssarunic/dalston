@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dalston.common.model_selection_keys import ACTIVE_MODEL_SELECTOR_KEYS
 from dalston.common.s3 import get_s3_client
 from dalston.config import get_settings
-from dalston.db.models import JobModel, ModelRegistryModel
+from dalston.db.models import JobModel, ModelLanguage, ModelRegistryModel
 from dalston.gateway.dependencies import get_audit_service
 
 # Marker file indicating a complete model upload
@@ -465,10 +465,19 @@ class ModelRegistryService:
         # any stage-level model selector parameter.
         from sqlalchemy import func, or_
 
-        model_filters = [
-            JobModel.parameters[key].astext == model_id
-            for key in ACTIVE_MODEL_SELECTOR_KEYS
-        ]
+        dialect_name = db.get_bind().dialect.name
+
+        if dialect_name == "postgresql":
+            model_filters = [
+                JobModel.parameters[key].astext == model_id
+                for key in ACTIVE_MODEL_SELECTOR_KEYS
+            ]
+        else:
+            # SQLite: use json_extract() for each key in the parameters JSON blob
+            model_filters = [
+                func.json_extract(JobModel.parameters, f"$.{key}") == model_id
+                for key in ACTIVE_MODEL_SELECTOR_KEYS
+            ]
 
         result = await db.execute(
             select(func.count())
@@ -689,7 +698,7 @@ class ModelRegistryService:
             status="not_downloaded",
             source=source,
             library_name=library_name,
-            languages=languages,
+            languages=languages,  # JSON column kept for backward compat
             word_timestamps=word_timestamps,
             punctuation=punctuation,
             capitalization=capitalization,
@@ -700,6 +709,10 @@ class ModelRegistryService:
             model_metadata=model_metadata or {},
         )
         db.add(model)
+        await db.flush()
+        if languages:
+            for lang_code in languages:
+                db.add(ModelLanguage(model_id=model_id, language_code=lang_code))
         await db.commit()
         await db.refresh(model)
 
@@ -779,7 +792,7 @@ class ModelRegistryService:
                     stage=entry.stage,
                     status="not_downloaded",
                     source=entry.source,
-                    languages=entry.languages,
+                    languages=entry.languages,  # JSON column (backward compat)
                     word_timestamps=entry.word_timestamps,
                     punctuation=entry.punctuation,
                     capitalization=entry.capitalization,
@@ -790,6 +803,12 @@ class ModelRegistryService:
                     metadata_source="yaml",
                 )
                 db.add(model)
+                await db.flush()
+                if entry.languages:
+                    for lang_code in entry.languages:
+                        db.add(
+                            ModelLanguage(model_id=entry.id, language_code=lang_code)
+                        )
                 result["created"] += 1
 
             elif existing.metadata_source == "user":

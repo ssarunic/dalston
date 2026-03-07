@@ -81,7 +81,12 @@ class TestModelRegistryModelDefaults:
     def test_model_metadata_default(self):
         """Test that model_metadata defaults to empty JSON object."""
         table = ModelRegistryModel.__table__
-        assert table.c.model_metadata.server_default.arg == "{}"
+        # model_metadata uses a Python-level callable default (default=dict),
+        # not a server_default. Verify the ORM default is a callable that produces {}.
+        col_default = table.c.model_metadata.default
+        assert col_default is not None
+        assert col_default.is_callable is True
+        assert table.c.model_metadata.server_default is None
 
 
 class TestModelRegistryModelIndexes:
