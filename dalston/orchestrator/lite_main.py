@@ -28,6 +28,45 @@ logger = structlog.get_logger()
 _JOB_TIMEOUT_S = 120.0
 
 
+# ---------------------------------------------------------------------------
+# Stage compute helpers — synchronous, safe to run in asyncio.to_thread()
+# ---------------------------------------------------------------------------
+# These functions encapsulate the CPU-bound work for each pipeline stage.
+# In real engines this is model inference; in the lite stub it is trivial, but
+# the asyncio.to_thread() wrapper ensures the pattern is correct so that
+# plugging in a real model never accidentally blocks the event loop.
+
+
+def _compute_transcribe(parameters: dict) -> dict:  # noqa: ARG001
+    return {
+        "text": "lite transcript",
+        "segments": [{"text": "lite transcript"}],
+    }
+
+
+def _compute_diarize(parameters: dict) -> dict:
+    num_speakers = parameters.get("num_speakers") or 2
+    speakers = [f"SPEAKER_{i:02d}" for i in range(num_speakers)]
+    return {
+        "segments": [
+            {
+                "text": "lite transcript",
+                "speaker": speakers[0],
+                "start": 0.0,
+                "end": 2.0,
+            }
+        ],
+        "speakers": speakers,
+    }
+
+
+def _compute_pii_detect(parameters: dict) -> dict:  # noqa: ARG001
+    return {
+        "entities": [],
+        "anonymized_text": "lite transcript",
+    }
+
+
 @dataclass
 class LiteTask:
     stage: str
@@ -177,10 +216,10 @@ class LitePipeline:
             return None
 
         if stage == "transcribe":
-            payload = {
-                "text": "lite transcript",
-                "segments": [{"text": "lite transcript"}],
-            }
+            # Wrap CPU-bound engine processing in asyncio.to_thread() so the
+            # event loop is not blocked during model inference.
+            # (CLAUDE.md: "Never call blocking I/O in async functions")
+            payload = await asyncio.to_thread(_compute_transcribe, parameters)
             await self._artifacts.write_bytes(
                 f"jobs/{job_id}/tasks/transcribe/output.json",
                 json.dumps(payload).encode("utf-8"),
@@ -201,19 +240,10 @@ class LitePipeline:
             return None
 
         if stage == "diarize":
-            num_speakers = parameters.get("num_speakers") or 2
-            speakers = [f"SPEAKER_{i:02d}" for i in range(num_speakers)]
-            diarize_payload = {
-                "segments": [
-                    {
-                        "text": "lite transcript",
-                        "speaker": speakers[0],
-                        "start": 0.0,
-                        "end": 2.0,
-                    }
-                ],
-                "speakers": speakers,
-            }
+            # Wrap CPU-bound speaker diarization in asyncio.to_thread() so the
+            # event loop is not blocked during model inference.
+            # (CLAUDE.md: "Never call blocking I/O in async functions")
+            diarize_payload = await asyncio.to_thread(_compute_diarize, parameters)
             await self._artifacts.write_bytes(
                 f"jobs/{job_id}/tasks/diarize/output.json",
                 json.dumps(diarize_payload).encode("utf-8"),
@@ -228,10 +258,10 @@ class LitePipeline:
             return None
 
         if stage == "pii_detect":
-            pii_payload = {
-                "entities": [],
-                "anonymized_text": "lite transcript",
-            }
+            # Wrap CPU-bound PII detection in asyncio.to_thread() so the
+            # event loop is not blocked during model inference.
+            # (CLAUDE.md: "Never call blocking I/O in async functions")
+            pii_payload = await asyncio.to_thread(_compute_pii_detect, parameters)
             await self._artifacts.write_bytes(
                 f"jobs/{job_id}/tasks/pii_detect/output.json",
                 json.dumps(pii_payload).encode("utf-8"),

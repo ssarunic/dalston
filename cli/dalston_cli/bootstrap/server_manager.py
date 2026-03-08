@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import signal
@@ -86,19 +87,86 @@ class _BootstrapLock:
         self._acquired = False
 
     def _reclaim_stale_lock(self) -> bool:
-        """Attempt to reclaim a stale lock file."""
+        """Attempt to reclaim a stale or orphaned lock file atomically.
+
+        Reads and validates the lock file JSON before deciding whether to
+        reclaim.  Checks whether the holder PID is still alive before
+        reclaiming based on age alone.  Uses ``os.rename`` of a newly
+        created temp file over the existing lock to close the TOCTOU
+        window present in a plain ``unlink()``-then-``O_EXCL`` approach.
+
+        Returns ``True`` when the lock was atomically transferred to this
+        process (``_acquired`` is also set to ``True``).  Returns ``False``
+        when the lock is held by a live process within the timeout, the file
+        disappeared, or a concurrent reclaim won the rename race.
+        """
+        # Read lock file; gone means nothing to reclaim.
         try:
-            age = time.time() - self._path.stat().st_mtime
+            content = self._path.read_text(encoding="utf-8")
         except FileNotFoundError:
             return False
 
-        if age <= self._timeout_seconds:
+        # Parse JSON; corrupt or unrecognised format falls through to age check.
+        lock_pid: int | None = None
+        try:
+            data = json.loads(content)
+            pid_val = data.get("pid") if isinstance(data, dict) else None
+            if isinstance(pid_val, int):
+                lock_pid = pid_val
+        except json.JSONDecodeError:
+            pass  # Corrupt lock file — fall through to age-based check below.
+
+        if lock_pid is not None:
+            # We parsed a PID: check whether the holder process is still alive.
+            # Distinguish PermissionError (process exists, different user — alive)
+            # from ProcessLookupError (no such process — dead).  Catching bare
+            # OSError would misclassify a cross-user live process as dead.
+            try:
+                os.kill(lock_pid, 0)
+                holder_alive = True
+            except PermissionError:
+                holder_alive = True  # process exists; we just can't signal it
+            except ProcessLookupError:
+                holder_alive = False
+
+            if holder_alive:
+                # Live holder: only reclaim if the lock has expired.
+                try:
+                    age = time.time() - self._path.stat().st_mtime
+                except FileNotFoundError:
+                    return False
+                if age <= self._timeout_seconds:
+                    return False
+            # Dead process: reclaim regardless of age (process cannot renew the lock).
+        else:
+            # No valid PID (corrupt or missing field): fall back to age-based check.
+            # A fresh corrupt file may still be written by another process.
+            try:
+                age = time.time() - self._path.stat().st_mtime
+            except FileNotFoundError:
+                return False
+            if age <= self._timeout_seconds:
+                return False
+
+        # Lock is reclaimable.  Write our PID to a temp file and rename
+        # atomically over the stale lock.  This closes the TOCTOU window
+        # between checking staleness and re-creating the file.
+        tmp_path = self._path.with_suffix(f".tmp.{os.getpid()}")
+        payload = json.dumps(
+            {"pid": os.getpid(), "acquired_at": datetime.now(UTC).isoformat()}
+        )
+        try:
+            fd = os.open(tmp_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(payload)
+            os.rename(tmp_path, self._path)
+        except (FileExistsError, OSError):
+            # A concurrent reclaim beat us; clean up our temp file.
+            with contextlib.suppress(FileNotFoundError):
+                tmp_path.unlink()
             return False
 
-        try:
-            self._path.unlink()
-        except FileNotFoundError:
-            return False
+        self._acquired = True
         return True
 
     def __enter__(self) -> _BootstrapLock:
@@ -114,7 +182,8 @@ class _BootstrapLock:
                 )
             except FileExistsError:
                 if self._reclaim_stale_lock():
-                    continue
+                    # Reclaim atomically transferred the lock to us.
+                    return self
                 if time.monotonic() >= deadline:
                     raise ServerBootstrapError(
                         "Timed out waiting for bootstrap lock.",
