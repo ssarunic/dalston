@@ -4,6 +4,7 @@ import { KeyRound, AlertCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/contexts/AuthContext'
+import { S } from '@/lib/strings'
 
 export function Login() {
   const [apiKey, setApiKey] = useState('')
@@ -24,7 +25,7 @@ export function Login() {
     if (result.success) {
       navigate('/')
     } else {
-      setError(result.error || 'Login failed')
+      setError(result.error || S.errors.loginFailed)
     }
   }
 
@@ -35,23 +36,23 @@ export function Login() {
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
             <KeyRound className="h-6 w-6 text-primary" />
           </div>
-          <CardTitle className="text-2xl">Dalston Console</CardTitle>
+          <CardTitle className="text-2xl">{S.login.title}</CardTitle>
           <p className="text-sm text-muted-foreground mt-2">
-            Enter your API key with admin scope to access the console
+            {S.login.instructions}
           </p>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <label htmlFor="apiKey" className="text-sm font-medium">
-                API Key
+                {S.login.apiKeyLabel}
               </label>
               <input
                 id="apiKey"
                 type="password"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="dk_..."
+                placeholder={S.login.apiKeyPlaceholder}
                 className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 disabled={isLoading}
                 autoFocus
@@ -66,15 +67,15 @@ export function Login() {
             )}
 
             <Button type="submit" className="w-full" disabled={isLoading || !apiKey.trim()}>
-              {isLoading ? 'Validating...' : 'Login'}
+              {isLoading ? S.login.validating : S.common.login}
             </Button>
           </form>
 
           <div className="mt-6 text-center text-xs text-muted-foreground">
             <p>
-              Create an admin key with:{' '}
+              {S.login.createKeyHint}{' '}
               <code className="bg-muted px-1 py-0.5 rounded">
-                python -m dalston.gateway.cli create-key --scopes admin
+                {S.login.createKeyCommand}
               </code>
             </p>
           </div>

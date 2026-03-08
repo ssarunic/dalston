@@ -38,6 +38,7 @@ from dalston.gateway.dependencies import (
     get_session_router,
     get_storage_service,
 )
+from dalston.gateway.error_codes import Err
 from dalston.gateway.models.responses import JobCancelledResponse
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
@@ -235,7 +236,7 @@ async def get_job_tasks(
     )
 
     if job_dto is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=Err.JOB_NOT_FOUND)
 
     # Sort tasks by stage order for display
     stage_order = {
@@ -319,12 +320,12 @@ async def get_task_artifacts(
     job_dto = await console_service.get_job_with_tasks_admin(db, job_id)
 
     if job_dto is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=Err.JOB_NOT_FOUND)
 
     # Find the task
     task = next((t for t in job_dto.tasks if t.id == task_id), None)
     if task is None:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(status_code=404, detail=Err.TASK_NOT_FOUND)
 
     # Calculate duration
     duration_ms = None
@@ -605,7 +606,7 @@ async def list_console_jobs(
             db, limit=limit, cursor=cursor, status=status, sort=sort
         )
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid cursor format") from None
+        raise HTTPException(status_code=400, detail=Err.INVALID_CURSOR_FORMAT) from None
 
     return ConsoleJobListResponse(
         jobs=[
@@ -666,7 +667,7 @@ async def get_console_job(
     job_dto = await console_service.get_job_admin(db, job_id)
 
     if job_dto is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=Err.JOB_NOT_FOUND)
 
     return ConsoleJobDetailResponse(
         id=job_dto.id,
@@ -723,7 +724,7 @@ async def delete_console_job(
         raise HTTPException(status_code=409, detail=str(e)) from None
 
     if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=Err.JOB_NOT_FOUND)
 
     # Clean up S3 artifacts (best-effort)
     try:
@@ -766,7 +767,7 @@ async def cancel_console_job(
         raise HTTPException(status_code=409, detail=str(e)) from None
 
     if result is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=Err.JOB_NOT_FOUND)
 
     # Publish event for orchestrator
     await publish_job_cancel_requested(redis, job_id)
@@ -887,7 +888,7 @@ async def get_settings_namespace(
     service = SettingsService()
     ns = await service.get_namespace(db, namespace)
     if ns is None:
-        raise HTTPException(status_code=404, detail=f"Unknown namespace: {namespace}")
+        raise HTTPException(status_code=404, detail=Err.NAMESPACE_NOT_FOUND.format(namespace=namespace))
 
     return NamespaceSettingsResponse(
         namespace=ns.namespace,

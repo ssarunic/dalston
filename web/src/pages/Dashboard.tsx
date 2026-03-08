@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { S } from '@/lib/strings'
 import { Activity, Cpu, Radio, CheckCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -110,34 +111,34 @@ export function Dashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground">System overview and recent activity</p>
+        <h1 className="text-2xl font-bold">{S.dashboard.title}</h1>
+        <p className="text-muted-foreground">{S.dashboard.subtitle}</p>
       </div>
 
       {/* Status Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard
-          title="System Status"
+          title={S.dashboard.systemStatus}
           value={isHealthy ? 'Online' : isLoading ? '-' : 'Offline'}
           subtitle={health?.version ? `v${health.version}` : undefined}
           icon={Activity}
         />
         <StatCard
-          title="Running Jobs"
+          title={S.dashboard.runningJobs}
           value={jobStats?.running ?? '-'}
-          subtitle={`${jobStats?.queued ?? '-'} queued`}
+          subtitle={`${jobStats?.queued ?? '-'} ${S.dashboard.queued}`}
           icon={Cpu}
         />
         <StatCard
-          title="Real-time Sessions"
+          title={S.dashboard.realtimeSessions}
           value={`${realtime?.active_sessions ?? '-'}/${realtime?.total_capacity ?? '-'}`}
-          subtitle={`${realtime?.worker_count ?? '-'} workers`}
+          subtitle={`${realtime?.worker_count ?? '-'} ${S.dashboard.workers}`}
           icon={Radio}
         />
         <StatCard
-          title="Completed Today"
+          title={S.dashboard.completedToday}
           value={jobStats?.completed_today ?? '-'}
-          subtitle={jobStats?.failed_today ? `${jobStats.failed_today} failed` : 'no failures'}
+          subtitle={jobStats?.failed_today ? `${jobStats.failed_today} ${S.dashboard.failed}` : S.dashboard.noFailures}
           icon={CheckCircle}
         />
       </div>
@@ -149,19 +150,19 @@ export function Dashboard() {
       <div className="grid gap-6 grid-cols-1 lg:grid-cols-2">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Recent Batch Jobs</CardTitle>
+            <CardTitle>{S.dashboard.recentBatchJobs}</CardTitle>
             <Link
               to="/jobs"
               className="text-sm text-primary hover:underline"
             >
-              View all
+              {S.common.viewAll}
             </Link>
           </CardHeader>
           <CardContent>
             {recentJobs.length === 0 ? (
               !isLoading && (
                 <p className="text-sm text-muted-foreground py-4 text-center">
-                  No jobs yet
+                  {S.dashboard.noJobsYet}
                 </p>
               )
             ) : (
@@ -176,19 +177,19 @@ export function Dashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Recent Real-time Sessions</CardTitle>
+            <CardTitle>{S.dashboard.recentRealtimeSessions}</CardTitle>
             <Link
               to="/realtime"
               className="text-sm text-primary hover:underline"
             >
-              View all
+              {S.common.viewAll}
             </Link>
           </CardHeader>
           <CardContent>
             {recentSessions.length === 0 ? (
               !sessionsLoading && (
                 <p className="text-sm text-muted-foreground py-4 text-center">
-                  No sessions yet
+                  {S.dashboard.noSessionsYet}
                 </p>
               )
             ) : (

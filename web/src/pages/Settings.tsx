@@ -4,6 +4,7 @@ import { HTTPError } from 'ky'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
+import { S } from '@/lib/strings'
 import {
   useSettingsNamespaces,
   useSettingsNamespace,
@@ -42,38 +43,38 @@ function validateSettingValue(setting: SettingValue, value: unknown): string | n
   // Empty values are invalid for numeric fields
   if (value === '' || value === null || value === undefined) {
     if (setting.value_type === 'int' || setting.value_type === 'float') {
-      return 'Value is required'
+      return S.errors.valueRequired
     }
     return null
   }
 
   if (setting.value_type === 'int') {
     if (typeof value !== 'number' || !Number.isInteger(value)) {
-      return 'Must be a whole number'
+      return S.errors.mustBeWholeNumber
     }
     if (setting.min_value != null && value < setting.min_value) {
-      return `Minimum value is ${setting.min_value}`
+      return S.errors.minValue(setting.min_value)
     }
     if (setting.max_value != null && value > setting.max_value) {
-      return `Maximum value is ${setting.max_value}`
+      return S.errors.maxValue(setting.max_value)
     }
   }
 
   if (setting.value_type === 'float') {
     if (typeof value !== 'number' || isNaN(value)) {
-      return 'Must be a number'
+      return S.errors.mustBeNumber
     }
     if (setting.min_value != null && value < setting.min_value) {
-      return `Minimum value is ${setting.min_value}`
+      return S.errors.minValue(setting.min_value)
     }
     if (setting.max_value != null && value > setting.max_value) {
-      return `Maximum value is ${setting.max_value}`
+      return S.errors.maxValue(setting.max_value)
     }
   }
 
   if (setting.value_type === 'select') {
     if (setting.options && !setting.options.includes(String(value))) {
-      return `Must be one of: ${setting.options.join(', ')}`
+      return S.errors.mustBeOneOf(setting.options.join(', '))
     }
   }
 
@@ -126,7 +127,7 @@ function SettingField({
             />
           </button>
           <span className="text-sm text-muted-foreground">
-            {value ? 'Enabled' : 'Disabled'}
+            {value ? S.common.enabled : S.common.disabled}
           </span>
         </div>
       )
@@ -190,7 +191,7 @@ function SettingField({
           {setting.description}
         </label>
         {isOverridden && (
-          <span className="inline-block h-2 w-2 rounded-full bg-primary shrink-0" title="Modified" aria-label="Setting modified" />
+          <span className="inline-block h-2 w-2 rounded-full bg-primary shrink-0" title={S.settings.modified} aria-label="Setting modified" />
         )}
       </div>
 
@@ -230,7 +231,7 @@ function SystemInfoTab({ settings }: { settings: SettingValue[] }) {
       <CardContent className="overflow-hidden pt-6">
         <div className="rounded-md border border-blue-500/20 bg-blue-500/10 p-3 mb-4">
           <p className="text-sm text-blue-400">
-            System settings are read-only and controlled by environment variables.
+            {S.settings.readOnlyNotice}
           </p>
         </div>
         <div className="divide-y divide-border overflow-hidden">
@@ -348,7 +349,7 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
     setFieldErrors((prev) => ({ ...prev, ...errors }))
 
     if (hasErrors) {
-      setErrorMessage('Please fix validation errors before saving')
+      setErrorMessage(S.errors.fixValidationErrors)
       return
     }
 
@@ -364,12 +365,12 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
       setErrorMessage(null)
     } catch (err) {
       if (err instanceof HTTPError && err.response.status === 409) {
-        setErrorMessage('Settings were modified by another admin. Please refresh and try again.')
+        setErrorMessage(S.errors.concurrencyConflict)
       } else if (err instanceof HTTPError && err.response.status === 400) {
         const body = await err.response.json()
-        setErrorMessage(body.detail || 'Validation error')
+        setErrorMessage(body.detail || S.settings.validationError)
       } else {
-        setErrorMessage('Failed to save settings')
+        setErrorMessage(S.errors.failedToSaveSettings)
       }
     }
   }, [data, dirtyKeys, formValues, updateMutation])
@@ -380,7 +381,7 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
       setIsResetDialogOpen(false)
       setErrorMessage(null)
     } catch {
-      setErrorMessage('Failed to reset settings')
+      setErrorMessage(S.errors.failedToResetSettings)
     }
   }, [resetMutation])
 
@@ -405,7 +406,7 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
                 className="text-muted-foreground h-9 px-3 touch-manipulation"
               >
                 <RotateCcw className="h-4 w-4 mr-1.5" />
-                Reset to defaults
+                {S.settings.resetToDefaults}
               </Button>
             </div>
           )}
@@ -431,25 +432,25 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
             {hasValidationErrors ? (
               <>
                 <span className="inline-block h-2 w-2 rounded-full bg-red-500" aria-hidden="true" />
-                <span className="text-red-400">Fix errors before saving</span>
+                <span className="text-red-400">{S.errors.fixErrorsBeforeSaving}</span>
               </>
             ) : (
               <>
                 <span className="inline-block h-2 w-2 rounded-full bg-amber-500" aria-hidden="true" />
-                {dirtyKeys.length} unsaved {dirtyKeys.length === 1 ? 'change' : 'changes'}
+                {dirtyKeys.length} unsaved {dirtyKeys.length === 1 ? S.settings.unsavedChange : S.settings.unsavedChanges}
               </>
             )}
           </span>
           <div className="flex items-center gap-2">
             <Button variant="outline" className="flex-1 sm:flex-initial h-11 sm:h-9 px-4" onClick={handleCancel}>
-              Cancel
+              {S.common.cancel}
             </Button>
             <Button
               className="flex-1 sm:flex-initial h-11 sm:h-9 px-4"
               onClick={handleSave}
               disabled={updateMutation.isPending || hasValidationErrors}
             >
-              {updateMutation.isPending ? 'Saving...' : 'Save'}
+              {updateMutation.isPending ? S.common.saving : S.common.save}
             </Button>
           </div>
         </div>
@@ -465,7 +466,7 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
       {/* Success message */}
       {updateMutation.isSuccess && !isDirty && (
         <div className="mt-2 rounded-md border border-green-500/20 bg-green-500/10 p-3">
-          <p className="text-sm text-green-400">Settings saved successfully.</p>
+          <p className="text-sm text-green-400">{S.settings.savedSuccessfully}</p>
         </div>
       )}
 
@@ -475,7 +476,7 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
           <CardHeader>
             <CardTitle className="text-lg">Reset {data.label}</CardTitle>
             <p className="text-sm text-muted-foreground">
-              This will revert all settings in this section to their default values.
+              {S.settings.resetConfirm}
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -496,7 +497,7 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
                 className="h-11 sm:h-9"
                 onClick={() => setIsResetDialogOpen(false)}
               >
-                Cancel
+                {S.common.cancel}
               </Button>
               <Button
                 variant="destructive"
@@ -504,7 +505,7 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
                 onClick={handleReset}
                 disabled={resetMutation.isPending}
               >
-                {resetMutation.isPending ? 'Resetting...' : 'Reset to defaults'}
+                {resetMutation.isPending ? S.settings.resetting : S.settings.resetToDefaults}
               </Button>
             </div>
           </CardContent>
@@ -536,9 +537,9 @@ export function Settings() {
     <div className="space-y-6 min-w-0">
       {/* Page header */}
       <div>
-        <h1 className="text-2xl font-bold">Settings</h1>
+        <h1 className="text-2xl font-bold">{S.settings.title}</h1>
         <p className="text-muted-foreground">
-          Manage system configuration and operational parameters
+          {S.settings.subtitle}
         </p>
       </div>
 

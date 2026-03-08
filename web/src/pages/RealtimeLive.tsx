@@ -21,6 +21,7 @@ import {
 import { AudioLevelMeter } from '@/components/AudioLevelMeter'
 import { BackButton } from '@/components/BackButton'
 import { LiveTranscript } from '@/components/LiveTranscript'
+import { S } from '@/lib/strings'
 import { useLiveSession } from '@/contexts/LiveSessionContext'
 import { useEngines } from '@/hooks/useEngines'
 import { useRealtimeStatus } from '@/hooks/useRealtimeStatus'
@@ -190,9 +191,9 @@ export function RealtimeLive() {
         <div className="flex items-center gap-3 sm:gap-4">
           <BackButton fallbackPath="/realtime" />
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold">Live Transcription</h1>
+            <h1 className="text-xl sm:text-2xl font-bold">{S.realtimeLive.title}</h1>
             <p className="text-sm sm:text-base text-muted-foreground hidden sm:block">
-              Start a real-time transcription session using your microphone
+              {S.realtimeLive.subtitle}
             </p>
           </div>
         </div>
@@ -204,7 +205,7 @@ export function RealtimeLive() {
           className="self-start sm:self-auto"
         >
           <Settings2 className="h-4 w-4 sm:mr-2" />
-          <span className="hidden sm:inline">Settings</span>
+          <span className="hidden sm:inline">{S.realtimeLive.settingsButton}</span>
           {showSettings ? (
             <ChevronUp className="h-4 w-4 sm:ml-1" />
           ) : (
@@ -220,7 +221,7 @@ export function RealtimeLive() {
             <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  Language
+                  {S.realtimeLive.languageLabel}
                 </label>
                 <Select value={language} onValueChange={setLanguage}>
                   <SelectTrigger>
@@ -237,14 +238,14 @@ export function RealtimeLive() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  Model
+                  {S.realtimeLive.modelLabel}
                 </label>
                 <Select value={model} onValueChange={setModel}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Any available" />
+                    <SelectValue placeholder={S.realtimeLive.anyAvailable} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Any available</SelectItem>
+                    <SelectItem value="">{S.realtimeLive.anyAvailable}</SelectItem>
                     {availableModels.map((m) => (
                       <SelectItem key={m.id} value={m.id}>
                         {loadedModels.has(m.id) ? `${m.label} (loaded)` : m.label}
@@ -254,19 +255,19 @@ export function RealtimeLive() {
                 </Select>
                 {availableModels.length === 0 && rtRuntimes.size > 0 && (
                   <p className="text-xs text-amber-500 mt-1">
-                    No downloaded models for available runtimes. Visit Models page to download.
+                    {S.realtimeLive.noModelsWarning}
                   </p>
                 )}
               </div>
               <div className="sm:col-span-2">
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  Vocabulary (comma-separated terms to boost recognition)
+                  {S.realtimeLive.vocabularyLabel}
                 </label>
                 <input
                   type="text"
                   value={vocabularyText}
                   onChange={(e) => setVocabularyText(e.target.value)}
-                  placeholder="e.g., Kubernetes, CrewAI, Bizzon"
+                  placeholder={S.realtimeLive.vocabularyPlaceholder}
                   className="w-full px-3 py-2 text-sm border rounded-md bg-background"
                 />
                 {vocabularyHint.text && (
@@ -287,18 +288,17 @@ export function RealtimeLive() {
           <div className="text-sm">
             {isUnavailable ? (
               <p>
-                Real-time transcription is currently unavailable. No workers are
-                ready.{' '}
+                {S.realtimeLive.unavailable}{' '}
                 <button
                   className="underline text-amber-400 hover:text-amber-300"
                   onClick={() => navigate('/engines')}
                 >
-                  Check engine health
+                  {S.realtimeLive.checkEngineHealth}
                 </button>
               </p>
             ) : (
               <p>
-                All worker capacity is currently in use (
+                {S.realtimeLive.atCapacity} (
                 {statusData?.active_sessions}/{statusData?.total_capacity}).
                 You may need to wait for a session to finish.
               </p>
@@ -328,13 +328,13 @@ export function RealtimeLive() {
             disabled={isUnavailable}
           >
             <Mic className="h-5 w-5" />
-            Start Session
+            {S.realtimeLive.startSession}
           </Button>
         )}
         {isConnecting && (
           <Button size="lg" className="h-12 sm:h-14 px-6 sm:px-8 text-base gap-2 w-full sm:w-auto max-w-xs" disabled>
             <div className="h-5 w-5 rounded-full border-2 border-current border-t-transparent animate-spin" />
-            Connecting...
+            {S.realtimeLive.connecting}
           </Button>
         )}
         {isRecording && (
@@ -345,13 +345,13 @@ export function RealtimeLive() {
             onClick={stop}
           >
             <Square className="h-5 w-5" />
-            Stop
+            {S.realtimeLive.stop}
           </Button>
         )}
         {isStopping && (
           <Button size="lg" className="h-12 sm:h-14 px-6 sm:px-8 text-base gap-2 w-full sm:w-auto max-w-xs" disabled>
             <div className="h-5 w-5 rounded-full border-2 border-current border-t-transparent animate-spin" />
-            Finishing...
+            {S.realtimeLive.finishing}
           </Button>
         )}
 
@@ -375,7 +375,7 @@ export function RealtimeLive() {
         {isRecording && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            Recording
+            {S.realtimeLive.recording}
           </div>
         )}
       </div>
@@ -384,11 +384,11 @@ export function RealtimeLive() {
       <Card className="flex-1 min-h-0 flex flex-col">
         <CardHeader className="py-3 shrink-0">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <CardTitle className="text-sm font-medium">Transcript</CardTitle>
+            <CardTitle className="text-sm font-medium">{S.realtimeLive.transcriptTitle}</CardTitle>
             <div className="flex items-center gap-2 sm:gap-3 text-xs text-muted-foreground">
               <span>{formatDuration(durationSeconds)}</span>
-              <span>{wordCount} words</span>
-              <span className="hidden sm:inline">{segments.length} segments</span>
+              <span>{wordCount} {S.realtimeLive.words}</span>
+              <span className="hidden sm:inline">{segments.length} {S.realtimeLive.segments}</span>
             </div>
           </div>
         </CardHeader>
@@ -407,7 +407,7 @@ export function RealtimeLive() {
           <CardContent className="py-3 sm:py-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3">
               <div className="text-sm">
-                <span className="text-muted-foreground">Session completed</span>
+                <span className="text-muted-foreground">{S.realtimeLive.sessionCompleted}</span>
                 <span className="font-mono text-xs ml-2 text-muted-foreground hidden sm:inline">
                   {sessionId.slice(0, 16)}...
                 </span>

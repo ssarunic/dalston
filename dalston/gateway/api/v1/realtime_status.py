@@ -15,6 +15,7 @@ from dalston.gateway.dependencies import (
     get_security_manager,
     get_session_router,
 )
+from dalston.gateway.error_codes import Err
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
 from dalston.session_router import SessionRouter
@@ -138,7 +139,7 @@ async def get_worker_status(
     worker = await session_router.get_worker(instance)
 
     if worker is None:
-        raise HTTPException(status_code=404, detail="Worker not found")
+        raise HTTPException(status_code=404, detail=Err.WORKER_NOT_FOUND)
 
     return WorkerStatusResponse(
         instance=worker.instance,

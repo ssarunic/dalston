@@ -9,6 +9,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { S } from '@/lib/strings'
 import {
   useModelRegistry,
   usePullModel,
@@ -70,15 +71,15 @@ export function Models() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Models</h1>
+            <h1 className="text-2xl font-bold">{S.models.title}</h1>
             <p className="text-muted-foreground">
-              Manage transcription models and download from HuggingFace
+              {S.models.subtitle}
             </p>
           </div>
         </div>
         <div className="text-center py-12">
           <AlertCircle className="h-12 w-12 mx-auto mb-4 text-red-500" />
-          <p className="text-red-500">Failed to load model registry</p>
+          <p className="text-red-500">{S.errors.failedToLoadModels}</p>
           <p className="text-sm text-muted-foreground mt-1">{error.message}</p>
         </div>
       </div>
@@ -90,9 +91,9 @@ export function Models() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Models</h1>
+          <h1 className="text-2xl font-bold">{S.models.title}</h1>
           <p className="text-muted-foreground">
-            Manage transcription models and download from HuggingFace
+            {S.models.subtitle}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -102,14 +103,14 @@ export function Models() {
             disabled={syncModels.isPending}
           >
             <RefreshCw className={cn('h-4 w-4 mr-2', syncModels.isPending && 'animate-spin')} />
-            Sync with Disk
+            {S.models.syncWithDisk}
           </Button>
           <Button onClick={() => {
             resolveHF.reset()
             setAddDialogOpen(true)
           }}>
             <Plus className="h-4 w-4 mr-2" />
-            Add from HF
+            {S.models.addFromHF}
           </Button>
         </div>
       </div>
@@ -117,7 +118,7 @@ export function Models() {
       {/* Models Card */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-          <CardTitle className="text-base font-medium">Model Registry</CardTitle>
+          <CardTitle className="text-base font-medium">{S.models.cardTitle}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Filters */}
@@ -127,7 +128,7 @@ export function Models() {
           {isLoading && (
             <div className="text-center py-12">
               <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-muted-foreground" />
-              <p className="text-muted-foreground">Loading models...</p>
+              <p className="text-muted-foreground">{S.models.loadingModels}</p>
             </div>
           )}
 
@@ -135,9 +136,9 @@ export function Models() {
           {!isLoading && models.length === 0 && (
             <div className="text-center py-12">
               <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p className="text-muted-foreground">No models found</p>
+              <p className="text-muted-foreground">{S.models.noModelsFound}</p>
               <p className="text-sm text-muted-foreground mt-1">
-                Add a model from HuggingFace or sync with disk
+                {S.models.noModelsHint}
               </p>
             </div>
           )}

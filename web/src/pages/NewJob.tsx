@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { S } from '@/lib/strings'
 import { Upload, Link, AlertCircle, ChevronDown, ChevronUp, X, Info } from 'lucide-react'
 import { BackButton } from '@/components/BackButton'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -104,7 +105,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
 }
 
 function getLanguageLabel(code: string): string {
-  return LANGUAGE_NAMES[code] || code.toUpperCase()
+  return S.newJob.languages[code] || LANGUAGE_NAMES[code] || code.toUpperCase()
 }
 
 const SPEAKER_DETECTION_OPTIONS: { value: SpeakerDetection; label: string }[] = [

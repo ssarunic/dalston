@@ -11,12 +11,13 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useSystemCapabilities } from '@/hooks/useCapabilities'
 import { cn } from '@/lib/utils'
+import { S } from '@/lib/strings'
 
 const FEATURES = [
-  { key: 'word_timestamps', label: 'Word Timestamps' },
-  { key: 'speaker_diarization', label: 'Speaker Diarization' },
-  { key: 'pii_detection', label: 'PII Detection' },
-  { key: 'streaming', label: 'Streaming' },
+  { key: 'word_timestamps', label: S.capabilities.wordTimestamps },
+  { key: 'speaker_diarization', label: S.capabilities.speakerDiarization },
+  { key: 'pii_detection', label: S.capabilities.piiDetection },
+  { key: 'streaming', label: S.capabilities.streaming },
 ] as const
 
 export function CapabilitiesCard() {
@@ -53,7 +54,7 @@ export function CapabilitiesCard() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Zap className="h-4 w-4" />
-            <span className="font-semibold">System Capabilities</span>
+            <span className="font-semibold">{S.capabilities.title}</span>
           </div>
           <div className="flex items-center gap-4">
             <div className="text-sm">
@@ -64,7 +65,7 @@ export function CapabilitiesCard() {
             </div>
             <Button variant="outline" size="sm" asChild>
               <Link to="/models" className="inline-flex items-center gap-2">
-                View All
+                {S.common.viewAll}
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </Button>

@@ -18,6 +18,7 @@ from dalston.gateway.dependencies import (
     get_principal,
     get_security_manager,
 )
+from dalston.gateway.error_codes import Err
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.audit_query import AuditEventDTO, AuditQueryService
@@ -132,7 +133,7 @@ async def list_audit_events(
             sort=sort,
         )
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid cursor format") from None
+        raise HTTPException(status_code=400, detail=Err.INVALID_CURSOR_FORMAT) from None
 
     return AuditListResponse(
         events=[_dto_to_response(e) for e in result.events],
@@ -176,7 +177,7 @@ async def get_resource_audit_trail(
             cursor=cursor,
         )
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid cursor format") from None
+        raise HTTPException(status_code=400, detail=Err.INVALID_CURSOR_FORMAT) from None
 
     return AuditListResponse(
         events=[_dto_to_response(e) for e in result.events],

@@ -28,6 +28,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
+import { S } from '@/lib/strings'
 import { useAuditEvents } from '@/hooks/useAuditLog'
 import { useSharedTableState } from '@/hooks/useSharedTableState'
 import { ListLoadMoreFooter } from '@/components/ListLoadMoreFooter'
@@ -43,27 +44,27 @@ const SORT_OPTIONS = [
 ] as const
 
 const RESOURCE_TYPES = [
-  { value: '', label: 'All Resources' },
-  { value: 'job', label: 'Job' },
-  { value: 'transcript', label: 'Transcript' },
-  { value: 'audio', label: 'Audio' },
-  { value: 'session', label: 'Session' },
-  { value: 'api_key', label: 'API Key' },
-  { value: 'retention_policy', label: 'Retention Policy' },
+  { value: '', label: S.auditLog.allResources },
+  { value: 'job', label: S.auditLog.resourceTypes.job },
+  { value: 'transcript', label: S.auditLog.resourceTypes.transcript },
+  { value: 'audio', label: S.auditLog.resourceTypes.audio },
+  { value: 'session', label: S.auditLog.resourceTypes.session },
+  { value: 'api_key', label: S.auditLog.resourceTypes.apiKey },
+  { value: 'retention_policy', label: S.auditLog.resourceTypes.retentionPolicy },
 ]
 
 const ACTION_CATEGORIES: Record<string, { label: string; color: string }> = {
-  created: { label: 'Created', color: 'bg-green-500/10 text-green-500 border-green-500/20' },
-  completed: { label: 'Completed', color: 'bg-blue-500/10 text-blue-500 border-blue-500/20' },
-  accessed: { label: 'Accessed', color: 'bg-slate-500/10 text-slate-400 border-slate-500/20' },
-  exported: { label: 'Exported', color: 'bg-purple-500/10 text-purple-500 border-purple-500/20' },
-  deleted: { label: 'Deleted', color: 'bg-red-500/10 text-red-500 border-red-500/20' },
-  purged: { label: 'Purged', color: 'bg-orange-500/10 text-orange-500 border-orange-500/20' },
-  failed: { label: 'Failed', color: 'bg-red-500/10 text-red-500 border-red-500/20' },
-  started: { label: 'Started', color: 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20' },
-  ended: { label: 'Ended', color: 'bg-slate-500/10 text-slate-400 border-slate-500/20' },
-  revoked: { label: 'Revoked', color: 'bg-red-500/10 text-red-500 border-red-500/20' },
-  cancelled: { label: 'Cancelled', color: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' },
+  created: { label: S.auditLog.actionLabels.created, color: 'bg-green-500/10 text-green-500 border-green-500/20' },
+  completed: { label: S.auditLog.actionLabels.completed, color: 'bg-blue-500/10 text-blue-500 border-blue-500/20' },
+  accessed: { label: S.auditLog.actionLabels.accessed, color: 'bg-slate-500/10 text-slate-400 border-slate-500/20' },
+  exported: { label: S.auditLog.actionLabels.exported, color: 'bg-purple-500/10 text-purple-500 border-purple-500/20' },
+  deleted: { label: S.auditLog.actionLabels.deleted, color: 'bg-red-500/10 text-red-500 border-red-500/20' },
+  purged: { label: S.auditLog.actionLabels.purged, color: 'bg-orange-500/10 text-orange-500 border-orange-500/20' },
+  failed: { label: S.auditLog.actionLabels.failed, color: 'bg-red-500/10 text-red-500 border-red-500/20' },
+  started: { label: S.auditLog.actionLabels.started, color: 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20' },
+  ended: { label: S.auditLog.actionLabels.ended, color: 'bg-slate-500/10 text-slate-400 border-slate-500/20' },
+  revoked: { label: S.auditLog.actionLabels.revoked, color: 'bg-red-500/10 text-red-500 border-red-500/20' },
+  cancelled: { label: S.auditLog.actionLabels.cancelled, color: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' },
 }
 
 function getActionStyle(action: string): { label: string; color: string } {
@@ -268,8 +269,8 @@ export function AuditLog() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Audit Log</h1>
-        <p className="text-muted-foreground">View data access and lifecycle events</p>
+        <h1 className="text-2xl font-bold">{S.auditLog.title}</h1>
+        <p className="text-muted-foreground">{S.auditLog.subtitle}</p>
       </div>
 
       {/* Events Table */}
@@ -277,7 +278,7 @@ export function AuditLog() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2">
             <ScrollText className="h-5 w-5" />
-            Events
+            {S.auditLog.eventsTitle}
           </CardTitle>
           <div className="flex items-center gap-2">
             <Button
@@ -286,10 +287,10 @@ export function AuditLog() {
               onClick={() => setShowFilters(!showFilters)}
             >
               <Filter className="h-4 w-4 mr-2" />
-              Filters
+              {S.auditLog.filters}
               {hasActiveFilters && (
                 <Badge variant="secondary" className="ml-2">
-                  Active
+                  {S.auditLog.activeFilters}
                 </Badge>
               )}
             </Button>
@@ -300,7 +301,7 @@ export function AuditLog() {
               disabled={isFetching}
             >
               <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
-              Refresh
+              {S.common.refresh}
             </Button>
           </div>
         </CardHeader>
@@ -309,25 +310,25 @@ export function AuditLog() {
         {showFilters && (
           <CardContent className="border-b pb-4">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-medium text-muted-foreground">Filters</span>
+              <span className="text-sm font-medium text-muted-foreground">{S.auditLog.filters}</span>
               {hasActiveFilters && (
                 <Button variant="ghost" size="sm" onClick={clearFilters}>
                   <X className="h-4 w-4 mr-1" />
-                  Clear
+                  {S.common.clear}
                 </Button>
               )}
             </div>
             <div className="grid gap-4 md:grid-cols-7">
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  Resource Type
+                  {S.auditLog.resourceType}
                 </label>
                 <Select
                   value={filters.resource_type || ''}
                   onValueChange={(v) => handleFilterChange('resource_type', v)}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="All Resources" />
+                    <SelectValue placeholder={S.auditLog.allResources} />
                   </SelectTrigger>
                   <SelectContent>
                     {RESOURCE_TYPES.map((type) => (
@@ -340,11 +341,11 @@ export function AuditLog() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  Action
+                  {S.auditLog.action}
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g., job.created"
+                  placeholder={S.auditLog.actionPlaceholder}
                   value={filters.action || ''}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFilterChange('action', e.target.value)}
                   className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm h-10"
@@ -352,11 +353,11 @@ export function AuditLog() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  Actor ID
+                  {S.auditLog.actorId}
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g., dk_abc1234"
+                  placeholder={S.auditLog.actorPlaceholder}
                   value={filters.actor_id || ''}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFilterChange('actor_id', e.target.value)}
                   className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm h-10"
@@ -364,7 +365,7 @@ export function AuditLog() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  Since
+                  {S.auditLog.since}
                 </label>
                 <input
                   ref={sinceRef}
@@ -376,7 +377,7 @@ export function AuditLog() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  Until
+                  {S.auditLog.until}
                 </label>
                 <input
                   ref={untilRef}
@@ -388,7 +389,7 @@ export function AuditLog() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  Sort
+                  {S.auditLog.sort}
                 </label>
                 <Select value={sort} onValueChange={handleSortChange}>
                   <SelectTrigger>
@@ -405,7 +406,7 @@ export function AuditLog() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  Rows per page
+                  {S.auditLog.rowsPerPage}
                 </label>
                 <Select value={String(limit)} onValueChange={handleLimitChange}>
                   <SelectTrigger>
@@ -436,9 +437,9 @@ export function AuditLog() {
             !(isLoading || isFetching) && (
               <div className="text-center py-12 text-muted-foreground">
                 <ScrollText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>No audit events found</p>
+                <p>{S.auditLog.noEventsFound}</p>
                 {hasActiveFilters && (
-                  <p className="text-sm mt-1">Try adjusting your filters</p>
+                  <p className="text-sm mt-1">{S.auditLog.noEventsHint}</p>
                 )}
               </div>
             )
@@ -473,11 +474,11 @@ export function AuditLog() {
                           </div>
                           <div className="grid grid-cols-2 gap-2 text-xs">
                             <div>
-                              <p className="text-muted-foreground">Actor</p>
+                              <p className="text-muted-foreground">{S.auditLog.colActor}</p>
                               <p className="font-mono break-all">{event.actor_id}</p>
                             </div>
                             <div>
-                              <p className="text-muted-foreground">IP Address</p>
+                              <p className="text-muted-foreground">{S.auditLog.colIpAddress}</p>
                               <p>{event.ip_address || '-'}</p>
                             </div>
                           </div>
@@ -501,11 +502,11 @@ export function AuditLog() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-8 sticky left-0 z-10 bg-card" />
-                      <TableHead className="sticky left-8 z-10 bg-card">Timestamp</TableHead>
-                      <TableHead>Action</TableHead>
-                      <TableHead>Resource</TableHead>
-                      <TableHead>Actor</TableHead>
-                      <TableHead>IP Address</TableHead>
+                      <TableHead className="sticky left-8 z-10 bg-card">{S.auditLog.colTimestamp}</TableHead>
+                      <TableHead>{S.auditLog.colAction}</TableHead>
+                      <TableHead>{S.auditLog.colResource}</TableHead>
+                      <TableHead>{S.auditLog.colActor}</TableHead>
+                      <TableHead>{S.auditLog.colIpAddress}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>

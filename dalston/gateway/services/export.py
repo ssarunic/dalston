@@ -7,6 +7,8 @@ from typing import Any
 
 from fastapi import HTTPException, Response
 
+from dalston.gateway.error_codes import Err
+
 
 class ExportFormat(StrEnum):
     """Supported export formats."""
@@ -447,7 +449,7 @@ class ExportService:
             )
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported format: {format_str}. Supported formats: {valid_formats}",
+                detail=Err.UNSUPPORTED_FORMAT.format(format_str=format_str, valid_formats=valid_formats),
             ) from None
 
     def create_export_response(

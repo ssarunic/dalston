@@ -32,6 +32,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from dalston.orchestrator.lite_messages import LiteMsg
+
 MATRIX_VERSION = "1.0.0"
 PROFILE_ENV_VAR = "DALSTON_LITE_PROFILE"
 DEFAULT_PROFILE = "core"
@@ -72,10 +74,7 @@ CAPABILITY_MATRIX: dict[LiteProfile, ProfileCapability] = {
     LiteProfile.CORE: ProfileCapability(
         profile=LiteProfile.CORE,
         version=MATRIX_VERSION,
-        description=(
-            "Minimal transcription pipeline: prepare → transcribe → merge. "
-            "Zero-config default (M56/M57 baseline)."
-        ),
+        description=LiteMsg.PROFILE_DESC_CORE,
         stages=["prepare", "transcribe", "merge"],
         supported_options={
             "language": True,
@@ -94,10 +93,7 @@ CAPABILITY_MATRIX: dict[LiteProfile, ProfileCapability] = {
     LiteProfile.SPEAKER: ProfileCapability(
         profile=LiteProfile.SPEAKER,
         version=MATRIX_VERSION,
-        description=(
-            "Transcription with speaker diarisation: "
-            "prepare → transcribe → diarize → merge."
-        ),
+        description=LiteMsg.PROFILE_DESC_SPEAKER,
         stages=["prepare", "transcribe", "diarize", "merge"],
         supported_options={
             "language": True,
@@ -116,11 +112,7 @@ CAPABILITY_MATRIX: dict[LiteProfile, ProfileCapability] = {
     LiteProfile.COMPLIANCE: ProfileCapability(
         profile=LiteProfile.COMPLIANCE,
         version=MATRIX_VERSION,
-        description=(
-            "Transcription with PII detection: "
-            "prepare → transcribe → pii_detect → merge. "
-            "Requires presidio_analyzer and presidio_anonymizer."
-        ),
+        description=LiteMsg.PROFILE_DESC_COMPLIANCE,
         stages=["prepare", "transcribe", "pii_detect", "merge"],
         supported_options={
             "language": True,
@@ -157,8 +149,9 @@ class LiteUnsupportedFeatureError(Exception):
         remediation: str,
     ) -> None:
         super().__init__(
-            f"Feature '{feature}' is not supported in lite profile "
-            f"'{profile.value}'. {remediation}"
+            LiteMsg.FEATURE_NOT_SUPPORTED.format(
+                feature=feature, profile=profile.value, remediation=remediation,
+            )
         )
         self.feature = feature
         self.profile = profile
@@ -166,7 +159,7 @@ class LiteUnsupportedFeatureError(Exception):
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "error": "lite_unsupported_feature",
+            "error": LiteMsg.ERR_CODE_UNSUPPORTED_FEATURE,
             "feature": self.feature,
             "profile": self.profile.value,
             "remediation": self.remediation,
@@ -180,13 +173,13 @@ class LiteProfileNotFoundError(Exception):
     def __init__(self, profile_name: str) -> None:
         valid = ", ".join(p.value for p in LiteProfile)
         super().__init__(
-            f"Unknown lite profile '{profile_name}'. Valid profiles: {valid}"
+            LiteMsg.PROFILE_NOT_FOUND.format(profile_name=profile_name, valid=valid)
         )
         self.profile_name = profile_name
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "error": "lite_profile_not_found",
+            "error": LiteMsg.ERR_CODE_PROFILE_NOT_FOUND,
             "profile": self.profile_name,
             "valid_profiles": [p.value for p in LiteProfile],
         }
@@ -198,20 +191,22 @@ class LitePrerequisiteMissingError(Exception):
     def __init__(self, profile: LiteProfile, missing: list[str]) -> None:
         packages = ", ".join(missing)
         super().__init__(
-            f"Lite profile '{profile.value}' requires packages that are not "
-            f"installed: {packages}. "
-            f"Install them with: pip install {' '.join(missing)}"
+            LiteMsg.PREREQUISITE_MISSING.format(
+                profile=profile.value,
+                packages=packages,
+                install_args=" ".join(missing),
+            )
         )
         self.profile = profile
         self.missing = missing
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "error": "lite_prerequisite_missing",
+            "error": LiteMsg.ERR_CODE_PREREQUISITE_MISSING,
             "profile": self.profile.value,
             "missing_packages": self.missing,
-            "remediation": (
-                f"Install missing packages: pip install {' '.join(self.missing)}"
+            "remediation": LiteMsg.PREREQUISITE_REMEDIATION.format(
+                install_args=" ".join(self.missing),
             ),
         }
 
@@ -275,10 +270,7 @@ def validate_request(profile: LiteProfile, parameters: dict) -> None:
             raise LiteUnsupportedFeatureError(
                 feature="speaker_detection",
                 profile=profile,
-                remediation=(
-                    "Use --profile speaker to enable speaker detection in lite mode, "
-                    "or switch to distributed mode for full diarisation support."
-                ),
+                remediation=LiteMsg.REMEDIATION_USE_SPEAKER_PROFILE,
             )
         # per_channel is not supported by any lite profile; the specificity
         # belongs in the remediation string, not the feature key.
@@ -286,11 +278,7 @@ def validate_request(profile: LiteProfile, parameters: dict) -> None:
             raise LiteUnsupportedFeatureError(
                 feature="speaker_detection",
                 profile=profile,
-                remediation=(
-                    "per_channel speaker detection is not supported in lite mode. "
-                    "Use speaker_detection=diarize with the speaker profile, "
-                    "or switch to distributed mode."
-                ),
+                remediation=LiteMsg.REMEDIATION_PER_CHANNEL_NOT_SUPPORTED,
             )
 
     if parameters.get("pii_detection", False):
@@ -298,10 +286,7 @@ def validate_request(profile: LiteProfile, parameters: dict) -> None:
             raise LiteUnsupportedFeatureError(
                 feature="pii_detection",
                 profile=profile,
-                remediation=(
-                    "Use --profile compliance to enable PII detection in lite mode, "
-                    "or switch to distributed mode for full PII support."
-                ),
+                remediation=LiteMsg.REMEDIATION_PII_DETECTION,
             )
 
     if parameters.get("redact_pii_audio", False):
@@ -309,10 +294,7 @@ def validate_request(profile: LiteProfile, parameters: dict) -> None:
             raise LiteUnsupportedFeatureError(
                 feature="redact_pii_audio",
                 profile=profile,
-                remediation=(
-                    "Use --profile compliance to enable PII audio redaction "
-                    "in lite mode."
-                ),
+                remediation=LiteMsg.REMEDIATION_PII_AUDIO_REDACTION,
             )
 
     if parameters.get("pii_entity_types") and not caps.supported_options.get(
@@ -321,9 +303,7 @@ def validate_request(profile: LiteProfile, parameters: dict) -> None:
         raise LiteUnsupportedFeatureError(
             feature="pii_entity_types",
             profile=profile,
-            remediation=(
-                "Use --profile compliance to enable PII entity filtering in lite mode."
-            ),
+            remediation=LiteMsg.REMEDIATION_PII_ENTITY_FILTERING,
         )
 
     if parameters.get("pii_redaction_mode") and not caps.supported_options.get(
@@ -332,9 +312,7 @@ def validate_request(profile: LiteProfile, parameters: dict) -> None:
         raise LiteUnsupportedFeatureError(
             feature="pii_redaction_mode",
             profile=profile,
-            remediation=(
-                "Use --profile compliance to enable PII redaction mode in lite mode."
-            ),
+            remediation=LiteMsg.REMEDIATION_PII_REDACTION_MODE,
         )
 
 

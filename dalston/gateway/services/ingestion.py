@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from fastapi import HTTPException, UploadFile
 
 from dalston.config import Settings
+from dalston.gateway.error_codes import Err
 from dalston.gateway.services.audio_probe import (
     AudioMetadata,
     InvalidAudioError,
@@ -64,12 +65,12 @@ class AudioIngestionService:
         if file is None and url is None:
             raise HTTPException(
                 status_code=400,
-                detail="Either 'file' or 'audio_url' must be provided",
+                detail=Err.PROVIDE_FILE_OR_URL,
             )
         if file is not None and url is not None:
             raise HTTPException(
                 status_code=400,
-                detail="Provide either 'file' or 'audio_url', not both",
+                detail=Err.PROVIDE_FILE_OR_URL_NOT_BOTH,
             )
 
         # Acquire content from URL or file
@@ -127,6 +128,6 @@ class AudioIngestionService:
             HTTPException: If file has no filename
         """
         if not file.filename:
-            raise HTTPException(status_code=400, detail="File must have a filename")
+            raise HTTPException(status_code=400, detail=Err.FILE_MUST_HAVE_FILENAME)
         content = await file.read()
         return content, file.filename

@@ -21,6 +21,7 @@ from dalston.gateway.dependencies import (
     get_security_manager,
     require_auth,
 )
+from dalston.gateway.error_codes import Err
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.auth import (
@@ -190,7 +191,7 @@ async def create_api_key(
             valid_scopes = [s.value for s in Scope]
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid scope. Valid scopes: {valid_scopes}",
+                detail=Err.INVALID_SCOPE.format(valid_scopes=valid_scopes),
             ) from e
 
     # Create key
@@ -264,11 +265,11 @@ async def get_api_key(
     target_key = await auth_service.get_api_key_by_id(key_id)
 
     if target_key is None:
-        raise HTTPException(status_code=404, detail="API key not found")
+        raise HTTPException(status_code=404, detail=Err.API_KEY_NOT_FOUND)
 
     # Verify tenant ownership
     if target_key.tenant_id != principal.tenant_id:
-        raise HTTPException(status_code=404, detail="API key not found")
+        raise HTTPException(status_code=404, detail=Err.API_KEY_NOT_FOUND)
 
     return APIKeyResponse.from_api_key(target_key, current_key_id=principal.id)
 
@@ -293,16 +294,16 @@ async def revoke_api_key(
     target_key = await auth_service.get_api_key_by_id(key_id)
 
     if target_key is None:
-        raise HTTPException(status_code=404, detail="API key not found")
+        raise HTTPException(status_code=404, detail=Err.API_KEY_NOT_FOUND)
 
     if target_key.tenant_id != principal.tenant_id:
-        raise HTTPException(status_code=404, detail="API key not found")
+        raise HTTPException(status_code=404, detail=Err.API_KEY_NOT_FOUND)
 
     # Prevent self-revocation
     if target_key.id == principal.id:
         raise HTTPException(
             status_code=400,
-            detail="Cannot revoke your own API key",
+            detail=Err.CANNOT_REVOKE_OWN_KEY,
         )
 
     await auth_service.revoke_api_key(key_id)
@@ -355,7 +356,7 @@ async def create_session_token(
     if not api_key.has_scope(Scope.REALTIME):
         raise HTTPException(
             status_code=403,
-            detail="API key requires 'realtime' scope to create session tokens",
+            detail=Err.KEY_REQUIRES_REALTIME_SCOPE,
         )
 
     # Parse scopes
@@ -367,7 +368,7 @@ async def create_session_token(
             valid_scopes = [s.value for s in Scope]
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid scope. Valid scopes: {valid_scopes}",
+                detail=Err.INVALID_SCOPE.format(valid_scopes=valid_scopes),
             ) from e
 
     # Create token

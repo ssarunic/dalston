@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Radio, Trash2, Mic } from 'lucide-react'
+import { S } from '@/lib/strings'
 import { apiClient } from '@/api/client'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useSharedTableState } from '@/hooks/useSharedTableState'
@@ -72,9 +73,9 @@ interface StatusGuidance {
 function buildStatusGuidance(statusData?: RealtimeStatusResponse): StatusGuidance {
   if (!statusData) {
     return {
-      title: 'Status not available',
-      summary: 'Real-time status data has not loaded yet.',
-      details: 'Refresh status and check engine health if this persists.',
+      title: S.realtimeSessions.statusNotAvailable,
+      summary: S.realtimeSessions.statusNotLoaded,
+      details: S.realtimeSessions.statusNotLoadedHint,
       level: 'warning',
       showStartWorker: false,
     }
@@ -83,8 +84,8 @@ function buildStatusGuidance(statusData?: RealtimeStatusResponse): StatusGuidanc
   if (statusData.status === 'unavailable') {
     if (statusData.worker_count === 0) {
       return {
-        title: 'No real-time workers running',
-        summary: 'Real-time is unavailable because no workers are registered.',
+        title: S.realtimeSessions.noWorkersRunning,
+        summary: S.realtimeSessions.noWorkersDetail,
         details:
           'Start at least one real-time worker, then refresh this page. If you run on AWS/ECS/Kubernetes, scale the worker service/deployment instead of using local Docker commands.',
         level: 'error',
@@ -93,8 +94,8 @@ function buildStatusGuidance(statusData?: RealtimeStatusResponse): StatusGuidanc
     }
 
     return {
-      title: 'Workers unhealthy',
-      summary: `Real-time is unavailable: 0/${statusData.worker_count} workers are ready.`,
+      title: S.realtimeSessions.workersUnhealthy,
+      summary: S.realtimeSessions.workersUnhealthyDetail(0, statusData.worker_count),
       details:
         'Workers are registered but not healthy. Check worker logs, model loading, and health checks.',
       level: 'error',
@@ -104,9 +105,9 @@ function buildStatusGuidance(statusData?: RealtimeStatusResponse): StatusGuidanc
 
   if (statusData.status === 'at_capacity') {
     return {
-      title: 'At capacity',
+      title: S.realtimeSessions.atCapacityTitle,
       summary:
-        `All available capacity is currently in use (${statusData.active_sessions}/${statusData.total_capacity}).`,
+        `${S.realtimeSessions.atCapacityDetail} (${statusData.active_sessions}/${statusData.total_capacity}).`,
       details: 'Wait for active sessions to finish or scale workers to increase available capacity.',
       level: 'warning',
       showStartWorker: false,
@@ -114,9 +115,9 @@ function buildStatusGuidance(statusData?: RealtimeStatusResponse): StatusGuidanc
   }
 
   return {
-    title: 'Real-time healthy',
-    summary: `Workers are ready and can accept new sessions (${statusData.ready_workers}/${statusData.worker_count} ready).`,
-    details: 'No action needed unless you expect higher throughput.',
+    title: S.realtimeSessions.healthyTitle,
+    summary: `${S.realtimeSessions.healthyDetail} (${statusData.ready_workers}/${statusData.worker_count} ${S.realtimeSessions.ready}).`,
+    details: S.realtimeSessions.healthyHint,
     level: 'normal',
     showStartWorker: false,
   }
@@ -190,7 +191,7 @@ export function RealtimeSessions() {
       await refetch()
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to delete session'
+        error instanceof Error ? error.message : S.errors.failedToDeleteSession
       setDeleteError(message)
     } finally {
       setIsDeleting(false)
@@ -201,20 +202,20 @@ export function RealtimeSessions() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Real-time</h1>
+          <h1 className="text-2xl font-bold">{S.realtimeSessions.title}</h1>
           <p className="text-muted-foreground">
-            Real-time transcription workers, capacity, and session history
+            {S.realtimeSessions.subtitle}
           </p>
         </div>
         <Button onClick={() => navigate('/realtime/live')}>
           <Mic className="h-4 w-4 mr-2" />
-          New Session
+          {S.realtimeSessions.newSession}
         </Button>
       </div>
 
       {statusError && (
         <div className="p-4 bg-destructive/10 text-destructive rounded-md">
-          Failed to load realtime status
+          {S.errors.failedToLoadRealtimeStatus}
         </div>
       )}
 
@@ -222,7 +223,7 @@ export function RealtimeSessions() {
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <span className="text-sm font-medium text-muted-foreground">Status</span>
+            <span className="text-sm font-medium text-muted-foreground">{S.realtimeSessions.statusTitle}</span>
             <Radio className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -237,39 +238,39 @@ export function RealtimeSessions() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <span className="text-sm font-medium text-muted-foreground">Active Sessions</span>
+            <span className="text-sm font-medium text-muted-foreground">{S.realtimeSessions.activeSessions}</span>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
               {statusData?.active_sessions ?? '-'} / {statusData?.total_capacity ?? '-'}
             </div>
             <p className="text-xs text-muted-foreground">
-              {statusData?.available_capacity ?? '-'} available
+              {statusData?.available_capacity ?? '-'} {S.realtimeSessions.available}
             </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <span className="text-sm font-medium text-muted-foreground">Workers</span>
+            <span className="text-sm font-medium text-muted-foreground">{S.realtimeSessions.workersTitle}</span>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
               {statusData?.ready_workers ?? '-'} / {statusData?.worker_count ?? '-'}
             </div>
-            <p className="text-xs text-muted-foreground">ready</p>
+            <p className="text-xs text-muted-foreground">{S.realtimeSessions.ready}</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <span className="text-sm font-medium text-muted-foreground">Capacity Overview</span>
+            <span className="text-sm font-medium text-muted-foreground">{S.realtimeSessions.capacityOverview}</span>
           </CardHeader>
           <CardContent>
             {statusData && (
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span>Used</span>
+                  <span>{S.realtimeSessions.used}</span>
                   <span>{statusData?.active_sessions ?? 0} / {statusData?.total_capacity ?? 0}</span>
                 </div>
                 <div className="h-2 bg-muted rounded-full overflow-hidden">
@@ -308,7 +309,7 @@ export function RealtimeSessions() {
                   size="sm"
                   onClick={() => navigate('/engines')}
                 >
-                  Check engine health
+                  {S.realtimeLive.checkEngineHealth}
                 </Button>
                 {statusGuidance.showStartWorker && (
                   <Button
@@ -316,7 +317,7 @@ export function RealtimeSessions() {
                     size="sm"
                     onClick={() => setShowStatusWhy(true)}
                   >
-                    Start worker (self-hosted)
+                    {S.realtimeSessions.startWorker}
                   </Button>
                 )}
                 <Button
@@ -324,7 +325,7 @@ export function RealtimeSessions() {
                   size="sm"
                   onClick={() => setShowStatusWhy((prev) => !prev)}
                 >
-                  {showStatusWhy ? 'Hide why this state' : 'Why this state?'}
+                  {showStatusWhy ? S.realtimeSessions.hideWhyThisState : S.realtimeSessions.whyThisState}
                 </Button>
               </div>
             </div>
@@ -335,13 +336,13 @@ export function RealtimeSessions() {
                 {statusGuidance.showStartWorker && (
                   <>
                     <p className="text-xs text-muted-foreground">
-                      Self-hosted quick start:
+                      {S.realtimeSessions.selfHostedQuickStart}
                     </p>
                     <code className="block rounded bg-muted px-2 py-1 text-xs font-mono">
                       docker compose up -d stt-rt-transcribe-parakeet-rnnt-0.6b-cpu
                     </code>
                     <p className="text-xs text-muted-foreground">
-                      On AWS/ECS/Kubernetes, scale your realtime worker service/deployment instead.
+                      {S.realtimeSessions.scaleInstructions}
                     </p>
                   </>
                 )}
@@ -354,7 +355,7 @@ export function RealtimeSessions() {
       {/* Session History */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Sessions</CardTitle>
+          <CardTitle>{S.realtimeSessions.sessionsTitle}</CardTitle>
           <div className="flex items-center gap-2">
             <Select value={statusFilter} onValueChange={handleFilterChange}>
               <SelectTrigger className="w-[130px]">
@@ -398,7 +399,7 @@ export function RealtimeSessions() {
           {visibleSessions.length === 0 ? (
             !(sessionsLoading || isFetching) && (
               <div className="text-center py-8 text-muted-foreground">
-                No sessions found
+                {S.realtimeSessions.noSessionsFound}
               </div>
             )
           ) : (
@@ -421,15 +422,15 @@ export function RealtimeSessions() {
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
                       <div>
-                        <p className="text-xs text-muted-foreground">Model</p>
+                        <p className="text-xs text-muted-foreground">{S.common.colModel}</p>
                         <p>{session.model ?? '-'}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-muted-foreground">Duration</p>
+                        <p className="text-xs text-muted-foreground">{S.common.colDuration}</p>
                         <p>{formatDuration(session.audio_duration_seconds)}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-muted-foreground">Segments</p>
+                        <p className="text-xs text-muted-foreground">{S.realtimeSessions.colSegments}</p>
                         <p>{session.segment_count}</p>
                       </div>
                     </div>
@@ -445,7 +446,7 @@ export function RealtimeSessions() {
                           }}
                         >
                           <Trash2 className="h-4 w-4 mr-1" />
-                          Delete
+                          {S.common.delete}
                         </Button>
                       </div>
                     )}
@@ -456,12 +457,12 @@ export function RealtimeSessions() {
               <Table className="min-w-[900px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="sticky left-0 z-10 bg-card">ID</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Model</TableHead>
-                    <TableHead>Duration</TableHead>
-                    <TableHead>Segments</TableHead>
-                    <TableHead>Created</TableHead>
+                    <TableHead className="sticky left-0 z-10 bg-card">{S.realtimeSessions.colId}</TableHead>
+                    <TableHead>{S.common.colStatus}</TableHead>
+                    <TableHead>{S.common.colModel}</TableHead>
+                    <TableHead>{S.common.colDuration}</TableHead>
+                    <TableHead>{S.realtimeSessions.colSegments}</TableHead>
+                    <TableHead>{S.common.colCreated}</TableHead>
                     <TableHead className="sticky right-0 z-10 bg-card"></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -519,7 +520,7 @@ export function RealtimeSessions() {
           )}
           <ListLoadMoreFooter
             count={visibleSessions.length}
-            itemLabel="sessions"
+            itemLabel={S.realtimeSessions.sessions}
             hasNextPage={hasNextPage}
             isFetchingNextPage={isFetchingNextPage}
             onLoadMore={loadMore}
@@ -532,12 +533,11 @@ export function RealtimeSessions() {
         <DialogContent>
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Delete Session</CardTitle>
+              <CardTitle className="text-base">{S.realtimeSessions.deleteSession}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                This will permanently delete the session and all its stored data
-                (audio, transcripts). This action cannot be undone.
+                {S.realtimeSessions.deleteConfirm}
               </p>
               {deleteTarget && (
                 <p className="text-sm font-mono text-muted-foreground">
@@ -554,7 +554,7 @@ export function RealtimeSessions() {
                   onClick={() => { setDeleteTarget(null); setDeleteError(null) }}
                   disabled={isDeleting}
                 >
-                  Cancel
+                  {S.common.cancel}
                 </Button>
                 <Button
                   variant="default"
@@ -563,7 +563,7 @@ export function RealtimeSessions() {
                   onClick={handleDelete}
                   disabled={isDeleting}
                 >
-                  {isDeleting ? 'Deleting...' : 'Delete'}
+                  {isDeleting ? S.batchJobs.deleting : S.common.delete}
                 </Button>
               </div>
             </CardContent>

@@ -15,6 +15,7 @@ import { useEngines } from '@/hooks/useEngines'
 import { useModelRegistry } from '@/hooks/useModelRegistry'
 import type { BatchEngine, EngineStatus, WorkerStatus, ModelRegistryEntry, ModelStatus } from '@/api/types'
 import { cn } from '@/lib/utils'
+import { S } from '@/lib/strings'
 
 // Pipeline stages in their natural processing order
 const PIPELINE_STAGES = [
@@ -128,18 +129,18 @@ function StageHeader({
 
   const summaryParts: string[] = []
   if (engines.length === 0) {
-    summaryParts.push('no engines')
+    summaryParts.push(S.engines.noEngines)
   } else if (healthyCount === engines.length) {
     // All engines ready - just show count
     summaryParts.push(`${engines.length} engine${engines.length !== 1 ? 's' : ''}`)
   } else {
     // Some engines offline - show fraction
-    summaryParts.push(`${healthyCount}/${engines.length} engines ready`)
+    summaryParts.push(`${healthyCount}/${engines.length} ${S.engines.enginesReady}`)
   }
   if (totalQueueDepth > 0 || totalProcessing > 0) {
     const activityParts: string[] = []
-    if (totalProcessing > 0) activityParts.push(`${totalProcessing} processing`)
-    if (totalQueueDepth > 0) activityParts.push(`${totalQueueDepth} queued`)
+    if (totalProcessing > 0) activityParts.push(`${totalProcessing} ${S.engines.processing}`)
+    if (totalQueueDepth > 0) activityParts.push(`${totalQueueDepth} ${S.engines.queued}`)
     summaryParts.push(activityParts.join(', '))
   }
 
@@ -236,7 +237,7 @@ function getStageSpecificInfo(stage: string, models: ModelRegistryEntry[]): Reac
         )}
         {readyCount === 0 && (
           <span className="text-xs text-muted-foreground italic ml-1">
-            (none ready)
+            {S.engines.noneReady}
           </span>
         )}
       </div>
@@ -272,13 +273,13 @@ function EngineCard({ engine, models }: { engine: BatchEngine; models: ModelRegi
             {engine.processing > 0 && (
               <div className="text-sm">
                 <span className="font-medium">{engine.processing}</span>
-                <span className="text-muted-foreground ml-1">processing</span>
+                <span className="text-muted-foreground ml-1">{S.engines.processing}</span>
               </div>
             )}
             {engine.queue_depth > 0 && (
               <div className="text-sm">
                 <span className="font-medium">{engine.queue_depth}</span>
-                <span className="text-muted-foreground ml-1">queued</span>
+                <span className="text-muted-foreground ml-1">{S.engines.queued}</span>
               </div>
             )}
           </div>
@@ -318,7 +319,7 @@ function StageAccordion({
         <div className="p-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground p-4 rounded-lg bg-muted/30 border border-dashed">
             <AlertCircle className="h-4 w-4" />
-            No engines registered for this stage
+            {S.engines.noEnginesForStage}
           </div>
         </div>
       )}
@@ -502,9 +503,9 @@ export function Engines() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold">Engines</h1>
+        <h1 className="text-2xl font-bold">{S.engines.title}</h1>
         <p className="text-muted-foreground">
-          Pipeline stages and processing capacity
+          {S.engines.subtitle}
         </p>
       </div>
 
@@ -523,7 +524,7 @@ export function Engines() {
             <div className="flex items-center gap-3">
               <Server className="h-5 w-5 text-muted-foreground" />
               <div>
-                <p className="text-xs text-muted-foreground">Batch Engines</p>
+                <p className="text-xs text-muted-foreground">{S.engines.batchEngines}</p>
                 <p className="text-lg font-semibold">
                   {healthyEngines}
                   <span className="text-muted-foreground text-sm font-normal">/{totalEngines}</span>
@@ -537,7 +538,7 @@ export function Engines() {
             <div className="flex items-center gap-3">
               <Radio className="h-5 w-5 text-muted-foreground" />
               <div>
-                <p className="text-xs text-muted-foreground">Real-time Workers</p>
+                <p className="text-xs text-muted-foreground">{S.engines.realtimeWorkers}</p>
                 <p className="text-lg font-semibold">
                   {readyWorkers}
                   <span className="text-muted-foreground text-sm font-normal">/{totalWorkers}</span>
@@ -551,7 +552,7 @@ export function Engines() {
             <div className="flex items-center gap-3">
               <Layers className="h-5 w-5 text-muted-foreground" />
               <div>
-                <p className="text-xs text-muted-foreground">Pipeline Stages</p>
+                <p className="text-xs text-muted-foreground">{S.engines.pipelineStages}</p>
                 <p className="text-lg font-semibold">
                   {stageStatuses.filter((s) => s.engines.length > 0).length}
                   <span className="text-muted-foreground text-sm font-normal">/{PIPELINE_STAGES.length}</span>
@@ -565,7 +566,7 @@ export function Engines() {
             <div className="flex items-center gap-3">
               <AlertCircle className="h-5 w-5 text-muted-foreground" />
               <div>
-                <p className="text-xs text-muted-foreground">Issues</p>
+                <p className="text-xs text-muted-foreground">{S.engines.issues}</p>
                 <p className="text-lg font-semibold">
                   {totalEngines - healthyEngines + (totalWorkers - readyWorkers)}
                 </p>
@@ -579,7 +580,7 @@ export function Engines() {
       <Card>
         <CardHeader className="flex flex-row items-center gap-2">
           <Server className="h-5 w-5 text-muted-foreground" />
-          <CardTitle>Batch Pipeline</CardTitle>
+          <CardTitle>{S.engines.batchPipeline}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
           {isLoading ? (
@@ -606,7 +607,7 @@ export function Engines() {
       <Card>
         <CardHeader className="flex flex-row items-center gap-2">
           <Radio className="h-5 w-5 text-muted-foreground" />
-          <CardTitle>Real-time Workers</CardTitle>
+          <CardTitle>{S.engines.realtimeWorkers}</CardTitle>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -618,7 +619,7 @@ export function Engines() {
           ) : realtimeWorkers.length === 0 ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground p-4 rounded-lg bg-muted/30 border border-dashed">
               <AlertCircle className="h-4 w-4" />
-              No real-time workers registered
+              {S.engines.noRealtimeWorkers}
             </div>
           ) : (
             <div className="space-y-2">

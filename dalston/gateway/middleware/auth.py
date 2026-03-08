@@ -11,6 +11,7 @@ from __future__ import annotations
 import structlog
 from fastapi import HTTPException, Request, WebSocket, status
 
+from dalston.gateway.error_codes import Err
 from dalston.gateway.services.auth import (
     TOKEN_PREFIX,
     APIKey,
@@ -49,7 +50,7 @@ class RateLimitError(HTTPException):
     def __init__(self, retry_after: int = 60):
         super().__init__(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Rate limit exceeded",
+            detail=Err.RATE_LIMIT_EXCEEDED,
             headers={"Retry-After": str(retry_after)},
         )
 

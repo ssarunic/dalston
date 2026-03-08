@@ -30,6 +30,7 @@ import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useSharedTableState } from '@/hooks/useSharedTableState'
 import { CreateWebhookDialog } from '@/components/CreateWebhookDialog'
 import { WebhookSecretModal } from '@/components/WebhookSecretModal'
+import { S } from '@/lib/strings'
 import {
   Select,
   SelectContent,
@@ -173,12 +174,12 @@ export function Webhooks() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Webhooks</h1>
-          <p className="text-muted-foreground">Manage webhook endpoints for event notifications</p>
+          <h1 className="text-2xl font-bold">{S.webhooks.title}</h1>
+          <p className="text-muted-foreground">{S.webhooks.subtitle}</p>
         </div>
         <Button onClick={() => setCreateDialogOpen(true)}>
           <Plus className="h-4 w-4 mr-2" />
-          Create Webhook
+          {S.webhooks.createWebhook}
         </Button>
       </div>
 
@@ -186,7 +187,7 @@ export function Webhooks() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2">
             <Webhook className="h-5 w-5" />
-            Webhook Endpoints
+            {S.webhooks.cardTitle}
           </CardTitle>
           <div className="flex items-center gap-2">
             <Select value={status} onValueChange={setStatus}>
@@ -237,8 +238,8 @@ export function Webhooks() {
             !isLoading && (
               <div className="text-center py-8 text-muted-foreground">
                 <Webhook className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>No webhook endpoints found</p>
-                <p className="text-sm mt-1">Try changing filters or create a new endpoint</p>
+                <p>{S.webhooks.noWebhooksFound}</p>
+                <p className="text-sm mt-1">{S.webhooks.noWebhooksHint}</p>
               </div>
             )
           ) : (
@@ -263,15 +264,15 @@ export function Webhooks() {
                       <div className="flex flex-col gap-1">
                         {webhook.is_active ? (
                           <Badge variant="outline" className="text-xs bg-green-500/10 text-green-500 w-fit">
-                            Active
+                            {S.common.active}
                           </Badge>
                         ) : webhook.disabled_reason === 'auto_disabled' ? (
                           <Badge variant="outline" className="text-xs bg-orange-500/10 text-orange-500 border-orange-500/20 w-fit">
-                            Auto-disabled
+                            {S.webhooks.autoDisabled}
                           </Badge>
                         ) : (
                           <Badge variant="outline" className="text-xs bg-gray-500/10 text-gray-500 w-fit">
-                            Inactive
+                            {S.common.inactive}
                           </Badge>
                         )}
                         <span className="text-xs text-muted-foreground">{formatTimeAgo(webhook.created_at)}</span>
@@ -323,11 +324,11 @@ export function Webhooks() {
               <Table className="min-w-[900px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="sticky left-0 z-10 bg-card">URL</TableHead>
-                    <TableHead>Events</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead className="sticky right-0 z-10 bg-card text-right">Actions</TableHead>
+                    <TableHead className="sticky left-0 z-10 bg-card">{S.webhooks.colUrl}</TableHead>
+                    <TableHead>{S.webhooks.colEvents}</TableHead>
+                    <TableHead>{S.common.colStatus}</TableHead>
+                    <TableHead>{S.common.colCreated}</TableHead>
+                    <TableHead className="sticky right-0 z-10 bg-card text-right">{S.common.colActions}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -364,7 +365,7 @@ export function Webhooks() {
                             </Badge>
                           ) : webhook.disabled_reason === 'auto_disabled' ? (
                             <Badge variant="outline" className="text-xs bg-orange-500/10 text-orange-500 border-orange-500/20">
-                              Auto-disabled
+                              {S.webhooks.autoDisabled}
                             </Badge>
                           ) : (
                             <Badge variant="outline" className="text-xs bg-gray-500/10 text-gray-500">
@@ -373,7 +374,7 @@ export function Webhooks() {
                           )}
                           {webhook.consecutive_failures > 0 && (
                             <span className="text-xs text-muted-foreground">
-                              {webhook.consecutive_failures} consecutive failure{webhook.consecutive_failures !== 1 ? 's' : ''}
+                              {webhook.consecutive_failures} {webhook.consecutive_failures !== 1 ? S.webhooks.consecutiveFailures : S.webhooks.consecutiveFailure}
                             </span>
                           )}
                         </div>
@@ -390,7 +391,7 @@ export function Webhooks() {
                               e.stopPropagation()
                               handleToggleActive(webhook)
                             }}
-                            title={webhook.is_active ? 'Deactivate' : 'Activate'}
+                            title={webhook.is_active ? S.webhooks.deactivate : S.webhooks.activate}
                             disabled={updateWebhook.isPending}
                           >
                             {webhook.is_active ? (
@@ -406,7 +407,7 @@ export function Webhooks() {
                               e.stopPropagation()
                               handleRotateSecret(webhook)
                             }}
-                            title="Rotate secret"
+                            title={S.webhooks.rotateSecret}
                             disabled={rotateSecret.isPending}
                           >
                             <RefreshCw className="h-4 w-4" />
@@ -418,7 +419,7 @@ export function Webhooks() {
                               e.stopPropagation()
                               setDeleteConfirm(webhook)
                             }}
-                            title="Delete"
+                            title={S.common.delete}
                             className="text-red-400 hover:text-red-300 hover:bg-red-950"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -461,12 +462,11 @@ export function Webhooks() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <Card className="w-full max-w-md mx-4">
             <CardHeader>
-              <CardTitle className="text-destructive">Delete Webhook</CardTitle>
+              <CardTitle className="text-destructive">{S.webhooks.deleteWebhook}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Are you sure you want to delete this webhook? This will also delete all delivery
-                history. This action cannot be undone.
+                {S.webhooks.deleteConfirm}
               </p>
               <div className="bg-muted p-3 rounded-md">
                 <p className="font-mono text-sm break-all">{deleteConfirm.url}</p>
@@ -488,14 +488,14 @@ export function Webhooks() {
                     setDeleteError(null)
                   }}
                 >
-                  Cancel
+                  {S.common.cancel}
                 </Button>
                 <Button
                   variant="destructive"
                   onClick={() => handleDelete(deleteConfirm)}
                   disabled={deleteWebhook.isPending}
                 >
-                  {deleteWebhook.isPending ? 'Deleting...' : 'Delete Webhook'}
+                  {deleteWebhook.isPending ? S.batchJobs.deleting : S.webhooks.deleteWebhook}
                 </Button>
               </div>
             </CardContent>
