@@ -28,6 +28,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
+import { S } from '@/lib/strings'
 import { useAuditEvents } from '@/hooks/useAuditLog'
 import { useSharedTableState } from '@/hooks/useSharedTableState'
 import { ListLoadMoreFooter } from '@/components/ListLoadMoreFooter'
@@ -43,27 +44,27 @@ const SORT_OPTIONS = [
 ] as const
 
 const RESOURCE_TYPES = [
-  { value: '', label: 'All Resources' },
-  { value: 'job', label: 'Job' },
-  { value: 'transcript', label: 'Transcript' },
-  { value: 'audio', label: 'Audio' },
-  { value: 'session', label: 'Session' },
-  { value: 'api_key', label: 'API Key' },
-  { value: 'retention_policy', label: 'Retention Policy' },
+  { value: '', label: S.auditLog.allResources },
+  { value: 'job', label: S.auditLog.resourceTypes.job },
+  { value: 'transcript', label: S.auditLog.resourceTypes.transcript },
+  { value: 'audio', label: S.auditLog.resourceTypes.audio },
+  { value: 'session', label: S.auditLog.resourceTypes.session },
+  { value: 'api_key', label: S.auditLog.resourceTypes.apiKey },
+  { value: 'retention_policy', label: S.auditLog.resourceTypes.retentionPolicy },
 ]
 
 const ACTION_CATEGORIES: Record<string, { label: string; color: string }> = {
-  created: { label: 'Created', color: 'bg-green-500/10 text-green-500 border-green-500/20' },
-  completed: { label: 'Completed', color: 'bg-blue-500/10 text-blue-500 border-blue-500/20' },
-  accessed: { label: 'Accessed', color: 'bg-slate-500/10 text-slate-400 border-slate-500/20' },
-  exported: { label: 'Exported', color: 'bg-purple-500/10 text-purple-500 border-purple-500/20' },
-  deleted: { label: 'Deleted', color: 'bg-red-500/10 text-red-500 border-red-500/20' },
-  purged: { label: 'Purged', color: 'bg-orange-500/10 text-orange-500 border-orange-500/20' },
-  failed: { label: 'Failed', color: 'bg-red-500/10 text-red-500 border-red-500/20' },
-  started: { label: 'Started', color: 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20' },
-  ended: { label: 'Ended', color: 'bg-slate-500/10 text-slate-400 border-slate-500/20' },
-  revoked: { label: 'Revoked', color: 'bg-red-500/10 text-red-500 border-red-500/20' },
-  cancelled: { label: 'Cancelled', color: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' },
+  created: { label: S.auditLog.actionLabels.created, color: 'bg-green-500/10 text-green-500 border-green-500/20' },
+  completed: { label: S.auditLog.actionLabels.completed, color: 'bg-blue-500/10 text-blue-500 border-blue-500/20' },
+  accessed: { label: S.auditLog.actionLabels.accessed, color: 'bg-slate-500/10 text-slate-400 border-slate-500/20' },
+  exported: { label: S.auditLog.actionLabels.exported, color: 'bg-purple-500/10 text-purple-500 border-purple-500/20' },
+  deleted: { label: S.auditLog.actionLabels.deleted, color: 'bg-red-500/10 text-red-500 border-red-500/20' },
+  purged: { label: S.auditLog.actionLabels.purged, color: 'bg-orange-500/10 text-orange-500 border-orange-500/20' },
+  failed: { label: S.auditLog.actionLabels.failed, color: 'bg-red-500/10 text-red-500 border-red-500/20' },
+  started: { label: S.auditLog.actionLabels.started, color: 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20' },
+  ended: { label: S.auditLog.actionLabels.ended, color: 'bg-slate-500/10 text-slate-400 border-slate-500/20' },
+  revoked: { label: S.auditLog.actionLabels.revoked, color: 'bg-red-500/10 text-red-500 border-red-500/20' },
+  cancelled: { label: S.auditLog.actionLabels.cancelled, color: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' },
 }
 
 function getActionStyle(action: string): { label: string; color: string } {
@@ -268,8 +269,8 @@ export function AuditLog() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Audit Log</h1>
-        <p className="text-muted-foreground">View data access and lifecycle events</p>
+        <h1 className="text-2xl font-bold">{S.auditLog.title}</h1>
+        <p className="text-muted-foreground">{S.auditLog.subtitle}</p>
       </div>
 
       {/* Events Table */}
@@ -277,7 +278,7 @@ export function AuditLog() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2">
             <ScrollText className="h-5 w-5" />
-            Events
+            {S.auditLog.eventsTitle}
           </CardTitle>
           <div className="flex items-center gap-2">
             <Button
@@ -286,10 +287,10 @@ export function AuditLog() {
               onClick={() => setShowFilters(!showFilters)}
             >
               <Filter className="h-4 w-4 mr-2" />
-              Filters
+              {S.auditLog.filters}
               {hasActiveFilters && (
                 <Badge variant="secondary" className="ml-2">
-                  Active
+                  {S.auditLog.activeFilters}
                 </Badge>
               )}
             </Button>
@@ -300,7 +301,7 @@ export function AuditLog() {
               disabled={isFetching}
             >
               <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
-              Refresh
+              {S.common.refresh}
             </Button>
           </div>
         </CardHeader>
@@ -309,7 +310,7 @@ export function AuditLog() {
         {showFilters && (
           <CardContent className="border-b pb-4">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-medium text-muted-foreground">Filters</span>
+              <span className="text-sm font-medium text-muted-foreground">{S.auditLog.filters}</span>
               {hasActiveFilters && (
                 <Button variant="ghost" size="sm" onClick={clearFilters}>
                   <X className="h-4 w-4 mr-1" />
