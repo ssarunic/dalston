@@ -1,5 +1,8 @@
 """Centralized user-facing strings for lite mode orchestrator.
 
+Internal to dalston.orchestrator — do not import from other packages (gateway,
+CLI, engines).  Package install boundaries enforce this at runtime.
+
 Usage:
 
     from dalston.orchestrator.lite_messages import LiteMsg
@@ -51,9 +54,7 @@ class LiteMsg:
         "Install them with: pip install {install_args}"
     )
     PREREQUISITE_REMEDIATION = "Install missing packages: pip install {install_args}"
-    PROFILE_NOT_FOUND = (
-        "Unknown lite profile '{profile_name}'. Valid profiles: {valid}"
-    )
+    PROFILE_NOT_FOUND = "Unknown lite profile '{profile_name}'. Valid profiles: {valid}"
 
     # -------------------------------------------------------------------------
     # Error codes (machine-readable keys in to_dict())
@@ -66,8 +67,7 @@ class LiteMsg:
     # Remediation hints
     # -------------------------------------------------------------------------
     REMEDIATION_PII_AUDIO_REDACTION = (
-        "Use --profile compliance to enable PII audio redaction "
-        "in lite mode."
+        "Use --profile compliance to enable PII audio redaction in lite mode."
     )
     REMEDIATION_PII_DETECTION = (
         "Use --profile compliance to enable PII detection in lite mode, "

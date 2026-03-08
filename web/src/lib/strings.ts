@@ -1,6 +1,8 @@
 /**
  * Centralized UI strings for the Dalston console.
  *
+ * Internal to the web/ package — do not import from backend or CLI code.
+ *
  * Keeps magic strings out of components. If localization is ever needed,
  * these keys map directly to translation keys with a mechanical refactor.
  *

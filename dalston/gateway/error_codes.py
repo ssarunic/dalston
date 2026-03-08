@@ -1,5 +1,8 @@
 """Centralized error codes and messages for HTTP API responses.
 
+Internal to dalston.gateway — do not import from other packages (CLI,
+orchestrator, engines).  Package install boundaries enforce this at runtime.
+
 Usage:
 
     from dalston.gateway.error_codes import Err

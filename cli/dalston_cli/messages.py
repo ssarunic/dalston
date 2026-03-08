@@ -1,5 +1,8 @@
 """Centralized user-facing strings for the Dalston CLI.
 
+Internal to dalston_cli — do not import from other packages (gateway,
+orchestrator, engines).  Package install boundaries enforce this at runtime.
+
 Usage:
 
     from dalston_cli.messages import CLIMsg
@@ -33,9 +36,7 @@ class CLIMsg:
     BOOTSTRAP_FAILED = "[red]Bootstrap failed:[/red] {error}"
     BOOTSTRAP_HOW_TO_FIX = "[yellow]How to fix:[/yellow] {remediation}"
     BOOTSTRAP_PREFLIGHT = "Bootstrap: preflight checks"
-    BOOTSTRAP_SERVER_SIDE_AUTO = (
-        "Bootstrap: using server-side model auto-selection"
-    )
+    BOOTSTRAP_SERVER_SIDE_AUTO = "Bootstrap: using server-side model auto-selection"
 
     # -------------------------------------------------------------------------
     # Bootstrap error messages
@@ -44,12 +45,9 @@ class CLIMsg:
         "Model '{model_id}' is not ready while DALSTON_BOOTSTRAP=false{error_detail}"
     )
     MODEL_NOT_READY_REMEDIATION = (
-        "Run `dalston models pull {model_id}` and retry, or set "
-        "DALSTON_BOOTSTRAP=true."
+        "Run `dalston models pull {model_id}` and retry, or set DALSTON_BOOTSTRAP=true."
     )
-    SERVER_NOT_HEALTHY = (
-        "Local server is not healthy while DALSTON_BOOTSTRAP=false."
-    )
+    SERVER_NOT_HEALTHY = "Local server is not healthy while DALSTON_BOOTSTRAP=false."
     SERVER_NOT_HEALTHY_REMEDIATION = (
         "Run `dalston status` for diagnostics, or set DALSTON_BOOTSTRAP=true "
         "for automatic recovery."
@@ -69,16 +67,12 @@ class CLIMsg:
         "[red]Error:[/red] Provide either audio files or --url, not both."
     )
     ERR_INVALID_LITE_PROFILE = "[red]Error:[/red] Invalid lite profile: {error}"
-    ERR_NO_INPUT = (
-        "[red]Error:[/red] Either provide audio files or --url, not neither."
-    )
+    ERR_NO_INPUT = "[red]Error:[/red] Either provide audio files or --url, not neither."
 
     # -------------------------------------------------------------------------
     # Transcription progress / result messages
     # -------------------------------------------------------------------------
     ERR_PROCESSING = "[red]Error:[/red] Error processing {source}: {error}"
-    ERR_TRANSCRIPTION_FAILED = (
-        "[red]Error:[/red] Transcription failed: {error}"
-    )
+    ERR_TRANSCRIPTION_FAILED = "[red]Error:[/red] Transcription failed: {error}"
     SUBMITTING_FILE = "Submitting: {file_path}"
     SUBMITTING_URL = "Submitting URL: {url}..."
