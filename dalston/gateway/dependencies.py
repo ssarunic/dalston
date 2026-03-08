@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Protocol
+from uuid import UUID
 
 import structlog
 from fastapi import Depends, HTTPException, Request
@@ -318,21 +319,23 @@ _lite_rate_limiter: _NoopRateLimiter | None = None
 class RateLimiter(Protocol):
     """Shared rate limiter interface used by both Redis and lite no-op impls."""
 
-    async def check_request_rate(self, tenant_id) -> RateLimitResult: ...
+    async def check_request_rate(self, tenant_id: UUID) -> RateLimitResult: ...
 
-    async def check_concurrent_jobs(self, tenant_id) -> RateLimitResult: ...
+    async def check_concurrent_jobs(self, tenant_id: UUID) -> RateLimitResult: ...
 
-    async def check_concurrent_sessions(self, tenant_id) -> RateLimitResult: ...
+    async def check_concurrent_sessions(self, tenant_id: UUID) -> RateLimitResult: ...
 
-    async def increment_concurrent_jobs(self, tenant_id) -> None: ...
+    async def increment_concurrent_jobs(self, tenant_id: UUID) -> None: ...
 
-    async def decrement_concurrent_jobs(self, tenant_id) -> None: ...
+    async def decrement_concurrent_jobs(self, tenant_id: UUID) -> None: ...
 
-    async def decrement_concurrent_jobs_once(self, job_id, tenant_id) -> bool: ...
+    async def decrement_concurrent_jobs_once(
+        self, job_id: UUID, tenant_id: UUID
+    ) -> bool: ...
 
-    async def increment_concurrent_sessions(self, tenant_id) -> None: ...
+    async def increment_concurrent_sessions(self, tenant_id: UUID) -> None: ...
 
-    async def decrement_concurrent_sessions(self, tenant_id) -> None: ...
+    async def decrement_concurrent_sessions(self, tenant_id: UUID) -> None: ...
 
 
 class _NoopRateLimiter:
@@ -348,7 +351,7 @@ class _NoopRateLimiter:
         self._max_concurrent_jobs = max_concurrent_jobs
         self._max_concurrent_sessions = max_concurrent_sessions
 
-    async def check_request_rate(self, _tenant_id) -> RateLimitResult:
+    async def check_request_rate(self, _tenant_id: UUID) -> RateLimitResult:
         return RateLimitResult(
             allowed=True,
             limit=self._requests_per_minute,
@@ -356,33 +359,35 @@ class _NoopRateLimiter:
             reset_seconds=60,
         )
 
-    async def check_concurrent_jobs(self, _tenant_id) -> RateLimitResult:
+    async def check_concurrent_jobs(self, _tenant_id: UUID) -> RateLimitResult:
         return RateLimitResult(
             allowed=True,
             limit=self._max_concurrent_jobs,
             remaining=self._max_concurrent_jobs,
         )
 
-    async def check_concurrent_sessions(self, _tenant_id) -> RateLimitResult:
+    async def check_concurrent_sessions(self, _tenant_id: UUID) -> RateLimitResult:
         return RateLimitResult(
             allowed=True,
             limit=self._max_concurrent_sessions,
             remaining=self._max_concurrent_sessions,
         )
 
-    async def increment_concurrent_jobs(self, _tenant_id) -> None:
+    async def increment_concurrent_jobs(self, _tenant_id: UUID) -> None:
         return None
 
-    async def decrement_concurrent_jobs(self, _tenant_id) -> None:
+    async def decrement_concurrent_jobs(self, _tenant_id: UUID) -> None:
         return None
 
-    async def decrement_concurrent_jobs_once(self, _job_id, _tenant_id) -> bool:
+    async def decrement_concurrent_jobs_once(
+        self, _job_id: UUID, _tenant_id: UUID
+    ) -> bool:
         return True
 
-    async def increment_concurrent_sessions(self, _tenant_id) -> None:
+    async def increment_concurrent_sessions(self, _tenant_id: UUID) -> None:
         return None
 
-    async def decrement_concurrent_sessions(self, _tenant_id) -> None:
+    async def decrement_concurrent_sessions(self, _tenant_id: UUID) -> None:
         return None
 
 

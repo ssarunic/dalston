@@ -15,6 +15,7 @@ from dalston_sdk import (
 
 from dalston_cli.bootstrap import (
     ModelBootstrapError,
+    ModelStatus,
     PreflightError,
     ensure_model_ready,
     load_bootstrap_settings,
@@ -38,6 +39,7 @@ from dalston_cli.output import (
 
 if TYPE_CHECKING:
     from dalston_sdk import Dalston
+    from dalston_sdk.types import HealthStatus
 
 FormatType = Literal["txt", "json", "srt", "vtt"]
 SpeakerMode = Literal["none", "diarize", "per-channel"]
@@ -61,14 +63,14 @@ def _assert_prerequisites_when_bootstrap_disabled(
     model_id: str,
 ) -> None:
     try:
-        health = client.health()
+        health: HealthStatus = client.health()
     except Exception as exc:
         raise ServerBootstrapError(
             CLIMsg.SERVER_NOT_REACHABLE,
             remediation=CLIMsg.SERVER_NOT_REACHABLE_REMEDIATION,
         ) from exc
 
-    if getattr(health, "status", "") != "healthy":
+    if health.status != "healthy":
         raise ServerBootstrapError(
             CLIMsg.SERVER_NOT_HEALTHY,
             remediation=CLIMsg.SERVER_NOT_HEALTHY_REMEDIATION,
@@ -78,7 +80,7 @@ def _assert_prerequisites_when_bootstrap_disabled(
         # Server-side engine selection remains authoritative for auto model.
         return
 
-    model_status = read_model_status(
+    model_status: ModelStatus = read_model_status(
         base_url=client.base_url,
         api_key=client.api_key,
         model_id=model_id,
@@ -398,7 +400,9 @@ def transcribe(
                     _emit_bootstrap_step(
                         quiet=quiet,
                         json_output=json_output,
-                        message=CLIMsg.BOOTSTRAP_ENSURING_MODEL.format(model=effective_model),
+                        message=CLIMsg.BOOTSTRAP_ENSURING_MODEL.format(
+                            model=effective_model
+                        ),
                     )
                     ensure_model_ready(
                         base_url=client.base_url,
@@ -410,7 +414,9 @@ def transcribe(
         error_console.print(CLIMsg.BOOTSTRAP_FAILED.format(error=exc))
         remediation = getattr(exc, "remediation", None)
         if remediation:
-            error_console.print(CLIMsg.BOOTSTRAP_HOW_TO_FIX.format(remediation=remediation))
+            error_console.print(
+                CLIMsg.BOOTSTRAP_HOW_TO_FIX.format(remediation=remediation)
+            )
         raise typer.Exit(code=1) from None
 
     # Map speaker detection string to enum
@@ -496,7 +502,9 @@ def transcribe(
 
             if result.status.value == "failed":
                 error_console.print(
-                    CLIMsg.ERR_TRANSCRIPTION_FAILED.format(error=result.error or "Unknown error")
+                    CLIMsg.ERR_TRANSCRIPTION_FAILED.format(
+                        error=result.error or "Unknown error"
+                    )
                 )
                 raise typer.Exit(code=1)
 
