@@ -449,7 +449,9 @@ class ExportService:
             )
             raise HTTPException(
                 status_code=400,
-                detail=Err.UNSUPPORTED_FORMAT.format(format_str=format_str, valid_formats=valid_formats),
+                detail=Err.UNSUPPORTED_FORMAT.format(
+                    format_str=format_str, valid_formats=valid_formats
+                ),
             ) from None
 
     def create_export_response(

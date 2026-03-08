@@ -150,7 +150,9 @@ class LiteUnsupportedFeatureError(Exception):
     ) -> None:
         super().__init__(
             LiteMsg.FEATURE_NOT_SUPPORTED.format(
-                feature=feature, profile=profile.value, remediation=remediation,
+                feature=feature,
+                profile=profile.value,
+                remediation=remediation,
             )
         )
         self.feature = feature

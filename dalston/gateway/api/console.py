@@ -888,7 +888,9 @@ async def get_settings_namespace(
     service = SettingsService()
     ns = await service.get_namespace(db, namespace)
     if ns is None:
-        raise HTTPException(status_code=404, detail=Err.NAMESPACE_NOT_FOUND.format(namespace=namespace))
+        raise HTTPException(
+            status_code=404, detail=Err.NAMESPACE_NOT_FOUND.format(namespace=namespace)
+        )
 
     return NamespaceSettingsResponse(
         namespace=ns.namespace,

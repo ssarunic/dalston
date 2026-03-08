@@ -276,7 +276,6 @@ def transcribe(
     profile: Annotated[
         str,
         typer.Option(
-            "--profile",
             help=(
                 "Lite mode pipeline profile: core (default), speaker, compliance. "
                 "Ignored when the server is running in distributed mode."
