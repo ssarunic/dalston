@@ -57,6 +57,7 @@ from dalston.gateway.api.v1.openai_audio import (
     raise_openai_error,
     validate_openai_request,
 )
+from dalston.gateway.error_codes import Err
 from dalston.gateway.dependencies import (
     RateLimiter,
     check_request_rate_limit,
@@ -308,9 +309,7 @@ async def create_transcription(
             )
         raise HTTPException(
             status_code=400,
-            detail=f"per_channel speaker detection requires stereo audio, "
-            f"but file has {ingested.metadata.channels} channel(s). "
-            f"Use speaker_detection=diarize for mono audio.",
+            detail=Err.PER_CHANNEL_REQUIRES_STEREO.format(channels=ingested.metadata.channels),
         )
 
     # Build parameters
@@ -357,25 +356,25 @@ async def create_transcription(
             if not isinstance(parsed_vocabulary, list):
                 raise HTTPException(
                     status_code=400,
-                    detail="vocabulary must be a JSON array of strings",
+                    detail=Err.VOCABULARY_MUST_BE_ARRAY,
                 )
             if len(parsed_vocabulary) > 100:
                 raise HTTPException(
                     status_code=400,
-                    detail="vocabulary cannot exceed 100 terms",
+                    detail=Err.VOCABULARY_EXCEED_LIMIT,
                 )
             # Validate all items are strings
             for term in parsed_vocabulary:
                 if not isinstance(term, str):
                     raise HTTPException(
                         status_code=400,
-                        detail="vocabulary must contain only strings",
+                        detail=Err.VOCABULARY_MUST_BE_STRINGS,
                     )
             parameters["vocabulary"] = parsed_vocabulary
         except json.JSONDecodeError as e:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid JSON in vocabulary: {e}",
+                detail=Err.VOCABULARY_INVALID_JSON.format(error=e),
             ) from e
 
     # Apply server default retention if not specified
@@ -496,7 +495,7 @@ async def create_transcription(
                 )
             raise HTTPException(
                 status_code=500,
-                detail=f"Lite transcription failed: {e}",
+                detail=Err.LITE_TRANSCRIPTION_FAILED.format(error=e),
             ) from e
 
         if not openai_mode:
@@ -596,7 +595,7 @@ async def get_transcription(
     )
 
     if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=Err.JOB_NOT_FOUND)
 
     # Build stages array from tasks (if any)
     stages = None
@@ -727,7 +726,7 @@ async def list_transcriptions(
     except ValueError as e:
         if "cursor" in str(e).lower():
             raise HTTPException(
-                status_code=400, detail="Invalid cursor format"
+                status_code=400, detail=Err.INVALID_CURSOR_FORMAT
             ) from None
         raise
 
@@ -877,13 +876,13 @@ async def export_transcription(
     # Get job with authorization
     job = await jobs_service.get_job_authorized(db, job_id, principal, security_manager)
     if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=Err.JOB_NOT_FOUND)
 
     # Check job is completed
     if job.status != JobStatus.COMPLETED.value:
         raise HTTPException(
             status_code=400,
-            detail=f"Job not completed. Current status: {job.status}",
+            detail=Err.JOB_NOT_COMPLETED.format(status=job.status),
         )
 
     # Fetch transcript from S3
@@ -930,7 +929,7 @@ async def get_job_audio(
     job = await jobs_service.get_job_authorized(db, job_id, principal, security_manager)
 
     if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=Err.JOB_NOT_FOUND)
 
     # Check job is in terminal state
     terminal_states = {
@@ -941,18 +940,14 @@ async def get_job_audio(
     if job.status not in terminal_states:
         raise HTTPException(
             status_code=409,
-            detail=f"Job not in terminal state. Current status: {job.status}",
+            detail=Err.JOB_NOT_TERMINAL.format(status=job.status),
         )
 
     # Check if audio has been purged by retention policy
     if job.purged_at is not None:
         raise HTTPException(
             status_code=410,
-            detail={
-                "code": "audio_purged",
-                "message": "Audio has been purged according to retention policy",
-                "purged_at": job.purged_at.isoformat(),
-            },
+            detail=Err.structured("audio_purged", purged_at=job.purged_at.isoformat()),
         )
 
     # Parse and validate S3 URI
@@ -960,7 +955,7 @@ async def get_job_audio(
         bucket, key = storage.parse_s3_uri(job.audio_uri or "")
     except ValueError:
         raise HTTPException(
-            status_code=404, detail="Original audio not found"
+            status_code=404, detail=Err.ORIGINAL_AUDIO_NOT_FOUND
         ) from None
 
     if bucket != settings.s3_bucket:
@@ -970,16 +965,13 @@ async def get_job_audio(
             expected_bucket=settings.s3_bucket,
             actual_bucket=bucket,
         )
-        raise HTTPException(status_code=404, detail="Original audio not found")
+        raise HTTPException(status_code=404, detail=Err.ORIGINAL_AUDIO_NOT_FOUND)
 
     # Verify exact S3 object exists (handles manual deletion via DELETE /audio)
     if not await storage.object_exists(key):
         raise HTTPException(
             status_code=410,
-            detail={
-                "code": "audio_deleted",
-                "message": "Audio has been deleted",
-            },
+            detail=Err.structured("audio_deleted"),
         )
 
     # Generate presigned URL
@@ -1002,7 +994,7 @@ async def get_job_audio(
         )
         raise HTTPException(
             status_code=404,
-            detail="Failed to generate audio download URL",
+            detail=Err.FAILED_AUDIO_DOWNLOAD_URL,
         ) from None
 
 
@@ -1042,32 +1034,27 @@ async def get_job_audio_redacted(
     job = await jobs_service.get_job_authorized(db, job_id, principal, security_manager)
 
     if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=Err.JOB_NOT_FOUND)
 
     # Redacted audio only exists for completed jobs
     if job.status != JobStatus.COMPLETED.value:
         raise HTTPException(
             status_code=409,
-            detail=f"Job not completed. Current status: {job.status}. "
-            "Redacted audio is only available for completed jobs.",
+            detail=Err.REDACTED_AUDIO_REQUIRES_COMPLETED.format(status=job.status),
         )
 
     # Check if PII redaction was enabled
     if not job.pii_redact_audio:
         raise HTTPException(
             status_code=404,
-            detail="PII audio redaction was not enabled for this job",
+            detail=Err.PII_NOT_ENABLED,
         )
 
     # Check if audio has been purged
     if job.purged_at is not None:
         raise HTTPException(
             status_code=410,
-            detail={
-                "code": "audio_purged",
-                "message": "Audio has been purged according to retention policy",
-                "purged_at": job.purged_at.isoformat(),
-            },
+            detail=Err.structured("audio_purged", purged_at=job.purged_at.isoformat()),
         )
 
     # Get redacted audio URI from transcript's pii_metadata (matches UI availability flag)
@@ -1077,14 +1064,14 @@ async def get_job_audio_redacted(
     if not transcript:
         raise HTTPException(
             status_code=404,
-            detail="Transcript not found",
+            detail=Err.TRANSCRIPT_NOT_FOUND,
         )
 
     pii_metadata = transcript.get("pii_metadata")
     if not pii_metadata:
         raise HTTPException(
             status_code=404,
-            detail="PII metadata not available in transcript",
+            detail=Err.PII_METADATA_NOT_AVAILABLE,
         )
 
     redacted_audio_uri = pii_metadata.get("redacted_audio_uri")
@@ -1099,7 +1086,7 @@ async def get_job_audio_redacted(
     if not redacted_audio_uri:
         raise HTTPException(
             status_code=404,
-            detail="Redacted audio not available. PII redaction may not have completed successfully.",
+            detail=Err.REDACTED_AUDIO_INCOMPLETE,
         )
 
     # Parse and validate S3 URI
@@ -1112,7 +1099,7 @@ async def get_job_audio_redacted(
             uri=redacted_audio_uri,
         )
         raise HTTPException(
-            status_code=404, detail="Redacted audio not found"
+            status_code=404, detail=Err.REDACTED_AUDIO_NOT_FOUND
         ) from None
 
     if bucket != settings.s3_bucket:
@@ -1122,16 +1109,13 @@ async def get_job_audio_redacted(
             expected_bucket=settings.s3_bucket,
             actual_bucket=bucket,
         )
-        raise HTTPException(status_code=404, detail="Redacted audio not found")
+        raise HTTPException(status_code=404, detail=Err.REDACTED_AUDIO_NOT_FOUND)
 
     # Verify the S3 object exists (handles manual deletion)
     if not await storage.object_exists(key):
         raise HTTPException(
             status_code=410,
-            detail={
-                "code": "audio_deleted",
-                "message": "Redacted audio has been deleted",
-            },
+            detail=Err.structured("audio_deleted", message="Redacted audio has been deleted"),
         )
 
     # Generate presigned URL
@@ -1154,7 +1138,7 @@ async def get_job_audio_redacted(
         )
         raise HTTPException(
             status_code=404,
-            detail="Failed to generate redacted audio download URL",
+            detail=Err.FAILED_REDACTED_AUDIO_DOWNLOAD_URL,
         ) from None
 
 
@@ -1196,12 +1180,12 @@ async def cancel_transcription(
             db, job_id, principal, security_manager
         )
     except ResourceNotFoundError:
-        raise HTTPException(status_code=404, detail="Job not found") from None
+        raise HTTPException(status_code=404, detail=Err.JOB_NOT_FOUND) from None
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from None
 
     if result is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=Err.JOB_NOT_FOUND)
 
     # Publish event for orchestrator to remove tasks from Redis queues
     await publish_job_cancel_requested(redis, job_id)
@@ -1259,7 +1243,7 @@ async def delete_audio(
     # Get job with authorization (includes ownership check)
     job = await jobs_service.get_job_authorized(db, job_id, principal, security_manager)
     if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=Err.JOB_NOT_FOUND)
 
     # Check job is in terminal state
     terminal_states = {
@@ -1270,12 +1254,12 @@ async def delete_audio(
     if job.status not in terminal_states:
         raise HTTPException(
             status_code=409,
-            detail=f"Job not in terminal state. Current status: {job.status}",
+            detail=Err.JOB_NOT_TERMINAL.format(status=job.status),
         )
 
     # Check if audio already purged
     if not await storage.has_audio(job_id):
-        raise HTTPException(status_code=410, detail="Audio already purged")
+        raise HTTPException(status_code=410, detail=Err.AUDIO_ALREADY_PURGED)
 
     # Delete audio and task artifacts (preserves transcript)
     await storage.delete_job_audio(job_id)
@@ -1338,12 +1322,12 @@ async def delete_transcription(
             ip_address=request.client.host if request.client else None,
         )
     except ResourceNotFoundError:
-        raise HTTPException(status_code=404, detail="Job not found") from None
+        raise HTTPException(status_code=404, detail=Err.JOB_NOT_FOUND) from None
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from None
 
     if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=Err.JOB_NOT_FOUND)
 
     # Clean up S3 artifacts (best-effort; DB record is already gone)
     try:

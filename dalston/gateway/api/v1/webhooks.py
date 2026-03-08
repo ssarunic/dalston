@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dalston.gateway.error_codes import Err
 from dalston.gateway.dependencies import (
     get_db,
     get_principal,
@@ -254,7 +255,7 @@ async def get_webhook_endpoint(
         security_manager=security_manager,
     )
     if endpoint is None:
-        raise HTTPException(status_code=404, detail="Webhook endpoint not found")
+        raise HTTPException(status_code=404, detail=Err.WEBHOOK_NOT_FOUND)
 
     return WebhookEndpointResponse(
         id=endpoint.id,
@@ -298,13 +299,13 @@ async def update_webhook_endpoint(
         )
     except ResourceNotFoundError:
         raise HTTPException(
-            status_code=404, detail="Webhook endpoint not found"
+            status_code=404, detail=Err.WEBHOOK_NOT_FOUND
         ) from None
     except WebhookValidationError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     if endpoint is None:
-        raise HTTPException(status_code=404, detail="Webhook endpoint not found")
+        raise HTTPException(status_code=404, detail=Err.WEBHOOK_NOT_FOUND)
 
     return WebhookEndpointResponse(
         id=endpoint.id,
@@ -343,10 +344,10 @@ async def delete_webhook_endpoint(
         )
     except ResourceNotFoundError:
         raise HTTPException(
-            status_code=404, detail="Webhook endpoint not found"
+            status_code=404, detail=Err.WEBHOOK_NOT_FOUND
         ) from None
     if not deleted:
-        raise HTTPException(status_code=404, detail="Webhook endpoint not found")
+        raise HTTPException(status_code=404, detail=Err.WEBHOOK_NOT_FOUND)
 
 
 @router.post(
@@ -371,7 +372,7 @@ async def rotate_webhook_secret(
         security_manager=security_manager,
     )
     if endpoint is None:
-        raise HTTPException(status_code=404, detail="Webhook endpoint not found")
+        raise HTTPException(status_code=404, detail=Err.WEBHOOK_NOT_FOUND)
 
     # Now rotate the secret
     result = await service.rotate_secret(
@@ -380,7 +381,7 @@ async def rotate_webhook_secret(
         tenant_id=principal.tenant_id,
     )
     if result is None:
-        raise HTTPException(status_code=404, detail="Webhook endpoint not found")
+        raise HTTPException(status_code=404, detail=Err.WEBHOOK_NOT_FOUND)
 
     endpoint, raw_secret = result
     return WebhookEndpointCreatedResponse(
@@ -429,7 +430,7 @@ async def list_webhook_deliveries(
         security_manager=security_manager,
     )
     if endpoint is None:
-        raise HTTPException(status_code=404, detail="Webhook endpoint not found")
+        raise HTTPException(status_code=404, detail=Err.WEBHOOK_NOT_FOUND)
 
     try:
         deliveries, has_more = await service.list_deliveries(
@@ -444,7 +445,7 @@ async def list_webhook_deliveries(
     except ValueError as e:
         if "cursor" in str(e).lower():
             raise HTTPException(
-                status_code=400, detail="Invalid cursor format"
+                status_code=400, detail=Err.INVALID_CURSOR_FORMAT
             ) from None
         raise
 
@@ -499,7 +500,7 @@ async def retry_webhook_delivery(
         security_manager=security_manager,
     )
     if endpoint is None:
-        raise HTTPException(status_code=404, detail="Webhook endpoint not found")
+        raise HTTPException(status_code=404, detail=Err.WEBHOOK_NOT_FOUND)
 
     try:
         delivery = await service.retry_delivery(
@@ -512,7 +513,7 @@ async def retry_webhook_delivery(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     if delivery is None:
-        raise HTTPException(status_code=404, detail="Delivery not found")
+        raise HTTPException(status_code=404, detail=Err.DELIVERY_NOT_FOUND)
 
     return WebhookDeliveryResponse(
         id=delivery.id,

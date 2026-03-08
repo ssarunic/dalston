@@ -25,6 +25,7 @@ import { useApiKeys, useRevokeApiKey } from '@/hooks/useApiKeys'
 import { CreateKeyDialog } from '@/components/CreateKeyDialog'
 import { KeyCreatedModal } from '@/components/KeyCreatedModal'
 import type { APIKey, APIKeyCreatedResponse } from '@/api/types'
+import { S } from '@/lib/strings'
 
 const DEFAULT_LIMIT = 20
 const LIMIT_OPTIONS = [20, 50, 100] as const
@@ -112,11 +113,11 @@ export function ApiKeys() {
       if (err instanceof Error) {
         // Try to extract error detail from response
         const message = err.message.includes('Cannot revoke your own')
-          ? 'Cannot revoke the API key you are currently using'
+          ? S.errors.cannotRevokeOwnKey
           : err.message
         setRevokeError(message)
       } else {
-        setRevokeError('Failed to revoke key')
+        setRevokeError(S.errors.failedToRevokeKey)
       }
     }
   }
@@ -146,12 +147,12 @@ export function ApiKeys() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">API Keys</h1>
-          <p className="text-muted-foreground">Manage API keys for authentication</p>
+          <h1 className="text-2xl font-bold">{S.apiKeys.title}</h1>
+          <p className="text-muted-foreground">{S.apiKeys.subtitle}</p>
         </div>
         <Button onClick={() => setCreateDialogOpen(true)}>
           <Plus className="h-4 w-4 mr-2" />
-          Create Key
+          {S.apiKeys.createKey}
         </Button>
       </div>
 
@@ -159,7 +160,7 @@ export function ApiKeys() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2">
             <Key className="h-5 w-5" />
-            API Keys
+            {S.apiKeys.cardTitle}
           </CardTitle>
           <div className="flex items-center gap-2">
             <Select value={status} onValueChange={setStatus}>
@@ -210,8 +211,8 @@ export function ApiKeys() {
             !isLoading && (
               <div className="text-center py-8 text-muted-foreground">
                 <Key className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>No API keys found</p>
-                <p className="text-sm mt-1">Try changing filters or create a key</p>
+                <p>{S.apiKeys.noKeysFound}</p>
+                <p className="text-sm mt-1">{S.apiKeys.noKeysHint}</p>
               </div>
             )
           ) : (
@@ -230,12 +231,12 @@ export function ApiKeys() {
                       <div className="flex items-center gap-1">
                         {key.is_current && (
                           <Badge variant="secondary" className="text-xs">
-                            current
+                            {S.common.current}
                           </Badge>
                         )}
                         {key.is_revoked && (
                           <Badge variant="destructive" className="text-xs">
-                            revoked
+                            {S.common.revoked}
                           </Badge>
                         )}
                       </div>
@@ -252,7 +253,7 @@ export function ApiKeys() {
                       </div>
                       <div>
                         <p className="text-muted-foreground">Last Used</p>
-                        <p>{key.last_used_at ? formatTimeAgo(key.last_used_at) : 'Never'}</p>
+                        <p>{key.last_used_at ? formatTimeAgo(key.last_used_at) : S.common.never}</p>
                       </div>
                     </div>
                     {!key.is_revoked && (
@@ -264,7 +265,7 @@ export function ApiKeys() {
                           className="text-red-400 hover:text-red-300 hover:bg-red-950"
                         >
                           <Trash2 className="h-4 w-4 mr-1" />
-                          Revoke
+                          {S.apiKeys.revoke}
                         </Button>
                       </div>
                     )}
@@ -293,12 +294,12 @@ export function ApiKeys() {
                         {key.prefix}...
                         {key.is_current && (
                           <Badge variant="secondary" className="ml-2 text-xs">
-                            current
+                            {S.common.current}
                           </Badge>
                         )}
                         {key.is_revoked && (
                           <Badge variant="destructive" className="ml-2 text-xs">
-                            revoked
+                            {S.common.revoked}
                           </Badge>
                         )}
                       </TableCell>
@@ -314,7 +315,7 @@ export function ApiKeys() {
                         {formatTimeAgo(key.created_at)}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {key.last_used_at ? formatTimeAgo(key.last_used_at) : 'Never'}
+                        {key.last_used_at ? formatTimeAgo(key.last_used_at) : S.common.never}
                       </TableCell>
                       <TableCell className="text-right sticky right-0 z-10 bg-card">
                         {!key.is_revoked && (
@@ -336,7 +337,7 @@ export function ApiKeys() {
           )}
           {filteredKeys.length > 0 && (
             <p className="pt-4 text-sm text-muted-foreground text-center">
-              Showing {visibleKeys.length} of {filteredKeys.length} keys
+              {S.apiKeys.showingKeys(visibleKeys.length, filteredKeys.length)}
             </p>
           )}
         </CardContent>
@@ -367,11 +368,11 @@ export function ApiKeys() {
       >
         <Card className="w-full max-w-md mx-4">
           <CardHeader>
-            <CardTitle className="text-destructive">Revoke API Key</CardTitle>
+            <CardTitle className="text-destructive">{S.apiKeys.revokeKey}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Are you sure you want to revoke this API key? This action cannot be undone.
+              {S.apiKeys.revokeConfirm}
             </p>
             {revokeConfirm && (
               <div className="bg-muted p-3 rounded-md">
@@ -393,14 +394,14 @@ export function ApiKeys() {
                   setRevokeError(null)
                 }}
               >
-                Cancel
+                {S.common.cancel}
               </Button>
               <Button
                 variant="destructive"
                 onClick={() => revokeConfirm && handleRevoke(revokeConfirm)}
                 disabled={revokeApiKey.isPending}
               >
-                {revokeApiKey.isPending ? 'Revoking...' : 'Revoke Key'}
+                {revokeApiKey.isPending ? 'Revoking...' : S.apiKeys.revokeButton}
               </Button>
             </div>
           </CardContent>

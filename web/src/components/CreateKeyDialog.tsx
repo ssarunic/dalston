@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useCreateApiKey } from '@/hooks/useApiKeys'
 import type { APIKeyCreatedResponse } from '@/api/types'
+import { S } from '@/lib/strings'
 
 interface CreateKeyDialogProps {
   open: boolean
@@ -12,11 +13,11 @@ interface CreateKeyDialogProps {
 }
 
 const AVAILABLE_SCOPES = [
-  { value: 'jobs:read', label: 'Read Jobs', description: 'View job status and results' },
-  { value: 'jobs:write', label: 'Create Jobs', description: 'Submit transcription jobs' },
-  { value: 'realtime', label: 'Real-time', description: 'Connect to WebSocket streams' },
-  { value: 'webhooks', label: 'Webhooks', description: 'Manage webhook configurations' },
-  { value: 'admin', label: 'Admin Access', description: 'Full console access (grants all permissions)' },
+  { value: 'jobs:read', label: S.createKeyDialog.scopes.read.label, description: S.createKeyDialog.scopes.read.description },
+  { value: 'jobs:write', label: S.createKeyDialog.scopes.create.label, description: S.createKeyDialog.scopes.create.description },
+  { value: 'realtime', label: S.createKeyDialog.scopes.realtime.label, description: S.createKeyDialog.scopes.realtime.description },
+  { value: 'webhooks', label: S.createKeyDialog.scopes.webhooks.label, description: S.createKeyDialog.scopes.webhooks.description },
+  { value: 'admin', label: S.createKeyDialog.scopes.admin.label, description: S.createKeyDialog.scopes.admin.description },
 ]
 
 const DEFAULT_SCOPES = ['jobs:read', 'jobs:write', 'realtime']
@@ -60,12 +61,12 @@ export function CreateKeyDialog({ open, onOpenChange, onCreated }: CreateKeyDial
     setError(null)
 
     if (!name.trim()) {
-      setError('Name is required')
+      setError(S.errors.nameRequired)
       return
     }
 
     if (selectedScopes.length === 0) {
-      setError('At least one scope is required')
+      setError(S.errors.scopeRequired)
       return
     }
 
@@ -84,7 +85,7 @@ export function CreateKeyDialog({ open, onOpenChange, onCreated }: CreateKeyDial
       if (err instanceof Error) {
         setError(err.message)
       } else {
-        setError('Failed to create key')
+        setError(S.errors.failedToCreateKey)
       }
     }
   }
@@ -105,21 +106,21 @@ export function CreateKeyDialog({ open, onOpenChange, onCreated }: CreateKeyDial
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <Card className="w-full max-w-lg mx-4">
         <CardHeader>
-          <CardTitle>Create API Key</CardTitle>
+          <CardTitle>{S.createKeyDialog.title}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Name */}
             <div className="space-y-2">
               <label htmlFor="keyName" className="text-sm font-medium">
-                Name
+                {S.createKeyDialog.nameLabel}
               </label>
               <input
                 id="keyName"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g., Production API, CI Pipeline"
+                placeholder={S.createKeyDialog.namePlaceholder}
                 className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm"
                 autoFocus
               />
@@ -127,7 +128,7 @@ export function CreateKeyDialog({ open, onOpenChange, onCreated }: CreateKeyDial
 
             {/* Scopes */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">Scopes</label>
+              <label className="text-sm font-medium">{S.createKeyDialog.scopesLabel}</label>
               <div className="space-y-2">
                 {AVAILABLE_SCOPES.map((scope) => (
                   <label
@@ -163,9 +164,9 @@ export function CreateKeyDialog({ open, onOpenChange, onCreated }: CreateKeyDial
               <div className="flex items-start gap-2 p-3 rounded-md bg-orange-500/10 border border-orange-500/20 text-sm">
                 <AlertTriangle className="h-4 w-4 text-orange-500 mt-0.5" />
                 <div>
-                  <p className="font-medium text-orange-500">Admin scope selected</p>
+                  <p className="font-medium text-orange-500">{S.createKeyDialog.adminWarningTitle}</p>
                   <p className="text-muted-foreground">
-                    This key will have full access to all API operations including key management.
+                    {S.createKeyDialog.adminWarningText}
                   </p>
                 </div>
               </div>
@@ -174,7 +175,7 @@ export function CreateKeyDialog({ open, onOpenChange, onCreated }: CreateKeyDial
             {/* Rate Limit (optional) */}
             <div className="space-y-2">
               <label htmlFor="rateLimit" className="text-sm font-medium">
-                Rate Limit (optional)
+                {S.createKeyDialog.rateLimitLabel}
               </label>
               <div className="flex items-center gap-2">
                 <input
@@ -182,12 +183,12 @@ export function CreateKeyDialog({ open, onOpenChange, onCreated }: CreateKeyDial
                   type="number"
                   value={rateLimit}
                   onChange={(e) => setRateLimit(e.target.value)}
-                  placeholder="Unlimited"
+                  placeholder={S.createKeyDialog.rateLimitPlaceholder}
                   min="1"
                   max="10000"
                   className="w-32 px-3 py-2 rounded-md border border-input bg-background text-sm"
                 />
-                <span className="text-sm text-muted-foreground">requests/minute</span>
+                <span className="text-sm text-muted-foreground">{S.createKeyDialog.rateLimitUnit}</span>
               </div>
             </div>
 
@@ -202,10 +203,10 @@ export function CreateKeyDialog({ open, onOpenChange, onCreated }: CreateKeyDial
             {/* Actions */}
             <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="outline" onClick={handleClose}>
-                Cancel
+                {S.common.cancel}
               </Button>
               <Button type="submit" disabled={createApiKey.isPending}>
-                {createApiKey.isPending ? 'Creating...' : 'Create Key'}
+                {createApiKey.isPending ? S.createKeyDialog.creating : S.apiKeys.createKey}
               </Button>
             </div>
           </form>

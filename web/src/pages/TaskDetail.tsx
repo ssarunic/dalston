@@ -1,4 +1,5 @@
 import { useParams, Link } from 'react-router-dom'
+import { S } from '@/lib/strings'
 import {
   ArrowLeft,
   Clock,
@@ -179,7 +180,7 @@ function TranscribeOutputView({ output }: { output: Record<string, unknown> }) {
       <div className="flex gap-4 text-sm">
         {language && (
           <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">Language:</span>
+            <span className="text-muted-foreground">{S.taskDetail.language}</span>
             <span className="font-medium">
               {language.toUpperCase()}
               {languageConfidence && ` (${Math.round(languageConfidence * 100)}%)`}
@@ -188,7 +189,7 @@ function TranscribeOutputView({ output }: { output: Record<string, unknown> }) {
         )}
         {segments && (
           <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">Segments:</span>
+            <span className="text-muted-foreground">{S.taskDetail.segments}</span>
             <span className="font-medium">{segments.length}</span>
           </div>
         )}
@@ -197,7 +198,7 @@ function TranscribeOutputView({ output }: { output: Record<string, unknown> }) {
       {/* Full text */}
       {text && (
         <div>
-          <h4 className="text-sm font-medium mb-2">Full Text</h4>
+          <h4 className="text-sm font-medium mb-2">{S.taskDetail.fullText}</h4>
           <div className="bg-zinc-900 rounded-lg p-4 text-sm max-h-[200px] overflow-auto">
             {text}
           </div>
@@ -207,7 +208,7 @@ function TranscribeOutputView({ output }: { output: Record<string, unknown> }) {
       {/* Segments preview */}
       {segments && segments.length > 0 && (
         <div>
-          <h4 className="text-sm font-medium mb-2">Segments (first 10)</h4>
+          <h4 className="text-sm font-medium mb-2">{S.taskDetail.segmentsFirst10}</h4>
           <div className="space-y-1 max-h-[300px] overflow-auto">
             {segments.slice(0, 10).map((seg, idx) => (
               <div
@@ -222,7 +223,7 @@ function TranscribeOutputView({ output }: { output: Record<string, unknown> }) {
             ))}
             {segments.length > 10 && (
               <p className="text-xs text-muted-foreground py-2">
-                ... and {segments.length - 10} more segments
+                ... {S.taskDetail.andMoreSegments(segments.length - 10)}
               </p>
             )}
           </div>
@@ -252,7 +253,7 @@ function DiarizeOutputView({ output }: { output: Record<string, unknown> }) {
       {/* Speaker summary */}
       {speakers && speakers.length > 0 && (
         <div>
-          <h4 className="text-sm font-medium mb-2">Speakers Detected</h4>
+          <h4 className="text-sm font-medium mb-2">{S.taskDetail.speakersDetected}</h4>
           <div className="flex flex-wrap gap-2">
             {speakers.map((speaker, idx) => (
               <div
@@ -269,7 +270,7 @@ function DiarizeOutputView({ output }: { output: Record<string, unknown> }) {
       {/* Segment count */}
       {segments && (
         <div className="text-sm text-muted-foreground">
-          {segments.length} speaker segments detected
+          {segments.length} {S.taskDetail.speakerSegmentsDetected}
         </div>
       )}
     </div>
@@ -343,7 +344,7 @@ function AlignOutputView({ output }: { output: Record<string, unknown> }) {
       {warning && (
         <div className="flex items-start gap-2 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
           <span className="text-yellow-400 text-sm">
-            Alignment fallback: {warning.reason}
+            {S.taskDetail.alignmentFallback} {warning.reason}
           </span>
         </div>
       )}
@@ -433,7 +434,7 @@ function MergeOutputView({ output }: { output: Record<string, unknown> }) {
       {/* Text preview */}
       {text && (
         <div>
-          <h4 className="text-sm font-medium mb-2">Transcript Preview</h4>
+          <h4 className="text-sm font-medium mb-2">{S.taskDetail.transcriptPreview}</h4>
           <div className="bg-zinc-900 rounded-lg p-4 text-sm max-h-[150px] overflow-auto">
             {text.slice(0, 500)}
             {text.length > 500 && <span className="text-muted-foreground">...</span>}
@@ -480,7 +481,7 @@ function OutputViewer({ stage, output }: { stage: string; output: Record<string,
           onClick={() => setShowRaw(!showRaw)}
           className="text-xs"
         >
-          {showRaw ? 'Hide' : 'Show'} Raw JSON
+          {showRaw ? S.taskDetail.hide : S.taskDetail.show} {S.taskDetail.rawJson}
         </Button>
         {showRaw && <JsonViewer data={output} />}
       </div>
@@ -501,8 +502,8 @@ export function TaskDetail() {
     return (
       <div className="flex flex-col items-center justify-center py-12">
         <AlertCircle className="h-12 w-12 text-red-400 mb-4" />
-        <p className="text-red-400">Error loading task</p>
-        <BackButton fallbackPath={`/jobs/${jobId}`} variant="outline" label="Back to Job" className="mt-4" />
+        <p className="text-red-400">{S.taskDetail.errorLoading}</p>
+        <BackButton fallbackPath={`/jobs/${jobId}`} variant="outline" label={S.taskDetail.backToJob} className="mt-4" />
       </div>
     )
   }
@@ -558,11 +559,11 @@ export function TaskDetail() {
             <div className="flex items-start gap-3">
               <AlertCircle className="h-5 w-5 text-red-400 mt-0.5" />
               <div>
-                <p className="font-medium text-red-400">Task Failed</p>
+                <p className="font-medium text-red-400">{S.taskDetail.taskFailed}</p>
                 <p className="text-sm text-red-400/80 mt-1">{artifact.error}</p>
                 {artifact.retries > 0 && (
                   <p className="text-xs text-red-400/60 mt-2">
-                    Failed after {artifact.retries} retry attempt{artifact.retries > 1 ? 's' : ''}
+                    {S.taskDetail.failedAfter} {artifact.retries} {artifact.retries > 1 ? S.taskDetail.retryAttempts : S.taskDetail.retryAttempt}
                   </p>
                 )}
               </div>
@@ -574,19 +575,19 @@ export function TaskDetail() {
       {/* Metrics */}
       <div className="grid gap-3 sm:gap-4 grid-cols-2 lg:grid-cols-4">
         <MetricCard
-          label="Duration"
+          label={S.taskDetail.duration}
           value={artifact.duration_ms ? formatDuration(artifact.duration_ms) : '-'}
         />
         <MetricCard
-          label="Started"
+          label={S.taskDetail.started}
           value={artifact.started_at ? formatTime(artifact.started_at) : '-'}
         />
         <MetricCard
-          label="Completed"
+          label={S.taskDetail.completed}
           value={artifact.completed_at ? formatTime(artifact.completed_at) : '-'}
         />
         <MetricCard
-          label="Retries"
+          label={S.taskDetail.retries}
           value={`${artifact.retries} / ${artifact.max_retries}`}
           subtext={artifact.required ? 'Required' : 'Optional'}
         />
@@ -596,7 +597,7 @@ export function TaskDetail() {
       {artifact.dependencies.length > 0 && tasksData?.tasks && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base font-medium">Dependencies</CardTitle>
+            <CardTitle className="text-base font-medium">{S.taskDetail.dependencies}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
@@ -610,7 +611,7 @@ export function TaskDetail() {
               ))}
               <div className="flex items-center text-muted-foreground">
                 <ArrowLeft className="h-4 w-4 rotate-180 mx-2" />
-                <span className="text-sm">This task</span>
+                <span className="text-sm">{S.taskDetail.thisTask}</span>
               </div>
             </div>
           </CardContent>
@@ -618,25 +619,25 @@ export function TaskDetail() {
       )}
 
       {/* Input */}
-      <CollapsibleSection title="Input" defaultOpen={artifact.status === 'failed'}>
+      <CollapsibleSection title={S.taskDetail.input} defaultOpen={artifact.status === 'failed'}>
         {artifact.input ? (
           <JsonViewer data={artifact.input} />
         ) : (
-          <p className="text-sm text-muted-foreground">No input data available</p>
+          <p className="text-sm text-muted-foreground">{S.taskDetail.noInputData}</p>
         )}
       </CollapsibleSection>
 
       {/* Output */}
-      <CollapsibleSection title="Output" defaultOpen={artifact.status === 'completed'}>
+      <CollapsibleSection title={S.taskDetail.output} defaultOpen={artifact.status === 'completed'}>
         {artifact.output ? (
           <OutputViewer stage={artifact.stage} output={artifact.output} />
         ) : artifact.status === 'pending' ? (
-          <p className="text-sm text-muted-foreground">Task has not started yet</p>
+          <p className="text-sm text-muted-foreground">{S.taskDetail.taskNotStarted}</p>
         ) : artifact.status === 'running' ? (
-          <p className="text-sm text-muted-foreground">Task is still running...</p>
+          <p className="text-sm text-muted-foreground">{S.taskDetail.taskStillRunning}</p>
         ) : (
           <p className="text-sm text-muted-foreground">
-            No output - task failed before producing results
+            {S.taskDetail.noOutputFailed}
           </p>
         )}
       </CollapsibleSection>

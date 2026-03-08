@@ -4,6 +4,7 @@ import { HTTPError } from 'ky'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
+import { S } from '@/lib/strings'
 import {
   useSettingsNamespaces,
   useSettingsNamespace,
@@ -190,7 +191,7 @@ function SettingField({
           {setting.description}
         </label>
         {isOverridden && (
-          <span className="inline-block h-2 w-2 rounded-full bg-primary shrink-0" title="Modified" aria-label="Setting modified" />
+          <span className="inline-block h-2 w-2 rounded-full bg-primary shrink-0" title={S.settings.modified} aria-label="Setting modified" />
         )}
       </div>
 
@@ -230,7 +231,7 @@ function SystemInfoTab({ settings }: { settings: SettingValue[] }) {
       <CardContent className="overflow-hidden pt-6">
         <div className="rounded-md border border-blue-500/20 bg-blue-500/10 p-3 mb-4">
           <p className="text-sm text-blue-400">
-            System settings are read-only and controlled by environment variables.
+            {S.settings.readOnlyNotice}
           </p>
         </div>
         <div className="divide-y divide-border overflow-hidden">
@@ -436,7 +437,7 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
             ) : (
               <>
                 <span className="inline-block h-2 w-2 rounded-full bg-amber-500" aria-hidden="true" />
-                {dirtyKeys.length} unsaved {dirtyKeys.length === 1 ? 'change' : 'changes'}
+                {dirtyKeys.length} unsaved {dirtyKeys.length === 1 ? S.settings.unsavedChange : S.settings.unsavedChanges}
               </>
             )}
           </span>
@@ -536,9 +537,9 @@ export function Settings() {
     <div className="space-y-6 min-w-0">
       {/* Page header */}
       <div>
-        <h1 className="text-2xl font-bold">Settings</h1>
+        <h1 className="text-2xl font-bold">{S.settings.title}</h1>
         <p className="text-muted-foreground">
-          Manage system configuration and operational parameters
+          {S.settings.subtitle}
         </p>
       </div>
 

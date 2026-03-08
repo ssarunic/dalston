@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { S } from '@/lib/strings'
 import { Trash2, X, Plus } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useJobs } from '@/hooks/useJobs'
@@ -155,7 +156,7 @@ export function BatchJobs() {
       await queryClient.invalidateQueries({ queryKey: ['jobs'] })
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Failed to delete job'
+        err instanceof Error ? err.message : S.errors.failedToDeleteJob
       setDeleteError(message)
     } finally {
       setIsDeleting(false)
@@ -175,7 +176,7 @@ export function BatchJobs() {
       setTimeout(() => setCancelSuccess(null), 3000)
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Failed to cancel job'
+        err instanceof Error ? err.message : S.errors.failedToCancelJob
       setCancelError(message)
     } finally {
       setIsCancelling(false)
@@ -186,14 +187,14 @@ export function BatchJobs() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Batch Jobs</h1>
+          <h1 className="text-2xl font-bold">{S.batchJobs.title}</h1>
           <p className="text-muted-foreground">
-            Manage and monitor transcription jobs
+            {S.batchJobs.subtitle}
           </p>
         </div>
         <Button onClick={() => navigate('/jobs/new')}>
           <Plus className="h-4 w-4 mr-2" />
-          Submit Job
+          {S.batchJobs.submitJob}
         </Button>
       </div>
 
@@ -201,7 +202,7 @@ export function BatchJobs() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base font-medium">
-            Jobs
+            {S.batchJobs.cardTitle}
           </CardTitle>
           <div className="flex items-center gap-2">
             <Select
@@ -252,12 +253,12 @@ export function BatchJobs() {
             !isLoading && (
               <div className="text-center py-12">
                 <p className="text-muted-foreground mb-4">
-                  {statusFilter ? 'No jobs found matching the filter' : 'No jobs yet'}
+                  {statusFilter ? S.batchJobs.noJobsFound : S.batchJobs.noJobsYet}
                 </p>
                 {!statusFilter && (
                   <Button variant="outline" onClick={() => navigate('/jobs/new')}>
                     <Plus className="h-4 w-4 mr-2" />
-                    Submit your first job
+                    {S.batchJobs.submitFirstJob}
                   </Button>
                 )}
               </div>
@@ -293,7 +294,7 @@ export function BatchJobs() {
                         <p>{formatDuration(job.audio_duration_seconds)}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-muted-foreground">Segments</p>
+                        <p className="text-xs text-muted-foreground">{S.batchJobs.segments}</p>
                         <p>{job.result_segment_count ?? '-'}</p>
                       </div>
                     </div>
@@ -341,7 +342,7 @@ export function BatchJobs() {
                     <TableHead>Status</TableHead>
                     <TableHead>Model</TableHead>
                     <TableHead>Duration</TableHead>
-                    <TableHead>Segments</TableHead>
+                    <TableHead>{S.batchJobs.segments}</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead className="sticky right-0 z-10 bg-card text-right">Actions</TableHead>
                   </TableRow>
@@ -445,12 +446,11 @@ export function BatchJobs() {
         <DialogContent>
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Cancel Job</CardTitle>
+              <CardTitle className="text-base">{S.batchJobs.cancelJob}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                This will cancel the job. Running tasks will complete naturally,
-                but no new tasks will be started.
+                {S.batchJobs.cancelConfirm}
               </p>
               {cancelTarget && (
                 <p className="text-sm font-mono text-muted-foreground">
@@ -476,7 +476,7 @@ export function BatchJobs() {
                   onClick={handleCancel}
                   disabled={isCancelling}
                 >
-                  {isCancelling ? 'Cancelling...' : 'Cancel Job'}
+                  {isCancelling ? S.batchJobs.cancelling : S.batchJobs.cancelJob}
                 </Button>
               </div>
             </CardContent>
@@ -489,13 +489,11 @@ export function BatchJobs() {
         <DialogContent>
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Delete Job</CardTitle>
+              <CardTitle className="text-base">{S.batchJobs.deleteJob}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                This will permanently delete the job and all its artifacts
-                (audio, transcripts, intermediate outputs). This action cannot
-                be undone.
+                {S.batchJobs.deleteConfirm}
               </p>
               {deleteTarget && (
                 <p className="text-sm font-mono text-muted-foreground">
@@ -521,7 +519,7 @@ export function BatchJobs() {
                   onClick={handleDelete}
                   disabled={isDeleting}
                 >
-                  {isDeleting ? 'Deleting...' : 'Delete'}
+                  {isDeleting ? S.batchJobs.deleting : S.common.delete}
                 </Button>
               </div>
             </CardContent>

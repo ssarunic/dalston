@@ -3,6 +3,7 @@ import { Check, Copy, Eye, EyeOff, AlertTriangle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import type { APIKeyCreatedResponse } from '@/api/types'
+import { S } from '@/lib/strings'
 
 interface KeyCreatedModalProps {
   keyData: APIKeyCreatedResponse | null
@@ -47,7 +48,7 @@ export function KeyCreatedModal({ keyData, onClose }: KeyCreatedModalProps) {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-green-500">
             <Check className="h-5 w-5" />
-            API Key Created
+            {S.keyCreatedModal.title}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -55,9 +56,9 @@ export function KeyCreatedModal({ keyData, onClose }: KeyCreatedModalProps) {
           <div className="flex items-start gap-2 p-3 rounded-md bg-orange-500/10 border border-orange-500/20 text-sm">
             <AlertTriangle className="h-4 w-4 text-orange-500 mt-0.5" />
             <div>
-              <p className="font-medium text-orange-500">Save this key now</p>
+              <p className="font-medium text-orange-500">{S.keyCreatedModal.saveWarningTitle}</p>
               <p className="text-muted-foreground">
-                This is the only time you will see the full API key. Store it securely!
+                {S.keyCreatedModal.saveWarningText}
               </p>
             </div>
           </div>
@@ -76,7 +77,7 @@ export function KeyCreatedModal({ keyData, onClose }: KeyCreatedModalProps) {
 
             {/* API Key */}
             <div>
-              <p className="text-sm font-medium text-muted-foreground mb-2">API Key</p>
+              <p className="text-sm font-medium text-muted-foreground mb-2">{S.keyCreatedModal.apiKeyLabel}</p>
               <div className="flex items-center gap-2">
                 <div className="flex-1 bg-muted p-3 rounded-md font-mono text-sm break-all">
                   {showKey ? keyData.key : maskedKey}
@@ -86,7 +87,7 @@ export function KeyCreatedModal({ keyData, onClose }: KeyCreatedModalProps) {
                     variant="outline"
                     size="icon"
                     onClick={() => setShowKey(!showKey)}
-                    title={showKey ? 'Hide key' : 'Show key'}
+                    title={showKey ? S.common.hideKey : S.common.showKey}
                   >
                     {showKey ? (
                       <EyeOff className="h-4 w-4" />
@@ -98,7 +99,7 @@ export function KeyCreatedModal({ keyData, onClose }: KeyCreatedModalProps) {
                     variant="outline"
                     size="icon"
                     onClick={handleCopy}
-                    title="Copy to clipboard"
+                    title={S.common.copyToClipboard}
                   >
                     {copied ? (
                       <Check className="h-4 w-4 text-green-500" />
@@ -113,7 +114,7 @@ export function KeyCreatedModal({ keyData, onClose }: KeyCreatedModalProps) {
 
           {/* Usage Example */}
           <div>
-            <p className="text-sm font-medium text-muted-foreground mb-2">Usage</p>
+            <p className="text-sm font-medium text-muted-foreground mb-2">{S.keyCreatedModal.usageSection}</p>
             <div className="bg-muted p-3 rounded-md">
               <code className="text-xs break-all">
                 curl -H "Authorization: Bearer {showKey ? keyData.key : maskedKey}" ...
@@ -124,7 +125,7 @@ export function KeyCreatedModal({ keyData, onClose }: KeyCreatedModalProps) {
           {/* Close Button */}
           <div className="flex justify-end pt-2">
             <Button onClick={onClose}>
-              Done
+              {S.common.done}
             </Button>
           </div>
         </CardContent>

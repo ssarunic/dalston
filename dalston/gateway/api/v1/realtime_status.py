@@ -10,6 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from dalston.gateway.error_codes import Err
 from dalston.gateway.dependencies import (
     get_principal,
     get_security_manager,
@@ -138,7 +139,7 @@ async def get_worker_status(
     worker = await session_router.get_worker(instance)
 
     if worker is None:
-        raise HTTPException(status_code=404, detail="Worker not found")
+        raise HTTPException(status_code=404, detail=Err.WORKER_NOT_FOUND)
 
     return WorkerStatusResponse(
         instance=worker.instance,

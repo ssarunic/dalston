@@ -1,4 +1,5 @@
 import { Search, X } from 'lucide-react'
+import { S } from '@/lib/strings'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import type { ModelFilters, ModelStatus } from '@/api/types'
@@ -39,7 +40,7 @@ export function ModelFiltersBar({ filters, onChange }: ModelFiltersBarProps) {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <input
           type="text"
-          placeholder="Search models..."
+          placeholder={S.modelFilters.searchPlaceholder}
           className="w-full h-10 pl-9 pr-3 rounded-md border border-input bg-background text-sm"
           value={filters.search || ''}
           onChange={(e) => onChange({ ...filters, search: e.target.value || undefined })}
@@ -52,10 +53,10 @@ export function ModelFiltersBar({ filters, onChange }: ModelFiltersBarProps) {
         onValueChange={(v) => onChange({ ...filters, stage: v || undefined })}
       >
         <SelectTrigger className="w-[140px]">
-          <SelectValue placeholder="All stages" />
+          <SelectValue placeholder={S.modelFilters.allStages} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">All stages</SelectItem>
+          <SelectItem value="">{S.modelFilters.allStages}</SelectItem>
           {STAGES.map((s) => (
             <SelectItem key={s.value} value={s.value}>
               {s.label}
@@ -70,10 +71,10 @@ export function ModelFiltersBar({ filters, onChange }: ModelFiltersBarProps) {
         onValueChange={(v) => onChange({ ...filters, runtime: v || undefined })}
       >
         <SelectTrigger className="w-[160px]">
-          <SelectValue placeholder="All runtimes" />
+          <SelectValue placeholder={S.modelFilters.allRuntimes} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">All runtimes</SelectItem>
+          <SelectItem value="">{S.modelFilters.allRuntimes}</SelectItem>
           {RUNTIMES.map((r) => (
             <SelectItem key={r.value} value={r.value}>
               {r.label}
@@ -88,10 +89,10 @@ export function ModelFiltersBar({ filters, onChange }: ModelFiltersBarProps) {
         onValueChange={(v) => onChange({ ...filters, status: (v as ModelStatus) || undefined })}
       >
         <SelectTrigger className="w-[150px]">
-          <SelectValue placeholder="All statuses" />
+          <SelectValue placeholder={S.modelFilters.allStatuses} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">All statuses</SelectItem>
+          <SelectItem value="">{S.modelFilters.allStatuses}</SelectItem>
           {STATUSES.map((s) => (
             <SelectItem key={s.value} value={s.value}>
               {s.label}

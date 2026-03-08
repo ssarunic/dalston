@@ -31,6 +31,7 @@ from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_created
 from dalston.common.models import JobStatus
 from dalston.config import Settings
+from dalston.gateway.error_codes import Err
 from dalston.gateway.dependencies import (
     get_audit_service,
     get_db,
@@ -231,30 +232,30 @@ async def create_transcription(
             if not isinstance(parsed_keyterms, list):
                 raise HTTPException(
                     status_code=400,
-                    detail="keyterms must be a JSON array of strings",
+                    detail=Err.KEYTERMS_MUST_BE_ARRAY,
                 )
             if len(parsed_keyterms) > 100:
                 raise HTTPException(
                     status_code=400,
-                    detail="keyterms cannot exceed 100 terms",
+                    detail=Err.KEYTERMS_EXCEED_LIMIT,
                 )
             for term in parsed_keyterms:
                 if not isinstance(term, str):
                     raise HTTPException(
                         status_code=400,
-                        detail="keyterms must contain only strings",
+                        detail=Err.KEYTERMS_MUST_BE_STRINGS,
                     )
                 if len(term) > 50:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Each keyterm must be at most 50 characters, got {len(term)}",
+                        detail=Err.KEYTERM_TOO_LONG.format(length=len(term)),
                     )
             if parsed_keyterms:
                 parameters["vocabulary"] = parsed_keyterms
         except json.JSONDecodeError as e:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid JSON in keyterms: {e}",
+                detail=Err.KEYTERMS_INVALID_JSON.format(error=e),
             ) from e
 
     # Generate job ID upfront so we can upload to the correct S3 path
@@ -319,16 +320,16 @@ async def create_transcription(
     if result.failed:
         raise HTTPException(
             status_code=500,
-            detail=f"Transcription failed: {job.error or 'Unknown error'}",
+            detail=Err.TRANSCRIPTION_FAILED.format(error=job.error or 'Unknown error'),
         )
 
     if result.cancelled:
-        raise HTTPException(status_code=400, detail="Transcription was cancelled")
+        raise HTTPException(status_code=400, detail=Err.TRANSCRIPTION_CANCELLED)
 
     # Timeout
     raise HTTPException(
         status_code=408,
-        detail="Transcription timeout. Use webhook=true for long files.",
+        detail=Err.TRANSCRIPTION_TIMEOUT,
     )
 
 
@@ -364,7 +365,7 @@ async def get_transcript(
         db, transcription_id, principal, security_manager
     )
     if job is None:
-        raise HTTPException(status_code=404, detail="Transcription not found")
+        raise HTTPException(status_code=404, detail=Err.TRANSCRIPTION_NOT_FOUND)
 
     # If not completed, return status
     if job.status != JobStatus.COMPLETED.value:
@@ -503,13 +504,13 @@ async def export_transcript(
         db, transcription_id, principal, security_manager
     )
     if job is None:
-        raise HTTPException(status_code=404, detail="Transcription not found")
+        raise HTTPException(status_code=404, detail=Err.TRANSCRIPTION_NOT_FOUND)
 
     # Check job is completed
     if job.status != JobStatus.COMPLETED.value:
         raise HTTPException(
             status_code=400,
-            detail=f"Transcription not completed. Current status: {job.status}",
+            detail=Err.TRANSCRIPTION_NOT_COMPLETED.format(status=job.status),
         )
 
     # Fetch transcript from S3

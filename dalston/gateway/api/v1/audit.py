@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dalston.gateway.error_codes import Err
 from dalston.gateway.dependencies import (
     get_audit_query_service,
     get_db,
@@ -132,7 +133,7 @@ async def list_audit_events(
             sort=sort,
         )
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid cursor format") from None
+        raise HTTPException(status_code=400, detail=Err.INVALID_CURSOR_FORMAT) from None
 
     return AuditListResponse(
         events=[_dto_to_response(e) for e in result.events],
@@ -176,7 +177,7 @@ async def get_resource_audit_trail(
             cursor=cursor,
         )
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid cursor format") from None
+        raise HTTPException(status_code=400, detail=Err.INVALID_CURSOR_FORMAT) from None
 
     return AuditListResponse(
         events=[_dto_to_response(e) for e in result.events],

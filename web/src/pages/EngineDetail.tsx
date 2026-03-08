@@ -19,6 +19,7 @@ import { BackButton } from '@/components/BackButton'
 import { apiClient } from '@/api/client'
 import { useModelRegistry } from '@/hooks/useModelRegistry'
 import { cn } from '@/lib/utils'
+import { S } from '@/lib/strings'
 import type { Engine, BatchEngine, EngineStatus, ModelStatus } from '@/api/types'
 
 function StatusDot({ status }: { status: 'running' | 'available' | 'unhealthy' }) {
@@ -69,12 +70,12 @@ function CapabilityRow({
         {supported ? (
           <span className="flex items-center gap-1 text-sm text-green-500">
             <CheckCircle className="h-4 w-4" />
-            Supported
+            {S.engineDetail.supported}
           </span>
         ) : (
           <span className="flex items-center gap-1 text-sm text-muted-foreground">
             <XCircle className="h-4 w-4" />
-            Not supported
+            {S.engineDetail.notSupported}
           </span>
         )}
       </div>
@@ -196,7 +197,7 @@ export function EngineDetail() {
       <div className="space-y-6">
         <div className="flex items-center gap-4">
           <BackButton fallbackPath="/engines" />
-          <h1 className="text-2xl font-bold">Engine Not Found</h1>
+          <h1 className="text-2xl font-bold">{S.engineDetail.notFound}</h1>
         </div>
         <Card>
           <CardContent className="py-8">
@@ -205,7 +206,7 @@ export function EngineDetail() {
               <div>
                 <p className="text-lg font-medium">Engine "{decodedEngineId}" not found</p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  The engine may not be running or may have been removed.
+                  {S.engineDetail.notFoundHint}
                 </p>
               </div>
             </div>
@@ -234,9 +235,9 @@ export function EngineDetail() {
               </div>
             </div>
             <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-              Stage: <span className="font-medium">{stage}</span>
+              {S.engineDetail.stageLabel} <span className="font-medium">{stage}</span>
               {engineInfo?.version && (
-                <span className="ml-2">· Version: {engineInfo.version}</span>
+                <span className="ml-2">· {S.engineDetail.versionLabel} {engineInfo.version}</span>
               )}
             </p>
           </div>
@@ -254,29 +255,29 @@ export function EngineDetail() {
           <>
             <MetricCard
               icon={Activity}
-              label="Processing"
+              label={S.engineDetail.processingMetric}
               value={batchEngineInfo.processing}
-              subValue="active tasks"
+              subValue={S.engineDetail.activeTasks}
             />
             <MetricCard
               icon={Clock}
-              label="Queue Depth"
+              label={S.engineDetail.queueDepth}
               value={batchEngineInfo.queue_depth}
-              subValue="waiting"
+              subValue={S.engineDetail.waiting}
             />
           </>
         )}
         {engineInfo?.capabilities.max_audio_duration_s && (
           <MetricCard
             icon={Clock}
-            label="Max Duration"
+            label={S.engineDetail.maxDuration}
             value={formatDuration(engineInfo.capabilities.max_audio_duration_s)}
           />
         )}
         {engineInfo?.capabilities.max_concurrency && (
           <MetricCard
             icon={Zap}
-            label="Max Concurrency"
+            label={S.engineDetail.maxConcurrency}
             value={engineInfo.capabilities.max_concurrency}
           />
         )}
@@ -288,25 +289,25 @@ export function EngineDetail() {
           <CardHeader>
             <CardTitle className="text-base font-medium flex items-center gap-2">
               <Server className="h-4 w-4" />
-              Capabilities
+              {S.engineDetail.capabilities}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-1">
             <CapabilityRow
-              label="Word Timestamps"
+              label={S.engineDetail.wordTimestamps}
               supported={engineInfo.capabilities.supports_word_timestamps}
             />
             <CapabilityRow
-              label="Streaming"
+              label={S.engineDetail.streaming}
               supported={engineInfo.capabilities.supports_streaming}
             />
             <CapabilityRow
-              label="Max Audio Duration"
+              label={S.engineDetail.maxAudioDuration}
               value={formatDuration(engineInfo.capabilities.max_audio_duration_s)}
             />
             {engineInfo.capabilities.max_concurrency && (
               <CapabilityRow
-                label="Max Concurrency"
+                label={S.engineDetail.maxConcurrency}
                 value={engineInfo.capabilities.max_concurrency}
               />
             )}
@@ -320,17 +321,17 @@ export function EngineDetail() {
           <CardHeader>
             <CardTitle className="text-base font-medium flex items-center gap-2">
               <Globe className="h-4 w-4" />
-              Supported Languages
+              {S.engineDetail.supportedLanguages}
             </CardTitle>
           </CardHeader>
           <CardContent>
             {!engineInfo.capabilities.languages ? (
               <p className="text-sm text-muted-foreground">
-                Multilingual — supports automatic language detection and all languages
+                {S.engineDetail.multilingual}
               </p>
             ) : engineInfo.capabilities.languages.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No language information available
+                {S.engineDetail.noLanguageInfo}
               </p>
             ) : (
               <div className="flex flex-wrap gap-2">
@@ -351,13 +352,13 @@ export function EngineDetail() {
           <CardHeader>
             <CardTitle className="text-base font-medium flex items-center gap-2">
               <Box className="h-4 w-4" />
-              Available Models
+              {S.engineDetail.availableModels}
             </CardTitle>
           </CardHeader>
           <CardContent>
             {engineModels.length === 0 ? (
               <p className="text-sm text-muted-foreground italic">
-                No models in registry for this engine
+                {S.engineDetail.noModelsForEngine}
               </p>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
@@ -426,7 +427,7 @@ export function EngineDetail() {
       {engineInfo && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base font-medium">Engine Details</CardTitle>
+            <CardTitle className="text-base font-medium">{S.engineDetail.engineDetails}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-1">
             <CapabilityRow label="Engine ID" value={engineInfo.id} />

@@ -49,6 +49,7 @@ class Err:
     )
     PROVIDE_FILE_OR_URL = "Either 'file' or 'audio_url' must be provided"
     PROVIDE_FILE_OR_URL_NOT_BOTH = "Provide either 'file' or 'audio_url'"
+    UNSUPPORTED_FORMAT = "Unsupported format: {format_str}. Supported formats: {valid_formats}"
     TRANSCRIPTION_CANCELLED = "Transcription was cancelled"
     TRANSCRIPTION_NOT_COMPLETED = "Transcription not completed. Current status: {status}"
     VOCABULARY_EXCEED_LIMIT = "vocabulary cannot exceed 100 terms"

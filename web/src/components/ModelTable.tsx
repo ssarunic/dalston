@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import { S } from '@/lib/strings'
 import type { ModelRegistryEntry } from '@/api/types'
 
 // Format bytes to human-readable string
@@ -52,10 +53,10 @@ const statusColors: Record<string, string> = {
 }
 
 const statusLabels: Record<string, string> = {
-  ready: 'Ready',
-  downloading: 'Downloading',
-  not_downloaded: 'Available',
-  failed: 'Failed',
+  ready: S.modelTable.statusReady,
+  downloading: S.modelTable.statusDownloading,
+  not_downloaded: S.modelTable.statusAvailable,
+  failed: S.modelTable.statusFailed,
 }
 
 interface ModelTableProps {
@@ -110,11 +111,11 @@ export function ModelTable({
           <TableRow>
             <TableHead className="w-8"></TableHead>
             <TableHead>Model</TableHead>
-            <TableHead>Runtime</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Size</TableHead>
-            <TableHead>Capabilities</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
+            <TableHead>{S.modelTable.colRuntime}</TableHead>
+            <TableHead>{S.common.colStatus}</TableHead>
+            <TableHead>{S.modelTable.colSize}</TableHead>
+            <TableHead>{S.modelTable.colCapabilities}</TableHead>
+            <TableHead className="text-right">{S.common.colActions}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -151,11 +152,11 @@ export function ModelTable({
       >
         <Card className="w-full max-w-md mx-4">
           <CardHeader>
-            <CardTitle className="text-destructive">Delete from Registry</CardTitle>
+            <CardTitle className="text-destructive">{S.modelTable.deleteTitle}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              This will remove the model from the registry and delete any downloaded files. You can re-add it from HuggingFace later if needed.
+              {S.modelTable.deleteConfirm}
             </p>
             {purgeConfirm && (
               <div className="bg-muted p-3 rounded-md">
@@ -258,24 +259,24 @@ function ModelTableRow({
             {model.word_timestamps && (
               <Badge variant="outline" className="text-xs">
                 <Clock className="h-3 w-3 mr-1" />
-                word
+                {S.modelTable.capWord}
               </Badge>
             )}
             {!model.word_timestamps && (
               <Badge variant="outline" className="text-xs text-muted-foreground">
                 <Clock className="h-3 w-3 mr-1" />
-                segment
+                {S.modelTable.capSegment}
               </Badge>
             )}
             {model.streaming && (
               <Badge variant="outline" className="text-xs">
-                stream
+                {S.modelTable.capStream}
               </Badge>
             )}
             {!model.supports_cpu && (
               <Badge variant="outline" className="text-xs text-amber-600 border-amber-400">
                 <Zap className="h-3 w-3 mr-1" />
-                GPU Only
+                {S.modelTable.capGpuOnly}
               </Badge>
             )}
           </div>
@@ -290,14 +291,14 @@ function ModelTableRow({
                 className="h-8 w-8"
                 onClick={() => onRemove(model.id)}
                 disabled={isRemoving || isPurging}
-                title="Remove downloaded files"
+                title={S.modelTable.removeDownloaded}
               >
                 {isRemoving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
               </Button>
             )}
             {/* Downloading: show spinner */}
             {model.status === 'downloading' && (
-              <Button variant="ghost" size="icon" className="h-8 w-8" disabled title="Downloading...">
+              <Button variant="ghost" size="icon" className="h-8 w-8" disabled title={S.modelTable.downloading}>
                 <Loader2 className="h-4 w-4 animate-spin" />
               </Button>
             )}
@@ -309,7 +310,7 @@ function ModelTableRow({
                 className="h-8 w-8"
                 onClick={() => onPull(model.id)}
                 disabled={isPulling || isPurging}
-                title="Download model"
+                title={S.modelTable.downloadModel}
               >
                 {isPulling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
               </Button>
@@ -322,7 +323,7 @@ function ModelTableRow({
                 className="h-8 w-8 text-destructive hover:text-destructive"
                 onClick={onPurgeClick}
                 disabled={isPurging || isRemoving}
-                title="Delete from registry"
+                title={S.modelTable.deleteFromRegistry}
               >
                 {isPurging ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
               </Button>
@@ -348,21 +349,21 @@ function ModelExpandedDetails({ model }: { model: ModelRegistryEntry }) {
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 px-2">
       {/* Capabilities */}
       <div className="space-y-2">
-        <h4 className="text-sm font-medium">Capabilities</h4>
+        <h4 className="text-sm font-medium">{S.modelTable.colCapabilities}</h4>
         <div className="space-y-1 text-sm text-muted-foreground">
           <div className="flex items-center gap-2">
             <span className={model.word_timestamps ? 'text-green-500' : ''}>
-              {model.word_timestamps ? 'Word-level timestamps' : 'Segment-level timestamps only'}
+              {model.word_timestamps ? S.modelTable.wordTimestamps : S.modelTable.segmentTimestamps}
             </span>
           </div>
           <div className="flex items-center gap-2">
             <span className={model.punctuation ? 'text-green-500' : ''}>
-              {model.punctuation ? 'Punctuation' : 'No punctuation'}
+              {model.punctuation ? S.modelTable.punctuation : S.modelTable.noPunctuation}
             </span>
           </div>
           <div className="flex items-center gap-2">
             <span className={model.streaming ? 'text-green-500' : ''}>
-              {model.streaming ? 'Streaming support' : 'Batch only'}
+              {model.streaming ? S.modelTable.streamingSupport : S.modelTable.batchOnly}
             </span>
           </div>
         </div>
@@ -370,13 +371,13 @@ function ModelExpandedDetails({ model }: { model: ModelRegistryEntry }) {
 
       {/* Hardware */}
       <div className="space-y-2">
-        <h4 className="text-sm font-medium">Hardware Requirements</h4>
+        <h4 className="text-sm font-medium">{S.modelTable.hardwareTitle}</h4>
         <div className="space-y-1 text-sm text-muted-foreground">
           {model.min_vram_gb && <div>VRAM: {model.min_vram_gb} GB</div>}
           {model.min_ram_gb && <div>RAM: {model.min_ram_gb} GB</div>}
           <div className="flex items-center gap-2">
             <span className={model.supports_cpu ? 'text-green-500' : ''}>
-              {model.supports_cpu ? 'CPU compatible' : 'GPU required'}
+              {model.supports_cpu ? S.modelTable.cpuCompatible : S.modelTable.gpuRequired}
             </span>
           </div>
         </div>
@@ -384,7 +385,7 @@ function ModelExpandedDetails({ model }: { model: ModelRegistryEntry }) {
 
       {/* Languages & Metadata */}
       <div className="space-y-2">
-        <h4 className="text-sm font-medium">Languages & Info</h4>
+        <h4 className="text-sm font-medium">{S.modelTable.languagesAndInfo}</h4>
         <div className="space-y-1 text-sm text-muted-foreground">
           {model.languages && model.languages.length > 0 ? (
             <div className="flex items-start gap-2">
@@ -398,7 +399,7 @@ function ModelExpandedDetails({ model }: { model: ModelRegistryEntry }) {
           ) : (
             <div className="flex items-center gap-2">
               <Globe className="h-4 w-4" />
-              <span>Multilingual</span>
+              <span>{S.modelTable.multilingual}</span>
             </div>
           )}
 
@@ -429,7 +430,7 @@ function ModelExpandedDetails({ model }: { model: ModelRegistryEntry }) {
               className="inline-flex items-center gap-1 text-primary hover:underline pt-1"
             >
               <ExternalLink className="h-3 w-3" />
-              View on HuggingFace
+              {S.modelTable.viewOnHuggingFace}
             </a>
           )}
         </div>

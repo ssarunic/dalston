@@ -25,6 +25,7 @@ from dalston.gateway.models.responses import (
 )
 from dalston.gateway.security.manager import SecurityManager
 from dalston.gateway.security.principal import Principal
+from dalston.gateway.error_codes import Err
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
 
@@ -53,7 +54,7 @@ async def list_job_tasks(
         db, job_id, principal, security_manager
     )
     if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=Err.JOB_NOT_FOUND)
 
     # Tasks are already loaded, just sort them topologically
     tasks = jobs_service._topological_sort_tasks(list(job.tasks)) if job.tasks else []
@@ -107,7 +108,7 @@ async def get_task_artifacts(
     if job is None:
         raise HTTPException(
             status_code=404,
-            detail={"code": "job_not_found", "message": "Job not found"},
+            detail=Err.structured("job_not_found"),
         )
 
     # Fetch task (job access already verified above)
@@ -118,14 +119,14 @@ async def get_task_artifacts(
     if task is None:
         raise HTTPException(
             status_code=404,
-            detail={"code": "task_not_found", "message": "Task not found"},
+            detail=Err.structured("task_not_found"),
         )
 
     # Check if task has started (artifacts only exist after task starts)
     if task.status == "pending":
         raise HTTPException(
             status_code=400,
-            detail={"code": "no_artifacts", "message": "Task has not started yet"},
+            detail=Err.structured("no_artifacts"),
         )
 
     # Fetch artifacts from S3

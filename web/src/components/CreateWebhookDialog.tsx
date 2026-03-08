@@ -3,6 +3,7 @@ import { AlertCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useCreateWebhook } from '@/hooks/useWebhooks'
+import { S } from '@/lib/strings'
 import type { WebhookEndpointCreated } from '@/api/types'
 
 interface CreateWebhookDialogProps {
@@ -14,23 +15,23 @@ interface CreateWebhookDialogProps {
 const AVAILABLE_EVENTS = [
   {
     value: 'transcription.completed',
-    label: 'Transcription Completed',
-    description: 'Triggered when a job finishes successfully',
+    label: S.createWebhookDialog.events.completed.label,
+    description: S.createWebhookDialog.events.completed.description,
   },
   {
     value: 'transcription.failed',
-    label: 'Transcription Failed',
-    description: 'Triggered when a job fails permanently',
+    label: S.createWebhookDialog.events.failed.label,
+    description: S.createWebhookDialog.events.failed.description,
   },
   {
     value: 'transcription.cancelled',
-    label: 'Transcription Cancelled',
-    description: 'Triggered when a job is cancelled by the user',
+    label: S.createWebhookDialog.events.cancelled.label,
+    description: S.createWebhookDialog.events.cancelled.description,
   },
   {
     value: '*',
-    label: 'All Events',
-    description: 'Subscribe to all event types (current and future)',
+    label: S.createWebhookDialog.events.all.label,
+    description: S.createWebhookDialog.events.all.description,
   },
 ]
 
@@ -76,7 +77,7 @@ export function CreateWebhookDialog({ open, onOpenChange, onCreated }: CreateWeb
     setError(null)
 
     if (!url.trim()) {
-      setError('URL is required')
+      setError(S.errors.urlRequired)
       return
     }
 
@@ -84,12 +85,12 @@ export function CreateWebhookDialog({ open, onOpenChange, onCreated }: CreateWeb
     try {
       new URL(url)
     } catch {
-      setError('Invalid URL format')
+      setError(S.errors.invalidUrlFormat)
       return
     }
 
     if (selectedEvents.length === 0) {
-      setError('At least one event is required')
+      setError(S.errors.eventRequired)
       return
     }
 
@@ -108,7 +109,7 @@ export function CreateWebhookDialog({ open, onOpenChange, onCreated }: CreateWeb
       if (err instanceof Error) {
         setError(err.message)
       } else {
-        setError('Failed to create webhook')
+        setError(S.errors.failedToCreateWebhook)
       }
     }
   }
@@ -127,47 +128,47 @@ export function CreateWebhookDialog({ open, onOpenChange, onCreated }: CreateWeb
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <Card className="w-full max-w-lg mx-4">
         <CardHeader>
-          <CardTitle>Create Webhook Endpoint</CardTitle>
+          <CardTitle>{S.createWebhookDialog.title}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* URL */}
             <div className="space-y-2">
               <label htmlFor="webhookUrl" className="text-sm font-medium">
-                URL
+                {S.createWebhookDialog.urlLabel}
               </label>
               <input
                 id="webhookUrl"
                 type="url"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://your-server.com/webhooks/dalston"
+                placeholder={S.createWebhookDialog.urlPlaceholder}
                 className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm"
                 autoFocus
               />
               <p className="text-xs text-muted-foreground">
-                Must be HTTPS in production. Webhook payloads will be POSTed here.
+                {S.createWebhookDialog.urlHint}
               </p>
             </div>
 
             {/* Description (optional) */}
             <div className="space-y-2">
               <label htmlFor="webhookDescription" className="text-sm font-medium">
-                Description (optional)
+                {S.createWebhookDialog.descriptionLabel}
               </label>
               <input
                 id="webhookDescription"
                 type="text"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="e.g., Production notification handler"
+                placeholder={S.createWebhookDialog.descriptionPlaceholder}
                 className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm"
               />
             </div>
 
             {/* Events */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">Events</label>
+              <label className="text-sm font-medium">{S.createWebhookDialog.eventsLabel}</label>
               <div className="space-y-2">
                 {AVAILABLE_EVENTS.map((event) => (
                   <label
@@ -204,10 +205,10 @@ export function CreateWebhookDialog({ open, onOpenChange, onCreated }: CreateWeb
             {/* Actions */}
             <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="outline" onClick={handleClose}>
-                Cancel
+                {S.common.cancel}
               </Button>
               <Button type="submit" disabled={createWebhook.isPending}>
-                {createWebhook.isPending ? 'Creating...' : 'Create Webhook'}
+                {createWebhook.isPending ? S.createWebhookDialog.creating : S.webhooks.createWebhook}
               </Button>
             </div>
           </form>

@@ -31,6 +31,7 @@ from dalston.gateway.services.ingestion import AudioIngestionService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.pii_entity_types import PIIEntityTypeService
 from dalston.gateway.services.rate_limiter import RateLimitResult, RedisRateLimiter
+from dalston.gateway.error_codes import Err
 from dalston.gateway.services.storage import StorageService
 
 if TYPE_CHECKING:
@@ -174,7 +175,7 @@ def get_session_router() -> SessionRouter:
     if session_router is None:
         raise HTTPException(
             status_code=503,
-            detail="Session router not initialized",
+            detail=Err.SESSION_ROUTER_NOT_INITIALIZED,
         )
     return session_router
 
@@ -464,7 +465,7 @@ async def check_request_rate_limit(
     if not result.allowed:
         raise HTTPException(
             status_code=429,
-            detail="Rate limit exceeded",
+            detail=Err.RATE_LIMIT_EXCEEDED,
             headers={
                 "Retry-After": str(result.reset_seconds),
                 "X-RateLimit-Limit": str(result.limit),
@@ -486,7 +487,7 @@ async def check_concurrent_jobs_limit(
     if not result.allowed:
         raise HTTPException(
             status_code=429,
-            detail=f"Concurrent job limit exceeded ({result.limit} max)",
+            detail=Err.CONCURRENT_JOB_LIMIT.format(limit=result.limit),
             headers={
                 "X-RateLimit-Limit": str(result.limit),
                 "X-RateLimit-Remaining": str(result.remaining),
@@ -507,7 +508,7 @@ async def check_concurrent_sessions_limit(
     if not result.allowed:
         raise HTTPException(
             status_code=429,
-            detail=f"Concurrent session limit exceeded ({result.limit} max)",
+            detail=Err.CONCURRENT_SESSION_LIMIT.format(limit=result.limit),
             headers={
                 "X-RateLimit-Limit": str(result.limit),
                 "X-RateLimit-Remaining": str(result.remaining),
@@ -535,7 +536,7 @@ async def get_principal_with_job_rate_limit(
     if not rate_result.allowed:
         raise HTTPException(
             status_code=429,
-            detail="Rate limit exceeded",
+            detail=Err.RATE_LIMIT_EXCEEDED,
             headers={
                 "Retry-After": str(rate_result.reset_seconds),
                 "X-RateLimit-Limit": str(rate_result.limit),
@@ -548,7 +549,7 @@ async def get_principal_with_job_rate_limit(
     if not jobs_result.allowed:
         raise HTTPException(
             status_code=429,
-            detail=f"Concurrent job limit exceeded ({jobs_result.limit} max)",
+            detail=Err.CONCURRENT_JOB_LIMIT.format(limit=jobs_result.limit),
             headers={
                 "X-RateLimit-Limit": str(jobs_result.limit),
                 "X-RateLimit-Remaining": str(jobs_result.remaining),

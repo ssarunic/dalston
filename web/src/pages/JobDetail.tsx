@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect, useCallback } from 'react'
+import { S } from '@/lib/strings'
 import { useParams } from 'react-router-dom'
 import {
   Globe,
@@ -177,13 +178,13 @@ function FailureDetailsCard({ error }: { error: string }) {
         <div className="flex items-start gap-3">
           <AlertCircle className="h-5 w-5 text-red-400 mt-0.5" />
           <div className="min-w-0 flex-1 space-y-3">
-            <p className="font-medium text-red-400">Job Failed</p>
+            <p className="font-medium text-red-400">{S.jobDetail.jobFailed}</p>
             <div className="grid gap-2 md:grid-cols-2">
-              <ErrorField label="Error" value={parsed.error} />
-              <ErrorField label="Message" value={parsed.message} />
-              <ErrorField label="Engine" value={parsed.engine} />
-              <ErrorField label="Stage" value={parsed.stage} />
-              <ErrorField label="Suggestion" value={parsed.suggestion} />
+              <ErrorField label={S.jobDetail.error} value={parsed.error} />
+              <ErrorField label={S.jobDetail.message} value={parsed.message} />
+              <ErrorField label={S.jobDetail.engine} value={parsed.engine} />
+              <ErrorField label={S.jobDetail.stage} value={parsed.stage} />
+              <ErrorField label={S.jobDetail.suggestion} value={parsed.suggestion} />
             </div>
             {parsed.rawJson && (
               <div className="space-y-2">
@@ -194,7 +195,7 @@ function FailureDetailsCard({ error }: { error: string }) {
                   onClick={() => setShowRawJson((prev) => !prev)}
                   className="border-red-500/40 bg-transparent text-red-200 hover:bg-red-500/15"
                 >
-                  {showRawJson ? 'Hide raw JSON' : 'View raw JSON'}
+                  {showRawJson ? S.jobDetail.hideRawJson : S.jobDetail.viewRawJson}
                 </Button>
                 {showRawJson && (
                   <pre className="max-h-80 overflow-auto rounded-md border border-red-500/30 bg-black/30 p-3 text-xs text-red-100 whitespace-pre-wrap break-all">
@@ -250,8 +251,8 @@ function RetentionCard({ retention }: { retention?: RetentionInfo }) {
 
   // Calculate the original retention period text
   const getRetentionPeriod = (): string => {
-    if (mode === 'keep') return 'Permanent'
-    if (mode === 'none') return 'Transient'
+    if (mode === 'keep') return S.jobDetail.permanent
+    if (mode === 'none') return S.jobDetail.transient
     if (hours) {
       const days = Math.floor(hours / 24)
       if (days > 0) {
@@ -259,7 +260,7 @@ function RetentionCard({ retention }: { retention?: RetentionInfo }) {
       }
       return `${hours}h`
     }
-    return 'Default'
+    return S.jobDetail.default
   }
 
   // Calculate remaining time until purge
@@ -269,18 +270,18 @@ function RetentionCard({ retention }: { retention?: RetentionInfo }) {
     const now = new Date()
     const diffMs = purgeDate.getTime() - now.getTime()
 
-    if (diffMs <= 0) return 'Pending purge'
+    if (diffMs <= 0) return S.jobDetail.pendingPurge
 
     const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
     const diffDays = Math.floor(diffHours / 24)
 
     if (diffDays > 0) {
-      return `${diffDays}d ${diffHours % 24}h until purge`
+      return `${diffDays}d ${diffHours % 24}h ${S.jobDetail.untilPurge}`
     } else if (diffHours > 0) {
-      return `${diffHours}h until purge`
+      return `${diffHours}h ${S.jobDetail.untilPurge}`
     }
     const diffMins = Math.floor(diffMs / (1000 * 60))
-    return `${diffMins}m until purge`
+    return `${diffMins}m ${S.jobDetail.untilPurge}`
   }
 
   let statusText: string
@@ -289,12 +290,12 @@ function RetentionCard({ retention }: { retention?: RetentionInfo }) {
   if (purged_at) {
     // Show original retention period with "Purged" as subtitle
     statusText = getRetentionPeriod()
-    subtitleText = 'Purged'
+    subtitleText = S.jobDetail.purged
   } else if (mode === 'keep') {
-    statusText = 'Permanent'
+    statusText = S.jobDetail.permanent
   } else if (mode === 'none') {
-    statusText = 'Transient'
-    subtitleText = 'No storage'
+    statusText = S.jobDetail.transient
+    subtitleText = S.jobDetail.noStorage
   } else {
     // Show original retention period as main text
     statusText = getRetentionPeriod()
@@ -303,7 +304,7 @@ function RetentionCard({ retention }: { retention?: RetentionInfo }) {
     if (remaining) {
       subtitleText = remaining
     } else if (hours) {
-      subtitleText = 'after completion'
+      subtitleText = S.jobDetail.afterCompletion
     }
   }
 
@@ -346,12 +347,12 @@ function AuditTrailSection({ events, isLoading }: { events?: AuditEvent[]; isLoa
         <CardHeader>
           <CardTitle className="text-base font-medium flex items-center gap-2">
             <ScrollText className="h-4 w-4" />
-            Audit Trail
+            {S.jobDetail.auditTrail}
           </CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground text-center py-4">
-            No audit events recorded
+            {S.jobDetail.noAuditEvents}
           </p>
         </CardContent>
       </Card>
@@ -363,7 +364,7 @@ function AuditTrailSection({ events, isLoading }: { events?: AuditEvent[]; isLoa
       <CardHeader>
         <CardTitle className="text-base font-medium flex items-center gap-2">
           <ScrollText className="h-4 w-4" />
-          Audit Trail
+          {S.jobDetail.auditTrail}
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -518,8 +519,8 @@ export function JobDetail() {
     return (
       <div className="flex flex-col items-center justify-center py-12">
         <AlertCircle className="h-12 w-12 text-red-400 mb-4" />
-        <p className="text-red-400">Error loading job</p>
-        <BackButton fallbackPath="/jobs" variant="outline" label="Back to Jobs" className="mt-4" />
+        <p className="text-red-400">{S.jobDetail.errorLoading}</p>
+        <BackButton fallbackPath="/jobs" variant="outline" label={S.jobDetail.backToJobs} className="mt-4" />
       </div>
     )
   }
@@ -527,8 +528,8 @@ export function JobDetail() {
   if (!job) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
-        <p className="text-muted-foreground">Job not found</p>
-        <BackButton fallbackPath="/jobs" variant="outline" label="Back to Jobs" className="mt-4" />
+        <p className="text-muted-foreground">{S.jobDetail.notFound}</p>
+        <BackButton fallbackPath="/jobs" variant="outline" label={S.jobDetail.backToJobs} className="mt-4" />
       </div>
     )
   }
@@ -607,7 +608,7 @@ export function JobDetail() {
       {/* Task Pipeline */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base font-medium">Pipeline</CardTitle>
+          <CardTitle className="text-base font-medium">{S.jobDetail.pipeline}</CardTitle>
         </CardHeader>
         <CardContent>
           {tasksData?.tasks && tasksData.tasks.length > 0 && jobId ? (
@@ -628,10 +629,10 @@ export function JobDetail() {
               )}
               <p className="text-sm text-muted-foreground">
                 {job.status === 'pending'
-                  ? 'Preparing pipeline — selecting engines and building task graph...'
+                  ? S.jobDetail.preparingPipeline
                   : job.current_stage
-                    ? `Current stage: ${job.current_stage}`
-                    : 'Loading pipeline...'}
+                    ? `${S.jobDetail.currentStage} ${job.current_stage}`
+                    : S.jobDetail.loadingPipeline}
               </p>
             </div>
           )}
@@ -643,7 +644,7 @@ export function JobDetail() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base font-medium">
-              {job.status === 'completed' ? 'Transcript' : 'Audio'}
+              {job.status === 'completed' ? S.jobDetail.transcript : S.jobDetail.audio}
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
@@ -663,8 +664,8 @@ export function JobDetail() {
               exportConfig={{ type: 'job', id: job.id }}
               emptyMessage={
                 job.status === 'completed'
-                  ? 'No transcript available'
-                  : 'Transcript not available for this job status'
+                  ? S.jobDetail.noTranscript
+                  : S.jobDetail.transcriptNotAvailable
               }
               piiConfig={job.pii?.enabled ? {
                 enabled: true,

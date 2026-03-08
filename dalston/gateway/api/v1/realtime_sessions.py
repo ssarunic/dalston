@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.s3 import get_s3_client
+from dalston.gateway.error_codes import Err
 from dalston.common.timeouts import S3_PRESIGNED_URL_EXPIRY_SECONDS
 from dalston.config import get_settings
 from dalston.db.models import RealtimeSessionModel
@@ -136,14 +137,14 @@ async def list_realtime_sessions(
             since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
         except ValueError:
             raise HTTPException(
-                status_code=400, detail="Invalid 'since' datetime format"
+                status_code=400, detail=Err.INVALID_DATETIME_SINCE
             ) from None
     if until:
         try:
             until_dt = datetime.fromisoformat(until.replace("Z", "+00:00"))
         except ValueError:
             raise HTTPException(
-                status_code=400, detail="Invalid 'until' datetime format"
+                status_code=400, detail=Err.INVALID_DATETIME_UNTIL
             ) from None
 
     settings = get_settings()
@@ -163,7 +164,7 @@ async def list_realtime_sessions(
     except ValueError as e:
         if "cursor" in str(e).lower():
             raise HTTPException(
-                status_code=400, detail="Invalid cursor format"
+                status_code=400, detail=Err.INVALID_CURSOR_FORMAT
             ) from None
         raise
 
@@ -216,7 +217,7 @@ async def get_realtime_session(
     )
 
     if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail=Err.SESSION_NOT_FOUND)
 
     return SessionDetail(
         id=str(session.id),
@@ -272,12 +273,12 @@ async def delete_realtime_session(
             session_id, principal, security_manager
         )
     except ResourceNotFoundError:
-        raise HTTPException(status_code=404, detail="Session not found") from None
+        raise HTTPException(status_code=404, detail=Err.SESSION_NOT_FOUND) from None
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
 
     if not deleted:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail=Err.SESSION_NOT_FOUND)
 
     return {"deleted": True, "session_id": session_id}
 
@@ -306,16 +307,16 @@ async def get_session_transcript(
     )
 
     if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail=Err.SESSION_NOT_FOUND)
 
     if not session.transcript_uri:
-        raise HTTPException(status_code=404, detail="Transcript not available")
+        raise HTTPException(status_code=404, detail=Err.TRANSCRIPT_NOT_AVAILABLE)
 
     # Parse S3 URI and fetch transcript
     try:
         bucket, key = storage.parse_s3_uri(session.transcript_uri)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Transcript not found") from None
+        raise HTTPException(status_code=404, detail=Err.TRANSCRIPT_NOT_FOUND) from None
 
     async with get_s3_client(settings) as s3:
         try:
@@ -332,7 +333,7 @@ async def get_session_transcript(
                 error=str(e),
             )
             raise HTTPException(
-                status_code=404, detail="Transcript not found"
+                status_code=404, detail=Err.TRANSCRIPT_NOT_FOUND
             ) from None
 
 
@@ -411,16 +412,16 @@ async def export_session_transcript(
     )
 
     if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail=Err.SESSION_NOT_FOUND)
 
     if not session.transcript_uri:
-        raise HTTPException(status_code=404, detail="Transcript not available")
+        raise HTTPException(status_code=404, detail=Err.TRANSCRIPT_NOT_AVAILABLE)
 
     # Parse S3 URI and fetch transcript
     try:
         bucket, key = storage.parse_s3_uri(session.transcript_uri)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Transcript not found") from None
+        raise HTTPException(status_code=404, detail=Err.TRANSCRIPT_NOT_FOUND) from None
 
     async with get_s3_client(settings) as s3:
         try:
@@ -436,7 +437,7 @@ async def export_session_transcript(
                 error=str(e),
             )
             raise HTTPException(
-                status_code=404, detail="Transcript not found"
+                status_code=404, detail=Err.TRANSCRIPT_NOT_FOUND
             ) from None
 
     # Normalize realtime transcript to batch format for export
@@ -475,10 +476,10 @@ async def get_session_audio(
     )
 
     if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail=Err.SESSION_NOT_FOUND)
 
     if not session.audio_uri:
-        raise HTTPException(status_code=404, detail="Audio not available")
+        raise HTTPException(status_code=404, detail=Err.AUDIO_NOT_AVAILABLE)
 
     # Generate presigned URL from S3 URI
     try:
@@ -489,7 +490,7 @@ async def get_session_audio(
         )
         return {"url": url, "expires_in": S3_PRESIGNED_URL_EXPIRY_SECONDS}
     except ValueError:
-        raise HTTPException(status_code=404, detail="Invalid audio URI") from None
+        raise HTTPException(status_code=404, detail=Err.INVALID_AUDIO_URI) from None
     except Exception as e:
         logger.warning(
             "audio_presigned_url_failed",
@@ -497,4 +498,4 @@ async def get_session_audio(
             uri=session.audio_uri,
             error=str(e),
         )
-        raise HTTPException(status_code=404, detail="Audio not found") from None
+        raise HTTPException(status_code=404, detail=Err.AUDIO_NOT_FOUND) from None

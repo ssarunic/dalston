@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.gateway.dependencies import get_db, get_principal, get_security_manager
+from dalston.gateway.error_codes import Err
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.model_registry import (
@@ -314,7 +315,7 @@ async def update_model(
     except ModelNotFoundError:
         raise HTTPException(
             status_code=404,
-            detail=f"Model not found in registry: {model_id}",
+            detail=Err.MODEL_NOT_FOUND.format(model_id=model_id),
         ) from None
 
     return ModelRegistryResponse(
@@ -379,7 +380,7 @@ async def pull_model(
     except ModelNotFoundError:
         raise HTTPException(
             status_code=404,
-            detail=f"Model not found in registry: {model_id}",
+            detail=Err.MODEL_NOT_FOUND.format(model_id=model_id),
         ) from None
 
     if model.status == "ready" and not force:
@@ -455,7 +456,7 @@ async def remove_model(
     except ModelNotFoundError:
         raise HTTPException(
             status_code=404,
-            detail=f"Model not found in registry: {model_id}",
+            detail=Err.MODEL_NOT_FOUND.format(model_id=model_id),
         ) from None
     except ModelInUseError as e:
         raise HTTPException(
@@ -571,7 +572,7 @@ async def resolve_hf_model(
     if metadata is None:
         raise HTTPException(
             status_code=404,
-            detail=f"Model not found on HuggingFace Hub: {request.model_id}",
+            detail=Err.MODEL_NOT_ON_HF.format(model_id=request.model_id),
         )
 
     # Auto-register if requested and runtime was resolved
@@ -673,7 +674,7 @@ async def get_model(
     except ModelNotFoundError:
         raise HTTPException(
             status_code=404,
-            detail=f"Model not found: {model_id}. Use GET /v1/models to see available models.",
+            detail=Err.MODEL_NOT_FOUND_HINT.format(model_id=model_id),
         ) from None
 
     return ModelRegistryResponse(
