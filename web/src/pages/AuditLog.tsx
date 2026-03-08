@@ -314,21 +314,21 @@ export function AuditLog() {
               {hasActiveFilters && (
                 <Button variant="ghost" size="sm" onClick={clearFilters}>
                   <X className="h-4 w-4 mr-1" />
-                  Clear
+                  {S.common.clear}
                 </Button>
               )}
             </div>
             <div className="grid gap-4 md:grid-cols-7">
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  Resource Type
+                  {S.auditLog.resourceType}
                 </label>
                 <Select
                   value={filters.resource_type || ''}
                   onValueChange={(v) => handleFilterChange('resource_type', v)}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="All Resources" />
+                    <SelectValue placeholder={S.auditLog.allResources} />
                   </SelectTrigger>
                   <SelectContent>
                     {RESOURCE_TYPES.map((type) => (
@@ -341,11 +341,11 @@ export function AuditLog() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  Action
+                  {S.auditLog.action}
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g., job.created"
+                  placeholder={S.auditLog.actionPlaceholder}
                   value={filters.action || ''}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFilterChange('action', e.target.value)}
                   className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm h-10"
@@ -353,11 +353,11 @@ export function AuditLog() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  Actor ID
+                  {S.auditLog.actorId}
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g., dk_abc1234"
+                  placeholder={S.auditLog.actorPlaceholder}
                   value={filters.actor_id || ''}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFilterChange('actor_id', e.target.value)}
                   className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm h-10"
@@ -365,7 +365,7 @@ export function AuditLog() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  Since
+                  {S.auditLog.since}
                 </label>
                 <input
                   ref={sinceRef}
@@ -377,7 +377,7 @@ export function AuditLog() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  Until
+                  {S.auditLog.until}
                 </label>
                 <input
                   ref={untilRef}
@@ -389,7 +389,7 @@ export function AuditLog() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  Sort
+                  {S.auditLog.sort}
                 </label>
                 <Select value={sort} onValueChange={handleSortChange}>
                   <SelectTrigger>
@@ -406,7 +406,7 @@ export function AuditLog() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  Rows per page
+                  {S.auditLog.rowsPerPage}
                 </label>
                 <Select value={String(limit)} onValueChange={handleLimitChange}>
                   <SelectTrigger>
