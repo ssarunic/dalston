@@ -20,6 +20,7 @@ from dalston.orchestrator.lite_capabilities import (
     resolve_profile,
     validate_request,
 )
+from dalston.orchestrator.lite_messages import LiteMsg
 
 logger = structlog.get_logger()
 
@@ -313,7 +314,7 @@ def build_pipeline(profile: str = DEFAULT_PROFILE) -> LitePipeline:
     """
     settings = get_settings()
     if settings.runtime_mode != "lite":
-        raise RuntimeError("Lite pipeline is only available in DALSTON_MODE=lite")
+        raise RuntimeError(LiteMsg.LITE_MODE_REQUIRED)
     return LitePipeline(
         LocalFilesystemArtifactStoreAdapter(settings.lite_artifacts_dir),
         profile=profile,
@@ -332,7 +333,7 @@ def build_default_pipeline() -> LitePipeline:
 async def orchestrator_loop() -> None:
     settings = get_settings()
     if settings.runtime_mode != "lite":
-        raise RuntimeError("lite_main can only run in DALSTON_MODE=lite")
+        raise RuntimeError(LiteMsg.LITE_MAIN_MODE_REQUIRED)
     # Deferred to avoid a circular import: dalston.db.session imports Settings
     # indirectly via dalston.config, which is not fully initialised at the
     # time this module is first imported.

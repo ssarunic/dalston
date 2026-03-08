@@ -28,6 +28,7 @@ from dalston_cli.bootstrap.server_manager import (
     ensure_local_server_ready,
 )
 from dalston_cli.main import state
+from dalston_cli.messages import CLIMsg
 from dalston_cli.output import (
     error_console,
     output_job_created,
@@ -63,20 +64,14 @@ def _assert_prerequisites_when_bootstrap_disabled(
         health = client.health()
     except Exception as exc:
         raise ServerBootstrapError(
-            "Local server is not reachable while DALSTON_BOOTSTRAP=false.",
-            remediation=(
-                "Start the server manually or set DALSTON_BOOTSTRAP=true for "
-                "automatic local startup."
-            ),
+            CLIMsg.SERVER_NOT_REACHABLE,
+            remediation=CLIMsg.SERVER_NOT_REACHABLE_REMEDIATION,
         ) from exc
 
     if getattr(health, "status", "") != "healthy":
         raise ServerBootstrapError(
-            "Local server is not healthy while DALSTON_BOOTSTRAP=false.",
-            remediation=(
-                "Run `dalston status` for diagnostics, or set DALSTON_BOOTSTRAP=true "
-                "for automatic recovery."
-            ),
+            CLIMsg.SERVER_NOT_HEALTHY,
+            remediation=CLIMsg.SERVER_NOT_HEALTHY_REMEDIATION,
         )
 
     if model_id.strip().lower() == "auto":
@@ -91,11 +86,8 @@ def _assert_prerequisites_when_bootstrap_disabled(
     if model_status.status != "ready":
         error_detail = f": {model_status.error}" if model_status.error else ""
         raise ModelBootstrapError(
-            f"Model '{model_id}' is not ready while DALSTON_BOOTSTRAP=false{error_detail}",
-            remediation=(
-                f"Run `dalston models pull {model_id}` and retry, or set "
-                "DALSTON_BOOTSTRAP=true."
-            ),
+            CLIMsg.MODEL_NOT_READY.format(model_id=model_id, error_detail=error_detail),
+            remediation=CLIMsg.MODEL_NOT_READY_REMEDIATION.format(model_id=model_id),
         )
 
 
@@ -335,14 +327,10 @@ def transcribe(
 
     # Validate: must provide either files or url, not both or neither
     if not files and not url:
-        error_console.print(
-            "[red]Error:[/red] Either provide audio files or --url, not neither."
-        )
+        error_console.print(CLIMsg.ERR_NO_INPUT)
         raise typer.Exit(code=1)
     if files and url:
-        error_console.print(
-            "[red]Error:[/red] Provide either audio files or --url, not both."
-        )
+        error_console.print(CLIMsg.ERR_FILES_AND_URL)
         raise typer.Exit(code=1)
 
     # Validate lite profile name client-side (fail fast before network request).
@@ -353,7 +341,7 @@ def transcribe(
 
             resolve_profile(profile)
         except Exception as exc:
-            error_console.print(f"[red]Error:[/red] Invalid lite profile: {exc}")
+            error_console.print(CLIMsg.ERR_INVALID_LITE_PROFILE.format(error=exc))
             raise typer.Exit(code=1) from None
 
     bootstrap_settings = load_bootstrap_settings(server_url=client.base_url)
@@ -366,7 +354,7 @@ def transcribe(
             _emit_bootstrap_step(
                 quiet=quiet,
                 json_output=json_output,
-                message="Bootstrap: preflight checks",
+                message=CLIMsg.BOOTSTRAP_PREFLIGHT,
             )
             run_preflight(
                 files=list(files or []),
@@ -377,7 +365,7 @@ def transcribe(
                 _emit_bootstrap_step(
                     quiet=quiet,
                     json_output=json_output,
-                    message="Bootstrap: disabled, validating manual prerequisites",
+                    message=CLIMsg.BOOTSTRAP_DISABLED_VALIDATING,
                 )
                 _assert_prerequisites_when_bootstrap_disabled(
                     client=client,
@@ -387,7 +375,7 @@ def transcribe(
                 _emit_bootstrap_step(
                     quiet=quiet,
                     json_output=json_output,
-                    message="Bootstrap: ensuring local server",
+                    message=CLIMsg.BOOTSTRAP_ENSURING_SERVER,
                 )
                 server_ready = ensure_local_server_ready(
                     target_url=client.base_url,
@@ -404,13 +392,13 @@ def transcribe(
                     _emit_bootstrap_step(
                         quiet=quiet,
                         json_output=json_output,
-                        message="Bootstrap: using server-side model auto-selection",
+                        message=CLIMsg.BOOTSTRAP_SERVER_SIDE_AUTO,
                     )
                 else:
                     _emit_bootstrap_step(
                         quiet=quiet,
                         json_output=json_output,
-                        message=f"Bootstrap: ensuring model '{effective_model}'",
+                        message=CLIMsg.BOOTSTRAP_ENSURING_MODEL.format(model=effective_model),
                     )
                     ensure_model_ready(
                         base_url=client.base_url,
@@ -419,10 +407,10 @@ def transcribe(
                         timeout_seconds=bootstrap_settings.model_ensure_timeout_seconds,
                     )
     except (PreflightError, ServerBootstrapError, ModelBootstrapError) as exc:
-        error_console.print(f"[red]Bootstrap failed:[/red] {exc}")
+        error_console.print(CLIMsg.BOOTSTRAP_FAILED.format(error=exc))
         remediation = getattr(exc, "remediation", None)
         if remediation:
-            error_console.print(f"[yellow]How to fix:[/yellow] {remediation}")
+            error_console.print(CLIMsg.BOOTSTRAP_HOW_TO_FIX.format(remediation=remediation))
         raise typer.Exit(code=1) from None
 
     # Map speaker detection string to enum
@@ -474,9 +462,9 @@ def transcribe(
     for file_path, audio_url in inputs:
         if not quiet and not json_output:
             if file_path:
-                error_console.print(f"Submitting: {file_path}")
+                error_console.print(CLIMsg.SUBMITTING_FILE.format(file_path=file_path))
             else:
-                error_console.print(f"Submitting URL: {audio_url[:60]}...")
+                error_console.print(CLIMsg.SUBMITTING_URL.format(url=audio_url[:60]))
 
         try:
             # Submit job
@@ -508,7 +496,7 @@ def transcribe(
 
             if result.status.value == "failed":
                 error_console.print(
-                    f"[red]Error:[/red] Transcription failed: {result.error or 'Unknown error'}"
+                    CLIMsg.ERR_TRANSCRIPTION_FAILED.format(error=result.error or "Unknown error")
                 )
                 raise typer.Exit(code=1)
 
@@ -530,5 +518,5 @@ def transcribe(
             raise
         except Exception as e:
             source = file_path or audio_url
-            error_console.print(f"[red]Error:[/red] Error processing {source}: {e}")
+            error_console.print(CLIMsg.ERR_PROCESSING.format(source=source, error=e))
             raise typer.Exit(code=1) from e

@@ -302,7 +302,7 @@ async def create_transcription(
     if openai_mode and len(ingested.content) > OPENAI_MAX_FILE_SIZE:
         raise_openai_error(
             400,
-            f"File size exceeds 25MB limit ({len(ingested.content) / 1024 / 1024:.1f}MB)",
+            Err.OPENAI_FILE_TOO_LARGE.format(size_mb=len(ingested.content) / 1024 / 1024),
             param="file",
             code="file_too_large",
         )
@@ -312,8 +312,7 @@ async def create_transcription(
         if openai_mode:
             raise_openai_error(
                 400,
-                f"per_channel speaker detection requires stereo audio, "
-                f"but file has {ingested.metadata.channels} channel(s).",
+                Err.OPENAI_PER_CHANNEL_REQUIRES_STEREO.format(channels=ingested.metadata.channels),
                 param="file",
                 code="invalid_audio_channels",
             )
@@ -545,7 +544,7 @@ async def create_transcription(
             if openai_mode:
                 raise_openai_error(
                     500,
-                    f"Transcription failed: {job.error or 'Unknown error'}",
+                    Err.TRANSCRIPTION_FAILED.format(error=job.error or "Unknown error"),
                     error_type="server_error",
                     code="processing_failed",
                 )
@@ -567,7 +566,7 @@ async def create_transcription(
         if transcript is None:
             raise_openai_error(
                 500,
-                "Transcription completed but transcript could not be loaded.",
+                Err.TRANSCRIPT_LOAD_FAILED,
                 error_type="server_error",
                 code="processing_failed",
             )
@@ -604,7 +603,7 @@ async def create_transcription(
     if result.failed:
         raise_openai_error(
             500,
-            f"Transcription failed: {job.error or 'Unknown error'}",
+            Err.TRANSCRIPTION_FAILED.format(error=job.error or "Unknown error"),
             error_type="server_error",
             code="processing_failed",
         )
@@ -612,14 +611,14 @@ async def create_transcription(
     if result.cancelled:
         raise_openai_error(
             400,
-            "Transcription was cancelled",
+            Err.TRANSCRIPTION_CANCELLED,
             code="cancelled",
         )
 
     # Timeout
     raise_openai_error(
         408,
-        "Transcription timeout. The audio file may be too long.",
+        Err.OPENAI_TRANSCRIPTION_TIMEOUT,
         error_type="timeout_error",
         code="timeout",
     )

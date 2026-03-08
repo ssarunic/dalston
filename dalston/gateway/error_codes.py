@@ -49,6 +49,17 @@ class Err:
     )
     PROVIDE_FILE_OR_URL = "Either 'file' or 'audio_url' must be provided"
     PROVIDE_FILE_OR_URL_NOT_BOTH = "Provide either 'file' or 'audio_url'"
+    OPENAI_FILE_TOO_LARGE = "File size exceeds 25MB limit ({size_mb:.1f}MB)"
+    OPENAI_PER_CHANNEL_REQUIRES_STEREO = (
+        "per_channel speaker detection requires stereo audio, "
+        "but file has {channels} channel(s)."
+    )
+    OPENAI_TRANSCRIPTION_TIMEOUT = (
+        "Transcription timeout. The audio file may be too long."
+    )
+    TRANSCRIPT_LOAD_FAILED = (
+        "Transcription completed but transcript could not be loaded."
+    )
     UNSUPPORTED_FORMAT = "Unsupported format: {format_str}. Supported formats: {valid_formats}"
     TRANSCRIPTION_CANCELLED = "Transcription was cancelled"
     TRANSCRIPTION_NOT_COMPLETED = "Transcription not completed. Current status: {status}"
