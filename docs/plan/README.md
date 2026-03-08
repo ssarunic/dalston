@@ -14,7 +14,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 
 ## Status Overview
 
-### Completed (25)
+### Completed (26)
 
 | # | Milestone | Completed |
 |---|-----------|-----------|
@@ -43,6 +43,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M55](milestones/M55-non-transcribe-runtime-model-management-clean-cut.md) | Non-Transcribe Runtime Model Management (Clean-Cut) | 2026-03-06 |
 | [M56](milestones/M56-lite-mode-infra-backends-clean-cut.md) | Lite Mode Infra Backends (Clean-Cut) | 2026-03-06 |
 | [M57](milestones/M57-ghost-server-zero-config-cli-bootstrap.md) | Ghost Server + Zero-Config CLI Bootstrap (Clean-Cut) | 2026-03-06 |
+| [M57.1](milestones/M57-1-lite-sqlite-migration-track-clean-cut.md) | Lite SQLite Migration Track and Schema Compatibility (Clean-Cut) | 2026-03-08 |
 
 ### In Progress (8)
 
@@ -57,12 +58,11 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Audio/transcript S3 storage working; session resume pending |
 
-### Not Started (5)
+### Not Started (4)
 
 | # | Milestone | Goal |
 |---|-----------|------|
 | [M9](milestones/M09-enrichment.md) | Enrichment | Emotions, events, LLM cleanup |
-| [M57.1](milestones/M57-1-lite-sqlite-migration-track-clean-cut.md) | Lite SQLite Migration Track and Schema Compatibility (Clean-Cut) | Versioned lite schema migrations, legacy DB upgrades, migration-gated startup reliability, plus targeted M57 carry-forward hardening closures |
 | [M58](milestones/M58-lite-pipeline-expansion-capability-parity.md) | Lite Pipeline Expansion and Capability Parity (Clean-Cut) | Expand lite-mode profiles/features with explicit capability matrix and deterministic unsupported-feature behavior |
 | [M59](milestones/M59-runtime-isolation-profiles-clean-cut.md) | Runtime Isolation Profiles (In-Proc / Venv / Container, Clean-Cut) | Profile-based runtime isolation to handle incompatible dependencies under one control plane |
 | [M60](milestones/M60-one-line-distribution-packaging-clean-cut.md) | One-Line Distribution and Packaging (Clean-Cut) | Cross-platform distribution channels and install/release pipeline for zero-config onboarding |
