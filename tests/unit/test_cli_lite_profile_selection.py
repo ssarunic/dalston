@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -11,12 +12,18 @@ from typer.testing import CliRunner
 
 runner = CliRunner()
 
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[mGKH]")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_ESCAPE.sub("", text)
+
 
 class TestTranscribeHelpIncludesProfile:
     def test_profile_option_in_help(self) -> None:
         result = runner.invoke(app, ["transcribe", "--help"])
         assert result.exit_code == 0
-        assert "--profile" in result.output
+        assert "--profile" in _strip_ansi(result.output)
 
     def test_profile_help_mentions_valid_values(self) -> None:
         result = runner.invoke(app, ["transcribe", "--help"])
