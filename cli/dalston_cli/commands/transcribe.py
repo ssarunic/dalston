@@ -470,6 +470,9 @@ def transcribe(
             if file_path:
                 error_console.print(CLIMsg.SUBMITTING_FILE.format(file_path=file_path))
             else:
+                assert (
+                    audio_url is not None
+                )  # loop invariant: (None, url) or (path, None)
                 error_console.print(CLIMsg.SUBMITTING_URL.format(url=audio_url[:60]))
 
         try:
@@ -511,6 +514,9 @@ def transcribe(
             # Determine output path for this file
             file_output = output_path
             if output_is_dir and file_path:
+                assert (
+                    output is not None
+                )  # output_is_dir is truthy only when output is set
                 stem = Path(file_path).stem
                 file_output = str(output / f"{stem}.{fmt}")
 
