@@ -24,7 +24,10 @@ class VenvExecutor(RuntimeExecutor):
         env_manager: VenvEnvironmentManager,
         output_dir: Path,
         workspace_dir: Path | None = None,
+        subprocess_timeout_s: float = 300.0,
     ) -> None:
+        if subprocess_timeout_s <= 0:
+            raise ValueError("subprocess_timeout_s must be > 0")
         self._env_manager = env_manager
         self._output_dir = Path(output_dir).expanduser().resolve()
         self._output_dir.mkdir(parents=True, exist_ok=True)
@@ -33,6 +36,7 @@ class VenvExecutor(RuntimeExecutor):
             if workspace_dir is not None
             else Path(__file__).resolve().parents[3]
         )
+        self._subprocess_timeout_s = subprocess_timeout_s
 
     def execute(self, request: ExecutionRequest) -> dict[str, Any]:
         if not request.engine_ref:
@@ -49,21 +53,28 @@ class VenvExecutor(RuntimeExecutor):
                 encoding="utf-8",
             )
 
-            completed = subprocess.run(
-                [
-                    str(environment.python_executable),
-                    "-m",
-                    "dalston.engine_sdk.executors.venv_executor",
-                    "--request",
-                    str(request_path),
-                    "--output",
-                    str(output_path),
-                ],
-                cwd=self._workspace_dir,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            try:
+                completed = subprocess.run(
+                    [
+                        str(environment.python_executable),
+                        "-m",
+                        "dalston.engine_sdk.executors.venv_executor",
+                        "--request",
+                        str(request_path),
+                        "--output",
+                        str(output_path),
+                    ],
+                    cwd=self._workspace_dir,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=self._subprocess_timeout_s,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError(
+                    "Venv executor timed out for runtime "
+                    f"'{request.runtime}' after {self._subprocess_timeout_s:.0f}s"
+                ) from exc
             if completed.returncode != 0:
                 stderr = completed.stderr.strip() or completed.stdout.strip()
                 raise RuntimeError(

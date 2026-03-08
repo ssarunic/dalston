@@ -287,7 +287,8 @@ async def queue_task(
         raise CatalogValidationError(
             f"Runtime '{task.runtime}' declares execution_profile "
             f"'{catalog_entry.execution_profile}' and cannot be queued on the "
-            "distributed container path.",
+            "distributed container path. Use the lite pipeline for inproc/venv "
+            "runtimes.",
             stage=task.stage,
         )
 

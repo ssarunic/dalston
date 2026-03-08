@@ -23,7 +23,10 @@ class VenvEnvironmentManager:
         *,
         runtime_pythons: dict[str, Path | str] | None = None,
         runtime_lockfiles: dict[str, Path | str] | None = None,
+        health_check_timeout_s: float = 30.0,
     ) -> None:
+        if health_check_timeout_s <= 0:
+            raise ValueError("health_check_timeout_s must be > 0")
         self._runtime_pythons = {
             runtime: Path(path) for runtime, path in (runtime_pythons or {}).items()
         }
@@ -31,6 +34,7 @@ class VenvEnvironmentManager:
             runtime: Path(path) for runtime, path in (runtime_lockfiles or {}).items()
         }
         self._cache: dict[str, VenvEnvironment] = {}
+        self._health_check_timeout_s = health_check_timeout_s
 
     def register_runtime(
         self,
@@ -72,7 +76,11 @@ class VenvEnvironmentManager:
                     f"'{runtime}': {resolved_lockfile}"
                 )
 
-        self._health_check(runtime, resolved_python)
+        self._health_check(
+            runtime,
+            resolved_python,
+            timeout_s=self._health_check_timeout_s,
+        )
 
         environment = VenvEnvironment(
             runtime=runtime,
@@ -87,17 +95,29 @@ class VenvEnvironmentManager:
         self._cache.clear()
 
     @staticmethod
-    def _health_check(runtime: str, python_executable: Path) -> None:
-        completed = subprocess.run(
-            [
-                str(python_executable),
-                "-c",
-                "import dalston, sys; print(sys.executable)",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+    def _health_check(
+        runtime: str,
+        python_executable: Path,
+        *,
+        timeout_s: float,
+    ) -> None:
+        try:
+            completed = subprocess.run(
+                [
+                    str(python_executable),
+                    "-c",
+                    "import dalston, sys; print(sys.executable)",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout_s,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"Health check timed out for runtime '{runtime}' venv "
+                f"({python_executable}) after {timeout_s:.0f}s"
+            ) from exc
         if completed.returncode != 0:
             stderr = completed.stderr.strip() or completed.stdout.strip()
             raise RuntimeError(

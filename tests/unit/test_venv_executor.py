@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -117,5 +118,67 @@ def test_venv_executor_requires_engine_ref(tmp_path: Path) -> None:
                 previous_outputs={},
                 payload=None,
                 artifacts={},
+            )
+        )
+
+
+def test_env_manager_health_check_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = VenvEnvironmentManager(
+        runtime_pythons={"stub-runtime": _runtime_python()},
+        health_check_timeout_s=1,
+    )
+
+    def _timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs["timeout"])
+
+    monkeypatch.setattr(
+        "dalston.engine_sdk.executors.env_manager.subprocess.run",
+        _timeout,
+    )
+
+    with pytest.raises(RuntimeError, match="Health check timed out"):
+        manager.ensure_environment("stub-runtime")
+
+
+def test_venv_executor_subprocess_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = VenvEnvironmentManager(
+        runtime_pythons={"stub-runtime": _runtime_python()},
+    )
+    executor = VenvExecutor(
+        env_manager=manager,
+        output_dir=tmp_path / "artifacts",
+        workspace_dir=_repo_root(),
+        subprocess_timeout_s=1,
+    )
+    # Warm cache so this test exercises only the executor subprocess timeout.
+    manager.ensure_environment("stub-runtime")
+
+    def _timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs["timeout"])
+
+    monkeypatch.setattr(
+        "dalston.engine_sdk.executors.venv_executor.subprocess.run",
+        _timeout,
+    )
+
+    with pytest.raises(RuntimeError, match="Venv executor timed out"):
+        executor.execute(
+            ExecutionRequest(
+                task_id="task-1",
+                job_id="job-1",
+                stage="transcribe",
+                runtime="stub-runtime",
+                instance="lite-test",
+                config={},
+                previous_outputs={},
+                payload=None,
+                artifacts={},
+                engine_ref="engines.fake:FakeEngine",
             )
         )

@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import structlog
 
-from dalston.common.queue_backends import InMemoryQueue
+from dalston.common.queue_backends import InMemoryQueue, QueueEnvelope
 from dalston.config import get_settings
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.context import BatchTaskContext
@@ -292,14 +292,17 @@ class LitePipeline:
                 await asyncio.sleep(0.01)
 
     async def _handle_stage(
-        self, stage: str, envelope: object, parameters: dict
+        self,
+        stage: str,
+        envelope: QueueEnvelope,
+        parameters: dict,
     ) -> dict | None:
         """Process one stage envelope.
 
         Returns the final result dict when ``merge`` completes; ``None`` for
         all other stages so the loop continues.
         """
-        job_id: str = envelope.job_id  # type: ignore[attr-defined]
+        job_id = envelope.job_id
 
         if stage == "prepare":
             # Next stage is always transcribe regardless of profile.
@@ -366,7 +369,10 @@ class LitePipeline:
         return await self._handle_merge(job_id, parameters)
 
     async def _execute_stage(
-        self, stage: str, envelope: object, parameters: dict
+        self,
+        stage: str,
+        envelope: QueueEnvelope,
+        parameters: dict,
     ) -> dict[str, Any]:
         binding = self._stage_bindings.get(stage)
         if binding is None:
@@ -383,8 +389,8 @@ class LitePipeline:
             )
 
         request = ExecutionRequest(
-            task_id=envelope.task_id,  # type: ignore[attr-defined]
-            job_id=envelope.job_id,  # type: ignore[attr-defined]
+            task_id=envelope.task_id,
+            job_id=envelope.job_id,
             stage=stage,
             runtime=binding.entry.runtime,
             instance=f"lite-{self._profile.value}",
