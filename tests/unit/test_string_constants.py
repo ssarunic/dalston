@@ -9,13 +9,11 @@ Validates that:
 from __future__ import annotations
 
 import re
-import string
 
 import pytest
 
 from dalston.gateway.error_codes import Err
 from dalston.orchestrator.lite_messages import LiteMsg
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -96,9 +94,7 @@ class TestErrStructured:
         assert result["code"] == "any_code"
 
     def test_extra_fields_included(self) -> None:
-        result = Err.structured(
-            "job_not_found", purged_at="2024-01-01T00:00:00Z"
-        )
+        result = Err.structured("job_not_found", purged_at="2024-01-01T00:00:00Z")
         assert result["purged_at"] == "2024-01-01T00:00:00Z"
 
     def test_structured_values_match_class_attrs(self) -> None:
