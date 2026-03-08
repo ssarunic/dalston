@@ -15,6 +15,11 @@ class CLIMsg:
     """CLI message constants.
 
     Organized by category, then alphabetically.
+
+    NOTE: Constants prefixed with ``ERR_`` and ``BOOTSTRAP_FAILED`` /
+    ``BOOTSTRAP_HOW_TO_FIX`` embed Rich console markup (e.g. ``[red]...[/red]``).
+    They must only be used with ``rich.console.Console.print()``; passing them
+    to plain loggers or JSON serializers will leak the markup tags.
     """
 
     # -------------------------------------------------------------------------

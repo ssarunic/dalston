@@ -47,8 +47,6 @@ class Err:
         "per_channel speaker detection requires stereo audio, "
         "got {channels} channel(s)"
     )
-    PROVIDE_FILE_OR_URL = "Either 'file' or 'audio_url' must be provided"
-    PROVIDE_FILE_OR_URL_NOT_BOTH = "Provide either 'file' or 'audio_url'"
     OPENAI_FILE_TOO_LARGE = "File size exceeds 25MB limit ({size_mb:.1f}MB)"
     OPENAI_PER_CHANNEL_REQUIRES_STEREO = (
         "per_channel speaker detection requires stereo audio, "
@@ -57,12 +55,14 @@ class Err:
     OPENAI_TRANSCRIPTION_TIMEOUT = (
         "Transcription timeout. The audio file may be too long."
     )
+    PROVIDE_FILE_OR_URL = "Either 'file' or 'audio_url' must be provided"
+    PROVIDE_FILE_OR_URL_NOT_BOTH = "Provide either 'file' or 'audio_url'"
     TRANSCRIPT_LOAD_FAILED = (
         "Transcription completed but transcript could not be loaded."
     )
-    UNSUPPORTED_FORMAT = "Unsupported format: {format_str}. Supported formats: {valid_formats}"
     TRANSCRIPTION_CANCELLED = "Transcription was cancelled"
     TRANSCRIPTION_NOT_COMPLETED = "Transcription not completed. Current status: {status}"
+    UNSUPPORTED_FORMAT = "Unsupported format: {format_str}. Supported formats: {valid_formats}"
     VOCABULARY_EXCEED_LIMIT = "vocabulary cannot exceed 100 terms"
     VOCABULARY_INVALID_JSON = "Invalid JSON in vocabulary: {error}"
     VOCABULARY_MUST_BE_ARRAY = "vocabulary must be a JSON array of strings"
@@ -157,6 +157,10 @@ class Err:
     # -------------------------------------------------------------------------
     # These map error codes to messages for endpoints that return
     # {"code": "...", "message": "..."} in the detail field.
+    #
+    # ORDERING: This dict references class attributes defined above.
+    # All referenced constants (e.g. JOB_NOT_FOUND) must appear earlier in
+    # the class body, otherwise Python raises NameError at class creation time.
     _STRUCTURED: dict[str, str] = {
         "job_not_found": JOB_NOT_FOUND,
         "task_not_found": TASK_NOT_FOUND,
@@ -177,13 +181,27 @@ class Err:
 
         Args:
             code: Machine-readable error code (e.g. "job_not_found").
+                Must exist in ``_STRUCTURED`` unless *message* is provided.
             message: Override the default message for this code.
             **extra: Additional fields to include (e.g. purged_at).
 
         Returns:
             Dict like {"code": "job_not_found", "message": "Job not found"}.
+
+        Raises:
+            KeyError: If *code* is not in ``_STRUCTURED`` and no *message*
+                override is given.
         """
-        msg = message or cls._STRUCTURED.get(code, code)
+        if message:
+            msg = message
+        else:
+            try:
+                msg = cls._STRUCTURED[code]
+            except KeyError:
+                raise KeyError(
+                    f"Unknown structured error code {code!r}. "
+                    f"Valid codes: {sorted(cls._STRUCTURED)}"
+                ) from None
         result: dict[str, str] = {"code": code, "message": msg}
         result.update(extra)
         return result
