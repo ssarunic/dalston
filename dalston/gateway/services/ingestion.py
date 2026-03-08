@@ -65,12 +65,12 @@ class AudioIngestionService:
         if file is None and url is None:
             raise HTTPException(
                 status_code=400,
-                detail=Err.PROVIDE_FILE_OR_URL,
+                detail=Err.MISSING_FILE_OR_URL,
             )
         if file is not None and url is not None:
             raise HTTPException(
                 status_code=400,
-                detail=Err.PROVIDE_FILE_OR_URL_NOT_BOTH,
+                detail=Err.BOTH_FILE_AND_URL,
             )
 
         # Acquire content from URL or file

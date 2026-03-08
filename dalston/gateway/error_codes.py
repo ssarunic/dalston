@@ -57,8 +57,8 @@ class Err:
     OPENAI_TRANSCRIPTION_TIMEOUT = (
         "Transcription timeout. The audio file may be too long."
     )
-    PROVIDE_FILE_OR_URL = "Either 'file' or 'audio_url' must be provided"
-    PROVIDE_FILE_OR_URL_NOT_BOTH = "Provide either 'file' or 'audio_url', not both"
+    MISSING_FILE_OR_URL = "Either 'file' or 'audio_url' must be provided"
+    BOTH_FILE_AND_URL = "Provide either 'file' or 'audio_url', not both"
     TRANSCRIPT_LOAD_FAILED = (
         "Transcription completed but transcript could not be loaded."
     )
