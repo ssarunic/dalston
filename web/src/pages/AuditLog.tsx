@@ -437,9 +437,9 @@ export function AuditLog() {
             !(isLoading || isFetching) && (
               <div className="text-center py-12 text-muted-foreground">
                 <ScrollText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>No audit events found</p>
+                <p>{S.auditLog.noEventsFound}</p>
                 {hasActiveFilters && (
-                  <p className="text-sm mt-1">Try adjusting your filters</p>
+                  <p className="text-sm mt-1">{S.auditLog.noEventsHint}</p>
                 )}
               </div>
             )
@@ -474,11 +474,11 @@ export function AuditLog() {
                           </div>
                           <div className="grid grid-cols-2 gap-2 text-xs">
                             <div>
-                              <p className="text-muted-foreground">Actor</p>
+                              <p className="text-muted-foreground">{S.auditLog.colActor}</p>
                               <p className="font-mono break-all">{event.actor_id}</p>
                             </div>
                             <div>
-                              <p className="text-muted-foreground">IP Address</p>
+                              <p className="text-muted-foreground">{S.auditLog.colIpAddress}</p>
                               <p>{event.ip_address || '-'}</p>
                             </div>
                           </div>
@@ -502,11 +502,11 @@ export function AuditLog() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-8 sticky left-0 z-10 bg-card" />
-                      <TableHead className="sticky left-8 z-10 bg-card">Timestamp</TableHead>
-                      <TableHead>Action</TableHead>
-                      <TableHead>Resource</TableHead>
-                      <TableHead>Actor</TableHead>
-                      <TableHead>IP Address</TableHead>
+                      <TableHead className="sticky left-8 z-10 bg-card">{S.auditLog.colTimestamp}</TableHead>
+                      <TableHead>{S.auditLog.colAction}</TableHead>
+                      <TableHead>{S.auditLog.colResource}</TableHead>
+                      <TableHead>{S.auditLog.colActor}</TableHead>
+                      <TableHead>{S.auditLog.colIpAddress}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
