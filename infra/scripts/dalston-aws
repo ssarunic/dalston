@@ -8,6 +8,8 @@ set -euo pipefail
 #   dalston-aws setup --cpu            # CPU-only instance (Scenario 1)
 #   dalston-aws setup --split          # Two-tier: CPU control plane + GPU worker (Scenario 5)
 #   dalston-aws setup --spot           # Use spot pricing (combine with any scenario)
+#   dalston-aws add-gpu [--spot]        # Add a GPU worker to existing deployment
+#   dalston-aws remove-gpu              # Remove the GPU worker
 #   dalston-aws teardown               # Remove all AWS resources
 #   dalston-aws status                 # Show instance state
 #   dalston-aws up                     # Start instance(s)
@@ -925,6 +927,153 @@ cmd_ssh() {
 }
 
 # ============================================================
+# ADD-GPU / REMOVE-GPU — incremental scaling
+# ============================================================
+
+cmd_add_gpu() {
+    require_state
+
+    if [[ -n "$GPU_INSTANCE_ID" ]]; then
+        local gpu_state
+        gpu_state=$(get_instance_state "$GPU_INSTANCE_ID")
+        if [[ "$gpu_state" != "terminated" ]]; then
+            die "GPU worker already exists ($GPU_INSTANCE_ID, state=$gpu_state). Use 'dalston-aws remove-gpu' first."
+        fi
+    fi
+
+    # Verify main instance is running
+    local main_state
+    main_state=$(get_instance_state "$INSTANCE_ID")
+    if [[ "$main_state" != "running" ]]; then
+        die "Main instance $INSTANCE_ID is $main_state. Run 'dalston-aws up' first."
+    fi
+
+    local ctrl_private_ip
+    ctrl_private_ip=$(aws ec2 describe-instances \
+        --instance-ids "$INSTANCE_ID" \
+        --query 'Reservations[0].Instances[0].PrivateIpAddress' \
+        --output text \
+        --region "$REGION")
+
+    local vpc_id
+    vpc_id=$(aws ec2 describe-instances \
+        --instance-ids "$INSTANCE_ID" \
+        --query 'Reservations[0].Instances[0].VpcId' \
+        --output text \
+        --region "$REGION")
+
+    log "Adding GPU worker to existing deployment"
+    log "  Main instance: $INSTANCE_ID ($ctrl_private_ip)"
+    log "  GPU type:      $GPU_INSTANCE_TYPE"
+    log "  Spot:          $USE_SPOT"
+    echo ""
+
+    # GPU worker security group
+    create_gpu_worker_security_group "$vpc_id"
+    open_control_plane_ports "$SG_ID" "$GPU_SG_ID"
+
+    # Launch GPU worker
+    log "Launching GPU worker ($GPU_INSTANCE_TYPE)..."
+    local gpu_user_data
+    gpu_user_data=$(mktemp)
+    generate_gpu_worker_user_data "$S3_BUCKET" "$ctrl_private_ip" > "$gpu_user_data"
+    GPU_INSTANCE_ID=$(launch_instance "$GPU_INSTANCE_TYPE" "$GPU_SG_ID" "$gpu_user_data" "${NAME_PREFIX}-gpu-worker" "$USE_SPOT")
+    rm -f "$gpu_user_data"
+    wait_instance_running "$GPU_INSTANCE_ID"
+    GPU_DATA_VOLUME_ID=$(create_and_attach_data_volume "$GPU_INSTANCE_ID")
+
+    # Update scenario to split
+    SCENARIO="split"
+    save_state
+
+    echo ""
+    echo "=========================================="
+    log "GPU worker added!"
+    echo "=========================================="
+    echo ""
+    log "GPU worker: $GPU_INSTANCE_ID ($(get_instance_ip "$GPU_INSTANCE_ID"))"
+    echo ""
+    log "Next steps on the GPU worker:"
+    echo "  1. SSH: dalston-aws ssh gpu"
+    echo "  2. sudo tailscale up"
+    echo "  3. Update .env.gpu REDIS_URL/DATABASE_URL with control plane Tailscale IP"
+    echo "  4. sudo systemctl start dalston-gpu"
+}
+
+cmd_remove_gpu() {
+    require_state
+
+    if [[ -z "$GPU_INSTANCE_ID" ]]; then
+        die "No GPU worker found. Nothing to remove."
+    fi
+
+    local gpu_state
+    gpu_state=$(get_instance_state "$GPU_INSTANCE_ID")
+    if [[ "$gpu_state" == "terminated" ]]; then
+        log "GPU worker already terminated. Cleaning up state..."
+        GPU_INSTANCE_ID=""
+        GPU_DATA_VOLUME_ID=""
+        GPU_SG_ID=""
+        SCENARIO="gpu"  # revert to single-instance
+        # Check if main instance is GPU-capable
+        local main_type
+        main_type=$(aws ec2 describe-instances \
+            --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].InstanceType' \
+            --output text \
+            --region "$REGION" 2>/dev/null || echo "")
+        if [[ "$main_type" == t* || "$main_type" == m* || "$main_type" == c* ]]; then
+            SCENARIO="cpu"
+        fi
+        save_state
+        log "State cleaned up."
+        return 0
+    fi
+
+    warn "This will terminate GPU worker $GPU_INSTANCE_ID and delete its data volume."
+    read -rp "Type 'yes' to confirm: " confirm
+    [[ "$confirm" == "yes" ]] || die "Aborted."
+
+    # Terminate GPU instance
+    log "Terminating GPU worker $GPU_INSTANCE_ID..."
+    aws ec2 terminate-instances --instance-ids "$GPU_INSTANCE_ID" --region "$REGION" --no-cli-pager || true
+    aws ec2 wait instance-terminated --instance-ids "$GPU_INSTANCE_ID" --region "$REGION" || true
+
+    # Delete GPU data volume
+    if [[ -n "$GPU_DATA_VOLUME_ID" ]]; then
+        log "Deleting GPU data volume $GPU_DATA_VOLUME_ID..."
+        aws ec2 delete-volume --volume-id "$GPU_DATA_VOLUME_ID" --region "$REGION" --no-cli-pager 2>/dev/null || true
+    fi
+
+    # Delete GPU security group
+    if [[ -n "$GPU_SG_ID" ]]; then
+        log "Deleting GPU security group $GPU_SG_ID..."
+        sleep 3
+        aws ec2 delete-security-group --group-id "$GPU_SG_ID" --region "$REGION" --no-cli-pager 2>/dev/null || true
+    fi
+
+    # Update state — figure out scenario from main instance type
+    local main_type
+    main_type=$(aws ec2 describe-instances \
+        --instance-ids "$INSTANCE_ID" \
+        --query 'Reservations[0].Instances[0].InstanceType' \
+        --output text \
+        --region "$REGION" 2>/dev/null || echo "")
+    if [[ "$main_type" == g* || "$main_type" == p* ]]; then
+        SCENARIO="gpu"
+    else
+        SCENARIO="cpu"
+    fi
+
+    GPU_INSTANCE_ID=""
+    GPU_DATA_VOLUME_ID=""
+    GPU_SG_ID=""
+    save_state
+
+    log "GPU worker removed. Deployment is now single-instance ($SCENARIO)."
+}
+
+# ============================================================
 # TEARDOWN
 # ============================================================
 
@@ -1001,6 +1150,8 @@ Usage: dalston-aws <command> [options]
 
 Commands:
   setup      Provision AWS resources and launch instance(s)
+  add-gpu    Add a GPU worker to an existing deployment
+  remove-gpu Remove the GPU worker and revert to single instance
   teardown   Remove all AWS resources
   status     Show instance state
   up         Start instance(s)
@@ -1021,6 +1172,8 @@ Examples:
   dalston-aws setup --spot             # Same, with spot pricing
   dalston-aws setup --cpu              # CPU-only t3.xlarge
   dalston-aws setup --split --spot     # Control plane + GPU spot worker
+  dalston-aws add-gpu --spot           # Add GPU worker to existing setup
+  dalston-aws remove-gpu               # Remove GPU worker
   dalston-aws down                     # Stop (saves ~\$4/day)
   dalston-aws up                       # Restart
   dalston-aws teardown                 # Delete everything
@@ -1048,14 +1201,16 @@ main() {
     done
 
     case "$command" in
-        setup)    cmd_setup ;;
-        teardown) cmd_teardown ;;
-        status)   cmd_status ;;
-        up)       cmd_up ;;
-        down)     cmd_down ;;
-        ssh)      cmd_ssh "${@:-}" ;;
+        setup)      cmd_setup ;;
+        add-gpu)    cmd_add_gpu ;;
+        remove-gpu) cmd_remove_gpu ;;
+        teardown)   cmd_teardown ;;
+        status)     cmd_status ;;
+        up)         cmd_up ;;
+        down)       cmd_down ;;
+        ssh)        cmd_ssh "${@:-}" ;;
         ""|help|-h|--help) usage ;;
-        *)        die "Unknown command: $command. Run 'dalston-aws help'" ;;
+        *)          die "Unknown command: $command. Run 'dalston-aws help'" ;;
     esac
 }
 
