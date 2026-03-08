@@ -1,617 +1,654 @@
-# OpenAI ASR API — Parity Gap Analysis
+# OpenAI STT API — Parity Gap Analysis
 
 **Date**: 2026-03-08
-**Source spec**: OpenAI OpenAPI spec (Stainless, March 2026)
-**Scope**: `POST /v1/audio/transcriptions`, `POST /v1/audio/translations`, `WS /v1/realtime`
+**Scope**: `POST /v1/audio/transcriptions`, `POST /v1/audio/translations`, `POST /v1/realtime/transcription_sessions`, `WS /v1/realtime`
+**Companion milestone**: [M61: OpenAI Speech-to-Text API Parity](../../plan/milestones/M61-openai-api-parity.md)
 
 ---
 
-## How to Read This Document
+## Purpose
 
-Each gap is assessed on three dimensions:
+This document is the analysis companion to
+[M61: OpenAI Speech-to-Text API Parity](../../plan/milestones/M61-openai-api-parity.md).
+
+- `PARITY_GAPS.md` answers: "What is currently wrong or missing, and why?"
+- `M61` answers: "What should we implement, in what order, and with what constraints?"
+
+Both documents are intentionally locked to the public OpenAI STT surface as of
+**March 8, 2026**.
+
+For ambiguous cases, this analysis treats the official `openai-python` SDK as the
+primary consumer-contract for request/response behavior, with real OpenAI traces used
+to settle runtime details the SDK does not encode.
+
+---
+
+## Reading Guide
+
+Each gap is classified on two axes:
 
 | Feasibility | Meaning |
 |-------------|---------|
-| ✅ Current | Closable with gateway/adapter code alone — no engine or architecture changes needed |
-| 🔧 New capability | Requires changes to real-time workers, batch engines, or pipeline schema |
-| ❌ Not feasible | Structurally blocked by architecture, a hard dependency, or a constraint we have deliberately accepted |
+| ✅ Current | Closable with gateway or adapter code only |
+| 🔧 Cross-service | Requires worker, pipeline, engine, or schema changes |
+| 🧪 Contract lock first | Do not implement until SDK traces and exact docs-backed schemas are frozen |
+| 🧱 New subsystem | Requires a genuinely new subsystem or capability |
 
-Remedies are grouped into three tiers by implementation cost:
-
-- **Easy** — single-file, < 1 day, no risk to stability
-- **Medium** — cross-cutting change (multiple files or services), 1–5 days, needs test coverage
-- **Hard** — new subsystem, engine change, or protocol extension, > 1 week, carries integration risk
-
----
-
-## Part 1: POST /v1/audio/transcriptions
-
-### G-1 · `stream=true` SSE streaming not implemented
-
-**Gap**: When `stream=true`, OpenAI returns `text/event-stream` with incremental
-`transcript.text.delta` and `transcript.text.done` events as transcription progresses.
-Dalston in OpenAI mode always waits for full completion, then returns a single JSON body.
-
-**Feasibility**: 🔧 New capability
-
-The batch pipeline is inherently stage-sequential: audio goes through PREPARE → TRANSCRIBE
-→ ALIGN → DIARIZE → MERGE before a result is available. Raw partial segments emerge from
-the TRANSCRIBE stage, but they are not currently surfaced to the gateway.
-
-To implement SSE:
-
-1. Engines need to publish partial segment events to a Redis pub/sub channel keyed by `job_id`.
-2. The gateway opens an SSE response before the job completes and consumes that channel.
-3. A new `transcript.text.delta` SSE event type must be defined in the engine SDK.
-
-The ALIGN and DIARIZE stages refine the transcript after the fact; partial streaming would
-need to decide whether to stream raw TRANSCRIBE output (lower quality) or wait for
-post-processed segments (delayed). OpenAI's model appears to stream raw ASR output.
-
-**Remedy**: Hard. Requires a new engine-level streaming protocol, Redis pub/sub event
-definitions, a gateway SSE handler, and a decision on quality vs. latency trade-off for
-intermediate results.
+| Priority | Meaning |
+|----------|---------|
+| P0 | Current behavior is wrong for supported OpenAI callers |
+| P1 | Required for parity of the supported surface |
+| P2 | Valid parity gap, but can follow once the contract is locked |
+| P3 | Legitimate future parity work, not required for the first exact-compatible slice |
 
 ---
 
-### G-2 · `include=["logprobs"]` not implemented
+## Executive Summary
 
-**Gap**: OpenAI accepts `include=["logprobs"]` to attach log-probability data to each word
-and segment in the verbose response. Dalston ignores this parameter entirely and never
-returns `logprobs`.
+The main problem is no longer "a few missing fields". The real issue is that Dalston's
+OpenAI compatibility layer is still shaped around an older OpenAI STT surface.
 
-**Feasibility**: 🔧 New capability
+The highest-value conclusions are:
 
-`faster-whisper` produces `avg_logprob` and per-token probabilities per segment.
-These values are not currently captured in `pipeline_types.py` and are discarded by the
-transcription engine before output is written to S3. The path to closing this gap:
+1. **The official Python SDK must be treated as an executable compatibility contract**
+   The repo currently has only a thin SDK smoke test, which is not enough to catch
+   subtle request, response, header, and realtime setup mismatches.
 
-1. Add `logprobs` fields to `TranscriptionOutput` in `pipeline_types.py`.
-2. Update the faster-whisper (and whisperx) engines to capture and emit them.
-3. Pass them through the merge engine into `transcript.json`.
-4. Format them in `format_openai_response()` when the `include` parameter contains `"logprobs"`.
+2. **Model and capability validation must become table-driven**
+   The current regex-based approach is too loose and cannot model per-model constraints.
 
-**Remedy**: Medium. No architectural change required, but touches engine output schema,
-pipeline types, the merge engine, and the gateway formatter.
+3. **Response-shape parity must be exact**
+   Old assumptions such as universal `usage.audio_seconds`, a top-level `model` field,
+   or older diarized response shapes must not be carried forward.
 
----
+4. **`prompt` must remain free text**
+   Converting it into gateway-level hotwords is the wrong abstraction.
 
-### G-3 · `chunking_strategy` parameter not implemented
+5. **Realtime parity requires exact item-graph behavior, 24 kHz correctness, and SDK-visible session setup**
+   The `pcm16` bug and the missing item events are the biggest realtime correctness issues.
 
-**Gap**: OpenAI accepts `chunking_strategy: "auto"` to control how long audio files are
-segmented before transcription. Dalston does not accept or forward this parameter.
-
-**Feasibility**: ✅ Current (for accepting `"auto"`) / 🔧 New capability (for custom strategies)
-
-`"auto"` is the only value OpenAI currently documents, and it corresponds to our existing
-default VAD-based chunking behaviour. We can accept and silently validate the parameter
-without any engine change, achieving spec compliance for today's OpenAI clients.
-
-If OpenAI later adds explicit chunking configurations (e.g. fixed-interval or silence-based
-thresholds), those would require PREPARE stage changes.
-
-**Remedy**: Easy (for `"auto"` acceptance) — add the parameter to the form signature,
-validate it against `{"auto"}`, and ignore it. Medium if actual custom chunking strategies
-are needed.
+6. **Some gaps are real, but they are subsystem work rather than cleanup**
+   SSE streaming, speaker references, and realtime denoise belong in a later track.
 
 ---
 
-### G-4 · `known_speaker_names` not implemented
+## Cross-Document Contract
 
-**Gap**: OpenAI accepts an array of speaker name strings as hints (e.g. `["Alice", "Bob"]`)
-to substitute for generic labels like `SPEAKER_0` in diarized output. Dalston ignores this.
+This document intentionally matches the structure and decisions in
+[M61: OpenAI Speech-to-Text API Parity](../../plan/milestones/M61-openai-api-parity.md).
 
+If one of these documents changes, the other should be reviewed in the same PR.
+
+The contract hierarchy is:
+
+- Public OpenAI docs for the intended product surface
+- Pinned `openai-python` behavior for client-facing request/response semantics
+- Real OpenAI traces for runtime semantics the SDK does not fully specify
+
+---
+
+## Part 1: Contract Drift
+
+### C-0 · The parity target is not executable without a real SDK contract suite
+
+**Priority**: P0
 **Feasibility**: ✅ Current
 
-We already produce `speaker_id` labels in diarized transcripts. The final-merger engine
-assembles speaker labels from the diarization stage. Adding a relabeling pass at merge time
-that maps ordered speaker labels to provided names is a self-contained change.
+The repo currently contains only a thin SDK smoke test in
+[tests/e2e/test_openai_sdk.py](../../tests/e2e/test_openai_sdk.py).
+That does not exercise the parts of compatibility that usually break first:
 
-**Remedy**: Medium. Requires: (1) gateway accepts and forwards `known_speaker_names` as a
-job parameter, (2) DAG builder passes it to the merge engine, (3) merge engine applies the
-label substitution map before writing `transcript.json`.
+- the exact multipart fields serialized by the official SDK
+- parsed response unions and object shapes
+- raw response headers via `with_raw_response`
+- batch streaming event parsing
+- realtime transcription-session creation
+
+Because the public OpenAI docs are ambiguous in some areas, especially realtime, parity
+cannot be treated as complete until the official Python SDK is part of the required test
+contract.
+
+**Conclusion**
+
+Add a pinned-version SDK contract suite under `tests/integration/` and keep the current
+e2e SDK test as a smaller live-stack smoke path.
+
+### C-1 · Model validation is regex-driven instead of capability-driven
+
+**Priority**: P0
+**Feasibility**: 🧪 Contract lock first
+
+Current code in [openai_audio.py](../../dalston/gateway/api/v1/openai_audio.py)
+detects OpenAI models using permissive patterns. That allows undocumented names and
+cannot express endpoint-specific or feature-specific support.
+
+This creates three concrete failures:
+
+- unsupported models can be accepted
+- supported models can be misvalidated for the wrong endpoint
+- parameters and response formats cannot be gated by model
+
+**Conclusion**
+
+This is the root cause of many downstream parity mismatches. It must be replaced with a
+single docs-backed capability table, as specified in
+[M61 Phase 0](../../plan/milestones/M61-openai-api-parity.md#phase-0-contract-lock-week-1).
 
 ---
 
-### G-5 · `known_speaker_references` not implemented
+### C-2 · Translation support is frozen to an older assumption
 
-**Gap**: OpenAI accepts audio data URIs as reference clips for voice-print-based speaker
-identification — i.e. "this clip is Alice, find her across the recording." Dalston has no
-equivalent.
+**Priority**: P1
+**Feasibility**: 🧪 Contract lock first
 
-**Feasibility**: 🔧 New capability
+Current translation validation in
+[openai_translation.py](../../dalston/gateway/api/v1/openai_translation.py)
+hardcodes `whisper-1` and maintains its own response-format rules.
 
-This requires speaker embedding extraction (typically a separate neural model such as
-pyannote's embedding extractor or resemblyzer) and a matching step during or after
-diarization. The reference clips must be embedded, then compared against speaker clusters
-produced by the diarize engine. `pyannote-audio` supports this via its speaker
-verification pipeline, but we don't currently expose it.
+That means translation behavior is not aligned with the same docs source as the
+transcription endpoint.
 
-**Remedy**: Hard. Requires a new pipeline stage (or extension of the diarize engine) for
-speaker enrollment, a new job parameter type for audio data URIs, and changes to the
-diarization engine to accept reference embeddings.
+**Conclusion**
+
+Translation must be brought under the same capability table as transcription.
 
 ---
 
-### G-6 · `diarized_json` format documented but silently falls through to `json`
+### C-3 · Realtime support is tied to an older model/request surface
 
-**Gap**: `diarized_json` appears in the `Form` description at
-[transcription.py:179](../../dalston/gateway/api/v1/transcription.py#L179) and in the OpenAI
-spec, but it is **absent from `OPENAI_RESPONSE_FORMATS`** and unhandled in
-`format_openai_response()`. Clients requesting `diarized_json` silently receive plain `json`
-with no error. This is a correctness bug, not a feature gap.
+**Priority**: P0
+**Feasibility**: 🧪 Contract lock first
 
-**OpenAI's `diarized_json` schema**:
+Current realtime support in
+[openai_realtime.py](../../dalston/gateway/api/v1/openai_realtime.py)
+accepts only a narrow model list and only the older `transcription_session.update`
+style request shape. It also does not treat the SDK-visible realtime session-create REST
+flow as part of the compatibility contract.
 
-```json
-{
-  "speakers": [
-    {
-      "id": "speaker_0",
-      "name": null,
-      "segments": [
-        { "start": 0.0, "end": 3.5, "text": "Hello world." }
-      ]
-    }
-  ],
-  "usage": { "type": "audio", "audio_seconds": 12.5 }
-}
-```
+The current OpenAI docs are inconsistent between the API reference and guide, so the
+problem is not "choose one shape". The correct first step is to freeze SDK traces and
+accept the current documented variants.
 
-We already produce speaker-attributed segments in our diarized transcript output.
+**Conclusion**
 
+Realtime parity needs dual-shape request acceptance with one normalized internal config.
+
+---
+
+## Part 2: Batch Endpoint Gaps
+
+### G-1 · `diarized_json` silently falls through to `json`
+
+**Priority**: P0
 **Feasibility**: ✅ Current
 
-**Remedy**: Easy. Two changes required:
+This is a real correctness bug in the current code. `diarized_json` is documented in the
+form description but not implemented in the formatter.
 
-1. Add `DIARIZED_JSON = "diarized_json"` to `OpenAIResponseFormat` in
-   [openai_audio.py](../../dalston/gateway/api/v1/openai_audio.py).
-2. Add a `diarized_json` branch in `format_openai_response()` that maps speaker segments
-   from the transcript to OpenAI's schema.
+However, the remedy must use the **current** OpenAI diarized schema, not older internal
+assumptions.
+
+**Important correction**
+
+We should not assume:
+
+- old `utterances[]` shapes
+- universal `usage.audio_seconds`
+- a top-level `model` field
+
+See the implementation direction in
+[M61 1.2](../../plan/milestones/M61-openai-api-parity.md#12-fix-diarized_json-using-the-exact-openai-schema).
 
 ---
 
-### G-7 · `usage` field absent from all response schemas
+### G-2 · `usage` is missing, and the old one-size-fits-all remedy is wrong
 
-**Gap**: All OpenAI response types (`json`, `verbose_json`, `diarized_json`) include a
-`usage` object:
+**Priority**: P0
+**Feasibility**: 🧪 Contract lock first
 
-```json
-{ "usage": { "type": "audio", "audio_seconds": 42.1 } }
-```
+Dalston currently omits `usage`, but the older assumption that all STT responses should
+return `{"type":"audio","audio_seconds":...}` is no longer safe.
 
-Dalston returns none of this. The audio duration is available from the transcript's
-`metadata.duration` field and from the job record.
+The OpenAI STT surface is now model-dependent. Some models/formats may require different
+usage semantics.
 
+**Conclusion**
+
+The real gap is "usage is not model-aware and exact". We should not land a universal
+audio-seconds response as a shortcut.
+
+---
+
+### G-3 · `temperature=0` is silently dropped
+
+**Priority**: P0
 **Feasibility**: ✅ Current
 
-**Remedy**: Easy. Add `usage: dict` to `OpenAITranscriptionResponse` and
-`OpenAIVerboseResponse`, and populate it from `transcript["metadata"]["duration"]` in
-`format_openai_response()`.
+Current code in:
+
+- [transcription.py](../../dalston/gateway/api/v1/transcription.py)
+- [openai_translation.py](../../dalston/gateway/api/v1/openai_translation.py)
+
+only forwards temperature when it is greater than zero.
+
+This is a straightforward correctness bug. Explicit zero is semantically meaningful.
+
+**Conclusion**
+
+This remains an easy fix and should land early.
 
 ---
 
-### G-8 · `temperature=0` silently not forwarded to engine
+### G-4 · `prompt` is treated as hotwords instead of prompt text
 
-**Gap**: In both transcription ([transcription.py:343](../../dalston/gateway/api/v1/transcription.py#L343))
-and translation ([openai_translation.py:156](../../dalston/gateway/api/v1/openai_translation.py#L156)),
-temperature is only forwarded when `> 0`:
+**Priority**: P0
+**Feasibility**: 🔧 Cross-service
 
-```python
-if temperature is not None and temperature > 0:
-    parameters["temperature"] = temperature
-```
+Current behavior is inconsistent and wrong:
 
-A client explicitly sending `temperature=0` to disable sampling receives the engine's
-default sampling behaviour instead. This is semantically wrong — `0` is not equivalent to
-"omitted".
+- batch path may pass raw prompt text into `vocabulary`
+- realtime path may split prompt on commas
+- engines interpret `vocabulary` as hotwords / boost terms rather than free-text context
 
+This is not just a validation bug. It is an abstraction mismatch.
+
+**Conclusion**
+
+The right fix is not "canonical prompt-to-vocabulary splitting". The right fix is to add
+a first-class internal prompt field and let engine adapters consume it natively where possible.
+
+See [M61 2.1](../../plan/milestones/M61-openai-api-parity.md#21-preserve-prompt-as-a-first-class-field-end-to-end).
+
+---
+
+### G-5 · Prompt length is documented but not validated
+
+**Priority**: P1
 **Feasibility**: ✅ Current
 
-**Remedy**: Easy. Change the condition to `if temperature is not None:`.
+The current gateway never enforces the documented prompt limit.
+
+The older proposal of a pure character heuristic is weak but still directionally useful.
+The better remedy is token-aware validation with a conservative fallback.
+
+**Conclusion**
+
+This is a real gap, but the implementation should be token-aware rather than character-only.
 
 ---
 
-## Part 2: POST /v1/audio/translations
+### G-6 · `chunking_strategy` analysis in the old doc is stale
 
-### G-9 · `stream=true` SSE streaming not implemented
+**Priority**: P2
+**Feasibility**: 🧪 Contract lock first
 
-Same root cause as G-1. Translation is a special case of transcription with forced English
-output — SSE streaming applies identically.
+The older parity analysis assumed `chunking_strategy="auto"` as a bare string. That is no
+longer a safe assumption.
 
-**Feasibility**: 🔧 New capability
-**Remedy**: Hard (same as G-1; translation endpoint would be addressed as part of the same work).
+The real gap is:
 
----
+- Dalston does not parse the **current docs-backed request shape**
+- Dalston does not gate support by model
 
-### G-10 · Translation accepts `text`, `srt`, `vtt` response formats beyond OpenAI spec
+**Conclusion**
 
-**Gap**: Dalston's translation endpoint accepts `text`, `srt`, and `vtt` in
-`response_format`. The current OpenAI spec for `POST /audio/translations` only documents
-`json` and `verbose_json`.
-
-**Assessment**: This is a **harmless extension**, not a bug. Spec-compliant OpenAI clients
-will never send these values. Dalston-native clients who happen to use an OpenAI model
-with `response_format=srt` will get useful output. No action required — but this should
-be documented as a deliberate extension.
+Treat this as a request-schema and capability-table gap, not a string-acceptance tweak.
 
 ---
 
-## Part 3: WS /v1/realtime
+### G-7 · `known_speaker_names` is a real, feasible gap
 
-### G-11 · `pcm16` treated as 16 kHz instead of OpenAI's 24 kHz
+**Priority**: P1
+**Feasibility**: 🔧 Cross-service
 
-**Gap**: The OpenAI Realtime spec defines `pcm16` as 16-bit PCM at **24 kHz**.
-Dalston maps it to 16 kHz (documented in the comment at
-[openai_realtime.py:100](../../dalston/gateway/api/v1/openai_realtime.py#L100)):
+This gap remains valid. Dalston already has the right architecture to solve it:
 
-```python
-# Note: OpenAI spec uses 24kHz but our Silero VAD only supports 8kHz/16kHz
-"pcm16": ("pcm_s16le", DEFAULT_SAMPLE_RATE),  # 16kHz
-```
+- gateway parses the names
+- DAG carries them
+- merge stage relabels speaker metadata
 
-A spec-compliant client that sends 24 kHz PCM16 will have its audio interpreted at 16 kHz,
-playing back at 0.67× speed with lower pitch. The engine will transcribe incorrect timing
-and possibly garbled phonemes. This is the most impactful correctness bug in the realtime
-path.
-
-**Feasibility**: 🔧 New capability
-
-Silero VAD itself only supports 8 kHz and 16 kHz. Two approaches:
-
-- **Option A** (preferred): Add a resampling step in the realtime worker that downsamples
-  incoming 24 kHz audio to 16 kHz before VAD. This is a standard DSP operation
-  (scipy/numpy resample). The ASR engine then sees 16 kHz, which Whisper handles natively.
-  Audio quality loss is minimal.
-- **Option B**: Replace Silero VAD with one that supports 24 kHz (e.g. WebRTC VAD, or
-  Silero v5 if it ever adds 24 kHz support). More invasive.
-
-**Remedy**: Medium. Option A requires a resampling pass in the realtime worker engine, a
-worker URL protocol update to pass the client's claimed sample rate, and corresponding
-changes to `_proxy_to_worker_openai`.
+The only correction is that the implementation must target the exact current diarized
+response shape, not an older assumed output schema.
 
 ---
 
-### G-12 · `conversation.item.created` event not emitted
+### G-8 · `known_speaker_references` is real subsystem work
 
-**Gap**: After `input_audio_buffer.committed`, OpenAI emits a `conversation.item.created`
-event:
+**Priority**: P3
+**Feasibility**: 🧱 New subsystem
 
-```json
-{
-  "type": "conversation.item.created",
-  "event_id": "evt_...",
-  "item": {
-    "id": "item_...",
-    "type": "message",
-    "role": "user",
-    "content": [{ "type": "input_audio", "audio": null, "transcript": null }]
-  }
-}
-```
+This remains correctly classified as requiring a new enrollment / speaker-embedding path.
 
-Dalston emits only `input_audio_buffer.committed`. Clients that track conversation item
-state (as OpenAI's own SDKs do) will have a mismatch.
+No change in conclusion here, except that it should stay clearly separated from the much
+easier `known_speaker_names` relabeling work.
 
+---
+
+### G-9 · `include=item.input_audio_transcription.logprobs` is not the same as segment quality metadata
+
+**Priority**: P2
+**Feasibility**: 🔧 Cross-service
+
+The older analysis collapsed two things into one:
+
+- real segment-quality metadata such as `avg_logprob`
+- OpenAI's newer `include=...logprobs` transcription feature
+
+Those are related but not equivalent.
+
+**Conclusion**
+
+We need to track them separately:
+
+- one track for preserving true segment metadata in `verbose_json`
+- one track for exact OpenAI `include` support
+
+---
+
+### G-10 · `verbose_json` quality fields are currently fake
+
+**Priority**: P1
+**Feasibility**: 🔧 Cross-service
+
+This is a real parity issue independent of `include=...logprobs`.
+
+Current `verbose_json` returns hardcoded sentinels for:
+
+- `avg_logprob`
+- `compression_ratio`
+- `no_speech_prob`
+- `tokens`
+
+If an engine can produce real values, Dalston should preserve and return them.
+
+**Conclusion**
+
+This remains a valid medium-sized cross-service fix.
+
+---
+
+## Part 3: Translation Endpoint Gaps
+
+### T-1 · Translation validation must be capability-driven
+
+**Priority**: P1
+**Feasibility**: 🧪 Contract lock first
+
+The old analysis described Dalston's extra translation formats as a harmless extension.
+That is not the right framing for OpenAI-compatible routes.
+
+If the goal is exact OpenAI parity on OpenAI routes, then translation should be validated
+against the same capability table and exact docs-backed formats as everything else.
+
+**Conclusion**
+
+This is not about whether extra formats are useful. It is about whether the OpenAI route
+is exact.
+
+---
+
+### T-2 · `stream=true` on translation remains new subsystem work
+
+**Priority**: P3
+**Feasibility**: 🧱 New subsystem
+
+No substantive change from the earlier analysis. This still depends on the same partial
+result streaming infrastructure as transcription SSE.
+
+---
+
+## Part 4: Realtime Gaps
+
+### R-0 · The SDK-visible realtime session-create endpoint is missing from the parity target
+
+**Priority**: P1
+**Feasibility**: 🧪 Contract lock first
+
+The official Python SDK exposes
+`client.beta.realtime.transcription_sessions.create(...)`.
+Dalston's current parity work is centered on the WebSocket route and sparse
+session-created events, which is not enough for true SDK compatibility.
+
+**Conclusion**
+
+`/v1/realtime/transcription_sessions` needs to be part of the frozen contract and should
+share the same capability validation and session normalization as the WebSocket flow.
+
+### R-1 · `pcm16` is wrong on the OpenAI route
+
+**Priority**: P0
+**Feasibility**: 🔧 Cross-service
+
+This remains the highest-impact realtime correctness bug.
+
+The correction to the old analysis is in the remedy framing:
+
+- internal resampling is the right answer
+- advertising a Dalston-only public format on the OpenAI route is not
+
+**Conclusion**
+
+Keep `/v1/realtime` spec-accurate and resample internally.
+
+See [M61 3.3](../../plan/milestones/M61-openai-api-parity.md#33-fix-pcm16-to-mean-24-khz-on-the-openai-route).
+
+---
+
+### R-2 · Missing item-graph events on commit
+
+**Priority**: P0
+**Feasibility**: ✅ Current for event emission, 🔧 Cross-service for full correctness
+
+The gaps remain real:
+
+- `conversation.item.created` missing
+- `input_audio_buffer.committed.previous_item_id` missing
+- `speech_started.item_id` missing
+- `speech_stopped.item_id` missing
+
+But the old analysis understated the state-management issue. The problem is not just
+"missing fields"; the current item cursor logic is too simplistic and can drift.
+
+**Conclusion**
+
+Fixing the event shapes and fixing the item-state model should be treated as one piece of work.
+
+---
+
+### R-3 · `turn_detection` tuning is currently discarded
+
+**Priority**: P1
+**Feasibility**: 🔧 Cross-service
+
+This remains a valid gap.
+
+The extra nuance is that `prefix_padding_ms` should be mapped onto the existing VAD
+lookback behavior rather than a separate ad hoc buffer.
+
+---
+
+### R-4 · Realtime request/session shape drift
+
+**Priority**: P0
+**Feasibility**: 🧪 Contract lock first
+
+The older analysis assumed only the older `transcription_session.*` shape.
+
+The current docs and guides are inconsistent enough that the real parity gap is broader:
+
+- Dalston does not accept the current documented request variants
+- Dalston does not normalize them into one internal config
+- Dalston emits only a sparse older session-created payload
+
+**Conclusion**
+
+Contract freeze plus dual-shape input support is required before implementation.
+
+---
+
+### R-5 · `noise_reduction` is config-only today
+
+**Priority**: P3
+**Feasibility**: 🧱 New subsystem
+
+This remains correctly classified as a real new capability rather than a cleanup task.
+
+One correction: we should be careful not to fake support merely by echoing fields.
+Echoing `null` or unsupported config is fine if the contract requires it; claiming active
+noise reduction without a DSP stage is not.
+
+---
+
+## Part 5: Blind Spots and Corrections
+
+### B-1 · OpenAI rate-limit headers are missing under the wrong names
+
+**Priority**: P1
 **Feasibility**: ✅ Current
 
-**Remedy**: Easy. Emit `conversation.item.created` in the `input_audio_buffer.commit`
-branch of `_openai_client_to_worker()`, just before the `committed` ack, using the same
-`item_id`.
+The older analysis said Dalston returned no rate-limit headers. That is not quite true:
+legacy `X-RateLimit-*` headers are already emitted on some 429 paths.
+
+The real gap is:
+
+- OpenAI header names are not consistently emitted
+- success responses do not consistently carry rate-limit headers
+
+**Conclusion**
+
+This is still real, but it should be fixed in the existing dependency flow rather than
+via a new response middleware by default.
 
 ---
 
-### G-13 · `input_audio_buffer.committed` missing `previous_item_id`
+### B-2 · URL-size enforcement gap was overstated
 
-**Gap**: OpenAI's `committed` event includes both `item_id` (the newly committed item) and
-`previous_item_id` (the preceding item, for sequencing). Dalston only sends `item_id`.
-
+**Priority**: P1
 **Feasibility**: ✅ Current
 
-**Remedy**: Easy. Add `previous_item_id` to `OpenAISessionState` and populate it before
-rotating `current_item_id` on each commit.
+The old analysis said large URL downloads effectively bypassed limits. In reality,
+[audio_url.py](../../dalston/gateway/services/audio_url.py) already enforces:
+
+- `Content-Length` checks
+- streaming byte-count checks
+
+The real bug is that OpenAI routes do not pass the 25 MB OpenAI ceiling into ingestion.
+
+**Conclusion**
+
+The downloader is mostly correct already. The OpenAI-mode limit is not threaded through.
 
 ---
 
-### G-14 · VAD events missing `item_id`
+### B-3 · Sync-mode scalability is not a parity requirement
 
-**Gap**: OpenAI's `input_audio_buffer.speech_started` and `speech_stopped` events include
-`item_id` to correlate speech detection with the subsequent transcript item. Dalston omits
-it.
+**Priority**: P3
+**Feasibility**: N/A
 
+The old analysis framed synchronous OpenAI-mode waiting as tying up HTTP threads. The
+current implementation in [polling.py](../../dalston/gateway/services/polling.py) is an
+async polling loop, so that framing was too strong.
+
+There may still be a performance or latency reason to replace polling with a pub/sub wakeup,
+but that is not itself an OpenAI parity gap.
+
+**Conclusion**
+
+Track this as performance work, not parity work.
+
+---
+
+### B-4 · `sk-` key handling was described incorrectly
+
+**Priority**: P1
 **Feasibility**: ✅ Current
 
-**Remedy**: Easy. In `_openai_worker_to_client()`, include
-`"item_id": session_state.current_item_id` in the `speech_started` and `speech_stopped`
-translated events.
+The older analysis implied that `sk-` keys were accepted. The current code does not do that;
+they fail generic auth. The real gap is diagnostic quality, not silent acceptance.
+
+**Conclusion**
+
+Add a targeted auth diagnostic for accidental OpenAI key usage.
 
 ---
 
-### G-15 · `turn_detection` configuration silently ignored
+### B-5 · Binary realtime frames still deserve explicit validation work
 
-**Gap**: OpenAI's `transcription_session.update` accepts rich VAD parameters:
+**Priority**: P2
+**Feasibility**: ✅ Current for shallow checks / 🔧 Cross-service for stronger guarantees
 
-```json
-{
-  "turn_detection": {
-    "type": "server_vad",
-    "threshold": 0.5,
-    "silence_duration_ms": 600,
-    "prefix_padding_ms": 300
-  }
-}
-```
-
-Dalston treats `turn_detection` as a binary on/off flag and discards `threshold`,
-`silence_duration_ms`, and `prefix_padding_ms`. These map directly to Silero VAD
-parameters.
-
-**Feasibility**: 🔧 New capability
-
-The realtime worker session URL already accepts params like `enable_vad`. Extending the
-protocol to pass through VAD threshold and silence duration is straightforward.
-
-**Remedy**: Medium. (1) Extend `_build_worker_params()` to include VAD config fields.
-(2) Update the realtime worker's VAD initialisation to consume them. (3) Update
-`_handle_session_update()` to extract and store the values from `turn_detection`.
+This gap remains valid. Raw binary frames can still bypass useful structural validation.
+It is worth keeping, but it is not in the first parity slice.
 
 ---
 
-### G-16 · `transcription_session.created` returns minimal session object
+## Recommended Order
 
-**Gap**: Dalston sends a sparse session object on connection:
+This analysis maps directly onto
+[M61: OpenAI Speech-to-Text API Parity](../../plan/milestones/M61-openai-api-parity.md):
 
-```json
-{
-  "type": "transcription_session.created",
-  "session": {
-    "id": "sess_...",
-    "model": "gpt-4o-transcribe",
-    "input_audio_format": "pcm16",
-    "input_audio_transcription": { "model": "gpt-4o-transcribe" }
-  }
-}
-```
+1. **Contract lock first**
+   Freeze the pinned SDK contract, real traces, model capability table, and exact
+   request/response shapes.
 
-OpenAI's full object also includes `turn_detection` (with defaults), `noise_reduction`,
-and `client_secret`. SDKs that inspect session state on creation will see missing fields.
+2. **Gateway correctness second**
+   Fix validation, exact response formatting, `temperature=0`, prompt-length validation,
+   rate-limit headers, `sk-` diagnostics, and ingestion limit threading.
 
-**Feasibility**: ✅ Current (for the structural fields; `noise_reduction` requires G-17)
+3. **Batch pipeline fidelity third**
+   Preserve prompt as prompt, implement `known_speaker_names`, preserve real segment
+   quality metadata, and add model-gated `include=...logprobs`.
 
-**Remedy**: Easy. Extend the `transcription_session.created` send in
-`openai_realtime_transcription()` to include default values for `turn_detection`
-and `noise_reduction: null`.
+4. **Realtime correctness fourth**
+   Add the SDK-visible session-create endpoint, accept both request shapes, fix the item
+   graph, fix 24 kHz `pcm16`, and forward full `turn_detection` tuning.
 
----
-
-### G-17 · `noise_reduction` session parameter not handled
-
-**Gap**: OpenAI's session update accepts a `noise_reduction` object:
-
-```json
-{ "noise_reduction": { "type": "near_field" } }
-```
-
-Dalston ignores this field entirely. Most realtime whisper workers don't have a built-in
-noise reduction pre-filter.
-
-**Feasibility**: 🔧 New capability
-
-Audio pre-processing (e.g. RNNoise, demucs-vocal-isolation) would need to be integrated
-into the realtime worker pipeline as a pre-VAD step. This is a significant engine addition.
-
-**Remedy**: Hard. Requires a new pre-processing stage in realtime workers and a worker
-protocol extension. Could be deferred unless clients explicitly depend on it. For now,
-the session updated response should acknowledge the field with `"noise_reduction": null`
-to signal unsupported.
+5. **Subsystem work later**
+   SSE, speaker references, denoise DSP, and any pub/sub wakeup optimization.
 
 ---
 
-### G-18 · Verbose JSON stubs are inaccurate (per-segment quality signals)
+## Summary Table
 
-**Gap**: Dalston hardcodes quality signals in every segment of a `verbose_json` response:
-
-```python
-tokens=[],
-avg_logprob=-0.5,     # fixed sentinel
-compression_ratio=1.0, # fixed sentinel
-no_speech_prob=0.02,   # fixed sentinel
-```
-
-`faster-whisper` and `whisperx` both emit real values for these per segment. Clients
-using `avg_logprob` or `no_speech_prob` for quality filtering will get misleading data.
-
-**Feasibility**: 🔧 New capability
-
-The values are discarded by the transcription engine before output is written to S3.
-They need to be: (1) added to `TranscriptionSegment` in `pipeline_types.py`, (2) captured
-and emitted by the faster-whisper and whisperx engines, (3) passed through the merge engine
-into `transcript.json`, (4) read and formatted in `format_openai_response()`.
-
-**Remedy**: Medium. Same pipeline path as G-2; can be done in the same pass.
-
----
-
-## Part 4: Blind Spots
-
-These are issues not covered by the gap list above that could affect real-world clients.
-
----
-
-### B-1 · `prompt` passed as a raw string to an engine expecting a term array
-
-In OpenAI mode, the `prompt` parameter (free prose text, max 224 tokens) is stored
-directly as `parameters["vocabulary"] = prompt` in both transcription and translation.
-However, the Dalston pipeline's `vocabulary` parameter is intended to be a **JSON array
-of boost terms** — and the engines that receive it may expect a list, not a prose string.
-
-In the realtime path the same parameter is split on commas: `prompt.split(",")`. The batch
-path passes the raw string. The two paths treat the same conceptual parameter differently,
-and neither correctly implements OpenAI's intent (which is to feed the model a priming
-context, not a term list).
-
-**Risk**: Vocabulary boosting silently does nothing, or causes engine-side parse errors.
-**Remedy**: Easy-Medium. Decide on a canonical mapping (e.g. split on whitespace/commas
-and deduplicate for the engine's term-boost path) and apply it consistently across both
-paths.
+| ID | Gap | Priority | Feasibility |
+|----|-----|----------|-------------|
+| C-0 | No pinned SDK contract suite exists yet | P0 | ✅ Current |
+| C-1 | Model validation is regex-driven | P0 | 🧪 Contract lock first |
+| C-2 | Translation validation is split-brain | P1 | 🧪 Contract lock first |
+| C-3 | Realtime support is tied to older request/model surface | P0 | 🧪 Contract lock first |
+| G-1 | `diarized_json` fallback bug | P0 | ✅ Current |
+| G-2 | `usage` missing and older remedy is stale | P0 | 🧪 Contract lock first |
+| G-3 | `temperature=0` dropped | P0 | ✅ Current |
+| G-4 | `prompt` treated as hotwords | P0 | 🔧 Cross-service |
+| G-5 | Prompt length not validated | P1 | ✅ Current |
+| G-6 | `chunking_strategy` analysis is stale | P2 | 🧪 Contract lock first |
+| G-7 | `known_speaker_names` missing | P1 | 🔧 Cross-service |
+| G-8 | `known_speaker_references` missing | P3 | 🧱 New subsystem |
+| G-9 | `include=...logprobs` is a distinct gap | P2 | 🔧 Cross-service |
+| G-10 | `verbose_json` quality fields are fake | P1 | 🔧 Cross-service |
+| T-1 | Translation route needs exact capability-driven validation | P1 | 🧪 Contract lock first |
+| T-2 | Translation SSE missing | P3 | 🧱 New subsystem |
+| R-0 | SDK-visible realtime session-create route missing from parity target | P1 | 🧪 Contract lock first |
+| R-1 | `pcm16` 24 kHz mismatch | P0 | 🔧 Cross-service |
+| R-2 | Realtime item-graph events/state are incomplete | P0 | ✅/🔧 |
+| R-3 | `turn_detection` tuning ignored | P1 | 🔧 Cross-service |
+| R-4 | Realtime request/session shape drift | P0 | 🧪 Contract lock first |
+| R-5 | `noise_reduction` not implemented | P3 | 🧱 New subsystem |
+| B-1 | OpenAI rate-limit header names missing | P1 | ✅ Current |
+| B-2 | OpenAI 25 MB limit not threaded through URL ingestion | P1 | ✅ Current |
+| B-3 | Sync-mode scalability is performance work, not parity | P3 | N/A |
+| B-4 | `sk-` auth diagnostics missing | P1 | ✅ Current |
+| B-5 | Binary realtime frames bypass useful validation | P2 | ✅/🔧 |
 
 ---
 
-### B-2 · Rate-limit response headers not returned
+## Maintenance Rule
 
-OpenAI clients and SDKs inspect `x-ratelimit-limit-requests`, `x-ratelimit-remaining-requests`,
-and `x-ratelimit-reset-requests` headers to implement adaptive backoff. Dalston returns HTTP
-429 but does not include these headers. Libraries that use the headers for retry scheduling
-(e.g. `openai-python`) will fall back to exponential backoff rather than using the exact
-reset time.
+When updating this document, also review:
 
-**Feasibility**: ✅ Current
-**Remedy**: Easy. Add a response middleware that injects rate-limit headers from the
-`RedisRateLimiter.check_*` result into HTTP responses.
+- [M61: OpenAI Speech-to-Text API Parity](../../plan/milestones/M61-openai-api-parity.md)
 
----
+When updating the milestone, also review this analysis.
 
-### B-3 · `model` not echoed in transcription responses
-
-OpenAI's responses include a `model` field indicating which model actually processed the
-request. Dalston's `json` and `verbose_json` responses contain no model field. Clients
-that log or audit which model handled a request will be unable to determine this.
-
-**Feasibility**: ✅ Current
-**Remedy**: Easy. Add `model: str` to `OpenAITranscriptionResponse` and
-`OpenAIVerboseResponse` and populate it from the resolved engine identifier (available
-from the job record after completion).
-
----
-
-### B-4 · `prompt` token-length validation not enforced
-
-The `Form` description documents "max 224 tokens" for `prompt`, matching OpenAI's limit,
-but the gateway never validates this. A client sending a very long prompt could cause
-unexpected engine behaviour (truncation, performance degradation, or silent quality loss)
-with no error returned.
-
-**Feasibility**: ✅ Current
-**Remedy**: Easy. Add a tokenisation check (use `tiktoken` or a rough character-count
-heuristic — 224 tokens ≈ 900 characters) in `validate_openai_request()`.
-
----
-
-### B-5 · Large URL-based audio downloads bypass the 25 MB limit effectively
-
-The 25 MB file size check runs on `ingested.content` after the full download:
-
-```python
-if len(ingested.content) > OPENAI_MAX_FILE_SIZE:
-    raise_openai_error(...)
-```
-
-For `audio_url`-based ingestion, the gateway downloads the entire file into memory before
-checking the size. A 500 MB file passed via URL in OpenAI model mode will exhaust worker
-memory before the limit is enforced.
-
-**Feasibility**: ✅ Current
-**Remedy**: Easy-Medium. The ingestion service should stream-download and abort early if
-content-length exceeds the limit, or validate the `Content-Length` header before
-downloading.
-
----
-
-### B-6 · Binary realtime audio frames bypass format validation
-
-Raw binary WebSocket frames sent to `/v1/realtime` are passed directly to the worker
-without verifying they match the negotiated `input_audio_format`. If a client sends G.711
-ulaw bytes but the session was configured for `pcm16`, the realtime worker will silently
-process garbage, producing nonsensical transcription with no error.
-
-**Feasibility**: ✅ Current (for header validation) / 🔧 New capability (for deep validation)
-**Remedy**: Easy for structural checks (e.g. detect obvious non-PCM framing); Medium for
-full per-frame format verification.
-
----
-
-### B-7 · Synchronous OpenAI mode does not scale under concurrent long-running jobs
-
-In OpenAI mode, the gateway holds an open HTTP connection and polls until the job
-completes (or 408 timeout). Under concurrent load with long audio files, this ties up
-HTTP worker threads for the full transcription duration. The gateway has no mechanism
-to shed load or defer slow OpenAI-mode requests to a separate queue.
-
-This is a known trade-off of the synchronous-compatibility design, but it creates a risk
-of cascading latency under load — short jobs queue behind slow ones at the HTTP level.
-
-**Feasibility**: 🔧 New capability
-**Remedy**: Hard. Proper mitigation requires a dedicated async-await loop separate from
-the HTTP thread pool (FastAPI's background task machinery helps here, but the polling
-loop still holds an HTTP connection). A `202 + polling` approach won't satisfy OpenAI
-SDK clients expecting a synchronous response.
-
----
-
-### B-8 · `sk-` prefix API keys accepted without validation
-
-The API compatibility doc notes that `Authorization: Bearer sk-xxx` keys are accepted.
-The `sk-` prefix is OpenAI's production key prefix; a misconfigured client that accidentally
-sends its real OpenAI key to a Dalston instance will be silently accepted and charged
-against the Dalston account's rate limits, with no error message explaining the mismatch.
-
-**Feasibility**: ✅ Current
-**Remedy**: Easy. Detect `sk-` prefixed keys and return an informative 401 error suggesting
-the user is using an OpenAI key against a Dalston endpoint. (Alternatively, document this
-explicitly as intentional for migration ergonomics and keep the current behaviour.)
-
----
-
-## Remediation Roadmap
-
-### Tier 1 — Easy wins (gateway-only changes, < 1 day each)
-
-| ID | Gap | Change |
-|----|-----|--------|
-| G-6 | `diarized_json` silent fallback | Add enum value + formatter branch |
-| G-7 | Missing `usage` field | Add to response models, populate from transcript |
-| G-8 | `temperature=0` not forwarded | Change `> 0` to `is not None` |
-| G-12 | `conversation.item.created` not emitted | Emit in commit handler |
-| G-13 | `previous_item_id` missing | Track in `OpenAISessionState` |
-| G-14 | VAD events missing `item_id` | Include in translated events |
-| G-16 | Sparse `transcription_session.created` | Extend with defaults |
-| B-2 | Rate-limit headers absent | Response middleware |
-| B-3 | `model` not in response | Add field, populate from job |
-| B-4 | `prompt` length not validated | Add char/token check |
-| B-8 | `sk-` key warning | Return descriptive 401 |
-
-### Tier 2 — Medium (multi-file, up to 1 week each)
-
-| ID | Gap | Change |
-|----|-----|--------|
-| G-3 | `chunking_strategy: "auto"` acceptance | Accept + validate parameter (no-op for now) |
-| G-4 | `known_speaker_names` | Gateway param → job parameter → merge engine relabelling |
-| G-11 | PCM16 24 kHz mismatch | Resampling step in realtime workers |
-| G-15 | `turn_detection` params ignored | Extend worker URL protocol + VAD init |
-| G-2 + G-18 | `logprobs` and real quality signals | Engine output schema + pipeline types + formatter |
-| B-1 | `prompt` → vocabulary mismatch | Canonicalise mapping, unify batch/realtime paths |
-| B-5 | Large URL bypasses size limit | Stream-download with early abort |
-
-### Tier 3 — Hard (new subsystems, > 1 week each)
-
-| ID | Gap | Change |
-|----|-----|--------|
-| G-1 / G-9 | SSE streaming for batch endpoints | Engine pub/sub events + gateway SSE handler |
-| G-5 | `known_speaker_references` | Speaker embedding engine + enrollment pipeline stage |
-| G-17 | `noise_reduction` | Pre-processing stage in realtime workers |
-| B-7 | Sync mode scalability | Dedicated async HTTP layer for long-running OAI requests |
-
----
-
-## Summary
-
-| Category | Count |
-|----------|-------|
-| Easy closable with current capabilities | 11 |
-| Closable with engine/protocol changes | 7 |
-| Hard / new subsystem | 4 |
-| Blind spots identified | 8 |
-| Not feasible / deliberate deviation | 0 |
-
-No gap is architecturally permanent. All deviations are either implementation cost
-decisions or are intentional Dalston extensions that do not break OpenAI spec compliance.
+When updating the pinned `openai-python` version or the SDK trace fixtures, review both
+documents in the same PR.

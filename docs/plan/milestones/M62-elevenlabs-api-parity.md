@@ -1,1482 +1,638 @@
-# M62: ElevenLabs API Parity
+# M62: ElevenLabs Speech-to-Text API Parity
 
 | | |
 |---|---|
-| **Goal** | Close all actionable gaps between Dalston's ElevenLabs-compatible API and the current ElevenLabs ASR spec |
-| **Duration** | Phase 1: 2 weeks · Phase 2: 4 weeks · Phase 3: 8 weeks |
+| **Goal** | Close the actionable gaps between Dalston's ElevenLabs-compatible STT API and the public ElevenLabs STT docs as of **March 8, 2026** |
+| **Duration** | Phase 0: 1 week; Phase 1: 2 weeks; Phase 2: 4 weeks; Phase 3: 4 weeks |
 | **Dependencies** | M08 (ElevenLabs compat base), M45 (security hardening), M48 (realtime routing) |
-| **Deliverable** | The ElevenLabs Python SDK works unchanged against Dalston; no silent failures or behavioural divergence under spec-compliant clients |
+| **Deliverable** | A pinned `elevenlabs-python` contract suite plus docs/traces prove Dalston interoperates with the supported ElevenLabs STT surface, with exact request validation, exact response shapes, correct realtime behavior, and browser-safe auth that matches the published contract |
 | **Status** | Not started |
-| **Gap Reference** | [`docs/reports/elevenlabs-api-parity-gap-analysis.md`](../../reports/elevenlabs-api-parity-gap-analysis.md) |
+| **Gap Reference** | [`docs/specs/elevenlabs/PARITY_GAPS.md`](../../specs/elevenlabs/PARITY_GAPS.md) |
 
-## User Stories
+## User Story
 
-> *"As a developer migrating from ElevenLabs, I can point the ElevenLabs Python SDK at Dalston by changing only the base URL — the same parameters, the same response shape, the same error format."*
+> *"As a developer migrating from ElevenLabs, I can point the ElevenLabs SDK at Dalston by changing only the base URL and get the same request validation, response shapes, and realtime protocol for the STT features Dalston claims to support."*
 
-> *"As an async caller using `webhook=true`, I receive a push notification when my transcription completes instead of polling forever."*
+> *"As a browser application, I can open a realtime STT session with a short-lived single-use token instead of embedding a long-lived API key in client-side JavaScript."*
 
-> *"As a browser application, I can open a real-time WebSocket session using a short-lived token rather than embedding my API key in client-side JavaScript."*
+> *"As an async caller using `webhook=true`, I get the documented webhook delivery semantics instead of an acknowledgement that never results in a callback."*
+
+---
+
+## Scope Lock
+
+This milestone is pegged to the public ElevenLabs STT surface available on **March 8, 2026**:
+
+- [Speech-to-text API reference](https://elevenlabs.io/docs/api-reference/speech-to-text)
+- [Realtime speech-to-text API reference](https://elevenlabs.io/docs/api-reference/speech-to-text/realtime)
+- [Single-use token API reference](https://elevenlabs.io/docs/api-reference/tokens/create)
+- [Speech-to-text capabilities](https://elevenlabs.io/docs/capabilities/speech-to-text)
+- [Model and rate-limit docs](https://elevenlabs.io/docs/models#rate-limits)
+- [Official `elevenlabs-python` SDK](https://github.com/elevenlabs/elevenlabs-python)
+
+The public docs are not perfectly consistent in every example, especially around model
+IDs on the batch side. Where docs and examples drift, we should freeze the contract from:
+
+1. The latest official API reference pages.
+2. The current official Python SDK request shapes.
+3. Captured SDK traces against the live public contract.
+
+This milestone's analysis companion is
+[PARITY_GAPS.md](../../specs/elevenlabs/PARITY_GAPS.md).
+
+---
+
+## Principles
+
+1. **Exact public surface on ElevenLabs routes**
+   Dalston must not invent Dalston-only request parameters, response bodies, or auth
+   flows on `/v1/speech-to-text/*` and `/v1/single-use-token/*`.
+
+2. **Reuse existing Dalston subsystems**
+   We already have job deletion, ephemeral token issuance, webhook endpoint CRUD, and a
+   delivery worker. Parity work should adapt those subsystems to the ElevenLabs contract,
+   not build parallel infrastructure.
+
+3. **No deliberate incompatibility phases**
+   If ElevenLabs currently documents a feature as supported, such as `ulaw_8000`, we do
+   not ship an intentional reject-first phase. We either support it correctly or reject
+   the entire unsupported combination explicitly before claiming parity.
+
+4. **Separate batch and realtime capability tables**
+   Batch and realtime model IDs are no longer safely interchangeable. Validation must be
+   endpoint-specific and driven by one docs-backed compatibility table.
+
+5. **Exact request locations matter**
+   Query-vs-form placement is part of the public API. Examples: batch `enable_logging`
+   belongs on the query string, realtime auth uses `?token=`, and single-use token
+   issuance uses the documented ElevenLabs path rather than a Dalston-only alias.
+
+6. **Exact schema beats heuristics**
+   `words[].type`, `words[].characters`, `words[].logprob`, and `entities` should come
+   from exact transcript/token data. We should not approximate ElevenLabs response shapes
+   with silence-gap heuristics or placeholder payloads.
+
+7. **Executable SDK parity gate**
+   The official `elevenlabs-python` SDK should be part of the required test contract.
+   Mock-heavy route tests are still useful, but they are not enough to catch subtle
+   multipart, response-parsing, auth, and realtime-client drift.
 
 ---
 
 ## Problem
 
-The original M08 implementation established the structural scaffold for ElevenLabs compatibility.
-What remains is a set of fidelity gaps that cause silent failures and observable behavioural
-divergence under spec-compliant clients:
+M08 established the ElevenLabs-compatible routes, but Dalston's compatibility layer is
+still anchored to older assumptions about the public contract.
 
-```
-CRITICAL BUGS (client receives wrong behaviour)
-───────────────────────────────────────────────────────────────
-  ├── DELETE /transcripts/{id} endpoint missing entirely
-  ├── commit_strategy defaults to "vad" — ElevenLabs spec mandates "manual"
-  ├── webhook=true returns acknowledgement but never pushes results
-  └── GET /transcripts/{id} returns non-spec "processing" object for in-flight jobs
+### Current Gaps
 
-SILENT PARAMETER DROPS (accepted but never applied)
-───────────────────────────────────────────────────────────────
-  ├── tag_audio_events — accepted, silently ignored
-  ├── model_id — silently substituted with default engine
-  ├── temperature / seed — not forwarded to engine
-  ├── enable_logging — causes 422 on some client versions
-  └── keyterm word-count limit (≤5 words) not enforced
+```text
+CONTRACT DRIFT
+- Batch and realtime model handling is still M08-era and not locked to the current
+  docs + SDK surface
+- The batch handler is missing documented request fields such as entity_detection,
+  file_format, webhook_id, and webhook_metadata
+- Batch enable_logging is treated as a form concern instead of the current
+  query-param contract
+- Browser auth still revolves around api_key= instead of the published
+  single-use token flow with token=
 
-RESPONSE SCHEMA GAPS (missing fields)
-───────────────────────────────────────────────────────────────
-  ├── words[].logprob — never emitted (batch + realtime)
-  ├── words[].characters — never emitted (batch only)
-  ├── words[].type — hardcoded "word"; "spacing" and "audio_event" absent
-  ├── additional_formats — ElevenLabs returns inline; Dalston has separate endpoint
-  └── request_id — always null in async responses
+BATCH CORRECTNESS BUGS
+- DELETE /transcripts/{id} alias is missing even though Dalston already has a native
+  delete path we can reuse
+- GET /transcripts/{id} returns a Dalston-only processing object instead of the public
+  ElevenLabs behavior
+- model_id is silently ignored
+- request_id is always null in async responses
+- Keyterm validation misses the <=5 word limit
+- additional_formats are not returned inline
+- entity_detection / entities are absent from the public ElevenLabs-compatible route
 
-REALTIME PROTOCOL GAPS
-───────────────────────────────────────────────────────────────
-  ├── ?token= auth not supported (blocks browser clients using ElevenLabs SDK)
-  ├── include_language_detection not wired
-  ├── VAD tuning params discarded (vad_silence_threshold_secs, vad_threshold, …)
-  ├── session_started config echo incomplete
-  ├── previous_text context hint not forwarded
-  ├── ulaw_8000 accepted at handshake, decoded as garbage
-  └── 13 ElevenLabs error subtypes collapsed to generic "error"
+REALTIME CORRECTNESS BUGS
+- commit_strategy still defaults to "vad" instead of ElevenLabs' documented "manual"
+- ulaw_8000 is accepted then forwarded as garbage bytes
+- include_language_detection is dropped
+- previous_text and VAD tuning parameters are discarded
+- session_started does not reflect the effective config
+- ElevenLabs error message types collapse to generic error
+- The word schema is stale: no logprob, no characters, and no correct spacing tokens
 
-BLIND SPOTS
-───────────────────────────────────────────────────────────────
-  ├── No file size limit enforced at gateway (3 GB / 2 GB limits)
-  ├── ulaw_8000 not rejected early — produces silent garbage output
-  ├── No idempotency key support — retried POSTs create duplicate jobs
-  ├── No rate-limit headers on responses
-  └── cloud_storage_url provider coverage unverified (Dropbox, Google Drive)
-```
+INTEGRATION GAPS
+- webhook=true is not wired to Dalston's existing webhook endpoint and delivery
+  subsystems
+- The existing auth token service is not adapted to the ElevenLabs single-use token
+  contract
+- 3 GB upload / 2 GB cloud URL size ceilings are not enforced consistently at the gateway
+- use_multi_channel and audio_event-style enrichment still require genuine new capability
+  work
 
----
+LOWER-PRIORITY NON-PARITY WORK
+- Idempotency-Key support is useful platform work, but it is not an ElevenLabs STT
+  parity requirement
+- If we expose rate-limit headers, they must be the official ElevenLabs concurrency
+  headers, not custom x-ratelimit-*
 
-## Phase 1: Gateway Fidelity (Weeks 1–2)
-
-All changes in this phase are confined to `dalston/gateway/`. No engine, pipeline schema,
-or worker changes. Every step is independently deployable and testable in isolation.
-
----
-
-### 1.1: Fix `commit_strategy` default
-
-**Gap:** G02 — ElevenLabs mandates `"manual"` as the default commit strategy. Dalston defaults
-to `"vad"`, which causes automatic commits for any client that does not pass the parameter
-explicitly. This is the highest-risk behavioural divergence in the realtime path.
-
-**File:** `dalston/gateway/api/v1/realtime.py:536`
-
-```python
-# Before
-commit_strategy: Annotated[
-    str, Query(description="Commit strategy: 'vad' or 'manual'")
-] = "vad",
-
-# After
-commit_strategy: Annotated[
-    str, Query(description="Commit strategy: 'vad' or 'manual'")
-] = "manual",
+TEST CONTRACT GAPS
+- The current ElevenLabs coverage is still mostly route-level and mock-heavy
+- No pinned official Python SDK contract suite exists under `tests/integration/`
+- Existing tests still encode stale assumptions such as arbitrary `model_id`
+  acceptance and a custom `200 {"status":"processing"}` GET shape
+- No SDK coverage currently exercises the single-use token flow or browser-safe realtime
+  connection setup
 ```
 
 ---
 
-### 1.2: Fix GET transcript response for in-progress jobs
+## Phase 0: Contract Lock (Week 1)
 
-**Gap:** G04 — ElevenLabs defines only two outcomes from `GET /transcripts/{id}`: a completed
-transcript (200) or not-found (404). Dalston returns a custom `ElevenLabsProcessingResponse`
-for in-flight jobs. Strict clients cannot parse it and will surface it as an error or ignore
-the body.
+This phase is mandatory. The public docs have drifted since M08, and the SDK is the
+right tie-breaker when examples conflict.
 
-The correct pattern: return 404 with a `Retry-After` header while the job is running.
-Clients polling for async results will naturally retry. Return 410 Gone for failed or
-cancelled jobs so the caller knows not to retry.
+### 0.1: Pin the Python SDK contract and capture traces
 
-**File:** `dalston/gateway/api/v1/speech_to_text.py`
+Pin one `elevenlabs-python` version for the primary compatibility gate and record
+request/response traces for the exact methods Dalston intends to support:
 
-Remove `ElevenLabsProcessingResponse` from the response model and the handler:
+- `speech_to_text.convert(...)` in sync and async forms
+- `speech_to_text.get(...)`
+- `speech_to_text.delete(...)`
+- single-use token creation for realtime STT
+- realtime session setup, manual commit flow, and `ulaw_8000` input
 
-```python
-# Remove this model entirely
-class ElevenLabsProcessingResponse(BaseModel): ...
+Store these as locked fixtures under `tests/integration/elevenlabs_fixtures/`.
 
-# Route declaration — remove ElevenLabsProcessingResponse from union
-@router.get(
-    "/transcripts/{transcription_id}",
-    response_model=ElevenLabsTranscript,     # was: | ElevenLabsProcessingResponse
-    ...
-)
+Also record a small set of raw HTTP/WebSocket traces for runtime details the SDK does not
+fully expose, especially polling semantics, webhook payload shapes, and realtime error
+event details.
 
-# Handler — replace the status switch with HTTP semantics
-if job.status != JobStatus.COMPLETED.value:
-    if job.status == JobStatus.FAILED.value:
-        raise HTTPException(
-            status_code=500,
-            detail=Err.TRANSCRIPTION_FAILED.format(error=job.error or "Unknown error"),
-        )
-    if job.status in (JobStatus.CANCELLED.value, JobStatus.CANCELLING.value):
-        raise HTTPException(status_code=410, detail=Err.TRANSCRIPTION_CANCELLED)
-    # PENDING or RUNNING — not ready yet
-    raise HTTPException(
-        status_code=404,
-        detail=Err.TRANSCRIPTION_NOT_FOUND,
-        headers={"Retry-After": "5"},
-    )
-```
+### 0.2: Build one authoritative capability table
 
----
+Create an `ELEVENLABS_STT_CAPABILITIES` table in the gateway layer with separate
+endpoint-specific entries for:
 
-### 1.3: Implement DELETE /transcripts/{transcription_id}
+- Batch transcription model IDs accepted by the current docs + SDK
+- Realtime model IDs accepted by the current docs + SDK
+- Supported request fields and where they live (`query`, `multipart`, `ws_query`,
+  `message_body`)
+- Supported audio formats
+- Supported word payload fields
+- Supported webhook and token flows
 
-**Gap:** G01 — The DELETE endpoint is completely absent. Any ElevenLabs client that calls
-DELETE receives 405 Method Not Allowed. The endpoint must perform a soft-delete (set
-`deleted_at`) and schedule async S3 artifact removal.
+This must replace the current mix of hardcoded defaults, one-off whitelists, and silent
+fallbacks.
 
-**File:** `dalston/gateway/api/v1/speech_to_text.py`
+### 0.3: Freeze canonical public schemas
 
-Add after the GET handler:
+For each supported route, lock the exact response shapes Dalston must emit:
 
-```python
-@router.delete(
-    "/transcripts/{transcription_id}",
-    status_code=200,
-    summary="Delete transcript (ElevenLabs compatible)",
-    responses={
-        200: {"description": "Transcript deleted successfully"},
-        404: {"description": "Transcript not found"},
-    },
-)
-async def delete_transcript(
-    transcription_id: UUID,
-    principal: Annotated[Principal, Depends(get_principal)],
-    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
-    db: AsyncSession = Depends(get_db),
-    jobs_service: JobsService = Depends(get_jobs_service),
-    storage: StorageService = Depends(get_storage_service),
-    redis: Redis = Depends(get_redis),
-) -> dict:
-    """Delete a transcript and its associated audio artifacts."""
-    job = await jobs_service.get_job_authorized(
-        db, transcription_id, principal, security_manager
-    )
-    if job is None:
-        raise HTTPException(status_code=404, detail=Err.TRANSCRIPTION_NOT_FOUND)
+- async batch acknowledgement
+- completed transcript payload
+- GET/DELETE transcript behavior
+- webhook payloads for completed and failed jobs
+- realtime `session_started`, transcript, and error messages
+- single-use token issuance response
 
-    security_manager.require_permission(principal, Permission.JOB_DELETE)
+### 0.4: Define the SDK contract suite up front
 
-    await jobs_service.soft_delete_job(db, job.id)
-    await storage.schedule_artifact_deletion(job.id, redis)
+Add a dedicated SDK contract test layer that uses the official Python SDK against
+Dalston's ElevenLabs-compatible surface.
 
-    return {}
-```
+- Add a pinned-version integration suite under `tests/integration/`
+- Keep a smaller live-stack smoke test under `tests/e2e/`
+- Make the integration suite the primary compatibility gate for:
+  - request serialization
+  - response parsing
+  - auth and token flow
+  - GET/DELETE behavior
+  - realtime connection setup where the SDK exposes it
 
-`JobsService.soft_delete_job` sets `deleted_at = now()` on the job row.
-`StorageService.schedule_artifact_deletion` publishes a Redis message consumed by a
-background worker that removes the S3 objects asynchronously (audio file + transcript JSON).
-Deletion is non-blocking from the client's perspective.
+**Best solution**
 
-Extend `get_job_authorized` to filter out soft-deleted jobs (treat as 404), and add a
-`JOB_DELETE` permission.
+Prefer fast SDK integration tests over live-stack-only smoke tests. The cleanest setup is
+to run Dalston in a deterministic test harness and point `ElevenLabs(base_url=...)` at
+it, then reserve full Docker e2e coverage for a narrow smoke path.
+
+### Phase 0 Checkpoint
+
+- [ ] Pinned `elevenlabs-python` version chosen for the compatibility gate
+- [ ] SDK request/response traces checked into fixtures
+- [ ] `ELEVENLABS_STT_CAPABILITIES` defined from docs + SDK traces
+- [ ] Batch and realtime model IDs separated in validation
+- [ ] Canonical transcript, webhook, realtime, and token schemas frozen
+- [ ] SDK contract suite skeleton checked in with locked fixtures
 
 ---
 
-### 1.4: Populate `request_id` in async response
+## Phase 1: Gateway Correctness (Weeks 2-3)
 
-**Gap:** G22 — `ElevenLabsAsyncResponse.request_id` is always `None`. The gateway
-already extracts `X-Request-ID` into `request.state.request_id` and echoes it in response
-headers. The async response should carry the same value.
+All Phase 1 work should be gateway-owned and should remove current silent divergence
+before we expand worker or pipeline behavior.
 
-**File:** `dalston/gateway/api/v1/speech_to_text.py:307`
+### 1.1: Replace M08-era validation with capability-table validation
 
-```python
-# Before
-return ElevenLabsAsyncResponse(
-    message="Request processed successfully",
-    transcription_id=str(job.id),
-)
+**Current problem**
 
-# After
-return ElevenLabsAsyncResponse(
-    message="Request processed successfully",
-    request_id=getattr(request.state, "request_id", None),
-    transcription_id=str(job.id),
-)
-```
+Validation is still scattered across the handlers and anchored to older assumptions:
 
----
+- batch `model_id` is accepted then ignored
+- realtime defaults still assume `scribe_v1`
+- documented request fields are missing or live in the wrong place
+- unsupported combinations are sometimes accepted and silently discarded
 
-### 1.5: Enforce keyterm word-count limit
+**Remedy**
 
-**Gap:** G21 — ElevenLabs rejects keyterms with more than 5 words. Dalston validates
-character length (≤50) and count (≤100) but not the word limit. Clients submitting
-multi-word terms that ElevenLabs rejects will be accepted silently by Dalston.
+- Centralize ElevenLabs request validation behind `ELEVENLABS_STT_CAPABILITIES`
+- Validate field location as well as field value
+- Reject unsupported combinations with ElevenLabs-shaped 4xx errors instead of silently
+  accepting and dropping them
 
-**File:** `dalston/gateway/api/v1/speech_to_text.py` (batch validation loop) and
-`dalston/gateway/api/v1/realtime.py` (WebSocket validation loop)
+**Best solution**
 
-In both locations, add after the character-length check:
+Make the compatibility table authoritative for both batch and realtime so that parameter
+acceptance, model support, and response shape are all driven from one locked contract.
 
-```python
-word_count = len(term.split())
-if word_count > 5:
-    raise HTTPException(
-        status_code=400,
-        detail=Err.KEYTERM_TOO_MANY_WORDS.format(count=word_count),
-    )
-```
+### 1.2: Fix GET and DELETE transcript compatibility by reusing existing job services
 
-Add to `dalston/gateway/error_codes.py`:
+**Current problem**
 
-```python
-KEYTERM_TOO_MANY_WORDS = "Each keyterm must be at most 5 words, got {count}"
-```
+Dalston currently invents a `processing` response for in-flight transcripts and simply
+does not expose the ElevenLabs DELETE alias.
 
-The WebSocket path raises a JSON error message and closes the connection, consistent with
-existing keyterm error handling there.
+**Remedy**
 
----
+- Remove the Dalston-only processing response from the ElevenLabs route
+- Return a transcript only when the transcript is actually materialized
+- While a job is still pending, return ElevenLabs-compatible `404` plus `Retry-After`
+  rather than a custom body
+- Add `DELETE /v1/speech-to-text/transcripts/{id}` as a thin alias over Dalston's
+  existing deletion path
 
-### 1.6: Accept `enable_logging` without error
+**Best solution**
 
-**Gap:** G26 — ElevenLabs clients pass `enable_logging=false` for enterprise zero-retention
-mode. Dalston does not define this parameter; some FastAPI versions will return a 422
-Unprocessable Entity because the field is unexpected in a strict `multipart/form-data`
-validation context.
+Reuse the existing authorization and deletion machinery in the native transcription API.
+Do not add a second soft-delete subsystem or a second artifact-cleanup path just for the
+ElevenLabs route.
 
-For a self-hosted deployment, retention is operator-controlled. Accept the parameter
-and ignore it. Document the limitation.
+Terminal failure polling semantics should be finalized from Phase 0 traces. Until that is
+locked, the only hard rule is: do not invent a Dalston-only `processing` schema.
 
-**File:** `dalston/gateway/api/v1/speech_to_text.py` — add form field:
+### 1.3: Close the easy batch correctness gaps and stop silent drops
 
-```python
-enable_logging: Annotated[
-    bool,
-    Form(description="Retention control (accepted for ElevenLabs compatibility; ignored — "
-                     "retention is operator-controlled in self-hosted deployments)"),
-] = True,
-```
+**Current problem**
 
-**File:** `dalston/gateway/api/v1/realtime.py` — add query param:
+Several easy fields still diverge from the public contract:
 
-```python
-enable_logging: Annotated[
-    bool, Query(description="Accepted for ElevenLabs compatibility; ignored.")
-] = True,
-```
+- `request_id` is null in async responses
+- keyterms do not enforce the published <=5 word limit
+- batch `enable_logging` is not modeled at the correct request location
+- documented request fields such as `file_format`, `webhook_id`, and
+  `webhook_metadata` are not consistently parsed and validated
 
----
+**Remedy**
 
-### 1.7: Reject unsupported `audio_format` at WebSocket handshake
+- Populate `request_id` from the existing correlation middleware
+- Enforce the keyterm word-count limit on both batch and realtime routes
+- Accept `enable_logging` on the query string, matching the current ElevenLabs contract
+- Parse and validate the full docs-backed batch field inventory
 
-**Gap:** B10 — Dalston accepts `audio_format=ulaw_8000` at handshake (because the parameter
-has no whitelist) but then feeds raw μ-law bytes to the worker as if they were PCM. The
-worker produces garbage transcription with no error. The session should be rejected
-immediately with a clear message.
+**Best solution**
 
-**File:** `dalston/gateway/api/v1/realtime.py`
+If a field is documented but not yet supported end-to-end, reject it explicitly. Do not
+accept it and quietly throw it away.
 
-Define a supported format set before the handler:
+### 1.4: Fix the realtime session contract at the gateway boundary
 
-```python
-_SUPPORTED_AUDIO_FORMATS: frozenset[str] = frozenset({
-    "pcm_8000",
-    "pcm_16000",
-    "pcm_22050",
-    "pcm_24000",
-    "pcm_44100",
-    "pcm_48000",
-})
-```
+**Current problem**
 
-Add validation before accepting the connection:
+The realtime route diverges from the current contract before the worker is even involved:
 
-```python
-if audio_format not in _SUPPORTED_AUDIO_FORMATS:
-    await websocket.accept()
-    await websocket.send_json({
-        "message_type": "input_error",
-        "error": (
-            f"Unsupported audio_format '{audio_format}'. "
-            f"Supported formats: {sorted(_SUPPORTED_AUDIO_FORMATS)}"
-        ),
-    })
-    await websocket.close(code=WS_CLOSE_INVALID_REQUEST, reason="Unsupported audio format")
-    return
-```
+- `commit_strategy` defaults to the wrong value
+- `include_language_detection` is not wired
+- `session_started` does not reflect the real effective config
+- worker and gateway failures collapse to generic `error`
 
-Note: `ulaw_8000` support is deferred to step 2.7. Once μ-law decoding is implemented,
-add it to the frozenset and remove from the rejection path.
+**Remedy**
+
+- Change the default `commit_strategy` to `manual`
+- Accept and forward `include_language_detection`
+- Emit `session_started` from the normalized effective config
+- Map gateway and worker failures to the ElevenLabs error vocabulary
+
+**Best solution**
+
+Only echo fields in `session_started` once they are actually validated and normalized.
+Do not echo unsupported VAD knobs as if they were active until they are truly wired
+through in Phase 2.
+
+### 1.5: Decode docs-supported telephony audio instead of rejecting it
+
+**Current problem**
+
+`ulaw_8000` is a documented realtime input format, but Dalston currently base64-decodes
+the chunk and forwards the raw mu-law bytes as if they were PCM16.
+
+**Remedy**
+
+- Add a small gateway-side codec helper that converts `ulaw_8000` to PCM16 before
+  forwarding audio to the worker
+- Keep the WebSocket handshake whitelist aligned with the published audio format set
+
+**Best solution**
+
+Do not ship a temporary "reject `ulaw_8000`" phase. Correct decoding is gateway-local
+and should land as a direct parity fix.
 
 ---
 
-### 1.8: Complete `session_started` config echo
+## Phase 2: Cross-Service Parity (Weeks 4-7)
 
-**Gap:** G13 — ElevenLabs echoes the full effective session config in `session_started` so
-clients can verify active settings. Dalston omits `include_timestamps`,
-`include_language_detection`, `enable_logging`, and the four VAD tuning fields.
+These items cross the gateway boundary into auth, orchestrator, export, or engine code.
 
-**File:** `dalston/gateway/api/v1/realtime.py:684`
+### 2.1: Adapt the existing auth service to the official single-use token contract
 
-```python
-# Before
-await websocket.send_json({
-    "message_type": "session_started",
-    "session_id": allocation.session_id,
-    "config": {
-        "sample_rate": sample_rate,
-        "audio_format": audio_format,
-        "language_code": language_code,
-        "model_id": model_id,
-        "commit_strategy": commit_strategy,
-    },
-})
+**Current problem**
 
-# After
-await websocket.send_json({
-    "message_type": "session_started",
-    "session_id": allocation.session_id,
-    "config": {
-        "sample_rate": sample_rate,
-        "audio_format": audio_format,
-        "language_code": language_code,
-        "model_id": model_id,
-        "commit_strategy": commit_strategy,
-        "include_timestamps": include_timestamps,
-        "include_language_detection": include_language_detection,  # wired in 1.9
-        "enable_logging": enable_logging,                          # added in 1.6
-        # VAD params — values reflect defaults until 2.5 wires them to the engine
-        "vad_silence_threshold_secs": vad_silence_threshold_secs,
-        "vad_threshold": vad_threshold,
-        "min_speech_duration_ms": min_speech_duration_ms,
-        "min_silence_duration_ms": min_silence_duration_ms,
-    },
-})
-```
+Dalston already has ephemeral session tokens, but the public ElevenLabs contract uses:
 
-The VAD parameters are accepted as query params in step 1.8 but not forwarded to the
-engine until step 2.5. Adding them to the echo now means the client at least sees what
-values it sent.
+- the documented single-use token endpoint
+- typed tokens for specific realtime flows
+- `?token=` on the realtime WebSocket
+- consume-on-first-use semantics
 
-Add the four VAD params as query params on the handler (mirrors 1.6 pattern):
+**Remedy**
 
-```python
-vad_silence_threshold_secs: Annotated[
-    float, Query(description="Silence duration (s) before VAD commits")
-] = 1.5,
-vad_threshold: Annotated[
-    float, Query(description="VAD speech detection sensitivity")
-] = 0.4,
-min_speech_duration_ms: Annotated[
-    int, Query(description="Minimum speech segment length in ms")
-] = 100,
-min_silence_duration_ms: Annotated[
-    int, Query(description="Minimum silence segment length in ms")
-] = 100,
-```
+- Expose the current ElevenLabs token issuance path on Dalston
+- Reuse the existing auth token service rather than introducing a second token store
+- Extend it with token type, single-use consumption, and short TTL semantics
+- Accept `?token=` in WebSocket auth on the ElevenLabs route
 
----
+**Best solution**
 
-### 1.9: Wire `include_language_detection`
+Add the official ElevenLabs-compatible endpoint and make it an adapter over the existing
+token infrastructure. Do not add a Dalston-only `/v1/speech-to-text/realtime/token`
+contract if the public ElevenLabs SDK expects `/v1/single-use-token/{token_type}`.
 
-**Gap:** G14 — `include_language_detection` controls whether the detected language appears
-in `committed_transcript` and `committed_transcript_with_timestamps` messages. The realtime
-worker already detects language and includes it in `transcript.final` messages. This is a
-pure formatting change in the gateway translation layer.
+### 2.2: Reuse the existing webhook platform for ElevenLabs async delivery
 
-**File:** `dalston/gateway/api/v1/realtime.py`
+**Current problem**
 
-Add query param to the handler:
+Dalston already has webhook endpoint CRUD and a delivery worker, but the ElevenLabs route
+does not wire `webhook=true`, `webhook_id`, or `webhook_metadata` into that subsystem.
 
-```python
-include_language_detection: Annotated[
-    bool, Query(description="Include language_code in committed transcript messages")
-] = False,
-```
+**Remedy**
 
-Pass to `_proxy_to_worker_elevenlabs`:
+- Validate `webhook=true`, `webhook_id`, and `webhook_metadata` on submission
+- Route delivery through the existing webhook endpoint registry and delivery worker
+- Emit the exact ElevenLabs transcript-complete / transcript-failed payloads
+- Include `request_id` and metadata in the webhook body where the public contract
+  requires them
 
-```python
-await _proxy_to_worker_elevenlabs(
-    ...
-    word_timestamps=include_timestamps,
-    include_language_detection=include_language_detection,  # ADD
-    vocabulary=parsed_vocabulary,
-)
-```
+**Best solution**
 
-In `_elevenlabs_worker_to_client`, update the `transcript.final` branch:
+Treat this as an adapter problem, not a greenfield subsystem. The missing work is
+ElevenLabs STT semantics on top of Dalston's existing durable webhook platform.
 
-```python
-elif msg_type == "transcript.final":
-    if include_timestamps and data.get("words"):
-        translated = {
-            "message_type": "committed_transcript_with_timestamps",
-            "text": data.get("text", ""),
-            "words": [...],
-        }
-    else:
-        translated = {
-            "message_type": "committed_transcript",
-            "text": data.get("text", ""),
-        }
-    # Include language if requested (data is already present from worker)
-    if include_language_detection and data.get("language"):
-        translated["language_code"] = data["language"]
-```
+### 2.3: Respect model selection and control parameters end-to-end
 
----
+**Current problem**
 
-### 1.10: Map worker errors to ElevenLabs error type vocabulary
+Dalston currently accepts several documented controls and either ignores them or silently
+substitutes defaults:
 
-**Gap:** G15 — ElevenLabs defines 13 structured error `message_type` values. Dalston emits
-a single generic `"error"` type. Clients that branch on error type for retry logic or UX
-messaging cannot distinguish conditions.
+- batch `model_id`
+- realtime `model_id`
+- batch `temperature`
+- batch `seed`
+- realtime `previous_text`
+- realtime VAD tuning parameters
 
-**File:** `dalston/gateway/api/v1/realtime.py`
+**Remedy**
 
-Add a mapping constant before the handler:
+- Route batch and realtime model IDs through separate capability rows and mappings
+- Forward `temperature` and `seed` end-to-end
+- Forward `previous_text` as the worker's initial prompt/context hint
+- Forward VAD tuning parameters through the realtime worker stack
 
-```python
-_WORKER_ERROR_TO_ELEVENLABS: dict[str, str] = {
-    "auth_failed":            "auth_error",
-    "rate_limited":           "rate_limited",
-    "quota_exceeded":         "quota_exceeded",
-    "no_capacity":            "queue_overflow",
-    "capacity_exhausted":     "resource_exhausted",
-    "session_time_exceeded":  "session_time_limit_exceeded",
-    "input_invalid":          "input_error",
-    "chunk_too_large":        "chunk_size_exceeded",
-    "no_speech":              "insufficient_audio_activity",
-    "transcriber_failed":     "transcriber_error",
-    "lag_exceeded":           "transcriber_error",
-}
-```
+**Best solution**
 
-In `_elevenlabs_worker_to_client`, update the error branch:
+Never silently substitute `settings.default_model` for a requested public model ID. If a
+docs-backed model is not available in a deployment, reject it explicitly.
 
-```python
-elif msg_type == "error":
-    worker_code = data.get("code", "")
-    el_type = _WORKER_ERROR_TO_ELEVENLABS.get(worker_code, "transcriber_error")
-    translated = {
-        "message_type": el_type,
-        "error": data.get("message", "Unknown error"),
-    }
-```
+### 2.4: Implement the missing ElevenLabs batch enrichment surface
 
-Also map errors raised by the gateway itself before the worker is contacted. In the capacity
-check:
+**Current problem**
 
-```python
-await websocket.send_json({
-    "message_type": "queue_overflow",
-    "error": "No realtime capacity available",
-})
-```
+The current ElevenLabs-compatible batch route omits major pieces of the documented
+surface:
+
+- `entity_detection`
+- `entities`
+- inline `additional_formats`
+
+**Remedy**
+
+- Extend the batch pipeline and merge layer so `entity_detection` can produce `entities`
+- Reuse the existing export service to return `additional_formats` inline on the
+  ElevenLabs response model
+
+**Best solution**
+
+Prioritize `entity_detection` and `entities` before chasing lower-signal platform extras.
+This is a first-class public contract gap, not a nice-to-have.
+
+### 2.5: Fix the word schema end-to-end
+
+**Current problem**
+
+Dalston's current `words[]` output is shaped around older assumptions:
+
+- `type` is hardcoded to `word`
+- `logprob` is missing
+- `characters` are missing
+- realtime and batch formatting are inconsistent
+
+**Remedy**
+
+- Thread `logprob` from engine output to transcript storage and API formatting
+- Thread character-level alignment data where the engine provides it
+- Build `type` values from actual lexical/token boundaries so `spacing` is represented
+  correctly
+
+**Best solution**
+
+Do not synthesize `spacing` purely from silence gaps. Space tokens are textual structure,
+not just pauses. Build one shared formatter for batch and realtime word payloads from the
+actual transcript/token data.
 
 ---
 
-### 1.11: Synthesise `spacing` word tokens
+## Phase 3: New Capability and Edge-Contract Work (Weeks 8-11)
 
-**Gap:** G06 (partial) — ElevenLabs emits `spacing` tokens representing pauses between
-words. These are used by subtitle renderers and transcription editors. Dalston hardcodes
-`type="word"` everywhere. Spacing tokens can be synthesised from timestamp gaps with no
-engine changes.
+These items are real parity work, but they are either larger features or lower-priority
+than the gateway and integration fixes above.
 
-**File:** `dalston/gateway/api/v1/speech_to_text.py`
+### 3.1: Enforce the public size ceilings early
 
-Add a helper and update `_format_elevenlabs_response`:
+ElevenLabs documents 3 GB direct uploads and 2 GB `cloud_storage_url` inputs. Dalston
+should enforce those ceilings at the gateway using early `Content-Length` checks plus
+streaming byte counters, reusing the existing URL download service where possible.
 
-```python
-_SPACING_THRESHOLD_SECS = 0.1  # Gaps wider than 100 ms become spacing tokens
+### 3.2: Add `use_multi_channel` and the multichannel response shape
 
+This requires real pipeline fan-out and a different response model. It is a valid public
+gap, but it should follow the higher-value correctness work above.
 
-def _with_spacing_tokens(words: list[ElevenLabsWord]) -> list[ElevenLabsWord]:
-    """Insert spacing tokens between words with meaningful gaps."""
-    if not words:
-        return words
-    result: list[ElevenLabsWord] = []
-    for i, word in enumerate(words):
-        result.append(word)
-        if i < len(words) - 1:
-            gap = words[i + 1].start - word.end
-            if gap >= _SPACING_THRESHOLD_SECS:
-                result.append(
-                    ElevenLabsWord(
-                        text=" ",
-                        start=word.end,
-                        end=words[i + 1].start,
-                        type="spacing",
-                        speaker_id=None,
-                    )
-                )
-    return result
-```
+### 3.3: Expose only the official concurrency headers if we can compute them exactly
 
-Call in `_format_elevenlabs_response` before building the return value:
-
-```python
-if words:
-    words = _with_spacing_tokens(words)
-```
-
-Update `ElevenLabsWord.type` to drop the hardcoded default:
-
-```python
-class ElevenLabsWord(BaseModel):
-    text: str
-    start: float
-    end: float
-    type: str = "word"          # remains "word"; spacing tokens override explicitly
-    speaker_id: str | None = None
-    logprob: float | None = None    # populated in Phase 2
-```
+If we surface rate-limit information, it should use the official ElevenLabs header names
+described in the current docs, such as `current-concurrent-requests` and
+`maximum-concurrent-requests`. Do not add custom `x-ratelimit-*` headers under the guise
+of ElevenLabs parity.
 
 ---
 
-### 1.12: Inline `additional_formats` via ExportService
+## Tests
 
-**Gap:** G17 — ElevenLabs returns requested export formats inline in the POST response
-under `additional_formats`. Dalston has a separate export endpoint (not in the ElevenLabs
-spec). Clients that pass `additional_formats` receive nothing.
+### Required Integration Coverage
 
-**File:** `dalston/gateway/api/v1/speech_to_text.py`
+- Capability-table validation for batch and realtime
+- Exact response-shape fixtures for async acknowledgement, completed transcript, and
+  transcript polling behavior
+- Keyterm validation including the <=5 word rule
+- `request_id` propagation
+- `enable_logging` request-location validation
+- DELETE transcript alias behavior
+- Realtime `commit_strategy`, token auth, and `ulaw_8000` handling
+- Webhook payload-shape validation at the adapter boundary
 
-Add the request parameter:
+### Required SDK Coverage
 
-```python
-additional_formats: Annotated[
-    str | None,
-    Form(
-        description='JSON array of export formats, e.g. \'["srt","txt"]\'. '
-                    "Supported: srt, webvtt, txt, json",
-    ),
-] = None,
-```
+- A pinned-version Python SDK contract suite under `tests/integration/`
+- `ElevenLabs(base_url=...)` batch coverage for:
+  - sync convert
+  - async convert
+  - get/delete
+  - validation failures for unsupported model/field combinations
+  - `additional_formats` where supported
+  - `entity_detection` where supported
+- Single-use token coverage using the official SDK helper if exposed, otherwise a raw
+  HTTP fixture captured in Phase 0
+- Realtime connection/setup coverage driven by SDK traces and the frozen Phase 0 event
+  fixtures where the SDK exposes a stable helper
+- A smaller live-stack smoke test in `tests/e2e/test_elevenlabs_sdk.py`
 
-Add an output model:
+### CI Policy
 
-```python
-class ElevenLabsAdditionalFormat(BaseModel):
-    requested_format: str
-    file_extension: str
-    content_type: str
-    is_base64_encoded: bool = False
-    content: str
+- Pin the main CI compatibility gate to one known `elevenlabs` version
+- Optionally run a non-blocking canary job against the latest `elevenlabs` release to
+  catch upstream drift early
 
+### Preparation Docs
 
-class ElevenLabsTranscript(BaseModel):
-    language_code: str | None = None
-    language_probability: float | None = None
-    text: str
-    words: list[ElevenLabsWord] | None = None
-    transcription_id: str
-    additional_formats: list[ElevenLabsAdditionalFormat] | None = None  # ADD
-```
-
-Parse and generate in `_format_elevenlabs_response` (pass `export_service` and
-`requested_formats: list[str] | None` as arguments):
-
-```python
-inline_formats: list[ElevenLabsAdditionalFormat] | None = None
-if requested_formats:
-    inline_formats = []
-    for fmt in requested_formats:
-        export_format = export_service.validate_format(fmt, strict=False)
-        if export_format is None:
-            continue
-        content = export_service.render_to_string(transcript, export_format)
-        inline_formats.append(
-            ElevenLabsAdditionalFormat(
-                requested_format=fmt,
-                file_extension=export_format.file_extension,
-                content_type=export_format.content_type,
-                is_base64_encoded=False,
-                content=content,
-            )
-        )
-```
-
-`ExportService.render_to_string` is a new method that returns the export as a string
-instead of an HTTP `Response`. It reuses the existing rendering logic.
+- [PARITY_GAPS.md](../../specs/elevenlabs/PARITY_GAPS.md)
+- [M62 Task 62.1: ElevenLabs SDK Contract Tests](../impl/M62-62.1-elevenlabs-sdk-contract-tests.md)
 
 ---
 
-## Phase 2: Pipeline Integration (Weeks 3–6)
+## Files Expected To Change
 
-Changes in this phase cross the gateway boundary into engines, the realtime SDK, or the
-pipeline parameter schema. Each step requires coordinated changes across at least two
-components.
-
----
-
-### 2.1: Thread `logprob` from engine output
-
-**Gap:** G07 — faster-whisper and WhisperX both produce per-word log probability scores.
-The data exists in engine output but is discarded before the transcript reaches S3, so it
-cannot be surfaced in the API response.
-
-**Part A — Merge engine** (`engines/stt-merge/final-merger/engine.py`)
-
-When assembling `transcript.json`, preserve `logprob` from each word in the source stage
-output:
-
-```python
-word_entry = {
-    "text": w.get("word", w.get("text", "")),
-    "start": w.get("start", 0),
-    "end": w.get("end", 0),
-    "logprob": w.get("probability") or w.get("logprob"),  # faster-whisper: probability
-}
-```
-
-**Part B — Common pipeline types** (`dalston/common/pipeline_types.py`)
-
-Add `logprob: float | None = None` to the `Word` model.
-
-**Part C — Gateway** (`dalston/gateway/api/v1/speech_to_text.py`)
-
-In `_format_elevenlabs_response`, populate from the word dict:
-
-```python
-ElevenLabsWord(
-    ...
-    logprob=w.get("logprob"),
-)
-```
-
-**Part D — Realtime** (`dalston/gateway/api/v1/realtime.py`)
-
-In `_elevenlabs_worker_to_client`, add `logprob` to the word list in
-`committed_transcript_with_timestamps`:
-
-```python
-{
-    "text": w.get("word", ""),
-    "start": w.get("start", 0),
-    "end": w.get("end", 0),
-    "type": "word",
-    "logprob": w.get("logprob"),
-}
-```
+| File | Phase | Change |
+|------|-------|--------|
+| `pyproject.toml` | 0 | Add pinned `elevenlabs` test/dev dependency for the contract suite |
+| `dalston/gateway/api/v1/speech_to_text.py` | 0, 1, 2 | Capability-table validation, exact transcript polling/delete behavior, full batch field inventory, `request_id`, inline `additional_formats`, and `entities` |
+| `dalston/gateway/api/v1/realtime.py` | 0, 1, 2 | Capability-driven validation, docs-backed model handling, `commit_strategy`, `ulaw_8000` decoding, exact session/error payloads, and realtime control forwarding |
+| `dalston/gateway/api/auth.py` | 0, 2 | ElevenLabs-compatible single-use token issuance path over the existing auth service |
+| `dalston/gateway/middleware/auth.py` | 1, 2 | `?token=` support, single-use token consumption, and compatibility auth-path handling |
+| `dalston/gateway/services/auth.py` | 2 | Token type, single-use semantics, and short-TTL behavior for the existing token system |
+| `dalston/gateway/services/ingestion.py` | 3 | Early 3 GB upload ceiling enforcement |
+| `dalston/gateway/services/audio_url.py` | 3 | Early 2 GB `cloud_storage_url` ceiling enforcement, likely by extending existing guards |
+| `dalston/gateway/services/export.py` | 2 | Reuse existing export rendering for inline `additional_formats` |
+| `dalston/common/pipeline_types.py` | 2 | Enriched transcript/token fields such as `logprob`, `entities`, and exact word payload support |
+| `engines/stt-merge/final-merger/engine.py` | 2 | Preserve transcript data required for `logprob`, `characters`, `entities`, and exact word formatting |
+| `dalston/realtime_sdk/session.py` | 2 | Apply forwarded realtime settings such as prompt/context and VAD tuning where supported |
+| `dalston/realtime_sdk/vad.py` | 2 | VAD tuning plumbed from the public ElevenLabs realtime surface |
+| `dalston/orchestrator/distributed_main.py` | 2 | Adapt completed/failed job events into exact ElevenLabs webhook semantics |
+| `dalston/orchestrator/delivery.py` | 2 | Deliver exact ElevenLabs-compatible webhook payloads through the existing durable worker |
+| `tests/integration/elevenlabs_fixtures/*` | 0 | Locked docs/SDK/raw-HTTP compatibility fixtures |
+| `tests/integration/test_elevenlabs_api.py` | 0, 1, 2 | Narrow route-level assertions and remove stale parity assumptions |
+| `tests/integration/test_elevenlabs_sdk_contract.py` | 0, 1, 2, 3 | Pinned official Python SDK compatibility suite |
+| `tests/integration/test_elevenlabs_realtime_api.py` | 0, 1, 2 | Focused realtime contract coverage if the generic realtime tests are too diffuse |
+| `tests/e2e/test_elevenlabs_sdk.py` | 0, 1, 2, 3 | Narrow live-stack smoke test using the official Python SDK |
 
 ---
 
-### 2.2: Character-level timestamps
-
-**Gaps:** G10, G11 — ElevenLabs returns character-level `characters` arrays on each word
-when `timestamps_granularity="character"`. WhisperX's alignment stage produces
-character-level timing as an optional output; the data is currently discarded.
-
-**Part A — Align engine** (e.g. `engines/stt-align/whisperx-align/engine.py`)
-
-Check whether `model.align()` returns `char_segments`. If yes, add them to the output
-word dict:
-
-```python
-word_entry["characters"] = [
-    {"text": c["char"], "start": c["start"], "end": c["end"]}
-    for c in char_segments
-    if "start" in c
-]
-```
-
-If the alignment model does not produce character data, skip the field.
-
-**Part B — Batch endpoint** (`dalston/gateway/api/v1/speech_to_text.py`)
-
-Change `map_timestamps_granularity` to pass `"character"` through when the data is
-available, or raise 422 when it is not:
-
-```python
-def map_timestamps_granularity(granularity: str, char_supported: bool) -> str:
-    if granularity == "character":
-        if not char_supported:
-            raise HTTPException(
-                status_code=422,
-                detail="timestamps_granularity='character' is not supported by the "
-                       "active transcription engine. Use 'word' or 'none'.",
-            )
-        return "character"
-    return {"none": "none", "word": "word"}.get(granularity, "word")
-```
-
-**Part C — ElevenLabsWord model**
-
-```python
-class ElevenLabsCharacter(BaseModel):
-    text: str
-    start: float
-    end: float
-
-
-class ElevenLabsWord(BaseModel):
-    text: str
-    start: float
-    end: float
-    type: str = "word"
-    speaker_id: str | None = None
-    logprob: float | None = None
-    characters: list[ElevenLabsCharacter] | None = None   # ADD
-```
-
-Populate in `_format_elevenlabs_response` from the word dict's `characters` field.
-
----
-
-### 2.3: Diarization threshold
-
-**Gap:** G16 — ElevenLabs exposes `diarization_threshold` (~0.22 default) for controlling
-speaker separation sensitivity when the number of speakers is unknown. pyannote's
-`SpeakerDiarization` pipeline accepts an equivalent `clustering_threshold` parameter.
-
-**Part A — Batch endpoint** (`dalston/gateway/api/v1/speech_to_text.py`)
-
-Add form field:
-
-```python
-diarization_threshold: Annotated[
-    float | None,
-    Form(
-        description="Speaker separation sensitivity (0.0–1.0). "
-                    "Only applies when diarize=true and num_speakers is unset.",
-        ge=0.0, le=1.0,
-    ),
-] = None,
-```
-
-Add to parameters dict only when relevant:
-
-```python
-if diarize and num_speakers is None and diarization_threshold is not None:
-    parameters["diarization_threshold"] = diarization_threshold
-```
-
-**Part B — Diarize engine** (`engines/stt-diarize/pyannote-*/engine.py`)
-
-Read and apply the parameter:
-
-```python
-threshold = task_input.parameters.get("diarization_threshold")
-pipeline_params = {}
-if threshold is not None:
-    pipeline_params["clustering"] = {"threshold": threshold}
-diarization = pipeline(audio_path, **pipeline_params)
-```
-
----
-
-### 2.4: Forward `temperature` and `seed`
-
-**Gap:** G20 — faster-whisper accepts `temperature` (float or list of floats) and
-`repetition_penalty`. Neither is forwarded from the ElevenLabs batch endpoint.
-
-**Part A — Batch endpoint** (`dalston/gateway/api/v1/speech_to_text.py`)
-
-Add form fields:
-
-```python
-temperature: Annotated[
-    float | None,
-    Form(description="Sampling temperature (0.0–2.0)", ge=0.0, le=2.0),
-] = None,
-seed: Annotated[
-    int | None,
-    Form(description="Random seed for deterministic output", ge=0, le=2_147_483_647),
-] = None,
-```
-
-Add to parameters dict unconditionally (including `temperature=0`):
-
-```python
-if temperature is not None:
-    parameters["temperature"] = temperature
-if seed is not None:
-    parameters["seed"] = seed
-```
-
-**Part B — Transcribe engine** (`engines/stt-transcribe/*/engine.py`)
-
-Read from task parameters:
-
-```python
-temperature = task_input.parameters.get("temperature", 0)
-# faster-whisper accepts a float or a tuple of fallback values
-model.transcribe(audio_path, temperature=temperature, ...)
-```
-
-Seed support in faster-whisper is indirect (via `torch.manual_seed`). Apply if present:
-
-```python
-seed = task_input.parameters.get("seed")
-if seed is not None:
-    import torch
-    torch.manual_seed(seed)
-```
-
----
-
-### 2.5: VAD tuning parameters in realtime
-
-**Gap:** G12 — ElevenLabs exposes `vad_silence_threshold_secs`, `vad_threshold`,
-`min_speech_duration_ms`, `min_silence_duration_ms` as connection-time parameters.
-Dalston accepts them (after step 1.8) but does not forward them to the worker.
-
-**Part A — Gateway** (`dalston/gateway/api/v1/realtime.py`)
-
-Pass to `_proxy_to_worker_elevenlabs`:
-
-```python
-await _proxy_to_worker_elevenlabs(
-    ...
-    vad_silence_threshold_secs=vad_silence_threshold_secs,
-    vad_threshold=vad_threshold,
-    min_speech_duration_ms=min_speech_duration_ms,
-    min_silence_duration_ms=min_silence_duration_ms,
-)
-```
-
-In `_proxy_to_worker_elevenlabs`, add to the worker URL params:
-
-```python
-params["vad_silence_threshold_secs"] = str(vad_silence_threshold_secs)
-params["vad_threshold"] = str(vad_threshold)
-params["min_speech_duration_ms"] = str(min_speech_duration_ms)
-params["min_silence_duration_ms"] = str(min_silence_duration_ms)
-```
-
-**Part B — Realtime engine** (`engines/realtime/whisper-streaming/engine.py`)
-
-Read from session URL params and apply to the VAD configuration:
-
-```python
-vad_params = {
-    "threshold":              float(params.get("vad_threshold", 0.4)),
-    "min_speech_duration_ms": int(params.get("min_speech_duration_ms", 100)),
-    "min_silence_duration_ms": int(params.get("min_silence_duration_ms", 100)),
-}
-silence_threshold_secs = float(params.get("vad_silence_threshold_secs", 1.5))
-```
-
-Pass to the Silero VAD model and the silence-based commit loop.
-
-**Part C — Realtime SDK** (`dalston/realtime_sdk/`)
-
-If the SDK provides a session configuration type, add the four new fields to it.
-
----
-
-### 2.6: Forward `previous_text` context hint
-
-**Gap:** G23 — ElevenLabs allows the client to send `previous_text` in the first
-`input_audio_chunk` to prime the transcription context (equivalent to Whisper's
-`initial_prompt`). The field is currently parsed but silently discarded.
-
-**Part A — Gateway** (`dalston/gateway/api/v1/realtime.py`)
-
-In `_elevenlabs_client_to_worker`, capture `previous_text` from the first chunk and
-forward it as a worker message before the first audio frame:
-
-```python
-first_chunk = True
-
-if msg_type == "input_audio_chunk":
-    if first_chunk:
-        first_chunk = False
-        previous_text = data.get("previous_text")
-        if previous_text:
-            await worker_ws.send(json.dumps({
-                "type": "initial_prompt",
-                "text": previous_text,
-            }))
-    # then send audio bytes as before
-```
-
-**Part B — Realtime engine**
-
-Handle `initial_prompt` message type: set it as the Whisper `initial_prompt` parameter
-on the next transcription call.
-
----
-
-### 2.7: μ-law audio decoding
-
-**Gap:** G25 — `ulaw_8000` is a standard telephony encoding (G.711). After step 1.7
-rejects it at handshake, this step adds proper decoding support and removes the rejection.
-
-**Part A — Gateway** (`dalston/gateway/api/v1/realtime.py`)
-
-Add `"ulaw_8000"` to `_SUPPORTED_AUDIO_FORMATS`.
-
-In `_elevenlabs_client_to_worker`, detect μ-law sessions and transcode before forwarding:
-
-```python
-# At session start, determine if decoding is needed
-is_ulaw = audio_format == "ulaw_8000"
-
-if msg_type == "input_audio_chunk":
-    audio_bytes = base64.b64decode(data.get("audio_base_64", ""))
-    if is_ulaw and audio_bytes:
-        # audioop is stdlib; converts 8-bit μ-law to 16-bit linear PCM
-        import audioop
-        audio_bytes = audioop.ulaw2lin(audio_bytes, 2)
-    if audio_bytes:
-        await worker_ws.send(audio_bytes)
-```
-
-The worker receives standard PCM regardless of the client's encoding.
-
-**Note:** `audioop` was deprecated in Python 3.11 and removed in 3.13. If the runtime is
-3.13+, use `soundfile` or an equivalent library for μ-law decoding. Abstract into a
-`_decode_audio(data: bytes, fmt: str) -> bytes` helper.
-
----
-
-### 2.8: Model ID routing or explicit rejection
-
-**Gap:** G08 — Dalston silently ignores `model_id` and uses `settings.default_model`.
-Clients selecting `scribe_v1` for low-latency or `scribe_v2` for accuracy get the same
-engine regardless. The substitution is invisible.
-
-**File:** `dalston/config.py`
-
-Add a model mapping to settings:
-
-```python
-class Settings(BaseSettings):
-    ...
-    elevenlabs_model_map: dict[str, str] = Field(
-        default_factory=lambda: {
-            "scribe_v1": "",    # empty → use default_model
-            "scribe_v2": "",    # empty → use default_model
-        },
-        description="Map ElevenLabs model IDs to Dalston engine names. "
-                    "Empty string means use default_model.",
-    )
-```
-
-**File:** `dalston/gateway/api/v1/speech_to_text.py`
-
-Replace the silent ignore with a lookup:
-
-```python
-def resolve_engine_for_model_id(model_id: str, settings: Settings) -> str:
-    mapped = settings.elevenlabs_model_map.get(model_id)
-    if mapped is None:
-        # Unknown model ID — reject explicitly
-        raise HTTPException(
-            status_code=422,
-            detail=f"Unknown model_id '{model_id}'. "
-                   f"Supported: {list(settings.elevenlabs_model_map.keys())}",
-        )
-    return mapped or settings.default_model
-```
-
-Apply in the parameter building section, replacing the current silent fallback.
-Operators can set `DALSTON_ELEVENLABS_MODEL_MAP__scribe_v2=faster-whisper-large-v3`
-to route scribe_v2 requests to a higher-quality engine.
-
----
-
-## Phase 3: New Capabilities (Weeks 7–14)
-
-Changes in this phase require new infrastructure, new subsystems, or significant pipeline
-extensions. Each step should be treated as a mini-project with its own design review.
-
----
-
-### 3.1: File size limits at the gateway
-
-**Gap:** B05 — ElevenLabs enforces 3 GB for file uploads and 2 GB for `cloud_storage_url`.
-Dalston has no gateway-level enforcement; oversized uploads stream fully to S3 before any
-limit is applied, wasting bandwidth and storage.
-
-**File:** `dalston/gateway/services/ingestion.py`
-
-Add limits as constants:
-
-```python
-MAX_UPLOAD_BYTES   = 3 * 1024 ** 3   # 3 GB
-MAX_URL_BYTES      = 2 * 1024 ** 3   # 2 GB
-```
-
-For file uploads, check `Content-Length` before streaming:
-
-```python
-content_length = request.headers.get("content-length")
-if content_length and int(content_length) > MAX_UPLOAD_BYTES:
-    raise HTTPException(
-        status_code=413,
-        detail=f"File too large. Maximum is {MAX_UPLOAD_BYTES // 1024**3} GB.",
-    )
-```
-
-Stream with a byte counter and abort if the limit is exceeded mid-upload:
-
-```python
-received = 0
-async for chunk in file.stream():
-    received += len(chunk)
-    if received > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="File too large.")
-    yield chunk
-```
-
-For `cloud_storage_url`, issue a HEAD request before downloading and check
-`Content-Length`. If the server does not return `Content-Length`, enforce the limit via
-the streaming counter during download (same pattern).
-
----
-
-### 3.2: Rate-limit response headers
-
-**Gap:** B07 — ElevenLabs clients use `x-ratelimit-*` headers for adaptive backoff.
-Dalston enforces rate limits internally but does not expose them in response headers,
-so clients fall back to blind exponential backoff.
-
-**File:** `dalston/gateway/services/rate_limiter.py`
-
-Extend `RateLimitResult` to carry header values:
-
-```python
-@dataclass
-class RateLimitResult:
-    allowed: bool
-    limit: int
-    remaining: int
-    reset_after_seconds: float    # ADD
-```
-
-**File:** `dalston/gateway/middleware/` (wherever 429 responses are built)
-
-Return headers on both 429 responses and successful responses:
-
-```python
-headers = {
-    "x-ratelimit-limit-requests": str(result.limit),
-    "x-ratelimit-remaining-requests": str(result.remaining),
-    "x-ratelimit-reset-requests": f"{result.reset_after_seconds:.3f}s",
-}
-# On 429, also add Retry-After
-if not result.allowed:
-    headers["retry-after"] = str(int(result.reset_after_seconds) + 1)
-```
-
-Inject via a response middleware or by adding headers directly in the dependency.
-
----
-
-### 3.3: Idempotency key support
-
-**Gap:** B06 — If a client retries a timed-out POST (e.g. after a slow upload), Dalston
-creates a duplicate job. ElevenLabs does not document an `Idempotency-Key` header, but the
-principle applies: retried requests should be safe.
-
-Implement `Idempotency-Key` as a standard HTTP header. Store the key → response mapping in
-Redis with a TTL (24 hours). On a duplicate key, return the cached response immediately.
-
-**File:** `dalston/gateway/middleware/idempotency.py` (new file)
-
-```python
-IDEMPOTENCY_TTL_SECS = 86_400  # 24 hours
-KEY_PREFIX = "idempotency:"
-
-
-async def get_cached_response(redis: Redis, key: str) -> dict | None:
-    raw = await redis.get(f"{KEY_PREFIX}{key}")
-    return json.loads(raw) if raw else None
-
-
-async def cache_response(redis: Redis, key: str, response: dict) -> None:
-    await redis.setex(f"{KEY_PREFIX}{key}", IDEMPOTENCY_TTL_SECS, json.dumps(response))
-```
-
-Apply in `create_transcription` before job creation:
-
-```python
-idempotency_key = request.headers.get("Idempotency-Key")
-if idempotency_key:
-    cached = await get_cached_response(redis, idempotency_key)
-    if cached:
-        return cached   # return the original response verbatim
-
-# ... create job ...
-
-if idempotency_key:
-    await cache_response(redis, idempotency_key, result.model_dump())
-```
-
-Scope idempotency keys per tenant to prevent cross-tenant collisions.
-
----
-
-### 3.4: Single-use WebSocket token endpoint
-
-**Gaps:** G05, B01 — Browser-based clients using the ElevenLabs JavaScript SDK cannot
-safely embed API keys. ElevenLabs provides a token endpoint for short-lived connection
-tokens. Without it, there is no secure way to use the realtime endpoint from a browser.
-
-**New endpoint:** `POST /v1/speech-to-text/realtime/token`
-
-```python
-@router.post("/realtime/token", response_model=RealtimeTokenResponse)
-async def create_realtime_token(
-    principal: Annotated[Principal, Depends(get_principal)],
-    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
-    redis: Redis = Depends(get_redis),
-) -> RealtimeTokenResponse:
-    """Issue a single-use, short-lived token for WebSocket authentication."""
-    security_manager.require_permission(principal, Permission.REALTIME_CONNECT)
-    token = secrets.token_urlsafe(32)
-    await redis.setex(
-        f"rt_token:{token}",
-        300,   # 5 minutes
-        json.dumps({"tenant_id": str(principal.tenant_id), "used": False}),
-    )
-    return RealtimeTokenResponse(token=token, expires_in=300)
-```
-
-**WebSocket handler:** accept `?token=` in addition to `?api_key=` and `xi-api-key`:
-
-```python
-# In authenticate_websocket()
-token = websocket.query_params.get("token")
-if token:
-    raw = await redis.get(f"rt_token:{token}")
-    if not raw:
-        # Token missing or expired
-        return None
-    data = json.loads(raw)
-    if data["used"]:
-        # Already consumed — reject
-        return None
-    # Mark consumed (atomic with SET NX)
-    await redis.setex(f"rt_token:{token}", 300, json.dumps({**data, "used": True}))
-    return await auth_service.get_tenant(data["tenant_id"])
-```
-
-Tokens are single-use, 5-minute TTL, scoped to the issuing tenant.
-
----
-
-### 3.5: Outbound webhook push delivery
-
-**Gap:** G03 — `webhook=true` currently returns an acknowledgement but never delivers
-results. ElevenLabs clients using async mode for long-form audio receive the
-`transcription_id` and wait forever for a callback.
-
-This requires a webhook delivery subsystem with four components:
-
-**Component A — Webhook endpoint registry**
-
-New table: `webhook_endpoints(id, tenant_id, url, secret, events[], created_at, active)`.
-
-New REST API (separate from the ElevenLabs compat layer):
-
-- `POST /v1/webhooks` — register an endpoint
-- `GET /v1/webhooks` — list
-- `DELETE /v1/webhooks/{id}` — remove
-
-**Component B — Delivery worker**
-
-A background worker that subscribes to a Redis queue (`dalston:webhooks:delivery`).
-When a job completes, the orchestrator publishes a delivery task:
-
-```json
-{
-  "event": "transcription.completed",
-  "tenant_id": "...",
-  "transcription_id": "...",
-  "webhook_id": "...",      // optional, routes to a specific endpoint
-  "metadata": {...}         // webhook_metadata passthrough
-}
-```
-
-The worker fetches the transcript, signs the payload with HMAC-SHA256 using the endpoint
-secret, and POSTs to the registered URL.
-
-**Component C — Retry policy**
-
-Exponential backoff: attempt at 0 s, 5 s, 30 s, 5 min, 30 min, 2 h. After six failures,
-mark the delivery as permanently failed and emit a log event. Use Redis sorted sets keyed
-by next-attempt timestamp for scheduling.
-
-**Component D — Gateway integration**
-
-In `create_transcription`, when `webhook=true`, also accept and store `webhook_id`
-and `webhook_metadata` as job parameters. When the orchestrator emits `job.completed`,
-include these parameters in the delivery task.
-
-`webhook_id` routes to a specific registered endpoint. If absent, deliver to all active
-endpoints for the tenant.
-
----
-
-### 3.6: Multi-channel transcription
-
-**Gap:** G18 — ElevenLabs supports independent per-channel transcription for stereo and
-multi-track audio (up to 5 channels), returning a `MultichannelSpeechToTextResponseModel`.
-This requires a new pipeline stage and a new response model.
-
-**Stage A — Audio channel splitter** (`engines/stt-prepare/channel-splitter/`)
-
-A new engine that runs after `PREPARE` when `use_multi_channel=true`. Splits the input
-audio into N mono files (one per channel) and outputs a manifest:
-
-```json
-{
-  "channels": [
-    {"channel_index": 0, "audio_uri": "s3://.../channel_0.wav"},
-    {"channel_index": 1, "audio_uri": "s3://.../channel_1.wav"}
-  ]
-}
-```
-
-**Stage B — Orchestrator fan-out**
-
-The orchestrator detects the multi-channel manifest and creates a `TRANSCRIBE` task per
-channel, each tagged with its `channel_index`. Downstream `ALIGN` and `DIARIZE` tasks
-similarly fan out per channel.
-
-**Stage C — Merge engine extension**
-
-When all per-channel tasks complete, assemble the `MultichannelSpeechToTextResponseModel`:
-
-```json
-{
-  "transcripts": [
-    { "channel_index": 0, "text": "...", "words": [...], "transcription_id": "..." },
-    { "channel_index": 1, "text": "...", "words": [...], "transcription_id": "..." }
-  ],
-  "transcription_id": "..."
-}
-```
-
-**Stage D — Gateway**
-
-Accept `use_multi_channel: bool = False` as a form field. Set `parameters["multi_channel"] = True`
-and return `MultichannelSpeechToTextResponseModel` when the transcript has a `channels` key.
-
----
-
-### 3.7: Entity detection annotations
-
-**Gap:** G19 — ElevenLabs returns character-position entity annotations (`pii`, `phi`,
-`pci`, `offensive_language`) in the response body. Dalston's `PII_DETECT` stage is
-oriented toward audio redaction, not inline annotation.
-
-**Part A — PII_DETECT stage extension**
-
-When `entity_detection` is set and audio redaction is not requested, run the NER model
-in annotation-only mode and emit a JSON manifest alongside the redacted audio:
-
-```json
-{
-  "entities": [
-    {"text": "John Smith", "entity_type": "pii", "start_char": 42, "end_char": 52}
-  ]
-}
-```
-
-Support the `entity_detection` filter: `"all"` or an array of specific types
-(`["pii", "phi"]`).
-
-**Part B — Merge engine**
-
-Include the `entities` array in `transcript.json`.
-
-**Part C — Gateway response**
-
-Add `entities: list[ElevenLabsEntity] | None = None` to `ElevenLabsTranscript` and
-populate from the transcript.
-
-```python
-class ElevenLabsEntity(BaseModel):
-    text: str
-    entity_type: str
-    start_char: int
-    end_char: int
-```
-
----
-
-## Verification
-
-### Phase 1 Acceptance
-
-```python
-from elevenlabs import ElevenLabs
-
-client = ElevenLabs(api_key="dalston-key", base_url="http://localhost:8000")
-
-# Sync transcription
-result = client.speech_to_text.convert(
-    file=open("sample.mp3", "rb"),
-    model_id="scribe_v1",
-    diarize=True,
-    timestamps_granularity="word",
-)
-assert result.transcription_id
-assert result.text
-assert all(w.type in ("word", "spacing") for w in result.words)
-
-# Async transcription
-result = client.speech_to_text.convert(
-    file=open("sample.mp3", "rb"),
-    model_id="scribe_v1",
-    webhook=True,
-)
-assert result.transcription_id
-assert result.request_id is not None   # populated after 1.4
-
-# Delete transcript
-client.speech_to_text.delete(transcription_id=result.transcription_id)
-
-# Verify deleted
-try:
-    client.speech_to_text.get(transcription_id=result.transcription_id)
-    assert False, "Should have raised"
-except ElevenLabsError as e:
-    assert e.status_code == 404
-```
-
-### Phase 1 Realtime Acceptance
-
-```python
-async with client.speech_to_text.realtime(model_id="scribe_v1") as session:
-    # commit_strategy defaults to "manual" — no automatic commits
-    started = await session.__anext__()
-    assert started.message_type == "session_started"
-    assert started.config.commit_strategy == "manual"
-    assert "include_timestamps" in started.config.__fields__
-
-    await session.send_audio(chunk, commit=True)
-    msg = await session.__anext__()
-    assert msg.message_type == "committed_transcript"
-```
-
-### Phase 2 Acceptance
-
-```python
-# logprob present on words
-result = client.speech_to_text.convert(file=open("sample.mp3", "rb"), model_id="scribe_v1")
-assert all(w.logprob is not None for w in result.words)
-
-# character timestamps
-result = client.speech_to_text.convert(
-    file=open("sample.mp3", "rb"),
-    model_id="scribe_v1",
-    timestamps_granularity="character",
-)
-assert any(w.characters for w in result.words)
-
-# diarization threshold
-result = client.speech_to_text.convert(
-    file=open("multi-speaker.mp3", "rb"),
-    model_id="scribe_v1",
-    diarize=True,
-    diarization_threshold=0.5,
-)
-assert result.text
-```
-
-### Phase 3 Acceptance
-
-```python
-# Webhook push delivery (integration test with ngrok or equivalent)
-# POST with webhook=True → job completes → Dalston POSTs to registered URL
-# Verify HMAC signature on received payload
-
-# Single-use token
-token_resp = requests.post("http://localhost:8000/v1/speech-to-text/realtime/token",
-                           headers={"Authorization": "Bearer dalston-key"})
-token = token_resp.json()["token"]
-
-async with websockets.connect(
-    f"ws://localhost:8000/v1/speech-to-text/realtime?token={token}"
-) as ws:
-    msg = json.loads(await ws.recv())
-    assert msg["message_type"] == "session_started"
-
-# Second use of same token is rejected
-async with websockets.connect(
-    f"ws://localhost:8000/v1/speech-to-text/realtime?token={token}"
-) as ws:
-    msg = json.loads(await ws.recv())
-    assert msg["message_type"] == "auth_error"
-```
+## Risks and Mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| ElevenLabs docs continue to drift during implementation | Freeze Phase 0 fixtures, capability rows, and schemas with an explicit March 8, 2026 date stamp |
+| SDK releases drift faster than the docs | Pin one `elevenlabs` version in CI and keep an optional latest-version canary |
+| Existing mock-heavy tests continue asserting stale behavior | Narrow `test_elevenlabs_api.py` to route-level concerns and make the SDK suite the primary contract gate |
+| Gateway starts claiming parity with approximate transcript/token shapes | Reject unsupported combinations until exact `words[]`, `entities`, and webhook shapes are implemented |
+| The SDK does not expose every public route or realtime helper cleanly | Use frozen raw HTTP/WebSocket traces for the non-SDK-visible runtime edges |
+| Token flow semantics diverge between docs, SDK, and existing Dalston tokens | Freeze the token contract in Phase 0 and adapt the existing token system to that contract instead of adding a second one |
+| Existing webhook infrastructure does not match ElevenLabs payload semantics exactly | Treat webhook work as an adapter layer over the current subsystem and lock payload fixtures before implementation |
+| `ulaw_8000` decoding differs by Python/runtime support | Keep codec handling isolated behind a small helper and pin test coverage for the supported runtime |
 
 ---
 
 ## Checkpoint
 
+### Phase 0
+
+- [ ] Pinned `elevenlabs-python` version chosen for the compatibility gate
+- [ ] SDK and HTTP traces captured for batch, get/delete, token issuance, and realtime
+- [ ] `ELEVENLABS_STT_CAPABILITIES` defined and used as the source of truth
+- [ ] Canonical transcript, webhook, realtime, and token schemas frozen
+- [ ] SDK contract suite skeleton checked in with locked fixtures
+
 ### Phase 1
 
-- [ ] DELETE endpoint implemented and returns 200 `{}`
-- [ ] GET in-progress returns 404 + Retry-After
-- [ ] `commit_strategy` defaults to `"manual"`
-- [ ] `request_id` populated in async response
-- [ ] Keyterm word-count limit enforced (≤5 words per term)
-- [ ] `enable_logging` accepted without 422
-- [ ] Unsupported `audio_format` rejected at handshake with `input_error`
-- [ ] `session_started` echoes all accepted parameters
-- [ ] `include_language_detection` wired
-- [ ] Error types mapped to ElevenLabs vocabulary
-- [ ] Spacing tokens synthesised from timestamp gaps
-- [ ] `additional_formats` returned inline via ExportService
+- [ ] Batch and realtime validation come from the capability table
+- [ ] GET no longer returns a Dalston-only processing object
+- [ ] DELETE transcript alias reuses the native deletion path
+- [ ] `request_id` is populated in async responses
+- [ ] Keyterm <=5 word validation is enforced
+- [ ] Batch `enable_logging` is accepted on the query string
+- [ ] `commit_strategy` defaults to `manual`
+- [ ] `include_language_detection` is wired
+- [ ] Realtime error messages use the ElevenLabs vocabulary
+- [ ] `ulaw_8000` is decoded correctly before forwarding
+- [ ] SDK contract tests cover the Phase 1 public surface and replace stale assumptions
 
 ### Phase 2
 
-- [ ] `logprob` flows from engine → transcript.json → API response (batch + realtime)
-- [ ] Character-level timestamps available when engine supports it; `422` otherwise
-- [ ] `diarization_threshold` forwarded to pyannote
-- [ ] `temperature` and `seed` forwarded to transcribe engine
-- [ ] VAD tuning params forwarded to realtime engine
-- [ ] `previous_text` forwarded as initial prompt
-- [ ] `ulaw_8000` decoded to PCM before forwarding
-- [ ] `model_id` routed via config map or rejected with 422
+- [ ] Official single-use token endpoint implemented over the existing auth service
+- [ ] WebSocket auth accepts `?token=` and consumes tokens once
+- [ ] `webhook=true`, `webhook_id`, and `webhook_metadata` are wired through the existing webhook platform
+- [ ] Batch and realtime `model_id` are routed or rejected explicitly
+- [ ] `temperature`, `seed`, `previous_text`, and VAD tuning are forwarded end-to-end
+- [ ] `entity_detection` and `entities` are implemented
+- [ ] `additional_formats` are returned inline
+- [ ] `logprob`, `characters`, and correct `words[].type` values are emitted
+- [ ] SDK contract tests cover token, webhook, and batch enrichment semantics
 
 ### Phase 3
 
-- [ ] 3 GB / 2 GB file size limits enforced at ingestion
-- [ ] `x-ratelimit-*` headers on all batch responses
-- [ ] `Idempotency-Key` deduplicates POSTs within 24 hours
-- [ ] `POST /v1/speech-to-text/realtime/token` issues single-use tokens
-- [ ] WebSocket accepts `?token=` and invalidates after first use
-- [ ] Webhook endpoint registry CRUD
-- [ ] Delivery worker with retry policy
-- [ ] `webhook_id` + `webhook_metadata` passthrough
-- [ ] Multi-channel audio fan-out pipeline
-- [ ] Entity detection annotations in batch response
+- [ ] 3 GB / 2 GB size ceilings are enforced before wasteful ingestion
+- [ ] `use_multi_channel` is supported with the correct response model
+- [ ] Official concurrency headers are returned only if computed exactly
+- [ ] Live-stack SDK smoke coverage is stable against the supported ElevenLabs surface
 
 ---
 
 ## What We Are Not Closing
 
-| Gap | Reason |
+| Item | Reason |
 |---|---|
-| `audio_event` word type (laughter, music) | Requires specialist event-detection model; out of scope |
-| Per-chunk `sample_rate` mid-stream changes | Not worth implementing; accept and ignore |
-| `enable_logging` zero-retention semantics | Self-hosted — retention is operator-controlled |
-| ElevenLabs proprietary model behaviour parity | `scribe_v1/v2` are closed-source; we map to comparable open engines |
+| `Idempotency-Key` support as a parity requirement | Useful platform work, but not part of the published ElevenLabs STT contract |
+| Custom `x-ratelimit-*` headers | Not the official ElevenLabs contract; use official concurrency headers or nothing |
+| A temporary reject-first phase for `ulaw_8000` | Official docs already treat it as supported input |
+| Silence-gap-only `spacing` synthesis | Too approximate to claim parity |
+| A second webhook subsystem just for ElevenLabs | Dalston already has durable webhook infrastructure |
+| A second token service or a Dalston-only realtime-token endpoint | Dalston already has token infrastructure; the public contract should be adapted onto it |
+| `audio_event` word tokens without a real detector | Requires genuine new audio-event capability, not response formatting |
+| Self-hosted zero-retention semantics for `enable_logging` | We can accept the flag for compatibility, but retention remains operator-controlled |
 
 **Previous milestone**: [M61 OpenAI API Parity](M61-openai-api-parity.md)
 **Next milestone**: TBD
