@@ -303,6 +303,7 @@ class Dalston:
         redact_pii_audio: bool = False,
         pii_redaction_mode: PIIRedactionMode | str | None = None,
         retention: int = 30,
+        lite_profile: str = "core",
     ) -> Job:
         """Submit audio for transcription.
 
@@ -326,6 +327,8 @@ class Dalston:
             pii_redaction_mode: Audio redaction mode (silence or beep).
             retention: Retention in days. 0=transient (no storage), -1=permanent
                 (never delete), 1-3650=days. Default 30.
+            lite_profile: Pipeline profile for lite mode servers: "core" (default),
+                "speaker", or "compliance". Ignored by distributed mode servers.
 
         Returns:
             Job object with ID and initial status.
@@ -388,6 +391,9 @@ class Dalston:
 
         # Retention: 0=transient, -1=permanent, N=days
         data["retention"] = retention
+
+        # Lite mode profile selection (M58). Ignored by distributed servers.
+        data["lite_profile"] = lite_profile or "core"
 
         # Handle file upload
         files: dict[str, Any] | None = None
@@ -1244,6 +1250,7 @@ class AsyncDalston:
         redact_pii_audio: bool = False,
         pii_redaction_mode: PIIRedactionMode | str | None = None,
         retention: int = 30,
+        lite_profile: str = "core",
     ) -> Job:
         """Submit audio for transcription.
 
@@ -1267,6 +1274,8 @@ class AsyncDalston:
             retention: Retention in days. 0=transient (no storage), -1=permanent
                 (never delete), 1-3650=days. Default 30.
             pii_redaction_mode: Audio redaction mode (silence or beep).
+            lite_profile: Pipeline profile for lite mode servers: "core" (default),
+                "speaker", or "compliance". Ignored by distributed mode servers.
 
         Returns:
             Job object with ID and initial status.
@@ -1325,6 +1334,9 @@ class AsyncDalston:
 
         # Retention: 0=transient, -1=permanent, N=days
         data["retention"] = retention
+
+        # Lite mode profile selection (M58). Ignored by distributed servers.
+        data["lite_profile"] = lite_profile or "core"
 
         # Handle file upload
         files: dict[str, Any] | None = None

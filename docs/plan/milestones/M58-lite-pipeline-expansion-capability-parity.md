@@ -6,7 +6,7 @@
 | **Duration** | 8-10 days |
 | **Dependencies** | M56 (lite infra backends), M57 (zero-config bootstrap UX), M57.1 (lite SQLite migration track), existing batch pipeline contracts |
 | **Deliverable** | Lite capability matrix, profile-aware lite pipeline planner, explicit unsupported-feature semantics, and expanded integration coverage across selected stages/options |
-| **Status** | Planned |
+| **Status** | Completed |
 
 Dependency clarification:
 

@@ -18,6 +18,7 @@ from dalston.gateway.api.v1 import (
     transcription,
     webhooks,
 )
+from dalston.gateway.api.v1.engines import lite_router
 
 router = APIRouter(prefix="/v1")
 
@@ -26,6 +27,9 @@ router.include_router(models.router)
 
 # Mount engine discovery routes (M30)
 router.include_router(engines.router)
+
+# Mount lite capability discovery (M58)
+router.include_router(lite_router)  # GET /v1/lite/capabilities
 
 # Mount transcription routes (Dalston native API + OpenAI compatible via model detection)
 router.include_router(transcription.router)

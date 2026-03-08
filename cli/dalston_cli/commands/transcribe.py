@@ -278,6 +278,17 @@ def transcribe(
             help="Retention in days. 0=transient (no storage), -1=permanent, 1-3650=days.",
         ),
     ] = 30,
+    # Lite mode profile selection (M58).  Ignored in distributed mode.
+    profile: Annotated[
+        str,
+        typer.Option(
+            "--profile",
+            help=(
+                "Lite mode pipeline profile: core (default), speaker, compliance. "
+                "Ignored when the server is running in distributed mode."
+            ),
+        ),
+    ] = "core",
 ) -> None:
     """Transcribe audio files.
 
@@ -334,10 +345,20 @@ def transcribe(
         )
         raise typer.Exit(code=1)
 
+    # Validate lite profile name client-side (fail fast before network request).
+    runtime_mode = os.getenv("DALSTON_MODE", "distributed").strip().lower()
+    if runtime_mode == "lite":
+        try:
+            from dalston.orchestrator.lite_capabilities import resolve_profile
+
+            resolve_profile(profile)
+        except Exception as exc:
+            error_console.print(f"[red]Error:[/red] Invalid lite profile: {exc}")
+            raise typer.Exit(code=1) from None
+
     bootstrap_settings = load_bootstrap_settings(server_url=client.base_url)
     effective_model = model
     local_target = bootstrap_settings.target_is_local(client.base_url)
-    runtime_mode = os.getenv("DALSTON_MODE", "distributed").strip().lower()
 
     # Pre-bootstrap for local zero-config flow
     try:
@@ -475,6 +496,7 @@ def transcribe(
                 redact_pii_audio=redact_audio,
                 pii_redaction_mode=pii_redaction_mode,
                 retention=retention,
+                lite_profile=profile,
             )
 
             if not wait:

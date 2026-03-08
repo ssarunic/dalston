@@ -434,7 +434,7 @@ class TestOpenAITranscriptionEndpoint:
             )
 
             with patch(
-                "dalston.orchestrator.lite_main.build_default_pipeline",
+                "dalston.orchestrator.lite_main.build_pipeline",
                 return_value=mock_pipeline,
             ):
                 audio_content = b"fake audio content"
