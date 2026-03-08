@@ -98,6 +98,13 @@ class TestLiteJobAuditRecord:
 
     @pytest.fixture
     def mock_pipeline(self, tmp_path):
+        """Stub pipeline used via patch(), not injected into `app` directly.
+
+        Tests that need this fixture must patch
+        ``dalston.orchestrator.lite_main.build_pipeline`` to return it,
+        because the handler imports and calls ``build_pipeline`` lazily
+        inside the function body rather than receiving it as a dependency.
+        """
         pipeline = AsyncMock()
         transcript_path = tmp_path / "artifacts" / "transcript.json"
         transcript_path.parent.mkdir(parents=True, exist_ok=True)

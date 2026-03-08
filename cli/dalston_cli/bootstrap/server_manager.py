@@ -118,10 +118,15 @@ class _BootstrapLock:
 
         if lock_pid is not None:
             # We parsed a PID: check whether the holder process is still alive.
+            # Distinguish PermissionError (process exists, different user — alive)
+            # from ProcessLookupError (no such process — dead).  Catching bare
+            # OSError would misclassify a cross-user live process as dead.
             try:
                 os.kill(lock_pid, 0)
                 holder_alive = True
-            except OSError:
+            except PermissionError:
+                holder_alive = True  # process exists; we just can't signal it
+            except ProcessLookupError:
                 holder_alive = False
 
             if holder_alive:
