@@ -12,6 +12,8 @@ description: |
   Supports optional min/max speaker count hints.
   CPU inference supported but slow (~2x realtime).
 
+execution_profile: venv
+
 container:
   gpu: optional
   memory: 8G

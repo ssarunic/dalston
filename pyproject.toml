@@ -37,6 +37,7 @@ gateway = [
     "opentelemetry-instrumentation-redis>=0.60b0,<1.0.0",
     "opentelemetry-instrumentation-httpx>=0.60b0,<1.0.0",
     "opentelemetry-instrumentation-sqlalchemy>=0.60b0,<1.0.0",
+    "alembic>=1.13.0",
 ]
 orchestrator = [
     "redis>=7.0.0",
@@ -51,6 +52,7 @@ orchestrator = [
     "tinytag>=2.0.0",  # Required by gateway.services.audio_probe
     "aiohttp>=3.9.0",  # For lightweight HTTP server (metrics endpoint)
     "pyyaml>=6.0",  # For engine catalog YAML parsing (M29)
+    "alembic>=1.13.0",
 ]
 engine-sdk = [
     "redis>=7.0.0",

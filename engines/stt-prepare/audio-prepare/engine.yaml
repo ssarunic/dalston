@@ -9,6 +9,8 @@ description: |
   Extracts duration and audio metadata using ffprobe.
   Required as the first stage of all batch pipelines.
 
+execution_profile: container
+
 container:
   gpu: none
   memory: 512M

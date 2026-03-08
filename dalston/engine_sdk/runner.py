@@ -37,6 +37,7 @@ from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.materializer import ArtifactMaterializer, S3ArtifactStore
 from dalston.engine_sdk.registry import BatchEngineInfo, BatchEngineRegistry
 from dalston.engine_sdk.types import EngineInput, EngineOutput
+from dalston.orchestrator.catalog import get_catalog
 
 if TYPE_CHECKING:
     from dalston.engine_sdk.base import Engine
@@ -121,6 +122,7 @@ class EngineRunner:
         self._current_stream_id: str | None = None  # Source stream for ack
         self._task_lock = threading.Lock()  # Protects _current_task_id
         self._stage: str = "unknown"  # Pipeline stage from capabilities
+        self._execution_profile = "container"
         self._materializer = ArtifactMaterializer(store=S3ArtifactStore())
 
         # Load configuration from environment
@@ -176,6 +178,15 @@ class EngineRunner:
         # Initialize registry and register engine with capabilities
         self._registry = BatchEngineRegistry(self.redis_url)
         capabilities = self.engine.get_capabilities()
+        catalog_entry = get_catalog().get_engine(self.runtime)
+        if catalog_entry is not None:
+            self._execution_profile = catalog_entry.execution_profile
+            if self._execution_profile != "container":
+                raise RuntimeError(
+                    f"Runtime '{self.runtime}' declares execution_profile "
+                    f"'{self._execution_profile}' and cannot start as a "
+                    "distributed container worker."
+                )
 
         # Get stage from capabilities (derived from engine.yaml) or fallback to "unknown"
         self._stage = capabilities.stages[0] if capabilities.stages else "unknown"
@@ -187,13 +198,19 @@ class EngineRunner:
                 stage=self._stage,
                 stream_name=self.stream_key,
                 capabilities=capabilities,
+                execution_profile=self._execution_profile,
             )
         )
 
         # Start heartbeat thread to advertise engine status
         self._start_heartbeat_thread()
 
-        logger.info("engine_loop_starting", runtime=self.runtime, queue=self.stream_key)
+        logger.info(
+            "engine_loop_starting",
+            runtime=self.runtime,
+            queue=self.stream_key,
+            execution_profile=self._execution_profile,
+        )
 
         try:
             while self._running:
@@ -486,7 +503,9 @@ class EngineRunner:
                 dequeued_at = datetime.now(UTC)
                 queue_wait_seconds = (dequeued_at - enqueued_at).total_seconds()
                 dalston.metrics.observe_engine_queue_wait(
-                    self.runtime, queue_wait_seconds
+                    self.runtime,
+                    queue_wait_seconds,
+                    self._execution_profile,
                 )
             except ValueError:
                 pass  # Skip if timestamp is malformed
@@ -518,7 +537,9 @@ class EngineRunner:
                 with dalston.telemetry.create_span("engine.download_input"):
                     task_input = self._load_task_input(task_id, temp_dir)
                 dalston.metrics.observe_engine_s3_download(
-                    self.runtime, time.time() - download_start
+                    self.runtime,
+                    time.time() - download_start,
+                    self._execution_profile,
                 )
                 job_id = task_input.job_id
 
@@ -570,14 +591,24 @@ class EngineRunner:
                 with dalston.telemetry.create_span("engine.upload_output"):
                     self._save_task_output(task_id, job_id, output, total_task_time)
                 dalston.metrics.observe_engine_s3_upload(
-                    self.runtime, time.time() - upload_start
+                    self.runtime,
+                    time.time() - upload_start,
+                    self._execution_profile,
                 )
 
                 # Record task success metrics (M20)
                 dalston.metrics.observe_engine_task_duration(
-                    self.runtime, task_model, process_time
+                    self.runtime,
+                    task_model,
+                    process_time,
+                    self._execution_profile,
                 )
-                dalston.metrics.inc_engine_tasks(self.runtime, task_model, "success")
+                dalston.metrics.inc_engine_tasks(
+                    self.runtime,
+                    task_model,
+                    "success",
+                    self._execution_profile,
+                )
 
                 # Publish success event
                 self._publish_task_completed(task_id, job_id)
@@ -590,7 +621,12 @@ class EngineRunner:
                 logger.exception("task_failed", error=str(e))
 
                 # Record task failure metric (M20)
-                dalston.metrics.inc_engine_tasks(self.runtime, task_model, "failure")
+                dalston.metrics.inc_engine_tasks(
+                    self.runtime,
+                    task_model,
+                    "failure",
+                    self._execution_profile,
+                )
 
                 # We need job_id for the event, try to extract from input
                 try:
@@ -700,11 +736,8 @@ class EngineRunner:
             "data": output.to_dict(),
         }
 
-        task_stage = self._get_task_metadata(task_id).get("stage")
-        if task_stage == "merge":
-            canonical_uri = f"s3://{self.s3_bucket}/jobs/{job_id}/transcript.json"
-            io.upload_json(output.to_dict(), canonical_uri)
-            output_data["canonical_transcript_uri"] = canonical_uri
+        task_metadata = self._get_task_metadata(task_id)
+        task_stage = task_metadata.get("stage")
 
         persisted_artifacts = self._materializer.persist_produced(
             job_id=job_id,
@@ -719,6 +752,18 @@ class EngineRunner:
         output_data["produced_artifact_ids"] = [
             artifact.artifact_id for artifact in persisted_artifacts
         ]
+        canonical_transcript = next(
+            (
+                artifact
+                for artifact in persisted_artifacts
+                if artifact.kind == "transcript" and artifact.role == "final"
+            ),
+            None,
+        )
+        if canonical_transcript is not None:
+            output_data["canonical_transcript_uri"] = (
+                canonical_transcript.storage_locator
+            )
 
         io.upload_json(output_data, output_uri)
         logger.info("output_uploaded", output_uri=output_uri)

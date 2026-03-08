@@ -17,12 +17,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import structlog
+from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
 log = structlog.get_logger()
 
 _SQLITE_MIN_VERSION = (3, 35, 0)  # Minimum for RETURNING support
+_POSTGRES_MIGRATION_LOCK_KEY = 59059331
 
 # ---------------------------------------------------------------------------
 # Legacy migration chain support
@@ -136,6 +138,11 @@ def _check_sqlite_preflight(database_url: str) -> None:
                     ) from exc
 
 
+def _is_postgres_url(database_url: str) -> bool:
+    """Return True when the URL targets PostgreSQL."""
+    return make_url(database_url).drivername.startswith("postgresql")
+
+
 async def _get_current_head(alembic_cfg) -> str:
     """Return the current head revision from Alembic script directory."""
     from alembic.script import ScriptDirectory
@@ -204,6 +211,33 @@ def _make_alembic_config(
     return cfg
 
 
+async def _run_with_postgres_migration_lock(
+    database_url: str,
+    operation,
+):
+    """Serialize PostgreSQL migrations across concurrent service startups."""
+    lock_engine = create_async_engine(
+        database_url,
+        echo=False,
+        isolation_level="AUTOCOMMIT",
+    )
+    try:
+        async with lock_engine.connect() as connection:
+            await connection.execute(
+                text("SELECT pg_advisory_lock(:key)"),
+                {"key": _POSTGRES_MIGRATION_LOCK_KEY},
+            )
+            try:
+                return await operation()
+            finally:
+                await connection.execute(
+                    text("SELECT pg_advisory_unlock(:key)"),
+                    {"key": _POSTGRES_MIGRATION_LOCK_KEY},
+                )
+    finally:
+        await lock_engine.dispose()
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -237,6 +271,11 @@ async def upgrade_to_head(database_url: str) -> MigrationResult:
 
     try:
         head = await _get_current_head(alembic_cfg)
+        if _is_postgres_url(url):
+            return await _run_with_postgres_migration_lock(
+                url,
+                lambda: _run_alembic_upgrade(alembic_cfg, url, head),
+            )
         return await _run_alembic_upgrade(alembic_cfg, url, head)
     except (
         MigrationError,

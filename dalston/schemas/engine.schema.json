@@ -61,6 +61,11 @@
       "minLength": 10,
       "description": "Multi-line description of engine functionality"
     },
+    "execution_profile": {
+      "type": "string",
+      "enum": ["inproc", "venv", "container"],
+      "description": "Runtime isolation profile. Defaults to 'container' when omitted."
+    },
     "container": {
       "$ref": "#/$defs/container"
     },

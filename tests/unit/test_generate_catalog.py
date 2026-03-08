@@ -35,6 +35,7 @@ def valid_runtime_yaml() -> dict:
         "name": "Test Runtime",
         "version": "1.2.0",
         "description": "A test runtime for unit testing catalog generation.",
+        "execution_profile": "venv",
         "container": {
             "gpu": "optional",
             "memory": "8G",
@@ -95,6 +96,7 @@ class TestTransformRuntimeToEntry:
         assert entry["name"] == "Test Runtime"
         assert entry["version"] == "1.2.0"
         assert entry["stage"] == "transcribe"
+        assert entry["execution_profile"] == "venv"
         assert entry["capabilities"]["stages"] == ["transcribe"]
         assert entry["capabilities"]["languages"] == ["en", "es"]
         assert entry["capabilities"]["supports_word_timestamps"] is True
@@ -102,6 +104,14 @@ class TestTransformRuntimeToEntry:
         assert entry["hardware"]["gpu_optional"] is True
         assert entry["hardware"]["min_vram_gb"] == 4
         assert entry["performance"]["rtf_gpu"] == 0.05
+
+    def test_execution_profile_defaults_to_container(
+        self, valid_runtime_yaml: dict
+    ) -> None:
+        """Missing execution_profile should default to container."""
+        valid_runtime_yaml.pop("execution_profile")
+        entry = transform_runtime_to_entry(valid_runtime_yaml, Path("test.yaml"))
+        assert entry["execution_profile"] == "container"
 
     def test_all_languages_converted_to_null(self, valid_runtime_yaml: dict) -> None:
         """Languages ['all'] should be converted to None."""
@@ -188,6 +198,7 @@ class TestGenerateCatalog:
             assert catalog["engine_count"] == 1
             assert "test-runtime" in catalog["engines"]
             assert catalog["engines"]["test-runtime"]["version"] == "1.2.0"
+            assert catalog["engines"]["test-runtime"]["execution_profile"] == "venv"
 
 
 class TestCatalogJsonOutput:

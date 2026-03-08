@@ -282,6 +282,14 @@ async def queue_task(
     # 1. Catalog check - does any engine in catalog support this?
     if catalog is None:
         catalog = get_catalog()
+    catalog_entry = catalog.get_engine(task.runtime)
+    if catalog_entry is not None and catalog_entry.execution_profile != "container":
+        raise CatalogValidationError(
+            f"Runtime '{task.runtime}' declares execution_profile "
+            f"'{catalog_entry.execution_profile}' and cannot be queued on the "
+            "distributed container path.",
+            stage=task.stage,
+        )
 
     # Get word_timestamps requirement from config
     word_timestamps = task.config.get("word_timestamps") if task.config else None
@@ -373,6 +381,11 @@ async def queue_task(
         "stage": task.stage,
         "runtime": task.runtime,
         "queue_id": queue_id,
+        "execution_profile": (
+            catalog_entry.execution_profile
+            if catalog_entry is not None
+            else "container"
+        ),
         "enqueued_at": datetime.now(
             UTC
         ).isoformat(),  # M20: For queue wait time metrics
@@ -409,7 +422,6 @@ async def queue_task(
         audio_duration = task.config["audio_duration"]
 
     # Get RTF from catalog entry
-    catalog_entry = catalog.get_engine(task.runtime)
     rtf_gpu = None
     rtf_cpu = None
     if catalog_entry and catalog_entry.capabilities:

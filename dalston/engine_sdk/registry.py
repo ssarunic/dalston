@@ -43,6 +43,7 @@ class BatchEngineInfo:
     stage: str
     stream_name: str
     capabilities: EngineCapabilities | None = None
+    execution_profile: str = "container"
 
 
 class BatchEngineRegistry:
@@ -118,6 +119,7 @@ class BatchEngineRegistry:
             "instance": info.instance,  # Unique instance identifier
             "stage": info.stage,
             "stream_name": info.stream_name,
+            "execution_profile": info.execution_profile,
             "status": "idle",
             "current_task": "",
             "last_heartbeat": now,
@@ -193,6 +195,7 @@ class BatchEngineRegistry:
                 "instance": info.instance,
                 "stage": info.stage,
                 "stream_name": info.stream_name,
+                "execution_profile": info.execution_profile,
                 "status": status,
                 "current_task": current_task or "",
                 "last_heartbeat": now,

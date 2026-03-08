@@ -420,7 +420,7 @@ class TestServiceMetricsConfiguration:
     def test_engine_metrics_isolation(self):
         """Engine metrics should work independently."""
         with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
-            dalston.metrics.configure_metrics("stt-batch-transcribe-whisper")
+            dalston.metrics.configure_metrics("engine-faster-whisper")
 
             # These should all work without errors
             dalston.metrics.inc_engine_tasks("faster-whisper", "", "success")

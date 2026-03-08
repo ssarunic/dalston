@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-04T13:24:40.147487+00:00",
+  "generated_at": "2026-03-08T20:49:49.301521+00:00",
   "schema_version": "3.0",
   "engine_count": 12,
   "engines": {
@@ -11,6 +11,7 @@
       "type": null,
       "description": "Word-level timestamp alignment using CTC forced alignment with\nwav2vec2 models. Standalone reimplementation of the phoneme alignment\nalgorithm from the WhisperX paper (Bain et al., INTERSPEECH 2023).\n\nDoes not depend on the whisperx package. Uses torchaudio pipeline\nmodels for major European languages and HuggingFace wav2vec2 models\nfor 35+ additional languages.",
       "image": "dalston/stt-batch-align-phoneme-align:1.0.0",
+      "execution_profile": "container",
       "capabilities": {
         "stages": [
           "align"
@@ -46,6 +47,7 @@
       "type": null,
       "description": "Detects personally identifiable information using GLiNER (zero-shot NER)\nas the primary detector, supplemented by Presidio for checksum-validated\npatterns (credit cards via Luhn, IBANs via mod-97).",
       "image": "dalston/stt-batch-pii_detect-pii-presidio:2.0.0",
+      "execution_profile": "container",
       "capabilities": {
         "stages": [
           "pii_detect"
@@ -79,6 +81,7 @@
       "type": null,
       "description": "Speaker diarization using NVIDIA NeMo Multi-scale Diarization Decoder.\nNeural end-to-end system with built-in overlap detection.\n\nNo HuggingFace token required - models are open under CC-BY-4.0 license.\nSupports optional min/max speaker count hints.\nCPU inference supported but slow (~2x realtime).",
       "image": "dalston/stt-batch-diarize-nemo-msdd:1.0.0",
+      "execution_profile": "venv",
       "capabilities": {
         "stages": [
           "diarize"
@@ -115,6 +118,7 @@
       "type": null,
       "description": "Speaker diarization using pyannote-audio 4.0 with the new Community-1 pipeline.\nIdentifies who speaks when in an audio file.\n\nNew in 4.0:\n  - VBx clustering for improved speaker counting and assignment\n  - Exclusive mode for single-speaker segments (better Whisper alignment)\n  - NumPy 2.0 and modern dependency compatibility\n\nRequires HuggingFace token (HF_TOKEN) for accessing gated models.\nSupports optional min/max speaker count hints for improved accuracy.",
       "image": "dalston/stt-batch-diarize-pyannote-4.0:1.0.0",
+      "execution_profile": "container",
       "capabilities": {
         "stages": [
           "diarize"
@@ -150,6 +154,7 @@
       "type": null,
       "description": "Combines outputs from upstream pipeline stages into the\nstandard Dalston transcript format.\n\nAdds segment IDs, metadata, and writes the canonical\ntranscript.json file for the Gateway to read.\n\nFor per_channel mode with PII detection and audio redaction:\n- Collects and merges PII entities from each channel\n- Assembles redacted mono WAVs into stereo output (FFmpeg)",
       "image": "dalston/stt-batch-merge-final-merger:1.1.0",
+      "execution_profile": "container",
       "capabilities": {
         "stages": [
           "merge"
@@ -183,6 +188,7 @@
       "type": null,
       "description": "Converts any audio format to 16kHz, 16-bit, mono WAV.\nExtracts duration and audio metadata using ffprobe.\nRequired as the first stage of all batch pipelines.",
       "image": "dalston/stt-batch-prepare-audio-prepare:1.0.0",
+      "execution_profile": "container",
       "capabilities": {
         "stages": [
           "prepare"
@@ -216,6 +222,7 @@
       "type": null,
       "description": "Redacts audio by replacing PII segments with silence or beep tones.\nUses FFmpeg for efficient single-pass processing. Requires PII detection\noutput with entity timing information.",
       "image": "dalston/stt-batch-audio_redact-audio-redactor:1.0.0",
+      "execution_profile": "container",
       "capabilities": {
         "stages": [
           "audio_redact"
@@ -249,6 +256,7 @@
       "type": null,
       "description": "Runtime engine for faster-whisper (CTranslate2-based Whisper) transcription.\nCan load any Whisper-compatible model at runtime via runtime_model_id.\n\nM36: This is a runtime-level configuration. The engine loads specific model\nvariants on demand, without requiring separate Docker images per variant.\nSee models/*.yaml for pre-defined model variants.",
       "image": "dalston/stt-batch-transcribe-faster-whisper:1.0.0",
+      "execution_profile": "container",
       "capabilities": {
         "stages": [
           "transcribe"
@@ -285,6 +293,7 @@
       "type": null,
       "description": "Generic ASR engine for HuggingFace Transformers models.\nSupports Whisper, Wav2Vec2, HuBERT, MMS, and other ASR architectures\nwith pipeline_tag=automatic-speech-recognition.\n\nUse for community fine-tunes and research models. Any of the 10,000+\nASR models on HuggingFace Hub can be loaded at runtime via runtime_model_id.",
       "image": "dalston/stt-batch-transcribe-hf-asr:1.0.0",
+      "execution_profile": "container",
       "capabilities": {
         "stages": [
           "transcribe"
@@ -321,6 +330,7 @@
       "type": null,
       "description": "Runtime engine for NVIDIA NeMo Parakeet transcription models.\nCan load any Parakeet model at runtime via runtime_model_id.\n\nM36: This is a runtime-level configuration. The engine loads specific model\nvariants on demand, without requiring separate Docker images per variant.\nSee models/*.yaml for pre-defined model variants.\n\nAll Parakeet models produce native word-level timestamps without needing\na separate alignment stage.",
       "image": "dalston/stt-batch-transcribe-nemo:1.0.0",
+      "execution_profile": "container",
       "capabilities": {
         "stages": [
           "transcribe"
@@ -359,6 +369,7 @@
       "type": null,
       "description": "Lightweight ONNX Runtime engine for NVIDIA Parakeet transcription models.\nUses the onnx-asr library for fast inference without the full NeMo toolkit.\nSupports CTC, TDT, and RNNT decoders.\n\nM41: This runtime provides the same Parakeet model accuracy with significantly\nsmaller container images (~1GB vs ~12GB) and faster startup. Uses ONNX Runtime\nfor inference and supports both CPU and GPU execution.\n\nSupported models:\n  - nvidia/parakeet-ctc-0.6b (CTC, fast, 600M params)\n  - nvidia/parakeet-ctc-1.1b (CTC, accurate, 1.1B params)\n  - nvidia/parakeet-tdt-0.6b-v2 (TDT, English-only, 600M params)\n  - nvidia/parakeet-tdt-0.6b-v3 (TDT, punctuation + capitalization, 600M params)\n  - nvidia/parakeet-rnnt-0.6b (RNNT, English-only, 600M params)\n\nAll models produce native word-level timestamps without needing a separate\nalignment stage.",
       "image": "dalston/stt-batch-transcribe-nemo-onnx:1.0.0",
+      "execution_profile": "container",
       "capabilities": {
         "stages": [
           "transcribe"
@@ -397,6 +408,7 @@
       "type": null,
       "description": "Audio-capable LLMs via vLLM for high-accuracy transcription.\nSupports Voxtral (Mistral) and Qwen2-Audio model families.\n\nUses model-specific adapters for prompt building and output parsing.\nLoads models at runtime via runtime_model_id without requiring\nseparate Docker images per variant.\n\nNote: Audio LLMs produce text only - no word timestamps.\nUse the alignment stage (phoneme-align) if word-level timing is needed.",
       "image": "dalston/stt-batch-transcribe-vllm-asr:1.0.0",
+      "execution_profile": "container",
       "capabilities": {
         "stages": [
           "transcribe"

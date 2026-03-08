@@ -157,6 +157,28 @@ class TestOrchestratorMetrics:
         dalston.metrics.inc_orchestrator_tasks_completed("faster-whisper", "success")
         dalston.metrics.inc_orchestrator_tasks_completed("faster-whisper", "failure")
 
+    def test_orchestrator_metrics_include_execution_profile_label(self):
+        """Task metrics should include execution_profile label values."""
+        from prometheus_client import generate_latest
+
+        import dalston.metrics
+
+        dalston.metrics.inc_orchestrator_tasks_scheduled(
+            "faster-whisper",
+            "transcribe",
+            "container",
+        )
+        dalston.metrics.inc_orchestrator_tasks_completed(
+            "faster-whisper",
+            "success",
+            "container",
+        )
+
+        content = generate_latest().decode()
+        assert "dalston_orchestrator_tasks_scheduled_total" in content
+        assert "dalston_orchestrator_tasks_completed_total" in content
+        assert 'execution_profile="container"' in content
+
     def test_inc_orchestrator_events(self):
         """Test incrementing events counter."""
         import dalston.metrics
@@ -181,7 +203,7 @@ class TestEngineMetrics:
         import dalston.metrics
 
         with patch.dict(os.environ, {"DALSTON_METRICS_ENABLED": "true"}):
-            dalston.metrics.configure_metrics("stt-batch-transcribe-whisper")
+            dalston.metrics.configure_metrics("engine-faster-whisper")
 
     def test_inc_engine_tasks(self):
         """Test incrementing engine tasks counter."""
@@ -213,6 +235,33 @@ class TestEngineMetrics:
         import dalston.metrics
 
         dalston.metrics.observe_engine_s3_upload("faster-whisper", 0.3)
+
+    def test_engine_metrics_include_execution_profile_label(self):
+        """Engine task metrics should include execution_profile label values."""
+        from prometheus_client import generate_latest
+
+        import dalston.metrics
+
+        dalston.metrics.inc_engine_tasks(
+            "faster-whisper",
+            "",
+            "success",
+            "venv",
+        )
+        dalston.metrics.observe_engine_task_duration(
+            "faster-whisper",
+            "",
+            15.5,
+            "venv",
+        )
+        dalston.metrics.observe_engine_queue_wait("faster-whisper", 2.5, "venv")
+        dalston.metrics.observe_engine_s3_download("faster-whisper", 0.5, "venv")
+        dalston.metrics.observe_engine_s3_upload("faster-whisper", 0.3, "venv")
+
+        content = generate_latest().decode()
+        assert "dalston_engine_tasks_processed_total" in content
+        assert "dalston_engine_task_duration_seconds" in content
+        assert 'execution_profile="venv"' in content
 
 
 class TestSessionRouterMetrics:

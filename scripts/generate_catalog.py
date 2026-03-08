@@ -27,6 +27,8 @@ from pathlib import Path
 
 import yaml
 
+VALID_EXECUTION_PROFILES = frozenset({"inproc", "venv", "container"})
+
 
 def find_runtime_yamls(engines_dir: Path) -> list[Path]:
     """Find all engine.yaml files (runtime definitions)."""
@@ -58,6 +60,17 @@ def transform_runtime_to_entry(data: dict, yaml_path: Path) -> dict:
     engine_file_id = data.get("id")
     version = data.get("version", "1.0.0")
     stage = data.get("stage")
+    execution_profile = data.get("execution_profile", "container")
+
+    if (
+        not isinstance(execution_profile, str)
+        or execution_profile not in VALID_EXECUTION_PROFILES
+    ):
+        valid = ", ".join(sorted(VALID_EXECUTION_PROFILES))
+        raise ValueError(
+            f"Invalid execution_profile {execution_profile!r} in {yaml_path}; "
+            f"expected one of {{{valid}}}"
+        )
 
     # Derive stages list
     stages = [stage] if stage else []
@@ -85,6 +98,7 @@ def transform_runtime_to_entry(data: dict, yaml_path: Path) -> dict:
         "name": data.get("name", runtime_id),
         "version": version,
         "stage": stage,
+        "execution_profile": execution_profile,
         "description": data.get("description", "").strip(),
         "image": derive_image_name(runtime_id, stage, version),
         "capabilities": {
@@ -139,6 +153,7 @@ def generate_catalog(engines_dir: Path) -> dict:
                 "type": None,
                 "description": entry["description"],
                 "image": entry["image"],
+                "execution_profile": entry["execution_profile"],
                 "capabilities": entry["capabilities"],
                 "hardware": entry["hardware"],
                 "performance": entry["performance"],
