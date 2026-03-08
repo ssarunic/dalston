@@ -214,28 +214,29 @@ create_iam_role() {
     IAM_ROLE="${NAME_PREFIX}-ec2-role"
     INSTANCE_PROFILE="${NAME_PREFIX}-instance-profile"
 
-    if aws iam get-role --role-name "$IAM_ROLE" 2>/dev/null; then
+    local role_exists=false
+    if aws iam get-role --role-name "$IAM_ROLE" --no-cli-pager 2>/dev/null; then
         log "IAM role $IAM_ROLE already exists"
-        return 0
+        role_exists=true
     fi
 
-    log "Creating IAM role: $IAM_ROLE"
+    if [[ "$role_exists" == "false" ]]; then
+        log "Creating IAM role: $IAM_ROLE"
+        aws iam create-role \
+            --role-name "$IAM_ROLE" \
+            --assume-role-policy-document '{
+                "Version":"2012-10-17",
+                "Statement":[{
+                    "Effect":"Allow",
+                    "Principal":{"Service":"ec2.amazonaws.com"},
+                    "Action":"sts:AssumeRole"
+                }]
+            }' \
+            --tags "Key=Project,Value=dalston" \
+            --no-cli-pager
+    fi
 
-    # Trust policy
-    aws iam create-role \
-        --role-name "$IAM_ROLE" \
-        --assume-role-policy-document '{
-            "Version":"2012-10-17",
-            "Statement":[{
-                "Effect":"Allow",
-                "Principal":{"Service":"ec2.amazonaws.com"},
-                "Action":"sts:AssumeRole"
-            }]
-        }' \
-        --tags "Key=Project,Value=dalston" \
-        --no-cli-pager
-
-    # S3 access policy
+    # S3 access policy — put-role-policy is idempotent (upsert)
     local bucket_arn="arn:aws:s3:::${S3_BUCKET}"
     aws iam put-role-policy \
         --role-name "$IAM_ROLE" \
@@ -248,21 +249,26 @@ create_iam_role() {
             ]
         }"
 
-    # Instance profile
-    aws iam create-instance-profile \
-        --instance-profile-name "$INSTANCE_PROFILE" \
-        --tags "Key=Project,Value=dalston" \
-        --no-cli-pager
+    # Instance profile — check independently (role may exist but profile may not)
+    if aws iam get-instance-profile --instance-profile-name "$INSTANCE_PROFILE" --no-cli-pager 2>/dev/null; then
+        log "Instance profile $INSTANCE_PROFILE already exists"
+    else
+        log "Creating instance profile: $INSTANCE_PROFILE"
+        aws iam create-instance-profile \
+            --instance-profile-name "$INSTANCE_PROFILE" \
+            --tags "Key=Project,Value=dalston" \
+            --no-cli-pager
 
-    aws iam add-role-to-instance-profile \
-        --instance-profile-name "$INSTANCE_PROFILE" \
-        --role-name "$IAM_ROLE"
+        aws iam add-role-to-instance-profile \
+            --instance-profile-name "$INSTANCE_PROFILE" \
+            --role-name "$IAM_ROLE"
 
-    # IAM is eventually consistent — wait for the instance profile to propagate
-    log "Waiting for IAM instance profile to propagate..."
-    sleep 10
+        # IAM is eventually consistent — wait for the instance profile to propagate
+        log "Waiting for IAM instance profile to propagate..."
+        sleep 10
+    fi
 
-    log "IAM role + instance profile created"
+    log "IAM role + instance profile ready"
 }
 
 create_security_group() {
@@ -357,18 +363,15 @@ create_gpu_worker_security_group() {
 }
 
 ensure_key_pair() {
-    if [[ -n "${KEY_NAME:-}" ]]; then
-        return 0
-    fi
+    KEY_NAME="${KEY_NAME:-${NAME_PREFIX}-key}"
 
-    KEY_NAME="${NAME_PREFIX}-key"
-
-    if aws ec2 describe-key-pairs --key-names "$KEY_NAME" --region "$REGION" 2>/dev/null; then
-        log "Key pair $KEY_NAME already exists"
+    if aws ec2 describe-key-pairs --key-names "$KEY_NAME" --region "$REGION" --no-cli-pager 2>/dev/null; then
+        log "Key pair $KEY_NAME already exists in AWS"
         return 0
     fi
 
     log "Creating key pair: $KEY_NAME"
+    mkdir -p "$STATE_DIR"
     local key_file="${STATE_DIR}/${KEY_NAME}.pem"
     aws ec2 create-key-pair \
         --key-name "$KEY_NAME" \
@@ -739,6 +742,37 @@ cmd_setup() {
     # Check AWS credentials
     aws sts get-caller-identity --region "$REGION" > /dev/null 2>&1 \
         || die "AWS credentials not configured. Run 'aws configure' first."
+
+    # Idempotency: if state exists and instance is alive, don't create a duplicate
+    if load_state 2>/dev/null && [[ -n "${INSTANCE_ID:-}" ]]; then
+        local existing_state
+        existing_state=$(get_instance_state "$INSTANCE_ID")
+        if [[ "$existing_state" == "running" || "$existing_state" == "stopped" ]]; then
+            log "Existing deployment found: $INSTANCE_ID (state=$existing_state)"
+            log "Infrastructure resources (S3, IAM, SG) will be verified."
+            log "Instance will NOT be re-created. Use 'dalston-aws teardown' first to start fresh."
+            echo ""
+
+            # Still re-run infra setup to ensure idempotent convergence
+            local account_id vpc_id
+            account_id=$(aws_account_id)
+            vpc_id=$(aws ec2 describe-instances \
+                --instance-ids "$INSTANCE_ID" \
+                --query 'Reservations[0].Instances[0].VpcId' \
+                --output text \
+                --region "$REGION")
+
+            create_s3_bucket
+            create_iam_role
+            ensure_key_pair
+            create_security_group "$vpc_id"
+            save_state
+            cmd_status
+            return 0
+        fi
+        # Instance terminated/gone — fall through to re-create
+        log "Previous instance $INSTANCE_ID is $existing_state. Will create a new one."
+    fi
 
     local account_id
     account_id=$(aws_account_id)
