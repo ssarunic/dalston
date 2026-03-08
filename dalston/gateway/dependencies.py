@@ -17,6 +17,7 @@ from dalston.config import Settings
 from dalston.config import get_settings as _get_settings
 from dalston.db.models import APIKeyModel
 from dalston.db.session import async_session
+from dalston.gateway.error_codes import Err
 from dalston.gateway.middleware.auth import authenticate_request
 from dalston.gateway.security.manager import SecurityManager
 from dalston.gateway.security.manager import (
@@ -31,7 +32,6 @@ from dalston.gateway.services.ingestion import AudioIngestionService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.pii_entity_types import PIIEntityTypeService
 from dalston.gateway.services.rate_limiter import RateLimitResult, RedisRateLimiter
-from dalston.gateway.error_codes import Err
 from dalston.gateway.services.storage import StorageService
 
 if TYPE_CHECKING:

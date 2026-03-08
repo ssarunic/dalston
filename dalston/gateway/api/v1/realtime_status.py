@@ -10,12 +10,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from dalston.gateway.error_codes import Err
 from dalston.gateway.dependencies import (
     get_principal,
     get_security_manager,
     get_session_router,
 )
+from dalston.gateway.error_codes import Err
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
 from dalston.session_router import SessionRouter

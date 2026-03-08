@@ -57,7 +57,6 @@ from dalston.gateway.api.v1.openai_audio import (
     raise_openai_error,
     validate_openai_request,
 )
-from dalston.gateway.error_codes import Err
 from dalston.gateway.dependencies import (
     RateLimiter,
     check_request_rate_limit,
@@ -74,6 +73,7 @@ from dalston.gateway.dependencies import (
     get_settings,
     get_storage_service,
 )
+from dalston.gateway.error_codes import Err
 from dalston.gateway.models.responses import (
     AudioUrlResponse,
     JobCancelledResponse,
@@ -302,7 +302,9 @@ async def create_transcription(
     if openai_mode and len(ingested.content) > OPENAI_MAX_FILE_SIZE:
         raise_openai_error(
             400,
-            Err.OPENAI_FILE_TOO_LARGE.format(size_mb=len(ingested.content) / 1024 / 1024),
+            Err.OPENAI_FILE_TOO_LARGE.format(
+                size_mb=len(ingested.content) / 1024 / 1024
+            ),
             param="file",
             code="file_too_large",
         )
@@ -312,13 +314,17 @@ async def create_transcription(
         if openai_mode:
             raise_openai_error(
                 400,
-                Err.OPENAI_PER_CHANNEL_REQUIRES_STEREO.format(channels=ingested.metadata.channels),
+                Err.OPENAI_PER_CHANNEL_REQUIRES_STEREO.format(
+                    channels=ingested.metadata.channels
+                ),
                 param="file",
                 code="invalid_audio_channels",
             )
         raise HTTPException(
             status_code=400,
-            detail=Err.PER_CHANNEL_REQUIRES_STEREO.format(channels=ingested.metadata.channels),
+            detail=Err.PER_CHANNEL_REQUIRES_STEREO.format(
+                channels=ingested.metadata.channels
+            ),
         )
 
     # Build parameters
@@ -1170,7 +1176,9 @@ async def get_job_audio_redacted(
     if not await storage.object_exists(key):
         raise HTTPException(
             status_code=410,
-            detail=Err.structured("audio_deleted", message="Redacted audio has been deleted"),
+            detail=Err.structured(
+                "audio_deleted", message="Redacted audio has been deleted"
+            ),
         )
 
     # Generate presigned URL

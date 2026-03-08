@@ -31,7 +31,6 @@ from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_created
 from dalston.common.models import JobStatus
 from dalston.config import Settings
-from dalston.gateway.error_codes import Err
 from dalston.gateway.dependencies import (
     get_audit_service,
     get_db,
@@ -46,6 +45,7 @@ from dalston.gateway.dependencies import (
     get_settings,
     get_storage_service,
 )
+from dalston.gateway.error_codes import Err
 from dalston.gateway.security.manager import SecurityManager
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
@@ -320,7 +320,7 @@ async def create_transcription(
     if result.failed:
         raise HTTPException(
             status_code=500,
-            detail=Err.TRANSCRIPTION_FAILED.format(error=job.error or 'Unknown error'),
+            detail=Err.TRANSCRIPTION_FAILED.format(error=job.error or "Unknown error"),
         )
 
     if result.cancelled:

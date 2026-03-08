@@ -18,6 +18,7 @@ from dalston.gateway.dependencies import (
     get_security_manager,
     get_storage_service,
 )
+from dalston.gateway.error_codes import Err
 from dalston.gateway.models.responses import (
     TaskArtifactResponse,
     TaskListResponse,
@@ -25,7 +26,6 @@ from dalston.gateway.models.responses import (
 )
 from dalston.gateway.security.manager import SecurityManager
 from dalston.gateway.security.principal import Principal
-from dalston.gateway.error_codes import Err
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
 

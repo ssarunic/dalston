@@ -20,7 +20,6 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.s3 import get_s3_client
-from dalston.gateway.error_codes import Err
 from dalston.common.timeouts import S3_PRESIGNED_URL_EXPIRY_SECONDS
 from dalston.config import get_settings
 from dalston.db.models import RealtimeSessionModel
@@ -30,6 +29,7 @@ from dalston.gateway.dependencies import (
     get_security_manager,
     get_storage_service,
 )
+from dalston.gateway.error_codes import Err
 from dalston.gateway.security.exceptions import ResourceNotFoundError
 from dalston.gateway.security.manager import SecurityManager
 from dalston.gateway.security.principal import Principal

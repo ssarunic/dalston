@@ -15,13 +15,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from dalston.gateway.error_codes import Err
 from dalston.gateway.dependencies import (
     get_auth_service,
     get_principal,
     get_security_manager,
     require_auth,
 )
+from dalston.gateway.error_codes import Err
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.auth import (

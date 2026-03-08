@@ -18,12 +18,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dalston.gateway.error_codes import Err
 from dalston.gateway.dependencies import (
     get_db,
     get_principal,
     get_security_manager,
 )
+from dalston.gateway.error_codes import Err
 from dalston.gateway.security.exceptions import ResourceNotFoundError
 from dalston.gateway.security.manager import SecurityManager
 from dalston.gateway.security.permissions import Permission
@@ -298,9 +298,7 @@ async def update_webhook_endpoint(
             is_active=request.is_active,
         )
     except ResourceNotFoundError:
-        raise HTTPException(
-            status_code=404, detail=Err.WEBHOOK_NOT_FOUND
-        ) from None
+        raise HTTPException(status_code=404, detail=Err.WEBHOOK_NOT_FOUND) from None
     except WebhookValidationError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -343,9 +341,7 @@ async def delete_webhook_endpoint(
             security_manager=security_manager,
         )
     except ResourceNotFoundError:
-        raise HTTPException(
-            status_code=404, detail=Err.WEBHOOK_NOT_FOUND
-        ) from None
+        raise HTTPException(status_code=404, detail=Err.WEBHOOK_NOT_FOUND) from None
     if not deleted:
         raise HTTPException(status_code=404, detail=Err.WEBHOOK_NOT_FOUND)
 

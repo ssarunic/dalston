@@ -12,13 +12,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dalston.gateway.error_codes import Err
 from dalston.gateway.dependencies import (
     get_audit_query_service,
     get_db,
     get_principal,
     get_security_manager,
 )
+from dalston.gateway.error_codes import Err
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.audit_query import AuditEventDTO, AuditQueryService

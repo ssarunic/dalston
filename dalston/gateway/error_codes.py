@@ -44,8 +44,7 @@ class Err:
     KEYTERMS_MUST_BE_STRINGS = "keyterms must contain only strings"
     KEYTERM_TOO_LONG = "Each keyterm must be at most 50 characters, got {length}"
     PER_CHANNEL_REQUIRES_STEREO = (
-        "per_channel speaker detection requires stereo audio, "
-        "got {channels} channel(s)"
+        "per_channel speaker detection requires stereo audio, got {channels} channel(s)"
     )
     OPENAI_FILE_TOO_LARGE = "File size exceeds 25MB limit ({size_mb:.1f}MB)"
     OPENAI_PER_CHANNEL_REQUIRES_STEREO = (
@@ -56,13 +55,17 @@ class Err:
         "Transcription timeout. The audio file may be too long."
     )
     PROVIDE_FILE_OR_URL = "Either 'file' or 'audio_url' must be provided"
-    PROVIDE_FILE_OR_URL_NOT_BOTH = "Provide either 'file' or 'audio_url'"
+    PROVIDE_FILE_OR_URL_NOT_BOTH = "Provide either 'file' or 'audio_url', not both"
     TRANSCRIPT_LOAD_FAILED = (
         "Transcription completed but transcript could not be loaded."
     )
     TRANSCRIPTION_CANCELLED = "Transcription was cancelled"
-    TRANSCRIPTION_NOT_COMPLETED = "Transcription not completed. Current status: {status}"
-    UNSUPPORTED_FORMAT = "Unsupported format: {format_str}. Supported formats: {valid_formats}"
+    TRANSCRIPTION_NOT_COMPLETED = (
+        "Transcription not completed. Current status: {status}"
+    )
+    UNSUPPORTED_FORMAT = (
+        "Unsupported format: {format_str}. Supported formats: {valid_formats}"
+    )
     VOCABULARY_EXCEED_LIMIT = "vocabulary cannot exceed 100 terms"
     VOCABULARY_INVALID_JSON = "Invalid JSON in vocabulary: {error}"
     VOCABULARY_MUST_BE_ARRAY = "vocabulary must be a JSON array of strings"
@@ -114,9 +117,7 @@ class Err:
     # -------------------------------------------------------------------------
     # 408 Request Timeout
     # -------------------------------------------------------------------------
-    TRANSCRIPTION_TIMEOUT = (
-        "Transcription timeout. Use webhook=true for long files."
-    )
+    TRANSCRIPTION_TIMEOUT = "Transcription timeout. Use webhook=true for long files."
 
     # -------------------------------------------------------------------------
     # 409 Conflict

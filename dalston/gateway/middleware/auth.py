@@ -8,11 +8,10 @@ Extracts and validates API keys from:
 
 from __future__ import annotations
 
-from dalston.gateway.error_codes import Err
-
 import structlog
 from fastapi import HTTPException, Request, WebSocket, status
 
+from dalston.gateway.error_codes import Err
 from dalston.gateway.services.auth import (
     TOKEN_PREFIX,
     APIKey,
