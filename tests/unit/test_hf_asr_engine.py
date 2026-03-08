@@ -50,10 +50,10 @@ class TestHFASREngine:
 
     @pytest.fixture(autouse=True)
     def _clear_module_cache(self):
-        """Clear cached module to force reload."""
-        if "hf_asr_engine" in sys.modules:
-            del sys.modules["hf_asr_engine"]
+        """Clear cached module before and after each test."""
+        sys.modules.pop("hf_asr_engine", None)
         yield
+        sys.modules.pop("hf_asr_engine", None)
 
     @pytest.fixture
     def mock_torch(self):

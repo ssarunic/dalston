@@ -19,9 +19,6 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-# Load .env from current directory (does not override existing env vars)
-load_dotenv()
-
 
 def load_config() -> dict[str, Any]:
     """Load configuration from file and environment.
@@ -29,12 +26,16 @@ def load_config() -> dict[str, Any]:
     Priority (lowest to highest):
     1. Default values
     2. Config file (~/.dalston/config.yaml)
-    3. .env file (loaded at module import, does not override existing env vars)
+    3. .env file (does not override existing env vars)
     4. Environment variables
 
     Returns:
         Configuration dictionary.
     """
+    # Load .env from current directory — must be called here (not at module
+    # level) so that test imports of this module do not pollute os.environ
+    # during collection.  load_dotenv() is idempotent and cheap.
+    load_dotenv()
     config: dict[str, Any] = {
         "server": "http://127.0.0.1:8000",
         "api_key": None,

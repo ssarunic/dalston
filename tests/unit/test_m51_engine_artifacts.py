@@ -7,9 +7,27 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from dalston.common.artifacts import MaterializedArtifact
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.types import EngineInput
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_injected_modules():
+    """Remove engine modules injected into sys.modules by _load_engine_class.
+
+    ``_load_engine_class`` writes arbitrary module names (e.g.
+    ``m51_prepare_engine``) directly into ``sys.modules``.  Without cleanup
+    those entries persist for the rest of the process and can interfere with
+    later tests that load engines under the same name.
+    """
+    keys_before = set(sys.modules)
+    yield
+    for key in list(sys.modules):
+        if key not in keys_before:
+            sys.modules.pop(key, None)
 
 
 def _ctx(task_id: str = "task-123", job_id: str = "job-456") -> BatchTaskContext:

@@ -16,6 +16,21 @@ from dalston.engine_sdk.context import BatchTaskContext
 HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 
+@pytest.fixture(autouse=True)
+def _cleanup_injected_modules():
+    """Remove adapter modules injected into sys.modules by load_adapter_module.
+
+    ``load_adapter_module`` writes ``vllm_asr_adapter_*`` keys directly into
+    ``sys.modules``.  Without cleanup those entries persist for the rest of the
+    process and can cause cross-test import aliasing.
+    """
+    keys_before = set(sys.modules)
+    yield
+    for key in list(sys.modules):
+        if key not in keys_before:
+            sys.modules.pop(key, None)
+
+
 def _ctx(input_obj) -> BatchTaskContext:
     return BatchTaskContext(
         runtime="vllm-asr",
