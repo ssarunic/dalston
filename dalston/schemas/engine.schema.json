@@ -10,7 +10,6 @@
     "name",
     "version",
     "description",
-    "container",
     "capabilities"
   ],
   "properties": {
@@ -60,6 +59,11 @@
       "type": "string",
       "minLength": 10,
       "description": "Multi-line description of engine functionality"
+    },
+    "execution_profile": {
+      "type": "string",
+      "enum": ["inproc", "venv", "container"],
+      "description": "Runtime isolation profile. Defaults to 'container' when omitted."
     },
     "container": {
       "$ref": "#/$defs/container"
@@ -128,6 +132,31 @@
         "stage": false
       },
       "description": "Realtime engine with type field"
+    }
+  ],
+  "allOf": [
+    {
+      "if": {
+        "not": {
+          "required": ["execution_profile"]
+        }
+      },
+      "then": {
+        "required": ["container"]
+      }
+    },
+    {
+      "if": {
+        "required": ["execution_profile"],
+        "properties": {
+          "execution_profile": {
+            "const": "container"
+          }
+        }
+      },
+      "then": {
+        "required": ["container"]
+      }
     }
   ],
   "$defs": {

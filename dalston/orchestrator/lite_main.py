@@ -4,14 +4,28 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import structlog
 
-from dalston.common.queue_backends import InMemoryQueue
+from dalston.common.queue_backends import InMemoryQueue, QueueEnvelope
 from dalston.config import get_settings
+from dalston.engine_sdk.base import Engine
+from dalston.engine_sdk.context import BatchTaskContext
+from dalston.engine_sdk.executors import (
+    ExecutionRequest,
+    InProcExecutor,
+    RuntimeExecutor,
+    VenvEnvironmentManager,
+    VenvExecutor,
+)
+from dalston.engine_sdk.types import EngineCapabilities, EngineInput, EngineOutput
 from dalston.gateway.services.artifact_store import LocalFilesystemArtifactStoreAdapter
+from dalston.orchestrator.catalog import CatalogEntry
 from dalston.orchestrator.lite_capabilities import (
     DEFAULT_PROFILE,
     LitePrerequisiteMissingError,
@@ -67,6 +81,70 @@ def _compute_pii_detect(parameters: dict) -> dict:  # noqa: ARG001
     }
 
 
+class _LiteComputeEngine(Engine[Any, Any]):
+    """Adapter that preserves the existing lite stage outputs behind Engine.process."""
+
+    def __init__(self, compute: Callable[[dict[str, Any]], dict[str, Any]]) -> None:
+        super().__init__()
+        self._compute = compute
+
+    def process(
+        self,
+        engine_input: EngineInput,
+        ctx: BatchTaskContext,
+    ) -> EngineOutput:
+        del ctx
+        return EngineOutput(data=self._compute(engine_input.config))
+
+
+@dataclass(frozen=True)
+class _LiteStageBinding:
+    entry: CatalogEntry
+    engine_factory: Callable[[], Engine[Any, Any]] | None = None
+    engine_ref: str | None = None
+
+
+def _make_stage_binding(
+    *,
+    stage: str,
+    runtime: str,
+    compute: Callable[[dict[str, Any]], dict[str, Any]],
+    execution_profile: str = "inproc",
+) -> _LiteStageBinding:
+    return _LiteStageBinding(
+        entry=CatalogEntry(
+            runtime=runtime,
+            image=f"dalston/lite-{stage}:{execution_profile}",
+            capabilities=EngineCapabilities(
+                runtime=runtime,
+                version="lite",
+                stages=[stage],
+            ),
+            execution_profile=execution_profile,
+        ),
+        engine_factory=lambda: _LiteComputeEngine(compute),
+    )
+
+
+_DEFAULT_STAGE_BINDINGS: dict[str, _LiteStageBinding] = {
+    "transcribe": _make_stage_binding(
+        stage="transcribe",
+        runtime="lite-transcribe",
+        compute=_compute_transcribe,
+    ),
+    "diarize": _make_stage_binding(
+        stage="diarize",
+        runtime="lite-diarize",
+        compute=_compute_diarize,
+    ),
+    "pii_detect": _make_stage_binding(
+        stage="pii_detect",
+        runtime="lite-pii-detect",
+        compute=_compute_pii_detect,
+    ),
+}
+
+
 @dataclass
 class LiteTask:
     stage: str
@@ -99,6 +177,8 @@ class LitePipeline:
         artifacts: LocalFilesystemArtifactStoreAdapter,
         *,
         profile: str = DEFAULT_PROFILE,
+        stage_bindings: dict[str, _LiteStageBinding] | None = None,
+        executors: dict[str, RuntimeExecutor] | None = None,
     ) -> None:
         cap = resolve_profile(profile)
 
@@ -111,6 +191,22 @@ class LitePipeline:
         self._artifacts = artifacts
         self._profile = cap.profile
         self._profile_cap = cap
+        self._stage_bindings = dict(
+            _DEFAULT_STAGE_BINDINGS if stage_bindings is None else stage_bindings
+        )
+        if executors is None:
+            lite_output_dir = Path(get_settings().lite_artifacts_dir)
+            self._executors: dict[str, RuntimeExecutor] = {}
+            self._executor_factories: dict[str, Callable[[], RuntimeExecutor]] = {
+                "inproc": lambda: InProcExecutor(output_dir=lite_output_dir),
+                "venv": lambda: VenvExecutor(
+                    env_manager=VenvEnvironmentManager(),
+                    output_dir=lite_output_dir,
+                ),
+            }
+        else:
+            self._executors = dict(executors)
+            self._executor_factories = {}
         logger.info(
             "lite_pipeline_created",
             profile=self._profile.value,
@@ -196,14 +292,17 @@ class LitePipeline:
                 await asyncio.sleep(0.01)
 
     async def _handle_stage(
-        self, stage: str, envelope: object, parameters: dict
+        self,
+        stage: str,
+        envelope: QueueEnvelope,
+        parameters: dict,
     ) -> dict | None:
         """Process one stage envelope.
 
         Returns the final result dict when ``merge`` completes; ``None`` for
         all other stages so the loop continues.
         """
-        job_id: str = envelope.job_id  # type: ignore[attr-defined]
+        job_id = envelope.job_id
 
         if stage == "prepare":
             # Next stage is always transcribe regardless of profile.
@@ -216,10 +315,7 @@ class LitePipeline:
             return None
 
         if stage == "transcribe":
-            # Wrap CPU-bound engine processing in asyncio.to_thread() so the
-            # event loop is not blocked during model inference.
-            # (CLAUDE.md: "Never call blocking I/O in async functions")
-            payload = await asyncio.to_thread(_compute_transcribe, parameters)
+            payload = await self._execute_stage(stage, envelope, parameters)
             await self._artifacts.write_bytes(
                 f"jobs/{job_id}/tasks/transcribe/output.json",
                 json.dumps(payload).encode("utf-8"),
@@ -240,10 +336,7 @@ class LitePipeline:
             return None
 
         if stage == "diarize":
-            # Wrap CPU-bound speaker diarization in asyncio.to_thread() so the
-            # event loop is not blocked during model inference.
-            # (CLAUDE.md: "Never call blocking I/O in async functions")
-            diarize_payload = await asyncio.to_thread(_compute_diarize, parameters)
+            diarize_payload = await self._execute_stage(stage, envelope, parameters)
             await self._artifacts.write_bytes(
                 f"jobs/{job_id}/tasks/diarize/output.json",
                 json.dumps(diarize_payload).encode("utf-8"),
@@ -258,10 +351,7 @@ class LitePipeline:
             return None
 
         if stage == "pii_detect":
-            # Wrap CPU-bound PII detection in asyncio.to_thread() so the
-            # event loop is not blocked during model inference.
-            # (CLAUDE.md: "Never call blocking I/O in async functions")
-            pii_payload = await asyncio.to_thread(_compute_pii_detect, parameters)
+            pii_payload = await self._execute_stage(stage, envelope, parameters)
             await self._artifacts.write_bytes(
                 f"jobs/{job_id}/tasks/pii_detect/output.json",
                 json.dumps(pii_payload).encode("utf-8"),
@@ -277,6 +367,60 @@ class LitePipeline:
 
         # merge — assemble profile-specific transcript and return.
         return await self._handle_merge(job_id, parameters)
+
+    async def _execute_stage(
+        self,
+        stage: str,
+        envelope: QueueEnvelope,
+        parameters: dict,
+    ) -> dict[str, Any]:
+        binding = self._stage_bindings.get(stage)
+        if binding is None:
+            raise RuntimeError(
+                f"No lite runtime binding configured for stage '{stage}'"
+            )
+
+        executor = self._resolve_executor(binding.entry.execution_profile)
+        if executor is None:
+            raise RuntimeError(
+                "No executor configured for "
+                f"profile '{binding.entry.execution_profile}' "
+                f"(runtime '{binding.entry.runtime}', stage '{stage}')"
+            )
+
+        request = ExecutionRequest(
+            task_id=envelope.task_id,
+            job_id=envelope.job_id,
+            stage=stage,
+            runtime=binding.entry.runtime,
+            instance=f"lite-{self._profile.value}",
+            config=parameters,
+            previous_outputs={},
+            payload=None,
+            artifacts={},
+            engine=binding.engine_factory() if binding.engine_factory else None,
+            engine_ref=binding.engine_ref,
+            metadata={
+                "mode": "lite",
+                "execution_profile": binding.entry.execution_profile,
+            },
+        )
+
+        result = await asyncio.to_thread(executor.execute, request)
+        return result["data"]
+
+    def _resolve_executor(self, profile: str) -> RuntimeExecutor | None:
+        executor = self._executors.get(profile)
+        if executor is not None:
+            return executor
+
+        factory = self._executor_factories.get(profile)
+        if factory is None:
+            return None
+
+        executor = factory()
+        self._executors[profile] = executor
+        return executor
 
     async def _handle_merge(self, job_id: str, parameters: dict) -> dict:
         """Write the final transcript artifact and return the result dict."""

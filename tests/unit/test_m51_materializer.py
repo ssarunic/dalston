@@ -74,3 +74,33 @@ def test_persist_uploads_engine_outputs_and_returns_references(tmp_path: Path) -
     assert refs[0].role == "prepared"
     assert refs[0].media_type == "audio/wav"
     assert refs[0].storage_locator in store.remote_files
+
+
+def test_final_transcript_persists_to_canonical_job_path(tmp_path: Path) -> None:
+    store = _MemoryStore()
+    local_file = tmp_path / "transcript.json"
+    local_file.write_text('{"job_id": "job-123"}', encoding="utf-8")
+
+    materializer = ArtifactMaterializer(store=store)
+    produced = [
+        ProducedArtifact(
+            logical_name="transcript",
+            local_path=local_file,
+            kind="transcript",
+            role="final",
+            media_type="application/json",
+        )
+    ]
+
+    refs = materializer.persist_produced(
+        job_id="job-123",
+        task_id="task-merge",
+        produced_artifacts=produced,
+    )
+
+    assert len(refs) == 1
+    assert refs[0].artifact_id == "task-merge:transcript"
+    assert (
+        refs[0].storage_locator == "s3://dalston-artifacts/jobs/job-123/transcript.json"
+    )
+    assert refs[0].storage_locator in store.remote_files

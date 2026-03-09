@@ -75,6 +75,31 @@ Tasks are atomic units of work. Each task:
 
 ---
 
+## Execution Profiles
+
+Runtime isolation is policy-driven from `CatalogEntry.execution_profile`.
+
+- `container` (default): scheduler and Redis stream dispatch stay unchanged; long-running engine workers execute tasks as they do today
+- `venv`: lite mode runs the task in a runtime-specific virtualenv via subprocess
+- `inproc`: lite mode runs the task directly inside the orchestrator process
+
+Selection rules:
+
+1. `execution_profile` comes from the catalog entry generated from `engine.yaml`
+2. If `execution_profile` is omitted in YAML, Dalston defaults it to `container`
+3. There is no silent fallback from `venv` or `inproc` to another profile when an executor is missing or fails
+
+### Lite Executor Envelope
+
+Non-container lite executors use the same task contract regardless of profile. The subprocess envelope is JSON and carries:
+
+- input: `task_id`, `job_id`, `stage`, `config`, `payload`, `previous_outputs`, `resolved_artifact_ids`, `artifact_index`
+- output: `task_id`, `job_id`, `stage`, `data`, `produced_artifacts`, `produced_artifact_ids`
+
+Artifact bytes stay out-of-band via artifact references. Isolation for `venv` is subprocess-based only; Dalston does not use `sys.path` injection for profile isolation.
+
+---
+
 ## Task State Machine
 
 ```

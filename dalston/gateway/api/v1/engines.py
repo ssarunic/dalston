@@ -24,7 +24,7 @@ from dalston.gateway.security.manager import SecurityManager
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.model_registry import ModelRegistryService
-from dalston.orchestrator.catalog import get_catalog
+from dalston.orchestrator.catalog import ExecutionProfile, get_catalog
 from dalston.orchestrator.lite_capabilities import (
     LiteProfile,
     check_prerequisites,
@@ -75,6 +75,7 @@ class EngineResponse(BaseModel):
     name: str | None = None
     stage: str
     version: str
+    execution_profile: ExecutionProfile
     status: Literal["running", "available", "unhealthy"]
     loaded_model: str | None = None  # M36: Currently loaded model (runtime_model_id)
     available_models: list[str] | None = None  # M36: Models on disk, ready to load
@@ -177,6 +178,7 @@ async def list_engines(
                 name=None,  # Could be added to catalog if needed
                 stage=caps.stages[0] if caps.stages else "unknown",
                 version=caps.version,
+                execution_profile=entry.execution_profile,
                 status=status,
                 loaded_model=loaded_model,
                 available_models=available_models,

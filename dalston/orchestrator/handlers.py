@@ -82,6 +82,14 @@ def _serialize_engine_error(
     return str(e)
 
 
+def _get_runtime_execution_profile(runtime: str) -> str:
+    """Resolve the catalog-declared execution profile for metrics/logging."""
+    entry = get_catalog().get_engine(runtime)
+    if entry is None:
+        return "unknown"
+    return entry.execution_profile
+
+
 async def _decrement_concurrent_jobs(
     redis: Redis, job_id: UUID, tenant_id: UUID
 ) -> bool:
@@ -341,7 +349,11 @@ async def handle_job_created(
                 return
 
             # Record task scheduled metric (M20)
-            dalston.metrics.inc_orchestrator_tasks_scheduled(task.runtime, task.stage)
+            dalston.metrics.inc_orchestrator_tasks_scheduled(
+                task.runtime,
+                task.stage,
+                _get_runtime_execution_profile(task.runtime),
+            )
 
             log.info("queued_initial_task", task_id=str(task.id), stage=task.stage)
 
@@ -469,7 +481,11 @@ async def handle_task_completed(
         log.info("marked_task_completed")
 
         # Record task completion metric (M20) - only on first completion
-        dalston.metrics.inc_orchestrator_tasks_completed(task.runtime, "success")
+        dalston.metrics.inc_orchestrator_tasks_completed(
+            task.runtime,
+            "success",
+            _get_runtime_execution_profile(task.runtime),
+        )
 
     # Update job audio_duration from prepare stage output if not already set
     # This handles enhancement jobs that don't have duration set at creation time
@@ -593,7 +609,9 @@ async def handle_task_completed(
 
             # Record task scheduled metric (M20)
             dalston.metrics.inc_orchestrator_tasks_scheduled(
-                dependent.runtime, dependent.stage
+                dependent.runtime,
+                dependent.stage,
+                _get_runtime_execution_profile(dependent.runtime),
             )
 
             log.info(
@@ -788,7 +806,11 @@ async def handle_task_failed(
     await db.commit()
 
     # Record task failure metric (M20)
-    dalston.metrics.inc_orchestrator_tasks_completed(task.runtime, "failure")
+    dalston.metrics.inc_orchestrator_tasks_completed(
+        task.runtime,
+        "failure",
+        _get_runtime_execution_profile(task.runtime),
+    )
 
     job = await db.get(JobModel, job_id)
     if job:
@@ -867,7 +889,11 @@ async def handle_task_wait_timeout(
     task.completed_at = datetime.now(UTC)
     await db.commit()
 
-    dalston.metrics.inc_orchestrator_tasks_completed(task.runtime, "failure")
+    dalston.metrics.inc_orchestrator_tasks_completed(
+        task.runtime,
+        "failure",
+        _get_runtime_execution_profile(task.runtime),
+    )
 
     await _ensure_job_failed_side_effects(
         task=task,

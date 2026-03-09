@@ -59,19 +59,19 @@ class AudioPrepareEngine(Engine):
 
     def process(
         self,
-        input: EngineInput,
+        engine_input: EngineInput,
         ctx: BatchTaskContext,
     ) -> EngineOutput:
         """Convert audio to standardized format.
 
         Args:
-            input: Task input with audio file path
+            engine_input: Task input with audio file path
 
         Returns:
             EngineOutput with PrepareOutput containing artifact IDs and metadata
         """
-        audio_path = input.audio_path
-        config = input.config
+        audio_path = engine_input.audio_path
+        config = engine_input.config
 
         # Get config options with defaults
         target_sample_rate = config.get("target_sample_rate", self.DEFAULT_SAMPLE_RATE)
@@ -96,7 +96,7 @@ class AudioPrepareEngine(Engine):
                 audio_path=audio_path,
                 original_metadata=original_metadata,
                 target_sample_rate=target_sample_rate,
-                task_id=input.task_id,
+                task_id=engine_input.task_id,
                 ctx=ctx,
             )
 
@@ -118,7 +118,7 @@ class AudioPrepareEngine(Engine):
         self.logger.info("prepared_audio_metadata", metadata=prepared_metadata)
 
         logical_name = "prepared_audio"
-        artifact_id = build_task_artifact_id(input.task_id, logical_name)
+        artifact_id = build_task_artifact_id(engine_input.task_id, logical_name)
         produced = ctx.describe_artifact(
             logical_name=logical_name,
             local_path=prepared_path,

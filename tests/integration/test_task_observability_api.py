@@ -305,6 +305,33 @@ class TestJobStatusWithStages:
         assert stage["retries"] == 2
         assert stage["required"] is False
 
+    def test_job_status_sets_pii_enabled_without_pii_metadata(
+        self, client, mock_jobs_service, mock_api_key, monkeypatch
+    ):
+        """PII enabled jobs expose pii.enabled even when transcript metadata is missing."""
+        job_id = uuid4()
+        job = _create_mock_job(
+            job_id=job_id,
+            tenant_id=mock_api_key.tenant_id,
+            status="completed",
+            tasks=[],
+        )
+        job.parameters = {"pii_detection": True}
+        mock_jobs_service.get_job_with_tasks_authorized.return_value = job
+
+        async def mock_get_transcript(self, job_id):
+            return {"text": "Hello", "segments": [], "pii_entities": []}
+
+        monkeypatch.setattr(StorageService, "get_transcript", mock_get_transcript)
+
+        response = client.get(f"/v1/audio/transcriptions/{job_id}")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["pii"]["enabled"] is True
+        assert data["pii"]["entities_detected"] == 0
+        assert data["pii"]["redacted_audio_available"] is False
+
 
 class TestTaskListEndpoint:
     """Tests for GET /v1/audio/transcriptions/{job_id}/tasks endpoint."""

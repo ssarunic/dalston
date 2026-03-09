@@ -130,16 +130,16 @@ class HFASREngine(Engine):
         )
         return "cpu", torch.float32
 
-    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Transcribe audio using a HuggingFace ASR pipeline.
 
         Args:
-            input: Task input with audio file path and config
+            engine_input: Task input with audio file path and config
 
         Returns:
             EngineOutput with TranscribeOutput containing text, segments, and language
         """
-        config = input.config
+        config = engine_input.config
 
         # Get model to use from task config
         runtime_model_id = config.get("runtime_model_id", self._default_model_id)
@@ -159,7 +159,7 @@ class HFASREngine(Engine):
 
             self.logger.info(
                 "transcribing",
-                audio_path=str(input.audio_path),
+                audio_path=str(engine_input.audio_path),
                 runtime_model_id=runtime_model_id,
                 language=language,
             )
@@ -178,7 +178,7 @@ class HFASREngine(Engine):
                 pipe_kwargs["generate_kwargs"] = generate_kwargs
 
             # Run ASR pipeline
-            result = pipe(str(input.audio_path), **pipe_kwargs)
+            result = pipe(str(engine_input.audio_path), **pipe_kwargs)
 
             # Normalize output to Dalston format
             output = self._normalize_output(result, runtime_model_id, language, channel)

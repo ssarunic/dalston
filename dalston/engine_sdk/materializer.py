@@ -151,6 +151,9 @@ class ArtifactMaterializer:
         artifact_id: str,
         produced: ProducedArtifact,
     ) -> str:
+        if produced.kind == "transcript" and produced.role == "final":
+            return f"s3://{cls._bucket()}/jobs/{job_id}/transcript.json"
+
         suffix = produced.local_path.suffix or ".bin"
         filename = f"{produced.logical_name}{suffix}"
         return f"s3://{cls._bucket()}/jobs/{job_id}/artifacts/{artifact_id}/{filename}"

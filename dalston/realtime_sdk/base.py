@@ -323,10 +323,17 @@ class RealtimeEngine(ABC):
         hardware = card.get("hardware", {})
         performance = card.get("performance", {})
 
-        # Determine GPU requirement from container.gpu field
+        # Determine GPU requirement from profile-specific metadata.
+        # container.gpu is authoritative when present; otherwise infer from
+        # hardware metadata for non-container profiles.
         container = card.get("container", {})
-        gpu_field = container.get("gpu", "none")
-        gpu_required = gpu_field == "required"
+        gpu_field = container.get("gpu")
+        if gpu_field is None:
+            min_vram_gb = hardware.get("min_vram_gb")
+            supports_cpu = hardware.get("supports_cpu", True)
+            gpu_required = bool(min_vram_gb and not supports_cpu)
+        else:
+            gpu_required = gpu_field == "required"
 
         # Languages: convert ["all"] to None (meaning all languages)
         languages = caps.get("languages")

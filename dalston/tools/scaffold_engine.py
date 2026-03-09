@@ -316,17 +316,19 @@ class {class_name}(Engine):
         self._model = "placeholder"
         self.logger.info("model_loaded")
 
-    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(
+        self, engine_input: EngineInput, ctx: BatchTaskContext
+    ) -> EngineOutput:
         """Process audio input.
 
         Args:
-            input: Task input with audio file path and config
+            engine_input: Task input with audio file path and config
 
         Returns:
             EngineOutput with processing results
         """
-        audio_path = input.audio_path
-        config = input.config
+        audio_path = engine_input.audio_path
+        config = engine_input.config
 
         # Load model (lazy loading, cached)
         self._load_model(config)
@@ -664,16 +666,18 @@ class {class_name}(Engine):
         self._model = "placeholder"
         self.logger.info("model_loaded", model_variant=self._model_variant)
 
-    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(
+        self, engine_input: EngineInput, ctx: BatchTaskContext
+    ) -> EngineOutput:
         """Process audio input.
 
         Args:
-            input: Task input with audio file path and config
+            engine_input: Task input with audio file path and config
 
         Returns:
             EngineOutput with processing results
         """
-        audio_path = input.audio_path
+        audio_path = engine_input.audio_path
 
         # Load model (lazy loading, cached)
         self._load_model()

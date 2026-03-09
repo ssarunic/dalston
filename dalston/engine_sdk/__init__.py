@@ -8,13 +8,15 @@ Example usage:
     from dalston.engine_sdk import PrepareOutput, TranscribeOutput, Segment, Word
 
     class MyTranscriptionEngine(Engine):
-        def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+        def process(
+            self, engine_input: EngineInput, ctx: BatchTaskContext
+        ) -> EngineOutput:
             # Get typed input from previous stage
-            prepare = input.get_prepare_output()
+            prepare = engine_input.get_prepare_output()
             audio_duration = prepare.duration if prepare else 0.0
 
             # Process the audio file
-            result = transcribe(input.audio_path)
+            result = transcribe(engine_input.audio_path)
 
             # Return typed output
             return EngineOutput(data=TranscribeOutput(

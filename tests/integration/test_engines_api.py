@@ -29,6 +29,7 @@ def mock_catalog() -> EngineCatalog:
         "faster-whisper": CatalogEntry(
             runtime="faster-whisper",
             image="dalston/stt-batch-transcribe-whisper:1.0.0",
+            execution_profile="container",
             capabilities=EngineCapabilities(
                 runtime="faster-whisper",
                 version="1.0.0",
@@ -48,6 +49,7 @@ def mock_catalog() -> EngineCatalog:
         "parakeet": CatalogEntry(
             runtime="parakeet",
             image="dalston/stt-batch-transcribe-parakeet:1.0.0",
+            execution_profile="venv",
             capabilities=EngineCapabilities(
                 runtime="parakeet",
                 version="1.0.0",
@@ -65,6 +67,7 @@ def mock_catalog() -> EngineCatalog:
         "pyannote-4.0": CatalogEntry(
             runtime="pyannote-4.0",
             image="dalston/stt-batch-diarize-pyannote-4.0:1.0.0",
+            execution_profile="inproc",
             capabilities=EngineCapabilities(
                 runtime="pyannote-4.0",
                 version="1.0.0",
@@ -92,6 +95,7 @@ def mock_running_engines() -> list[BatchEngineState]:
             instance="faster-whisper-test-instance",
             stage="transcribe",
             stream_name="dalston:stream:faster-whisper",
+            execution_profile="container",
             status="idle",
             current_task=None,
             last_heartbeat=datetime.now(UTC),
@@ -199,12 +203,15 @@ class TestListEngines:
             # faster-whisper is running
             assert engines_by_id["faster-whisper"]["status"] == "running"
             assert engines_by_id["faster-whisper"]["stage"] == "transcribe"
+            assert engines_by_id["faster-whisper"]["execution_profile"] == "container"
 
             # parakeet is not running (available)
             assert engines_by_id["parakeet"]["status"] == "available"
+            assert engines_by_id["parakeet"]["execution_profile"] == "venv"
 
             # pyannote is not running (available)
             assert engines_by_id["pyannote-4.0"]["status"] == "available"
+            assert engines_by_id["pyannote-4.0"]["execution_profile"] == "inproc"
 
     def test_engine_includes_capabilities(
         self, client, mock_catalog, mock_running_engines

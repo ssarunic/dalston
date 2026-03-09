@@ -54,6 +54,7 @@ class BatchEngineState:
     registered_at: datetime
     capabilities: EngineCapabilities | None = None
     loaded_model: str | None = None
+    execution_profile: str = "container"
 
     @property
     def is_available(self) -> bool:
@@ -280,6 +281,7 @@ class BatchEngineRegistry:
             registered_at=self._parse_datetime(data.get("registered_at")),
             capabilities=capabilities,
             loaded_model=loaded_model if loaded_model else None,
+            execution_profile=data.get("execution_profile", "container"),
         )
 
     def _parse_datetime(self, value: str | None) -> datetime:

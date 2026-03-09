@@ -6,7 +6,7 @@
 | **Duration** | 8-12 days |
 | **Dependencies** | M58 (expanded lite capability model), M36/M40 (runtime model lifecycle), existing engine runner contracts |
 | **Deliverable** | Runtime execution-profile contract, profile-aware dispatch layer, venv/container adapters, and observability/guardrails for profile-based execution |
-| **Status** | Planned |
+| **Status** | Completed |
 
 Dependency clarification:
 

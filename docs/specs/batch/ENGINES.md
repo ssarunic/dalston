@@ -154,6 +154,8 @@ description: |
   CTranslate2-optimized Whisper implementation.
   Loads any Whisper model variant at runtime.
 
+execution_profile: container              # inproc | venv | container
+
 container:
   gpu: optional                         # required | optional | none
   memory: 8G
@@ -202,6 +204,8 @@ name: Final Merger
 version: 1.0.0
 description: Merges all pipeline stage outputs into final transcript.
 
+execution_profile: container
+
 container:
   gpu: none
   memory: 2G
@@ -226,8 +230,26 @@ hardware:
 | `stage` | string | Pipeline stage |
 | `name` | string | Human-readable name |
 | `version` | string | Semantic version |
+| `execution_profile` | string | Runtime isolation profile: `inproc`, `venv`, or `container` |
 
-#### container (Required)
+#### execution_profile (Optional, defaults to `container`)
+
+Controls where the runtime executes:
+
+- `container`: existing distributed worker model via Redis streams and long-running engine containers
+- `venv`: lite-mode subprocess execution in a runtime-specific virtualenv
+- `inproc`: lite-mode direct execution inside the orchestrator process
+
+`execution_profile` is execution policy only. It does not change task payloads, model identity (`runtime_model_id`), or output schemas. If the field is omitted, Dalston treats the runtime as `container` for backward compatibility.
+
+#### container (Conditionally Required)
+
+Required when `execution_profile: container`, or when `execution_profile` is omitted
+(backward-compatible default is `container`).
+
+For `venv` and `inproc` profiles, `container` may be omitted. In that case,
+hardware metadata (`hardware.min_vram_gb`, `hardware.supports_cpu`, etc.) remains
+the source of resource hints.
 
 | Field | Type | Description |
 |-------|------|-------------|

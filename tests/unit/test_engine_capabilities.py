@@ -323,6 +323,7 @@ class TestEngineCatalog:
                     "stage": "transcribe",
                     "version": "1.0.0",
                     "image": "dalston/parakeet:latest",
+                    "execution_profile": "inproc",
                     "capabilities": {
                         "stages": ["transcribe"],
                         "languages": ["en"],
@@ -395,8 +396,27 @@ class TestEngineCatalog:
         assert entry is not None
         assert entry.runtime == "parakeet"
         assert entry.image == "dalston/parakeet:latest"
+        assert entry.execution_profile == "inproc"
         assert entry.capabilities.languages == ["en"]
         assert entry.capabilities.supports_word_timestamps is True
+
+    def test_execution_profile_defaults_to_container(self, catalog_json):
+        """Missing execution_profile should default to container."""
+        catalog = EngineCatalog.load(catalog_json)
+
+        entry = catalog.get_engine("faster-whisper")
+
+        assert entry is not None
+        assert entry.execution_profile == "container"
+
+    def test_invalid_execution_profile_rejected(self, catalog_json):
+        """Catalog entries must use a known execution profile."""
+        raw = json.loads(catalog_json.read_text())
+        raw["engines"]["faster-whisper"]["execution_profile"] = "bad-profile"
+        catalog_json.write_text(json.dumps(raw), encoding="utf-8")
+
+        with pytest.raises(ValueError, match="execution_profile must be one of"):
+            EngineCatalog.load(catalog_json)
 
     def test_get_engine_not_found(self, catalog_json):
         """Test getting non-existent engine."""

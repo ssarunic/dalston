@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import structlog
 
@@ -30,6 +31,9 @@ logger = structlog.get_logger()
 
 # Default catalog path (relative to this module)
 DEFAULT_CATALOG_PATH = Path(__file__).parent / "generated_catalog.json"
+ExecutionProfile = Literal["inproc", "venv", "container"]
+DEFAULT_EXECUTION_PROFILE: ExecutionProfile = "container"
+_VALID_EXECUTION_PROFILES = frozenset({"inproc", "venv", "container"})
 
 
 @dataclass
@@ -42,6 +46,7 @@ class CatalogEntry:
     runtime: str
     image: str
     capabilities: EngineCapabilities
+    execution_profile: ExecutionProfile = DEFAULT_EXECUTION_PROFILE
 
 
 class EngineCatalog:
@@ -180,10 +185,25 @@ class EngineCatalog:
             max_concurrency=caps_data.get("max_concurrency"),
             includes_diarization=caps_data.get("includes_diarization", False),
         )
+        execution_profile = engine_data.get(
+            "execution_profile", DEFAULT_EXECUTION_PROFILE
+        )
+        if not isinstance(execution_profile, str):
+            raise TypeError(
+                "execution_profile must be a string, "
+                f"got {type(execution_profile).__name__}"
+            )
+        if execution_profile not in _VALID_EXECUTION_PROFILES:
+            valid = ", ".join(sorted(_VALID_EXECUTION_PROFILES))
+            raise ValueError(
+                f"execution_profile must be one of {{{valid}}}, got "
+                f"{execution_profile!r}"
+            )
 
         return CatalogEntry(
             runtime=runtime,
             image=engine_data.get("image", f"dalston/{runtime}:latest"),
+            execution_profile=execution_profile,
             capabilities=capabilities,
         )
 

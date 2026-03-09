@@ -207,17 +207,17 @@ class VLLMASREngine(Engine):
             model_path=model_path,
         )
 
-    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Transcribe audio using a vLLM audio LLM.
 
         Args:
-            input: Task input with audio file path and config
+            engine_input: Task input with audio file path and config
 
         Returns:
             EngineOutput with TranscribeOutput containing text and segments
         """
-        audio_path = input.audio_path
-        config = input.config
+        audio_path = engine_input.audio_path
+        config = engine_input.config
         language = config.get("language")
         vocabulary = config.get("vocabulary")
         channel = config.get("channel")
