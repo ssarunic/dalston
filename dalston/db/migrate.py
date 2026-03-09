@@ -322,10 +322,16 @@ async def _run_alembic_upgrade(alembic_cfg, url: str, head: str) -> MigrationRes
 
 
 def _stamp_sync(cfg, revision: str) -> None:
-    """Synchronous Alembic stamp (runs in thread)."""
+    """Synchronous Alembic stamp (runs in thread).
+
+    Uses ``purge=True`` so Alembic unconditionally replaces the version row
+    without trying to resolve the *current* revision through the script
+    directory.  This is necessary because legacy revisions (0001–0038) no
+    longer exist as script files after the squash consolidation.
+    """
     from alembic import command
 
-    command.stamp(cfg, revision)
+    command.stamp(cfg, revision, purge=True)
 
 
 def _run_upgrade_sync(cfg) -> None:

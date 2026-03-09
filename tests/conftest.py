@@ -79,6 +79,23 @@ def _reset_db_session() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
+def _reset_security_manager() -> Generator[None, None, None]:
+    """Reset the SecurityManager singleton before and after each test.
+
+    The SecurityManager is a module-level singleton that caches security
+    configuration (API key enforcement, admin keys, etc.).  Without this
+    reset, a test that initialises the manager with permissive settings
+    (e.g. lite mode with no auth) will leak that state into subsequent
+    tests that expect authentication to be enforced.
+    """
+    from dalston.gateway.security.manager import reset_security_manager
+
+    reset_security_manager()
+    yield
+    reset_security_manager()
+
+
+@pytest.fixture(autouse=True)
 def _default_lite_stub_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep tests deterministic by avoiding heavyweight local model defaults."""
     monkeypatch.setenv("DALSTON_LITE_TRANSCRIBE_BACKEND", "stub")
