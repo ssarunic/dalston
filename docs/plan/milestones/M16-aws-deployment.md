@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Goal** | Deploy Dalston to AWS with Terraform, accessible via Tailscale VPN |
+| **Goal** | Deploy Dalston to AWS with `dalston-aws` CLI, accessible via Tailscale VPN |
 | **Duration** | 2-3 days |
 | **Dependencies** | Core services working locally (M1-M5) |
 | **Deliverable** | Single EC2 running all services, private access via Tailscale, S3 for artifacts |
@@ -10,7 +10,7 @@
 
 ## User Story
 
-> *"As a developer, I can deploy Dalston to AWS with a single Terraform apply, access it securely from my MacBook via Tailscale, and later connect my other AWS-hosted projects to it."*
+> *"As a developer, I can deploy Dalston to AWS with a single `dalston-aws setup`, access it securely from my MacBook via Tailscale, and later connect my other AWS-hosted projects to it."*
 
 ---
 
@@ -79,7 +79,7 @@
 3. **Future-proof URIs** — Services use Docker DNS names, not localhost
 4. **Persistent storage** — Separate EBS for data survives instance stop/termination
 5. **Cloud-native where sensible** — S3 replaces MinIO, IAM roles instead of credentials
-6. **Infrastructure as code** — Terraform for reproducibility and versioning
+6. **Infrastructure as code** — `dalston-aws` CLI script for reproducibility
 7. **Pay only when using** — Stop instance when idle, ~$6/month vs ~$120/month
 
 ---
@@ -179,35 +179,16 @@ alias dalston-status="aws ec2 describe-instances --instance-ids i-xxxxxxxxx --qu
 
 ---
 
-## Terraform Structure
+## Infrastructure Structure
 
 ```
 infra/
-├── terraform/
-│   ├── environments/
-│   │   └── dev/
-│   │       ├── main.tf           # Root module, provider config
-│   │       ├── variables.tf      # Input variables
-│   │       ├── outputs.tf        # Outputs (instance ID, bucket name)
-│   │       └── terraform.tfvars  # Environment-specific values
-│   │
-│   └── modules/
-│       ├── ec2-dalston/
-│       │   ├── main.tf
-│       │   ├── variables.tf
-│       │   └── outputs.tf
-│       │
-│       ├── s3-artifacts/
-│       │   └── ...
-│       │
-│       └── iam-dalston/
-│           └── ...
-│
 ├── scripts/
-│   └── user-data.sh              # EC2 bootstrap (Docker, EBS mount)
+│   ├── dalston-aws              # CLI script for AWS provisioning
+│   └── user-data.sh             # EC2 bootstrap (Docker, EBS mount)
 │
 └── docker/
-    └── docker-compose.aws.yml    # AWS-specific overrides
+    └── docker-compose.aws.yml   # AWS-specific overrides
 ```
 
 ---
@@ -282,11 +263,11 @@ docker compose -f docker-compose.yml -f docker-compose.aws.yml up -d \
 
 ## Steps
 
-### 16.1: Terraform Setup
+### 16.1: CLI Script Setup
 
-- Create `infra/terraform/` directory structure
-- Configure AWS provider, state backend (local initially, S3 later)
-- Define input variables: region, instance type, volume sizes
+- Create `infra/scripts/dalston-aws` CLI script
+- Implement AWS resource provisioning via AWS CLI
+- Support instance type, region, spot pricing options
 
 ### 16.2: IAM Module
 
@@ -347,10 +328,7 @@ docker compose -f docker-compose.yml -f docker-compose.aws.yml up -d \
 
 ```bash
 # Deploy infrastructure
-cd infra/terraform/environments/dev
-terraform init
-terraform plan
-terraform apply
+dalston-aws setup
 
 # Note the outputs
 # - instance_id: i-xxxxxxxxx
@@ -387,7 +365,7 @@ curl http://100.x.x.x:8000/health  # should work
 
 ## Checkpoint
 
-- [ ] Terraform directory structure created
+- [ ] `dalston-aws` CLI script created
 - [ ] IAM role and policy for S3 access
 - [ ] S3 bucket with blocked public access
 - [ ] EC2 instance with attached data EBS

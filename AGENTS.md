@@ -8,7 +8,7 @@
 - `cli/`: Python CLI package (`dalston_cli`) with its own tests.
 - `sdk/`: Python SDK package (`dalston_sdk`) with its own tests.
 - `web/`: React + TypeScript admin console.
-- `docs/`, `infra/`, `docker/`, `alembic/`: architecture docs, Terraform, container files, and DB migrations.
+- `docs/`, `infra/`, `docker/`, `alembic/`: architecture docs, deployment scripts, container files, and DB migrations.
 
 ## Build, Test, and Development Commands
 

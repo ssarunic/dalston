@@ -55,7 +55,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M8](milestones/M08-elevenlabs-compat.md) | ElevenLabs Compat | `gateway/api/v1/speech_to_text.py` |
 | [M12](milestones/M12-python-sdk.md) | Python SDK | `sdk/dalston_sdk/` |
 | [M13](milestones/M13-cli.md) | CLI | `cli/dalston_cli/` |
-| [M16](milestones/M16-aws-deployment.md) | AWS Deployment | `infra/terraform/` |
+| [M16](milestones/M16-aws-deployment.md) | AWS Deployment | `infra/scripts/dalston-aws` |
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Audio/transcript S3 storage working; session resume pending |
 
@@ -97,7 +97,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 
 | # | Milestone | Goal | Days | Status |
 |---|-----------|------|------|--------|
-| [M16](milestones/M16-aws-deployment.md) | AWS Deployment | Single EC2 + Tailscale + S3 via Terraform | 2-3 | In Progress |
+| [M16](milestones/M16-aws-deployment.md) | AWS Deployment | Single EC2 + Tailscale + S3 via dalston-aws CLI | 2-3 | In Progress |
 
 ## Console Feature Milestones
 

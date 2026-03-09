@@ -105,11 +105,10 @@ parakeet-tdt-0.6b-v3 is the best default — same speed as rnnt, better accuracy
 
 ### How to deploy
 
-Existing Terraform + `make aws-start` with the GPU profile disabled:
+Use `dalston-aws` with a CPU instance type:
 
 ```bash
-# In terraform.tfvars
-instance_type = "t3.xlarge"
+dalston-aws setup --instance-type t3.xlarge
 
 # On the instance — CPU-only, no --profile gpu
 docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
@@ -234,8 +233,7 @@ All four fit simultaneously on 24 GB — comfortable. Adding phoneme-align GPU (
 ### How to deploy
 
 ```bash
-# In terraform.tfvars
-instance_type = "g5.xlarge"
+dalston-aws setup --instance-type g5.xlarge
 
 # On the instance — full GPU profile
 docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
@@ -279,7 +277,7 @@ docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
 4. **Model swapping** — both runtimes share the GPU. The nemo runtime loads parakeet-tdt-1.1b for one job, could load parakeet-ctc-0.6b for the next. No container restart needed.
 5. **Two diarization options**: pyannote 4.0 (battle-tested, needs HF_TOKEN) or nemo-msdd (open license, built-in overlap detection)
 6. Realtime streaming for live English transcription
-7. One machine, one `terraform apply`, done
+7. One machine, one `dalston-aws setup`, done
 
 ---
 
@@ -305,8 +303,7 @@ The GPU is identical — the extra spend buys more CPU and RAM for:
 - PII detection (pii-presidio) + audio redaction without RAM pressure
 
 ```bash
-# In terraform.tfvars
-instance_type = "g5.2xlarge"
+dalston-aws setup --instance-type g5.2xlarge
 ```
 
 Everything else is identical to Scenario 2. Only worth it if you're hitting CPU/RAM limits.
@@ -464,6 +461,7 @@ The control plane (Gateway, Orchestrator, Redis, Postgres) and CPU engines (prep
 Running diarize on CPU means a 1-hour audio file takes **72 minutes** to diarize. On the GPU that's already there, it takes **5 minutes**. Same story for alignment. Since you're paying for the GPU anyway, there's no cost benefit to running these stages on CPU — only a massive performance penalty.
 
 Splitting lets you:
+
 - **Run the control plane 24/7 on a ~$30/month t3.medium** — Gateway accepts uploads, Orchestrator queues tasks
 - **Start/stop the GPU instance on demand** — or use spot ($0.35/hr vs $1.01/hr)
 - **All model-heavy stages on GPU** — transcribe, align, diarize run where they're 15-40x faster
@@ -532,6 +530,7 @@ Compare to Scenario 2 (single g5.xlarge 24/7): ~$300/month. The split saves mone
 ### Scaling up
 
 The split pattern extends naturally:
+
 - **Multiple GPU workers**: Launch 2-3 spot g5.xlarge instances, all pointing at the same Redis. Tasks distribute automatically via consumer groups. Drain the queue faster.
 - **Heterogeneous workers**: One g5.xlarge for transcription, one focused on align+diarize. Each engine type on the right hardware.
 - **Smaller GPU for align+diarize only**: If nemo-onnx handles transcription on CPU fast enough, the GPU worker only runs align + diarize engines. A smaller g4dn.xlarge (~$0.53/hr) is sufficient — align needs ~2 GB VRAM and diarize needs 2-4 GB.
@@ -610,7 +609,7 @@ If you primarily do batch transcription with occasional realtime English streami
 2. **Engine selector auto-routing** — submit a job and the orchestrator picks the best downloaded model. English → nemo (parakeet-tdt-1.1b), non-English → faster-whisper. Or pin a specific model per request.
 3. **Model registry** — `curl -X POST .../models/{id}/pull` downloads any compatible model from HuggingFace without rebuilding images
 4. **~$100/month** at 8h/day usage (~$35 with spot)
-5. **Upgrade path is clear**: bump to g5.2xlarge (same Terraform, one variable) or add vllm-asr for audio LLMs on g5.12xlarge
+5. **Upgrade path is clear**: bump to g5.2xlarge (`dalston-aws setup --instance-type g5.2xlarge`) or add vllm-asr for audio LLMs on g5.12xlarge
 
 ### Multilingual realtime: Scenario 2 still works
 
@@ -619,6 +618,7 @@ If you need multilingual realtime streaming, add faster-whisper RT (~6 GB VRAM).
 ### LLM-class realtime: Scenario 3 or 4
 
 If you want voxtral Mini 4B for 13-language LLM streaming (~16 GB VRAM), Scenario 2's VRAM budget gets too tight for batch + RT simultaneously. Options:
+
 - **Scenario 3** (g5.2xlarge): Same GPU, more CPU/RAM. voxtral RT fits alongside one batch runtime but not all.
 - **Scenario 4** (g5.12xlarge): Dedicated GPU per function. voxtral RT gets its own A10G. Overkill unless you also need parallel pipeline.
 
@@ -645,6 +645,7 @@ If your workload is sporadic — uploads come in throughout the day but processi
 ### English-only on a budget: Scenario 1 (`t3.xlarge`)
 
 If it's only English and batch latency is acceptable:
+
 - nemo-onnx with parakeet-tdt-0.6b-v3 transcribes at ~8x realtime on CPU with punctuation — a 10-minute file takes ~75 seconds
 - parakeet-onnx RT handles single-session English realtime on CPU (VAD-chunked)
 - ~$35/month. No GPU needed.
@@ -653,11 +654,8 @@ This is surprisingly capable for low-volume English workloads.
 
 ### Concrete config (Scenario 2)
 
-```hcl
-# terraform.tfvars
-instance_type    = "g5.xlarge"
-data_volume_size = 50   # Sufficient for typical setup (~10 GB models)
-use_spot         = true # ~65% savings, auto-retry on interruption
+```bash
+dalston-aws setup --instance-type g5.xlarge --spot
 ```
 
 Start these services:
@@ -879,7 +877,7 @@ Scenario 1 (CPU)          → EN batch + basic RT, ~$35/mo
 Scenario 2 (g5.xlarge)    → Full batch + EN RT + diarization, ~$100/mo (~$35 spot)
     ↓ change instance_type
 Scenario 3 (g5.2xlarge)   → + voxtral RT or heavy concurrent load, ~$150/mo
-    ↓ new terraform module
+    ↓ change instance type
 Scenario 4 (g5.12xlarge)  → Parallel pipeline, audio LLMs, multi-lang RT, ~$500/mo
     ↓ split into two instances
 Scenario 5 (CPU + GPU)    → Always-on API + GPU on demand, ~$87/mo (spot)
@@ -887,9 +885,10 @@ Scenario 5 (CPU + GPU)    → Always-on API + GPU on demand, ~$87/mo (spot)
 Scenario 6 (ECS split)    → Auto-scaling, managed services, production
 ```
 
-Each step is additive. Scenarios 1→3 are a one-line Terraform variable change. Scenario 4 needs a compose override for GPU pinning. Scenario 5 is a second EC2 instance. Scenario 6 is a new Terraform module with ECS.
+Each step is additive. Scenarios 1→3 are a `dalston-aws setup` with a different `--instance-type`. Scenario 4 needs a compose override for GPU pinning. Scenario 5 is a second EC2 instance. Scenario 6 uses ECS for auto-scaling.
 
 **Decision axes**:
+
 - Batch only, English? → Scenario 1 (CPU) is fine
 - Batch + English RT? → Scenario 2
 - Multilingual RT or voxtral RT? → Scenario 2-3
@@ -1137,35 +1136,19 @@ You can further reduce interruptions by:
 - Allowing multiple instance types: `g5.xlarge`, `g5.2xlarge`, `g6.xlarge` — the fleet picks whichever has capacity
 - Choosing availability zones with more capacity
 
-### How to add spot to existing Terraform
+### How to use spot instances
 
 #### Option A: Simple — Spot on the single EC2 (Scenarios 1-3)
 
-Minimal change to the existing `ec2-dalston` module:
+The `dalston-aws` script supports spot instances natively:
 
-```hcl
-# infra/terraform/modules/ec2-dalston/variables.tf
-variable "use_spot" {
-  description = "Use spot instance pricing"
-  type        = bool
-  default     = false
-}
-
-variable "spot_max_price" {
-  description = "Maximum hourly price for spot (empty = on-demand price cap)"
-  type        = string
-  default     = ""
-}
+```bash
+dalston-aws setup --instance-type g5.xlarge --spot
 ```
 
-```hcl
-# infra/terraform/modules/ec2-dalston/main.tf
-resource "aws_instance" "dalston" {
-  # ... existing config ...
+The script configures spot with `stop` interruption behavior (EBS preserved) and uses the on-demand price as the max bid. Internally, it sets up the EC2 launch with:
 
-  instance_market_options {
-    market_type = var.use_spot ? "spot" : null
-
+```
     dynamic "spot_options" {
       for_each = var.use_spot ? [1] : []
       content {
@@ -1176,12 +1159,6 @@ resource "aws_instance" "dalston" {
     }
   }
 }
-```
-
-```hcl
-# terraform.tfvars
-instance_type = "g5.xlarge"
-use_spot      = true
 ```
 
 Key detail: `instance_interruption_behavior = "stop"` means spot interruption **stops** the instance (like `dalston-down`) rather than terminating it. The EBS volumes, Tailscale IP, and all state are preserved. When spot capacity returns, AWS restarts it automatically. This is the simplest path — it behaves exactly like your manual start/stop workflow, just triggered by AWS pricing instead of your shell alias.
@@ -1256,12 +1233,12 @@ For Option A (the recommended path), this isn't an issue — EBS stays attached.
 
 ### Recommendation
 
-**Start with Option A**: Add `use_spot = true` to your `terraform.tfvars`. That's it.
+**Start with Option A**: Run `dalston-aws setup --spot`. That's it.
 
-- Same Terraform module, same Docker Compose, same `dalston-up`/`dalston-down` workflow
+- Same `dalston-aws` workflow, same Docker Compose, same `dalston-up`/`dalston-down`
 - Instance stops on interruption, restarts when capacity returns
 - 65% cost savings on the GPU instance
 - EBS and Tailscale IP preserved
 - Worst case: you're interrupted during a batch job, it auto-retries in ~2 minutes
 
-If you find spot interruptions too frequent (unlikely for g5), just flip `use_spot = false` and you're back to on-demand. Zero architectural changes needed.
+If you find spot interruptions too frequent (unlikely for g5), re-run `dalston-aws setup` without `--spot` and you're back to on-demand. Zero architectural changes needed.

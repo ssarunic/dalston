@@ -6,7 +6,7 @@ Dalston is a modular, self-hosted audio transcription server featuring an Eleven
 
 - **Core Technology:** Python 3.11+, FastAPI, SQLAlchemy (Async), Redis, PostgreSQL.
 - **Frontend:** React (TypeScript) with Vite and Tailwind CSS.
-- **Infrastructure:** Containerized architecture (Docker Compose), AWS/S3 compatible storage, and Terraform for infra-as-code.
+- **Infrastructure:** Containerized architecture (Docker Compose), AWS/S3 compatible storage, and `dalston-aws` CLI for AWS provisioning.
 - **Architecture:**
   - **Gateway:** REST and WebSocket entry points.
   - **Orchestrator:** Manages batch job DAGs and Redis-based task queues.
