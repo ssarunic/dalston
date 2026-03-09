@@ -53,7 +53,7 @@ Best for: getting started, small-to-medium workloads, one person.
 │  │              │  │  transcribe (NeMo)   │ │
 │  │              │  │  align (phoneme)     │ │
 │  │              │  │  diarize (pyannote)  │ │
-│  │              │  │  realtime (parakeet) │ │
+│  │              │  │  RT: NeMo, Whisper   │ │
 │  └──────────────┘  └──────────────────────┘ │
 │                    ┌──────────────────────┐  │
 │                    │ 50 GB EBS (/data)   │  │
@@ -146,8 +146,8 @@ enough that CPU transcription speed is acceptable.
 │  │              │  │  faster-whisper      │ │
 │  │              │  │  align (CPU)         │ │
 │  │              │  │  diarize (CPU, slow) │ │
-│  │              │  │  pii-detect          │ │
-│  │              │  │  merge               │ │
+│  │              │  │  pii-detect, merge   │ │
+│  │              │  │  RT: Whisper, NeMo   │ │
 │  └──────────────┘  └──────────────────────┘ │
 └─────────────────────────────────────────────┘
 ```
@@ -185,8 +185,8 @@ This creates a second instance:
 │  Gateway    Orchestrator│     │  GPU Engines             │
 │  Redis      Postgres    │◄────│   transcribe (NeMo)     │
 │                         │     │   align (phoneme)        │
-│  CPU engines (prepare,  │     │   diarize (pyannote)     │
-│   merge, pii-detect)    │     │   realtime (parakeet)    │
+│  CPU engines (prepare,  │     │   diarize (NeMo MSDD)    │
+│   merge, pii-detect)    │     │   RT: NeMo, Whisper      │
 └─────────────────────────┘     └──────────────────────────┘
      ↕ S3                             ↕ S3
 ```

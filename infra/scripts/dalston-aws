@@ -597,7 +597,8 @@ ExecStart=/usr/bin/docker-compose -f docker-compose.yml -f infra/docker/docker-c
   stt-batch-transcribe-faster-whisper \
   stt-batch-align-phoneme \
   stt-batch-diarize-nemo-msdd \
-  stt-rt-transcribe-parakeet-rnnt-0.6b
+  stt-rt-nemo \
+  stt-rt-faster-whisper
 ExecStop=/usr/bin/docker-compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml --env-file .env.gpu --profile gpu down
 TimeoutStartSec=600
 
