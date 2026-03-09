@@ -88,6 +88,11 @@ ELEVENLABS_ENDPOINTS = [
     ("POST", "/v1/speech-to-text", "Create transcription (ElevenLabs)"),
     ("GET", f"/v1/speech-to-text/transcripts/{uuid4()}", "Get transcript status"),
     (
+        "POST",
+        "/v1/single-use-token/speech_to_text",
+        "Create single-use token (ElevenLabs)",
+    ),
+    (
         "GET",
         f"/v1/speech-to-text/transcripts/{uuid4()}/export/srt",
         "Export transcript",

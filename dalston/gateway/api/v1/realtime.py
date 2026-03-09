@@ -14,7 +14,7 @@ from typing import Annotated
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 
 from dalston.common.audio_defaults import DEFAULT_SAMPLE_RATE
 from dalston.common.models import validate_retention
@@ -52,6 +52,13 @@ from dalston.gateway.api.v1._realtime_common import (
 from dalston.gateway.api.v1._realtime_common import (
     resolve_rt_routing as _resolve_rt_routing,
 )
+from dalston.gateway.api.v1.elevenlabs_stt import (
+    ElevenLabsEndpoint,
+    ensure_field_location_supported,
+    ensure_model_supported,
+    get_realtime_audio_format_spec,
+    validate_elevenlabs_keyterms,
+)
 from dalston.gateway.dependencies import get_session_router
 from dalston.gateway.middleware.auth import authenticate_websocket
 from dalston.gateway.services.auth import Scope
@@ -59,6 +66,27 @@ from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.realtime_sessions import RealtimeSessionService
 
 logger = structlog.get_logger()
+
+
+_ULAW_BIAS = 0x84
+
+
+def _decode_ulaw_to_pcm16(ulaw_audio: bytes) -> bytes:
+    """Decode G.711 u-law bytes into little-endian PCM16."""
+    pcm = bytearray(len(ulaw_audio) * 2)
+    out_idx = 0
+    for value in ulaw_audio:
+        companded = (~value) & 0xFF
+        sign = companded & 0x80
+        exponent = (companded >> 4) & 0x07
+        mantissa = companded & 0x0F
+        sample = ((mantissa << 3) + _ULAW_BIAS) << exponent
+        sample -= _ULAW_BIAS
+        if sign:
+            sample = -sample
+        pcm[out_idx : out_idx + 2] = int(sample).to_bytes(2, "little", signed=True)
+        out_idx += 2
+    return bytes(pcm)
 
 
 async def _check_realtime_rate_limits(
@@ -533,9 +561,12 @@ async def elevenlabs_realtime_transcription(
     ] = "pcm_16000",
     commit_strategy: Annotated[
         str, Query(description="Commit strategy: 'vad' or 'manual'")
-    ] = "vad",
+    ] = "manual",
     include_timestamps: Annotated[
         bool, Query(description="Include word-level timestamps")
+    ] = False,
+    include_language_detection: Annotated[
+        bool, Query(description="Include language detection output")
     ] = False,
     keyterms: Annotated[
         str | None,
@@ -543,6 +574,21 @@ async def elevenlabs_realtime_transcription(
             description="JSON array of bias terms to boost recognition "
             '(e.g., \'["PostgreSQL", "Kubernetes"]\'). Max 100 terms, 50 chars each.',
         ),
+    ] = None,
+    previous_text: Annotated[
+        str | None, Query(description="Existing transcript context for the session")
+    ] = None,
+    vad_threshold: Annotated[
+        float | None, Query(description="VAD threshold between 0.0 and 1.0")
+    ] = None,
+    min_speech_duration_ms: Annotated[
+        int | None, Query(description="Minimum speech duration in milliseconds")
+    ] = None,
+    min_silence_duration_ms: Annotated[
+        int | None, Query(description="Minimum silence duration in milliseconds")
+    ] = None,
+    prefix_padding_ms: Annotated[
+        int | None, Query(description="Prefix padding in milliseconds")
     ] = None,
 ):
     """ElevenLabs-compatible WebSocket endpoint for real-time transcription.
@@ -564,13 +610,29 @@ async def elevenlabs_realtime_transcription(
     - include_timestamps: Include word-level timing
     - keyterms: JSON array of terms to boost recognition
     """
-    # Parse audio format (e.g., "pcm_16000" -> sample_rate=16000)
-    sample_rate = DEFAULT_SAMPLE_RATE
-    if audio_format.startswith("pcm_"):
-        try:
-            sample_rate = int(audio_format.split("_")[1])
-        except (IndexError, ValueError):
-            pass
+    # Validate field locations for the ElevenLabs WS query contract.
+    for query_field in websocket.query_params.keys():
+        ensure_field_location_supported(
+            ElevenLabsEndpoint.REALTIME, "ws_query", query_field
+        )
+
+    ensure_model_supported(model_id, ElevenLabsEndpoint.REALTIME)
+
+    if commit_strategy not in {"manual", "vad"}:
+        await websocket.close(
+            code=WS_CLOSE_INVALID_REQUEST,
+            reason="Invalid commit_strategy. Use 'manual' or 'vad'.",
+        )
+        return
+
+    format_spec = get_realtime_audio_format_spec(audio_format)
+    if format_spec is None:
+        await websocket.close(
+            code=WS_CLOSE_INVALID_REQUEST,
+            reason=f"Invalid audio_format: {audio_format}",
+        )
+        return
+    sample_rate = format_spec.sample_rate
 
     # Get session router
     try:
@@ -613,28 +675,42 @@ async def elevenlabs_realtime_transcription(
                 parsed_vocabulary = json.loads(keyterms)
                 if not isinstance(parsed_vocabulary, list):
                     raise ValueError("keyterms must be a JSON array of strings")
-                if len(parsed_vocabulary) > 100:
-                    raise ValueError("keyterms cannot exceed 100 terms")
                 for term in parsed_vocabulary:
                     if not isinstance(term, str):
                         raise ValueError("keyterms must contain only strings")
-                    if len(term) > 50:
-                        raise ValueError(
-                            f"Each keyterm must be at most 50 characters, got {len(term)}"
-                        )
+                validate_elevenlabs_keyterms(parsed_vocabulary)
                 # Set to None if empty array
                 if not parsed_vocabulary:
                     parsed_vocabulary = None
             except json.JSONDecodeError as e:
                 await websocket.send_json(
-                    {"message_type": "error", "error": f"Invalid JSON in keyterms: {e}"}
+                    {
+                        "message_type": "error",
+                        "error": {
+                            "type": "invalid_request_error",
+                            "code": "invalid_keyterms",
+                            "message": f"Invalid JSON in keyterms: {e}",
+                        },
+                    }
                 )
                 await websocket.close(
                     code=WS_CLOSE_INVALID_REQUEST, reason="Invalid parameters"
                 )
                 return
-            except ValueError as e:
-                await websocket.send_json({"message_type": "error", "error": str(e)})
+            except (ValueError, HTTPException) as e:
+                message = str(e)
+                if isinstance(e, HTTPException):
+                    message = str(e.detail)
+                await websocket.send_json(
+                    {
+                        "message_type": "error",
+                        "error": {
+                            "type": "invalid_request_error",
+                            "code": "invalid_keyterms",
+                            "message": message,
+                        },
+                    }
+                )
                 await websocket.close(
                     code=WS_CLOSE_INVALID_REQUEST, reason="Invalid parameters"
                 )
@@ -691,6 +767,7 @@ async def elevenlabs_realtime_transcription(
                         "language_code": language_code,
                         "model_id": model_id,
                         "commit_strategy": commit_strategy,
+                        "include_language_detection": include_language_detection,
                     },
                 }
             )
@@ -707,6 +784,13 @@ async def elevenlabs_realtime_transcription(
                 interim_results=True,
                 word_timestamps=include_timestamps,
                 vocabulary=parsed_vocabulary,
+                decode_ulaw_to_pcm16=format_spec.decode_ulaw_to_pcm16,
+                include_language_detection=include_language_detection,
+                previous_text=previous_text,
+                vad_threshold=vad_threshold,
+                min_speech_duration_ms=min_speech_duration_ms,
+                min_silence_duration_ms=min_silence_duration_ms,
+                prefix_padding_ms=prefix_padding_ms,
             )
         except WebSocketDisconnect:
             log.info("elevenlabs_client_disconnected")
@@ -998,6 +1082,13 @@ async def _proxy_to_worker_elevenlabs(
     interim_results: bool,
     word_timestamps: bool,
     vocabulary: list[str] | None = None,
+    decode_ulaw_to_pcm16: bool = False,
+    include_language_detection: bool = False,
+    previous_text: str | None = None,
+    vad_threshold: float | None = None,
+    min_speech_duration_ms: int | None = None,
+    min_silence_duration_ms: int | None = None,
+    prefix_padding_ms: int | None = None,
 ) -> None:
     """Proxy with ElevenLabs protocol translation.
 
@@ -1023,6 +1114,18 @@ async def _proxy_to_worker_elevenlabs(
     # Add vocabulary as JSON if provided
     if vocabulary:
         params["vocabulary"] = json.dumps(vocabulary)
+    if include_language_detection:
+        params["include_language_detection"] = "true"
+    if previous_text:
+        params["prompt"] = previous_text
+    if vad_threshold is not None:
+        params["vad_threshold"] = str(vad_threshold)
+    if min_speech_duration_ms is not None:
+        params["min_speech_duration_ms"] = str(min_speech_duration_ms)
+    if min_silence_duration_ms is not None:
+        params["min_silence_duration_ms"] = str(min_silence_duration_ms)
+    if prefix_padding_ms is not None:
+        params["prefix_padding_ms"] = str(prefix_padding_ms)
 
     worker_url = f"{worker_endpoint}/session?{urlencode(params)}"
 
@@ -1035,7 +1138,12 @@ async def _proxy_to_worker_elevenlabs(
     ) as worker_ws:
         # Create translation tasks
         client_to_worker = asyncio.create_task(
-            _elevenlabs_client_to_worker(client_ws, worker_ws, session_id)
+            _elevenlabs_client_to_worker(
+                client_ws,
+                worker_ws,
+                session_id,
+                decode_ulaw_to_pcm16=decode_ulaw_to_pcm16,
+            )
         )
         worker_to_client = asyncio.create_task(
             _elevenlabs_worker_to_client(
@@ -1065,6 +1173,8 @@ async def _elevenlabs_client_to_worker(
     client_ws: WebSocket,
     worker_ws,
     session_id: str,
+    *,
+    decode_ulaw_to_pcm16: bool = False,
 ) -> None:
     """Translate ElevenLabs client messages to Dalston worker format.
 
@@ -1095,6 +1205,8 @@ async def _elevenlabs_client_to_worker(
                             audio_b64 = data.get("audio_base_64", "")
                             if audio_b64:
                                 audio_bytes = base64.b64decode(audio_b64)
+                                if decode_ulaw_to_pcm16:
+                                    audio_bytes = _decode_ulaw_to_pcm16(audio_bytes)
                                 await worker_ws.send(audio_bytes)
 
                             # Handle commit flag
@@ -1187,19 +1299,33 @@ async def _elevenlabs_worker_to_client(
 
                 elif msg_type == "transcript.final":
                     if include_timestamps and data.get("words"):
+                        words_payload = []
+                        for w in data.get("words", []):
+                            text = w.get("word", w.get("text", ""))
+                            word_type = w.get("type")
+                            if not word_type:
+                                word_type = (
+                                    "spacing"
+                                    if isinstance(text, str) and text.isspace()
+                                    else "word"
+                                )
+                            word_payload = {
+                                "text": text,
+                                "start": w.get("start", 0),
+                                "end": w.get("end", 0),
+                                "type": word_type,
+                            }
+                            if w.get("logprob") is not None:
+                                word_payload["logprob"] = w.get("logprob")
+                            if w.get("characters") is not None:
+                                word_payload["characters"] = w.get("characters")
+                            words_payload.append(word_payload)
+
                         translated = {
                             "message_type": "committed_transcript_with_timestamps",
                             "text": data.get("text", ""),
                             "language_code": data.get("language", "en"),
-                            "words": [
-                                {
-                                    "text": w.get("word", ""),
-                                    "start": w.get("start", 0),
-                                    "end": w.get("end", 0),
-                                    "type": "word",
-                                }
-                                for w in data.get("words", [])
-                            ],
+                            "words": words_payload,
                         }
                     else:
                         translated = {
@@ -1230,7 +1356,11 @@ async def _elevenlabs_worker_to_client(
                 elif msg_type == "error":
                     translated = {
                         "message_type": "error",
-                        "error": data.get("message", "Unknown error"),
+                        "error": {
+                            "type": "server_error",
+                            "code": data.get("code", "internal_error"),
+                            "message": data.get("message", "Unknown error"),
+                        },
                     }
 
                 elif msg_type == "warning":
@@ -1253,7 +1383,11 @@ async def _elevenlabs_worker_to_client(
                 elif msg_type == "session.terminated":
                     translated = {
                         "message_type": "error",
-                        "error": data.get("reason", "session_terminated"),
+                        "error": {
+                            "type": "server_error",
+                            "code": "session_terminated",
+                            "message": data.get("reason", "session_terminated"),
+                        },
                     }
 
                 if translated:

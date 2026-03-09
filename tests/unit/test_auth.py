@@ -1,7 +1,8 @@
 """Unit tests for API key authentication."""
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -590,6 +591,20 @@ class TestMiddlewareHelpers:
 
         assert key == "dk_ws_key"
 
+    def test_extract_api_key_from_websocket_token_takes_priority(self):
+        from dalston.gateway.middleware.auth import extract_api_key_from_websocket
+
+        websocket = MagicMock()
+        websocket.query_params = {
+            "token": "tk_single_use",
+            "api_key": "dk_ws_key",
+        }
+        websocket.headers = {}
+
+        key = extract_api_key_from_websocket(websocket)
+
+        assert key == "tk_single_use"
+
     def test_require_scope_raises_on_missing(self):
         from dalston.gateway.middleware.auth import (
             AuthorizationError,
@@ -724,6 +739,7 @@ class TestSessionTokenService:
         redis = AsyncMock()
         redis.hset = AsyncMock()
         redis.hgetall = AsyncMock(return_value={})
+        redis.hsetnx = AsyncMock(return_value=1)
         redis.expire = AsyncMock()
         redis.delete = AsyncMock(return_value=1)
         return redis
@@ -857,6 +873,49 @@ class TestSessionTokenService:
         assert session_token is None
 
     @pytest.mark.asyncio
+    async def test_validate_session_token_rejects_consumed_single_use(
+        self, auth_service: AuthService, mock_redis
+    ):
+        from datetime import timedelta
+
+        mock_redis.hgetall.return_value = {
+            "token_hash": "abc123",
+            "tenant_id": "00000000-0000-0000-0000-000000000000",
+            "parent_key_id": "12345678-1234-1234-1234-123456789abc",
+            "scopes": "realtime",
+            "expires_at": (datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
+            "single_use": "true",
+            "consumed_at": datetime.now(UTC).isoformat(),
+        }
+
+        session_token = await auth_service.validate_session_token("tk_single_use")
+        assert session_token is None
+
+    @pytest.mark.asyncio
+    async def test_consume_session_token_marks_single_use(
+        self, auth_service: AuthService, mock_redis
+    ):
+        from datetime import timedelta
+
+        mock_redis.hgetall.return_value = {
+            "token_hash": "abc123",
+            "tenant_id": "00000000-0000-0000-0000-000000000000",
+            "parent_key_id": "12345678-1234-1234-1234-123456789abc",
+            "scopes": "realtime",
+            "expires_at": (datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
+            "single_use": "true",
+            "consumed_at": "",
+        }
+        mock_redis.hsetnx.return_value = 1
+
+        session_token = await auth_service.consume_session_token("tk_single_use")
+        assert session_token is not None
+        assert session_token.consumed_at is not None
+        assert mock_redis.hsetnx.called
+
+    @pytest.mark.asyncio
     async def test_revoke_session_token(self, auth_service: AuthService, mock_redis):
         mock_redis.delete.return_value = 1
 
@@ -917,3 +976,31 @@ class TestMiddlewareSessionTokenSupport:
             require_scope(session_token, Scope.JOBS_READ)
 
         assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_authenticate_websocket_accepts_token_query_param(self):
+        from dalston.gateway.middleware.auth import authenticate_websocket
+
+        websocket = MagicMock()
+        websocket.headers = {}
+        websocket.query_params = {"token": "tk_single_use"}
+        websocket.close = AsyncMock()
+
+        auth_service = AsyncMock()
+        auth_service.consume_session_token.return_value = SessionToken(
+            token_hash="def456abc789",
+            tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
+            parent_key_id=UUID("12345678-1234-1234-1234-123456789abc"),
+            scopes=[Scope.REALTIME],
+            expires_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+        )
+
+        with patch(
+            "dalston.gateway.security.manager.get_security_manager",
+            return_value=SimpleNamespace(mode="strict"),
+        ):
+            result = await authenticate_websocket(websocket, auth_service)
+
+        assert result is not None
+        auth_service.consume_session_token.assert_awaited_once_with("tk_single_use")

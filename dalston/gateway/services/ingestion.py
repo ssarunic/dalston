@@ -43,6 +43,7 @@ class AudioIngestionService:
 
     def __init__(self, settings: Settings):
         self.settings = settings
+        self._read_chunk_size = 1024 * 1024  # 1MB
 
     async def ingest(
         self,
@@ -78,7 +79,10 @@ class AudioIngestionService:
         if url is not None:
             content, filename = await self._download_from_url(url, max_bytes=max_bytes)
         else:
-            content, filename = await self._read_from_file(file)  # type: ignore[arg-type]
+            content, filename = await self._read_from_file(  # type: ignore[arg-type]
+                file,
+                max_bytes=max_bytes,
+            )
 
         # Probe audio to extract metadata and validate
         # Uses to_thread() because probe_audio uses tinytag synchronously
@@ -125,7 +129,12 @@ class AudioIngestionService:
         except AudioUrlError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
 
-    async def _read_from_file(self, file: UploadFile) -> tuple[bytes, str]:
+    async def _read_from_file(
+        self,
+        file: UploadFile,
+        *,
+        max_bytes: int | None = None,
+    ) -> tuple[bytes, str]:
         """Read content from uploaded file.
 
         Args:
@@ -139,5 +148,37 @@ class AudioIngestionService:
         """
         if not file.filename:
             raise HTTPException(status_code=400, detail=Err.FILE_MUST_HAVE_FILENAME)
-        content = await file.read()
-        return content, file.filename
+
+        # If Starlette provided file size metadata, fail before reading content.
+        reported_size = getattr(file, "size", None)
+        if (
+            max_bytes is not None
+            and isinstance(reported_size, int)
+            and reported_size > max_bytes
+        ):
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"File too large: {reported_size / (1024**3):.2f} GB. "
+                    f"Maximum: {max_bytes / (1024**3):.1f} GB"
+                ),
+            )
+
+        chunks: list[bytes] = []
+        total_size = 0
+        while True:
+            chunk = await file.read(self._read_chunk_size)
+            if not chunk:
+                break
+            total_size += len(chunk)
+            if max_bytes is not None and total_size > max_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        f"File too large: {total_size / (1024**3):.2f} GB. "
+                        f"Maximum: {max_bytes / (1024**3):.1f} GB"
+                    ),
+                )
+            chunks.append(chunk)
+
+        return b"".join(chunks), file.filename

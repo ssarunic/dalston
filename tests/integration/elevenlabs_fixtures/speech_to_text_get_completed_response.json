@@ -1,0 +1,26 @@
+{
+  "language_code": "en",
+  "language_probability": 0.98,
+  "text": "Hello world",
+  "words": [
+    {
+      "text": "Hello",
+      "start": 0.0,
+      "end": 0.45,
+      "type": "word"
+    },
+    {
+      "text": " ",
+      "start": 0.45,
+      "end": 0.47,
+      "type": "spacing"
+    },
+    {
+      "text": "world",
+      "start": 0.47,
+      "end": 0.90,
+      "type": "word"
+    }
+  ],
+  "transcription_id": "00000000-0000-0000-0000-000000000000"
+}

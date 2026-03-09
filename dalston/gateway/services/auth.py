@@ -117,6 +117,9 @@ class SessionToken:
     scopes: list[Scope]
     expires_at: datetime
     created_at: datetime
+    token_type: str = "realtime"
+    single_use: bool = False
+    consumed_at: datetime | None = None
 
     @property
     def is_expired(self) -> bool:
@@ -137,11 +140,15 @@ class SessionToken:
             "scopes": ",".join(s.value for s in self.scopes),
             "expires_at": self.expires_at.isoformat(),
             "created_at": self.created_at.isoformat(),
+            "token_type": self.token_type,
+            "single_use": "true" if self.single_use else "false",
+            "consumed_at": self.consumed_at.isoformat() if self.consumed_at else "",
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> SessionToken:
         """Create from dictionary (Redis storage)."""
+        consumed_at_raw = data.get("consumed_at", "")
         return cls(
             token_hash=data["token_hash"],
             tenant_id=UUID(data["tenant_id"]),
@@ -149,6 +156,11 @@ class SessionToken:
             scopes=[Scope(s) for s in data["scopes"].split(",") if s],
             expires_at=datetime.fromisoformat(data["expires_at"]),
             created_at=datetime.fromisoformat(data["created_at"]),
+            token_type=data.get("token_type", "realtime"),
+            single_use=data.get("single_use", "false") == "true",
+            consumed_at=(
+                datetime.fromisoformat(consumed_at_raw) if consumed_at_raw else None
+            ),
         )
 
 
@@ -419,6 +431,9 @@ class AuthService:
         api_key: APIKey,
         ttl: int = DEFAULT_TOKEN_TTL,
         scopes: list[Scope] | None = None,
+        *,
+        token_type: str = "realtime",
+        single_use: bool = False,
     ) -> tuple[str, SessionToken]:
         """Create an ephemeral session token for client-side auth.
 
@@ -462,6 +477,8 @@ class AuthService:
             scopes=scopes,
             expires_at=datetime.fromtimestamp(now.timestamp() + ttl, tz=UTC),
             created_at=now,
+            token_type=token_type,
+            single_use=single_use,
         )
 
         # Store in Redis with TTL
@@ -497,7 +514,32 @@ class AuthService:
         # Double-check expiry (Redis TTL handles cleanup, but be safe)
         if session_token.is_expired:
             return None
+        if session_token.single_use and session_token.consumed_at is not None:
+            return None
 
+        return session_token
+
+    async def consume_session_token(self, raw_token: str) -> SessionToken | None:
+        """Validate and consume a session token when required.
+
+        For single-use tokens, this atomically marks consumed_at on first use.
+        Reusable tokens are returned unchanged.
+        """
+        session_token = await self.validate_session_token(raw_token)
+        if session_token is None:
+            return None
+
+        if not session_token.single_use:
+            return session_token
+
+        token_hash = hash_api_key(raw_token)
+        token_key = REDIS_SESSION_TOKEN.format(hash=token_hash)
+        consumed_at = datetime.now(UTC).isoformat()
+        marked = await self.redis.hsetnx(token_key, "consumed_at", consumed_at)
+        if marked != 1:
+            return None
+
+        session_token.consumed_at = datetime.fromisoformat(consumed_at)
         return session_token
 
     async def revoke_session_token(self, raw_token: str) -> bool:
