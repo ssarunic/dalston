@@ -14,7 +14,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 
 ## Status Overview
 
-### Completed (27)
+### Completed (30)
 
 | # | Milestone | Completed |
 |---|-----------|-----------|
@@ -25,6 +25,8 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M5](milestones/M05-export-webhooks.md) | Export & Webhooks | January 2026 |
 | [M10](milestones/M10-web-console.md) | Web Console | 2026-01-30 |
 | [M11](milestones/M11-api-authentication.md) | API Authentication | February 2026 |
+| [M12](milestones/M12-python-sdk.md) | Python SDK | February 2026 |
+| [M13](milestones/M13-cli.md) | CLI | February 2026 |
 | [M15](milestones/M15-console-authentication.md) | Console Auth | February 2026 |
 | [M17](milestones/M17-api-key-management.md) | API Key Management | February 2026 |
 | [M21](milestones/M21-admin-webhooks.md) | Admin Webhooks | February 2026 |
@@ -32,6 +34,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M26](milestones/M26-pii-detection-redaction.md) | PII Detection & Audio Redaction | February 2026 |
 | [M19](milestones/M19-distributed-tracing.md) | Distributed Tracing | 2026-02-11 |
 | [M20](milestones/M20-metrics-dashboards.md) | Metrics & Dashboards | 2026-02-12 |
+| [M8](milestones/M08-elevenlabs-compat.md) | ElevenLabs Compat | March 2026 |
 | [M38](milestones/M38-openai-compat.md) | OpenAI Compatibility | 2026-03-01 |
 | [M36](milestones/M36-runtime-model-management.md) | Runtime Model Management | March 2026 |
 | [M39](milestones/M39-model-cache-ttl.md) | Model Cache & TTL | March 2026 |
@@ -46,26 +49,25 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M57.1](milestones/M57-1-lite-sqlite-migration-track-clean-cut.md) | Lite SQLite Migration Track and Schema Compatibility (Clean-Cut) | 2026-03-08 |
 | [M59](milestones/M59-runtime-isolation-profiles-clean-cut.md) | Runtime Isolation Profiles (In-Proc / Venv / Container, Clean-Cut) | 2026-03-09 |
 
-### In Progress (8)
+### In Progress (5)
 
 | # | Milestone | Notes |
 |---|-----------|-------|
 | [M6](milestones/M06-realtime-mvp.md) | Real-Time MVP | `realtime_sdk/`, `session_router/`, `engines/realtime/` |
 | [M7](milestones/M07-hybrid-mode.md) | Hybrid Mode | `enhance_on_end` parameter implemented |
-| [M8](milestones/M08-elevenlabs-compat.md) | ElevenLabs Compat | `gateway/api/v1/speech_to_text.py` |
-| [M12](milestones/M12-python-sdk.md) | Python SDK | `sdk/dalston_sdk/` |
-| [M13](milestones/M13-cli.md) | CLI | `cli/dalston_cli/` |
 | [M16](milestones/M16-aws-deployment.md) | AWS Deployment | `infra/terraform/` |
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Audio/transcript S3 storage working; session resume pending |
 
-### Not Started (3)
+### Not Started (5)
 
 | # | Milestone | Goal |
 |---|-----------|------|
 | [M9](milestones/M09-enrichment.md) | Enrichment | Emotions, events, LLM cleanup |
 | [M58](milestones/M58-lite-pipeline-expansion-capability-parity.md) | Lite Pipeline Expansion and Capability Parity (Clean-Cut) | Expand lite-mode profiles/features with explicit capability matrix and deterministic unsupported-feature behavior |
 | [M60](milestones/M60-one-line-distribution-packaging-clean-cut.md) | One-Line Distribution and Packaging (Clean-Cut) | Cross-platform distribution channels and install/release pipeline for zero-config onboarding |
+| [M61](milestones/M61-openai-api-parity.md) | OpenAI Speech-to-Text API Parity | Close gaps between Dalston's OpenAI-compatible STT API and the public OpenAI STT docs |
+| [M62](milestones/M62-elevenlabs-api-parity.md) | ElevenLabs Speech-to-Text API Parity | Close gaps between Dalston's ElevenLabs-compatible STT API and the public ElevenLabs STT docs |
 
 ---
 
@@ -80,12 +82,12 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M5](milestones/M05-export-webhooks.md) | Export & Webhooks | SRT/VTT export, async notifications | 2 | Completed |
 | [M6](milestones/M06-realtime-mvp.md) | Real-Time MVP | Stream audio → live transcripts | 5-6 | In Progress |
 | [M7](milestones/M07-hybrid-mode.md) | Hybrid Mode | Real-time + batch enhancement | 2-3 | In Progress |
-| [M8](milestones/M08-elevenlabs-compat.md) | ElevenLabs Compat | Drop-in API replacement | 2-3 | In Progress |
+| [M8](milestones/M08-elevenlabs-compat.md) | ElevenLabs Compat | Drop-in API replacement | 2-3 | Completed |
 | [M9](milestones/M09-enrichment.md) | Enrichment | Emotions, events, LLM cleanup | 4-5 | Not Started |
 | [M10](milestones/M10-web-console.md) | Web Console | Monitoring UI | 3-4 | Completed |
 | [M11](milestones/M11-api-authentication.md) | API Authentication | Secure endpoints with API keys | 2-3 | Completed |
-| [M12](milestones/M12-python-sdk.md) | Python SDK | Native SDK for Dalston features | 3-4 | In Progress |
-| [M13](milestones/M13-cli.md) | CLI | Command-line interface | 2-3 | In Progress |
+| [M12](milestones/M12-python-sdk.md) | Python SDK | Native SDK for Dalston features | 3-4 | Completed |
+| [M13](milestones/M13-cli.md) | CLI | Command-line interface | 2-3 | Completed |
 | [M14](milestones/M14-model-selection.md) | Model Selection | User-selectable transcription models | 2-3 | Superseded by M36/M40 |
 | [M15](milestones/M15-console-authentication.md) | Console Auth | Secure web console access | 2-3 | Completed |
 
@@ -121,6 +123,8 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 |---|-----------|------|------|--------|
 | [M21](milestones/M21-admin-webhooks.md) | Admin Webhooks | Admin-registered webhook endpoints with persistent delivery | 3-4 | Completed |
 | [M38](milestones/M38-openai-compat.md) | OpenAI Compatibility | Drop-in OpenAI Audio API replacement | 3-4 | Completed |
+| [M61](milestones/M61-openai-api-parity.md) | OpenAI Speech-to-Text API Parity | Close actionable gaps with public OpenAI STT docs | 11 weeks | Not Started |
+| [M62](milestones/M62-elevenlabs-api-parity.md) | ElevenLabs Speech-to-Text API Parity | Close actionable gaps with public ElevenLabs STT docs | 11 weeks | Not Started |
 
 ## Engine Milestones
 
@@ -283,6 +287,9 @@ M56 + M57 + M47 ──► M57.1 (lite SQLite migration track + schema compatibil
 M56 + M57 + M57.1 ──► M58 (lite pipeline expansion + capability parity)
 M57.1 + M58 + M36 + M40 ──► M59 (runtime isolation profiles)
 M57 + M59 ──► M60 (one-line distribution + packaging)
+
+M38 ──► M61 (OpenAI Speech-to-Text API parity)
+M8 ──► M62 (ElevenLabs Speech-to-Text API parity)
 
 M10 + M11 + M15 ──► M35
 ```
