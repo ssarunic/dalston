@@ -134,17 +134,17 @@ class WhisperEngine(Engine):
         )
         return "cpu", "int8"
 
-    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Transcribe audio using Faster-Whisper.
 
         Args:
-            input: Task input with audio file path and config
+            engine_input: Task input with audio file path and config
 
         Returns:
             EngineOutput with TranscribeOutput containing text, segments, and language
         """
-        audio_path = input.audio_path
-        config = input.config
+        audio_path = engine_input.audio_path
+        config = engine_input.config
 
         # Handle language: None or "auto" means auto-detect
         language = config.get("language")

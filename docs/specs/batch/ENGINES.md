@@ -242,7 +242,14 @@ Controls where the runtime executes:
 
 `execution_profile` is execution policy only. It does not change task payloads, model identity (`runtime_model_id`), or output schemas. If the field is omitted, Dalston treats the runtime as `container` for backward compatibility.
 
-#### container (Required)
+#### container (Conditionally Required)
+
+Required when `execution_profile: container`, or when `execution_profile` is omitted
+(backward-compatible default is `container`).
+
+For `venv` and `inproc` profiles, `container` may be omitted. In that case,
+hardware metadata (`hardware.min_vram_gb`, `hardware.supports_cpu`, etc.) remains
+the source of resource hints.
 
 | Field | Type | Description |
 |-------|------|-------------|

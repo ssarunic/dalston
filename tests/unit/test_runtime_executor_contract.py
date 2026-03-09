@@ -158,3 +158,23 @@ async def test_lite_pipeline_raises_when_profile_executor_is_missing(
     envelope = SimpleNamespace(task_id="task-1", job_id="job-1", message_id="msg-1")
     with pytest.raises(RuntimeError, match="No executor configured for profile 'venv'"):
         await pipeline._handle_stage("transcribe", envelope, {"language": "en"})
+
+
+@pytest.mark.asyncio
+async def test_lite_pipeline_initializes_only_requested_profile_executor(
+    tmp_path: Path,
+) -> None:
+    artifacts = LocalFilesystemArtifactStoreAdapter(str(tmp_path / "artifacts"))
+    pipeline = LitePipeline(
+        artifacts,
+        profile="core",
+        stage_bindings={"transcribe": _binding("transcribe", "inproc")},
+    )
+
+    assert pipeline._executors == {}
+
+    envelope = SimpleNamespace(task_id="task-1", job_id="job-1", message_id="msg-1")
+    await pipeline._handle_stage("transcribe", envelope, {"language": "en"})
+
+    assert "inproc" in pipeline._executors
+    assert "venv" not in pipeline._executors

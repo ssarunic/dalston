@@ -10,7 +10,6 @@
     "name",
     "version",
     "description",
-    "container",
     "capabilities"
   ],
   "properties": {
@@ -133,6 +132,31 @@
         "stage": false
       },
       "description": "Realtime engine with type field"
+    }
+  ],
+  "allOf": [
+    {
+      "if": {
+        "not": {
+          "required": ["execution_profile"]
+        }
+      },
+      "then": {
+        "required": ["container"]
+      }
+    },
+    {
+      "if": {
+        "required": ["execution_profile"],
+        "properties": {
+          "execution_profile": {
+            "const": "container"
+          }
+        }
+      },
+      "then": {
+        "required": ["container"]
+      }
     }
   ],
   "$defs": {

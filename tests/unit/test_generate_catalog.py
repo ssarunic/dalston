@@ -113,6 +113,20 @@ class TestTransformRuntimeToEntry:
         entry = transform_runtime_to_entry(valid_runtime_yaml, Path("test.yaml"))
         assert entry["execution_profile"] == "container"
 
+    def test_non_container_profile_allows_missing_container(
+        self, valid_runtime_yaml: dict
+    ) -> None:
+        """Venv/inproc profiles may omit container metadata."""
+        valid_runtime_yaml["execution_profile"] = "venv"
+        valid_runtime_yaml.pop("container")
+
+        entry = transform_runtime_to_entry(valid_runtime_yaml, Path("test.yaml"))
+
+        assert entry["execution_profile"] == "venv"
+        assert entry["hardware"]["gpu_required"] is False
+        assert entry["hardware"]["gpu_optional"] is True
+        assert entry["hardware"]["memory"] is None
+
     def test_all_languages_converted_to_null(self, valid_runtime_yaml: dict) -> None:
         """Languages ['all'] should be converted to None."""
         valid_runtime_yaml["capabilities"]["languages"] = ["all"]

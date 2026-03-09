@@ -194,6 +194,35 @@ class TestValidateEngine:
         assert result.valid is False
         assert any("gpu" in error for error in result.errors)
 
+    def test_venv_profile_allows_missing_container(
+        self, schema: dict, valid_batch_engine: dict
+    ) -> None:
+        """Non-container profiles may omit the container block."""
+        valid_batch_engine["execution_profile"] = "venv"
+        del valid_batch_engine["container"]
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(valid_batch_engine, f)
+            f.flush()
+            result = validate_engine(Path(f.name), schema)
+
+        assert result.valid is True
+
+    def test_container_profile_requires_container(
+        self, schema: dict, valid_batch_engine: dict
+    ) -> None:
+        """Container profile must declare a container block."""
+        valid_batch_engine["execution_profile"] = "container"
+        del valid_batch_engine["container"]
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(valid_batch_engine, f)
+            f.flush()
+            result = validate_engine(Path(f.name), schema)
+
+        assert result.valid is False
+        assert any("container" in error for error in result.errors)
+
     def test_invalid_version_format_fails(
         self, schema: dict, valid_batch_engine: dict
     ) -> None:

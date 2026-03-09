@@ -43,14 +43,16 @@ class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
 
             def process(
                 self,
-                input: EngineInput,
+                engine_input: EngineInput,
                 ctx: BatchTaskContext,
             ) -> EngineOutput:
                 # Load model lazily
                 if self.model is None:
-                    self.model = load_model(input.config.get("model", "large-v3"))
+                    self.model = load_model(
+                        engine_input.config.get("model", "large-v3")
+                    )
 
-                result = self.model.transcribe(input.audio_path)
+                result = self.model.transcribe(engine_input.audio_path)
                 return EngineOutput(data={"text": result.text, "segments": result.segments})
 
         if __name__ == "__main__":
@@ -76,7 +78,7 @@ class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
     @abstractmethod
     def process(
         self,
-        input: EngineInput[InputPayloadT],
+        engine_input: EngineInput[InputPayloadT],
         ctx: BatchTaskContext,
     ) -> EngineOutput[OutputPayloadT]:
         """Process a single task.
@@ -86,7 +88,7 @@ class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
         and handles uploading results afterward.
 
         Args:
-            input: Engine input containing typed payload and materialized artifacts
+            engine_input: Engine input containing typed payload and materialized artifacts
             ctx: Runtime context for tracing/logging metadata helpers
 
         Returns:
@@ -186,10 +188,17 @@ class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
         hardware = card.get("hardware", {})
         performance = card.get("performance", {})
 
-        # Determine GPU requirement from container.gpu field
+        # Determine GPU requirement from profile-specific metadata.
+        # container.gpu is authoritative when present; otherwise infer from
+        # hardware metadata for non-container profiles.
         container = card.get("container", {})
-        gpu_field = container.get("gpu", "none")
-        gpu_required = gpu_field == "required"
+        gpu_field = container.get("gpu")
+        if gpu_field is None:
+            min_vram_gb = hardware.get("min_vram_gb")
+            supports_cpu = hardware.get("supports_cpu", True)
+            gpu_required = bool(min_vram_gb and not supports_cpu)
+        else:
+            gpu_required = gpu_field == "required"
 
         # Languages: convert ["all"] to None (meaning all languages)
         languages = caps.get("languages")

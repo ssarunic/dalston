@@ -28,19 +28,19 @@ class AudioRedactionEngine(Engine):
 
     def process(
         self,
-        input: EngineInput,
+        engine_input: EngineInput,
         ctx: BatchTaskContext,
     ) -> EngineOutput:
         """Redact PII from audio file.
 
         Args:
-            input: Task input with PII detection output
+            engine_input: Task input with PII detection output
 
         Returns:
             EngineOutput with AudioRedactOutput containing redacted audio artifact ID
         """
-        config = input.config
-        audio_path = input.audio_path
+        config = engine_input.config
+        audio_path = engine_input.audio_path
 
         # Get channel from config (set by DAG builder for per-channel mode)
         channel: int | None = config.get("channel")
@@ -54,7 +54,7 @@ class AudioRedactionEngine(Engine):
             pii_key = "pii_detect"
 
         logical_name = f"redacted_audio{channel_suffix}"
-        artifact_id = build_task_artifact_id(input.task_id, logical_name)
+        artifact_id = build_task_artifact_id(engine_input.task_id, logical_name)
 
         # Get config
         mode_str = config.get("redaction_mode", "silence")
@@ -63,16 +63,16 @@ class AudioRedactionEngine(Engine):
 
         self.logger.info(
             "audio_redaction_starting",
-            job_id=input.job_id,
+            job_id=engine_input.job_id,
             mode=mode.value,
             buffer_ms=buffer_ms,
             channel=channel,
         )
 
-        pii_output = input.get_pii_detect_output(pii_key)
+        pii_output = engine_input.get_pii_detect_output(pii_key)
         if not pii_output:
             # Try raw output with channel-specific key
-            raw_pii = input.get_raw_output(pii_key) or {}
+            raw_pii = engine_input.get_raw_output(pii_key) or {}
             entities = raw_pii.get("entities", [])
         else:
             entities = [e.model_dump() for e in pii_output.entities]
@@ -81,7 +81,7 @@ class AudioRedactionEngine(Engine):
             output_path = Path(tmp.name)
 
         if not entities:
-            self.logger.info("no_entities_to_redact", job_id=input.job_id)
+            self.logger.info("no_entities_to_redact", job_id=engine_input.job_id)
             shutil.copy2(audio_path, output_path)
             produced = ctx.describe_artifact(
                 logical_name=logical_name,
@@ -112,7 +112,7 @@ class AudioRedactionEngine(Engine):
 
         self.logger.info(
             "redacting_ranges",
-            job_id=input.job_id,
+            job_id=engine_input.job_id,
             entity_count=len(entities),
             range_count=len(merged_ranges),
         )
@@ -122,7 +122,7 @@ class AudioRedactionEngine(Engine):
 
         self.logger.info(
             "audio_redaction_complete",
-            job_id=input.job_id,
+            job_id=engine_input.job_id,
             redacted_audio_artifact_id=artifact_id,
         )
 

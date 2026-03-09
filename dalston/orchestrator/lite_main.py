@@ -90,11 +90,11 @@ class _LiteComputeEngine(Engine[Any, Any]):
 
     def process(
         self,
-        input: EngineInput,
+        engine_input: EngineInput,
         ctx: BatchTaskContext,
     ) -> EngineOutput:
         del ctx
-        return EngineOutput(data=self._compute(input.config))
+        return EngineOutput(data=self._compute(engine_input.config))
 
 
 @dataclass(frozen=True)
@@ -194,19 +194,19 @@ class LitePipeline:
         self._stage_bindings = dict(
             _DEFAULT_STAGE_BINDINGS if stage_bindings is None else stage_bindings
         )
-        self._executors = (
-            {
-                "inproc": InProcExecutor(
-                    output_dir=Path(get_settings().lite_artifacts_dir)
-                ),
-                "venv": VenvExecutor(
+        if executors is None:
+            lite_output_dir = Path(get_settings().lite_artifacts_dir)
+            self._executors: dict[str, RuntimeExecutor] = {}
+            self._executor_factories: dict[str, Callable[[], RuntimeExecutor]] = {
+                "inproc": lambda: InProcExecutor(output_dir=lite_output_dir),
+                "venv": lambda: VenvExecutor(
                     env_manager=VenvEnvironmentManager(),
-                    output_dir=Path(get_settings().lite_artifacts_dir),
+                    output_dir=lite_output_dir,
                 ),
             }
-            if executors is None
-            else executors
-        )
+        else:
+            self._executors = dict(executors)
+            self._executor_factories = {}
         logger.info(
             "lite_pipeline_created",
             profile=self._profile.value,
@@ -380,7 +380,7 @@ class LitePipeline:
                 f"No lite runtime binding configured for stage '{stage}'"
             )
 
-        executor = self._executors.get(binding.entry.execution_profile)
+        executor = self._resolve_executor(binding.entry.execution_profile)
         if executor is None:
             raise RuntimeError(
                 "No executor configured for "
@@ -408,6 +408,19 @@ class LitePipeline:
 
         result = await asyncio.to_thread(executor.execute, request)
         return result["data"]
+
+    def _resolve_executor(self, profile: str) -> RuntimeExecutor | None:
+        executor = self._executors.get(profile)
+        if executor is not None:
+            return executor
+
+        factory = self._executor_factories.get(profile)
+        if factory is None:
+            return None
+
+        executor = factory()
+        self._executors[profile] = executor
+        return executor
 
     async def _handle_merge(self, job_id: str, parameters: dict) -> dict:
         """Write the final transcript artifact and return the result dict."""

@@ -345,17 +345,17 @@ class ParakeetEngine(Engine):
                 error=str(e),
             )
 
-    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Transcribe audio using Parakeet CTC or TDT.
 
         Args:
-            input: Task input with audio file path and config
+            engine_input: Task input with audio file path and config
 
         Returns:
             EngineOutput with TranscribeOutput containing text, segments, and words
         """
-        audio_path = input.audio_path
-        config = input.config
+        audio_path = engine_input.audio_path
+        config = engine_input.config
         channel = config.get("channel")  # For per_channel mode
         vocabulary = config.get("vocabulary")  # Terms to boost
 

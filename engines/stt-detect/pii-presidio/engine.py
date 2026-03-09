@@ -275,18 +275,18 @@ class PIIDetectionEngine(Engine):
                 error=str(e),
             )
 
-    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Detect PII entities in transcript.
 
         Args:
-            input: Task input containing transcript from transcribe/align stages
+            engine_input: Task input containing transcript from transcribe/align stages
 
         Returns:
             EngineOutput with PIIDetectOutput containing detected entities
         """
         start_time = time.time()
-        config = input.config
-        job_id = input.job_id
+        config = engine_input.config
+        job_id = engine_input.job_id
 
         # Get entity types to detect
         entity_types = config.get("entity_types") or DEFAULT_ENTITY_TYPES
@@ -310,8 +310,8 @@ class PIIDetectionEngine(Engine):
         self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
         try:
             # Get transcript data from previous stages
-            align_output = input.get_align_output()
-            transcribe_output = input.get_transcribe_output()
+            align_output = engine_input.get_align_output()
+            transcribe_output = engine_input.get_transcribe_output()
 
             # Extract language from transcription
             language = "en"  # Default fallback
@@ -332,7 +332,7 @@ class PIIDetectionEngine(Engine):
                 text = transcribe_output.text
             else:
                 # Fallback to raw output
-                raw_transcribe = input.get_raw_output("transcribe") or {}
+                raw_transcribe = engine_input.get_raw_output("transcribe") or {}
                 text = raw_transcribe.get("text", "")
                 language = raw_transcribe.get("language", "en")
                 segments = []
@@ -340,7 +340,7 @@ class PIIDetectionEngine(Engine):
             self.logger.info("detected_language_for_pii", language=language)
 
             # Get diarization for speaker assignment
-            diarize_output = input.get_diarize_output()
+            diarize_output = engine_input.get_diarize_output()
             speaker_turns = diarize_output.turns if diarize_output else []
 
             # Detect entities

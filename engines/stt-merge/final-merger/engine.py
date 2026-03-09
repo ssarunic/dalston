@@ -49,20 +49,20 @@ class FinalMergerEngine(Engine):
 
     def process(
         self,
-        input: EngineInput,
+        engine_input: EngineInput,
         ctx: BatchTaskContext,
     ) -> EngineOutput:
         """Merge upstream outputs into final transcript.
 
         Args:
-            input: Task input with previous_outputs from prepare, transcribe,
+            engine_input: Task input with previous_outputs from prepare, transcribe,
                    and optionally align stages
 
         Returns:
             EngineOutput with MergeOutput containing the final transcript
         """
-        job_id = input.job_id
-        config = input.config
+        job_id = engine_input.job_id
+        config = engine_input.config
 
         # Get speaker detection mode from config
         speaker_detection_str = config.get("speaker_detection", "none")
@@ -72,17 +72,17 @@ class FinalMergerEngine(Engine):
 
         # Handle per_channel mode separately
         if speaker_detection == SpeakerDetectionMode.PER_CHANNEL:
-            return self._merge_per_channel(input, config, ctx)
+            return self._merge_per_channel(engine_input, config, ctx)
 
         # Get typed outputs from upstream stages
-        prepare_output = input.get_prepare_output()
-        transcribe_output = input.get_transcribe_output()
-        align_output = input.get_align_output()
-        diarize_output = input.get_diarize_output()
+        prepare_output = engine_input.get_prepare_output()
+        transcribe_output = engine_input.get_transcribe_output()
+        align_output = engine_input.get_align_output()
+        diarize_output = engine_input.get_diarize_output()
 
         # Fall back to raw dict if typed parsing fails
         if not prepare_output:
-            raw_prepare = input.get_raw_output("prepare") or {}
+            raw_prepare = engine_input.get_raw_output("prepare") or {}
             audio_duration = raw_prepare.get("duration", 0.0)
             audio_channels = raw_prepare.get("channels", 1)
             sample_rate = raw_prepare.get("sample_rate", 16000)
@@ -111,7 +111,7 @@ class FinalMergerEngine(Engine):
                 )
 
         if not transcribe_output:
-            raw_transcribe = input.get_raw_output("transcribe") or {}
+            raw_transcribe = engine_input.get_raw_output("transcribe") or {}
             text = raw_transcribe.get("text", "")
             language = raw_transcribe.get("language", "en")
             language_confidence = raw_transcribe.get("language_confidence", 1.0)
@@ -228,8 +228,8 @@ class FinalMergerEngine(Engine):
         pii_metadata: PIIMetadata | None = None
 
         if pii_detection_enabled:
-            pii_detect_output = input.get_pii_detect_output()
-            audio_redact_output = input.get_audio_redact_output()
+            pii_detect_output = engine_input.get_pii_detect_output()
+            audio_redact_output = engine_input.get_audio_redact_output()
 
             if pii_detect_output:
                 pipeline_stages.append("pii_detect")
@@ -270,7 +270,7 @@ class FinalMergerEngine(Engine):
                         )
             else:
                 # Try raw output
-                raw_pii = input.get_raw_output("pii_detect")
+                raw_pii = engine_input.get_raw_output("pii_detect")
                 if raw_pii:
                     pipeline_stages.append("pii_detect")
                     redacted_text = raw_pii.get("redacted_text")

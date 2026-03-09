@@ -85,9 +85,18 @@ def transform_runtime_to_entry(data: dict, yaml_path: Path) -> dict:
     hardware = data.get("hardware", {})
     container = data.get("container", {})
 
-    # Determine GPU requirement from container.gpu field
-    gpu_field = container.get("gpu", "none")
-    gpu_required = gpu_field == "required"
+    # Determine GPU requirement from profile-specific metadata.
+    # container.gpu is authoritative when present; otherwise infer from
+    # hardware metadata for non-container profiles.
+    gpu_field = container.get("gpu")
+    if gpu_field is None:
+        min_vram_gb = hardware.get("min_vram_gb")
+        supports_cpu = hardware.get("supports_cpu", True)
+        gpu_required = bool(min_vram_gb and not supports_cpu)
+        gpu_optional = bool(min_vram_gb and supports_cpu)
+    else:
+        gpu_required = gpu_field == "required"
+        gpu_optional = gpu_field == "optional"
 
     # Extract performance info
     performance = data.get("performance", {})
@@ -111,7 +120,7 @@ def transform_runtime_to_entry(data: dict, yaml_path: Path) -> dict:
         },
         "hardware": {
             "gpu_required": gpu_required,
-            "gpu_optional": gpu_field == "optional",
+            "gpu_optional": gpu_optional,
             "min_vram_gb": hardware.get("min_vram_gb"),
             "recommended_gpu": hardware.get("recommended_gpu"),
             "supports_cpu": hardware.get("supports_cpu", True),

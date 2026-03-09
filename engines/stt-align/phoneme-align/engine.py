@@ -98,12 +98,12 @@ class PhonemeAlignEngine(Engine):
             )
             return None
 
-    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Align transcription segments to produce word-level timestamps."""
-        audio_path = input.audio_path
+        audio_path = engine_input.audio_path
 
         # Get transcription output from previous stage
-        transcribe_output = input.get_transcribe_output()
+        transcribe_output = engine_input.get_transcribe_output()
         if transcribe_output:
             text = transcribe_output.text
             raw_segments: list[InputSegment] = [
@@ -112,7 +112,7 @@ class PhonemeAlignEngine(Engine):
             ]
             language = transcribe_output.language
         else:
-            raw_output = input.get_raw_output("transcribe")
+            raw_output = engine_input.get_raw_output("transcribe")
             if not raw_output:
                 raise ValueError("Missing 'transcribe' in previous_outputs")
             text = raw_output.get("text", "")
@@ -132,7 +132,7 @@ class PhonemeAlignEngine(Engine):
             language=language,
         )
 
-        runtime_model_id = input.config.get("runtime_model_id")
+        runtime_model_id = engine_input.config.get("runtime_model_id")
         if not runtime_model_id:
             raise ValueError(
                 "Missing required config field 'runtime_model_id' for align stage."
@@ -163,7 +163,7 @@ class PhonemeAlignEngine(Engine):
                 metadata=metadata,
                 audio=audio,
                 device=self._device,
-                return_char_alignments=input.config.get(
+                return_char_alignments=engine_input.config.get(
                     "return_char_alignments", False
                 ),
             )

@@ -157,11 +157,11 @@ class PyannoteEngine(Engine):
         self.logger.info("pyannote_4_0_pipeline_loaded_successfully")
         return pipeline
 
-    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Run speaker diarization on audio file.
 
         Args:
-            input: Task input with audio path and config
+            engine_input: Task input with audio path and config
 
         Returns:
             EngineOutput with DiarizeOutput containing speakers and turns
@@ -171,8 +171,8 @@ class PyannoteEngine(Engine):
             self.logger.info("diarization_disabled_returning_mock_output")
             return self._mock_output()
 
-        audio_path = input.audio_path
-        config = input.config
+        audio_path = engine_input.audio_path
+        config = engine_input.config
 
         self.logger.info("processing_diarization", audio_path=str(audio_path))
 
