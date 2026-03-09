@@ -404,29 +404,28 @@ you can eliminate the align stage entirely.
 **Saves:** An entire pipeline stage, ~200 LOC in dag.py + selector,
 one engine directory, one docker service.
 
-### 5c. Make PII text redaction post-processing; keep audio redaction in pipeline
+### 5c. Make PII detection a post-processing hook, not a pipeline stage
 
 PII detection and audio redaction are the only stages that don't improve
-the transcript -- they're compliance features.
+the transcript -- they're compliance features. Both can move to post-
+processing:
 
-**PII text redaction** (inserting `[PERSON]` markers) can move to a
-post-processing hook -- it only needs the transcript text and entity
-positions.
+- **PII text redaction** needs the transcript text + entity positions
+- **PII audio redaction** produces a new WAV artifact (doesn't modify
+  original). It reads the original audio from S3 (persists until job
+  cleanup) and PII entity timestamps from the transcript.
 
-**PII audio redaction** must stay in the pipeline. The `audio-redactor`
-engine creates a new audio file via FFmpeg with silence/beep over PII
-segments. It needs the original audio file, which isn't available after
-job completion. When requested, these stages append linearly:
+Neither requires running inside the core pipeline. They run as async
+post-completion jobs when requested.
 
-```
-... → [diarize] → [pii_detect → audio_redact]
-```
+**Caveat:** If compliance requires that unredacted audio never exists
+in storage even temporarily, audio redaction must run in-pipeline. This
+is a deployment policy choice, not an architectural constraint. See
+section 8i for detailed analysis.
 
-**Saves:** If only text redaction: two stages from the core pipeline,
-~100 LOC. If audio redaction requested: stages stay, but are still
-linear (no DAG branching needed).
-
-**⚠ See section 8a for full analysis of this blind spot.**
+**Saves:** Two pipeline stages from the core pipeline, ~100 LOC in
+DAG builder. PII engines themselves don't change -- they just run as
+post-completion jobs instead of pipeline stages.
 
 ### 5d. Eliminate the merge stage entirely
 
@@ -726,35 +725,25 @@ Systematic verification of every claim in this review against the actual
 codebase. Each section's conclusions were cross-checked with LOC counts,
 dependency analysis, and feasibility assessment.
 
-### 8a. CRITICAL: PII audio redaction cannot be post-processing
+### 8a. ~~CRITICAL: PII audio redaction cannot be post-processing~~ CORRECTED
 
-Section 5c proposes making PII detection a "post-processing hook".
-This is **partially wrong**.
+Initial cross-check flagged audio redaction as requiring pipeline
+inclusion because it "needs the original audio file." This was wrong.
 
-**PII text redaction** (inserting `[PERSON]` markers into transcript
-text) CAN be post-processing -- it only needs the transcript.
+Audio redaction produces a **new artifact** (redacted audio copy). It
+does NOT modify the original. The original audio persists in S3 as a
+prepare-stage artifact throughout the job lifecycle. Post-processing
+can read it just like any pipeline stage does.
 
-**PII audio redaction** CANNOT be post-processing. The `audio-redactor`
-engine (`engines/stt-redact/audio-redactor/engine.py`) creates a **new
-audio file** with FFmpeg, applying silence/beep over PII time ranges.
-This requires:
-- Access to the original audio file (not available after job completion
-  and cleanup)
-- In per_channel mode: per-channel redacted WAVs for stereo reassembly
+**Both PII text redaction AND audio redaction CAN be post-processing.**
+See section 8i for full analysis.
 
-**Corrected proposal:** If audio redaction is requested, keep it as a
-pipeline stage (`pii_detect → audio_redact`) that runs after diarize
-and before job completion. It enriches the `Transcript` document with
-`redacted_audio_artifact_id` and produces a parallel audio artifact.
-Text-only PII redaction can be post-processing.
-
-Updated pipeline with audio redaction:
+The core pipeline remains:
 ```
-prepare → transcribe → [diarize] → [pii_detect → audio_redact]
+prepare → transcribe → [diarize]
 ```
 
-This is still linear. PII stages are appended when requested, not
-branched.
+PII runs asynchronously after job completion when requested.
 
 ### 8b. per_channel scope is 4-5x larger than claimed
 
@@ -861,17 +850,116 @@ simplifies to "start next stage in list". The
 dependency) becomes "read the single previous stage's output" -- or
 with a shared Transcript document, just "pass the Transcript forward".
 
-### 8h. Section 2 pipeline diagram still shows MERGE and ALIGN
+### 8h. Merge elimination feasibility: convergence pattern resolved by linear pipeline
 
-The pipeline example in section 2 still shows the old stages:
-```
-PREPARE → [VAD] → [NOISE_REDUCE] → TRANSCRIBE → [ALIGN] → [DIARIZE]
-    → [SPEAKER_VERIFY] → [EMOTION] → [NONVERBAL] → [PII_DETECT]
-    → [AUDIO_REDACT] → MERGE
+Cross-checking the shared Transcript proposal against the codebase
+revealed a concern: the current DAG has a **two-input convergence**
+where transcribe and diarize both produce independent outputs that merge
+combines. Specifically:
+
+- Diarize engine (`engines/stt-diarize/pyannote-4.0/engine.py:174`)
+  needs **raw audio** (not transcript) -- it runs pyannote on the WAV
+  to extract speaker embeddings
+- Merge engine does **overlap matching** -- for each transcript segment,
+  find the diarize speaker turn with maximum temporal overlap
+
+Under the old parallel DAG, this required merge as a join point. But
+with the **linear pipeline** (transcribe → diarize), this is already
+resolved:
+
+1. Transcribe produces `Transcript` with segments (start, end, text)
+2. Diarize runs pyannote on the audio to get speaker turns
+3. Diarize **also** reads `previous_outputs["transcribe"]` to get
+   segments, applies overlap matching (~20 LOC), and writes enriched
+   `Transcript` with `segments[].speaker` populated
+
+The overlap matching logic (currently in merge at lines 195-200) is
+trivial:
+
+```python
+def assign_speakers(segments, speaker_turns):
+    for seg in segments:
+        overlaps = {}
+        for turn in speaker_turns:
+            overlap = max(0, min(seg.end, turn.end) - max(seg.start, turn.start))
+            if overlap > 0:
+                overlaps[turn.speaker] = overlaps.get(turn.speaker, 0) + overlap
+        if overlaps:
+            seg.speaker = max(overlaps, key=overlaps.get)
 ```
 
-This should be updated to match the section 6 conclusions (no align,
-no merge, PII only when audio redaction requested).
+**What moves into diarize:** overlap matching + `known_speaker_names`
+remapping (~40 LOC total). The diarize engine would output an enriched
+`Transcript` instead of raw `DiarizeOutput`.
+
+**Data flow validated:** Each stage currently reads `previous_outputs`
+from S3 via `_gather_previous_outputs()` (handlers.py:1023). With a
+linear pipeline, diarize reads transcribe's Transcript from S3, runs
+pyannote on the audio artifact (also in S3), then writes enriched
+Transcript back. No mechanism changes needed.
+
+**Gateway already decoupled:** `storage.py:81` fetches
+`jobs/{job_id}/transcript.json` generically -- it doesn't check for
+`stage == "merge"`. Any stage producing this artifact works.
+
+### 8i. Audio redaction CAN be post-processing (correcting 8a)
+
+Re-examining section 8a: audio redaction was flagged as requiring
+pipeline inclusion because it "needs the original audio file, which
+isn't available after job completion."
+
+This is **incorrect**. Audio redaction does not modify the original
+audio -- it produces a **new audio artifact** (the redacted copy).
+The original audio from the prepare stage persists in S3 as
+`jobs/{job_id}/artifacts/{prepare_task_id}/prepared_audio.wav` until
+explicit job cleanup. Any post-processing job can read it.
+
+Audio redaction needs:
+1. The prepared audio file → available in S3 throughout job lifecycle
+2. PII entity positions with timestamps → available in the Transcript
+3. Redaction config (mode, buffer_ms) → available in job parameters
+
+None of these require the redaction to run within the core pipeline.
+Audio redaction can run as a post-completion async job:
+
+```
+Core pipeline: prepare → transcribe → [diarize]
+                                           ↓ job completes
+Post-processing (async): pii_detect → audio_redact
+                         (reads transcript + original audio from S3)
+```
+
+This means PII detection AND audio redaction CAN both be post-
+processing, restoring the original section 5c proposal. The core
+pipeline stays maximally simple.
+
+**Caveat:** If a compliance requirement mandates that the original audio
+is NEVER stored without redaction (i.e., the unredacted audio must not
+exist even temporarily), then audio redaction must be in the pipeline.
+But this is a deployment policy, not an architectural constraint.
+
+### 8j. Section 2 pipeline diagram was stale (now fixed)
+
+The pipeline example in section 2 previously showed the old stages
+including ALIGN and MERGE. Updated to match section 6 conclusions.
+
+### 8k. No LLM cleanup / refine engine exists yet
+
+The review mentions LLM cleanup as a future stage. Confirmed: no
+refine or LLM-cleanup engine exists in the codebase. The `engines/`
+directory has: stt-prepare, stt-transcribe (5 variants), stt-align,
+stt-diarize (2 variants), stt-detect, stt-redact, stt-merge, stt-rt
+(4 variants). This validates the pipeline extensibility concern --
+adding new stages like LLM cleanup should be trivial, not a multi-file
+change.
+
+### 8l. Real-time system is completely independent
+
+The real-time transcription system (`realtime_sdk/`, `session_router/`)
+uses a completely separate code path from batch processing. It has no
+dependency on DAG, merge, or task scheduling. Eliminating the merge
+stage and simplifying the batch pipeline has **zero impact** on the
+real-time system. This de-risks the pipeline refactor significantly.
 
 ---
 
@@ -884,6 +972,6 @@ no merge, PII only when audio redaction requested).
 | Registry unification | Low -- internal protocol | Run old + new in parallel, cut over |
 | Declarative engine.yaml | Medium -- new stage registration contract | Keep hardcoded fallback during transition |
 | per_channel pre-processing split | Medium -- larger scope than initially estimated (~1,200 LOC) | Implement behind feature flag; keep old path until fully tested |
-| PII pipeline rework | Low-Medium -- audio redaction must stay in pipeline | Separate text-only PII (post-processing) from audio redaction (pipeline stage) |
+| PII as post-processing | Low -- both text and audio redaction can be async | Only risk: compliance requiring no unredacted audio in storage (deployment policy, not architecture) |
 | Session router merge | Medium -- affects realtime latency | Benchmark allocation latency before/after |
 | Gateway WS refactor | Low -- shared `_realtime_common.py` is a starting point | Contract tests per API compatibility layer |
