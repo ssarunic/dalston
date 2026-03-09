@@ -818,8 +818,8 @@ async def select_pipeline_engines(
             requirements,
             registry,
             catalog,
-            user_preference=effective_parameters.get(ENGINE_PARAM_TRANSCRIBE)
-            or effective_parameters.get(MODEL_PARAM_TRANSCRIBE),
+            user_preference=effective_parameters.get(MODEL_PARAM_TRANSCRIBE)
+            or effective_parameters.get(ENGINE_PARAM_TRANSCRIBE),
             db=db,
         )
 

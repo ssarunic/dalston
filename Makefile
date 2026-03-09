@@ -6,7 +6,13 @@
 .PHONY: help dev dev-minimal dev-gpu dev-observability stop logs logs-all ps \
         build-cpu build-gpu build-engine deploy-web \
         aws-start aws-stop aws-logs \
-        health clean clean-local validate test lint
+        health clean clean-local validate test lint test-openai-sdk-live \
+        test-elevenlabs-sdk-live test-e2e runtime-freshness runtime-freshness-required \
+        sync-test-stack docker-gc-soft docker-gc-hard docker-gc-auto
+
+# Python interpreter used for pytest-driven targets.
+PYTHON_TEST ?= python3.12
+PYTEST_CMD = $(PYTHON_TEST) -m pytest
 
 # Default target
 help:
@@ -35,6 +41,12 @@ help:
 	@echo ""
 	@echo "Testing & Validation:"
 	@echo "  make test            - Run all tests"
+	@echo "  make test-e2e        - Run e2e suite with freshness + GC guards"
+	@echo "  make test-openai-sdk-live - Run live OpenAI SDK parity tests (requires DALSTON_API_KEY)"
+	@echo "  make test-elevenlabs-sdk-live - Run live ElevenLabs SDK parity tests (requires DALSTON_API_KEY)"
+	@echo "  make runtime-freshness - Check running container revision freshness"
+	@echo "  make sync-test-stack - Rebuild currently running services with current git revision"
+	@echo "  make docker-gc-auto  - Docker GC with soft/hard auto escalation"
 	@echo "  make lint            - Run linters (ruff, mypy)"
 	@echo "  make validate        - Validate compose configurations"
 	@echo "  make health          - Check service health"
@@ -58,21 +70,25 @@ clean-local:
 
 # Start full local stack with all CPU engines
 dev: clean-local
-	docker compose --profile local-infra --profile local-object-storage up -d --build
+	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
+		docker compose --profile local-infra --profile local-object-storage up -d --build
 
 # Start minimal stack for quick iteration
 dev-minimal: clean-local
-	docker compose --profile local-infra --profile local-object-storage up -d --build \
+	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
+		docker compose --profile local-infra --profile local-object-storage up -d --build \
 		gateway orchestrator \
 		stt-batch-prepare stt-batch-transcribe-faster-whisper stt-batch-align-phoneme-cpu stt-batch-merge
 
 # Start with GPU engines (requires NVIDIA GPU)
 dev-gpu: clean-local
-	docker compose --profile local-infra --profile local-object-storage --profile gpu up -d --build
+	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
+		docker compose --profile local-infra --profile local-object-storage --profile gpu up -d --build
 
 # Start with observability stack (jaeger, prometheus, grafana)
 dev-observability:
-	docker compose --profile local-infra --profile local-object-storage --profile observability up -d
+	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
+		docker compose --profile local-infra --profile local-object-storage --profile observability up -d
 
 # Stop all services (all profiles)
 stop:
@@ -125,12 +141,14 @@ rebuild:
 ifndef ENGINE
 	$(error ENGINE is required. Usage: make rebuild ENGINE=<service-name>)
 endif
-	docker compose up -d --build $(ENGINE)
+	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
+		docker compose up -d --build $(ENGINE)
 
 # Rebuild gateway with latest web console changes
 deploy-web:
 	docker compose build gateway
-	docker compose up -d gateway
+	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
+		docker compose up -d gateway
 
 # ============================================================
 # AWS DEPLOYMENT
@@ -138,7 +156,8 @@ deploy-web:
 
 # Start on AWS with local infra + GPU
 aws-start:
-	docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
+	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
+		docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
 		--env-file .env.aws \
 		--profile local-infra --profile gpu up -d
 
@@ -164,11 +183,39 @@ aws-ps:
 
 # Run all tests
 test:
-	pytest
+	$(PYTEST_CMD)
+
+# Run end-to-end suite with runtime freshness and disk guards
+test-e2e: runtime-freshness-required docker-gc-auto
+	$(PYTEST_CMD) -m e2e tests/e2e
+
+# Run persisted live OpenAI SDK compatibility tests (M61)
+# Requires DALSTON_API_KEY. Optional: DALSTON_OPENAI_BASE_URL
+test-openai-sdk-live: runtime-freshness-required docker-gc-auto
+	@if [ -z "$$DALSTON_API_KEY" ]; then \
+		echo "DALSTON_API_KEY is required"; \
+		exit 1; \
+	fi
+	@DALSTON_OPENAI_BASE_URL=$${DALSTON_OPENAI_BASE_URL:-http://127.0.0.1:8000/v1} \
+		$(PYTEST_CMD) -q tests/integration/test_openai_sdk_contract.py
+	@DALSTON_OPENAI_BASE_URL=$${DALSTON_OPENAI_BASE_URL:-http://127.0.0.1:8000/v1} \
+		$(PYTEST_CMD) -q -m e2e tests/e2e/test_openai_sdk.py
+
+# Run persisted live ElevenLabs SDK compatibility tests (M62)
+# Requires DALSTON_API_KEY. Optional: DALSTON_ELEVENLABS_BASE_URL
+test-elevenlabs-sdk-live: runtime-freshness-required docker-gc-auto
+	@if [ -z "$$DALSTON_API_KEY" ]; then \
+		echo "DALSTON_API_KEY is required"; \
+		exit 1; \
+	fi
+	@DALSTON_ELEVENLABS_BASE_URL=$${DALSTON_ELEVENLABS_BASE_URL:-http://127.0.0.1:8000} \
+		$(PYTEST_CMD) -q tests/integration/test_elevenlabs_sdk_contract.py
+	@DALSTON_ELEVENLABS_BASE_URL=$${DALSTON_ELEVENLABS_BASE_URL:-http://127.0.0.1:8000} \
+		$(PYTEST_CMD) -q -m e2e tests/e2e/test_elevenlabs_sdk.py
 
 # Run tests with coverage
 test-cov:
-	pytest --cov=dalston --cov-report=html
+	$(PYTEST_CMD) --cov=dalston --cov-report=html
 
 # Run linters
 lint:
@@ -211,6 +258,33 @@ health:
 # ============================================================
 # UTILITIES
 # ============================================================
+
+# Runtime freshness checks for Docker stack
+runtime-freshness:
+	@scripts/check-runtime-freshness.sh
+
+runtime-freshness-required:
+	@scripts/check-runtime-freshness.sh --require-running
+
+# Rebuild currently running services with current git revision marker
+sync-test-stack:
+	@services="$$(docker compose ps --status running --services | tr '\n' ' ' | xargs)"; \
+	if [ -z "$$services" ]; then \
+		echo "No running services found. Start stack first (for example: make dev-minimal)."; \
+		exit 1; \
+	fi; \
+	echo "Rebuilding running services: $$services"; \
+	DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) docker compose up -d --build $$services
+
+# Docker garbage collection modes
+docker-gc-soft:
+	@scripts/docker-gc.sh soft
+
+docker-gc-hard:
+	@scripts/docker-gc.sh hard
+
+docker-gc-auto:
+	@scripts/docker-gc.sh auto
 
 # Remove stopped containers and unused images
 clean:

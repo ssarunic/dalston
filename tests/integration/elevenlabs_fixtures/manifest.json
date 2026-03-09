@@ -1,0 +1,17 @@
+{
+  "contract_date": "2026-03-08",
+  "sdk": {
+    "package": "elevenlabs",
+    "version": "2.38.1"
+  },
+  "fixtures": [
+    "speech_to_text_convert_sync_request.json",
+    "speech_to_text_convert_sync_response.json",
+    "speech_to_text_convert_async_response.json",
+    "speech_to_text_get_pending_response.json",
+    "speech_to_text_get_completed_response.json",
+    "speech_to_text_multichannel_response.json",
+    "single_use_token_create_response.json",
+    "realtime_session_started_message.json"
+  ]
+}

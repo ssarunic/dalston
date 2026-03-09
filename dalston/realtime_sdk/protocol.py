@@ -292,6 +292,9 @@ class ConfigUpdateMessage:
     """Client request to update session configuration."""
 
     language: str | None = None
+    vad_threshold: float | None = None
+    min_silence_duration_ms: int | None = None
+    prefix_padding_ms: int | None = None
     type: str = field(default="config", init=False)
 
 
@@ -361,7 +364,12 @@ def parse_client_message(data: str | dict) -> ClientMessage:
     msg_type = parsed.get("type")
 
     if msg_type == "config":
-        return ConfigUpdateMessage(language=parsed.get("language"))
+        return ConfigUpdateMessage(
+            language=parsed.get("language"),
+            vad_threshold=parsed.get("vad_threshold"),
+            min_silence_duration_ms=parsed.get("min_silence_duration_ms"),
+            prefix_padding_ms=parsed.get("prefix_padding_ms"),
+        )
     elif msg_type == "flush":
         return FlushMessage()
     elif msg_type == "clear":

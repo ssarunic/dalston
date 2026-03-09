@@ -190,3 +190,140 @@ def test_merge_engine_declares_transcript_artifact(tmp_path: Path) -> None:
     assert output.produced_artifacts[-1].logical_name == "transcript"
     assert output.produced_artifacts[-1].local_path.exists()
     assert output.data.job_id == "job-3"
+
+
+def test_merge_engine_applies_known_speaker_names(tmp_path: Path) -> None:
+    FinalMergerEngine = _load_engine_class(
+        "m51_merge_engine_named_speakers",
+        "engines/stt-merge/final-merger/engine.py",
+        "FinalMergerEngine",
+    )
+
+    input_audio = tmp_path / "audio.wav"
+    input_audio.write_bytes(b"audio")
+
+    engine = FinalMergerEngine()
+    task_input = EngineInput(
+        task_id="task-merge",
+        job_id="job-4",
+        stage="merge",
+        materialized_artifacts={
+            "audio": MaterializedArtifact(
+                artifact_id="task-prepare:prepared_audio",
+                kind="audio",
+                local_path=input_audio,
+            )
+        },
+        previous_outputs={
+            "prepare": {
+                "channel_files": [
+                    {
+                        "artifact_id": "task-prepare:prepared_audio",
+                        "format": "wav",
+                        "duration": 5.0,
+                        "sample_rate": 16000,
+                        "channels": 1,
+                        "bit_depth": 16,
+                    }
+                ],
+                "split_channels": False,
+                "runtime": "audio-prepare",
+            },
+            "transcribe": {
+                "segments": [{"start": 0.0, "end": 0.8, "text": "hello"}],
+                "text": "hello",
+                "language": "en",
+                "runtime": "faster-whisper",
+            },
+            "diarize": {
+                "turns": [
+                    {"speaker": "SPEAKER_00", "start": 0.0, "end": 1.0},
+                ],
+                "speakers": ["SPEAKER_00"],
+                "num_speakers": 1,
+                "runtime": "pyannote-4.0",
+                "skipped": False,
+                "warnings": [],
+            },
+        },
+        config={
+            "speaker_detection": "diarize",
+            "known_speaker_names": ["Alice"],
+        },
+    )
+
+    output = engine.process(task_input, _ctx(task_id="task-merge", job_id="job-4"))
+
+    assert output.data.segments[0].speaker == "Alice"
+    assert output.data.speakers[0].id == "Alice"
+    assert output.data.speakers[0].label == "Alice"
+
+
+def test_merge_engine_preserves_segment_quality_metadata(tmp_path: Path) -> None:
+    FinalMergerEngine = _load_engine_class(
+        "m51_merge_engine_quality",
+        "engines/stt-merge/final-merger/engine.py",
+        "FinalMergerEngine",
+    )
+
+    input_audio = tmp_path / "audio.wav"
+    input_audio.write_bytes(b"audio")
+
+    engine = FinalMergerEngine()
+    task_input = EngineInput(
+        task_id="task-merge-quality",
+        job_id="job-5",
+        stage="merge",
+        materialized_artifacts={
+            "audio": MaterializedArtifact(
+                artifact_id="task-prepare:prepared_audio",
+                kind="audio",
+                local_path=input_audio,
+            )
+        },
+        previous_outputs={
+            "prepare": {
+                "channel_files": [
+                    {
+                        "artifact_id": "task-prepare:prepared_audio",
+                        "format": "wav",
+                        "duration": 5.0,
+                        "sample_rate": 16000,
+                        "channels": 1,
+                        "bit_depth": 16,
+                    }
+                ],
+                "split_channels": False,
+                "runtime": "audio-prepare",
+            },
+            "transcribe": {
+                "segments": [
+                    {
+                        "start": 0.0,
+                        "end": 0.8,
+                        "text": "hello",
+                        "tokens": [11, 22, 33],
+                        "temperature": 0.0,
+                        "avg_logprob": -0.42,
+                        "compression_ratio": 1.15,
+                        "no_speech_prob": 0.07,
+                    }
+                ],
+                "text": "hello",
+                "language": "en",
+                "runtime": "faster-whisper",
+            },
+        },
+        config={"speaker_detection": "none"},
+    )
+
+    output = engine.process(
+        task_input, _ctx(task_id="task-merge-quality", job_id="job-5")
+    )
+
+    segment = output.data.segments[0]
+    assert segment.tokens == [11, 22, 33]
+    assert segment.temperature == 0.0
+    assert segment.avg_logprob == -0.42
+    assert segment.compression_ratio == 1.15
+    assert segment.no_speech_prob == 0.07

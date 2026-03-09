@@ -1,0 +1,23 @@
+{
+  "language_code": "en",
+  "language_probability": 0.98,
+  "text": "Hello world",
+  "words": [
+    {
+      "text": "Hello",
+      "start": 0.0,
+      "end": 0.45,
+      "type": "word",
+      "speaker_id": "spk_0",
+      "logprob": -0.12,
+      "characters": [
+        {
+          "text": "H",
+          "start": 0.0,
+          "end": 0.05
+        }
+      ]
+    }
+  ],
+  "transcription_id": "00000000-0000-0000-0000-000000000000"
+}

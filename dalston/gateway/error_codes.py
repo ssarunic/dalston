@@ -125,7 +125,11 @@ class Err:
     # -------------------------------------------------------------------------
     # 409 Conflict
     # -------------------------------------------------------------------------
+    DISTRIBUTED_MODE_REQUIRED = (
+        "{feature} is only available in distributed mode (S3/MinIO)."
+    )
     JOB_NOT_TERMINAL = "Job not in terminal state. Current status: {status}"
+    LITE_MODE_UNSUPPORTED = "Endpoint is not available in lite mode"
     REDACTED_AUDIO_REQUIRES_COMPLETED = (
         "Job not completed. Current status: {status}. "
         "Redacted audio is only available for completed jobs."
@@ -166,6 +170,7 @@ class Err:
     # All referenced constants (e.g. JOB_NOT_FOUND) must appear earlier in
     # the class body, otherwise Python raises NameError at class creation time.
     _STRUCTURED: dict[str, str] = {
+        "lite_mode_unsupported": LITE_MODE_UNSUPPORTED,
         "job_not_found": JOB_NOT_FOUND,
         "task_not_found": TASK_NOT_FOUND,
         "no_artifacts": "Task has not started yet",

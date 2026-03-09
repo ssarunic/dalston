@@ -21,6 +21,8 @@ from dalston.gateway.services.audio_url import (
     download_audio_from_url,
 )
 
+READ_CHUNK_SIZE_BYTES = 1024 * 1024  # 1MB
+
 
 @dataclass
 class IngestedAudio:
@@ -48,6 +50,7 @@ class AudioIngestionService:
         self,
         file: UploadFile | None,
         url: str | None,
+        max_bytes: int | None = None,
     ) -> IngestedAudio:
         """Ingest audio from either a file upload or URL.
 
@@ -75,9 +78,12 @@ class AudioIngestionService:
 
         # Acquire content from URL or file
         if url is not None:
-            content, filename = await self._download_from_url(url)
+            content, filename = await self._download_from_url(url, max_bytes=max_bytes)
         else:
-            content, filename = await self._read_from_file(file)  # type: ignore[arg-type]
+            content, filename = await self._read_from_file(  # type: ignore[arg-type]
+                file,
+                max_bytes=max_bytes,
+            )
 
         # Probe audio to extract metadata and validate
         # Uses to_thread() because probe_audio uses tinytag synchronously
@@ -92,7 +98,12 @@ class AudioIngestionService:
             metadata=metadata,
         )
 
-    async def _download_from_url(self, url: str) -> tuple[bytes, str]:
+    async def _download_from_url(
+        self,
+        url: str,
+        *,
+        max_bytes: int | None = None,
+    ) -> tuple[bytes, str]:
         """Download audio from URL.
 
         Args:
@@ -105,7 +116,11 @@ class AudioIngestionService:
             HTTPException: On download errors
         """
         try:
-            max_size = int(self.settings.audio_url_max_size_gb * 1024 * 1024 * 1024)
+            max_size = (
+                max_bytes
+                if max_bytes is not None
+                else int(self.settings.audio_url_max_size_gb * 1024 * 1024 * 1024)
+            )
             downloaded = await download_audio_from_url(
                 url=url,
                 max_size=max_size,
@@ -115,7 +130,12 @@ class AudioIngestionService:
         except AudioUrlError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
 
-    async def _read_from_file(self, file: UploadFile) -> tuple[bytes, str]:
+    async def _read_from_file(
+        self,
+        file: UploadFile,
+        *,
+        max_bytes: int | None = None,
+    ) -> tuple[bytes, str]:
         """Read content from uploaded file.
 
         Args:
@@ -129,5 +149,37 @@ class AudioIngestionService:
         """
         if not file.filename:
             raise HTTPException(status_code=400, detail=Err.FILE_MUST_HAVE_FILENAME)
-        content = await file.read()
-        return content, file.filename
+
+        # If Starlette provided file size metadata, fail before reading content.
+        reported_size = getattr(file, "size", None)
+        if (
+            max_bytes is not None
+            and isinstance(reported_size, int)
+            and reported_size > max_bytes
+        ):
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"File too large: {reported_size / (1024**3):.2f} GB. "
+                    f"Maximum: {max_bytes / (1024**3):.1f} GB"
+                ),
+            )
+
+        chunks: list[bytes] = []
+        total_size = 0
+        while True:
+            chunk = await file.read(READ_CHUNK_SIZE_BYTES)
+            if not chunk:
+                break
+            total_size += len(chunk)
+            if max_bytes is not None and total_size > max_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        f"File too large: {total_size / (1024**3):.2f} GB. "
+                        f"Maximum: {max_bytes / (1024**3):.1f} GB"
+                    ),
+                )
+            chunks.append(chunk)
+
+        return b"".join(chunks), file.filename

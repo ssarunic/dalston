@@ -137,6 +137,21 @@ class Segment(BaseModel):
     confidence: float | None = Field(
         default=None, description="Segment-level confidence, None if unavailable"
     )
+    tokens: list[int] | None = Field(
+        default=None, description="Decoder token IDs when provided by engine"
+    )
+    temperature: float | None = Field(
+        default=None, description="Decoding temperature used for this segment"
+    )
+    avg_logprob: float | None = Field(
+        default=None, description="Average token log probability for the segment"
+    )
+    compression_ratio: float | None = Field(
+        default=None, description="Compression ratio proxy emitted by decoder"
+    )
+    no_speech_prob: float | None = Field(
+        default=None, description="Decoder no-speech probability for the segment"
+    )
     language: str | None = Field(
         default=None, description="ISO 639-1 code (for code-switching)"
     )
@@ -255,6 +270,21 @@ class MergedSegment(BaseModel):
     )
     speaker: str | None = Field(default=None, description="Assigned speaker ID")
     words: list[Word] | None = Field(default=None, description="Word-level detail")
+    tokens: list[int] | None = Field(
+        default=None, description="Decoder token IDs when available"
+    )
+    temperature: float | None = Field(
+        default=None, description="Decoding temperature for this segment"
+    )
+    avg_logprob: float | None = Field(
+        default=None, description="Average token log probability"
+    )
+    compression_ratio: float | None = Field(
+        default=None, description="Decoder compression ratio metric"
+    )
+    no_speech_prob: float | None = Field(
+        default=None, description="Decoder no-speech probability metric"
+    )
     speaker_confidence: float | None = Field(
         default=None, description="Speaker assignment confidence"
     )
@@ -323,6 +353,10 @@ class TranscribeInput(StageInput):
         default=None, description="ISO 639-1 code, None=auto-detect"
     )
     task: str = Field(default="transcribe", description="'transcribe' or 'translate'")
+    prompt: str | None = Field(
+        default=None,
+        description="Free-text prompt/context to steer transcription",
+    )
 
     # Timestamps
     timestamp_granularity: TimestampGranularity = Field(
@@ -332,6 +366,13 @@ class TranscribeInput(StageInput):
     # Vocabulary boosting
     vocabulary: list[str] | None = Field(
         default=None, description="Terms to boost recognition (max 100)"
+    )
+    chunking_strategy: dict[str, Any] | None = Field(
+        default=None, description="Optional model-specific chunking strategy object"
+    )
+    include_transcription_logprobs: bool = Field(
+        default=False,
+        description="Include transcription logprobs when supported",
     )
     suppress_tokens: list[str] | None = Field(
         default=None, description="Tokens to suppress"
@@ -389,6 +430,10 @@ class MergeInput(StageInput):
     )
     split_on_speaker_change: bool = Field(
         default=False, description="Re-segment at speaker boundaries"
+    )
+    known_speaker_names: list[str] | None = Field(
+        default=None,
+        description="Optional ordered speaker names to apply to final transcript",
     )
 
 

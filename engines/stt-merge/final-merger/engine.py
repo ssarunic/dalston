@@ -176,11 +176,21 @@ class FinalMergerEngine(Engine):
                 seg_end = seg.end
                 seg_text = seg.text
                 seg_words = seg.words
+                seg_tokens = seg.tokens
+                seg_temperature = seg.temperature
+                seg_avg_logprob = seg.avg_logprob
+                seg_compression_ratio = seg.compression_ratio
+                seg_no_speech_prob = seg.no_speech_prob
             else:
                 seg_start = seg.get("start", 0.0)
                 seg_end = seg.get("end", 0.0)
                 seg_text = seg.get("text", "")
                 seg_words = seg.get("words")
+                seg_tokens = seg.get("tokens")
+                seg_temperature = seg.get("temperature")
+                seg_avg_logprob = seg.get("avg_logprob")
+                seg_compression_ratio = seg.get("compression_ratio")
+                seg_no_speech_prob = seg.get("no_speech_prob")
 
             # Assign speaker based on diarization overlap
             speaker = None
@@ -201,6 +211,11 @@ class FinalMergerEngine(Engine):
                 text=seg_text,
                 speaker=speaker,
                 words=words,
+                tokens=seg_tokens if isinstance(seg_tokens, list) else None,
+                temperature=seg_temperature,
+                avg_logprob=seg_avg_logprob,
+                compression_ratio=seg_compression_ratio,
+                no_speech_prob=seg_no_speech_prob,
                 emotion=None,
                 emotion_confidence=None,
                 events=[],
@@ -213,6 +228,16 @@ class FinalMergerEngine(Engine):
             for speaker_id in diarization_speakers:
                 speakers.append(Speaker(id=speaker_id, label=None))
             self.logger.info("built_speakers_array", speaker_count=len(speakers))
+
+        known_speaker_names = config.get("known_speaker_names")
+        if isinstance(known_speaker_names, list) and known_speaker_names:
+            remapped = self._apply_known_speaker_names(
+                segments=segments,
+                speakers=speakers,
+                known_speaker_names=known_speaker_names,
+            )
+            if remapped:
+                self.logger.info("known_speaker_names_applied", mapping=remapped)
 
         # Determine pipeline stages that ran
         pipeline_stages = ["prepare", "transcribe"]
@@ -456,6 +481,11 @@ class FinalMergerEngine(Engine):
                             "text": seg.text,
                             "speaker": speaker_id,
                             "words": seg.words if has_words else None,
+                            "tokens": seg.tokens,
+                            "temperature": seg.temperature,
+                            "avg_logprob": seg.avg_logprob,
+                            "compression_ratio": seg.compression_ratio,
+                            "no_speech_prob": seg.no_speech_prob,
                             "channel": source_channel,
                         }
                     )
@@ -467,6 +497,11 @@ class FinalMergerEngine(Engine):
                             "text": seg.get("text", ""),
                             "speaker": speaker_id,
                             "words": seg.get("words") if has_words else None,
+                            "tokens": seg.get("tokens"),
+                            "temperature": seg.get("temperature"),
+                            "avg_logprob": seg.get("avg_logprob"),
+                            "compression_ratio": seg.get("compression_ratio"),
+                            "no_speech_prob": seg.get("no_speech_prob"),
                             "channel": source_channel,
                         }
                     )
@@ -575,6 +610,13 @@ class FinalMergerEngine(Engine):
                 redacted_text=redacted_seg_text,
                 speaker=seg["speaker"],
                 words=words,
+                tokens=seg.get("tokens")
+                if isinstance(seg.get("tokens"), list)
+                else None,
+                temperature=seg.get("temperature"),
+                avg_logprob=seg.get("avg_logprob"),
+                compression_ratio=seg.get("compression_ratio"),
+                no_speech_prob=seg.get("no_speech_prob"),
                 emotion=None,
                 emotion_confidence=None,
                 events=[],
@@ -586,6 +628,16 @@ class FinalMergerEngine(Engine):
             Speaker(id=f"SPEAKER_{ch:02d}", label=None, channel=ch)
             for ch in range(channel_count)
         ]
+
+        known_speaker_names = config.get("known_speaker_names")
+        if isinstance(known_speaker_names, list) and known_speaker_names:
+            remapped = self._apply_known_speaker_names(
+                segments=segments,
+                speakers=speakers,
+                known_speaker_names=known_speaker_names,
+            )
+            if remapped:
+                self.logger.info("known_speaker_names_applied", mapping=remapped)
 
         # Combine text from all segments
         text = " ".join(seg.text for seg in segments if seg.text)
@@ -691,6 +743,48 @@ class FinalMergerEngine(Engine):
         )
         produced_artifacts.append(transcript_artifact)
         return EngineOutput(data=transcript, produced_artifacts=produced_artifacts)
+
+    def _apply_known_speaker_names(
+        self,
+        *,
+        segments: list[MergedSegment],
+        speakers: list[Speaker],
+        known_speaker_names: list[str],
+    ) -> dict[str, str]:
+        """Relabel speaker IDs based on ordered names in first-appearance order."""
+        mapping: dict[str, str] = {}
+        name_index = 0
+
+        for segment in segments:
+            speaker_id = segment.speaker
+            if not speaker_id:
+                continue
+            if speaker_id in mapping:
+                continue
+            if name_index >= len(known_speaker_names):
+                break
+            mapped_name = known_speaker_names[name_index].strip()
+            if not mapped_name:
+                name_index += 1
+                continue
+            mapping[speaker_id] = mapped_name
+            name_index += 1
+
+        if not mapping:
+            return {}
+
+        for segment in segments:
+            speaker_id = segment.speaker
+            if speaker_id in mapping:
+                segment.speaker = mapping[speaker_id]
+
+        for speaker in speakers:
+            if speaker.id in mapping:
+                new_name = mapping[speaker.id]
+                speaker.id = new_name
+                speaker.label = new_name
+
+        return mapping
 
     def _assemble_stereo_audio(
         self,

@@ -703,6 +703,18 @@ async def _handle_job_webhook(
 
     event_type = f"transcription.{status}"
     log = log.bind(event_type=event_type)
+    params = job.parameters if isinstance(job.parameters, dict) else {}
+    webhook_enabled = params.get("elevenlabs_webhook_enabled")
+    if webhook_enabled is False:
+        log.debug("elevenlabs_webhook_not_requested")
+        return
+
+    request_id = params.get("request_id")
+    if not isinstance(request_id, str):
+        request_id = None
+    webhook_metadata = params.get("elevenlabs_webhook_metadata")
+    if not isinstance(webhook_metadata, dict):
+        webhook_metadata = None
 
     # Initialize webhook service for building payload
     webhook_service = WebhookService(secret=settings.webhook_secret)
@@ -726,15 +738,31 @@ async def _handle_job_webhook(
         status=status,
         duration=duration,
         error=error,
+        request_id=request_id,
+        metadata=webhook_metadata,
     )
 
     deliveries_created = 0
 
     # Create deliveries for registered endpoints
     endpoint_service = WebhookEndpointService()
-    endpoints = await endpoint_service.get_endpoints_for_event(
-        db, job.tenant_id, event_type
-    )
+    endpoints = []
+    raw_endpoint_id = params.get("elevenlabs_webhook_id")
+    if isinstance(raw_endpoint_id, str):
+        try:
+            endpoint_id = UUID(raw_endpoint_id)
+            endpoint = await endpoint_service.get_endpoint(
+                db, endpoint_id, job.tenant_id
+            )
+            if endpoint is not None:
+                endpoints = [endpoint]
+        except ValueError:
+            log.warning("invalid_webhook_id_on_job", webhook_id=raw_endpoint_id)
+
+    if not endpoints:
+        endpoints = await endpoint_service.get_endpoints_for_event(
+            db, job.tenant_id, event_type
+        )
 
     for endpoint in endpoints:
         await create_webhook_delivery(

@@ -23,11 +23,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_created
+from dalston.common.model_selection_keys import MODEL_PARAM_TRANSCRIBE
 from dalston.gateway.api.v1.openai_audio import (
     OPENAI_MAX_FILE_SIZE,
+    OpenAIEndpoint,
+    attach_openai_rate_limit_headers,
     format_openai_response,
     map_openai_model,
+    map_openai_runtime_model,
     raise_openai_error,
+    validate_openai_request,
 )
 from dalston.gateway.dependencies import (
     get_audit_service,
@@ -69,6 +74,7 @@ router = APIRouter(prefix="/audio", tags=["openai"])
 )
 async def create_translation_openai(
     request: Request,
+    response: Response,
     principal: Annotated[Principal, Depends(get_principal_with_job_rate_limit)],
     security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     file: UploadFile = File(..., description="Audio file to translate"),
@@ -103,34 +109,33 @@ async def create_translation_openai(
     The translation is performed by the transcription engine with English output forced.
     """
     security_manager.require_permission(principal, Permission.JOB_CREATE)
-    # Validate model (only whisper-1 supports translation)
-    if model != "whisper-1":
-        raise_openai_error(
-            400,
-            "Translation only supports whisper-1 model",
-            param="model",
-            code="invalid_model",
-        )
+    openai_rate_headers = getattr(request.state, "openai_rate_limit_headers", None)
 
-    # Validate response format
-    valid_formats = {"json", "text", "srt", "verbose_json", "vtt"}
-    if response_format not in valid_formats:
-        raise_openai_error(
-            400,
-            f"Invalid response_format: {response_format}. Supported: {', '.join(valid_formats)}.",
-            param="response_format",
-            code="invalid_response_format",
-        )
+    validate_openai_request(
+        model,
+        response_format,
+        timestamp_granularities=None,
+        endpoint=OpenAIEndpoint.TRANSLATIONS,
+        prompt=prompt,
+    )
 
     # Ingest audio
     try:
-        ingested = await ingestion_service.ingest(file=file, url=None)
+        ingested = await ingestion_service.ingest(
+            file=file,
+            url=None,
+            max_bytes=OPENAI_MAX_FILE_SIZE,
+        )
     except HTTPException as e:
+        detail = str(e.detail)
+        error_code = (
+            "file_too_large" if "too large" in detail.lower() else "invalid_file_format"
+        )
         raise_openai_error(
             e.status_code,
-            str(e.detail),
+            detail,
             param="file",
-            code="invalid_file_format",
+            code=error_code,
         )
 
     # Enforce OpenAI 25MB file size limit
@@ -149,11 +154,14 @@ async def create_translation_openai(
         "timestamps_granularity": "segment",
         "task": "translate",  # Enable translation mode
     }
+    runtime_model_id = map_openai_runtime_model(model)
+    if runtime_model_id:
+        parameters[MODEL_PARAM_TRANSCRIBE] = runtime_model_id
 
     if prompt:
-        parameters["vocabulary"] = prompt
+        parameters["prompt"] = prompt
 
-    if temperature > 0:
+    if temperature is not None:
         parameters["temperature"] = temperature
 
     # Generate job ID
@@ -205,7 +213,16 @@ async def create_translation_openai(
 
     if result.completed:
         transcript = await storage.get_transcript(job_id)
-        return format_openai_response(transcript, response_format, None, export_service)
+        payload = format_openai_response(
+            transcript,
+            response_format,
+            None,
+            export_service,
+            model=model,
+            task="translate",
+        )
+        attach_openai_rate_limit_headers(payload, response, openai_rate_headers)
+        return payload
 
     if result.failed:
         raise_openai_error(

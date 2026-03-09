@@ -13,6 +13,7 @@ from dalston.gateway.api.v1 import (
     realtime,
     realtime_sessions,
     realtime_status,
+    single_use_token,
     speech_to_text,
     tasks,
     transcription,
@@ -45,6 +46,7 @@ router.include_router(jobs.router)
 
 # Mount speech-to-text routes (ElevenLabs compatible API)
 router.include_router(speech_to_text.router)
+router.include_router(single_use_token.router)
 
 # Mount real-time transcription routes
 router.include_router(realtime.stream_router)  # WS /v1/audio/transcriptions/stream

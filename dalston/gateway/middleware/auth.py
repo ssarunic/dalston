@@ -98,8 +98,9 @@ def extract_api_key_from_websocket(websocket: WebSocket) -> str | None:
 
     Checks in order:
     1. Authorization: Bearer header (preferred)
-    2. api_key query parameter (fallback for browser clients)
-    3. xi-api-key header (ElevenLabs-compatible, deprecated)
+    2. token query parameter (ElevenLabs single-use token flow)
+    3. api_key query parameter (fallback for browser clients)
+    4. xi-api-key header (ElevenLabs-compatible, deprecated)
 
     Args:
         websocket: FastAPI WebSocket object
@@ -114,7 +115,12 @@ def extract_api_key_from_websocket(websocket: WebSocket) -> str | None:
         if len(parts) == 2 and parts[0].lower() == "bearer":
             return parts[1]
 
-    # Check query parameter (fallback for browser clients that can't set headers)
+    # Check ElevenLabs single-use token query parameter.
+    token = websocket.query_params.get("token")
+    if token:
+        return token
+
+    # Check API key query parameter (fallback for browser clients that can't set headers)
     api_key = websocket.query_params.get("api_key")
     if api_key:
         return api_key
@@ -154,6 +160,23 @@ async def authenticate_request(
 
     if not raw_key:
         raise AuthenticationError("Missing API key")
+
+    if raw_key.startswith("sk-"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": {
+                    "message": (
+                        "Detected an OpenAI API key (sk-...) on a Dalston endpoint. "
+                        "Use a Dalston API key (dk_...)."
+                    ),
+                    "type": "authentication_error",
+                    "param": None,
+                    "code": "invalid_api_key",
+                }
+            },
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     # Check if this is a session token
     if raw_key.startswith(TOKEN_PREFIX):
@@ -260,9 +283,16 @@ async def authenticate_websocket(
         await websocket.close(code=WS_CLOSE_INVALID_KEY, reason="Missing API key")
         return None
 
+    if raw_key.startswith("sk-"):
+        await websocket.close(
+            code=WS_CLOSE_INVALID_KEY,
+            reason="Detected OpenAI API key (sk-...). Use Dalston key (dk_...).",
+        )
+        return None
+
     # Check if this is a session token
     if raw_key.startswith(TOKEN_PREFIX):
-        session_token = await auth_service.validate_session_token(raw_key)
+        session_token = await auth_service.consume_session_token(raw_key)
         if not session_token:
             await websocket.close(
                 code=WS_CLOSE_INVALID_KEY, reason="Invalid or expired session token"

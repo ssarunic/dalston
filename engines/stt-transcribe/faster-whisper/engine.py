@@ -154,6 +154,20 @@ class WhisperEngine(Engine):
         vad_filter = config.get("vad_filter", self.DEFAULT_VAD_FILTER)
         channel = config.get("channel")
         vocabulary = config.get("vocabulary")
+        prompt = config.get("prompt")
+        task = config.get("task", "transcribe")
+        raw_temperature = config.get("temperature", 0.0)
+        if isinstance(raw_temperature, list):
+            parsed_temperatures = [float(value) for value in raw_temperature]
+            decode_temperature: float | list[float] = (
+                parsed_temperatures if parsed_temperatures else 0.0
+            )
+            segment_temperature = parsed_temperatures[0] if parsed_temperatures else 0.0
+        else:
+            segment_temperature = (
+                float(raw_temperature) if raw_temperature is not None else 0.0
+            )
+            decode_temperature = segment_temperature
 
         # Get model to use from task config
         runtime_model_id = config.get("runtime_model_id", self._default_model_id)
@@ -172,6 +186,9 @@ class WhisperEngine(Engine):
                 beam_size=beam_size,
                 vad_filter=vad_filter,
                 vocabulary_terms=len(vocabulary) if vocabulary else 0,
+                has_prompt=bool(prompt),
+                task=task,
+                temperature=decode_temperature,
             )
 
             # Build transcribe kwargs
@@ -180,7 +197,13 @@ class WhisperEngine(Engine):
                 "beam_size": beam_size,
                 "vad_filter": vad_filter,
                 "word_timestamps": True,
+                "temperature": decode_temperature,
             }
+            if task in {"transcribe", "translate"}:
+                transcribe_kwargs["task"] = task
+
+            if prompt:
+                transcribe_kwargs["initial_prompt"] = prompt
 
             if vocabulary:
                 transcribe_kwargs["hotwords"] = " ".join(vocabulary)
@@ -202,6 +225,10 @@ class WhisperEngine(Engine):
 
             for segment in segments_generator:
                 words: list[Word] | None = None
+                raw_tokens = getattr(segment, "tokens", None)
+                raw_avg_logprob = getattr(segment, "avg_logprob", None)
+                raw_compression_ratio = getattr(segment, "compression_ratio", None)
+                raw_no_speech_prob = getattr(segment, "no_speech_prob", None)
                 if segment.words:
                     words = [
                         Word(
@@ -220,6 +247,23 @@ class WhisperEngine(Engine):
                         end=round(segment.end, 3),
                         text=segment.text.strip(),
                         words=words,
+                        tokens=list(raw_tokens) if raw_tokens else None,
+                        temperature=segment_temperature,
+                        avg_logprob=(
+                            round(raw_avg_logprob, 4)
+                            if raw_avg_logprob is not None
+                            else None
+                        ),
+                        compression_ratio=(
+                            round(raw_compression_ratio, 4)
+                            if raw_compression_ratio is not None
+                            else None
+                        ),
+                        no_speech_prob=(
+                            round(raw_no_speech_prob, 4)
+                            if raw_no_speech_prob is not None
+                            else None
+                        ),
                     )
                 )
                 full_text_parts.append(segment.text.strip())
