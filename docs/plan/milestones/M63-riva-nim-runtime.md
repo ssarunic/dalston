@@ -140,11 +140,11 @@ Unit tests, integration tests, health checks, and structured logging for the new
 
 Operator docs, Makefile targets, AWS integration, and deployment validation.
 
-1. Add `make dev-riva` target for GPU deployments with NIM
+1. Auto-detect `docker-compose.riva.yml` in Makefile when `NGC_API_KEY` is set
 2. Document NGC API key setup and first-start warmup
 3. Add Riva runtime to `make health` checks
 4. Update AWS deployment scripts and compose overlay for Riva NIM
-5. Add `make aws-start-riva` target and update `dalston-aws` script
+5. Update `dalston-aws` script with `--riva` flag for NGC key provisioning
 6. Validate end-to-end with production-like deployment (local + AWS)
 
 ---
@@ -398,6 +398,7 @@ class RivaEngine(Engine):
 ```
 
 Key mapping decisions:
+
 - Riva `RecognitionResult` → Dalston `Segment` (one per utterance)
 - Riva `WordInfo` → Dalston `Word` (field is `text`, not `word`)
 - `alignment_method = NATIVE` since Riva produces accurate timestamps
@@ -515,7 +516,7 @@ This service should be added to a GPU-specific compose override file (e.g., `doc
 **Files:**
 
 - NEW: `docker-compose.riva.yml` (GPU + NIM overlay)
-- MODIFY: `Makefile` — add `dev-riva` target
+- MODIFY: `Makefile` — auto-detect Riva overlay when `NGC_API_KEY` is set
 
 ---
 
@@ -617,6 +618,7 @@ CMD ["python", "engine.py"]
 ### 63.8: Implement Riva Realtime Engine
 
 The realtime engine must implement the `RealtimeEngine` abstract methods:
+
 - `load_models()` — called once at startup, sets up gRPC channel to NIM
 - `transcribe(audio, language, model_variant, vocabulary)` — called per utterance by `SessionHandler` when VAD detects an endpoint
 
@@ -688,6 +690,7 @@ class RivaRealtimeEngine(RealtimeEngine):
 ```
 
 Key design decisions:
+
 - Uses `offline_recognize` per VAD-segmented utterance (same pattern as faster-whisper realtime engine)
 - The `SessionHandler` already manages VAD, chunking, and WebSocket relay — the engine only does inference
 - `load_models()` sets up the gRPC channel, no actual model loading (NIM handles that)
@@ -734,6 +737,7 @@ Uses `DALSTON_INSTANCE` and `DALSTON_WORKER_PORT` (the actual env vars from `Rea
 Test the mapping layer in isolation with mock gRPC responses. These tests run without a NIM container.
 
 Cover:
+
 - Single-result response → single segment
 - Multi-result response → multiple segments
 - Empty transcript handling
@@ -755,6 +759,7 @@ End-to-end tests that require a running NIM container. These are GPU-only and mu
 excluded from default `make test` runs.
 
 Cover:
+
 - Batch: submit WAV file via REST API → get transcript with word timestamps
 - Realtime: open WebSocket → stream audio → receive interim + final results
 - Health check: verify NIM container reachable and model loaded
@@ -800,16 +805,24 @@ Add a health probe for the Riva gRPC connection, and structured logging for infe
 
 ---
 
-### 63.13: Makefile Targets and Operator Docs
+### 63.13: Makefile Auto-Detection and Operator Docs
 
-Add convenience targets for Riva deployments.
+Riva overlay is auto-detected — no separate targets needed. When `NGC_API_KEY`
+is set and `docker-compose.riva.yml` exists, all existing Makefile targets
+(`dev-gpu`, `aws-start`, `stop`, etc.) automatically include the Riva overlay.
 
 ```makefile
-dev-riva:  ## Start full stack with Riva NIM (requires GPU + NGC_API_KEY)
-    docker compose -f docker-compose.yml -f docker-compose.riva.yml up -d
+# Auto-detect Riva NIM overlay
+RIVA_COMPOSE := $(wildcard docker-compose.riva.yml)
+ifdef NGC_API_KEY
+  ifdef RIVA_COMPOSE
+    RIVA_FILES := -f docker-compose.riva.yml
+  endif
+endif
+RIVA_FILES ?=
 
-stop-riva:  ## Stop Riva NIM services
-    docker compose -f docker-compose.yml -f docker-compose.riva.yml down
+# Usage: just set the key and use any existing target
+#   export NGC_API_KEY=... && make dev-gpu
 ```
 
 **Files:**
@@ -826,35 +839,24 @@ Extend the AWS deployment scripts and compose overlay to support Riva NIM.
 **`infra/docker/docker-compose.aws.yml`** — add Riva NIM sidecar and thin engine services, matching the pattern of existing AWS service overrides (S3 env vars, IAM role, `/data` volume mounts). The NIM cache volume maps to `/data/nim-cache` for persistence across instance stop/start cycles.
 
 **`infra/scripts/dalston-aws`** — add `--riva` flag to `setup --gpu` that:
+
 - Prompts for `NGC_API_KEY` and writes it to the instance env file
 - Pulls the NIM container image during provisioning (avoids ~30min first-request delay)
 - Sets `shm_size` via compose override
 
 **`infra/scripts/user-data.sh`** — if `NGC_API_KEY` is present in env, pre-pull the NIM container during instance bootstrap. Create `/data/nim-cache` directory with correct permissions.
 
-**Makefile** — add AWS + Riva composite targets:
-
-```makefile
-aws-start-riva:  ## Start AWS stack with Riva NIM (requires GPU + NGC_API_KEY)
-    docker compose -f docker-compose.yml \
-        -f infra/docker/docker-compose.aws.yml \
-        -f docker-compose.riva.yml \
-        --env-file .env.aws up -d
-
-aws-stop-riva:  ## Stop AWS stack with Riva NIM
-    docker compose -f docker-compose.yml \
-        -f infra/docker/docker-compose.aws.yml \
-        -f docker-compose.riva.yml \
-        --env-file .env.aws down
-```
+**Makefile** — Riva overlay is auto-included via `$(RIVA_FILES)` when `NGC_API_KEY` is set (see 63.13). No separate AWS targets needed — `make aws-start` includes Riva automatically.
 
 **Docs** — update `docs/guides/aws-deploy.md` and `docs/guides/aws-deployment-scenarios.md`:
+
 - Add "Scenario: GPU with Riva NIM" section
 - Document NGC API key setup (in `.env.aws` or `dalston-aws --riva`)
 - Note first-start warmup (~30min) and subsequent starts (~30s)
 - Cost impact: none beyond existing GPU instance cost (NIM is a software layer, not an AWS service)
 
 **What does NOT change:**
+
 - Terraform modules — same EC2/S3/IAM resources, no new AWS services
 - IAM policies — NIM pulls from NGC (not ECR), no AWS permission changes needed
 - S3 configuration — Riva engines write results through the same Dalston pipeline
@@ -875,7 +877,7 @@ aws-stop-riva:  ## Stop AWS stack with Riva NIM
 ```bash
 # 1. Start with Riva NIM (requires GPU + NGC_API_KEY)
 export NGC_API_KEY=...
-make dev-riva
+make dev-gpu
 
 # 2. Wait for NIM warmup (first start ~30min, subsequent ~30s)
 docker compose -f docker-compose.yml -f docker-compose.riva.yml logs -f riva-nim
@@ -923,9 +925,9 @@ curl -X POST http://localhost:8000/v1/models/nvidia/parakeet-ctc-1.1b-riva/pull
 - [ ] `gpu` pytest marker added and excluded from default runs
 - [ ] Integration tests with live NIM container (`@pytest.mark.gpu`)
 - [ ] Health check verifies gRPC connectivity before accepting tasks
-- [ ] `make dev-riva` target works end-to-end
+- [ ] Makefile auto-detects Riva overlay when `NGC_API_KEY` is set (`make dev-gpu` includes Riva)
 - [ ] AWS deployment scripts updated (`dalston-aws --riva`, compose overlay, user-data.sh)
-- [ ] `make aws-start-riva` target works end-to-end on GPU instance
+- [ ] `make aws-start` with `NGC_API_KEY` works end-to-end on GPU instance
 - [ ] AWS deployment docs updated with Riva scenario and NGC key setup
 - [ ] NeMo engines unaffected — no regression when Riva is absent
 

@@ -1283,11 +1283,10 @@ Any GPU scenario (2-5) can optionally add the **Riva NIM runtime** for TensorRT-
 # Provision with Riva (prompts for NGC_API_KEY)
 dalston-aws setup --gpu --riva
 
-# Or add manually to .env.aws
+# Or add manually to .env.aws and start normally — Riva is auto-detected
 echo "NGC_API_KEY=your-ngc-key" >> .env.aws
-
-# Start with Riva
-make aws-start-riva
+export NGC_API_KEY=your-ngc-key
+make aws-start
 ```
 
 ### Requirements
