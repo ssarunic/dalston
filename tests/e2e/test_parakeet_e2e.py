@@ -14,6 +14,8 @@ import pytest
 
 from tests.e2e.conftest import transcribe_json
 
+PARAKEET_MODEL_ID = "nvidia/parakeet-tdt-0.6b-v3"
+
 
 @pytest.mark.e2e
 class TestParakeetTranscription:
@@ -24,7 +26,7 @@ class TestParakeetTranscription:
         result = transcribe_json(
             audio_dir / "test_merged.wav",
             "--model",
-            "parakeet-0.6b",
+            PARAKEET_MODEL_ID,
             timeout=300,  # Allow extra time for model loading
         )
 
@@ -38,7 +40,7 @@ class TestParakeetTranscription:
         result = transcribe_json(
             audio_dir / "test_merged.wav",
             "--model",
-            "parakeet-0.6b",
+            PARAKEET_MODEL_ID,
             "--timestamps",
             "word",
             timeout=300,
@@ -63,7 +65,7 @@ class TestParakeetTranscription:
         result = transcribe_json(
             audio_dir / "test_merged.wav",
             "--model",
-            "parakeet-0.6b",
+            PARAKEET_MODEL_ID,
             "--timestamps",
             "segment",
             timeout=300,
@@ -83,7 +85,7 @@ class TestParakeetTranscription:
         result = transcribe_json(
             audio_dir / "test_stereo_speakers.wav",
             "--model",
-            "parakeet-0.6b",
+            PARAKEET_MODEL_ID,
             "--speakers",
             "diarize",
             timeout=300,
@@ -96,12 +98,12 @@ class TestParakeetTranscription:
         speakers = {s["id"] for s in result.get("speakers", [])}
         assert len(speakers) > 0, "Diarization should identify speakers"
 
-    def test_parakeet_alias_works(self, audio_dir):
-        """The 'parakeet' model alias works correctly."""
+    def test_parakeet_full_model_id_works(self, audio_dir):
+        """The fully qualified Parakeet model ID resolves and runs."""
         result = transcribe_json(
             audio_dir / "test_merged.wav",
             "--model",
-            "parakeet",  # Alias for parakeet-0.6b
+            PARAKEET_MODEL_ID,
             timeout=300,
         )
 

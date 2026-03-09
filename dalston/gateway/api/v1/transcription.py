@@ -82,6 +82,7 @@ from dalston.gateway.models.responses import (
     JobRenameRequest,
     JobResponse,
     JobSummary,
+    PIIInfo,
     RetentionInfo,
     StageResponse,
 )
@@ -740,13 +741,14 @@ async def get_transcription(
             # PII data (M26)
             response.redacted_text = transcript.get("redacted_text")
             response.entities = transcript.get("pii_entities")
-            if transcript.get("pii_metadata"):
-                from dalston.gateway.models.responses import PIIInfo
-
-                pii_meta = transcript["pii_metadata"]
+            pii_enabled = bool(job.parameters and job.parameters.get("pii_detection"))
+            pii_meta = transcript.get("pii_metadata") or {}
+            if pii_meta or pii_enabled:
                 response.pii = PIIInfo(
-                    enabled=True,
-                    entities_detected=pii_meta.get("entities_detected", 0),
+                    enabled=pii_enabled or bool(pii_meta),
+                    entities_detected=pii_meta.get(
+                        "entities_detected", len(response.entities or [])
+                    ),
                     entity_summary=pii_meta.get("entity_count_by_type"),
                     redacted_audio_available=(
                         pii_meta.get("redacted_audio_artifact_id") is not None
