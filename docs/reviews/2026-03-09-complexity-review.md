@@ -335,14 +335,57 @@ The DAG builder, selector, and docker-compose don't change.
 
 ## 5. Specific Simplifications Worth the Flexibility Loss
 
-### 5a. Drop per_channel speaker detection mode
+### 5a. Drop per_channel from the DAG -- model it as a pre-processing split
 
-The `per_channel` mode in `dag.py` creates parallel transcription tasks
-per audio channel. This adds ~150 lines of DAG builder logic and is rarely
-used (stereo call-center recordings). If you need it, model it as a
-pre-processing step that splits the file, rather than a DAG variant.
+The `per_channel` mode in `dag.py` creates a completely different DAG shape:
+`_build_per_channel_dag_with_engines()` (160 LOC) duplicates the entire
+normal pipeline with `_ch{N}` suffixed stages, parallel branches, and
+channel-aware merge logic. Every future stage added to the pipeline would
+need a per-channel variant too.
 
-**Saves:** ~150 LOC in dag.py, removes an entire class of DAG shapes.
+**Replace with a pre-processing split at the gateway level:**
+
+1. When `speaker_detection=per_channel`, the gateway splits the stereo file
+   into N mono files using FFmpeg (~10ms, trivial).
+2. It submits N independent child jobs, each running the normal mono pipeline
+   with `speaker_detection=none`. No DAG changes needed.
+3. A parent job tracks the children. When all complete, a lightweight stitcher
+   merges results: interleave segments by timestamp, label speaker = channel
+   index (or `known_speaker_names`).
+
+```
+                              ┌─ Job A (ch0.wav): prepare → transcribe → ... → merge
+stereo.wav → channel-split ───┤
+                              └─ Job B (ch1.wav): prepare → transcribe → ... → merge
+
+Parent job: stitch Job A + Job B results, label speakers by channel
+```
+
+**What gets deleted (~275 LOC):**
+
+| Component | LOC |
+|---|---|
+| `_build_per_channel_dag_with_engines()` | ~160 |
+| `per_channel` branches in `_build_dag_with_engines()` | ~15 |
+| `_process_split_channels()` in audio-prepare engine | ~50 |
+| per-channel merge logic in final-merger (stereo reassembly) | ~40 |
+| `_ch{N}` stage name parsing in handlers.py | ~10 |
+
+**What gets added (~110 LOC):**
+
+| Component | LOC |
+|---|---|
+| `split_channels()` utility (FFmpeg one-liner per channel) | ~20 |
+| Parent-child job relationship in gateway | ~50 |
+| `stitch_per_channel_results()` post-processor | ~40 |
+
+**Net savings:** ~165 LOC, plus elimination of all future per-channel
+stage variants. Scales to N channels with zero DAG changes (current
+implementation hard-caps at 2).
+
+**What you give up:** Single job ID atomicity (now parent + N children).
+The gateway can hide this from clients by presenting the parent job as
+the single status endpoint.
 
 ### 5b. Collapse align into transcribe
 
@@ -374,7 +417,97 @@ registry stores capabilities including whether the engine accepts streaming.
 
 ---
 
-## 6. Recommended Execution Order
+## 6. Combined Effect: DAG Collapses to a Linear Pipeline
+
+Applying all simplifications from section 5, the current DAG:
+
+```
+              ┌─ transcribe → [align] ─────────────────────┐
+prepare ──────┤                                             ├─ [pii_detect] → [audio_redact] → merge
+              └─ [diarize] ────────────────────────────────┘
+              (+ per_channel variant: entirely different DAG shape)
+```
+
+...reduces to:
+
+```
+prepare → transcribe → [diarize] → merge
+```
+
+- **per_channel branching**: gone (pre-processing split, section 5a)
+- **align stage**: gone (modern transcribers produce native word timestamps, section 5b)
+- **pii_detect + audio_redact**: gone from core pipeline (post-processing hook, section 5c)
+
+The one remaining piece of non-linearity is **diarize running in parallel
+with transcribe** (both depend only on prepare). This parallelism matters
+on CPU where pyannote runs at 1.2x realtime (a 10-min file takes 12 min
+to diarize). Running them sequentially would add that to the critical path.
+
+### Option A: Keep the single fork-join (recommended)
+
+```
+              ┌─ transcribe ─┐
+prepare ──────┤               ├─ merge
+              └─ [diarize] ──┘
+```
+
+This is technically still a DAG, but it's a trivially simple one -- a
+pipeline with one optional parallel branch. The "DAG builder" becomes
+~30 lines:
+
+```python
+def build_pipeline(job_params, engines):
+    tasks = [make_task("prepare")]
+    tasks.append(make_task("transcribe", after="prepare"))
+    if job_params.get("speaker_detection") == "diarize":
+        tasks.append(make_task("diarize", after="prepare"))  # parallel with transcribe
+    tasks.append(make_task("merge", after=all_previous))
+    return tasks
+```
+
+Compare to the current 700+ LOC `dag.py`.
+
+### Option B: Fully linear (simpler, slower)
+
+```
+prepare → transcribe → [diarize] → merge
+```
+
+Diarize runs after transcribe. Simpler scheduling (pure FIFO queue, no
+dependency tracking needed), but adds diarization time to the critical
+path. On GPU this is seconds; on CPU it's minutes.
+
+### Option C: Diarize as a post-merge enrichment
+
+```
+prepare → transcribe → merge → [diarize enrichment]
+```
+
+The core pipeline produces a transcript without speaker labels. If
+diarization was requested, a post-merge step adds speaker labels to the
+existing transcript. This is fully linear AND doesn't block the user
+from getting initial results quickly. The transcript appears fast, then
+gets enriched with speaker labels asynchronously.
+
+**Recommendation:** Option A for now (minimal code, preserves GPU
+parallelism). Option C is worth exploring later as it enables a
+"progressive results" UX.
+
+### What this means for the orchestrator
+
+With Option A, `dag.py` no longer needs:
+- `_build_per_channel_dag_with_engines()` (160 LOC)
+- Stage-specific `if` branches for align, pii_detect, audio_redact
+- Complex merge dependency accumulation
+- The concept of "skip_alignment" / "skip_diarization" capability checks
+
+The orchestrator's scheduler still needs to resolve dependencies (for
+the transcribe ∥ diarize fork), but the dependency graph is static per
+job configuration -- it doesn't need a "builder", just a lookup table.
+
+---
+
+## 7. Recommended Execution Order
 
 1. **Unify the engine SDK** -- single base class with optional streaming.
    This is the highest-impact change and unblocks everything else.
@@ -396,7 +529,7 @@ registry stores capabilities including whether the engine accepts streaming.
 
 ---
 
-## 7. Risk Assessment
+## 8. Risk Assessment
 
 | Change | Risk | Mitigation |
 |---|---|---|
