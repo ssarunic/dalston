@@ -49,8 +49,5 @@ node_modules/
 # Large test fixtures
 tests/audio/large/
 
-# Temporary files
-tmp/
-
 # Local runtime state
 .dalston/
