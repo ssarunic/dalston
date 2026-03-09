@@ -84,11 +84,19 @@ async def test_elevenlabs_worker_to_client_translates_lag_warning_and_errors():
     }
     assert client_ws.sent_json[1] == {
         "message_type": "error",
-        "error": "Realtime lag budget exceeded",
+        "error": {
+            "type": "server_error",
+            "code": "lag_exceeded",
+            "message": "Realtime lag budget exceeded",
+        },
     }
     assert client_ws.sent_json[2] == {
         "message_type": "error",
-        "error": "lag_exceeded",
+        "error": {
+            "type": "server_error",
+            "code": "session_terminated",
+            "message": "lag_exceeded",
+        },
     }
     assert client_ws.sent_json[3] == {
         "message_type": "session_ended",

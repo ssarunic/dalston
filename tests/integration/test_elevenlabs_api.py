@@ -205,10 +205,10 @@ class TestCreateTranscriptionEndpoint:
         assert "transcription_id" in data
         assert data["message"] == "Request processed successfully"
 
-    def test_create_transcription_any_model_accepted(
+    def test_create_transcription_rejects_unsupported_model(
         self, client, mock_jobs_service, mock_job
     ):
-        """Test that any model_id is accepted (validated at orchestrator level)."""
+        """Unsupported ElevenLabs model IDs are rejected at the gateway boundary."""
         mock_jobs_service.create_job.return_value = mock_job
 
         with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
@@ -224,15 +224,15 @@ class TestCreateTranscriptionEndpoint:
                 audio_content = b"fake audio content"
                 files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
 
-                # Any model_id should be accepted - validation happens at orchestrator
+                # Unsupported model_id should fail fast.
                 response = client.post(
                     "/v1/speech-to-text",
                     files=files,
                     data={"model_id": "custom_engine", "webhook": "true"},
                 )
 
-        # Should succeed - model validation is done at orchestrator level
-        assert response.status_code == 200
+        assert response.status_code == 400
+        assert "Invalid model_id" in response.json()["detail"]
 
     def test_create_transcription_missing_filename(self, client):
         """Test that file without filename returns error."""
@@ -248,6 +248,20 @@ class TestCreateTranscriptionEndpoint:
 
         # FastAPI may return 400 or 422 for validation errors
         assert response.status_code in (400, 422)
+
+    def test_create_transcription_rejects_enable_logging_in_multipart(self, client):
+        """enable_logging must be provided on the query string, not multipart form."""
+        audio_content = b"fake audio content"
+        files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+
+        response = client.post(
+            "/v1/speech-to-text",
+            files=files,
+            data={"model_id": "scribe_v1", "enable_logging": "true"},
+        )
+
+        assert response.status_code == 400
+        assert "field location" in response.json()["detail"]
 
     def test_create_transcription_model_mapping(
         self,
@@ -316,6 +330,89 @@ class TestCreateTranscriptionEndpoint:
                 params = call_kwargs["parameters"]
                 assert params["speaker_detection"] == "diarize"
                 assert params["num_speakers"] == 2
+
+    def test_create_transcription_with_use_multi_channel(
+        self,
+        client,
+        mock_jobs_service,
+        mock_job,
+    ):
+        """use_multi_channel routes through per_channel processing."""
+        mock_jobs_service.create_job.return_value = mock_job
+
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
+            MockStorage.return_value.upload_audio = AsyncMock(
+                return_value="s3://bucket/audio.mp3"
+            )
+
+            with patch("dalston.gateway.api.v1.speech_to_text.publish_job_created"):
+                audio_content = b"fake audio content"
+                files = {
+                    "file": ("test_stereo.wav", BytesIO(audio_content), "audio/wav")
+                }
+
+                response = client.post(
+                    "/v1/speech-to-text",
+                    files=files,
+                    data={
+                        "model_id": "scribe_v1",
+                        "webhook": "true",
+                        "use_multi_channel": "true",
+                    },
+                )
+
+                assert response.status_code == 200
+                assert "current-concurrent-requests" in response.headers
+                assert "maximum-concurrent-requests" in response.headers
+
+                call_kwargs = mock_jobs_service.create_job.call_args.kwargs
+                params = call_kwargs["parameters"]
+                assert params["use_multi_channel"] is True
+                assert params["speaker_detection"] == "per_channel"
+                assert params["num_channels"] == 2
+
+    def test_create_transcription_rejects_multi_channel_above_limit(
+        self,
+        client,
+        mock_jobs_service,
+        mock_job,
+        mock_ingestion_service,
+    ):
+        """use_multi_channel enforces the public 5-channel ceiling."""
+        mock_jobs_service.create_job.return_value = mock_job
+        mock_ingestion_service.ingest.return_value = IngestedAudio(
+            content=b"fake audio content",
+            filename="test_6ch.wav",
+            metadata=AudioMetadata(
+                format="wav",
+                duration=60.0,
+                sample_rate=44100,
+                channels=6,
+                bit_depth=16,
+            ),
+        )
+
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
+            MockStorage.return_value.upload_audio = AsyncMock(
+                return_value="s3://bucket/audio.mp3"
+            )
+
+            with patch("dalston.gateway.api.v1.speech_to_text.publish_job_created"):
+                audio_content = b"fake audio content"
+                files = {"file": ("test_6ch.wav", BytesIO(audio_content), "audio/wav")}
+
+                response = client.post(
+                    "/v1/speech-to-text",
+                    files=files,
+                    data={
+                        "model_id": "scribe_v1",
+                        "webhook": "true",
+                        "use_multi_channel": "true",
+                    },
+                )
+
+        assert response.status_code == 400
+        assert "maximum of 5 channels" in response.json()["detail"]
 
     def test_create_transcription_with_keyterms(
         self,
@@ -492,6 +589,25 @@ class TestCreateTranscriptionEndpoint:
         assert response.status_code == 400
         assert "50 characters" in response.json()["detail"]
 
+    def test_create_transcription_keyterms_term_too_many_words(self, client):
+        """Test that a keyterm exceeding 5 words returns 400."""
+        import json
+
+        audio_content = b"fake audio content"
+        files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+
+        response = client.post(
+            "/v1/speech-to-text",
+            files=files,
+            data={
+                "model_id": "scribe_v1",
+                "keyterms": json.dumps(["one two three four five six"]),
+            },
+        )
+
+        assert response.status_code == 400
+        assert "at most 5 words" in response.json()["detail"]
+
     def test_create_transcription_keyterms_non_string_items(self, client):
         """Test that non-string items in keyterms returns 400."""
         audio_content = b"fake audio content"
@@ -611,8 +727,88 @@ class TestGetTranscriptEndpoint:
         assert data["language_code"] == "en"
         assert len(data["words"]) == 2
 
+    def test_get_transcript_completed_multichannel(
+        self,
+        client,
+        mock_jobs_service,
+        api_key,
+    ):
+        """Multichannel jobs return the ElevenLabs transcripts[] response shape."""
+        job_id = uuid4()
+        job = MagicMock()
+        job.id = job_id
+        job.tenant_id = api_key.tenant_id
+        job.status = JobStatus.COMPLETED.value
+        job.error = None
+        job.parameters = {"use_multi_channel": True}
+
+        mock_jobs_service.get_job_authorized.return_value = job
+
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
+            MockStorage.return_value.get_transcript = AsyncMock(
+                return_value={
+                    "text": "left phrase right phrase",
+                    "metadata": {"language": "en", "language_confidence": 0.95},
+                    "speakers": [
+                        {"id": "SPEAKER_00", "channel": 0},
+                        {"id": "SPEAKER_01", "channel": 1},
+                    ],
+                    "segments": [
+                        {
+                            "text": "left phrase",
+                            "start": 0.0,
+                            "end": 1.0,
+                            "speaker": "SPEAKER_00",
+                            "words": [
+                                {
+                                    "text": "left",
+                                    "start": 0.0,
+                                    "end": 0.5,
+                                    "logprob": -0.1,
+                                },
+                                {
+                                    "text": "phrase",
+                                    "start": 0.5,
+                                    "end": 1.0,
+                                    "logprob": -0.2,
+                                },
+                            ],
+                        },
+                        {
+                            "text": "right phrase",
+                            "start": 0.0,
+                            "end": 1.0,
+                            "speaker": "SPEAKER_01",
+                            "words": [
+                                {
+                                    "text": "right",
+                                    "start": 0.0,
+                                    "end": 0.5,
+                                    "logprob": -0.3,
+                                },
+                                {
+                                    "text": "phrase",
+                                    "start": 0.5,
+                                    "end": 1.0,
+                                    "logprob": -0.4,
+                                },
+                            ],
+                        },
+                    ],
+                }
+            )
+
+            response = client.get(f"/v1/speech-to-text/transcripts/{job_id}")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["transcription_id"] == str(job_id)
+        assert len(data["transcripts"]) == 2
+        assert {chunk["channel_index"] for chunk in data["transcripts"]} == {0, 1}
+        assert all(chunk["words"] for chunk in data["transcripts"])
+
     def test_get_transcript_processing(self, client, mock_jobs_service, api_key):
-        """Test retrieving a still-processing transcript."""
+        """Pending transcripts return 404 + Retry-After for ElevenLabs polling."""
         job_id = uuid4()
         job = MagicMock()
         job.id = job_id
@@ -624,13 +820,11 @@ class TestGetTranscriptEndpoint:
 
         response = client.get(f"/v1/speech-to-text/transcripts/{job_id}")
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "processing"
-        assert data["transcription_id"] == str(job_id)
+        assert response.status_code == 404
+        assert response.headers.get("Retry-After") == "2"
 
     def test_get_transcript_failed(self, client, mock_jobs_service, api_key):
-        """Test retrieving a failed transcript."""
+        """Failed transcripts do not expose Dalston-only status payloads."""
         job_id = uuid4()
         job = MagicMock()
         job.id = job_id
@@ -642,10 +836,7 @@ class TestGetTranscriptEndpoint:
 
         response = client.get(f"/v1/speech-to-text/transcripts/{job_id}")
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "failed"
-        assert data["message"] == "Transcription engine error"
+        assert response.status_code == 404
 
     def test_get_transcript_not_found(self, client, mock_jobs_service):
         """Test 404 when transcript doesn't exist."""
@@ -654,6 +845,100 @@ class TestGetTranscriptEndpoint:
         response = client.get(f"/v1/speech-to-text/transcripts/{uuid4()}")
 
         assert response.status_code == 404
+
+
+class TestDeleteTranscriptEndpoint:
+    """Tests for DELETE /v1/speech-to-text/transcripts/{id} endpoint."""
+
+    @pytest.fixture
+    def mock_jobs_service(self):
+        return AsyncMock(spec=JobsService)
+
+    @pytest.fixture
+    def mock_storage_service(self):
+        service = AsyncMock(spec=StorageService)
+        service.delete_job_artifacts = AsyncMock()
+        return service
+
+    @pytest.fixture
+    def api_key(self):
+        return APIKey(
+            id=UUID("12345678-1234-1234-1234-123456789abc"),
+            key_hash="abc123def456",
+            prefix="dk_test12",
+            name="Test Key",
+            tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
+            scopes=[Scope.JOBS_WRITE],
+            rate_limit=None,
+            created_at=datetime.now(UTC),
+            last_used_at=None,
+            expires_at=DEFAULT_EXPIRES_AT,
+            revoked_at=None,
+        )
+
+    @pytest.fixture
+    def app(self, mock_jobs_service, mock_storage_service, api_key):
+        from dalston.gateway.dependencies import (
+            get_audit_service,
+            get_db,
+            get_jobs_service,
+            get_principal,
+            get_security_manager,
+            get_storage_service,
+            require_auth,
+        )
+        from dalston.gateway.security.manager import SecurityManager
+        from dalston.gateway.security.principal import Principal, PrincipalType
+
+        app = FastAPI()
+        app.include_router(speech_to_text_router, prefix="/v1")
+
+        principal = Principal(
+            type=PrincipalType.API_KEY,
+            id=api_key.id,
+            tenant_id=api_key.tenant_id,
+            scopes=api_key.scopes,
+            key_prefix=api_key.prefix,
+        )
+
+        app.dependency_overrides[get_db] = lambda: AsyncMock()
+        app.dependency_overrides[get_jobs_service] = lambda: mock_jobs_service
+        app.dependency_overrides[get_storage_service] = lambda: mock_storage_service
+        app.dependency_overrides[get_audit_service] = lambda: AsyncMock()
+        app.dependency_overrides[require_auth] = lambda: api_key
+        app.dependency_overrides[get_principal] = lambda: principal
+        app.dependency_overrides[get_security_manager] = lambda: MagicMock(
+            spec=SecurityManager
+        )
+
+        return app
+
+    @pytest.fixture
+    def client(self, app):
+        return TestClient(app)
+
+    def test_delete_transcript_not_found(self, client, mock_jobs_service):
+        from dalston.gateway.security.exceptions import ResourceNotFoundError
+
+        mock_jobs_service.delete_job_authorized.side_effect = ResourceNotFoundError(
+            "job", uuid4()
+        )
+
+        response = client.delete(f"/v1/speech-to-text/transcripts/{uuid4()}")
+        assert response.status_code == 404
+
+    def test_delete_transcript_success(
+        self, client, mock_jobs_service, mock_storage_service
+    ):
+        job_id = uuid4()
+        job = MagicMock()
+        job.id = job_id
+        mock_jobs_service.delete_job_authorized.return_value = job
+
+        response = client.delete(f"/v1/speech-to-text/transcripts/{job_id}")
+
+        assert response.status_code == 204
+        mock_storage_service.delete_job_artifacts.assert_awaited_once()
 
 
 class TestExportTranscriptEndpoint:

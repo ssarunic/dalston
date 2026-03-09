@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /v1/speech-to-text",
+  "multipart_fields": {
+    "model_id": "scribe_v1",
+    "language_code": "en",
+    "timestamps_granularity": "word",
+    "diarize": false,
+    "keyterms": [
+      "Dalston"
+    ]
+  },
+  "query": {
+    "enable_logging": true
+  }
+}

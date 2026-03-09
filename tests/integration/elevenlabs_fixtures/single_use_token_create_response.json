@@ -1,0 +1,6 @@
+{
+  "token": "tk_example_single_use_token",
+  "expires_at": "2026-03-08T12:10:00Z",
+  "token_type": "realtime_scribe",
+  "tenant_id": "00000000-0000-0000-0000-000000000000"
+}

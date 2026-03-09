@@ -144,6 +144,8 @@ class WebhookService:
         status: str,
         duration: float | None = None,
         error: str | None = None,
+        request_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Build webhook payload following Standard Webhooks specification.
 
@@ -170,6 +172,10 @@ class WebhookService:
 
         if error is not None:
             data["error"] = error
+        if request_id is not None:
+            data["request_id"] = request_id
+        if metadata is not None:
+            data["metadata"] = metadata
 
         # Standard Webhooks envelope
         payload: dict[str, Any] = {

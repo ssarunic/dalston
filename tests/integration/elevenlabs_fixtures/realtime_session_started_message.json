@@ -1,0 +1,12 @@
+{
+  "message_type": "session_started",
+  "session_id": "sess_example",
+  "config": {
+    "sample_rate": 16000,
+    "audio_format": "pcm_16000",
+    "language_code": "en",
+    "model_id": "scribe_v1",
+    "commit_strategy": "manual",
+    "include_language_detection": false
+  }
+}
