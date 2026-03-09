@@ -253,6 +253,9 @@ input:
     - flac
   sample_rate: 16000
   channels: 1
+
+performance:
+  rtf_gpu: 0.0001  # TensorRT-optimized; ensures Riva wins RTF-based ranking
 ```
 
 **`engines/stt-transcribe/riva/Dockerfile`:**
@@ -391,7 +394,7 @@ class RivaEngine(Engine):
             runtime=ctx.runtime,
         )
 
-        return EngineOutput(payload=payload)
+        return EngineOutput(data=payload)
 ```
 
 Key mapping decisions:
