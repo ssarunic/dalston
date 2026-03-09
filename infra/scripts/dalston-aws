@@ -39,6 +39,7 @@ REPO_BRANCH="main"
 # Scenario defaults
 SCENARIO="gpu"  # gpu, cpu, split
 USE_SPOT=false
+USE_RIVA=false
 GPU_INSTANCE_TYPE="g5.xlarge"
 CPU_INSTANCE_TYPE="t3.xlarge"
 CTRL_INSTANCE_TYPE="t3.medium"
@@ -385,6 +386,7 @@ ensure_key_pair() {
 generate_user_data() {
     local s3_bucket="$1"
     local compose_profiles="$2"
+    local extra_compose_files="${3:-}"  # e.g., "-f docker-compose.riva.yml"
 
     cat << 'USERDATA_HEADER'
 #!/bin/bash
@@ -399,6 +401,8 @@ DATA_MOUNT="/data"
 S3_BUCKET="${s3_bucket}"
 AWS_REGION="${REGION}"
 COMPOSE_PROFILE_FLAGS="${compose_profiles}"
+EXTRA_COMPOSE_FILES="${extra_compose_files}"
+NGC_API_KEY="${NGC_API_KEY:-}"
 USERDATA_VARS
 
     # Use heredoc for the rest so variables above are expanded but
@@ -462,7 +466,7 @@ if ! grep -q "$DATA_MOUNT" /etc/fstab; then
 fi
 
 # Create data directories
-mkdir -p "$DATA_MOUNT/postgres" "$DATA_MOUNT/redis" "$DATA_MOUNT/models" "$DATA_MOUNT/dalston"
+mkdir -p "$DATA_MOUNT/postgres" "$DATA_MOUNT/redis" "$DATA_MOUNT/models" "$DATA_MOUNT/dalston" "$DATA_MOUNT/nim-cache"
 chown -R 1000:1000 "$DATA_MOUNT"
 
 # Create .env.aws
@@ -475,6 +479,11 @@ DATABASE_URL=postgresql+asyncpg://dalston:password@postgres:5432/dalston
 HF_HOME=/data/models
 ENVEOF
 
+# Add NGC_API_KEY if set (for Riva NIM)
+if [[ -n "${NGC_API_KEY:-}" ]]; then
+  echo "NGC_API_KEY=${NGC_API_KEY}" >> "$DATA_MOUNT/dalston/.env.aws"
+fi
+
 # Create systemd service
 cat > /etc/systemd/system/dalston.service << SVCEOF
 [Unit]
@@ -486,8 +495,8 @@ After=docker.service
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/data/dalston
-ExecStart=/usr/bin/docker-compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml --env-file .env.aws ${COMPOSE_PROFILE_FLAGS} up -d
-ExecStop=/usr/bin/docker-compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml --env-file .env.aws ${COMPOSE_PROFILE_FLAGS} down
+ExecStart=/usr/bin/docker-compose -f docker-compose.yml ${EXTRA_COMPOSE_FILES} -f infra/docker/docker-compose.aws.yml --env-file .env.aws ${COMPOSE_PROFILE_FLAGS} up -d
+ExecStop=/usr/bin/docker-compose -f docker-compose.yml ${EXTRA_COMPOSE_FILES} -f infra/docker/docker-compose.aws.yml --env-file .env.aws ${COMPOSE_PROFILE_FLAGS} down
 TimeoutStartSec=600
 
 [Install]
@@ -816,9 +825,18 @@ cmd_setup() {
 
         gpu)
             log "Launching GPU instance ($GPU_INSTANCE_TYPE)..."
-            local user_data_file
+            local user_data_file extra_compose=""
             user_data_file=$(mktemp)
-            generate_user_data "$S3_BUCKET" "--profile local-infra --profile gpu" > "$user_data_file"
+            if [[ "$USE_RIVA" == "true" ]]; then
+                extra_compose="-f docker-compose.riva.yml"
+                # Prompt for NGC_API_KEY if not already set
+                if [[ -z "${NGC_API_KEY:-}" ]]; then
+                    read -r -p "NGC_API_KEY (required for Riva NIM): " NGC_API_KEY
+                    [[ -n "$NGC_API_KEY" ]] || die "NGC_API_KEY is required for --riva"
+                fi
+                log "Riva NIM enabled (NGC_API_KEY set)"
+            fi
+            generate_user_data "$S3_BUCKET" "--profile local-infra --profile gpu" "$extra_compose" > "$user_data_file"
             INSTANCE_ID=$(launch_instance "$GPU_INSTANCE_TYPE" "$SG_ID" "$user_data_file" "${NAME_PREFIX}-server" "$USE_SPOT")
             rm -f "$user_data_file"
             wait_instance_running "$INSTANCE_ID"
@@ -1201,6 +1219,7 @@ Setup options:
   --region R     AWS region (default: eu-west-2)
   --key NAME     Existing SSH key pair name
   --gpu-type T   GPU instance type (default: g5.xlarge)
+  --riva         Enable Riva NIM runtime (prompts for NGC_API_KEY if not set)
 
 Examples:
   dalston-aws setup                    # Single g5.xlarge
@@ -1211,6 +1230,7 @@ Examples:
   dalston-aws remove-gpu               # Remove GPU worker
   dalston-aws down                     # Stop (saves ~\$4/day)
   dalston-aws up                       # Restart
+  dalston-aws setup --gpu --riva       # GPU with Riva NIM (TensorRT-optimized)
   dalston-aws teardown                 # Delete everything
 EOF
 }
@@ -1226,6 +1246,7 @@ main() {
             --gpu)     SCENARIO="gpu" ;;
             --split)   SCENARIO="split" ;;
             --spot)    USE_SPOT=true ;;
+            --riva)    USE_RIVA=true ;;
             --region)  REGION="${2:?--region requires a value}"; shift ;;
             --key)     KEY_NAME="${2:?--key requires a value}"; shift ;;
             --gpu-type) GPU_INSTANCE_TYPE="${2:?--gpu-type requires a value}"; shift ;;

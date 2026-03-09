@@ -1,0 +1,96 @@
+# Docker Compose overlay for Riva NIM runtime (M63)
+#
+# Adds NVIDIA Riva NIM container as a sidecar and thin Dalston engines
+# that delegate inference to it via gRPC.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.riva.yml up -d
+#
+# Requirements:
+#   - NVIDIA GPU with compute capability >= 7.0
+#   - NGC_API_KEY environment variable set
+#   - First start takes ~30 minutes for TensorRT engine build
+
+volumes:
+  nim-cache:
+
+services:
+  # =========================================================================
+  # Riva NIM Sidecar — TensorRT-optimized inference server
+  # =========================================================================
+  riva-nim:
+    image: nvcr.io/nim/nvidia/parakeet-1-1b-ctc-en-us:latest
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - NGC_API_KEY=${NGC_API_KEY}
+      - NIM_HTTP_API_PORT=9000
+      - NIM_GRPC_API_PORT=50051
+    ports:
+      - "50051:50051"
+    volumes:
+      - nim-cache:/opt/nim/.cache
+    shm_size: '8gb'
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50051"]
+      interval: 15s
+      timeout: 5s
+      retries: 40  # First start can take ~30min for TensorRT build
+      start_period: 300s
+
+  # =========================================================================
+  # Batch Transcription Engine — thin gRPC client to Riva NIM
+  # =========================================================================
+  stt-batch-transcribe-riva:
+    build:
+      context: .
+      dockerfile: engines/stt-transcribe/riva/Dockerfile
+    environment:
+      RIVA_GRPC_URL: riva-nim:50051
+      REDIS_URL: redis://redis:6379
+      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET:-dalston-artifacts}
+      DALSTON_S3_REGION: ${DALSTON_S3_REGION:-eu-west-2}
+      DALSTON_S3_ENDPOINT_URL: ${DALSTON_S3_ENDPOINT_URL:-http://minio:9000}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-${MINIO_ROOT_USER:-minioadmin}}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD:-minioadmin}}
+      DALSTON_RUNTIME: riva
+      DALSTON_LOG_LEVEL: ${DALSTON_LOG_LEVEL:-INFO}
+      DALSTON_LOG_FORMAT: ${DALSTON_LOG_FORMAT:-json}
+      DALSTON_RUNTIME_REVISION: ${DALSTON_RUNTIME_REVISION:-dev}
+    depends_on:
+      riva-nim:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+        required: false
+      minio-init:
+        condition: service_completed_successfully
+        required: false
+
+  # =========================================================================
+  # Realtime Transcription Engine — thin gRPC client to Riva NIM
+  # =========================================================================
+  stt-rt-riva:
+    build:
+      context: .
+      dockerfile: engines/stt-rt/riva/Dockerfile
+    environment:
+      RIVA_GRPC_URL: riva-nim:50051
+      REDIS_URL: redis://redis:6379
+      DALSTON_INSTANCE: riva-rt-1
+      DALSTON_WORKER_PORT: "9000"
+      DALSTON_MAX_SESSIONS: "8"
+      DALSTON_LOG_LEVEL: ${DALSTON_LOG_LEVEL:-INFO}
+      DALSTON_LOG_FORMAT: ${DALSTON_LOG_FORMAT:-json}
+      DALSTON_RUNTIME_REVISION: ${DALSTON_RUNTIME_REVISION:-dev}
+    depends_on:
+      riva-nim:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+        required: false

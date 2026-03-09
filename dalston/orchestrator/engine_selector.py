@@ -229,6 +229,11 @@ class NoCapableEngineError(Exception):
 
 def _resolve_runtime_model_id(model: ModelRegistryModel, stage: str) -> str:
     """Resolve the task-level runtime_model_id from a registry model."""
+    # External models (e.g., Riva NIM) always use runtime_model_id directly —
+    # source is informational (NGC container path), not an S3 artifact.
+    if model.management == "external":
+        return model.runtime_model_id
+
     # Transcribe uses source IDs for S3-backed artifact lookup compatibility.
     if stage == "transcribe":
         return model.source or model.id

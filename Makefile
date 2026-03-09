@@ -3,9 +3,9 @@
 # Simplifies common development and deployment commands.
 # Run `make help` to see all available targets.
 
-.PHONY: help dev dev-minimal dev-gpu dev-observability stop logs logs-all ps \
+.PHONY: help dev dev-minimal dev-gpu dev-riva dev-observability stop stop-riva logs logs-all ps \
         build-cpu build-gpu build-engine deploy-web \
-        aws-start aws-stop aws-logs \
+        aws-start aws-stop aws-start-riva aws-stop-riva aws-logs \
         health clean clean-local validate test lint test-openai-sdk-live \
         test-elevenlabs-sdk-live test-e2e runtime-freshness runtime-freshness-required \
         sync-test-stack docker-gc-soft docker-gc-hard docker-gc-auto
@@ -22,8 +22,10 @@ help:
 	@echo "  make dev             - Start full local stack (postgres, redis, minio, gateway, orchestrator, CPU engines)"
 	@echo "  make dev-minimal     - Start minimal stack (infra + gateway + transcribe + align + merge)"
 	@echo "  make dev-gpu         - Start with GPU engines (requires NVIDIA GPU)"
+	@echo "  make dev-riva        - Start with Riva NIM runtime (requires GPU + NGC_API_KEY)"
 	@echo "  make dev-observability - Start with monitoring stack (jaeger, prometheus, grafana)"
 	@echo "  make stop            - Stop all services"
+	@echo "  make stop-riva       - Stop Riva NIM services"
 	@echo "  make logs            - Follow gateway logs"
 	@echo "  make logs-all        - Follow all service logs"
 	@echo "  make ps              - Show running services"
@@ -36,7 +38,9 @@ help:
 	@echo ""
 	@echo "AWS Deployment:"
 	@echo "  make aws-start       - Start on AWS with local infra + GPU"
+	@echo "  make aws-start-riva  - Start on AWS with Riva NIM (requires GPU + NGC_API_KEY)"
 	@echo "  make aws-stop        - Stop AWS services"
+	@echo "  make aws-stop-riva   - Stop AWS Riva services"
 	@echo "  make aws-logs        - Follow logs on AWS"
 	@echo ""
 	@echo "Testing & Validation:"
@@ -84,6 +88,17 @@ dev-minimal: clean-local
 dev-gpu: clean-local
 	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
 		docker compose --profile local-infra --profile local-object-storage --profile gpu up -d --build
+
+# Start with Riva NIM runtime (requires GPU + NGC_API_KEY)
+dev-riva: clean-local
+	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
+		docker compose -f docker-compose.yml -f docker-compose.riva.yml \
+		--profile local-infra --profile local-object-storage up -d --build
+
+# Stop Riva NIM services
+stop-riva:
+	docker compose -f docker-compose.yml -f docker-compose.riva.yml \
+		--profile local-infra --profile local-object-storage --profile gpu down
 
 # Start with observability stack (jaeger, prometheus, grafana)
 dev-observability:
@@ -167,6 +182,23 @@ aws-stop:
 		--env-file .env.aws \
 		--profile local-infra --profile gpu down
 
+# Start on AWS with Riva NIM (requires GPU + NGC_API_KEY)
+aws-start-riva:
+	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
+		docker compose -f docker-compose.yml \
+		-f docker-compose.riva.yml \
+		-f infra/docker/docker-compose.aws.yml \
+		--env-file .env.aws \
+		--profile local-infra --profile gpu up -d
+
+# Stop AWS Riva services
+aws-stop-riva:
+	docker compose -f docker-compose.yml \
+		-f docker-compose.riva.yml \
+		-f infra/docker/docker-compose.aws.yml \
+		--env-file .env.aws \
+		--profile local-infra --profile gpu down
+
 # Follow logs on AWS
 aws-logs:
 	docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
@@ -239,6 +271,8 @@ validate:
 	@docker compose --profile gpu config > /dev/null
 	@echo "Validating AWS override..."
 	@S3_BUCKET=test AWS_REGION=eu-west-2 docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml config > /dev/null
+	@echo "Validating Riva NIM overlay..."
+	@docker compose -f docker-compose.yml -f docker-compose.riva.yml config > /dev/null
 	@echo "All compose configurations valid"
 
 # Check service health
@@ -254,6 +288,9 @@ health:
 	@echo ""
 	@echo "=== MinIO ==="
 	@curl -s http://localhost:9000/minio/health/live 2>/dev/null && echo "OK" || echo "Not running"
+	@echo ""
+	@echo "=== Riva NIM ==="
+	@grpc_health_probe -addr localhost:50051 2>/dev/null && echo "Healthy" || echo "Not running"
 
 # ============================================================
 # UTILITIES

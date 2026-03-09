@@ -231,6 +231,14 @@ class ModelRegistryService:
             ModelNotFoundError: If model doesn't exist in registry
         """
         model = await self.get_model_or_raise(db, model_id)
+
+        # External models (e.g., Riva NIM) manage their own lifecycle
+        if model.management == "external":
+            raise ValueError(
+                f"Model '{model_id}' is externally managed. "
+                f"Model lifecycle is handled by the external runtime, not Dalston."
+            )
+
         settings = get_settings()
 
         if model.status == "ready" and not force:
@@ -510,6 +518,16 @@ class ModelRegistryService:
         """
         model = await self.get_model_or_raise(db, model_id)
 
+        # External models cannot be removed — their lifecycle is managed
+        # outside Dalston (e.g., by NIM containers). Purge is allowed since
+        # it's an explicit admin action to remove the registry entry entirely.
+        if model.management == "external" and not purge:
+            raise ValueError(
+                f"Model '{model_id}' is externally managed. "
+                f"Use purge=true to remove it from the registry, or manage "
+                f"it through the external runtime."
+            )
+
         # Check if model is in use by pending jobs
         job_count = await self._check_model_in_use(db, model_id)
         if job_count > 0:
@@ -576,6 +594,11 @@ class ModelRegistryService:
         synced = {"updated": 0, "unchanged": 0}
 
         for model in models:
+            # Skip external models — their readiness is not tied to S3
+            if model.management == "external":
+                synced["unchanged"] += 1
+                continue
+
             in_s3 = await self._is_model_in_s3(model.id, settings.s3_bucket)
 
             if in_s3 and model.status != "ready":
@@ -784,13 +807,17 @@ class ModelRegistryService:
 
             if existing is None:
                 # New model - insert
+                # External models are always ready (managed outside Dalston)
+                initial_status = (
+                    "ready" if entry.management == "external" else "not_downloaded"
+                )
                 model = ModelRegistryModel(
                     id=entry.id,
                     name=entry.name,
                     runtime=entry.runtime,
                     runtime_model_id=entry.runtime_model_id,
                     stage=entry.stage,
-                    status="not_downloaded",
+                    status=initial_status,
                     source=entry.source,
                     languages=entry.languages,  # JSON column (backward compat)
                     word_timestamps=entry.word_timestamps,
@@ -800,6 +827,7 @@ class ModelRegistryService:
                     min_vram_gb=entry.min_vram_gb,
                     min_ram_gb=entry.min_ram_gb,
                     supports_cpu=entry.supports_cpu,
+                    management=entry.management,
                     metadata_source="yaml",
                 )
                 db.add(model)
@@ -817,25 +845,30 @@ class ModelRegistryService:
 
             else:
                 # yaml or hf - update with fresh YAML data
+                update_values = {
+                    "name": entry.name,
+                    "runtime": entry.runtime,
+                    "runtime_model_id": entry.runtime_model_id,
+                    "stage": entry.stage,
+                    "source": entry.source,
+                    "languages": entry.languages,
+                    "word_timestamps": entry.word_timestamps,
+                    "punctuation": entry.punctuation,
+                    "capitalization": entry.capitalization,
+                    "streaming": entry.streaming,
+                    "min_vram_gb": entry.min_vram_gb,
+                    "min_ram_gb": entry.min_ram_gb,
+                    "supports_cpu": entry.supports_cpu,
+                    "management": entry.management,
+                    "metadata_source": "yaml",
+                }
+                # If management changed to external, ensure status is ready
+                if entry.management == "external":
+                    update_values["status"] = "ready"
                 await db.execute(
                     update(ModelRegistryModel)
                     .where(ModelRegistryModel.id == entry.id)
-                    .values(
-                        name=entry.name,
-                        runtime=entry.runtime,
-                        runtime_model_id=entry.runtime_model_id,
-                        stage=entry.stage,
-                        source=entry.source,
-                        languages=entry.languages,
-                        word_timestamps=entry.word_timestamps,
-                        punctuation=entry.punctuation,
-                        capitalization=entry.capitalization,
-                        streaming=entry.streaming,
-                        min_vram_gb=entry.min_vram_gb,
-                        min_ram_gb=entry.min_ram_gb,
-                        supports_cpu=entry.supports_cpu,
-                        metadata_source="yaml",
-                    )
+                    .values(**update_values)
                 )
                 result["updated"] += 1
 

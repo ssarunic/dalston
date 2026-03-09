@@ -819,6 +819,13 @@ class ModelRegistryModel(Base):
     # Metadata cache (HuggingFace card data, download stats, etc.)
     model_metadata: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
 
+    # Model lifecycle management mode
+    # "dalston" (default): Dalston manages download via HuggingFace Hub
+    # "external": Model lifecycle managed externally (e.g., Riva NIM container)
+    management: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="dalston"
+    )
+
     # Provenance tracking - where did this model's metadata come from?
     # Values: "yaml" (from YAML files), "user" (manually enriched), "hf" (HuggingFace)
     metadata_source: Mapped[str] = mapped_column(

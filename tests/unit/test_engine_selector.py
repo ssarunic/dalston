@@ -376,6 +376,7 @@ class TestSelectEngine:
             runtime_model_id="pyannote/speaker-diarization-community-1",
             source="pyannote/speaker-diarization-community-1",
             languages=None,
+            management="dalston",
         )
         mock_db = AsyncMock()
         mock_db.execute.return_value = _ScalarOneResult(db_model)
@@ -426,6 +427,7 @@ class TestSelectEngine:
             runtime_model_id="urchade/gliner_multi-v2.1",
             source="urchade/gliner_multi-v2.1",
             languages=None,
+            management="dalston",
         )
         mock_db = AsyncMock()
         mock_db.execute.return_value = _ScalarOneResult(db_model)
@@ -453,6 +455,7 @@ class TestSelectEngine:
             runtime_model_id="jonatasgrosman/wav2vec2-large-xlsr-53-japanese",
             source="jonatasgrosman/wav2vec2-large-xlsr-53-japanese",
             languages=["ja"],
+            management="dalston",
         )
         mock_db = AsyncMock()
         mock_db.execute.return_value = _ScalarOneResult(db_model)
@@ -480,6 +483,7 @@ class TestSelectEngine:
             runtime_model_id="urchade/gliner_multi-v2.1",
             source="urchade/gliner_multi-v2.1",
             languages=None,
+            management="dalston",
         )
         mock_db = AsyncMock()
         mock_db.execute.return_value = _ScalarOneResult(db_model)

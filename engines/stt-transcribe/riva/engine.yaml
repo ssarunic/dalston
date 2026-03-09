@@ -1,0 +1,31 @@
+schema_version: "1.1"
+id: riva
+runtime: riva
+stage: transcribe
+name: NVIDIA Riva NIM Runtime
+version: 1.0.0
+description: |
+  Thin transcription engine that delegates inference to an NVIDIA Riva NIM
+  container via gRPC. The NIM container runs TensorRT-optimized models
+  served by Triton Inference Server.
+
+container:
+  gpu: none  # This engine is a gRPC client; GPU lives on the NIM container
+  memory: 1G
+
+capabilities:
+  languages:
+    - en
+  max_audio_duration: 7200
+  streaming: false
+  word_timestamps: true
+
+input:
+  audio_formats:
+    - wav
+    - flac
+  sample_rate: 16000
+  channels: 1
+
+performance:
+  rtf_gpu: 0.0001  # TensorRT-optimized; ensures Riva wins RTF-based ranking

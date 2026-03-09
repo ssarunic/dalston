@@ -78,6 +78,20 @@ services:
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
       AWS_REGION: ${AWS_REGION}
 
+  # Riva NIM overrides (when using docker-compose.riva.yml overlay)
+  riva-nim:
+    volumes:
+      - /data/nim-cache:/opt/nim/.cache
+    environment:
+      - NGC_API_KEY=${NGC_API_KEY:-}
+
+  stt-batch-transcribe-riva:
+    environment:
+      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
+      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
+      AWS_REGION: ${AWS_REGION}
+      DALSTON_S3_ENDPOINT_URL: ""  # Clear MinIO endpoint, use S3
+
 # Exclude MinIO services - using S3 instead
 # The base docker-compose.yml may define minio and minio-init
 # but they won't be started unless explicitly included

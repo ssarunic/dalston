@@ -72,6 +72,9 @@ class ModelYAMLEntry:
     supports_cpu: bool = False
     rtf_gpu: float | None = None
     rtf_cpu: float | None = None
+    management: str = (
+        "dalston"  # "dalston" (HF download) or "external" (e.g., Riva NIM)
+    )
 
 
 def load_model_yamls(models_dir: Path | None = None) -> list[ModelYAMLEntry]:
@@ -173,4 +176,5 @@ def _load_single_yaml(yaml_path: Path) -> ModelYAMLEntry:
         supports_cpu=hardware.get("supports_cpu", False),
         rtf_gpu=performance.get("rtf_gpu"),
         rtf_cpu=performance.get("rtf_cpu"),
+        management=data.get("management", "dalston"),
     )

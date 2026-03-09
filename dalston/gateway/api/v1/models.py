@@ -383,6 +383,16 @@ async def pull_model(
             detail=Err.MODEL_NOT_FOUND.format(model_id=model_id),
         ) from None
 
+    # External models are managed outside Dalston (e.g., by NIM containers)
+    if model.management == "external":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Model '{model_id}' is externally managed. "
+                f"Its lifecycle is handled by the external runtime, not Dalston."
+            ),
+        )
+
     if model.status == "ready" and not force:
         return PullModelResponse(
             message="Model already downloaded",
@@ -413,16 +423,26 @@ async def pull_model(
 
 async def _pull_model_background(model_id: str, force: bool) -> None:
     """Background task to download a model."""
+    import structlog
+
     from dalston.db.session import async_session
 
+    logger = structlog.get_logger()
     service = get_model_registry_service()
 
     async with async_session() as db:
         try:
             await service.pull_model(db, model_id, force=force)
         except Exception:
-            # Error is already logged and status updated in the service
-            pass
+            logger.exception("model_pull_background_failed", model_id=model_id)
+            # Only clear transient "downloading" states. If pull_model() has
+            # already marked "failed", preserve that for UI/API diagnostics.
+            try:
+                model = await service.get_model(db, model_id)
+                if model is not None and model.status == "downloading":
+                    await service.set_model_status(db, model_id, "not_downloaded")
+            except Exception:
+                logger.exception("model_status_reset_failed", model_id=model_id)
 
 
 @router.delete(
@@ -459,6 +479,11 @@ async def remove_model(
             detail=Err.MODEL_NOT_FOUND.format(model_id=model_id),
         ) from None
     except ModelInUseError as e:
+        raise HTTPException(
+            status_code=409,
+            detail=str(e),
+        ) from None
+    except ValueError as e:
         raise HTTPException(
             status_code=409,
             detail=str(e),

@@ -1,0 +1,37 @@
+# Model catalog entry for Parakeet CTC 1.1B via Riva NIM
+# This model is externally managed — the NIM container handles its lifecycle.
+
+schema_version: "1.1"
+id: nvidia/parakeet-ctc-1.1b-riva
+runtime: riva
+runtime_model_id: "parakeet-1-1b-ctc-en-us"  # NIM model tag, resolved directly
+management: external  # NIM manages model lifecycle; seed as ready, skip download
+
+name: NVIDIA Parakeet CTC 1.1B (Riva NIM)
+source: nvcr.io/nim/nvidia/parakeet-1-1b-ctc-en-us  # Informational only
+size_gb: 4.0
+stage: transcribe
+
+description: |
+  Parakeet CTC 1.1B served via NVIDIA Riva NIM with TensorRT optimization.
+  Same model as nvidia/parakeet-ctc-1.1b but 2-10x faster inference.
+  Requires NGC API key and NVIDIA GPU with compute capability >= 7.0.
+
+languages:
+  - en
+
+capabilities:
+  word_timestamps: true
+  punctuation: true
+  capitalization: true
+  streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  min_vram_gb: 4
+  supports_cpu: false
+  min_ram_gb: 8
+
+performance:
+  rtf_gpu: 0.0001  # TensorRT-optimized
+  rtf_cpu: null

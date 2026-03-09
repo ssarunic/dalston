@@ -937,6 +937,7 @@ class TestStageModelSelection:
                     runtime_model_id="facebook/wav2vec2-base-960h",
                     source="facebook/wav2vec2-base-960h",
                     languages=["en"],
+                    management="dalston",
                 )
             ),
             _ScalarOneResult(
@@ -948,6 +949,7 @@ class TestStageModelSelection:
                     runtime_model_id="pyannote/speaker-diarization-community-1",
                     source="pyannote/speaker-diarization-community-1",
                     languages=None,
+                    management="dalston",
                 )
             ),
             _ScalarOneResult(
@@ -959,6 +961,7 @@ class TestStageModelSelection:
                     runtime_model_id="urchade/gliner_multi-v2.1",
                     source="urchade/gliner_multi-v2.1",
                     languages=None,
+                    management="dalston",
                 )
             ),
         ]
@@ -1037,6 +1040,7 @@ class TestStageModelSelection:
                     runtime_model_id="urchade/gliner_multi-v2.1",
                     source="urchade/gliner_multi-v2.1",
                     languages=None,
+                    management="dalston",
                 )
             ),
         ]

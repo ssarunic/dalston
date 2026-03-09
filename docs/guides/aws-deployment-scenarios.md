@@ -464,6 +464,7 @@ The control plane (Gateway, Orchestrator, Redis, Postgres) and CPU engines (prep
 Running diarize on CPU means a 1-hour audio file takes **72 minutes** to diarize. On the GPU that's already there, it takes **5 minutes**. Same story for alignment. Since you're paying for the GPU anyway, there's no cost benefit to running these stages on CPU — only a massive performance penalty.
 
 Splitting lets you:
+
 - **Run the control plane 24/7 on a ~$30/month t3.medium** — Gateway accepts uploads, Orchestrator queues tasks
 - **Start/stop the GPU instance on demand** — or use spot ($0.35/hr vs $1.01/hr)
 - **All model-heavy stages on GPU** — transcribe, align, diarize run where they're 15-40x faster
@@ -532,6 +533,7 @@ Compare to Scenario 2 (single g5.xlarge 24/7): ~$300/month. The split saves mone
 ### Scaling up
 
 The split pattern extends naturally:
+
 - **Multiple GPU workers**: Launch 2-3 spot g5.xlarge instances, all pointing at the same Redis. Tasks distribute automatically via consumer groups. Drain the queue faster.
 - **Heterogeneous workers**: One g5.xlarge for transcription, one focused on align+diarize. Each engine type on the right hardware.
 - **Smaller GPU for align+diarize only**: If nemo-onnx handles transcription on CPU fast enough, the GPU worker only runs align + diarize engines. A smaller g4dn.xlarge (~$0.53/hr) is sufficient — align needs ~2 GB VRAM and diarize needs 2-4 GB.
@@ -619,6 +621,7 @@ If you need multilingual realtime streaming, add faster-whisper RT (~6 GB VRAM).
 ### LLM-class realtime: Scenario 3 or 4
 
 If you want voxtral Mini 4B for 13-language LLM streaming (~16 GB VRAM), Scenario 2's VRAM budget gets too tight for batch + RT simultaneously. Options:
+
 - **Scenario 3** (g5.2xlarge): Same GPU, more CPU/RAM. voxtral RT fits alongside one batch runtime but not all.
 - **Scenario 4** (g5.12xlarge): Dedicated GPU per function. voxtral RT gets its own A10G. Overkill unless you also need parallel pipeline.
 
@@ -645,6 +648,7 @@ If your workload is sporadic — uploads come in throughout the day but processi
 ### English-only on a budget: Scenario 1 (`t3.xlarge`)
 
 If it's only English and batch latency is acceptable:
+
 - nemo-onnx with parakeet-tdt-0.6b-v3 transcribes at ~8x realtime on CPU with punctuation — a 10-minute file takes ~75 seconds
 - parakeet-onnx RT handles single-session English realtime on CPU (VAD-chunked)
 - ~$35/month. No GPU needed.
@@ -890,6 +894,7 @@ Scenario 6 (ECS split)    → Auto-scaling, managed services, production
 Each step is additive. Scenarios 1→3 are a one-line Terraform variable change. Scenario 4 needs a compose override for GPU pinning. Scenario 5 is a second EC2 instance. Scenario 6 is a new Terraform module with ECS.
 
 **Decision axes**:
+
 - Batch only, English? → Scenario 1 (CPU) is fine
 - Batch + English RT? → Scenario 2
 - Multilingual RT or voxtral RT? → Scenario 2-3
@@ -1265,3 +1270,39 @@ For Option A (the recommended path), this isn't an issue — EBS stays attached.
 - Worst case: you're interrupted during a batch job, it auto-retries in ~2 minutes
 
 If you find spot interruptions too frequent (unlikely for g5), just flip `use_spot = false` and you're back to on-demand. Zero architectural changes needed.
+
+---
+
+## Riva NIM Runtime (M63)
+
+Any GPU scenario (2-5) can optionally add the **Riva NIM runtime** for TensorRT-optimized transcription. Riva NIM runs as a sidecar container and provides 2-10x faster inference compared to NeMo/PyTorch.
+
+### Setup
+
+```bash
+# Provision with Riva (prompts for NGC_API_KEY)
+dalston-aws setup --gpu --riva
+
+# Or add manually to .env.aws
+echo "NGC_API_KEY=your-ngc-key" >> .env.aws
+
+# Start with Riva
+make aws-start-riva
+```
+
+### Requirements
+
+- **NGC API Key** — required to pull NIM containers from `nvcr.io`. Get one at [NGC](https://ngc.nvidia.com/).
+- **GPU with Compute Capability >= 7.0** (Volta+; g5/g6 instances satisfy this).
+- **First start warmup ~30 minutes** — NIM downloads the model and builds TensorRT engines. Subsequent starts take ~30 seconds.
+- **8GB shared memory** — `shm_size: 8gb` is set in the compose overlay.
+
+### Cost Impact
+
+None beyond existing GPU instance cost. Riva NIM is a software layer, not an AWS service. The NIM container runs on the same GPU instance alongside other engines.
+
+### How It Works
+
+The Riva engine is a thin gRPC client — it delegates inference to the NIM container. The model catalog entry (`nvidia/parakeet-ctc-1.1b-riva`) is marked `management: external`, so Dalston seeds it as `status=ready` and skips the HuggingFace download flow. The engine selector's RTF-based ranking naturally prefers the Riva engine when it's running (RTF 0.0001 vs 0.0005 for NeMo).
+
+When the NIM container is not running, the selector falls back to other runtimes (NeMo, faster-whisper) automatically.
