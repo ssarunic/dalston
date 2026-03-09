@@ -407,7 +407,91 @@ simplifies the core pipeline without losing the feature.
 
 **Saves:** Two pipeline stages from the DAG builder, ~100 LOC.
 
-### 5d. Single registry protocol
+### 5d. Eliminate the merge stage entirely
+
+The merge stage (`engines/stt-merge/final-merger/engine.py`, 1141 LOC)
+exists because the DAG's parallel branches write **separate artifact
+files** with incompatible formats:
+
+- transcribe → `TranscribeOutput` (text, segments, language)
+- diarize → `DiarizeOutput` (speaker turns) — separate file
+- align → `AlignOutput` (word timestamps) — separate file
+- pii_detect → `PIIDetectOutput` (entities) — separate file
+
+Since these stages run in parallel (or at least independently), they
+can't write to the same document. Merge combines all of them into the
+canonical `transcript.json` (1141 LOC of format conversion, overlap
+matching, speaker assignment, PII redaction text splicing, per-channel
+stereo audio assembly via FFmpeg, etc.).
+
+**With a linear pipeline, merge is unnecessary.** Each stage reads the
+previous stage's output, enriches it, and writes it forward. The
+document evolves through the pipeline:
+
+```
+prepare    → { audio_meta }
+transcribe → { audio_meta, text, segments[], language }
+diarize    → { ..., segments[].speaker, speakers[] }
+emotion    → { ..., segments[].emotion }
+```
+
+The last stage's output IS the final `transcript.json`. No combiner
+needed.
+
+**What merge currently does and where it moves:**
+
+| Merge responsibility | Where it goes |
+|---|---|
+| Combine transcribe + diarize outputs | Diarize stage enriches transcript directly |
+| Speaker assignment via overlap matching | Diarize stage does this inline |
+| Word-level timestamp merging from align | Eliminated (transcribe produces native timestamps, section 5b) |
+| PII entity splicing into text | Post-processing hook (section 5c) |
+| Stereo audio assembly via FFmpeg | Pre-processing split handles this (section 5a) |
+| `known_speaker_names` remapping | Diarize stage or gateway response formatter |
+| Build metadata (pipeline_stages, warnings) | Orchestrator writes metadata on job completion |
+| Format canonical `transcript.json` | Each stage writes the same schema; last stage's output is canonical |
+
+**What this requires:** A shared `Transcript` schema that all stages
+read and write. Currently each stage has its own output model
+(`TranscribeOutput`, `DiarizeOutput`, etc.). These would be replaced
+with a single evolving `Transcript` model where each stage populates
+its fields.
+
+```python
+class Transcript(BaseModel):
+    """The single document that flows through the pipeline."""
+    job_id: str
+    version: str = "1.0"
+    metadata: TranscriptMetadata
+    text: str = ""
+    speakers: list[Speaker] = []
+    segments: list[Segment] = []
+    # Each stage adds its fields; downstream stages see upstream data
+
+class Segment(BaseModel):
+    id: str
+    start: float
+    end: float
+    text: str
+    speaker: str | None = None       # populated by diarize
+    words: list[Word] = []           # populated by transcribe (native timestamps)
+    emotion: str | None = None       # populated by emotion detection
+    emotion_confidence: float | None = None
+    events: list[Event] = []         # populated by non-verbal detection
+```
+
+**Saves:** 1141 LOC (the entire final-merger engine), one Docker
+service, one engine directory. Also eliminates the artifact fan-in
+pattern in the materializer and the `input_bindings` / `previous_outputs`
+plumbing that exists solely to feed merge.
+
+**What you give up:** The ability to run stages in parallel on separate
+outputs (already given up by choosing a linear pipeline). Also, stages
+are now coupled to a shared schema -- but this is a feature, not a bug.
+It makes the contract explicit and enforced by Pydantic, rather than
+implicit in merge's 1141-line format conversion logic.
+
+### 5e. Single registry protocol
 
 Replace `BatchEngineRegistry` (sync) and `WorkerRegistry` (async) with a
 single async `EngineRegistry`. All engines register the same way. The
@@ -431,12 +515,13 @@ prepare ──────┤                                             ├─
 ...reduces to a **fully linear pipeline**:
 
 ```
-prepare → transcribe → [diarize] → merge
+prepare → transcribe → [diarize]
 ```
 
 - **per_channel branching**: gone (pre-processing split, section 5a)
 - **align stage**: gone (modern transcribers produce native word timestamps, section 5b)
 - **pii_detect + audio_redact**: gone from core pipeline (post-processing hook, section 5c)
+- **merge stage**: gone (each stage enriches a shared Transcript document, section 5d)
 - **diarize ∥ transcribe parallelism**: dropped (see rationale below)
 
 ### Why fully linear over a fork-join
@@ -456,28 +541,32 @@ A fully linear pipeline means the orchestrator becomes a **simple FIFO
 queue processor** with zero dependency tracking:
 
 ```python
-PIPELINE_STAGES = ["prepare", "transcribe", "diarize", "merge"]
-
 def build_pipeline(job_params, engines):
     stages = ["prepare", "transcribe"]
     if job_params.get("speaker_detection") == "diarize":
         stages.append("diarize")
-    stages.append("merge")
     return [make_task(stage) for stage in stages]
 ```
 
-Compare to the current 700+ LOC `dag.py`. No dependency graph, no
-fork-join scheduling, no merge dependency accumulation.
+Compare to the current 700+ LOC `dag.py` + 1141 LOC merge engine. No
+dependency graph, no fork-join scheduling, no merge dependency
+accumulation, no artifact fan-in. Each stage reads the previous stage's
+`Transcript` object, enriches it, and writes it forward. The last
+stage's output is the final `transcript.json`.
 
 ### What this eliminates from the orchestrator
 
 - `_build_per_channel_dag_with_engines()` (160 LOC)
-- `_build_dag_with_engines()` dependency graph construction
+- `_build_dag_with_engines()` dependency graph construction (~540 LOC)
 - Stage-specific `if` branches for align, pii_detect, audio_redact
 - Complex merge dependency accumulation
 - The concept of "skip_alignment" / "skip_diarization" capability checks
-- All dependency resolution logic in the scheduler -- just run the next
-  stage when the current one completes
+- All dependency resolution logic in the scheduler
+- The entire merge engine (1141 LOC) and its Docker service
+- The `input_bindings` / `previous_outputs` plumbing in the engine SDK
+- Artifact fan-in logic in the materializer
+
+The orchestrator just runs the next stage when the current one completes.
 
 ### 6a. Future Stages Keep It Linear
 
@@ -486,9 +575,12 @@ foreseeable stage fits naturally into a linear pipeline because each
 depends on the output of the previous:
 
 ```
-prepare → [noise_removal] → [VAD] → transcribe → [diarize] → [emotion] → [non_verbal] → merge
+prepare → [noise_removal] → [VAD] → transcribe → [diarize] → [speaker_id] → [emotion] → [non_verbal]
            ↑ pre-processing          core          ↑ post-transcribe enrichments
 ```
+
+Each stage enriches the same `Transcript` document. The last stage's
+output is the final `transcript.json`. No merge needed at any point.
 
 | Future Stage | Position | Depends On | Why Linear |
 |---|---|---|---|
@@ -497,7 +589,7 @@ prepare → [noise_removal] → [VAD] → transcribe → [diarize] → [emotion]
 | Speaker fingerprint/ID | After diarize | Diarization segments + audio | Matches speakers to known identities |
 | Emotion detection | After transcribe | Transcript segments + audio | Labels segments with emotion |
 | Non-verbal events | After transcribe | Audio segments | Detects laughter, cough, applause, etc. |
-| LLM cleanup/summarization | After merge | Full transcript | Post-processing on final output |
+| LLM cleanup/summarization | After all enrichments | Full transcript | Rewrites, summarizes, formats |
 
 Could emotion and non-verbal run in parallel? Yes, they're independent.
 But on a single GPU they'd contend for resources anyway. If you ever
@@ -505,8 +597,9 @@ need that parallelism (multi-GPU cloud), you can add a single fork-join
 at that point -- but don't build the infrastructure until you need it.
 
 **Key insight: the pipeline is ordered by data dependency, and each
-stage refines or enriches the output of the previous. This is inherently
-sequential.**
+stage enriches the output of the previous. This is inherently sequential.
+The `Transcript` document is the single artifact that flows through the
+entire pipeline, getting richer at each stage.**
 
 ### 6b. Multi-capability Engines Collapse the Pipeline Further
 
@@ -540,13 +633,13 @@ a single inference call. This makes the pipeline even shorter:
 With these engines, the actual pipeline for a typical job might be:
 
 ```
-prepare → riva_transcribe_with_diarization → merge
+prepare → riva (covers: VAD + transcribe + diarize)
 ```
 
 Or with SenseVoice:
 
 ```
-prepare → sensevoice_transcribe_with_emotions → merge
+prepare → sensevoice (covers: transcribe + emotion + non_verbal)
 ```
 
 The pipeline framework doesn't need to know about internal engine
@@ -575,10 +668,13 @@ is batch-only. With Riva as a real-time engine:
 
 ## 7. Recommended Execution Order
 
-1. **Replace DAG with linear pipeline** -- rewrite `dag.py` as a simple
-   ordered stage list. This is now the highest-leverage change: 700 LOC
-   replaced with ~30 LOC, and it unblocks everything else by removing
-   the complexity that makes other changes scary.
+1. **Replace DAG with linear pipeline + eliminate merge** -- rewrite
+   `dag.py` as a simple ordered stage list, introduce a shared
+   `Transcript` schema that flows through the pipeline. This is the
+   highest-leverage change: ~700 LOC in dag.py + 1141 LOC merge engine
+   replaced with ~30 LOC pipeline builder + ~100 LOC shared schema.
+   Unblocks everything else by removing the complexity that makes other
+   changes scary.
 
 2. **Unify the engine SDK** -- single base class with optional streaming.
    High-impact, touches every engine.
