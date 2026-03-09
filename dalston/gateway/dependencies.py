@@ -42,6 +42,23 @@ if TYPE_CHECKING:
 logger = structlog.get_logger()
 
 
+def _build_rate_limit_headers(
+    limit: int,
+    remaining: int,
+    reset_seconds: int | None = None,
+) -> dict[str, str]:
+    """Build OpenAI+legacy rate-limit headers."""
+    headers = {
+        "X-RateLimit-Limit": str(limit),
+        "X-RateLimit-Remaining": str(remaining),
+        "X-RateLimit-Limit-Requests": str(limit),
+        "X-RateLimit-Remaining-Requests": str(remaining),
+    }
+    if reset_seconds is not None:
+        headers["X-RateLimit-Reset-Requests"] = str(reset_seconds)
+    return headers
+
+
 class _NoopRedis:
     """Minimal async no-op Redis client for lite mode endpoints."""
 
@@ -468,14 +485,16 @@ async def check_request_rate_limit(
     """
     result = await rate_limiter.check_request_rate(api_key.tenant_id)
     if not result.allowed:
+        headers = _build_rate_limit_headers(
+            limit=result.limit,
+            remaining=result.remaining,
+            reset_seconds=result.reset_seconds,
+        )
+        headers["Retry-After"] = str(result.reset_seconds)
         raise HTTPException(
             status_code=429,
             detail=Err.RATE_LIMIT_EXCEEDED,
-            headers={
-                "Retry-After": str(result.reset_seconds),
-                "X-RateLimit-Limit": str(result.limit),
-                "X-RateLimit-Remaining": str(result.remaining),
-            },
+            headers=headers,
         )
     return api_key
 
@@ -490,13 +509,15 @@ async def check_concurrent_jobs_limit(
     """
     result = await rate_limiter.check_concurrent_jobs(api_key.tenant_id)
     if not result.allowed:
+        headers = _build_rate_limit_headers(
+            limit=result.limit,
+            remaining=result.remaining,
+            reset_seconds=result.reset_seconds,
+        )
         raise HTTPException(
             status_code=429,
             detail=Err.CONCURRENT_JOB_LIMIT.format(limit=result.limit),
-            headers={
-                "X-RateLimit-Limit": str(result.limit),
-                "X-RateLimit-Remaining": str(result.remaining),
-            },
+            headers=headers,
         )
     return api_key
 
@@ -511,13 +532,15 @@ async def check_concurrent_sessions_limit(
     """
     result = await rate_limiter.check_concurrent_sessions(api_key.tenant_id)
     if not result.allowed:
+        headers = _build_rate_limit_headers(
+            limit=result.limit,
+            remaining=result.remaining,
+            reset_seconds=result.reset_seconds,
+        )
         raise HTTPException(
             status_code=429,
             detail=Err.CONCURRENT_SESSION_LIMIT.format(limit=result.limit),
-            headers={
-                "X-RateLimit-Limit": str(result.limit),
-                "X-RateLimit-Remaining": str(result.remaining),
-            },
+            headers=headers,
         )
     return api_key
 
@@ -528,6 +551,7 @@ async def check_concurrent_sessions_limit(
 
 
 async def get_principal_with_job_rate_limit(
+    request: Request,
     principal: Principal = Depends(get_principal),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> Principal:
@@ -538,27 +562,32 @@ async def get_principal_with_job_rate_limit(
     """
     # Check request rate limit
     rate_result = await rate_limiter.check_request_rate(principal.tenant_id)
+    request.state.openai_rate_limit_headers = _build_rate_limit_headers(
+        limit=rate_result.limit,
+        remaining=rate_result.remaining,
+        reset_seconds=rate_result.reset_seconds,
+    )
     if not rate_result.allowed:
+        headers = dict(request.state.openai_rate_limit_headers)
+        headers["Retry-After"] = str(rate_result.reset_seconds)
         raise HTTPException(
             status_code=429,
             detail=Err.RATE_LIMIT_EXCEEDED,
-            headers={
-                "Retry-After": str(rate_result.reset_seconds),
-                "X-RateLimit-Limit": str(rate_result.limit),
-                "X-RateLimit-Remaining": str(rate_result.remaining),
-            },
+            headers=headers,
         )
 
     # Check concurrent jobs limit
     jobs_result = await rate_limiter.check_concurrent_jobs(principal.tenant_id)
     if not jobs_result.allowed:
+        headers = _build_rate_limit_headers(
+            limit=jobs_result.limit,
+            remaining=jobs_result.remaining,
+            reset_seconds=jobs_result.reset_seconds,
+        )
         raise HTTPException(
             status_code=429,
             detail=Err.CONCURRENT_JOB_LIMIT.format(limit=jobs_result.limit),
-            headers={
-                "X-RateLimit-Limit": str(jobs_result.limit),
-                "X-RateLimit-Remaining": str(jobs_result.remaining),
-            },
+            headers=headers,
         )
 
     return principal

@@ -16,10 +16,23 @@ import binascii
 import json
 import uuid
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Header, Query, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.audio_defaults import DEFAULT_SAMPLE_RATE
 from dalston.common.redis import get_redis as _get_redis
@@ -55,9 +68,27 @@ from dalston.gateway.api.v1._realtime_common import (
 from dalston.gateway.api.v1._realtime_common import (
     resolve_rt_routing as _resolve_rt_routing,
 )
-from dalston.gateway.dependencies import get_session_router
+from dalston.gateway.api.v1.openai_audio import (
+    OpenAIEndpoint,
+    build_openai_rate_limit_headers,
+    is_openai_model_supported_for_endpoint,
+    list_openai_models,
+    raise_openai_error,
+    validate_openai_request,
+)
+from dalston.gateway.dependencies import (
+    get_db,
+    get_rate_limiter,
+    get_redis,
+    get_security_manager,
+    get_session_router,
+    require_auth,
+)
 from dalston.gateway.middleware.auth import authenticate_websocket
-from dalston.gateway.services.auth import Scope
+from dalston.gateway.security.manager import SecurityManager
+from dalston.gateway.security.permissions import Permission
+from dalston.gateway.security.principal import Principal
+from dalston.gateway.services.auth import APIKey, AuthService, Scope, SessionToken
 from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.realtime_sessions import RealtimeSessionService
 
@@ -69,48 +100,22 @@ openai_realtime_router = APIRouter(tags=["realtime", "openai"])
 
 
 # =============================================================================
-# OpenAI Model Mapping for Real-time
-# =============================================================================
-
-OPENAI_REALTIME_MODEL_MAP = {
-    "gpt-4o-transcribe": None,  # None = auto-select best available
-    "gpt-4o-mini-transcribe": None,  # None = auto-select
-    "whisper-1": None,  # None = auto-select
-}
-
-
-def is_openai_realtime_model(model: str) -> bool:
-    """Check if model is a valid OpenAI real-time model."""
-    return model in OPENAI_REALTIME_MODEL_MAP
-
-
-def map_openai_realtime_model(model: str) -> str | None:
-    """Map OpenAI model to Dalston engine ID.
-
-    Returns None for auto-selection.
-    """
-    return OPENAI_REALTIME_MODEL_MAP.get(model)
-
-
-# =============================================================================
 # OpenAI Audio Format Mapping
 # =============================================================================
 
 OPENAI_AUDIO_FORMAT_MAP = {
-    # Note: OpenAI spec uses 24kHz but our Silero VAD only supports 8kHz/16kHz
-    # Default to 16kHz for compatibility with our realtime workers
-    "pcm16": (
-        "pcm_s16le",
-        DEFAULT_SAMPLE_RATE,
-    ),  # 16-bit PCM, 16kHz (Silero VAD compatible)
-    "g711_ulaw": ("mulaw", 8000),
-    "g711_alaw": ("alaw", 8000),
+    "pcm16": ("pcm_s16le", 24000, DEFAULT_SAMPLE_RATE),
+    "g711_ulaw": ("mulaw", 8000, 8000),
+    "g711_alaw": ("alaw", 8000, 8000),
 }
 
 
-def map_openai_audio_format(audio_format: str) -> tuple[str, int]:
-    """Map OpenAI audio format to Dalston encoding and sample rate."""
-    return OPENAI_AUDIO_FORMAT_MAP.get(audio_format, ("pcm_s16le", 24000))
+def map_openai_audio_format(audio_format: str) -> tuple[str, int, int]:
+    """Map OpenAI format to (encoding, client_sample_rate, worker_sample_rate)."""
+    return OPENAI_AUDIO_FORMAT_MAP.get(
+        audio_format,
+        ("pcm_s16le", 24000, DEFAULT_SAMPLE_RATE),
+    )
 
 
 # =============================================================================
@@ -146,6 +151,7 @@ class OpenAISessionState:
     """
 
     current_item_id: str = field(default_factory=generate_item_id)
+    previous_item_id: str | None = None
 
 
 # =============================================================================
@@ -187,9 +193,327 @@ async def _check_realtime_rate_limits(
     return True
 
 
+def _parse_client_secret_ttl(client_secret: object) -> int:
+    """Parse optional client-secret expiration config from REST create payload."""
+    default_ttl = 600
+    if client_secret is None:
+        return default_ttl
+    if not isinstance(client_secret, dict):
+        raise_openai_error(
+            400,
+            "client_secret must be an object",
+            param="client_secret",
+            code="invalid_request",
+        )
+
+    expires_cfg = client_secret.get("expires_at") or client_secret.get("expires_after")
+    if expires_cfg is None:
+        return default_ttl
+    if not isinstance(expires_cfg, dict):
+        raise_openai_error(
+            400,
+            "client_secret.expires_at must be an object",
+            param="client_secret",
+            code="invalid_request",
+        )
+
+    seconds = expires_cfg.get("seconds")
+    if seconds is None:
+        return default_ttl
+    if not isinstance(seconds, int):
+        raise_openai_error(
+            400,
+            "client_secret.expires_at.seconds must be an integer",
+            param="client_secret",
+            code="invalid_request",
+        )
+    if seconds < 10 or seconds > 7200:
+        raise_openai_error(
+            400,
+            "client_secret.expires_at.seconds must be between 10 and 7200",
+            param="client_secret",
+            code="invalid_request",
+        )
+    return seconds
+
+
+def _normalize_turn_detection(turn_detection: object) -> dict | None:
+    """Validate and normalize turn detection config for REST create responses."""
+    if turn_detection is None:
+        return None
+    if not isinstance(turn_detection, dict):
+        raise_openai_error(
+            400,
+            "turn_detection must be an object or null",
+            param="turn_detection",
+            code="invalid_request",
+        )
+
+    turn_type = turn_detection.get("type", "server_vad")
+    if turn_type != "server_vad":
+        raise_openai_error(
+            400,
+            "Only turn_detection.type='server_vad' is currently supported",
+            param="turn_detection",
+            code="invalid_request",
+        )
+
+    threshold = turn_detection.get("threshold", 0.5)
+    silence_duration_ms = turn_detection.get("silence_duration_ms", 500)
+    prefix_padding_ms = turn_detection.get("prefix_padding_ms", 300)
+
+    if not isinstance(threshold, float | int) or not 0.0 <= float(threshold) <= 1.0:
+        raise_openai_error(
+            400,
+            "turn_detection.threshold must be between 0.0 and 1.0",
+            param="turn_detection",
+            code="invalid_request",
+        )
+    if not isinstance(silence_duration_ms, int) or silence_duration_ms < 0:
+        raise_openai_error(
+            400,
+            "turn_detection.silence_duration_ms must be a non-negative integer",
+            param="turn_detection",
+            code="invalid_request",
+        )
+    if not isinstance(prefix_padding_ms, int) or prefix_padding_ms < 0:
+        raise_openai_error(
+            400,
+            "turn_detection.prefix_padding_ms must be a non-negative integer",
+            param="turn_detection",
+            code="invalid_request",
+        )
+
+    return {
+        "type": "server_vad",
+        "threshold": float(threshold),
+        "silence_duration_ms": silence_duration_ms,
+        "prefix_padding_ms": prefix_padding_ms,
+    }
+
+
+def _normalize_noise_reduction(noise_reduction: object) -> dict | None:
+    """Validate and normalize noise reduction config."""
+    if noise_reduction is None:
+        return None
+    if not isinstance(noise_reduction, dict):
+        raise_openai_error(
+            400,
+            "input_audio_noise_reduction must be an object or null",
+            param="input_audio_noise_reduction",
+            code="invalid_request",
+        )
+    noise_type = noise_reduction.get("type")
+    if noise_type not in {"near_field", "far_field"}:
+        raise_openai_error(
+            400,
+            "input_audio_noise_reduction.type must be near_field or far_field",
+            param="input_audio_noise_reduction",
+            code="invalid_request",
+        )
+    return {"type": noise_type}
+
+
 # =============================================================================
-# WebSocket Endpoint
+# REST + WebSocket Endpoints
 # =============================================================================
+
+
+@openai_realtime_router.post(
+    "/realtime/transcription_sessions",
+    summary="Create OpenAI-compatible realtime transcription session",
+    description=(
+        "Create an ephemeral realtime client_secret for OpenAI-compatible "
+        "realtime transcription clients."
+    ),
+)
+async def create_openai_realtime_transcription_session(
+    request: Request,
+    response: Response,
+    api_identity: Annotated[APIKey | SessionToken, Depends(require_auth)],
+    security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
+    rate_limiter: Annotated[RedisRateLimiter, Depends(get_rate_limiter)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> dict:
+    """OpenAI-compatible REST setup endpoint for realtime transcription sessions."""
+    principal = (
+        Principal.from_session_token(api_identity)
+        if isinstance(api_identity, SessionToken)
+        else Principal.from_api_key(api_identity)
+    )
+    security_manager.require_permission(principal, Permission.SESSION_CREATE)
+
+    rate_result = await rate_limiter.check_request_rate(principal.tenant_id)
+    headers = build_openai_rate_limit_headers(
+        limit=rate_result.limit,
+        remaining=rate_result.remaining,
+        reset_seconds=rate_result.reset_seconds,
+    )
+    if not rate_result.allowed:
+        headers["Retry-After"] = str(rate_result.reset_seconds)
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": {
+                    "message": "Rate limit exceeded",
+                    "type": "rate_limit_error",
+                    "param": None,
+                    "code": "rate_limit_exceeded",
+                }
+            },
+            headers=headers,
+        )
+    response.headers.update(headers)
+
+    # Session tokens are already ephemeral and cannot mint further child tokens.
+    if isinstance(api_identity, SessionToken):
+        raise_openai_error(
+            403,
+            "Session token cannot create another client_secret",
+            param="Authorization",
+            code="invalid_session_token",
+        )
+
+    try:
+        raw_body = await request.json()
+    except json.JSONDecodeError as exc:
+        raise_openai_error(
+            400,
+            f"Invalid JSON body: {exc}",
+            param="body",
+            code="invalid_json",
+        )
+
+    if raw_body is None:
+        raw_body = {}
+    if not isinstance(raw_body, dict):
+        raise_openai_error(
+            400,
+            "Request body must be a JSON object",
+            param="body",
+            code="invalid_request",
+        )
+
+    if "session" in raw_body:
+        if not isinstance(raw_body["session"], dict):
+            raise_openai_error(
+                400,
+                "session must be a JSON object",
+                param="session",
+                code="invalid_request",
+            )
+        session_input = raw_body["session"]
+    else:
+        session_input = raw_body
+
+    normalized_session = _normalize_session_update_payload({"session": session_input})
+    transcription_cfg = normalized_session.get("input_audio_transcription", {})
+    if not isinstance(transcription_cfg, dict):
+        raise_openai_error(
+            400,
+            "input_audio_transcription must be an object",
+            param="input_audio_transcription",
+            code="invalid_request",
+        )
+
+    model = transcription_cfg.get("model", "gpt-4o-transcribe")
+    if not isinstance(model, str) or not model:
+        raise_openai_error(
+            400,
+            "input_audio_transcription.model must be a non-empty string",
+            param="input_audio_transcription.model",
+            code="invalid_request",
+        )
+
+    prompt = transcription_cfg.get("prompt")
+    if prompt is not None and not isinstance(prompt, str):
+        raise_openai_error(
+            400,
+            "input_audio_transcription.prompt must be a string",
+            param="input_audio_transcription.prompt",
+            code="invalid_request",
+        )
+
+    include = raw_body.get("include")
+    if include is not None:
+        if not isinstance(include, list) or not all(
+            isinstance(item, str) for item in include
+        ):
+            raise_openai_error(
+                400,
+                "include must be an array of strings",
+                param="include",
+                code="invalid_request",
+            )
+
+    validate_openai_request(
+        model=model,
+        response_format=None,
+        timestamp_granularities=None,
+        endpoint=OpenAIEndpoint.REALTIME,
+        prompt=prompt,
+        include=include,
+    )
+
+    input_audio_format = normalized_session.get("input_audio_format", "pcm16")
+    if input_audio_format not in OPENAI_AUDIO_FORMAT_MAP:
+        raise_openai_error(
+            400,
+            f"Invalid input_audio_format: {input_audio_format}",
+            param="input_audio_format",
+            code="invalid_request",
+        )
+
+    modalities = raw_body.get("modalities", ["text"])
+    if not isinstance(modalities, list) or not all(
+        isinstance(m, str) and m in {"text", "audio"} for m in modalities
+    ):
+        raise_openai_error(
+            400,
+            "modalities must be an array containing 'text' and/or 'audio'",
+            param="modalities",
+            code="invalid_request",
+        )
+
+    turn_detection = _normalize_turn_detection(
+        normalized_session.get("turn_detection", None)
+    )
+    noise_reduction = _normalize_noise_reduction(
+        normalized_session.get("input_audio_noise_reduction", None)
+    )
+
+    ttl = _parse_client_secret_ttl(raw_body.get("client_secret"))
+    auth_service = AuthService(db, redis)
+    raw_token, session_token = await auth_service.create_session_token(
+        api_key=api_identity,
+        ttl=ttl,
+        scopes=[Scope.REALTIME],
+    )
+
+    response_payload: dict = {
+        "client_secret": {
+            "value": raw_token,
+            "expires_at": int(session_token.expires_at.timestamp()),
+        },
+        "input_audio_format": input_audio_format,
+        "input_audio_transcription": {
+            "model": model,
+        },
+        "modalities": modalities,
+        "turn_detection": turn_detection,
+        "input_audio_noise_reduction": noise_reduction,
+    }
+    language = transcription_cfg.get("language")
+    if isinstance(language, str) and language:
+        response_payload["input_audio_transcription"]["language"] = language
+    if prompt:
+        response_payload["input_audio_transcription"]["prompt"] = prompt
+    if include:
+        response_payload["include"] = include
+    response_payload["created_at"] = int(datetime.now(UTC).timestamp())
+
+    return response_payload
 
 
 @openai_realtime_router.websocket("/realtime")
@@ -238,10 +562,11 @@ async def openai_realtime_transcription(
         return
 
     # Validate model
-    if not is_openai_realtime_model(model):
+    if not is_openai_model_supported_for_endpoint(model, OpenAIEndpoint.REALTIME):
+        supported = ", ".join(list_openai_models(OpenAIEndpoint.REALTIME))
         await websocket.close(
             code=WS_CLOSE_INVALID_REQUEST,
-            reason=f"Invalid model: {model}. Supported: gpt-4o-transcribe, gpt-4o-mini-transcribe, whisper-1",
+            reason=f"Invalid model: {model}. Supported: {supported}",
         )
         return
 
@@ -363,6 +688,8 @@ async def openai_realtime_transcription(
                         "input_audio_transcription": {
                             "model": model,
                         },
+                        "turn_detection": None,
+                        "input_audio_noise_reduction": None,
                     },
                 }
             )
@@ -487,16 +814,20 @@ async def _proxy_to_worker_openai(
 
     import websockets
 
-    # Session configuration state (updated via transcription_session.update)
-    # Note: Default to 16kHz as Silero VAD only supports 8kHz/16kHz
+    # Session configuration state (updated via transcription/session.update)
     session_config = {
         "language": "auto",
         "encoding": "pcm_s16le",
+        "client_sample_rate": 24000,
         "sample_rate": DEFAULT_SAMPLE_RATE,
         "enable_vad": True,
         "interim_results": True,
         "word_timestamps": False,
         "vocabulary": None,
+        "vad_threshold": 0.5,
+        "min_silence_duration_ms": 500,
+        "prefix_padding_ms": 300,
+        "noise_reduction": None,
     }
 
     # Shared state for item_id correlation between tasks
@@ -595,13 +926,42 @@ def _build_worker_params(session_id: str, config: dict) -> dict[str, str]:
         "model": config.get("model", ""),
         "encoding": config["encoding"],
         "sample_rate": str(config["sample_rate"]),
+        "client_sample_rate": str(config["client_sample_rate"]),
         "enable_vad": str(config["enable_vad"]).lower(),
         "interim_results": str(config["interim_results"]).lower(),
         "word_timestamps": str(config["word_timestamps"]).lower(),
+        "vad_threshold": str(config["vad_threshold"]),
+        "min_silence_duration_ms": str(config["min_silence_duration_ms"]),
+        "prefix_padding_ms": str(config["prefix_padding_ms"]),
     }
     if config.get("vocabulary"):
         params["vocabulary"] = json.dumps(config["vocabulary"])
     return params
+
+
+def _normalize_session_update_payload(data: dict) -> dict:
+    """Accept both legacy and nested OpenAI session update payload variants."""
+    session = data.get("session", {})
+    if not isinstance(session, dict):
+        return {}
+
+    normalized = dict(session)
+    audio = session.get("audio")
+    if isinstance(audio, dict):
+        audio_input = audio.get("input")
+        if isinstance(audio_input, dict):
+            if "format" in audio_input:
+                normalized["input_audio_format"] = audio_input["format"]
+            if isinstance(audio_input.get("transcription"), dict):
+                normalized["input_audio_transcription"] = audio_input["transcription"]
+            if "turn_detection" in audio_input:
+                normalized["turn_detection"] = audio_input["turn_detection"]
+            if "noise_reduction" in audio_input:
+                normalized["input_audio_noise_reduction"] = audio_input[
+                    "noise_reduction"
+                ]
+
+    return normalized
 
 
 # =============================================================================
@@ -644,7 +1004,10 @@ async def _openai_client_to_worker(
                         data = json.loads(message["text"])
                         msg_type = data.get("type")
 
-                        if msg_type == "transcription_session.update":
+                        if msg_type in {
+                            "transcription_session.update",
+                            "session.update",
+                        }:
                             # Update session config and forward to worker
                             await _handle_session_update(
                                 client_ws, worker_ws, data, session_config
@@ -660,16 +1023,31 @@ async def _openai_client_to_worker(
                         elif msg_type == "input_audio_buffer.commit":
                             # Force processing of buffered audio
                             await worker_ws.send(json.dumps({"type": "flush"}))
-                            # Generate new item_id for this commit and subsequent transcript
-                            session_state.current_item_id = generate_item_id()
-                            # Send committed acknowledgment with the item_id
+                            current_item_id = generate_item_id()
+                            previous_item_id = session_state.previous_item_id
+                            session_state.current_item_id = current_item_id
+                            await client_ws.send_json(
+                                {
+                                    "type": "conversation.item.created",
+                                    "event_id": generate_event_id(),
+                                    "previous_item_id": previous_item_id,
+                                    "item": {
+                                        "id": current_item_id,
+                                        "type": "message",
+                                        "role": "user",
+                                        "content": [{"type": "input_audio"}],
+                                    },
+                                }
+                            )
                             await client_ws.send_json(
                                 {
                                     "type": "input_audio_buffer.committed",
                                     "event_id": generate_event_id(),
-                                    "item_id": session_state.current_item_id,
+                                    "item_id": current_item_id,
+                                    "previous_item_id": previous_item_id,
                                 }
                             )
+                            session_state.previous_item_id = current_item_id
 
                         elif msg_type == "input_audio_buffer.clear":
                             # Clear buffer - discard without transcription
@@ -744,13 +1122,18 @@ async def _handle_session_update(
 
     Updates session configuration, forwards to worker, and sends acknowledgment.
     """
-    session = data.get("session", {})
+    session = _normalize_session_update_payload(data)
 
     # Update audio format
     audio_format = session.get("input_audio_format", "pcm16")
-    encoding, sample_rate = map_openai_audio_format(audio_format)
+    encoding, client_sample_rate, sample_rate = map_openai_audio_format(audio_format)
     session_config["encoding"] = encoding
+    session_config["client_sample_rate"] = client_sample_rate
     session_config["sample_rate"] = sample_rate
+    session_config.setdefault("vad_threshold", 0.5)
+    session_config.setdefault("min_silence_duration_ms", 500)
+    session_config.setdefault("prefix_padding_ms", 300)
+    session_config.setdefault("noise_reduction", None)
 
     # Update transcription settings
     transcription = session.get("input_audio_transcription", {})
@@ -767,19 +1150,35 @@ async def _handle_session_update(
 
     # Update turn detection (VAD)
     turn_detection = session.get("turn_detection")
-    if turn_detection is None:
-        session_config["enable_vad"] = False
-    elif isinstance(turn_detection, dict):
-        session_config["enable_vad"] = True
-        # Could extract threshold, silence_duration_ms, etc. for future use
+    if "turn_detection" in session:
+        if turn_detection is None:
+            session_config["enable_vad"] = False
+        elif isinstance(turn_detection, dict):
+            session_config["enable_vad"] = True
+            if "threshold" in turn_detection:
+                session_config["vad_threshold"] = turn_detection["threshold"]
+            if "silence_duration_ms" in turn_detection:
+                session_config["min_silence_duration_ms"] = turn_detection[
+                    "silence_duration_ms"
+                ]
+            if "prefix_padding_ms" in turn_detection:
+                session_config["prefix_padding_ms"] = turn_detection[
+                    "prefix_padding_ms"
+                ]
+
+    noise_reduction = session.get("input_audio_noise_reduction")
+    if noise_reduction is not None:
+        session_config["noise_reduction"] = noise_reduction
 
     # Forward config update to worker
-    # The worker supports language updates via ConfigUpdateMessage
     await worker_ws.send(
         json.dumps(
             {
                 "type": "config",
                 "language": session_config["language"],
+                "vad_threshold": session_config["vad_threshold"],
+                "min_silence_duration_ms": session_config["min_silence_duration_ms"],
+                "prefix_padding_ms": session_config["prefix_padding_ms"],
             }
         )
     )
@@ -796,6 +1195,7 @@ async def _handle_session_update(
                     "language": session_config["language"],
                 },
                 "turn_detection": turn_detection,
+                "input_audio_noise_reduction": session_config["noise_reduction"],
             },
         }
     )
@@ -869,13 +1269,12 @@ async def _openai_worker_to_client(
                         "content_index": 0,
                         "transcript": data.get("text", ""),
                     }
-                    # Generate new item ID for next utterance
-                    session_state.current_item_id = generate_item_id()
 
                 elif msg_type == "vad.speech_start":
                     translated = {
                         "type": "input_audio_buffer.speech_started",
                         "event_id": generate_event_id(),
+                        "item_id": session_state.current_item_id,
                         "audio_start_ms": int(data.get("timestamp", 0) * 1000),
                     }
 
@@ -883,6 +1282,7 @@ async def _openai_worker_to_client(
                     translated = {
                         "type": "input_audio_buffer.speech_stopped",
                         "event_id": generate_event_id(),
+                        "item_id": session_state.current_item_id,
                         "audio_end_ms": int(data.get("timestamp", 0) * 1000),
                     }
 

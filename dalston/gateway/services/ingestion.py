@@ -48,6 +48,7 @@ class AudioIngestionService:
         self,
         file: UploadFile | None,
         url: str | None,
+        max_bytes: int | None = None,
     ) -> IngestedAudio:
         """Ingest audio from either a file upload or URL.
 
@@ -75,7 +76,7 @@ class AudioIngestionService:
 
         # Acquire content from URL or file
         if url is not None:
-            content, filename = await self._download_from_url(url)
+            content, filename = await self._download_from_url(url, max_bytes=max_bytes)
         else:
             content, filename = await self._read_from_file(file)  # type: ignore[arg-type]
 
@@ -92,7 +93,12 @@ class AudioIngestionService:
             metadata=metadata,
         )
 
-    async def _download_from_url(self, url: str) -> tuple[bytes, str]:
+    async def _download_from_url(
+        self,
+        url: str,
+        *,
+        max_bytes: int | None = None,
+    ) -> tuple[bytes, str]:
         """Download audio from URL.
 
         Args:
@@ -105,7 +111,11 @@ class AudioIngestionService:
             HTTPException: On download errors
         """
         try:
-            max_size = int(self.settings.audio_url_max_size_gb * 1024 * 1024 * 1024)
+            max_size = (
+                max_bytes
+                if max_bytes is not None
+                else int(self.settings.audio_url_max_size_gb * 1024 * 1024 * 1024)
+            )
             downloaded = await download_audio_from_url(
                 url=url,
                 max_size=max_size,

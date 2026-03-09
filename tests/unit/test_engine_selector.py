@@ -675,6 +675,47 @@ class TestSelectPipelineEngines:
         assert "merge" in selections
 
     @pytest.mark.asyncio
+    async def test_prefers_model_transcribe_over_engine_transcribe(
+        self, mock_registry, mock_catalog
+    ):
+        parameters = {
+            "engine_transcribe": "faster-whisper",
+            "model_transcribe": "Systran/faster-whisper-base",
+        }
+
+        with patch(
+            "dalston.orchestrator.engine_selector.select_engine", new_callable=AsyncMock
+        ) as mock_select_engine:
+            mock_select_engine.side_effect = [
+                EngineSelectionResult(
+                    runtime="audio-prepare",
+                    capabilities=make_capabilities("audio-prepare"),
+                    selection_reason="prepare",
+                ),
+                EngineSelectionResult(
+                    runtime="faster-whisper",
+                    capabilities=make_capabilities(
+                        "faster-whisper", supports_word_timestamps=True
+                    ),
+                    selection_reason="transcribe",
+                    runtime_model_id="Systran/faster-whisper-base",
+                ),
+                EngineSelectionResult(
+                    runtime="final-merger",
+                    capabilities=make_capabilities("final-merger"),
+                    selection_reason="merge",
+                ),
+            ]
+
+            await select_pipeline_engines(parameters, mock_registry, mock_catalog)
+
+        transcribe_call = mock_select_engine.await_args_list[1]
+        assert transcribe_call.args[0] == "transcribe"
+        assert (
+            transcribe_call.kwargs["user_preference"] == "Systran/faster-whisper-base"
+        )
+
+    @pytest.mark.asyncio
     async def test_skips_alignment_with_native_timestamps(
         self, mock_registry, mock_catalog
     ):

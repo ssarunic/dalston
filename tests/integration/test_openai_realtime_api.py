@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
@@ -23,7 +23,16 @@ from dalston.gateway.api.v1.openai_realtime import (
     _openai_worker_to_client,
     openai_realtime_router,
 )
+from dalston.gateway.dependencies import (
+    get_db,
+    get_rate_limiter,
+    get_redis,
+    get_security_manager,
+    require_auth,
+)
+from dalston.gateway.security.manager import SecurityManager
 from dalston.gateway.services.auth import DEFAULT_EXPIRES_AT, APIKey, Scope
+from dalston.gateway.services.rate_limiter import RateLimitResult
 
 
 class _FakeWorkerSender:
@@ -120,7 +129,7 @@ async def test_openai_worker_to_client_translates_protocol_events():
     assert client_ws.sent_json[3]["audio_end_ms"] == 1100
     assert client_ws.sent_json[1]["item_id"] == "item_fixed"
     assert client_ws.sent_json[2]["item_id"] == "item_fixed"
-    assert session_state.current_item_id != "item_fixed"
+    assert session_state.current_item_id == "item_fixed"
     assert session_end_data is not None
     assert session_end_data["total_audio_seconds"] == 1.2
 
@@ -218,6 +227,7 @@ async def test_openai_client_to_worker_translates_protocol_messages():
     session_config = {
         "language": "auto",
         "encoding": "pcm_s16le",
+        "client_sample_rate": 24000,
         "sample_rate": 16000,
         "enable_vad": True,
         "interim_results": True,
@@ -234,14 +244,156 @@ async def test_openai_client_to_worker_translates_protocol_messages():
     )
 
     text_payloads = [json.loads(p) for p in worker_ws.sent if isinstance(p, str)]
-    assert {"type": "config", "language": "en"} in text_payloads
+    config_payload = next(p for p in text_payloads if p.get("type") == "config")
+    assert config_payload["language"] == "en"
+    assert "vad_threshold" in config_payload
+    assert "min_silence_duration_ms" in config_payload
+    assert "prefix_padding_ms" in config_payload
     assert {"type": "flush"} in text_payloads
     assert {"type": "end"} in text_payloads
     assert any(p == audio_chunk for p in worker_ws.sent if isinstance(p, bytes))
 
     client_event_types = [payload["type"] for payload in client_ws.sent_json]
     assert "transcription_session.updated" in client_event_types
+    assert "conversation.item.created" in client_event_types
     assert "input_audio_buffer.committed" in client_event_types
+
+
+def _build_rest_realtime_create_app(api_key: APIKey) -> tuple[FastAPI, AsyncMock]:
+    app = FastAPI()
+    app.include_router(openai_realtime_router, prefix="/v1")
+
+    limiter = AsyncMock()
+    limiter.check_request_rate.return_value = RateLimitResult(
+        allowed=True,
+        limit=100,
+        remaining=99,
+        reset_seconds=60,
+    )
+
+    async def _fake_require_auth() -> APIKey:
+        return api_key
+
+    async def _fake_get_db() -> AsyncMock:
+        return AsyncMock()
+
+    async def _fake_get_redis() -> AsyncMock:
+        return AsyncMock()
+
+    app.dependency_overrides[require_auth] = _fake_require_auth
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    app.dependency_overrides[get_security_manager] = lambda: SecurityManager(
+        mode="api_key"
+    )
+    app.dependency_overrides[get_db] = _fake_get_db
+    app.dependency_overrides[get_redis] = _fake_get_redis
+    return app, limiter
+
+
+def test_openai_realtime_session_create_endpoint_returns_client_secret():
+    """REST create endpoint returns OpenAI-compatible session payload and headers."""
+    api_key = _build_api_key()
+    app, _ = _build_rest_realtime_create_app(api_key)
+
+    token_expiry = datetime.now(UTC) + timedelta(minutes=10)
+    created_token = SimpleNamespace(expires_at=token_expiry)
+
+    with patch(
+        "dalston.gateway.api.v1.openai_realtime.AuthService.create_session_token",
+        new_callable=AsyncMock,
+    ) as create_token_mock:
+        create_token_mock.return_value = ("tk_test_session", created_token)
+        client = TestClient(app)
+        response = client.post(
+            "/v1/realtime/transcription_sessions",
+            headers={"Authorization": "Bearer dk_test"},
+            json={
+                "input_audio_format": "pcm16",
+                "input_audio_transcription": {
+                    "model": "gpt-4o-transcribe",
+                    "language": "en",
+                    "prompt": "test prompt",
+                },
+                "turn_detection": {
+                    "type": "server_vad",
+                    "threshold": 0.4,
+                    "silence_duration_ms": 700,
+                    "prefix_padding_ms": 200,
+                },
+                "input_audio_noise_reduction": {"type": "near_field"},
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["client_secret"]["value"] == "tk_test_session"
+    assert payload["input_audio_format"] == "pcm16"
+    assert payload["input_audio_transcription"]["model"] == "gpt-4o-transcribe"
+    assert payload["input_audio_transcription"]["language"] == "en"
+    assert payload["input_audio_transcription"]["prompt"] == "test prompt"
+    assert payload["turn_detection"]["type"] == "server_vad"
+    assert payload["input_audio_noise_reduction"]["type"] == "near_field"
+    assert response.headers["x-ratelimit-limit-requests"] == "100"
+    assert response.headers["x-ratelimit-remaining-requests"] == "99"
+
+    create_token_mock.assert_awaited_once()
+    assert create_token_mock.await_args.kwargs["api_key"] == api_key
+    assert create_token_mock.await_args.kwargs["scopes"] == [Scope.REALTIME]
+
+
+def test_openai_realtime_session_create_endpoint_accepts_wrapped_session_shape():
+    """REST create endpoint accepts legacy wrapped {'session': ...} payload shape."""
+    api_key = _build_api_key()
+    app, _ = _build_rest_realtime_create_app(api_key)
+
+    token_expiry = datetime.now(UTC) + timedelta(minutes=10)
+    created_token = SimpleNamespace(expires_at=token_expiry)
+
+    with patch(
+        "dalston.gateway.api.v1.openai_realtime.AuthService.create_session_token",
+        new_callable=AsyncMock,
+    ) as create_token_mock:
+        create_token_mock.return_value = ("tk_wrapped", created_token)
+        client = TestClient(app)
+        response = client.post(
+            "/v1/realtime/transcription_sessions",
+            headers={"Authorization": "Bearer dk_test"},
+            json={
+                "session": {
+                    "input_audio_format": "pcm16",
+                    "input_audio_transcription": {"model": "gpt-4o-transcribe"},
+                }
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["client_secret"]["value"] == "tk_wrapped"
+    assert payload["input_audio_transcription"]["model"] == "gpt-4o-transcribe"
+    create_token_mock.assert_awaited_once()
+
+
+def test_openai_realtime_session_create_endpoint_rejects_invalid_model():
+    """REST create endpoint validates model against realtime capability table."""
+    api_key = _build_api_key()
+    app, _ = _build_rest_realtime_create_app(api_key)
+    client = TestClient(app)
+    response = client.post(
+        "/v1/realtime/transcription_sessions",
+        headers={"Authorization": "Bearer dk_test"},
+        json={
+            "input_audio_transcription": {
+                "model": "not-a-real-openai-model",
+            }
+        },
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    error = payload.get("error") or payload.get("detail", {}).get("error")
+    assert error is not None
+    assert error["param"] == "model"
+    assert error["code"] in {"model_not_found", "invalid_model"}
 
 
 def test_openai_realtime_endpoint_rejects_invalid_model():

@@ -24,6 +24,7 @@ from dalston.common.audio_defaults import (
     DEFAULT_MAX_UTTERANCE_SECONDS,
     DEFAULT_MIN_SILENCE_MS,
     DEFAULT_MIN_SPEECH_MS,
+    DEFAULT_PRE_SPEECH_PAD_MS,
     DEFAULT_SAMPLE_RATE,
     DEFAULT_VAD_THRESHOLD,
 )
@@ -97,6 +98,7 @@ class SessionConfig:
     language: str = "auto"
     model: str | None = None
     encoding: str = "pcm_s16le"
+    client_sample_rate: int | None = None
     sample_rate: int = DEFAULT_SAMPLE_RATE
     channels: int = 1
     enable_vad: bool = True
@@ -110,6 +112,7 @@ class SessionConfig:
     min_silence_duration_ms: int = (
         DEFAULT_MIN_SILENCE_MS  # Silence to trigger endpoint (ms)
     )
+    prefix_padding_ms: int = DEFAULT_PRE_SPEECH_PAD_MS
     # Storage options (S3 bucket/endpoint read from Settings env vars)
     store_audio: bool = True
     store_transcript: bool = True
@@ -141,6 +144,7 @@ class AudioBuffer:
         self,
         sample_rate: int,
         encoding: str,
+        client_sample_rate: int | None = None,
         channels: int = 1,
         chunk_duration_ms: int = 100,
     ) -> None:
@@ -159,6 +163,7 @@ class AudioBuffer:
             )
 
         self.sample_rate = sample_rate
+        self.client_sample_rate = client_sample_rate or sample_rate
         self.encoding = encoding
         self.channels = max(1, channels)
         self.chunk_duration_ms = chunk_duration_ms
@@ -179,6 +184,7 @@ class AudioBuffer:
             data: Raw audio bytes in configured encoding
         """
         samples = self._decode_audio(data)
+        samples = self._resample_if_needed(samples)
         self._buffer.extend(samples.tolist())
         self._total_samples += len(samples)
 
@@ -261,6 +267,19 @@ class AudioBuffer:
         else:
             raise ValueError(f"Unsupported encoding: {self.encoding}")
 
+    def _resample_if_needed(self, samples: np.ndarray) -> np.ndarray:
+        """Resample client audio to worker processing sample rate if needed."""
+        if self.client_sample_rate == self.sample_rate or len(samples) == 0:
+            return samples
+
+        target_len = max(
+            1,
+            int(len(samples) * self.sample_rate / self.client_sample_rate),
+        )
+        src = np.linspace(0.0, 1.0, num=len(samples), endpoint=False)
+        dst = np.linspace(0.0, 1.0, num=target_len, endpoint=False)
+        return np.interp(dst, src, samples).astype(np.float32)
+
 
 # Type alias for transcribe callback
 TranscribeCallback = Callable[
@@ -318,6 +337,7 @@ class SessionHandler:
         self._buffer = AudioBuffer(
             sample_rate=config.sample_rate,
             encoding=config.encoding,
+            client_sample_rate=config.client_sample_rate,
             channels=config.channels,
         )
         # Only initialize VAD if enabled - when disabled, use time-based chunking
@@ -328,6 +348,10 @@ class SessionHandler:
                     speech_threshold=config.vad_threshold,
                     min_speech_duration=config.min_speech_duration_ms / 1000.0,
                     min_silence_duration=config.min_silence_duration_ms / 1000.0,
+                    lookback_chunks=max(
+                        1,
+                        int(round(config.prefix_padding_ms / 100.0)),
+                    ),
                 )
             )
         else:
@@ -730,6 +754,28 @@ class SessionHandler:
             if parsed.language:
                 self.config.language = parsed.language
                 logger.debug("language_updated", language=parsed.language)
+            if parsed.vad_threshold is not None:
+                self.config.vad_threshold = parsed.vad_threshold
+                if self._vad is not None:
+                    self._vad.config.speech_threshold = parsed.vad_threshold
+            if parsed.min_silence_duration_ms is not None:
+                self.config.min_silence_duration_ms = parsed.min_silence_duration_ms
+                if self._vad is not None:
+                    self._vad.config.min_silence_duration = (
+                        parsed.min_silence_duration_ms / 1000.0
+                    )
+            if parsed.prefix_padding_ms is not None:
+                self.config.prefix_padding_ms = parsed.prefix_padding_ms
+                if self._vad is not None:
+                    self._vad.config.lookback_chunks = max(
+                        1,
+                        int(
+                            round(
+                                parsed.prefix_padding_ms
+                                / self._buffer.chunk_duration_ms
+                            )
+                        ),
+                    )
 
         elif isinstance(parsed, FlushMessage):
             # Flush VAD buffer

@@ -820,17 +820,26 @@ class RealtimeEngine(ABC):
                 f"(got warning={lag_warning_seconds}, hard={lag_hard_seconds})"
             )
 
+        sample_rate = get_int_param(
+            "sample_rate",
+            DEFAULT_SAMPLE_RATE,
+            min_val=MIN_SAMPLE_RATE,
+            max_val=MAX_SAMPLE_RATE,
+        )
+        client_sample_rate = get_int_param(
+            "client_sample_rate",
+            sample_rate,
+            min_val=MIN_SAMPLE_RATE,
+            max_val=MAX_SAMPLE_RATE,
+        )
+
         return SessionConfig(
             session_id=session_id,
             language=get_param("language", "auto"),
             model=model_value,
             encoding=get_param("encoding", "pcm_s16le"),
-            sample_rate=get_int_param(
-                "sample_rate",
-                DEFAULT_SAMPLE_RATE,
-                min_val=MIN_SAMPLE_RATE,
-                max_val=MAX_SAMPLE_RATE,
-            ),
+            client_sample_rate=client_sample_rate,
+            sample_rate=sample_rate,
             channels=get_int_param("channels", 1, min_val=1, max_val=2),
             enable_vad=get_bool_param("enable_vad", True),
             interim_results=get_bool_param("interim_results", True),
@@ -867,6 +876,12 @@ class RealtimeEngine(ABC):
                 ),
                 min_val=50,
                 max_val=2000,
+            ),
+            prefix_padding_ms=get_int_param(
+                "prefix_padding_ms",
+                300,
+                min_val=0,
+                max_val=5000,
             ),
             # Storage options (S3 config read from Settings)
             store_audio=get_bool_param("store_audio", True),

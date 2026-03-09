@@ -50,17 +50,11 @@ class TestOpenAIModelDetection:
         assert is_openai_model("parakeet-0.6b") is False
         assert is_openai_model("whisper-large-v3") is False
 
-    def test_is_openai_model_handles_future_models(self):
-        """Test pattern matching for future OpenAI model releases."""
-        # Future whisper versions
-        assert is_openai_model("whisper-2") is True
-        assert is_openai_model("whisper-3") is True
-        # Future GPT audio models
-        assert is_openai_model("gpt-5o-transcribe") is True
-        assert is_openai_model("gpt-5o-mini-transcribe") is True
-        # Audio preview models
-        assert is_openai_model("gpt-4-audio") is True
-        assert is_openai_model("gpt-4-audio-preview") is True
+    def test_is_openai_model_rejects_unlisted_future_models(self):
+        """Model detection is table-driven and rejects unknown future aliases."""
+        assert is_openai_model("whisper-2") is False
+        assert is_openai_model("gpt-5o-transcribe") is False
+        assert is_openai_model("gpt-4-audio-preview") is False
 
     def test_map_openai_model_whisper_1(self):
         """Test whisper-1 maps to faster-whisper."""
@@ -91,6 +85,11 @@ class TestOpenAIResponseFormatting:
                     "end": 2.5,
                     "text": "Hello world, how are you?",
                     "speaker": "speaker_0",
+                    "tokens": [101, 102, 103],
+                    "temperature": 0.0,
+                    "avg_logprob": -0.12,
+                    "compression_ratio": 1.06,
+                    "no_speech_prob": 0.03,
                     "words": [
                         {"text": "Hello", "start": 0.0, "end": 0.3},
                         {"text": "world", "start": 0.3, "end": 0.6},
@@ -126,6 +125,10 @@ class TestOpenAIResponseFormatting:
         assert result["duration"] == 2.5
         assert result["text"] == "Hello world, how are you?"
         assert len(result["segments"]) == 1
+        assert result["segments"][0]["tokens"] == [101, 102, 103]
+        assert result["segments"][0]["avg_logprob"] == -0.12
+        assert result["segments"][0]["compression_ratio"] == 1.06
+        assert result["segments"][0]["no_speech_prob"] == 0.03
         assert result["words"] is None  # No timestamp_granularities specified
 
     def test_format_verbose_json_with_word_timestamps(
@@ -140,6 +143,22 @@ class TestOpenAIResponseFormatting:
         assert result["words"][0]["word"] == "Hello"
         assert result["words"][0]["start"] == 0.0
         assert result["words"][0]["end"] == 0.3
+
+    def test_format_diarized_json_response(
+        self, sample_transcript, mock_export_service
+    ):
+        """Test diarized_json response includes speaker-segment output."""
+        sample_transcript["speakers"] = [{"id": "speaker_0", "name": "Speaker 1"}]
+        result = format_openai_response(
+            sample_transcript,
+            "diarized_json",
+            None,
+            mock_export_service,
+            model="gpt-4o-transcribe-diarize",
+        )
+        assert result["text"] == "Hello world, how are you?"
+        assert result["segments"][0]["speaker"] == "speaker_0"
+        assert result["speakers"][0]["id"] == "speaker_0"
 
 
 class TestOpenAITranscriptionEndpoint:
@@ -364,6 +383,247 @@ class TestOpenAITranscriptionEndpoint:
         data = response.json()
         assert "text" in data
         assert data["text"] == "Hello world"
+        assert response.headers["X-RateLimit-Limit-Requests"] == "100"
+        assert response.headers["X-RateLimit-Remaining-Requests"] == "99"
+
+    def test_openai_mode_forwards_temperature_zero(
+        self,
+        client,
+        mock_jobs_service,
+        mock_job,
+    ):
+        """Explicit temperature=0 must be forwarded, not dropped."""
+        mock_jobs_service.create_job.return_value = mock_job
+
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
+            MockStorage.return_value.upload_audio = AsyncMock(
+                return_value="s3://bucket/audio.mp3"
+            )
+            MockStorage.return_value.get_transcript = AsyncMock(
+                return_value={
+                    "text": "Hello world",
+                    "metadata": {"language": "en"},
+                }
+            )
+
+            with patch(
+                "dalston.gateway.api.v1.transcription.publish_job_created"
+            ) as mock_publish:
+                mock_publish.return_value = None
+
+                audio_content = b"fake audio content"
+                files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+                response = client.post(
+                    "/v1/audio/transcriptions",
+                    files=files,
+                    data={"model": "whisper-1", "temperature": "0"},
+                )
+
+        assert response.status_code == 200
+        kwargs = mock_jobs_service.create_job.await_args.kwargs
+        assert kwargs["parameters"]["temperature"] == 0.0
+
+    def test_openai_mode_passes_prompt_without_vocabulary_conversion(
+        self,
+        client,
+        mock_jobs_service,
+        mock_job,
+    ):
+        mock_jobs_service.create_job.return_value = mock_job
+
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
+            MockStorage.return_value.upload_audio = AsyncMock(
+                return_value="s3://bucket/audio.mp3"
+            )
+            MockStorage.return_value.get_transcript = AsyncMock(
+                return_value={
+                    "text": "Hello world",
+                    "metadata": {"language": "en"},
+                }
+            )
+
+            with patch(
+                "dalston.gateway.api.v1.transcription.publish_job_created"
+            ) as mock_publish:
+                mock_publish.return_value = None
+
+                audio_content = b"fake audio content"
+                files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+                response = client.post(
+                    "/v1/audio/transcriptions",
+                    files=files,
+                    data={"model": "whisper-1", "prompt": "ACME quarterly earnings"},
+                )
+
+        assert response.status_code == 200
+        kwargs = mock_jobs_service.create_job.await_args.kwargs
+        assert kwargs["parameters"]["prompt"] == "ACME quarterly earnings"
+        assert "vocabulary" not in kwargs["parameters"]
+
+    def test_openai_mode_passes_max_bytes_to_ingestion(
+        self,
+        client,
+        mock_jobs_service,
+        mock_job,
+        mock_ingestion_service,
+    ):
+        """OpenAI path should thread the 25MB limit to ingestion service."""
+        mock_jobs_service.create_job.return_value = mock_job
+
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
+            MockStorage.return_value.upload_audio = AsyncMock(
+                return_value="s3://bucket/audio.mp3"
+            )
+            MockStorage.return_value.get_transcript = AsyncMock(
+                return_value={
+                    "text": "Hello world",
+                    "metadata": {"language": "en"},
+                }
+            )
+
+            with patch(
+                "dalston.gateway.api.v1.transcription.publish_job_created"
+            ) as mock_publish:
+                mock_publish.return_value = None
+
+                audio_content = b"fake audio content"
+                files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+                response = client.post(
+                    "/v1/audio/transcriptions",
+                    files=files,
+                    data={"model": "whisper-1"},
+                )
+
+        assert response.status_code == 200
+        assert (
+            mock_ingestion_service.ingest.await_args.kwargs["max_bytes"]
+            == 25 * 1024 * 1024
+        )
+
+    def test_openai_mode_rejects_diarized_json_for_non_diarize_model(
+        self,
+        client,
+    ):
+        audio_content = b"fake audio content"
+        files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+
+        response = client.post(
+            "/v1/audio/transcriptions",
+            files=files,
+            data={
+                "model": "gpt-4o-transcribe",
+                "response_format": "diarized_json",
+            },
+        )
+        assert response.status_code == 400
+        data = response.json()
+        error = data.get("error") or data.get("detail", {}).get("error")
+        assert error is not None
+        assert error["code"] == "invalid_response_format"
+
+    def test_openai_mode_rejects_prompt_over_token_limit(self, client):
+        audio_content = b"fake audio content"
+        files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+        prompt = "token " * 300
+
+        response = client.post(
+            "/v1/audio/transcriptions",
+            files=files,
+            data={"model": "whisper-1", "prompt": prompt},
+        )
+        assert response.status_code == 400
+        data = response.json()
+        error = data.get("error") or data.get("detail", {}).get("error")
+        assert error is not None
+        assert error["code"] == "invalid_prompt"
+        assert error["param"] == "prompt"
+
+    def test_openai_mode_accepts_known_speaker_names_for_diarize_model(
+        self,
+        client,
+        mock_jobs_service,
+        mock_job,
+    ):
+        mock_jobs_service.create_job.return_value = mock_job
+
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
+            MockStorage.return_value.upload_audio = AsyncMock(
+                return_value="s3://bucket/audio.mp3"
+            )
+            MockStorage.return_value.get_transcript = AsyncMock(
+                return_value={
+                    "text": "Hello world",
+                    "metadata": {"language": "en"},
+                    "segments": [
+                        {
+                            "start": 0.0,
+                            "end": 1.0,
+                            "text": "Hello world",
+                            "speaker": "SPEAKER_00",
+                        }
+                    ],
+                }
+            )
+
+            with patch(
+                "dalston.gateway.api.v1.transcription.publish_job_created"
+            ) as mock_publish:
+                mock_publish.return_value = None
+
+                audio_content = b"fake audio content"
+                files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+                response = client.post(
+                    "/v1/audio/transcriptions",
+                    files=files,
+                    data={
+                        "model": "gpt-4o-transcribe-diarize",
+                        "response_format": "diarized_json",
+                        "known_speaker_names": '["Alice","Bob"]',
+                    },
+                )
+
+        assert response.status_code == 200
+        kwargs = mock_jobs_service.create_job.await_args.kwargs
+        assert kwargs["parameters"]["known_speaker_names"] == ["Alice", "Bob"]
+
+    def test_openai_mode_accepts_auto_chunking_strategy(
+        self,
+        client,
+        mock_jobs_service,
+        mock_job,
+    ):
+        mock_jobs_service.create_job.return_value = mock_job
+
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
+            MockStorage.return_value.upload_audio = AsyncMock(
+                return_value="s3://bucket/audio.mp3"
+            )
+            MockStorage.return_value.get_transcript = AsyncMock(
+                return_value={
+                    "text": "Hello world",
+                    "metadata": {"language": "en"},
+                }
+            )
+
+            with patch(
+                "dalston.gateway.api.v1.transcription.publish_job_created"
+            ) as mock_publish:
+                mock_publish.return_value = None
+
+                audio_content = b"fake audio content"
+                files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+                response = client.post(
+                    "/v1/audio/transcriptions",
+                    files=files,
+                    data={
+                        "model": "gpt-4o-transcribe",
+                        "chunking_strategy": '{"type":"auto"}',
+                    },
+                )
+
+        assert response.status_code == 200
+        kwargs = mock_jobs_service.create_job.await_args.kwargs
+        assert kwargs["parameters"]["chunking_strategy"] == {"type": "auto"}
 
     def test_openai_mode_verbose_json_format(
         self,
@@ -591,3 +851,116 @@ class TestOpenAITranslationEndpoint:
         data = response.json()
         assert "error" in data
         assert data["error"]["code"] == "invalid_model"
+
+    def test_translation_forwards_temperature_zero(
+        self,
+        client,
+        mock_jobs_service,
+        mock_job,
+    ):
+        mock_jobs_service.create_job.return_value = mock_job
+
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
+            MockStorage.return_value.upload_audio = AsyncMock(
+                return_value="s3://bucket/audio.mp3"
+            )
+            MockStorage.return_value.get_transcript = AsyncMock(
+                return_value={
+                    "text": "Hello world",
+                    "metadata": {"language": "en"},
+                }
+            )
+
+            with patch(
+                "dalston.gateway.api.v1.openai_translation.publish_job_created"
+            ) as mock_publish:
+                mock_publish.return_value = None
+
+                audio_content = b"fake audio content"
+                files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+                response = client.post(
+                    "/v1/audio/translations",
+                    files=files,
+                    data={"model": "whisper-1", "temperature": "0"},
+                )
+
+        assert response.status_code == 200
+        kwargs = mock_jobs_service.create_job.await_args.kwargs
+        assert kwargs["parameters"]["temperature"] == 0.0
+        assert response.headers["X-RateLimit-Limit-Requests"] == "100"
+
+    def test_translation_passes_prompt_without_vocabulary_conversion(
+        self,
+        client,
+        mock_jobs_service,
+        mock_job,
+    ):
+        mock_jobs_service.create_job.return_value = mock_job
+
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
+            MockStorage.return_value.upload_audio = AsyncMock(
+                return_value="s3://bucket/audio.mp3"
+            )
+            MockStorage.return_value.get_transcript = AsyncMock(
+                return_value={
+                    "text": "Hello world",
+                    "metadata": {"language": "en"},
+                }
+            )
+
+            with patch(
+                "dalston.gateway.api.v1.openai_translation.publish_job_created"
+            ) as mock_publish:
+                mock_publish.return_value = None
+
+                audio_content = b"fake audio content"
+                files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+                response = client.post(
+                    "/v1/audio/translations",
+                    files=files,
+                    data={"model": "whisper-1", "prompt": "ACME quarterly earnings"},
+                )
+
+        assert response.status_code == 200
+        kwargs = mock_jobs_service.create_job.await_args.kwargs
+        assert kwargs["parameters"]["prompt"] == "ACME quarterly earnings"
+        assert "vocabulary" not in kwargs["parameters"]
+
+    def test_translation_passes_max_bytes_to_ingestion(
+        self,
+        client,
+        mock_jobs_service,
+        mock_job,
+        mock_ingestion_service,
+    ):
+        mock_jobs_service.create_job.return_value = mock_job
+
+        with patch("dalston.gateway.dependencies.StorageService") as MockStorage:
+            MockStorage.return_value.upload_audio = AsyncMock(
+                return_value="s3://bucket/audio.mp3"
+            )
+            MockStorage.return_value.get_transcript = AsyncMock(
+                return_value={
+                    "text": "Hello world",
+                    "metadata": {"language": "en"},
+                }
+            )
+
+            with patch(
+                "dalston.gateway.api.v1.openai_translation.publish_job_created"
+            ) as mock_publish:
+                mock_publish.return_value = None
+
+                audio_content = b"fake audio content"
+                files = {"file": ("test.mp3", BytesIO(audio_content), "audio/mpeg")}
+                response = client.post(
+                    "/v1/audio/translations",
+                    files=files,
+                    data={"model": "whisper-1"},
+                )
+
+        assert response.status_code == 200
+        assert (
+            mock_ingestion_service.ingest.await_args.kwargs["max_bytes"]
+            == 25 * 1024 * 1024
+        )

@@ -52,8 +52,11 @@ from dalston.config import Settings
 # OpenAI compatibility imports (M38)
 from dalston.gateway.api.v1.openai_audio import (
     OPENAI_MAX_FILE_SIZE,
+    OpenAIEndpoint,
     format_openai_response,
     is_openai_model,
+    map_openai_model,
+    map_openai_runtime_model,
     raise_openai_error,
     validate_openai_request,
 )
@@ -174,6 +177,16 @@ async def create_transcription(
             description="OpenAI: Vocabulary hints to guide transcription (max 224 tokens)"
         ),
     ] = None,
+    known_speaker_names: Annotated[
+        str | None,
+        Form(
+            description="OpenAI: JSON array of known speaker names (diarization models only)"
+        ),
+    ] = None,
+    chunking_strategy: Annotated[
+        str | None,
+        Form(description="OpenAI: Chunking strategy object (JSON)"),
+    ] = None,
     response_format: Annotated[
         str | None,
         Form(
@@ -189,6 +202,13 @@ async def create_transcription(
         Form(
             alias="timestamp_granularities[]",
             description="OpenAI: Timestamp granularities (word, segment) - requires verbose_json",
+        ),
+    ] = None,
+    include: Annotated[
+        list[str] | None,
+        Form(
+            alias="include[]",
+            description="OpenAI: Optional include fields",
         ),
     ] = None,
     # Dalston native parameters
@@ -276,6 +296,13 @@ async def create_transcription(
 
     # Detect OpenAI mode based on model parameter
     openai_mode = is_openai_model(model)
+    openai_rate_headers = (
+        getattr(request.state, "openai_rate_limit_headers", None)
+        if openai_mode
+        else None
+    )
+    parsed_known_speaker_names: list[str] | None = None
+    parsed_chunking_strategy: dict[str, Any] | None = None
 
     # Handle OpenAI-specific validation and parameter mapping
     if openai_mode:
@@ -283,19 +310,78 @@ async def create_transcription(
         if response_format is None:
             response_format = "json"
 
+        if known_speaker_names:
+            try:
+                parsed = json.loads(known_speaker_names)
+            except json.JSONDecodeError as e:
+                raise_openai_error(
+                    400,
+                    f"Invalid known_speaker_names JSON: {e}",
+                    param="known_speaker_names",
+                    code="invalid_request",
+                )
+
+            if not isinstance(parsed, list) or not all(
+                isinstance(name, str) and name.strip() for name in parsed
+            ):
+                raise_openai_error(
+                    400,
+                    "known_speaker_names must be a JSON array of non-empty strings",
+                    param="known_speaker_names",
+                    code="invalid_request",
+                )
+            parsed_known_speaker_names = [name.strip() for name in parsed]
+
+        if chunking_strategy:
+            try:
+                parsed_chunking_strategy = json.loads(chunking_strategy)
+            except json.JSONDecodeError as e:
+                raise_openai_error(
+                    400,
+                    f"Invalid chunking_strategy JSON: {e}",
+                    param="chunking_strategy",
+                    code="invalid_request",
+                )
+            if not isinstance(parsed_chunking_strategy, dict):
+                raise_openai_error(
+                    400,
+                    "chunking_strategy must be a JSON object",
+                    param="chunking_strategy",
+                    code="invalid_request",
+                )
+
         # Validate OpenAI request parameters
-        validate_openai_request(model, response_format, timestamp_granularities)
+        validate_openai_request(
+            model,
+            response_format,
+            timestamp_granularities,
+            endpoint=OpenAIEndpoint.TRANSCRIPTIONS,
+            prompt=prompt,
+            known_speaker_names=parsed_known_speaker_names,
+            chunking_strategy=parsed_chunking_strategy,
+            include=include,
+        )
 
     # Ingest audio (validates input, downloads from URL if needed, probes metadata)
     try:
-        ingested = await ingestion_service.ingest(file=file, url=audio_url)
+        ingested = await ingestion_service.ingest(
+            file=file,
+            url=audio_url,
+            max_bytes=OPENAI_MAX_FILE_SIZE if openai_mode else None,
+        )
     except HTTPException as e:
         if openai_mode:
+            detail = str(e.detail)
+            error_code = (
+                "file_too_large"
+                if "too large" in detail.lower()
+                else "invalid_file_format"
+            )
             raise_openai_error(
                 e.status_code,
-                str(e.detail),
+                detail,
                 param="file",
-                code="invalid_file_format",
+                code=error_code,
             )
         raise
 
@@ -330,18 +416,27 @@ async def create_transcription(
 
     # Build parameters
     if openai_mode:
-        # OpenAI mode: use default model (ignore OpenAI model parameter)
+        # OpenAI mode: map OpenAI model alias to configured runtime engine.
         parameters: dict = {
             "language": language or "auto",
-            ENGINE_PARAM_TRANSCRIBE: settings.default_model,
+            ENGINE_PARAM_TRANSCRIBE: map_openai_model(model),
             "timestamps_granularity": "word"
             if timestamp_granularities and "word" in timestamp_granularities
             else "segment",
         }
-        # OpenAI uses `prompt` for vocabulary hints
+        runtime_model_id = map_openai_runtime_model(model)
+        if runtime_model_id:
+            parameters[MODEL_PARAM_TRANSCRIBE] = runtime_model_id
+        # Preserve OpenAI free-text prompt semantics end-to-end.
         if prompt:
-            parameters["vocabulary"] = prompt
-        if temperature is not None and temperature > 0:
+            parameters["prompt"] = prompt
+        if parsed_known_speaker_names:
+            parameters["known_speaker_names"] = parsed_known_speaker_names
+        if parsed_chunking_strategy is not None:
+            parameters["chunking_strategy"] = parsed_chunking_strategy
+        if include and "item.input_audio_transcription.logprobs" in include:
+            parameters["include_transcription_logprobs"] = True
+        if temperature is not None:
             parameters["temperature"] = temperature
     else:
         # Dalston native mode
@@ -577,9 +672,19 @@ async def create_transcription(
                 error_type="server_error",
                 code="processing_failed",
             )
-        return format_openai_response(
-            transcript, response_format, timestamp_granularities, export_service
+        payload = format_openai_response(
+            transcript,
+            response_format,
+            timestamp_granularities,
+            export_service,
+            model=model,
         )
+        if openai_rate_headers:
+            if isinstance(payload, Response):
+                payload.headers.update(openai_rate_headers)
+            else:
+                response.headers.update(openai_rate_headers)
+        return payload
 
     # Publish event for orchestrator (include request_id for correlation)
     structlog.contextvars.bind_contextvars(job_id=str(job.id))
@@ -603,9 +708,19 @@ async def create_transcription(
 
     if result.completed:
         transcript = await storage.get_transcript(job.id)
-        return format_openai_response(
-            transcript, response_format, timestamp_granularities, export_service
+        payload = format_openai_response(
+            transcript,
+            response_format,
+            timestamp_granularities,
+            export_service,
+            model=model,
         )
+        if openai_rate_headers:
+            if isinstance(payload, Response):
+                payload.headers.update(openai_rate_headers)
+            else:
+                response.headers.update(openai_rate_headers)
+        return payload
 
     if result.failed:
         raise_openai_error(
