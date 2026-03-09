@@ -1,0 +1,17 @@
+{
+  "text": "Hello world",
+  "segments": [
+    {
+      "speaker": "speaker_0",
+      "start": 0.0,
+      "end": 1.0,
+      "text": "Hello world"
+    }
+  ],
+  "speakers": [
+    {
+      "id": "speaker_0",
+      "name": "Speaker 1"
+    }
+  ]
+}

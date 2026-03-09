@@ -128,6 +128,32 @@ class TestBuildTaskDagModelSelection:
             == DEFAULT_TRANSCRIBE_CONFIG["vad_filter"]
         )
 
+    def test_prompt_is_preserved_in_transcribe_config(
+        self, job_id: UUID, audio_uri: str
+    ):
+        tasks = build_task_dag_for_test(
+            job_id,
+            audio_uri,
+            {"prompt": "ACME quarterly earnings call", "temperature": 0.0},
+        )
+
+        transcribe_task = next(t for t in tasks if t.stage == "transcribe")
+        assert transcribe_task.config["prompt"] == "ACME quarterly earnings call"
+        assert transcribe_task.config["temperature"] == 0.0
+
+    def test_known_speaker_names_reach_merge_config(self, job_id: UUID, audio_uri: str):
+        tasks = build_task_dag_for_test(
+            job_id,
+            audio_uri,
+            {
+                "speaker_detection": "diarize",
+                "known_speaker_names": ["Alice", "Bob"],
+            },
+        )
+
+        merge_task = next(t for t in tasks if t.stage == "merge")
+        assert merge_task.config["known_speaker_names"] == ["Alice", "Bob"]
+
 
 class TestBuildTaskDagPipeline:
     """Tests for DAG pipeline structure."""

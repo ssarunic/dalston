@@ -291,6 +291,19 @@ def _build_dag_with_engines(
             ),
         }
 
+    if parameters.get("task"):
+        transcribe_config["task"] = parameters["task"]
+    if parameters.get("prompt"):
+        transcribe_config["prompt"] = parameters["prompt"]
+    if parameters.get("vocabulary"):
+        transcribe_config["vocabulary"] = parameters["vocabulary"]
+    if "temperature" in parameters:
+        transcribe_config["temperature"] = parameters["temperature"]
+    if parameters.get("chunking_strategy") is not None:
+        transcribe_config["chunking_strategy"] = parameters["chunking_strategy"]
+    if parameters.get("include_transcription_logprobs"):
+        transcribe_config["include_transcription_logprobs"] = True
+
     # M36: Set runtime_model_id if user requested a specific model variant
     # The selector already resolved model ID → (runtime, runtime_model_id)
     stage_runtime_model_ids = dict(stage_runtime_model_ids or {})
@@ -485,6 +498,8 @@ def _build_dag_with_engines(
         "word_timestamps": word_timestamps,
         "speaker_detection": speaker_detection,
     }
+    if parameters.get("known_speaker_names"):
+        merge_config["known_speaker_names"] = parameters["known_speaker_names"]
     if pii_detection_enabled:
         merge_config["pii_detection"] = True
     merge_bindings: list[dict] = []
@@ -683,6 +698,8 @@ def _build_per_channel_dag_with_engines(
         "speaker_detection": "per_channel",
         "channel_count": num_channels,
     }
+    if parameters.get("known_speaker_names"):
+        merge_config["known_speaker_names"] = parameters["known_speaker_names"]
     if pii_detection_enabled:
         merge_config["pii_detection"] = True
     if redact_pii_audio:

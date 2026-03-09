@@ -6,7 +6,7 @@
 .PHONY: help dev dev-minimal dev-gpu dev-observability stop logs logs-all ps \
         build-cpu build-gpu build-engine deploy-web \
         aws-start aws-stop aws-logs \
-        health clean clean-local validate test lint
+        health clean clean-local validate test lint test-openai-sdk-live
 
 # Default target
 help:
@@ -35,6 +35,7 @@ help:
 	@echo ""
 	@echo "Testing & Validation:"
 	@echo "  make test            - Run all tests"
+	@echo "  make test-openai-sdk-live - Run live OpenAI SDK parity tests (requires DALSTON_API_KEY)"
 	@echo "  make lint            - Run linters (ruff, mypy)"
 	@echo "  make validate        - Validate compose configurations"
 	@echo "  make health          - Check service health"
@@ -165,6 +166,18 @@ aws-ps:
 # Run all tests
 test:
 	pytest
+
+# Run persisted live OpenAI SDK compatibility tests (M61)
+# Requires DALSTON_API_KEY. Optional: DALSTON_OPENAI_BASE_URL
+test-openai-sdk-live:
+	@if [ -z "$$DALSTON_API_KEY" ]; then \
+		echo "DALSTON_API_KEY is required"; \
+		exit 1; \
+	fi
+	@DALSTON_OPENAI_BASE_URL=$${DALSTON_OPENAI_BASE_URL:-http://127.0.0.1:8000/v1} \
+		pytest -q tests/integration/test_openai_sdk_contract.py
+	@DALSTON_OPENAI_BASE_URL=$${DALSTON_OPENAI_BASE_URL:-http://127.0.0.1:8000/v1} \
+		pytest -q -m e2e tests/e2e/test_openai_sdk.py
 
 # Run tests with coverage
 test-cov:

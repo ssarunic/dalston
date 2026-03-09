@@ -87,6 +87,8 @@ dev = [
     "jsonschema>=4.0.0",  # For engine YAML validation (M30)
     # OpenTelemetry test utilities (M19)
     "opentelemetry-test-utils>=0.60b0,<1.0.0",
+    # Pinned OpenAI SDK for M61 contract suite
+    "openai==1.93.2",
 ]
 
 [build-system]

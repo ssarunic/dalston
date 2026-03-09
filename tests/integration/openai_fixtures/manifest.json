@@ -1,0 +1,15 @@
+{
+  "contract_date": "2026-03-08",
+  "sdk": {
+    "package": "openai",
+    "version": "1.93.2"
+  },
+  "fixtures": [
+    "transcriptions_json_response.json",
+    "transcriptions_verbose_response.json",
+    "transcriptions_diarized_response.json",
+    "translations_json_response.json",
+    "realtime_transcription_session_create_request.json",
+    "realtime_transcription_session_created_response.json"
+  ]
+}
