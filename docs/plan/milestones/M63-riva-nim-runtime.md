@@ -119,12 +119,14 @@ Unit tests, integration tests, health checks, and structured logging for the new
 
 ### Phase 4: Documentation & Deployment (Days 9-10)
 
-Operator docs, Makefile targets, and deployment validation.
+Operator docs, Makefile targets, AWS integration, and deployment validation.
 
 1. Add `make dev-riva` target for GPU deployments with NIM
 2. Document NGC API key setup and first-start warmup
 3. Add Riva runtime to `make health` checks
-4. Validate end-to-end with production-like deployment
+4. Update AWS deployment scripts and compose overlay for Riva NIM
+5. Add `make aws-start-riva` target and update `dalston-aws` script
+6. Validate end-to-end with production-like deployment (local + AWS)
 
 ---
 
@@ -566,6 +568,57 @@ stop-riva:  ## Stop Riva NIM services
 
 ---
 
+### 63.13: AWS Deployment Updates
+
+Extend the AWS deployment scripts and compose overlay to support Riva NIM.
+
+**`infra/docker/docker-compose.aws.yml`** — add Riva NIM sidecar and thin engine services, matching the pattern of existing AWS service overrides (S3 env vars, IAM role, `/data` volume mounts). The NIM cache volume maps to `/data/nim-cache` for persistence across instance stop/start cycles.
+
+**`infra/scripts/dalston-aws`** — add `--riva` flag to `setup --gpu` that:
+- Prompts for `NGC_API_KEY` and writes it to the instance env file
+- Pulls the NIM container image during provisioning (avoids ~30min first-request delay)
+- Sets `shm_size` via compose override
+
+**`infra/scripts/user-data.sh`** — if `NGC_API_KEY` is present in env, pre-pull the NIM container during instance bootstrap. Create `/data/nim-cache` directory with correct permissions.
+
+**Makefile** — add AWS + Riva composite targets:
+
+```makefile
+aws-start-riva:  ## Start AWS stack with Riva NIM (requires GPU + NGC_API_KEY)
+    docker compose -f docker-compose.yml \
+        -f infra/docker/docker-compose.aws.yml \
+        -f docker-compose.riva.yml \
+        --env-file .env.aws up -d
+
+aws-stop-riva:  ## Stop AWS stack with Riva NIM
+    docker compose -f docker-compose.yml \
+        -f infra/docker/docker-compose.aws.yml \
+        -f docker-compose.riva.yml \
+        --env-file .env.aws down
+```
+
+**Docs** — update `docs/guides/aws-deploy.md` and `docs/guides/aws-deployment-scenarios.md`:
+- Add "Scenario: GPU with Riva NIM" section
+- Document NGC API key setup (in `.env.aws` or `dalston-aws --riva`)
+- Note first-start warmup (~30min) and subsequent starts (~30s)
+- Cost impact: none beyond existing GPU instance cost (NIM is a software layer, not an AWS service)
+
+**What does NOT change:**
+- Terraform modules — same EC2/S3/IAM resources, no new AWS services
+- IAM policies — NIM pulls from NGC (not ECR), no AWS permission changes needed
+- S3 configuration — Riva engines write results through the same Dalston pipeline
+
+**Files:**
+
+- MODIFY: `infra/docker/docker-compose.aws.yml`
+- MODIFY: `infra/scripts/dalston-aws`
+- MODIFY: `infra/scripts/user-data.sh`
+- MODIFY: `Makefile`
+- MODIFY: `docs/guides/aws-deploy.md`
+- MODIFY: `docs/guides/aws-deployment-scenarios.md`
+
+---
+
 ## Verification
 
 ```bash
@@ -610,6 +663,9 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 - [ ] Integration tests with live NIM container (GPU-only, `@pytest.mark.gpu`)
 - [ ] Health check verifies gRPC connectivity before accepting tasks
 - [ ] `make dev-riva` target works end-to-end
+- [ ] AWS deployment scripts updated (`dalston-aws --riva`, compose overlay, user-data.sh)
+- [ ] `make aws-start-riva` target works end-to-end on GPU instance
+- [ ] AWS deployment docs updated with Riva scenario and NGC key setup
 - [ ] NeMo engines unaffected — no regression when Riva is absent
 
 ---
