@@ -10,6 +10,10 @@
         test-elevenlabs-sdk-live test-e2e runtime-freshness runtime-freshness-required \
         sync-test-stack docker-gc-soft docker-gc-hard docker-gc-auto
 
+# Python interpreter used for pytest-driven targets.
+PYTHON_TEST ?= python3.12
+PYTEST_CMD = $(PYTHON_TEST) -m pytest
+
 # Default target
 help:
 	@echo "Dalston Development Commands"
@@ -179,11 +183,11 @@ aws-ps:
 
 # Run all tests
 test:
-	pytest
+	$(PYTEST_CMD)
 
 # Run end-to-end suite with runtime freshness and disk guards
 test-e2e: runtime-freshness-required docker-gc-auto
-	pytest -m e2e tests/e2e
+	$(PYTEST_CMD) -m e2e tests/e2e
 
 # Run persisted live OpenAI SDK compatibility tests (M61)
 # Requires DALSTON_API_KEY. Optional: DALSTON_OPENAI_BASE_URL
@@ -193,9 +197,9 @@ test-openai-sdk-live: runtime-freshness-required docker-gc-auto
 		exit 1; \
 	fi
 	@DALSTON_OPENAI_BASE_URL=$${DALSTON_OPENAI_BASE_URL:-http://127.0.0.1:8000/v1} \
-		pytest -q tests/integration/test_openai_sdk_contract.py
+		$(PYTEST_CMD) -q tests/integration/test_openai_sdk_contract.py
 	@DALSTON_OPENAI_BASE_URL=$${DALSTON_OPENAI_BASE_URL:-http://127.0.0.1:8000/v1} \
-		pytest -q -m e2e tests/e2e/test_openai_sdk.py
+		$(PYTEST_CMD) -q -m e2e tests/e2e/test_openai_sdk.py
 
 # Run persisted live ElevenLabs SDK compatibility tests (M62)
 # Requires DALSTON_API_KEY. Optional: DALSTON_ELEVENLABS_BASE_URL
@@ -205,13 +209,13 @@ test-elevenlabs-sdk-live: runtime-freshness-required docker-gc-auto
 		exit 1; \
 	fi
 	@DALSTON_ELEVENLABS_BASE_URL=$${DALSTON_ELEVENLABS_BASE_URL:-http://127.0.0.1:8000} \
-		pytest -q tests/integration/test_elevenlabs_sdk_contract.py
+		$(PYTEST_CMD) -q tests/integration/test_elevenlabs_sdk_contract.py
 	@DALSTON_ELEVENLABS_BASE_URL=$${DALSTON_ELEVENLABS_BASE_URL:-http://127.0.0.1:8000} \
-		pytest -q -m e2e tests/e2e/test_elevenlabs_sdk.py
+		$(PYTEST_CMD) -q -m e2e tests/e2e/test_elevenlabs_sdk.py
 
 # Run tests with coverage
 test-cov:
-	pytest --cov=dalston --cov-report=html
+	$(PYTEST_CMD) --cov=dalston --cov-report=html
 
 # Run linters
 lint:
