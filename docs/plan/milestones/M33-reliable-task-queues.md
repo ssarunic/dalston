@@ -115,53 +115,9 @@ Streams provide all of this built-in. Same outcome, less code.
 - Pattern: `dalston:stream:{stage}` (e.g., `dalston:stream:transcribe`)
 - Consumer group: `engines` (created on first use)
 
-**Functions:**
+Implements `StreamMessage` and `PendingTask` dataclasses plus async helpers for stream group creation, task add/read/claim/ack, pending inspection, stream discovery via SCAN, and monitoring info.
 
-```python
-@dataclass
-class StreamMessage:
-    id: str              # Redis message ID (e.g., "1234567890-0")
-    task_id: str
-    job_id: str
-    enqueued_at: datetime
-    timeout_at: datetime
-    delivery_count: int  # How many times this message was delivered (1 = first attempt)
-
-@dataclass
-class PendingTask:
-    message_id: str
-    task_id: str
-    consumer: str        # Engine ID that claimed it
-    idle_ms: int         # Time since last delivery
-    delivery_count: int
-
-async def ensure_stream_group(redis: Redis, stage: str) -> None:
-    """Create consumer group if it doesn't exist. Idempotent."""
-
-async def add_task(redis: Redis, stage: str, task_id: str, job_id: str, timeout_s: int) -> str:
-    """Add task to stream. Returns message ID."""
-
-async def read_task(redis: Redis, stage: str, consumer: str, block_ms: int = 30000) -> StreamMessage | None:
-    """Read next available task. Blocks until available or timeout."""
-
-async def claim_stale_tasks(redis: Redis, stage: str, consumer: str, min_idle_ms: int, count: int = 1) -> list[StreamMessage]:
-    """Claim tasks idle longer than min_idle_ms. Returns claimed messages."""
-
-async def claim_tasks_by_id(redis: Redis, stage: str, consumer: str, message_ids: list[str]) -> list[StreamMessage]:
-    """Claim specific messages by ID. Used for selective recovery."""
-
-async def ack_task(redis: Redis, stage: str, message_id: str) -> None:
-    """Acknowledge task completion. Removes from PEL."""
-
-async def get_pending(redis: Redis, stage: str) -> list[PendingTask]:
-    """Get all pending tasks with metadata."""
-
-async def discover_streams(redis: Redis) -> list[str]:
-    """Discover all task streams via SCAN. Returns stream keys."""
-
-async def get_stream_info(redis: Redis, stage: str) -> dict:
-    """Get stream length, pending count, consumer info. For monitoring."""
-```
+*Implementation: see `dalston/common/streams.py`*
 
 ---
 
@@ -173,84 +129,9 @@ async def get_stream_info(redis: Redis, stage: str) -> dict:
 - Claim stale tasks on startup (recovery)
 - Acknowledge on completion
 
-**Changes to `EngineRunner`:**
+`EngineRunner._poll_and_process()` was updated to first attempt claiming stale tasks from dead engines (via heartbeat check), then fall back to reading new tasks via `XREADGROUP`. Tasks are always acknowledged after processing. A `claim_stale_from_dead_engines()` helper checks the PEL for idle tasks whose owning engine is no longer heartbeating before claiming them.
 
-```python
-# Constants
-STALE_THRESHOLD_MS = 10 * 60 * 1000  # 10 minutes
-MAX_DELIVERIES = 3
-
-def _poll_and_process(self) -> None:
-    # 1. Try to claim stale tasks from DEAD engines only
-    stale = claim_stale_from_dead_engines(
-        self.redis_client,
-        self.registry,
-        stage=self.stage,
-        consumer=self.engine_id,
-        min_idle_ms=STALE_THRESHOLD_MS,
-        count=1,
-    )
-
-    if stale:
-        message = stale[0]
-        logger.info(
-            "claimed_stale_task",
-            task_id=message.task_id,
-            delivery_count=message.delivery_count,
-        )
-        # Track redelivery for observability
-        dalston.metrics.inc_task_redelivery(self.stage, reason="engine_crash")
-    else:
-        # 2. No stale tasks - read new ones
-        message = read_task(
-            self.redis_client,
-            stage=self.stage,
-            consumer=self.engine_id,
-            block_ms=30000,
-        )
-
-    if not message:
-        return  # Timeout, no task
-
-    # 3. Process task
-    try:
-        self._process_task(message.task_id)
-    finally:
-        # 4. Always ack - failure handling is via task.failed event
-        ack_task(self.redis_client, self.stage, message.id)
-
-
-async def claim_stale_from_dead_engines(
-    redis: Redis,
-    registry: BatchEngineRegistry,
-    stage: str,
-    consumer: str,
-    min_idle_ms: int,
-    count: int = 1,
-) -> list[StreamMessage]:
-    """Only claim tasks from engines that are no longer heartbeating."""
-    pending = await get_pending(redis, stage)
-    claimable = []
-
-    for task in pending:
-        if task.idle_ms < min_idle_ms:
-            continue
-
-        # Check if the engine that has this task is still alive
-        engine_alive = await registry.is_engine_available(task.consumer)
-
-        if not engine_alive:
-            # Engine is dead - safe to steal this task
-            claimable.append(task.message_id)
-            if len(claimable) >= count:
-                break
-
-    if not claimable:
-        return []
-
-    # Claim the tasks
-    return await claim_tasks_by_id(redis, stage, consumer, claimable)
-```
+*Implementation: see `dalston/engine_sdk/runner.py`*
 
 **Key insight:** Only steal tasks from dead engines. If engine is alive but slow, leave it alone.
 
@@ -266,26 +147,9 @@ The engine already reads its stage from `engine.yaml` capabilities. Use `capabil
 
 - Update `dalston/orchestrator/scheduler.py` to use `XADD`
 
-**Changes to `queue_task()`:**
+Replaced `redis.lpush()` with `add_task()` (XADD) in `queue_task()`, passing the calculated timeout so it is stored in the stream message for the scanner to use.
 
-```python
-# Replace:
-await redis.lpush(queue_key, task_id_str)
-
-# With:
-message_id = await add_task(
-    redis,
-    stage=task.stage,
-    task_id=task_id_str,
-    job_id=job_id_str,
-    timeout_s=calculated_timeout,
-)
-logger.info("task_queued", task_id=task_id_str, stream=f"dalston:stream:{task.stage}", message_id=message_id)
-```
-
-**Timeout calculation:**
-
-Already implemented in `calculate_task_timeout()`. Pass to `add_task()` so it's stored in message for scanner to use.
+*Implementation: see `dalston/orchestrator/scheduler.py`*
 
 ---
 
@@ -298,78 +162,9 @@ Already implemented in `calculate_task_timeout()`. Pass to `add_task()` so it's 
 - Discovers streams dynamically (no hardcoded stage list)
 - Fails tasks that exceeded max deliveries or absolute timeout
 
-**Stream discovery:**
+The scanner dynamically discovers all `dalston:stream:*` keys via SCAN, then iterates pending entries in each stream. Tasks exceeding `MAX_DELIVERIES` (3) or `ABSOLUTE_TIMEOUT_MS` (30 min) are failed in the DB and acknowledged from the stream. The scanner runs as a background task in the orchestrator main loop, gated by leader election, every 60 seconds.
 
-```python
-async def discover_streams(redis: Redis) -> list[str]:
-    """Find all task streams in Redis."""
-    streams = []
-    cursor = 0
-
-    while True:
-        cursor, keys = await redis.scan(cursor, match="dalston:stream:*", count=100)
-        streams.extend(keys)
-        if cursor == 0:
-            break
-
-    return streams
-```
-
-**Scanner logic:**
-
-```python
-SCAN_INTERVAL_S = 60
-MAX_DELIVERIES = 3
-ABSOLUTE_TIMEOUT_MS = 30 * 60 * 1000  # 30 minutes
-
-async def scan_stale_tasks(redis: Redis, db: AsyncSession) -> None:
-    """Scan all active streams for stale tasks."""
-
-    # Discover streams dynamically - works for any stage
-    streams = await discover_streams(redis)
-
-    for stream_key in streams:
-        stage = stream_key.split(":")[-1]  # "dalston:stream:transcribe" → "transcribe"
-        pending = await get_pending(redis, stage)
-
-        for task in pending:
-            # Task exceeded max delivery attempts
-            if task.delivery_count >= MAX_DELIVERIES:
-                await fail_task_in_db(
-                    db, task.task_id,
-                    error=f"Max retries exceeded (delivered {task.delivery_count} times)"
-                )
-                await ack_task(redis, stage, task.message_id)  # Remove from stream
-                await publish_task_failed(redis, task.task_id, error)
-                continue
-
-            # Task exceeded absolute timeout (catches stuck engines)
-            if task.idle_ms > ABSOLUTE_TIMEOUT_MS:
-                await fail_task_in_db(
-                    db, task.task_id,
-                    error=f"Task timeout ({task.idle_ms // 1000}s idle)"
-                )
-                await ack_task(redis, stage, task.message_id)
-                await publish_task_failed(redis, task.task_id, error)
-```
-
-**Integration with orchestrator main loop:**
-
-```python
-async def main():
-    # Start scanner as background task
-    asyncio.create_task(run_scanner_loop())
-
-    # Existing event loop
-    async for event in subscribe_events():
-        await handle_event(event)
-
-async def run_scanner_loop():
-    while True:
-        if await try_acquire_leader(redis, instance_id):
-            await scan_stale_tasks(redis, db)
-        await asyncio.sleep(SCAN_INTERVAL_S)
-```
+*Implementation: see `dalston/orchestrator/scanner.py`*
 
 ---
 
@@ -381,27 +176,9 @@ async def run_scanner_loop():
 - Only one orchestrator runs the scanner at a time
 - Others are standby
 
-**Implementation:**
+Uses a Redis key (`dalston:orchestrator:leader`) with `SET NX EX 30` for leader acquisition. The leader renews via `EXPIRE` on each scan cycle; other instances remain standby until the key expires.
 
-```python
-LEADER_KEY = "dalston:orchestrator:leader"
-LEADER_TTL_S = 30
-
-async def try_acquire_leader(redis: Redis, instance_id: str) -> bool:
-    """Try to become leader. Returns True if successful or already leader."""
-    # Try to acquire
-    acquired = await redis.set(LEADER_KEY, instance_id, nx=True, ex=LEADER_TTL_S)
-    if acquired:
-        return True
-
-    # Check if we're already leader
-    current = await redis.get(LEADER_KEY)
-    if current == instance_id:
-        await redis.expire(LEADER_KEY, LEADER_TTL_S)  # Renew
-        return True
-
-    return False
-```
+*Implementation: see `dalston/orchestrator/leader.py`*
 
 **Note:** Event handling remains concurrent across all orchestrators (no leader election for events). Section 33.8 ensures correctness via atomic DB ownership claims rather than event routing.
 
@@ -413,24 +190,9 @@ async def try_acquire_leader(redis: Redis, instance_id: str) -> bool:
 
 - Update `remove_task_from_queue()` to work with Streams
 
-**Implementation:**
+`remove_task_from_stream()` searches the PEL for the target task and acknowledges it if found. If the task is unclaimed, engines check DB status before processing and skip cancelled tasks.
 
-```python
-async def remove_task_from_stream(redis: Redis, stage: str, task_id: str) -> bool:
-    """Remove a task from stream. Used during cancellation."""
-    pending = await get_pending(redis, stage)
-
-    for task in pending:
-        if task.task_id == task_id:
-            await ack_task(redis, stage, task.message_id)
-            return True
-
-    # Task not in pending - might be in stream but unclaimed
-    # Engine will check DB status and skip cancelled tasks
-    return False
-```
-
-**Engine side:** Check task status in PostgreSQL before processing. Skip if `CANCELLED`.
+*Implementation: see `dalston/common/streams.py` and `dalston/engine_sdk/runner.py`*
 
 ---
 
@@ -441,54 +203,9 @@ async def remove_task_from_stream(redis: Redis, stage: str, task_id: str) -> boo
 - Update existing queue metrics to use stream info
 - Add pending/stale task metrics
 
-**Metrics:**
+Updated `dalston_queue_depth` gauge to use stream info. Added new gauges (`dalston_tasks_pending`, `dalston_tasks_stale`) and counters (`dalston_task_recovery_total`, `dalston_task_redelivery_total` with stage/reason labels). Engines log `delivery_count` on every task processing for redelivery debugging.
 
-```python
-# Existing (update implementation)
-dalston_queue_depth = Gauge(
-    "dalston_queue_depth",
-    "Number of tasks waiting in queue",
-    ["stage"]
-)
-
-# New
-dalston_tasks_pending = Gauge(
-    "dalston_tasks_pending",
-    "Number of tasks currently being processed",
-    ["stage"]
-)
-
-dalston_tasks_stale = Gauge(
-    "dalston_tasks_stale",
-    "Number of tasks idle longer than threshold",
-    ["stage"]
-)
-
-dalston_task_recovery_total = Counter(
-    "dalston_task_recovery_total",
-    "Number of stale tasks recovered",
-    ["stage"]
-)
-
-dalston_task_redelivery_total = Counter(
-    "dalston_task_redelivery_total",
-    "Number of task redeliveries (delivery_count > 1)",
-    ["stage", "reason"]  # reason: "engine_crash", "timeout", "manual_retry"
-)
-```
-
-**Logging delivery count:**
-
-When processing a task, always log the `delivery_count` from the stream message. This aids debugging when tasks require multiple attempts:
-
-```python
-logger.info(
-    "task_processing",
-    task_id=message.task_id,
-    delivery_count=message.delivery_count,
-    is_redelivery=message.delivery_count > 1,
-)
-```
+*Implementation: see `dalston/metrics.py`*
 
 ---
 
@@ -514,142 +231,22 @@ When multiple orchestrators run concurrently, they all receive the same events v
 - Atomic task status transitions in `handle_task_completed()`
 - DB migration adding uniqueness constraint for tasks
 
-**Implementation:**
+**1. Atomic job ownership:** `handle_job_created()` uses an `UPDATE ... WHERE status = PENDING RETURNING id` to atomically claim ownership. Only the orchestrator that wins the row update builds the DAG; others log "already claimed" and return.
 
-**1. Atomic job ownership (`handlers.py`):**
+**2. Atomic dependent task transition:** `handle_task_completed()` uses the same pattern to transition dependents from PENDING to READY, ensuring only one orchestrator queues each dependent task.
 
-```python
-from sqlalchemy import update
+**3. DB uniqueness constraint:** A migration adds `UNIQUE (job_id, stage)` on the tasks table, preventing duplicate tasks even under race conditions. Per-channel stages (e.g., `transcribe_ch0`) are inherently unique by name.
 
-async def handle_job_created(job_id: UUID, db: AsyncSession, ...):
-    log = logger.bind(job_id=str(job_id))
-    log.info("handling_job_created")
-
-    # Atomically claim ownership - only one orchestrator wins
-    result = await db.execute(
-        update(JobModel)
-        .where(
-            JobModel.id == job_id,
-            JobModel.status == JobStatus.PENDING.value,
-        )
-        .values(
-            status=JobStatus.RUNNING.value,
-            started_at=datetime.now(UTC),
-        )
-        .returning(JobModel.id)
-    )
-
-    claimed_id = result.scalar_one_or_none()
-    if claimed_id is None:
-        # Another orchestrator already claimed this job, or job was cancelled
-        log.info("job_already_claimed_or_cancelled")
-        return
-
-    await db.commit()
-
-    # Now safe to build DAG - we own this job
-    job = await db.get(JobModel, job_id)
-    # ... rest of handler
-```
-
-**2. Atomic dependent task transition (`handlers.py`):**
-
-```python
-async def handle_task_completed(task_id: UUID, db: AsyncSession, ...):
-    # ... mark task completed ...
-
-    # For each potential dependent:
-    for dependent in all_tasks:
-        if dependent.status != TaskStatus.PENDING.value:
-            continue
-
-        deps_met = all(dep_id in completed_ids for dep_id in dependent.dependencies)
-
-        if deps_met:
-            # Atomically claim the transition - only one orchestrator wins
-            result = await db.execute(
-                update(TaskModel)
-                .where(
-                    TaskModel.id == dependent.id,
-                    TaskModel.status == TaskStatus.PENDING.value,
-                )
-                .values(status=TaskStatus.READY.value)
-                .returning(TaskModel.id)
-            )
-
-            claimed_id = result.scalar_one_or_none()
-            if claimed_id is None:
-                # Another orchestrator already transitioned this task
-                log.debug("dependent_already_claimed", task_id=str(dependent.id))
-                continue
-
-            await db.commit()
-
-            # Now safe to queue - we own this transition
-            await queue_task(redis=redis, task=task_model, ...)
-```
-
-**3. DB uniqueness constraint (migration):**
-
-```sql
--- Prevent duplicate tasks for same job+stage (excluding per-channel stages)
--- For per-channel stages like transcribe_ch0, the stage name itself is unique
-ALTER TABLE tasks ADD CONSTRAINT uq_tasks_job_stage
-    UNIQUE (job_id, stage);
-```
+*Implementation: see `dalston/orchestrator/handlers.py` and `alembic/versions/`*
 
 Note: This constraint works because:
 
 - Regular stages: one task per job (e.g., `prepare`, `merge`)
 - Per-channel stages: include channel in name (e.g., `transcribe_ch0`, `transcribe_ch1`)
 
-**4. Concurrency tests:**
+**4. Concurrency tests:** Tests verify that concurrent `handle_job_created()` calls produce exactly one DAG (no duplicate stages), and concurrent `handle_task_completed()` calls queue each dependent exactly once.
 
-```python
-async def test_concurrent_job_created_handlers():
-    """Only one orchestrator should create DAG when both handle same event."""
-    job = await create_pending_job(db)
-
-    # Simulate two orchestrators handling same event concurrently
-    results = await asyncio.gather(
-        handle_job_created(job.id, db_session_1, redis, settings, registry),
-        handle_job_created(job.id, db_session_2, redis, settings, registry),
-        return_exceptions=True,
-    )
-
-    # Verify exactly one DAG was created
-    tasks = await db.execute(select(TaskModel).where(TaskModel.job_id == job.id))
-    task_list = tasks.scalars().all()
-
-    # Should have exactly N tasks (one DAG), not 2N (duplicate DAGs)
-    assert len(task_list) == expected_task_count
-
-    # All tasks should have same creation pattern (from single DAG build)
-    stages = [t.stage for t in task_list]
-    assert len(stages) == len(set(stages))  # No duplicate stages
-
-
-async def test_concurrent_dependent_queueing():
-    """Only one orchestrator should queue dependent when both handle same completion."""
-    job, tasks = await create_job_with_tasks(db)
-    transcribe_task = next(t for t in tasks if t.stage == "transcribe")
-    merge_task = next(t for t in tasks if t.stage == "merge")
-
-    # Complete transcribe (merge depends on it)
-    transcribe_task.status = TaskStatus.COMPLETED.value
-    await db.commit()
-
-    # Simulate two orchestrators handling same task.completed event
-    await asyncio.gather(
-        handle_task_completed(transcribe_task.id, db_session_1, redis, ...),
-        handle_task_completed(transcribe_task.id, db_session_2, redis, ...),
-    )
-
-    # Verify merge was queued exactly once
-    queue_calls = redis_mock.xadd.call_args_list
-    merge_queues = [c for c in queue_calls if "merge" in str(c)]
-    assert len(merge_queues) == 1
-```
+*Implementation: see `tests/integration/test_multi_orchestrator.py`*
 
 ---
 
@@ -669,94 +266,9 @@ Even with durable event transport, defense-in-depth requires a reconciler that d
 - Runs in orchestrator under leader election (shares with scanner)
 - Repairs stranded jobs and tasks from database state
 
-**Implementation:**
+**Implementation:** The reconciler runs two checks every 5 minutes (under leader election, sharing the scanner loop): (1) finds PENDING jobs with no tasks (missed `job.created`) and re-publishes the event, and (2) finds READY tasks not present in any stream and re-queues them. Both use `skip_locked` to avoid contention and emit metrics via `reconciler_repairs` counter.
 
-```python
-RECONCILE_INTERVAL_S = 300  # 5 minutes
-STRANDED_JOB_THRESHOLD_S = 300  # Job PENDING for >5 min with no tasks
-STRANDED_TASK_THRESHOLD_S = 300  # Task READY for >5 min not in stream
-
-async def reconcile_stranded_states(redis: Redis, db: AsyncSession) -> None:
-    """Find and repair states that missed their events."""
-
-    await reconcile_stranded_jobs(redis, db)
-    await reconcile_stranded_tasks(redis, db)
-
-
-async def reconcile_stranded_jobs(redis: Redis, db: AsyncSession) -> None:
-    """Find PENDING jobs with no tasks and rebuild their DAGs."""
-
-    cutoff = datetime.now(UTC) - timedelta(seconds=STRANDED_JOB_THRESHOLD_S)
-
-    # Find jobs that are PENDING but have no tasks (missed job.created event)
-    stranded = await db.execute(
-        select(JobModel)
-        .outerjoin(TaskModel, JobModel.id == TaskModel.job_id)
-        .where(
-            JobModel.status == JobStatus.PENDING.value,
-            JobModel.created_at < cutoff,
-            TaskModel.id.is_(None),  # No tasks exist
-        )
-        .with_for_update(skip_locked=True)
-    )
-
-    for job in stranded.scalars():
-        logger.warning("reconciling_stranded_job", job_id=str(job.id))
-
-        # Re-publish the event - handler's atomic claim ensures idempotency
-        await add_event(
-            redis,
-            event_type="job.created",
-            payload={"job_id": str(job.id)},
-        )
-
-        dalston.metrics.reconciler_repairs.labels(type="stranded_job").inc()
-
-
-async def reconcile_stranded_tasks(redis: Redis, db: AsyncSession) -> None:
-    """Find READY tasks not in any stream and re-queue them."""
-
-    cutoff = datetime.now(UTC) - timedelta(seconds=STRANDED_TASK_THRESHOLD_S)
-
-    # Find tasks that are READY but not in stream (missed queueing)
-    ready_tasks = await db.execute(
-        select(TaskModel)
-        .where(
-            TaskModel.status == TaskStatus.READY.value,
-            TaskModel.updated_at < cutoff,
-        )
-    )
-
-    for task in ready_tasks.scalars():
-        # Check if task is actually in stream
-        pending = await get_pending(redis, task.stage)
-        task_in_stream = any(p.task_id == str(task.id) for p in pending)
-
-        if not task_in_stream:
-            logger.warning("reconciling_stranded_task", task_id=str(task.id))
-
-            # Re-queue the task
-            await add_task(
-                redis,
-                stage=task.stage,
-                task_id=str(task.id),
-                job_id=str(task.job_id),
-                timeout_s=task.timeout_seconds or 1800,
-            )
-
-            dalston.metrics.reconciler_repairs.labels(type="stranded_task").inc()
-```
-
-**Integration with scanner loop:**
-
-```python
-async def run_scanner_loop():
-    while True:
-        if await try_acquire_leader(redis, instance_id):
-            await scan_stale_tasks(redis, db)
-            await reconcile_stranded_states(redis, db)  # Add reconciliation
-        await asyncio.sleep(SCAN_INTERVAL_S)
-```
+*Implementation: see `dalston/orchestrator/reconciler.py`*
 
 ---
 
@@ -784,171 +296,13 @@ Redis Pub/Sub is fire-and-forget. If the orchestrator is disconnected when an ev
 - Consumer group: `orchestrators`
 - Each orchestrator instance is a consumer
 
-**Functions (add to `dalston/common/events.py`):**
+The events module provides: `ensure_events_group()` (idempotent consumer group creation), `add_event()` (XADD with trace context injection), `read_events()` (XREADGROUP consumer), `ack_event()` (XACK), and `claim_pending_events()` (XAUTOCLAIM for startup recovery). All `publish_*` functions were migrated to use `add_event()` instead of `redis.publish()`.
 
-```python
-EVENTS_STREAM = "dalston:events"
-EVENTS_GROUP = "orchestrators"
+*Implementation: see `dalston/common/events.py`*
 
-async def ensure_events_group(redis: Redis) -> None:
-    """Create consumer group if it doesn't exist. Idempotent."""
-    try:
-        await redis.xgroup_create(
-            EVENTS_STREAM,
-            EVENTS_GROUP,
-            id="0",  # Start from beginning
-            mkstream=True,
-        )
-    except ResponseError as e:
-        if "BUSYGROUP" not in str(e):
-            raise
+The orchestrator main loop generates a unique consumer ID per instance, claims pending events from dead orchestrators on startup, then enters a blocking read loop with explicit acknowledgment after each event is dispatched.
 
-
-async def add_event(
-    redis: Redis,
-    event_type: str,
-    payload: dict[str, Any],
-) -> str:
-    """Add event to stream. Returns message ID."""
-    event = {
-        "type": event_type,
-        "timestamp": datetime.now(UTC).isoformat(),
-        "payload": json.dumps(payload, default=_json_serializer),
-    }
-
-    # Inject trace context
-    trace_context = dalston.telemetry.inject_trace_context()
-    if trace_context:
-        event["_trace_context"] = json.dumps(trace_context)
-
-    return await redis.xadd(EVENTS_STREAM, event)
-
-
-async def read_events(
-    redis: Redis,
-    consumer: str,
-    count: int = 10,
-    block_ms: int = 1000,
-) -> list[dict]:
-    """Read events from stream. Returns list of events."""
-    results = await redis.xreadgroup(
-        EVENTS_GROUP,
-        consumer,
-        {EVENTS_STREAM: ">"},  # Only new messages
-        count=count,
-        block=block_ms,
-    )
-
-    if not results:
-        return []
-
-    events = []
-    for stream_name, messages in results:
-        for msg_id, fields in messages:
-            events.append({
-                "id": msg_id,
-                "type": fields["type"],
-                "timestamp": fields["timestamp"],
-                "payload": json.loads(fields["payload"]),
-                "_trace_context": json.loads(fields.get("_trace_context", "null")),
-            })
-
-    return events
-
-
-async def ack_event(redis: Redis, message_id: str) -> None:
-    """Acknowledge event processing."""
-    await redis.xack(EVENTS_STREAM, EVENTS_GROUP, message_id)
-
-
-async def claim_pending_events(
-    redis: Redis,
-    consumer: str,
-    min_idle_ms: int = 60000,
-    count: int = 100,
-) -> list[dict]:
-    """Claim events that were delivered but not acknowledged.
-
-    Called on orchestrator startup to recover missed events.
-    """
-    results = await redis.xautoclaim(
-        EVENTS_STREAM,
-        EVENTS_GROUP,
-        consumer,
-        min_idle_time=min_idle_ms,
-        start_id="0-0",
-        count=count,
-    )
-
-    if not results or len(results) < 2:
-        return []
-
-    # xautoclaim returns [next_id, [[id, fields], ...], ...]
-    messages = results[1]
-    events = []
-    for msg_id, fields in messages:
-        if fields:  # Skip deleted messages
-            events.append({
-                "id": msg_id,
-                "type": fields["type"],
-                "timestamp": fields["timestamp"],
-                "payload": json.loads(fields["payload"]),
-            })
-
-    return events
-```
-
-**Migrate publish functions:**
-
-```python
-# Replace all publish_* functions to use add_event instead of publish_event
-
-async def publish_job_created(
-    redis: Redis,
-    job_id: UUID,
-    request_id: str | None = None,
-) -> None:
-    """Publish a job.created event (now durable via Streams)."""
-    payload: dict[str, Any] = {"job_id": str(job_id)}
-    if request_id:
-        payload["request_id"] = request_id
-    await add_event(redis, "job.created", payload)
-
-# ... same pattern for other publish_* functions
-```
-
-**Update orchestrator main loop (`main.py`):**
-
-```python
-async def orchestrator_loop() -> None:
-    # ... initialization ...
-
-    # Generate unique consumer ID for this instance
-    consumer_id = f"orchestrator-{uuid4().hex[:8]}"
-
-    # Ensure consumer group exists
-    await ensure_events_group(redis)
-
-    # On startup, claim any pending events from dead orchestrators
-    pending = await claim_pending_events(redis, consumer_id, min_idle_ms=60000)
-    for event in pending:
-        logger.info("replaying_pending_event", event_type=event["type"], event_id=event["id"])
-        await _dispatch_event(event, redis, settings, batch_registry)
-        await ack_event(redis, event["id"])
-
-    # Main event loop
-    while not _shutdown_event.is_set():
-        try:
-            events = await read_events(redis, consumer_id, count=10, block_ms=1000)
-
-            for event in events:
-                await _dispatch_event(event, redis, settings, batch_registry)
-                await ack_event(redis, event["id"])
-
-        except Exception as e:
-            logger.exception("event_processing_error", error=str(e))
-            await asyncio.sleep(0.1)
-```
+*Implementation: see `dalston/orchestrator/main.py`*
 
 **Key behavioral changes:**
 
@@ -978,32 +332,9 @@ Current `docker-compose.yml` Redis configuration lacks persistence settings.
 - Update docker-compose.yml Redis configuration
 - Add Redis persistence volume
 
-**Implementation:**
+Redis is configured with `appendonly yes`, `appendfsync everysec`, AOF auto-rewrite at 100%/64MB minimum, a persistent data volume, and a health check.
 
-```yaml
-# docker-compose.yml
-services:
-  redis:
-    image: redis:7-alpine
-    command: >
-      redis-server
-      --appendonly yes
-      --appendfsync everysec
-      --auto-aof-rewrite-percentage 100
-      --auto-aof-rewrite-min-size 64mb
-    volumes:
-      - redis-data:/data
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
-
-volumes:
-  redis-data:
-```
+*Implementation: see `docker-compose.yml` (redis service)*
 
 **Configuration options:**
 
@@ -1020,129 +351,17 @@ volumes:
 
 ## Verification
 
-```bash
-# 1. Start services
-docker compose up -d gateway orchestrator redis \
-  stt-batch-prepare stt-batch-transcribe-whisper-cpu stt-batch-merge
-
-# 2. Submit a job
-JOB_ID=$(curl -s -X POST http://localhost:8000/v1/audio/transcriptions \
-  -F "file=@test_audio.mp3" | jq -r '.id')
-
-# 3. Wait for transcribe task to start
-sleep 5
-curl -s http://localhost:8000/v1/audio/transcriptions/$JOB_ID | jq '.status'
-# "running"
-
-# 4. Check pending tasks in stream
-docker compose exec redis redis-cli XPENDING dalston:stream:transcribe engines
-# Should show 1 pending
-
-# 5. Kill the engine mid-task
-docker compose stop stt-batch-transcribe-whisper-cpu
-
-# 6. Wait and check pending (task stays, idle time grows)
-sleep 60
-docker compose exec redis redis-cli XPENDING dalston:stream:transcribe engines - + 10
-# Should show idle time > 60000ms
-
-# 7. Restart engine - it should claim stale task
-docker compose start stt-batch-transcribe-whisper-cpu
-
-# 8. Job should complete
-sleep 30
-curl -s http://localhost:8000/v1/audio/transcriptions/$JOB_ID | jq '.status'
-# "completed"
-
-# 9. Check delivery count was incremented
-docker compose logs stt-batch-transcribe-whisper-cpu | grep claimed_stale
-
-# 10. Test multi-orchestrator safety
-# Scale to 2 orchestrators
-docker compose up -d --scale orchestrator=2
-
-# Submit multiple jobs rapidly
-for i in {1..5}; do
-  curl -s -X POST http://localhost:8000/v1/audio/transcriptions \
-    -F "file=@test_audio.mp3" &
-done
-wait
-
-# Verify no duplicate tasks in DB
-docker compose exec postgres psql -U dalston -c "
-  SELECT job_id, stage, COUNT(*) as cnt
-  FROM tasks
-  GROUP BY job_id, stage
-  HAVING COUNT(*) > 1;
-"
-# Should return 0 rows (no duplicates)
-
-# 11. Test orchestrator restart recovery (event durability)
-# Submit a job, then immediately kill orchestrator
-JOB_ID=$(curl -s -X POST http://localhost:8000/v1/audio/transcriptions \
-  -F "file=@test_audio.mp3" | jq -r '.id')
-docker compose stop orchestrator
-sleep 2
-
-# Restart orchestrator - it should replay pending events
-docker compose start orchestrator
-sleep 10
-
-# Job should have progressed (DAG created)
-curl -s http://localhost:8000/v1/audio/transcriptions/$JOB_ID | jq '.status'
-# "running" (not stuck in "pending")
-
-# 12. Test reconciler catches stranded jobs
-# Create job directly in DB (simulating missed event)
-docker compose exec postgres psql -U dalston -c "
-  INSERT INTO jobs (id, status, created_at, updated_at)
-  VALUES ('$(uuidgen)', 'pending', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes');
-"
-
-# Wait for reconciler (runs every 5 min, or trigger manually)
-sleep 330
-
-# Check job was repaired (has tasks now)
-docker compose exec postgres psql -U dalston -c "
-  SELECT j.id, j.status, COUNT(t.id) as task_count
-  FROM jobs j
-  LEFT JOIN tasks t ON j.id = t.job_id
-  WHERE j.created_at < NOW() - INTERVAL '5 minutes'
-  GROUP BY j.id, j.status;
-"
-
-# 13. Test Redis restart recovery
-# Check current stream state
-docker compose exec redis redis-cli XLEN dalston:events
-docker compose exec redis redis-cli XLEN dalston:stream:transcribe
-
-# Restart Redis
-docker compose restart redis
-sleep 5
-
-# Verify data persisted (AOF)
-docker compose exec redis redis-cli XLEN dalston:events
-# Should show same count as before restart
-
-# 14. Verify acceptance criteria
-# - Orchestrator down during event → processes after restart ✓ (test 11)
-# - Redis restart → recovers work ✓ (test 13)
-# - No job stuck due to missed event → reconciler repairs ✓ (test 12)
-```
+- [ ] **Engine crash recovery:** Kill an engine mid-task, restart it, confirm the stale task is auto-claimed and the job completes (check logs for `claimed_stale`)
+- [ ] **Multi-orchestrator safety:** Scale to 2 orchestrators, submit 5 concurrent jobs, verify no duplicate tasks in DB (`SELECT job_id, stage, COUNT(*) ... HAVING COUNT(*) > 1` returns 0 rows)
+- [ ] **Event durability:** Submit a job, immediately stop the orchestrator, restart it, confirm the job progresses (not stuck in PENDING)
+- [ ] **Reconciler repair:** Insert a stranded PENDING job directly in DB, wait for reconciler cycle (~5 min), confirm tasks were created
+- [ ] **Redis persistence:** Note stream lengths, restart Redis, verify AOF restored the same stream lengths
 
 ---
 
 ## Upgrade Path
 
-**Prerequisites:** Ensure all queues are empty before upgrade.
-
-```bash
-# Check legacy queue depths
-docker compose exec redis redis-cli KEYS "dalston:queue:*"
-# For each key:
-docker compose exec redis redis-cli LLEN dalston:queue:transcribe
-# All should return 0
-```
+**Prerequisites:** Ensure all legacy queues (`dalston:queue:*`) are empty before upgrade (check with `LLEN`).
 
 **Upgrade:**
 
@@ -1213,46 +432,17 @@ No data migration needed.
 
 ## Configuration
 
-```bash
-# Task recovery (engine)
-STALE_THRESHOLD_MS=600000       # 10 min - consider tasks idle longer than this
-                                # BUT only claim if engine is also not heartbeating
+Key tuning parameters (all configurable via environment variables):
 
-# Stale scanner (orchestrator)
-SCAN_INTERVAL_S=60              # Check every 60 seconds
-MAX_DELIVERIES=3                # Fail after 3 attempts
-ABSOLUTE_TIMEOUT_MS=1800000     # 30 min - fail even if engine alive
+| Parameter | Default | Purpose |
+| --------- | ------- | ------- |
+| `STALE_THRESHOLD_MS` | 600000 (10 min) | Task idle threshold (only claims from dead engines) |
+| `SCAN_INTERVAL_S` | 60 | Scanner check frequency |
+| `MAX_DELIVERIES` | 3 | Fail task after N attempts |
+| `ABSOLUTE_TIMEOUT_MS` | 1800000 (30 min) | Hard task timeout |
+| `LEADER_TTL_S` | 30 | Leader election key TTL |
+| `RECONCILE_INTERVAL_S` | 300 (5 min) | Reconciler check frequency |
+| `STRANDED_JOB_THRESHOLD_S` | 300 (5 min) | PENDING job with no tasks threshold |
+| `STRANDED_TASK_THRESHOLD_S` | 300 (5 min) | READY task not in stream threshold |
+| `EVENT_CLAIM_MIN_IDLE_MS` | 60000 (1 min) | Claim events from dead orchestrators |
 
-# Leader election (orchestrator)
-LEADER_TTL_S=30
-
-# Reconciliation sweeper (orchestrator)
-RECONCILE_INTERVAL_S=300        # 5 min - how often to check for stranded states
-STRANDED_JOB_THRESHOLD_S=300    # 5 min - job PENDING with no tasks
-STRANDED_TASK_THRESHOLD_S=300   # 5 min - task READY not in stream
-
-# Event stream (orchestrator)
-EVENT_CLAIM_MIN_IDLE_MS=60000   # 1 min - claim events from dead orchestrators
-```
-
----
-
-## Files Changed
-
-| File | Change |
-| ---- | ------ |
-| `dalston/common/streams.py` | New - Redis Streams helpers for task queues |
-| `dalston/common/events.py` | Migrate from Pub/Sub to Redis Streams |
-| `dalston/engine_sdk/runner.py` | Replace `brpop` with `xreadgroup` |
-| `dalston/orchestrator/scheduler.py` | Replace `lpush` with `xadd` |
-| `dalston/orchestrator/scanner.py` | New - stale task scanner |
-| `dalston/orchestrator/reconciler.py` | New - stranded state reconciliation |
-| `dalston/orchestrator/leader.py` | New - leader election |
-| `dalston/orchestrator/main.py` | Add scanner loop, event stream consumer |
-| `dalston/orchestrator/handlers.py` | Atomic ownership claims for job/task transitions |
-| `dalston/metrics.py` | Add stream + reconciliation metrics |
-| `docker-compose.yml` | Redis AOF configuration + data volume |
-| `alembic/versions/xxx_add_task_uniqueness.py` | New - unique constraint on tasks |
-| `tests/integration/test_multi_orchestrator.py` | New - concurrency tests |
-| `tests/integration/test_event_durability.py` | New - orchestrator restart recovery tests |
-| `tests/integration/test_reconciler.py` | New - stranded state recovery tests |

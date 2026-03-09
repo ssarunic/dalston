@@ -16,55 +16,7 @@
 
 ## Overview
 
-```text
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                         DATA RETENTION SYSTEM                                    │
-│                                                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────────────┐│
-│  │                       RETENTION POLICIES                                     ││
-│  │                                                                              ││
-│  │   System Policies (immutable):                                               ││
-│  │   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                       ││
-│  │   │   default    │  │zero-retention│  │    keep      │                       ││
-│  │   │ auto_delete  │  │    none      │  │    keep      │                       ││
-│  │   │   24 hours   │  │  immediate   │  │   forever    │                       ││
-│  │   └──────────────┘  └──────────────┘  └──────────────┘                       ││
-│  │                                                                              ││
-│  │   Tenant Policies (custom):                                                  ││
-│  │   ┌──────────────┐  ┌──────────────┐                                         ││
-│  │   │  hipaa-6yr   │  │  dev-testing │                                         ││
-│  │   │ auto_delete  │  │ auto_delete  │                                         ││
-│  │   │ 52560 hours  │  │   1 hour     │                                         ││
-│  │   └──────────────┘  └──────────────┘                                         ││
-│  └─────────────────────────────────────────────────────────────────────────────┘│
-│                                    │                                             │
-│                      Job references policy at creation                           │
-│                                    ▼                                             │
-│  ┌─────────────────────────────────────────────────────────────────────────────┐│
-│  │                           JOB LIFECYCLE                                      ││
-│  │                                                                              ││
-│  │   Created ──► Running ──► Completed ──► purge_after ──► Purged              ││
-│  │                               │              │              │                ││
-│  │                               │              │              │                ││
-│  │                     retention_policy    Cleanup Worker   purged_at set       ││
-│  │                      snapshotted         deletes S3       job row stays      ││
-│  │                                                                              ││
-│  └─────────────────────────────────────────────────────────────────────────────┘│
-│                                    │                                             │
-│                           Audit events emitted                                   │
-│                                    ▼                                             │
-│  ┌─────────────────────────────────────────────────────────────────────────────┐│
-│  │                          AUDIT LOG                                           ││
-│  │                                                                              ││
-│  │   job.created ──► transcript.accessed ──► job.purged                         ││
-│  │        │                   │                    │                            ││
-│  │   correlation_id      correlation_id       artifacts_deleted                 ││
-│  │   actor: dk_xxx       actor: dk_xxx        actor: cleanup_worker             ││
-│  │                                                                              ││
-│  └─────────────────────────────────────────────────────────────────────────────┘│
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+The data retention system has three layers: **retention policies** (system-immutable policies like `default`/24h, `zero-retention`/immediate, and `keep`/forever, plus custom tenant policies), a **job lifecycle** where the policy is snapshotted at creation and a cleanup worker purges S3 artifacts after `purge_after` (keeping the job row with `purged_at` set), and an **audit log** that records events (`job.created`, `transcript.accessed`, `job.purged`) with correlation IDs and actor context.
 
 ---
 
@@ -109,52 +61,7 @@ Audit log writes must not block business operations. If the audit INSERT fails, 
 - Create audit_log table with immutability rules
 - Add `RetentionPolicyModel` to `dalston/db/models.py`
 
-**Schema highlights:**
-
-```sql
--- Retention policies
-CREATE TABLE retention_policies (
-    id UUID PRIMARY KEY,
-    tenant_id UUID REFERENCES tenants(id),
-    name VARCHAR(100) NOT NULL,
-    mode VARCHAR(20) NOT NULL,
-    hours INTEGER,
-    scope VARCHAR(20) NOT NULL DEFAULT 'all',
-    realtime_mode VARCHAR(20) NOT NULL DEFAULT 'inherit',
-    realtime_hours INTEGER,
-    delete_realtime_on_enhancement BOOLEAN NOT NULL DEFAULT true,
-    is_system BOOLEAN NOT NULL DEFAULT false,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE NULLS NOT DISTINCT (tenant_id, name)
-);
-
--- Jobs retention columns
-ALTER TABLE jobs ADD COLUMN retention_policy_id UUID REFERENCES retention_policies(id);
-ALTER TABLE jobs ADD COLUMN retention_mode VARCHAR(20) NOT NULL DEFAULT 'auto_delete';
-ALTER TABLE jobs ADD COLUMN retention_hours INTEGER;
-ALTER TABLE jobs ADD COLUMN retention_scope VARCHAR(20) NOT NULL DEFAULT 'all';
-ALTER TABLE jobs ADD COLUMN purge_after TIMESTAMPTZ;
-ALTER TABLE jobs ADD COLUMN purged_at TIMESTAMPTZ;
-
--- Audit log (immutable)
-CREATE TABLE audit_log (
-    id BIGSERIAL PRIMARY KEY,
-    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    correlation_id VARCHAR(36),
-    tenant_id UUID,
-    actor_type VARCHAR(20) NOT NULL,
-    actor_id TEXT NOT NULL,
-    action VARCHAR(50) NOT NULL,
-    resource_type VARCHAR(30) NOT NULL,
-    resource_id TEXT NOT NULL,
-    detail JSONB,
-    ip_address INET,
-    user_agent TEXT
-);
-
-CREATE RULE audit_log_no_update AS ON UPDATE TO audit_log DO INSTEAD NOTHING;
-CREATE RULE audit_log_no_delete AS ON DELETE TO audit_log DO INSTEAD NOTHING;
-```
+The migration creates three schema changes: a `retention_policies` table (with tenant scoping, mode/hours/scope columns, and system policy flag), retention columns on the `jobs` table (`retention_policy_id`, `retention_mode`, `retention_hours`, `retention_scope`, `purge_after`, `purged_at`), and an immutable `audit_log` table with PostgreSQL rules blocking UPDATE and DELETE. See `alembic/versions/` for the migration files.
 
 ---
 
@@ -175,18 +82,7 @@ CREATE RULE audit_log_no_delete AS ON DELETE TO audit_log DO INSTEAD NOTHING;
 
 - Create `dalston/gateway/services/retention.py` with `RetentionService`
 
-**Service methods:**
-
-```python
-class RetentionService:
-    async def create_policy(self, tenant_id: UUID, data: CreatePolicyRequest) -> RetentionPolicy
-    async def list_policies(self, tenant_id: UUID) -> list[RetentionPolicy]
-    async def get_policy(self, tenant_id: UUID, policy_id: UUID) -> RetentionPolicy | None
-    async def get_policy_by_name(self, tenant_id: UUID, name: str) -> RetentionPolicy | None
-    async def delete_policy(self, tenant_id: UUID, policy_id: UUID) -> None
-    async def resolve_policy(self, tenant_id: UUID, policy_name: str | None) -> RetentionPolicy
-    async def validate_policy_hours(self, tenant_id: UUID, hours: int) -> None
-```
+`RetentionService` in `dalston/gateway/services/retention.py` provides CRUD for policies plus a `resolve_policy()` method that determines the effective policy for a job.
 
 **Policy resolution logic:**
 
@@ -225,25 +121,7 @@ DELETE /v1/retention-policies/{id}      Delete policy (if not in use)
 - Snapshot policy values into job record on creation
 - Add `RetentionInfo` to job responses
 
-**Submission flow:**
-
-```python
-async def create_job(..., retention_policy: str | None = None):
-    # 1. Resolve policy
-    policy = await retention_service.resolve_policy(tenant_id, retention_policy)
-
-    # 2. Create job with snapshotted values
-    job = JobModel(
-        ...,
-        retention_policy_id=policy.id,
-        retention_mode=policy.mode,
-        retention_hours=policy.hours,
-        retention_scope=policy.scope,
-    )
-
-    # 3. Emit audit event
-    await audit_service.log("job.created", "job", job.id, ...)
-```
+On submission, the resolved policy's mode, hours, and scope are snapshotted into the job record so that later policy changes do not affect in-flight jobs. An audit event is emitted on creation. See `dalston/gateway/services/jobs.py`.
 
 ---
 
@@ -254,22 +132,7 @@ async def create_job(..., retention_policy: str | None = None):
 - Update `JobsService` to compute `purge_after` on job completion
 - Handle zero-retention inline purge in orchestrator
 
-**Completion handler:**
-
-```python
-async def handle_job_completed(job_id: UUID):
-    job = await get_job(job_id)
-
-    if job.retention_mode == "auto_delete":
-        job.purge_after = job.completed_at + timedelta(hours=job.retention_hours)
-    elif job.retention_mode == "none":
-        # Immediate purge
-        await purge_job_artifacts(job)
-        job.purged_at = datetime.now(UTC)
-    # mode == "keep": purge_after stays NULL
-
-    await db.commit()
-```
+On job completion, `purge_after` is computed as `completed_at + retention_hours` for `auto_delete` mode. `none` mode triggers immediate inline purge. `keep` mode leaves `purge_after` NULL. See `dalston/gateway/services/jobs.py` and `dalston/orchestrator/handlers.py`.
 
 ---
 
@@ -282,36 +145,7 @@ async def handle_job_completed(job_id: UUID):
 - Add `get_audit_service` dependency
 - Integrate with auth middleware for actor context
 
-**Service implementation:**
-
-```python
-class AuditService:
-    def __init__(self, db_session_factory):
-        self.db_session_factory = db_session_factory
-
-    async def log(
-        self,
-        action: str,
-        resource_type: str,
-        resource_id: str,
-        *,
-        tenant_id: UUID | None = None,
-        actor_type: str = "system",
-        actor_id: str = "unknown",
-        detail: dict | None = None,
-        correlation_id: str | None = None,
-        ip_address: str | None = None,
-        user_agent: str | None = None,
-    ) -> None:
-        try:
-            async with self.db_session_factory() as session:
-                entry = AuditLogModel(...)
-                session.add(entry)
-                await session.commit()
-        except Exception:
-            logger.error("audit_log_write_failed", action=action, exc_info=True)
-            # Do NOT re-raise - fail open
-```
+`AuditService` in `dalston/common/audit.py` provides a `log()` method that writes audit entries with action, resource, actor, correlation ID, and optional detail. It follows the fail-open pattern: if the audit INSERT fails, the error is logged but the business operation proceeds unblocked.
 
 ---
 
@@ -357,41 +191,7 @@ The cleanup worker uses a two-phase commit pattern with Redis locks to ensure at
 
 If Phase 2 fails, the Redis lock expires (5 minute TTL) and the job is retried on next sweep. S3 deletion is idempotent so retry is safe.
 
-```python
-PURGE_LOCK_JOB_KEY = "dalston:purge_lock:job:{job_id}"
-PURGE_LOCK_TTL_SECONDS = 300  # 5 minutes
-
-async def _purge_expired_jobs(self) -> int:
-    """Find and purge expired jobs using two-phase commit."""
-    # Query jobs to purge
-    async with self.db_session_factory() as db:
-        jobs = await db.execute(
-            select(JobModel)
-            .where(JobModel.purge_after <= func.now())
-            .where(JobModel.purged_at.is_(None))
-            .order_by(JobModel.purge_after)
-            .limit(settings.retention_cleanup_batch_size)
-        )
-
-    for job in jobs:
-        # Phase 1: Acquire lock before S3 deletion
-        if not await self._acquire_job_lock(job.id):
-            continue  # Another worker is handling this job
-
-        try:
-            # Delete S3 artifacts (irreversible)
-            await self._delete_job_artifacts(job.id, job.retention_scope, storage)
-
-            # Phase 2: Mark as purged in fresh DB session
-            async with self.db_session_factory() as db:
-                job_record = await db.get(JobModel, job.id)
-                job_record.purged_at = datetime.now(UTC)
-                await db.commit()
-
-            await audit_service.log_job_purged(...)
-        finally:
-            await self._release_job_lock(job.id)
-```
+The cleanup worker queries jobs where `purge_after <= now()` and `purged_at IS NULL`, processing them in configurable batches. It uses Redis locks (5-minute TTL) per job for distributed coordination. See `dalston/orchestrator/cleanup.py`.
 
 ---
 
@@ -421,18 +221,7 @@ async def _purge_expired_jobs(self) -> int:
 - Delete audio, preserve transcript
 - Emit audit event
 
-**Endpoint behavior:**
-
-```
-DELETE /v1/audio/transcriptions/{job_id}/audio
-
-Response: 204 No Content
-
-Errors:
-- 404: Job not found
-- 400: Job not in terminal state
-- 410: Audio already purged
-```
+The endpoint returns 204 on success, 404 if the job is not found, 400 if the job is not in a terminal state, or 410 if audio was already purged. See `dalston/gateway/api/v1/transcription.py`.
 
 ---
 
@@ -512,49 +301,11 @@ Errors:
 
 ## Verification
 
-```bash
-# Create a retention policy
-curl -X POST http://localhost:8000/v1/retention-policies \
-  -H "Authorization: Bearer dk_xxx" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "short-test", "mode": "auto_delete", "hours": 1, "scope": "all"}'
-
-# Submit job with policy
-JOB_ID=$(curl -s -X POST http://localhost:8000/v1/audio/transcriptions \
-  -H "Authorization: Bearer dk_xxx" \
-  -F "file=@test.mp3" \
-  -F "retention_policy=short-test" | jq -r '.id')
-
-# Check job has retention info
-curl http://localhost:8000/v1/audio/transcriptions/$JOB_ID \
-  -H "Authorization: Bearer dk_xxx" | jq '.retention'
-# {"policy_name": "short-test", "mode": "auto_delete", "hours": 1, ...}
-
-# Wait for job completion, check purge_after is set
-curl http://localhost:8000/v1/audio/transcriptions/$JOB_ID \
-  -H "Authorization: Bearer dk_xxx" | jq '.retention.purge_after'
-# "2026-02-13T13:00:00Z"
-
-# Check audit trail
-curl "http://localhost:8000/v1/audit?resource_type=job&resource_id=$JOB_ID" \
-  -H "Authorization: Bearer dk_xxx" | jq '.events[].action'
-# "job.created"
-# "transcript.accessed"
-
-# Test zero-retention
-JOB_ID=$(curl -s -X POST http://localhost:8000/v1/audio/transcriptions \
-  -F "file=@test.mp3" \
-  -F "retention_policy=zero-retention" | jq -r '.id')
-# Wait for completion...
-curl http://localhost:8000/v1/audio/transcriptions/$JOB_ID/transcript
-# 410 Gone: "artifacts_purged"
-
-# Test audio-only delete
-curl -X DELETE http://localhost:8000/v1/audio/transcriptions/$JOB_ID/audio
-# 204 No Content
-curl http://localhost:8000/v1/audio/transcriptions/$JOB_ID/transcript
-# 200 OK (transcript still accessible)
-```
+- Create a retention policy via `POST /v1/retention-policies` and confirm it appears in `GET /v1/retention-policies`
+- Submit a job with `retention_policy=short-test`, verify the job response includes a `retention` block with snapshotted values and `purge_after` is set after completion
+- Submit a job with `retention_policy=zero-retention`, wait for completion, confirm `GET .../transcript` returns 410 Gone
+- Call `DELETE /v1/audio/transcriptions/{id}/audio`, confirm 204 and that the transcript remains accessible
+- Query `GET /v1/audit?resource_type=job&resource_id={id}` and verify audit events (`job.created`, `transcript.accessed`, etc.) are present
 
 ---
 
@@ -583,81 +334,6 @@ curl http://localhost:8000/v1/audio/transcriptions/$JOB_ID/transcript
 - [x] Console shows retention info on job detail
 - [x] Console has audit log viewer
 - [x] All tests passing
-
----
-
-## Files Changed
-
-| File | Description |
-|------|-------------|
-| `alembic/versions/xxx_create_retention_policies.py` | Migration for retention_policies table |
-| `alembic/versions/xxx_add_retention_columns.py` | Migration for jobs/sessions retention columns |
-| `alembic/versions/xxx_create_audit_log.py` | Migration for audit_log table |
-| `dalston/db/models.py` | Add `RetentionPolicyModel`, `AuditLogModel`, retention columns |
-| `dalston/common/models.py` | Add `RetentionMode`, `RetentionScope` enums |
-| `dalston/common/audit.py` | `AuditService` implementation |
-| `dalston/config.py` | Retention and audit config variables |
-| `dalston/gateway/services/retention.py` | `RetentionService` implementation |
-| `dalston/gateway/api/v1/retention_policies.py` | Policy CRUD endpoints |
-| `dalston/gateway/api/v1/audit.py` | Audit query endpoints |
-| `dalston/gateway/api/v1/transcription.py` | Retention param, delete audio endpoint, audit events |
-| `dalston/gateway/api/v1/speech_to_text.py` | Retention param (ElevenLabs compat) |
-| `dalston/gateway/api/v1/realtime.py` | Retention param for stored sessions |
-| `dalston/gateway/api/v1/router.py` | Mount new routers |
-| `dalston/gateway/models/responses.py` | `RetentionInfo`, `AuditEvent` models |
-| `dalston/gateway/services/jobs.py` | Snapshot policy, compute purge_after |
-| `dalston/gateway/services/storage.py` | `delete_job_audio()`, `delete_job_artifacts()` |
-| `dalston/gateway/main.py` | Initialize AuditService |
-| `dalston/gateway/dependencies.py` | `get_audit_service` dependency |
-| `dalston/orchestrator/cleanup.py` | Cleanup worker implementation |
-| `dalston/orchestrator/handlers.py` | Inline purge for zero-retention, audit events |
-| `dalston/orchestrator/main.py` | Start cleanup worker |
-| `sdk/dalston_sdk/types.py` | Retention types |
-| `sdk/dalston_sdk/client.py` | `retention_policy` param, policy methods |
-| `cli/dalston_cli/commands/transcribe.py` | `--retention-policy` flag |
-| `cli/dalston_cli/commands/retention.py` | Policy management commands |
-| `web/src/api/types.ts` | Retention types |
-| `web/src/pages/JobDetail.tsx` | Retention info, audit trail |
-| `web/src/pages/AuditLog.tsx` | Audit log viewer |
-
----
-
-## Implementation Notes
-
-The following additional improvements were made during implementation:
-
-### Redis-Based Two-Phase Commit (Cleanup Worker)
-
-The cleanup worker uses Redis locks for coordination instead of database transactions spanning S3 operations. This ensures atomicity without blocking database connections during potentially slow S3 deletions.
-
-### Thread Safety (Engine SDK)
-
-Added `threading.Lock` to protect `_current_task_id` in the engine SDK runner's heartbeat loop. This prevents race conditions when the heartbeat thread reads the task ID while the main thread is updating it.
-
-### System Policy Constants
-
-Created `dalston/common/constants.py` with well-known UUIDs for system policies:
-
-- `SYSTEM_POLICY_DEFAULT` - 24-hour auto-delete
-- `SYSTEM_POLICY_ZERO_RETENTION` - immediate purge
-- `SYSTEM_POLICY_KEEP` - never auto-delete
-
-### Cursor-Based Pagination (Audit API)
-
-The audit log API uses cursor-based pagination (not offset-based) since audit entries are append-only and new entries may arrive between page requests.
-
-### FK ON DELETE SET NULL
-
-Added migration `0011_add_fk_on_delete_set_null` to set `ON DELETE SET NULL` on `retention_policy_id` foreign keys in `jobs` and `realtime_sessions` tables. This provides defense-in-depth: if a policy is deleted while jobs reference it, the FK won't block deletion.
-
-### Retention Strategy Test Matrix
-
-Comprehensive parametrized tests cover all combinations of:
-
-- Modes: `auto_delete`, `keep`, `none`
-- Scopes: `all`, `audio_only`
-
-Tests verify correct purge scheduling and S3 artifact deletion behavior for each strategy.
 
 ---
 

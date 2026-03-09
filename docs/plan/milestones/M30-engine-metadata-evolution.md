@@ -34,21 +34,7 @@ This milestone makes `engine.yaml` the single source of truth by:
 
 ### Architecture After M30
 
-```
-engines/{stage}/{name}/engine.yaml     ─── single source of truth
-        │
-        ├─ CI: validated against JSON Schema
-        │
-        ├─ Build: catalog.json generated from all engine.yaml
-        │       └── baked into orchestrator image
-        │
-        ├─ Deploy: orchestrator loads catalog.json
-        │       └── answers "what could I start?"
-        │
-        └─ Runtime: engine loads its engine.yaml
-                └── publishes via heartbeat
-                └── registry answers "what's running?"
-```
+Each `engines/{stage}/{name}/engine.yaml` serves as the single source of truth. At CI time it is validated against JSON Schema. At build time, a catalog is generated from all engine.yaml files and baked into the orchestrator image. At deploy time, the orchestrator loads the catalog to answer "what could I start?". At runtime, each engine loads its own engine.yaml and publishes capabilities via heartbeat, enabling the registry to answer "what's running?".
 
 ---
 
@@ -56,57 +42,7 @@ engines/{stage}/{name}/engine.yaml     ─── single source of truth
 
 ### New Sections
 
-Add three new sections to the existing `engine.yaml` format:
-
-```yaml
-# === EXISTING FIELDS (unchanged) ===
-schema_version: "1.1"                    # NEW: version for migration
-id: faster-whisper
-stage: transcribe
-name: Faster Whisper Large V3
-version: "1.2.0"
-description: |
-  CTranslate2-optimized Whisper implementation.
-
-capabilities:
-  languages: [all]
-  max_audio_duration: 7200
-  streaming: false
-  word_timestamps: true
-
-container:
-  gpu: optional
-  memory: "8Gi"
-  model_cache: /models
-
-input:
-  audio_formats: [wav, flac, mp3]
-  sample_rate: 16000
-  channels: 1
-
-config_schema: { ... }
-output_schema: { ... }
-
-# === NEW: HF-compatible metadata ===
-hf_compat:
-  pipeline_tag: automatic-speech-recognition
-  library_name: ctranslate2
-  license: apache-2.0
-
-# === NEW: Hardware requirements ===
-hardware:
-  min_vram_gb: 4
-  recommended_gpu: [a10g, t4]
-  supports_cpu: true
-  min_ram_gb: 8
-
-# === NEW: Performance characteristics ===
-performance:
-  rtf_gpu: 0.05                          # real-time factor on GPU
-  rtf_cpu: 0.8                           # real-time factor on CPU
-  max_concurrent_jobs: 4
-  warm_start_latency_ms: 50
-```
+Three new optional sections are added to the existing `engine.yaml` format alongside existing fields (`id`, `stage`, `name`, `version`, `capabilities`, `container`, `input`, `config_schema`, `output_schema`). A `schema_version` field ("1.0" for baseline, "1.1" for extended) is also added. The new sections are `hf_compat` (HuggingFace ecosystem metadata), `hardware` (GPU/CPU/RAM requirements), and `performance` (RTF benchmarks, concurrency limits, warm-start latency). See any `engines/*/engine.yaml` file for a complete example.
 
 ### Field Definitions
 
@@ -183,31 +119,9 @@ Create `dalston/schemas/engine.schema.json` that validates engine.yaml files.
 
 ### 30.3: Build Validator CLI
 
-Create a CLI tool that validates engine.yaml against the JSON Schema.
+CLI tool (`dalston/tools/validate_engine.py`) that validates engine.yaml files against the JSON Schema. Supports single-file validation and `--all` mode to validate every engine. Outputs engine ID, version, schema version, stage, and key capability/hardware summaries.
 
-```bash
-# Validate single file
-python -m dalston.tools.validate_engine engines/transcribe/faster-whisper/engine.yaml
-
-# Validate all engines
-python -m dalston.tools.validate_engine --all
-
-# Output
-✓ faster-whisper v1.2.0 (schema 1.1)
-  Stage: transcribe
-  Languages: all
-  Hardware: min 4GB VRAM, supports CPU
-  Performance: RTF 0.05 (GPU)
-```
-
-**Files:**
-
-- NEW: `dalston/tools/validate_engine.py`
-- NEW: `dalston/tools/__init__.py`
-
-**Tests:**
-
-- NEW: `tests/unit/test_validate_engine.py`
+**Tests:** `tests/unit/test_validate_engine.py`
 
 ---
 
@@ -235,252 +149,58 @@ This requires benchmarking each engine for RTF values and documenting actual har
 
 ### 30.6: Catalog Generation Script
 
-Create a build-time script that generates catalog.json from engine.yaml files.
+Build-time script (`scripts/generate_catalog.py`) that reads all `engines/*/engine.yaml` files and produces `dalston/orchestrator/generated_catalog.json`. The output contains generation timestamp, schema version, and a map of engine entries with their capabilities, hardware requirements, and performance data.
 
-```bash
-python scripts/generate_catalog.py \
-  --engines-dir engines/ \
-  --output dalston/orchestrator/generated_catalog.json
-```
-
-**Output format:**
-
-```json
-{
-  "generated_at": "2026-02-16T10:30:00Z",
-  "schema_version": "1.1",
-  "engines": {
-    "faster-whisper": {
-      "id": "faster-whisper",
-      "stage": "transcribe",
-      "version": "1.2.0",
-      "image": "dalston/stt-batch-transcribe-whisper:1.2.0",
-      "capabilities": { ... },
-      "hardware": { ... },
-      "performance": { ... }
-    }
-  }
-}
-```
-
-**Files:**
-
-- NEW: `scripts/generate_catalog.py`
-
-**Tests:**
-
-- NEW: `tests/unit/test_generate_catalog.py`
+**Tests:** `tests/unit/test_generate_catalog.py`
 
 ---
 
 ### 30.7: Modify catalog.py to Load Generated Catalog
 
-Update `dalston/orchestrator/catalog.py` to load from `generated_catalog.json` instead of `engine_catalog.yaml`.
+Updated `dalston/orchestrator/catalog.py` to load from `generated_catalog.json` (defaulting to the file adjacent to catalog.py) instead of the legacy `engine_catalog.yaml`.
 
-```python
-class EngineCatalog:
-    @classmethod
-    def load(cls, path: Path | None = None) -> EngineCatalog:
-        if path is None:
-            path = Path(__file__).parent / "generated_catalog.json"
-
-        with open(path) as f:
-            data = json.load(f)
-
-        # Parse entries...
-```
-
-**Files:**
-
-- MODIFY: `dalston/orchestrator/catalog.py`
-
-**Tests:**
-
-- MODIFY: `tests/unit/test_engine_capabilities.py`
+**Tests:** `tests/unit/test_engine_capabilities.py` (modified)
 
 ---
 
 ### 30.8: Update Engine.get_capabilities() to Load from YAML
 
-Modify base Engine class to load capabilities from `/etc/dalston/engine.yaml` (baked into container) instead of hardcoded values.
-
-```python
-class Engine(ABC):
-    def get_capabilities(self) -> EngineCapabilities:
-        card = self._load_engine_yaml()
-        return EngineCapabilities(
-            engine_id=card["id"],
-            version=card["version"],
-            stages=[card["stage"]],
-            languages=card["capabilities"].get("languages"),
-            supports_word_timestamps=card["capabilities"].get("word_timestamps", False),
-            # ... etc
-        )
-
-    def _load_engine_yaml(self) -> dict:
-        path = Path("/etc/dalston/engine.yaml")
-        if not path.exists():
-            # Fallback for local dev
-            path = Path("engine.yaml")
-        with open(path) as f:
-            return yaml.safe_load(f)
-```
-
-**Files:**
-
-- MODIFY: `dalston/engine_sdk/base.py`
+Modified `dalston/engine_sdk/base.py` so the base Engine class loads capabilities from `/etc/dalston/engine.yaml` (baked into container) at runtime, with a fallback to `./engine.yaml` for local development. This replaces hardcoded capability values.
 
 ---
 
 ### 30.9: Extend EngineCapabilities Model
 
-Add fields to `EngineCapabilities` for hardware and performance data.
-
-```python
-class EngineCapabilities(BaseModel):
-    # Existing fields...
-    engine_id: str
-    version: str
-    stages: list[str]
-    languages: list[str] | None = None
-    supports_word_timestamps: bool = False
-    supports_streaming: bool = False
-    gpu_required: bool = False
-    gpu_vram_mb: int | None = None
-
-    # NEW fields
-    supports_cpu: bool = False
-    min_ram_gb: int | None = None
-    rtf_gpu: float | None = None
-    rtf_cpu: float | None = None
-    max_concurrent_jobs: int | None = None
-```
-
-**Files:**
-
-- MODIFY: `dalston/engine_sdk/types.py`
+Extended `EngineCapabilities` in `dalston/engine_sdk/types.py` with new fields: `supports_cpu`, `min_ram_gb`, `rtf_gpu`, `rtf_cpu`, and `max_concurrent_jobs`. These complement the existing fields (`engine_id`, `version`, `stages`, `languages`, `supports_word_timestamps`, `supports_streaming`, `gpu_required`, `gpu_vram_mb`).
 
 ---
 
 ### 30.10: Discovery API Endpoints
 
-Add REST endpoints for clients to discover capabilities.
+Two new REST endpoints in `dalston/gateway/api/v1/engines.py`:
 
-#### GET /v1/engines
+- **GET /v1/engines** — Returns all engines with current status (`running`, `available`, or `unhealthy`) based on registry heartbeats vs. catalog entries.
+- **GET /v1/capabilities** — Returns aggregate capabilities of running engines: supported languages, per-stage capabilities, max audio duration, and supported formats.
 
-Returns all engines with current status.
-
-```json
-{
-  "engines": [
-    {
-      "id": "faster-whisper",
-      "name": "Faster Whisper Large V3",
-      "stage": "transcribe",
-      "version": "1.2.0",
-      "status": "running",
-      "capabilities": { ... }
-    }
-  ]
-}
-```
-
-**Status values:**
-
-- `running` — In registry with valid heartbeat
-- `available` — In catalog but not running
-- `unhealthy` — In registry but heartbeat expired
-
-#### GET /v1/capabilities
-
-Returns aggregate capabilities of running engines.
-
-```json
-{
-  "languages": ["en", "es", "fr"],
-  "stages": {
-    "transcribe": { "languages": ["en", "es", "fr"], "word_timestamps": true },
-    "diarize": { "languages": null }
-  },
-  "max_audio_duration_s": 7200,
-  "supported_formats": ["wav", "flac", "mp3"]
-}
-```
-
-**Files:**
-
-- NEW: `dalston/gateway/api/v1/engines.py`
-- MODIFY: `dalston/gateway/api/v1/router.py`
-
-**Tests:**
-
-- NEW: `tests/integration/test_engines_api.py`
+**Tests:** `tests/integration/test_engines_api.py`
 
 ---
 
 ### 30.11: Performance-Based Timeout Calculation
 
-Use `performance.rtf_gpu` in the scheduler for timeout estimation.
-
-```python
-def calculate_timeout(audio_duration_s: float, engine: CatalogEntry) -> float:
-    rtf = engine.performance.get("rtf_gpu") or 1.0
-    estimated = audio_duration_s * rtf
-    return max(estimated * 3.0, MIN_TIMEOUT_S)  # 3x safety factor
-```
-
-**Files:**
-
-- MODIFY: `dalston/orchestrator/scheduler.py`
+Updated `dalston/orchestrator/scheduler.py` to use `performance.rtf_gpu` from the catalog for timeout estimation. Timeout is calculated as `audio_duration * rtf * 3.0` (3x safety factor), with a minimum floor.
 
 ---
 
 ### 30.12: Improved Error Messages
 
-Enhance validation errors to include catalog context and suggestions.
-
-```json
-{
-  "error": "catalog_validation_error",
-  "message": "No engine supports language 'hr' with word_timestamps for stage 'transcribe'",
-  "details": {
-    "required": { "stage": "transcribe", "language": "hr", "word_timestamps": true },
-    "available_engines": [
-      { "id": "parakeet", "languages": ["en"], "word_timestamps": true, "status": "running" },
-      { "id": "faster-whisper", "languages": null, "word_timestamps": false, "status": "available" }
-    ],
-    "suggestion": "Start faster-whisper (supports all languages) or submit without word_timestamps"
-  }
-}
-```
-
-**Files:**
-
-- MODIFY: `dalston/orchestrator/scheduler.py`
-- MODIFY: `dalston/orchestrator/exceptions.py`
+Enhanced validation errors in `dalston/orchestrator/scheduler.py` and `dalston/orchestrator/exceptions.py` to include catalog context: what was required, what engines are available (with their capabilities and status), and actionable suggestions (e.g. "Start faster-whisper (supports all languages) or submit without word_timestamps").
 
 ---
 
 ### 30.13: Scaffold Command
 
-Create a CLI to scaffold new engines.
-
-```bash
-python -m dalston.tools.scaffold_engine my-engine --stage transcribe
-
-# Creates:
-# engines/transcribe/my-engine/
-# ├── engine.yaml          (template with all fields)
-# ├── Dockerfile
-# ├── engine.py
-# ├── requirements.txt
-# └── README.md
-```
-
-**Files:**
-
-- NEW: `dalston/tools/scaffold_engine.py`
-- NEW: `dalston/tools/templates/` (template files)
+CLI tool (`dalston/tools/scaffold_engine.py`) that generates a new engine skeleton under `engines/{stage}/{name}/` with `engine.yaml`, `Dockerfile`, `engine.py`, `requirements.txt`, and `README.md`. Templates are in `dalston/tools/templates/`.
 
 ---
 
@@ -519,32 +239,11 @@ Update `docs/specs/batch/ENGINES.md` to document the extended schema.
 
 ## Verification
 
-```bash
-# 1. Validate all engine.yaml files
-python -m dalston.tools.validate_engine --all
-# All 11 engines valid
-
-# 2. Generate catalog
-python scripts/generate_catalog.py --engines-dir engines/ --output test_catalog.json
-cat test_catalog.json | jq '.engines | keys'
-# ["audio-prepare", "faster-whisper", "final-merger", ...]
-
-# 3. Start system and check discovery API
-docker compose up -d
-curl http://localhost:8000/v1/engines | jq '.[0]'
-# { "id": "faster-whisper", "status": "running", ... }
-
-curl http://localhost:8000/v1/capabilities | jq '.languages'
-# ["en", "es", "fr", ...]
-
-# 4. Verify error messages
-docker compose stop stt-batch-transcribe-whisper-cpu
-curl -X POST http://localhost:8000/v1/audio/transcriptions \
-  -H "Authorization: Bearer dk_test" \
-  -F "file=@test.mp3" \
-  -F "language=hr" | jq '.error'
-# Detailed error with available engines and suggestions
-```
+- [ ] `python -m dalston.tools.validate_engine --all` passes for all 11 engines
+- [ ] `scripts/generate_catalog.py` produces valid `generated_catalog.json` with all engine entries
+- [ ] `GET /v1/engines` returns engine list with correct status (running/available/unhealthy)
+- [ ] `GET /v1/capabilities` returns aggregate languages and per-stage capabilities
+- [ ] Stopping an engine and submitting an unsupported request returns detailed error with suggestions
 
 ---
 
@@ -569,54 +268,6 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 
 ---
 
-## Files Changed
-
-| File | Change |
-|------|--------|
-| `dalston/schemas/engine.schema.json` | NEW |
-| `dalston/tools/__init__.py` | NEW |
-| `dalston/tools/validate_engine.py` | NEW |
-| `dalston/tools/scaffold_engine.py` | NEW |
-| `dalston/tools/templates/` | NEW |
-| `scripts/generate_catalog.py` | NEW |
-| `dalston/orchestrator/generated_catalog.json` | NEW (generated) |
-| `dalston/orchestrator/catalog.py` | MODIFY |
-| `dalston/orchestrator/scheduler.py` | MODIFY |
-| `dalston/orchestrator/exceptions.py` | MODIFY |
-| `dalston/engine_sdk/base.py` | MODIFY |
-| `dalston/engine_sdk/types.py` | MODIFY |
-| `dalston/gateway/api/v1/engines.py` | NEW |
-| `dalston/gateway/api/v1/router.py` | MODIFY |
-| `engines/*/engine.yaml` | MODIFY (all 11 files) |
-| `dalston/orchestrator/engine_catalog.yaml` | DELETE |
-| `docs/specs/batch/ENGINES.md` | MODIFY |
-| `.github/workflows/ci.yml` | MODIFY |
-| `tests/unit/test_validate_engine.py` | NEW |
-| `tests/unit/test_generate_catalog.py` | NEW |
-| `tests/integration/test_engines_api.py` | NEW |
-
----
-
-## Implementation Order
-
-| Step | Scope | Effort |
-|------|-------|--------|
-| 30.1 | Add schema_version to existing files | 0.5 day |
-| 30.2 | Create JSON Schema | 1 day |
-| 30.3 | Build validator CLI | 0.5 day |
-| 30.4 | Add CI validation | 0.5 day |
-| 30.5 | Update engine.yaml files with new sections | 1 day |
-| 30.6 | Catalog generation script | 1 day |
-| 30.7 | Modify catalog.py | 0.5 day |
-| 30.8 | Update Engine.get_capabilities() | 0.5 day |
-| 30.9 | Extend EngineCapabilities model | 0.5 day |
-| 30.10 | Discovery API endpoints | 1 day |
-| 30.11 | Performance-based timeout | 0.5 day |
-| 30.12 | Improved error messages | 0.5 day |
-| 30.13 | Scaffold command | 1 day |
-| 30.14-15 | Cleanup and docs | 0.5 day |
-
-**Total: ~9 days**
 
 ---
 
@@ -629,49 +280,3 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 
 ---
 
-## Implementation Summary
-
-**Completed: February 2026**
-
-M30 was implemented in 4 phases:
-
-### Phase 1: Schema Validation
-
-- Created `dalston/schemas/engine.schema.json` with full validation
-- Built `dalston/tools/validate_engine.py` CLI tool
-- Added `schema_version: "1.0"` to all engine.yaml files
-
-### Phase 2: Extended Metadata & Catalog Generation
-
-- Extended all engine.yaml files with `hf_compat`, `hardware`, and `performance` sections
-- Created `scripts/generate_catalog.py` to build catalog from engine.yaml files
-- Generated `dalston/orchestrator/generated_catalog.json`
-
-### Phase 3: Discovery API & Error Handling
-
-- Added `GET /v1/engines` endpoint with engine status (running/available/unhealthy)
-- Added `GET /v1/capabilities` endpoint for aggregate capability discovery
-- Enhanced error messages with catalog context and suggestions
-
-### Phase 4: Runtime & Tooling
-
-- Modified `Engine.get_capabilities()` to load from engine.yaml at runtime
-- Created `dalston/tools/scaffold_engine.py` for new engine scaffolding
-- Deleted legacy `dalston/orchestrator/engine_catalog.yaml`
-- Extended `EngineCapabilities` model with hardware/performance fields
-
-### Key Files Created
-
-- `dalston/schemas/engine.schema.json`
-- `dalston/tools/validate_engine.py`
-- `dalston/tools/scaffold_engine.py`
-- `dalston/gateway/api/v1/engines.py`
-- `scripts/generate_catalog.py`
-- `dalston/orchestrator/generated_catalog.json`
-
-### Stage Names Updated
-
-During implementation, stage names were consolidated:
-
-- `detect` → `pii_detect` (PII detection stage)
-- `redact` → `audio_redact` (audio redaction stage)

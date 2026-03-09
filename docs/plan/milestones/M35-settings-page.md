@@ -16,54 +16,7 @@
 
 ## Overview
 
-```text
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          SETTINGS PAGE                                      │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  [Rate Limits]  [Engines]  [Audio]  [Retention]  [Webhooks]  [System ℹ]     │
-│  ─────────────                                                               │
-│                                                                              │
-│  Rate Limits                                         [↻ Reset to defaults]  │
-│  ┌────────────────────────────────────────────────────────────────────────┐ │
-│  │                                                                        │ │
-│  │  Requests per minute (per tenant)                                      │ │
-│  │  ┌──────────┐                                                          │ │
-│  │  │ 600      │  Default: 600                                            │ │
-│  │  └──────────┘                                                          │ │
-│  │                                                                        │ │
-│  │  Max concurrent batch jobs (per tenant)                                │ │
-│  │  ┌──────────┐                                                          │ │
-│  │  │ 10       │  Default: 10                                             │ │
-│  │  └──────────┘                                                          │ │
-│  │                                                                        │ │
-│  │  Max concurrent realtime sessions (per tenant)                         │ │
-│  │  ┌──────────┐                                                          │ │
-│  │  │ 5        │  Default: 5                                              │ │
-│  │  └──────────┘                                                          │ │
-│  │                                                                        │ │
-│  └────────────────────────────────────────────────────────────────────────┘ │
-│                                                                              │
-│  ┌──────────────────────────────────────────────────────────────────────┐   │
-│  │  Unsaved changes                              [Cancel]  [Save]       │   │
-│  └──────────────────────────────────────────────────────────────────────┘   │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-System Info Tab (read-only):
-┌──────────────────────────────────────────────────────────────────────────────┐
-│  System                                                                       │
-│  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │  Redis URL          redis://redis:6379                                 │  │
-│  │  Database            postgresql+asyncpg://...@db:5432/dalston          │  │
-│  │  S3 Bucket           dalston-artifacts                                 │  │
-│  │  S3 Region           eu-west-2                                         │  │
-│  │  Version             0.1.0                                             │  │
-│  └────────────────────────────────────────────────────────────────────────┘  │
-│                                                                               │
-│  ⚠ System settings are read-only and controlled by environment variables.    │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
+The Settings page provides a tabbed interface with namespaces (Rate Limits, Engines, Audio, Retention, Webhooks, System). Editable namespaces show form fields with current values, defaults, and override indicators. A sticky "Unsaved changes" footer with Save/Cancel appears on dirty forms. The System tab is read-only, displaying infrastructure config (Redis URL, Database, S3, version) sourced from environment variables.
 
 ---
 
@@ -166,48 +119,7 @@ This allows per-tenant overrides in the future without schema changes.
 - `get_system_info()` — read-only infrastructure info (Redis URL, DB, S3, version)
 - Short-lived TTL cache (5 seconds) to avoid per-request DB queries
 
-**Setting Definitions Registry:**
-
-```python
-@dataclass
-class SettingDefinition:
-    namespace: str
-    key: str
-    label: str
-    description: str
-    value_type: Literal["int", "float", "bool", "string", "select"]
-    default: Any
-    env_var: str  # Maps to Settings class field
-    min_value: int | float | None = None
-    max_value: int | float | None = None
-    options: list[str] | None = None  # For select type
-
-SETTING_DEFINITIONS: list[SettingDefinition] = [
-    SettingDefinition(
-        namespace="rate_limits",
-        key="requests_per_minute",
-        label="Requests per minute",
-        description="Maximum API requests per minute per tenant",
-        value_type="int",
-        default=600,
-        env_var="RATE_LIMIT_REQUESTS_PER_MINUTE",
-        min_value=1,
-        max_value=100000,
-    ),
-    SettingDefinition(
-        namespace="rate_limits",
-        key="concurrent_jobs",
-        label="Max concurrent batch jobs",
-        description="Maximum concurrent batch transcription jobs per tenant",
-        value_type="int",
-        default=10,
-        env_var="RATE_LIMIT_CONCURRENT_JOBS",
-        min_value=1,
-        max_value=1000,
-    ),
-    # ... remaining definitions
-]
-```
+A `SettingDefinition` dataclass in `dalston/gateway/services/settings.py` defines each setting's namespace, key, label, description, value type (`int`/`float`/`bool`/`string`/`select`), default, env var mapping, and optional min/max/options constraints. A `SETTING_DEFINITIONS` list registers all known settings.
 
 **Files:**
 
@@ -230,70 +142,7 @@ All endpoints require `RequireAdmin`.
 
 - `dalston/gateway/api/console.py` (modify)
 
-**API:**
-
-```
-GET /api/console/settings
-Authorization: Bearer dk_...
-
-Response 200:
-{
-  "namespaces": [
-    {
-      "namespace": "rate_limits",
-      "label": "Rate Limits",
-      "description": "Control API request and concurrency limits",
-      "setting_count": 3,
-      "has_overrides": true
-    },
-    {
-      "namespace": "engines",
-      "label": "Engines",
-      "description": "Engine availability and timeout behavior",
-      "setting_count": 2,
-      "has_overrides": false
-    }
-  ]
-}
-```
-
-```
-GET /api/console/settings/rate_limits
-Authorization: Bearer dk_...
-
-Response 200:
-{
-  "namespace": "rate_limits",
-  "label": "Rate Limits",
-  "settings": [
-    {
-      "key": "requests_per_minute",
-      "label": "Requests per minute",
-      "description": "Maximum API requests per minute per tenant",
-      "value_type": "int",
-      "value": 1000,
-      "default": 600,
-      "is_overridden": true,
-      "min_value": 1,
-      "max_value": 100000,
-      "env_var": "RATE_LIMIT_REQUESTS_PER_MINUTE"
-    },
-    {
-      "key": "concurrent_jobs",
-      "label": "Max concurrent batch jobs",
-      "description": "Maximum concurrent batch transcription jobs per tenant",
-      "value_type": "int",
-      "value": 10,
-      "default": 10,
-      "is_overridden": false,
-      "min_value": 1,
-      "max_value": 1000,
-      "env_var": "RATE_LIMIT_CONCURRENT_JOBS"
-    }
-  ],
-  "updated_at": "2026-02-20T10:30:00Z"
-}
-```
+**Example (PATCH — update with optimistic locking):**
 
 ```
 PATCH /api/console/settings/rate_limits
@@ -321,17 +170,7 @@ Response 409 (conflict):
 }
 ```
 
-```
-POST /api/console/settings/rate_limits/reset
-Authorization: Bearer dk_...
-
-Response 200:
-{
-  "namespace": "rate_limits",
-  "settings": [ ... ],
-  "updated_at": null
-}
-```
+The other endpoints (`GET /api/console/settings`, `GET .../settings/{namespace}`, `POST .../settings/{namespace}/reset`) follow the same auth and response patterns. See `dalston/gateway/api/console.py`.
 
 ---
 
@@ -368,23 +207,7 @@ The `SettingsService` exposes a `get_value(namespace, key)` method with a 5-seco
 
 - `dalston/gateway/api/console.py` (modify — add audit calls to settings endpoints)
 
-**Audit entry example:**
-
-```json
-{
-  "action": "settings.updated",
-  "actor_id": "api_key_uuid",
-  "tenant_id": "tenant_uuid",
-  "resource_type": "settings",
-  "resource_id": "rate_limits",
-  "details": {
-    "changes": {
-      "requests_per_minute": { "old": 600, "new": 1200 },
-      "concurrent_jobs": { "old": 10, "new": 20 }
-    }
-  }
-}
-```
+Audit entries use action `settings.updated` or `settings.reset`, with `resource_type: "settings"` and `resource_id` set to the namespace. The `details` field records old and new values for each changed key.
 
 ---
 
@@ -420,15 +243,6 @@ The `SettingsService` exposes a `get_value(namespace, key)` method with a 5-seco
 - Override indicator (dot or badge) when value differs from default
 - "Default: X" hint text below each field
 - `SettingsNamespaceForm` component wrapping fields with dirty tracking
-
-**Component structure:**
-
-```text
-web/src/components/
-├── SettingField.tsx           # Single setting input
-├── SettingsNamespaceForm.tsx  # Form wrapping all fields in a namespace
-└── SettingsResetDialog.tsx    # Confirmation dialog for reset
-```
 
 **Files:**
 
@@ -500,71 +314,12 @@ The only new table is `settings` in PostgreSQL, created by migration.
 
 ## Verification
 
-### List Namespaces
-
-```bash
-curl -H "Authorization: Bearer $ADMIN_KEY" \
-  http://localhost:8000/api/console/settings
-```
-
-### Get Namespace Settings
-
-```bash
-curl -H "Authorization: Bearer $ADMIN_KEY" \
-  http://localhost:8000/api/console/settings/rate_limits
-```
-
-### Update Settings
-
-```bash
-curl -X PATCH \
-  -H "Authorization: Bearer $ADMIN_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "settings": {"requests_per_minute": 1200},
-    "expected_updated_at": "2026-02-20T10:30:00Z"
-  }' \
-  http://localhost:8000/api/console/settings/rate_limits
-
-# Expected: 200 with updated values
-```
-
-### Reset to Defaults
-
-```bash
-curl -X POST \
-  -H "Authorization: Bearer $ADMIN_KEY" \
-  http://localhost:8000/api/console/settings/rate_limits/reset
-
-# Expected: 200 with default values, updated_at null
-```
-
-### Conflict Detection
-
-```bash
-# Two admins read at the same time
-# Admin A saves: 200 OK
-# Admin B saves with stale expected_updated_at: 409 Conflict
-```
-
-### Permission Check
-
-```bash
-# Non-admin key
-curl -H "Authorization: Bearer $REGULAR_KEY" \
-  http://localhost:8000/api/console/settings
-
-# Expected: 403 Forbidden
-```
-
-### Verify Audit Log
-
-```bash
-curl -H "Authorization: Bearer $ADMIN_KEY" \
-  "http://localhost:8000/api/console/audit?action=settings.updated"
-
-# Expected: Audit entries showing old/new values and actor
-```
+- `GET /api/console/settings` returns all namespaces with setting counts and override indicators
+- `PATCH /api/console/settings/rate_limits` with valid `expected_updated_at` returns 200 with updated values
+- `PATCH` with stale `expected_updated_at` returns 409 Conflict
+- `POST /api/console/settings/rate_limits/reset` reverts to defaults (`updated_at` becomes null)
+- Non-admin API key receives 403 on all settings endpoints
+- Audit log entries are created for each update and reset (queryable via `GET /api/console/audit?action=settings.updated`)
 
 ---
 
@@ -588,42 +343,6 @@ curl -H "Authorization: Bearer $ADMIN_KEY" \
 - [ ] System tab shows read-only infrastructure info
 - [ ] Sidebar includes Settings link
 - [ ] Tests pass
-
----
-
-## Implementation Summary
-
-### Backend Changes
-
-| File | Action | Description |
-|------|--------|-------------|
-| `dalston/db/models.py` | Modify | Add `SettingModel` |
-| `alembic/versions/xxxx_add_settings_table.py` | Create | Migration for `settings` table |
-| `dalston/gateway/services/settings.py` | Create | `SettingsService` with get/update/reset/cache |
-| `dalston/gateway/api/console.py` | Modify | Add settings CRUD endpoints |
-| `dalston/gateway/dependencies.py` | Modify | Add `get_settings_service` dependency |
-| `dalston/gateway/services/rate_limiter.py` | Modify | Read limits from `SettingsService` |
-
-### Frontend Changes
-
-| File | Action | Description |
-|------|--------|-------------|
-| `web/src/pages/Settings.tsx` | Create | Settings page with tabbed namespaces |
-| `web/src/components/SettingField.tsx` | Create | Typed input component for settings |
-| `web/src/components/SettingsNamespaceForm.tsx` | Create | Form wrapper with dirty tracking |
-| `web/src/components/SettingsResetDialog.tsx` | Create | Reset confirmation dialog |
-| `web/src/hooks/useSettings.ts` | Create | Data fetching and mutation hooks |
-| `web/src/components/Sidebar.tsx` | Modify | Add Settings nav item |
-| `web/src/App.tsx` | Modify | Add `/settings` route |
-| `web/src/api/client.ts` | Modify | Add settings API functions |
-| `web/src/api/types.ts` | Modify | Add settings type definitions |
-
-### Test Coverage
-
-| File | Action | Description |
-|------|--------|-------------|
-| `tests/unit/test_settings_service.py` | Create | Service unit tests |
-| `tests/integration/test_settings_api.py` | Create | API endpoint tests |
 
 ---
 
