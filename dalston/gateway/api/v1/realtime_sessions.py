@@ -288,6 +288,7 @@ async def delete_realtime_session(
     summary="Get session transcript",
     description="Download the transcript for a session (if stored).",
     responses={
+        409: {"description": "Endpoint not available in lite mode"},
         404: {"description": "Session or transcript not found"},
     },
 )
@@ -300,6 +301,18 @@ async def get_session_transcript(
 ):
     """Get transcript JSON for a session."""
     settings = get_settings()
+    if settings.runtime_mode == "lite":
+        raise HTTPException(
+            status_code=409,
+            detail=Err.structured(
+                "lite_mode_unsupported",
+                message=Err.DISTRIBUTED_MODE_REQUIRED.format(
+                    feature="Realtime transcript retrieval"
+                ),
+                feature="realtime_transcript_retrieval",
+            ),
+        )
+
     service = RealtimeSessionService(db, settings)
 
     session = await service.get_session_authorized(
@@ -374,6 +387,7 @@ def _normalize_realtime_transcript(transcript: dict) -> dict:
             },
         },
         400: {"description": "Unsupported format"},
+        409: {"description": "Endpoint not available in lite mode"},
         404: {"description": "Session or transcript not found"},
     },
 )
@@ -404,6 +418,18 @@ async def export_session_transcript(
     export_format = export_service.validate_format(format)
 
     settings = get_settings()
+    if settings.runtime_mode == "lite":
+        raise HTTPException(
+            status_code=409,
+            detail=Err.structured(
+                "lite_mode_unsupported",
+                message=Err.DISTRIBUTED_MODE_REQUIRED.format(
+                    feature="Realtime transcript export"
+                ),
+                feature="realtime_transcript_export",
+            ),
+        )
+
     service = RealtimeSessionService(db, settings)
 
     # Get session with authorization check
@@ -457,6 +483,7 @@ async def export_session_transcript(
     summary="Get session audio URL",
     description="Get a presigned URL to download the audio for a session (if stored).",
     responses={
+        409: {"description": "Endpoint not available in lite mode"},
         404: {"description": "Session or audio not found"},
     },
 )
@@ -469,6 +496,18 @@ async def get_session_audio(
 ):
     """Get presigned URL for session audio."""
     settings = get_settings()
+    if settings.runtime_mode == "lite":
+        raise HTTPException(
+            status_code=409,
+            detail=Err.structured(
+                "lite_mode_unsupported",
+                message=Err.DISTRIBUTED_MODE_REQUIRED.format(
+                    feature="Realtime audio download URLs"
+                ),
+                feature="realtime_audio_download_url",
+            ),
+        )
+
     service = RealtimeSessionService(db, settings)
 
     session = await service.get_session_authorized(

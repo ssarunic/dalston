@@ -129,7 +129,7 @@ async def get_task_artifacts(
             detail=Err.structured("no_artifacts"),
         )
 
-    # Fetch artifacts from S3
+    # Fetch artifacts from the configured artifact backend
     input_data = await storage.get_task_input(job_id, task_id)
     output_data = await storage.get_task_output(job_id, task_id)
 

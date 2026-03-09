@@ -1101,6 +1101,18 @@ async def get_job_audio(
     2. Job must be in a terminal state (completed, failed, cancelled)
     3. Audio must not have been purged by retention policy
     """
+    if settings.runtime_mode == "lite":
+        raise HTTPException(
+            status_code=409,
+            detail=Err.structured(
+                "lite_mode_unsupported",
+                message=Err.DISTRIBUTED_MODE_REQUIRED.format(
+                    feature="Audio download URLs"
+                ),
+                feature="job_audio_download_url",
+            ),
+        )
+
     job = await jobs_service.get_job_authorized(db, job_id, principal, security_manager)
 
     if job is None:
@@ -1206,6 +1218,18 @@ async def get_job_audio_redacted(
     Note: Uses transcript's pii_metadata redacted audio reference as source of truth,
     matching the UI's redacted_audio_available flag behavior.
     """
+    if settings.runtime_mode == "lite":
+        raise HTTPException(
+            status_code=409,
+            detail=Err.structured(
+                "lite_mode_unsupported",
+                message=Err.DISTRIBUTED_MODE_REQUIRED.format(
+                    feature="Redacted audio download URLs"
+                ),
+                feature="job_redacted_audio_download_url",
+            ),
+        )
+
     job = await jobs_service.get_job_authorized(db, job_id, principal, security_manager)
 
     if job is None:

@@ -3,25 +3,49 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Protocol
+
+from botocore.exceptions import ClientError
 
 from dalston.common.s3 import get_s3_client
 from dalston.config import Settings
 
 
 class ArtifactStore(Protocol):
+    async def uri_for_key(self, key: str) -> str: ...
+
     async def write_bytes(
         self, key: str, payload: bytes, content_type: str | None = None
     ) -> str: ...
 
     async def read_bytes(self, uri: str) -> bytes: ...
 
+    async def exists(self, uri: str) -> bool: ...
+
+    async def has_prefix(self, prefix: str) -> bool: ...
+
+    async def delete_prefix(self, prefix: str) -> None: ...
+
 
 class S3ArtifactStoreAdapter:
     def __init__(self, settings: Settings):
         self._settings = settings
         self._bucket = settings.s3_bucket
+
+    @staticmethod
+    def _parse_s3_uri(uri: str) -> tuple[str, str]:
+        if not uri.startswith("s3://"):
+            raise ValueError("Unsupported S3 artifact URI")
+        _, _, rest = uri.partition("s3://")
+        bucket, _, key = rest.partition("/")
+        if not bucket or not key:
+            raise ValueError("Malformed S3 artifact URI")
+        return bucket, key
+
+    async def uri_for_key(self, key: str) -> str:
+        return f"s3://{self._bucket}/{key}"
 
     async def write_bytes(
         self, key: str, payload: bytes, content_type: str | None = None
@@ -31,14 +55,52 @@ class S3ArtifactStoreAdapter:
             if content_type:
                 kwargs["ContentType"] = content_type
             await s3.put_object(**kwargs)
-        return f"s3://{self._bucket}/{key}"
+        return await self.uri_for_key(key)
 
     async def read_bytes(self, uri: str) -> bytes:
-        _, _, rest = uri.partition("s3://")
-        bucket, _, key = rest.partition("/")
+        bucket, key = self._parse_s3_uri(uri)
         async with get_s3_client(self._settings) as s3:
-            obj = await s3.get_object(Bucket=bucket, Key=key)
-            return await obj["Body"].read()
+            try:
+                obj = await s3.get_object(Bucket=bucket, Key=key)
+                return await obj["Body"].read()
+            except ClientError as exc:
+                if exc.response["Error"]["Code"] in ("404", "NoSuchKey"):
+                    raise FileNotFoundError(uri) from exc
+                raise
+
+    async def exists(self, uri: str) -> bool:
+        bucket, key = self._parse_s3_uri(uri)
+        async with get_s3_client(self._settings) as s3:
+            try:
+                await s3.head_object(Bucket=bucket, Key=key)
+                return True
+            except ClientError as exc:
+                if exc.response["Error"]["Code"] in ("404", "NoSuchKey"):
+                    return False
+                raise
+
+    async def has_prefix(self, prefix: str) -> bool:
+        async with get_s3_client(self._settings) as s3:
+            response = await s3.list_objects_v2(
+                Bucket=self._bucket,
+                Prefix=prefix,
+                MaxKeys=1,
+            )
+            return response.get("KeyCount", 0) > 0
+
+    async def delete_prefix(self, prefix: str) -> None:
+        async with get_s3_client(self._settings) as s3:
+            paginator = s3.get_paginator("list_objects_v2")
+            async for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
+                if "Contents" not in page:
+                    continue
+
+                objects = [{"Key": obj["Key"]} for obj in page["Contents"]]
+                if objects:
+                    await s3.delete_objects(
+                        Bucket=self._bucket,
+                        Delete={"Objects": objects},
+                    )
 
 
 class LocalFilesystemArtifactStoreAdapter:
@@ -66,16 +128,37 @@ class LocalFilesystemArtifactStoreAdapter:
             Path(uri.removeprefix("file://")), "Artifact URI"
         )
 
+    async def uri_for_key(self, key: str) -> str:
+        return f"file://{self._path_for_key(key)}"
+
     async def write_bytes(
         self, key: str, payload: bytes, content_type: str | None = None
     ) -> str:
         path = self._path_for_key(key)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(payload)
-        return f"file://{path}"
+        return await self.uri_for_key(key)
 
     async def read_bytes(self, uri: str) -> bytes:
         return self._path_for_uri(uri).read_bytes()
+
+    async def exists(self, uri: str) -> bool:
+        return self._path_for_uri(uri).exists()
+
+    async def has_prefix(self, prefix: str) -> bool:
+        path = self._path_for_key(prefix.rstrip("/"))
+        if not path.exists():
+            return False
+        if path.is_file():
+            return True
+        return any(path.iterdir())
+
+    async def delete_prefix(self, prefix: str) -> None:
+        path = self._path_for_key(prefix.rstrip("/"))
+        if path.is_file():
+            path.unlink(missing_ok=True)
+        elif path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
 
     async def write_json(self, key: str, payload: dict) -> str:
         return await self.write_bytes(

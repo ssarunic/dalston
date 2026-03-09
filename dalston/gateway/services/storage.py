@@ -1,4 +1,4 @@
-"""S3 storage service for audio files and transcripts."""
+"""Artifact storage service for audio files, task payloads, and transcripts."""
 
 import json
 import mimetypes
@@ -7,20 +7,16 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
-from botocore.exceptions import ClientError
 from fastapi import UploadFile
 
 from dalston.common.s3 import get_s3_client
 from dalston.common.timeouts import S3_PRESIGNED_URL_EXPIRY_SECONDS
 from dalston.config import Settings
-from dalston.gateway.services.artifact_store import (
-    LocalFilesystemArtifactStoreAdapter,
-    build_artifact_store,
-)
+from dalston.gateway.services.artifact_store import build_artifact_store
 
 
 class StorageService:
-    """Service for S3 storage operations."""
+    """Service for artifact storage operations."""
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -35,7 +31,7 @@ class StorageService:
         filename: str | None = None,
         content_type: str | None = None,
     ) -> str:
-        """Upload audio file to S3.
+        """Upload audio file to the configured artifact backend.
 
         Args:
             job_id: Job UUID for path construction
@@ -45,7 +41,7 @@ class StorageService:
             content_type: Explicit content type (used when file is None)
 
         Returns:
-            S3 URI: s3://{bucket}/jobs/{job_id}/audio/original.{ext}
+            Artifact URI (S3 in distributed mode, file URI in lite mode)
         """
         # Resolve filename
         resolved_filename = filename
@@ -65,7 +61,7 @@ class StorageService:
             resolved_content_type, _ = mimetypes.guess_type(resolved_filename)
         resolved_content_type = resolved_content_type or "application/octet-stream"
 
-        # Build S3 key
+        # Build canonical artifact key
         key = f"jobs/{job_id}/audio/original.{ext}"
 
         # Use provided content or read from file
@@ -83,7 +79,7 @@ class StorageService:
         )
 
     async def get_transcript(self, job_id: UUID) -> dict[str, Any] | None:
-        """Fetch transcript JSON from S3 if it exists.
+        """Fetch transcript JSON if it exists.
 
         Args:
             job_id: Job UUID
@@ -92,28 +88,15 @@ class StorageService:
             Parsed transcript dict or None if not found
         """
         key = f"jobs/{job_id}/transcript.json"
-        if self.settings.runtime_mode == "lite":
-            store = self.artifact_store
-            if not isinstance(store, LocalFilesystemArtifactStoreAdapter):
-                return None
-            try:
-                uri = f"file://{Path(self.settings.lite_artifacts_dir).resolve() / key}"
-                body = await store.read_bytes(uri)
-                return json.loads(body.decode("utf-8"))
-            except FileNotFoundError:
-                return None
-        async with get_s3_client(self.settings) as s3:
-            try:
-                response = await s3.get_object(Bucket=self.bucket, Key=key)
-                body = await response["Body"].read()
-                return json.loads(body.decode("utf-8"))
-            except ClientError as e:
-                if e.response["Error"]["Code"] == "NoSuchKey":
-                    return None
-                raise
+        uri = await self.artifact_store.uri_for_key(key)
+        try:
+            body = await self.artifact_store.read_bytes(uri)
+        except FileNotFoundError:
+            return None
+        return json.loads(body.decode("utf-8"))
 
     async def delete_job_artifacts(self, job_id: UUID) -> None:
-        """Delete all S3 artifacts for a job.
+        """Delete all artifacts for a job.
 
         Deletes: audio/*, tasks/*, transcript.json
 
@@ -121,21 +104,7 @@ class StorageService:
             job_id: Job UUID
         """
         prefix = f"jobs/{job_id}/"
-
-        async with get_s3_client(self.settings) as s3:
-            # List all objects with prefix
-            paginator = s3.get_paginator("list_objects_v2")
-            async for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
-                if "Contents" not in page:
-                    continue
-
-                # Delete objects
-                objects = [{"Key": obj["Key"]} for obj in page["Contents"]]
-                if objects:
-                    await s3.delete_objects(
-                        Bucket=self.bucket,
-                        Delete={"Objects": objects},
-                    )
+        await self.artifact_store.delete_prefix(prefix)
 
     async def delete_job_audio(self, job_id: UUID) -> None:
         """Delete audio files for a job.
@@ -146,40 +115,16 @@ class StorageService:
             job_id: Job UUID
         """
         prefix = f"jobs/{job_id}/audio/"
-
-        async with get_s3_client(self.settings) as s3:
-            paginator = s3.get_paginator("list_objects_v2")
-            async for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
-                if "Contents" not in page:
-                    continue
-
-                objects = [{"Key": obj["Key"]} for obj in page["Contents"]]
-                if objects:
-                    await s3.delete_objects(
-                        Bucket=self.bucket,
-                        Delete={"Objects": objects},
-                    )
+        await self.artifact_store.delete_prefix(prefix)
 
     async def delete_session_artifacts(self, session_id: UUID) -> None:
-        """Delete all S3 artifacts for a realtime session.
+        """Delete all artifacts for a realtime session.
 
         Args:
             session_id: Session UUID
         """
         prefix = f"sessions/{session_id}/"
-
-        async with get_s3_client(self.settings) as s3:
-            paginator = s3.get_paginator("list_objects_v2")
-            async for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
-                if "Contents" not in page:
-                    continue
-
-                objects = [{"Key": obj["Key"]} for obj in page["Contents"]]
-                if objects:
-                    await s3.delete_objects(
-                        Bucket=self.bucket,
-                        Delete={"Objects": objects},
-                    )
+        await self.artifact_store.delete_prefix(prefix)
 
     async def has_audio(self, job_id: UUID) -> bool:
         """Check if audio exists for a job.
@@ -191,14 +136,7 @@ class StorageService:
             True if audio files exist
         """
         prefix = f"jobs/{job_id}/audio/"
-
-        async with get_s3_client(self.settings) as s3:
-            response = await s3.list_objects_v2(
-                Bucket=self.bucket,
-                Prefix=prefix,
-                MaxKeys=1,
-            )
-            return response.get("KeyCount", 0) > 0
+        return await self.artifact_store.has_prefix(prefix)
 
     async def generate_presigned_url(
         self, key: str, expires_in: int = S3_PRESIGNED_URL_EXPIRY_SECONDS
@@ -318,7 +256,7 @@ class StorageService:
         return urlunsplit((scheme, netloc, "", "", ""))
 
     async def object_exists(self, key: str) -> bool:
-        """Check if a specific S3 object exists.
+        """Check if a specific object exists.
 
         Args:
             key: S3 object key
@@ -326,19 +264,13 @@ class StorageService:
         Returns:
             True if the object exists
         """
-        async with get_s3_client(self.settings) as s3:
-            try:
-                await s3.head_object(Bucket=self.bucket, Key=key)
-                return True
-            except ClientError as e:
-                if e.response["Error"]["Code"] in ("404", "NoSuchKey"):
-                    return False
-                raise
+        uri = await self.artifact_store.uri_for_key(key)
+        return await self.artifact_store.exists(uri)
 
     async def get_task_input(
         self, job_id: UUID, task_id: UUID
     ) -> dict[str, Any] | None:
-        """Fetch task input JSON from S3.
+        """Fetch task input JSON.
 
         Args:
             job_id: Job UUID
@@ -348,21 +280,17 @@ class StorageService:
             Parsed input dict or None if not found
         """
         key = f"jobs/{job_id}/tasks/{task_id}/input.json"
-
-        async with get_s3_client(self.settings) as s3:
-            try:
-                response = await s3.get_object(Bucket=self.bucket, Key=key)
-                body = await response["Body"].read()
-                return json.loads(body.decode("utf-8"))
-            except ClientError as e:
-                if e.response["Error"]["Code"] == "NoSuchKey":
-                    return None
-                raise
+        uri = await self.artifact_store.uri_for_key(key)
+        try:
+            body = await self.artifact_store.read_bytes(uri)
+        except FileNotFoundError:
+            return None
+        return json.loads(body.decode("utf-8"))
 
     async def get_task_output(
         self, job_id: UUID, task_id: UUID
     ) -> dict[str, Any] | None:
-        """Fetch task output JSON from S3.
+        """Fetch task output JSON.
 
         Args:
             job_id: Job UUID
@@ -372,13 +300,9 @@ class StorageService:
             Parsed output dict or None if not found
         """
         key = f"jobs/{job_id}/tasks/{task_id}/output.json"
-
-        async with get_s3_client(self.settings) as s3:
-            try:
-                response = await s3.get_object(Bucket=self.bucket, Key=key)
-                body = await response["Body"].read()
-                return json.loads(body.decode("utf-8"))
-            except ClientError as e:
-                if e.response["Error"]["Code"] == "NoSuchKey":
-                    return None
-                raise
+        uri = await self.artifact_store.uri_for_key(key)
+        try:
+            body = await self.artifact_store.read_bytes(uri)
+        except FileNotFoundError:
+            return None
+        return json.loads(body.decode("utf-8"))
