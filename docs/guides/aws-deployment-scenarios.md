@@ -14,13 +14,16 @@ The runtime-based engine architecture loads models dynamically from HuggingFace 
 | 2. Single GPU | g5.xlarge | 1x A10G 24GB | ~$100 | ~$35 | All batch + realtime + diarization |
 | 3. Dual-purpose GPU | g5.2xlarge | 1x A10G 24GB | ~$150 | ~$50 | Higher throughput, concurrent batch+RT |
 | 4. Multi-GPU | g5.12xlarge | 4x A10G 96GB | ~$500 | ~$170 | Full parallel pipeline + vllm-asr |
-| 5. Split infra | ECS + g5 | Varies | ~$200+ | Mixed | Auto-scaling engines |
+| 5. Split CPU/GPU | t3.medium + g5.xlarge | 1x A10G 24GB | ~$87 (spot) | GPU spot | Always-on API + GPU on demand |
+| 6. Auto-scaling | ECS + g5 | Varies | ~$200+ | Mixed | Auto-scaling engines |
 
 Spot instances save ~65% on GPU instances. See [Spot Instances](#spot-instances) below.
 
 ### Runtimes at a glance
 
 Runtimes are inference engines that load models dynamically. Each runtime is a Docker container that can serve multiple models from the same family.
+
+**Batch runtimes** (queue-based, file I/O):
 
 | Runtime | Stage | Languages | GPU required | Key models |
 |---------|-------|-----------|-------------|------------|
@@ -36,6 +39,16 @@ Runtimes are inference engines that load models dynamically. Each runtime is a D
 | **audio-redactor** | audio_redact | N/A | No | FFmpeg silence/beep replacement |
 | **audio-prepare** | prepare | N/A | No | FFmpeg format conversion |
 | **final-merger** | merge | N/A | No | Transcript assembly |
+
+**Realtime runtimes** (WebSocket streaming, low-latency):
+
+| Runtime | Languages | GPU required | Latency | Key detail |
+|---------|-----------|-------------|---------|------------|
+| **parakeet** (RNNT 0.6B) | EN | **Yes** | Sub-200ms | True streaming via cache-aware encoder |
+| **parakeet** (RNNT 1.1B) | EN | **Yes** | ~120ms | Higher accuracy, ~6 GB VRAM |
+| **parakeet-onnx** (TDT/CTC/RNNT) | EN | No | ~50ms warm | VAD-chunked (not true streaming), CPU-friendly |
+| **faster-whisper** | 99 langs | No (slow) | ~200ms | VAD-chunked, multilingual, distil-whisper for speed |
+| **voxtral** (Mini 4B) | 13 langs | **Yes** | <500ms | Native streaming LLM, ~16 GB VRAM |
 
 The engine selector automatically picks the best runtime for each pipeline stage based on job language, requested model, and what's currently running. See `dalston/orchestrator/engine_selector.py`.
 
@@ -75,8 +88,8 @@ The engine selector automatically picks the best runtime for each pipeline stage
 
 - **English**: nemo-onnx with parakeet-tdt-0.6b-v3 — native word timestamps, punctuation + capitalization, ~8x realtime on CPU (RTF 0.12). The ~1 GB container image starts in seconds vs ~12 GB for full NeMo.
 - **Multilingual**: faster-whisper with large-v3-turbo — 99 languages, ~3.3x realtime on CPU (RTF 0.3)
-- **No realtime streaming** (CPU too slow for streaming inference)
-- Batch-only, sequential processing
+- **Realtime (limited)**: parakeet-onnx realtime works on CPU (VAD-chunked, not true streaming) — usable for single-session English. faster-whisper realtime works on CPU for multilingual but is slow (RTF 0.5).
+- Batch-only for throughput; realtime is single-session and latency-sensitive on CPU
 - The engine selector auto-routes: English jobs → nemo-onnx, non-English → faster-whisper
 
 **nemo-onnx model choices** (all English, all have native word timestamps):
@@ -180,7 +193,18 @@ When faster-whisper actively processes a task, it loads the model (~8 GB peak). 
 
 - **English batch**: Parakeet TDT 1.1B via NeMo — best English accuracy (<7% avg WER), native word timestamps, RTF 0.0006 (~1667x realtime on GPU)
 - **Multilingual batch**: faster-whisper large-v3-turbo — 99 languages, RTF 0.03 (~33x realtime on GPU)
-- **English realtime**: Parakeet RNNT 0.6B streaming — sub-200ms latency
+- **Realtime streaming** — multiple options depending on needs:
+
+  | Realtime engine | Languages | VRAM | Latency | Notes |
+  |-----------------|-----------|------|---------|-------|
+  | parakeet RNNT 0.6B | EN | ~2 GB | <200ms | True streaming, lightweight |
+  | parakeet RNNT 1.1B | EN | ~6 GB | ~120ms | Higher accuracy |
+  | parakeet-onnx TDT 0.6B v3 | EN | ~2 GB | ~50ms | VAD-chunked, punctuation |
+  | faster-whisper | 99 langs | ~6 GB | ~200ms | Multilingual realtime |
+  | voxtral Mini 4B | 13 langs | ~16 GB | <500ms | LLM streaming (uses most of the VRAM budget) |
+
+  Default recommendation: **parakeet RNNT 0.6B** for English (true streaming, small VRAM footprint). Add **faster-whisper RT** if you need multilingual realtime.
+
 - **Diarization**: pyannote 4.0 (RTF 0.08) or nemo-msdd (RTF 0.05, no HF_TOKEN needed)
 - **Full pipeline**: prepare → transcribe → align → diarize → merge
 - **Auto-routing**: The engine selector picks the best runtime per job — English → nemo, non-English → faster-whisper. Parakeet's native word timestamps skip the align stage entirely.
@@ -201,7 +225,9 @@ The key constraint. Runtimes load models on demand and report loaded state via h
 
 All four fit simultaneously on 24 GB — comfortable. Adding phoneme-align GPU (~2 GB) or nemo-msdd (~4 GB) still fits.
 
-**If you only run English** (nemo for batch + RT parakeet + diarization): ~10-12 GB used, 12-14 GB free. Plenty of room to experiment with additional models.
+**If you only run English** (nemo for batch + RT parakeet-rnnt-0.6b + diarization): ~10-12 GB used, 12-14 GB free. Plenty of room to experiment with additional models.
+
+**Realtime VRAM trade-offs**: If you add faster-whisper RT for multilingual streaming (+6 GB) or voxtral Mini 4B for LLM streaming (+16 GB), the budget gets tighter. voxtral RT alone would consume ~16 GB, leaving only ~6 GB for batch — enough for one transcription runtime but not both nemo and faster-whisper simultaneously. For voxtral RT + full batch, Scenario 3 (g5.2xlarge) gives more CPU/RAM headroom, or Scenario 4 with dedicated GPUs.
 
 **Lighter alternative**: Use nemo-onnx instead of full NeMo — same Parakeet models, ~2 GB VRAM, ~12x smaller container image. Slightly slower on GPU but negligible for single-file workloads. Frees VRAM for other runtimes.
 
@@ -302,12 +328,16 @@ Everything else is identical to Scenario 2. Only worth it if you're hitting CPU/
 │                                                               │
 │  GPU 1 (24 GB): Realtime + diarization                       │
 │  ┌─────────────────────────┐  ┌────────────────────────────┐  │
-│  │ RT parakeet-rnnt-0.6b   │  │ nemo-msdd (diarize)        │  │
+│  │ RT parakeet-rnnt (EN)   │  │ RT faster-whisper (multi)  │  │
 │  └─────────────────────────┘  └────────────────────────────┘  │
+│  ┌─────────────────────────┐                                  │
+│  │ nemo-msdd (diarize)     │                                  │
+│  └─────────────────────────┘                                  │
 │                                                               │
-│  GPU 2 (24 GB): Audio LLM (vllm-asr)                        │
+│  GPU 2 (24 GB): Audio LLM — batch + realtime                │
 │  ┌──────────────────────────────────────────────────────────┐ │
-│  │ vllm-asr (Voxtral-Mini-3B or Qwen2-Audio-7B)           │ │
+│  │ vllm-asr batch (Voxtral-Mini-3B or Qwen2-Audio-7B)     │ │
+│  │ + voxtral RT (Mini 4B, 13-lang streaming)               │ │
 │  └──────────────────────────────────────────────────────────┘ │
 │                                                               │
 │  GPU 3 (24 GB): Alignment + PII + spare                      │
@@ -322,7 +352,7 @@ Everything else is identical to Scenario 2. Only worth it if you're hitting CPU/
 ### What this enables
 
 - **True parallel pipeline**: Transcribe job N while aligning job N-1 and diarizing job N-2
-- **Multiple realtime sessions**: Dedicated GPU for streaming, no batch contention
+- **Multiple concurrent realtime sessions**: Dedicated GPU for streaming (EN + multilingual), no batch contention. Parakeet RNNT for English, faster-whisper RT for multilingual, voxtral RT for 13-language LLM streaming.
 - **Audio LLMs via vllm-asr**: Highest-accuracy transcription for supported languages. Three model options:
 
   | Model | VRAM | Languages | RTF (GPU) | Notes |
@@ -385,7 +415,130 @@ This is serious money. Only justified for production workloads with throughput r
 
 ---
 
-## Scenario 5: Split Architecture (ECS/Fargate + GPU instances)
+## Scenario 5: Split CPU/GPU (Two EC2 Instances)
+
+**For**: Keep control plane + CPU engines running cheaply 24/7, only pay for GPU when processing.
+
+```
+┌─────────────────────────────────────────┐     ┌──────────────────────────────────────┐
+│  EC2: t3.medium (2 vCPU, 4 GB RAM)     │     │  EC2: g5.xlarge (4 vCPU, 16 GB RAM)  │
+│  "Control Plane" — runs 24/7            │     │  "GPU Worker" — runs on demand / spot │
+│                                         │     │                                      │
+│  ┌────────────┐  ┌──────────────┐       │     │  GPU (24 GB VRAM):                   │
+│  │  Gateway   │  │ Orchestrator │       │     │  ┌─────────────────────────────────┐  │
+│  └────────────┘  └──────────────┘       │     │  │ nemo (parakeet-tdt-1.1b)       │  │
+│  ┌────────────┐  ┌──────────────┐       │     │  └─────────────────────────────────┘  │
+│  │   Redis    │  │   Postgres   │       │     │  ┌─────────────────────────────────┐  │
+│  └────────────┘  └──────────────┘       │     │  │ faster-whisper (lg-v3-turbo)    │  │
+│                                         │     │  └─────────────────────────────────┘  │
+│  CPU engines:                           │     │  ┌─────────────────────────────────┐  │
+│  ┌──────────┐  ┌─────────┐              │     │  │ phoneme-align (GPU)             │  │
+│  │ prepare  │  │  merge  │              │     │  └─────────────────────────────────┘  │
+│  └──────────┘  └─────────┘              │     │  ┌─────────────────────────────────┐  │
+│  ┌─────────────┐  ┌───────────────────┐ │     │  │ pyannote-4.0 / nemo-msdd       │  │
+│  │ nemo-onnx   │  │ pii-presidio      │ │     │  └─────────────────────────────────┘  │
+│  │ (CPU batch) │  │ (CPU detection)   │ │     │  ┌─────────────────────────────────┐  │
+│  └─────────────┘  └───────────────────┘ │     │  │ RT parakeet-rnnt (streaming)    │  │
+│  ┌───────────────────┐                  │     │  └─────────────────────────────────┘  │
+│  │ audio-redactor    │                  │     │                                      │
+│  └───────────────────┘                  │     │  REDIS_URL=redis://<ctrl-plane>:6379 │
+│                                         │     │                                      │
+│  + Tailscale                            │     │  + Tailscale                          │
+└─────────────────────────────────────────┘     └──────────────────────────────────────┘
+         ▲                                                    ▲
+         └──────────── Same VPC / Tailscale network ──────────┘
+```
+
+### Why split
+
+The control plane (Gateway, Orchestrator, Redis, Postgres) and CPU engines (prepare, merge, PII, audio-redact) need to be always-on to accept API requests and manage jobs. But they barely need any compute. Meanwhile the GPU is expensive and only needed during actual transcription/diarization/alignment.
+
+**Align and diarize belong on the GPU instance.** Both are 15x faster on GPU:
+
+| Stage | GPU (T4/A10G) | CPU | Speedup |
+|-------|---------------|-----|---------|
+| phoneme-align | RTF 0.02 (~12s for 10-min file) | RTF 0.3 (~3 min) | 15x |
+| pyannote-4.0 | RTF 0.08 (~48s for 10-min file) | RTF 1.2 (~12 min) | 15x |
+| nemo-msdd | RTF 0.05 (~30s for 10-min file) | RTF 2.0 (~20 min) | 40x |
+
+Running diarize on CPU means a 1-hour audio file takes **72 minutes** to diarize. On the GPU that's already there, it takes **5 minutes**. Same story for alignment. Since you're paying for the GPU anyway, there's no cost benefit to running these stages on CPU — only a massive performance penalty.
+
+Splitting lets you:
+- **Run the control plane 24/7 on a ~$30/month t3.medium** — Gateway accepts uploads, Orchestrator queues tasks
+- **Start/stop the GPU instance on demand** — or use spot ($0.35/hr vs $1.01/hr)
+- **All model-heavy stages on GPU** — transcribe, align, diarize run where they're 15-40x faster
+- **CPU-side processing continues while GPU is off** — prepare, PII detection, audio-redact, merge, and nemo-onnx transcription (English, ~8x realtime) all run on the control plane
+- **Queue buffering** — if the GPU is off, tasks sit in Redis queues. Start the GPU instance, engines drain the backlog automatically
+
+### How it works
+
+All Dalston engines connect to Redis directly via `REDIS_URL`. Put Redis on the control plane, point GPU engines to it:
+
+```bash
+# On the control plane (t3.medium)
+docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
+  --env-file .env.aws --profile local-infra up -d \
+  gateway orchestrator \
+  stt-batch-prepare stt-batch-merge \
+  stt-batch-pii-detect-presidio \
+  stt-batch-audio-redact-audio \
+  stt-batch-transcribe-nemo-onnx
+
+# On the GPU instance (g5.xlarge)
+# .env.gpu points REDIS_URL and DATABASE_URL to the control plane
+REDIS_URL=redis://10.0.1.10:6379 \
+docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
+  --env-file .env.gpu --profile gpu up -d \
+  stt-batch-transcribe-nemo \
+  stt-batch-transcribe-faster-whisper \
+  stt-batch-align-phoneme \
+  stt-batch-diarize-nemo-msdd \
+  stt-rt-transcribe-parakeet-rnnt-0.6b
+```
+
+The GPU engines register themselves in Redis via heartbeat. The orchestrator sees them and routes tasks. When the GPU instance stops, heartbeats expire after 60s, stale tasks get reclaimed and re-queued.
+
+### Network setup
+
+Two options:
+
+1. **Same VPC, private subnet**: Both instances in the same VPC. Security group allows Redis port (6379) between them. Lowest latency (~0.1ms).
+
+2. **Tailscale mesh**: Both instances join the Tailscale network. GPU engines reach Redis at `redis://ctrl-plane:6379`. Works across AZs, regions, or even with a local dev machine as the GPU worker. Simpler than VPC peering.
+
+### Cost
+
+| Component | Monthly (GPU 8h/day) | Monthly (GPU spot 8h/day) | Monthly (GPU off) |
+|-----------|---------------------|--------------------------|-------------------|
+| t3.medium (24/7 control plane) | ~$30 | ~$30 | ~$30 |
+| g5.xlarge (GPU worker) | ~$165 | ~$57 | ~$6 (EBS only) |
+| **Total** | **~$195** | **~$87** | **~$36** |
+
+Compare to Scenario 2 (single g5.xlarge 24/7): ~$300/month. The split saves money because the control plane doesn't need GPU pricing, and the GPU instance can truly stop when idle.
+
+### When to use this vs Scenario 2
+
+| | Scenario 2 (single box) | Scenario 5 (split) |
+|---|---|---|
+| Simplicity | One machine, one compose | Two machines, two composes |
+| Always-on API | Pays GPU rate 24/7 | Pays CPU rate for API, GPU on demand |
+| Realtime | Always available | RT only when GPU is running |
+| Batch queueing | Immediate processing | Tasks queue until GPU starts |
+| Cost (8h/day workday) | ~$100 (spot ~$35) | ~$87 (spot) |
+| Cost (sporadic use) | ~$300 or stop entirely | ~$36 base + GPU hours |
+
+**Best for**: Workloads where you receive uploads throughout the day but only process in batches — the control plane accepts and queues, you start the GPU for processing runs. Also good when you want the API always available even without GPU.
+
+### Scaling up
+
+The split pattern extends naturally:
+- **Multiple GPU workers**: Launch 2-3 spot g5.xlarge instances, all pointing at the same Redis. Tasks distribute automatically via consumer groups. Drain the queue faster.
+- **Heterogeneous workers**: One g5.xlarge for transcription, one focused on align+diarize. Each engine type on the right hardware.
+- **Smaller GPU for align+diarize only**: If nemo-onnx handles transcription on CPU fast enough, the GPU worker only runs align + diarize engines. A smaller g4dn.xlarge (~$0.53/hr) is sufficient — align needs ~2 GB VRAM and diarize needs 2-4 GB.
+
+---
+
+## Scenario 6: Auto-Scaling Architecture (ECS/Fargate + GPU instances)
 
 **For**: Production with auto-scaling, cost optimization, team use.
 
@@ -443,19 +596,62 @@ Significant infrastructure complexity increase. Only worth it when you need mult
 
 ---
 
-## Recommendation: Start with Scenario 2
+## Recommendation
 
-For Parakeet for English + faster-whisper for other languages:
+The right scenario depends on whether you need realtime streaming, diarization, and for which languages.
 
-**`g5.xlarge`** is the right answer. Here's why:
+### Batch-only: Scenario 2 (`g5.xlarge`)
 
-1. **All runtimes fit in 24 GB VRAM** — nemo + faster-whisper + diarization + realtime with 8 GB headroom
+If you primarily do batch transcription with occasional realtime English streaming:
+
+**`g5.xlarge`** is the sweet spot. Here's why:
+
+1. **All batch runtimes + English RT fit in 24 GB VRAM** — nemo + faster-whisper + diarization + parakeet-rnnt-0.6b with 8 GB headroom
 2. **Engine selector auto-routing** — submit a job and the orchestrator picks the best downloaded model. English → nemo (parakeet-tdt-1.1b), non-English → faster-whisper. Or pin a specific model per request.
-3. **`dalston model pull`** downloads any compatible model from HuggingFace without rebuilding images
+3. **Model registry** — `curl -X POST .../models/{id}/pull` downloads any compatible model from HuggingFace without rebuilding images
 4. **~$100/month** at 8h/day usage (~$35 with spot)
 5. **Upgrade path is clear**: bump to g5.2xlarge (same Terraform, one variable) or add vllm-asr for audio LLMs on g5.12xlarge
 
-### Concrete config
+### Multilingual realtime: Scenario 2 still works
+
+If you need multilingual realtime streaming, add faster-whisper RT (~6 GB VRAM). Total VRAM for batch + multilingual RT: ~20 GB of 24 GB. Tight but it fits. The faster-whisper RT engine supports distil-whisper for low-latency and large-v3 for accuracy.
+
+### LLM-class realtime: Scenario 3 or 4
+
+If you want voxtral Mini 4B for 13-language LLM streaming (~16 GB VRAM), Scenario 2's VRAM budget gets too tight for batch + RT simultaneously. Options:
+- **Scenario 3** (g5.2xlarge): Same GPU, more CPU/RAM. voxtral RT fits alongside one batch runtime but not all.
+- **Scenario 4** (g5.12xlarge): Dedicated GPU per function. voxtral RT gets its own A10G. Overkill unless you also need parallel pipeline.
+
+### Diarization: GPU strongly recommended
+
+Diarization on CPU is painfully slow (10-20 min for a 10-min file). On GPU it takes seconds. If diarization is part of your standard pipeline:
+
+- **English**: Scenario 2 with `nemo + pyannote` — two stages, ~8 GB VRAM, fastest pipeline (no alignment needed)
+- **Multilingual**: Scenario 2 with `faster-whisper + phoneme-align + pyannote` — three stages, ~8 GB VRAM, alignment adds seconds on GPU
+- **Occasional diarization on CPU**: Scenario 1 works but expect 12-22 min per 10-min file. Acceptable for low volume.
+
+See [Diarization Pipeline](#diarization-pipeline) for full details.
+
+### Always-on API with GPU on demand: Scenario 5
+
+If your workload is sporadic — uploads come in throughout the day but processing can batch — the split CPU/GPU architecture is cost-effective:
+
+- Control plane on t3.medium (~$30/mo) keeps API, Redis, and CPU engines always available
+- GPU worker (g5.xlarge spot) starts when you have a queue to drain
+- All model-heavy stages (transcribe, align, diarize) run on GPU where they're 15-40x faster
+- Align and diarize tasks queue until the GPU starts — don't bother running them on CPU (too slow)
+- For light English-only work, nemo-onnx on the control plane handles transcription without GPU
+
+### English-only on a budget: Scenario 1 (`t3.xlarge`)
+
+If it's only English and batch latency is acceptable:
+- nemo-onnx with parakeet-tdt-0.6b-v3 transcribes at ~8x realtime on CPU with punctuation — a 10-minute file takes ~75 seconds
+- parakeet-onnx RT handles single-session English realtime on CPU (VAD-chunked)
+- ~$35/month. No GPU needed.
+
+This is surprisingly capable for low-volume English workloads.
+
+### Concrete config (Scenario 2)
 
 ```hcl
 # terraform.tfvars
@@ -492,6 +688,125 @@ curl http://localhost:8000/v1/models | jq '.models[] | {id, status, size_bytes}'
 ```
 
 The model registry tracks download state (`not_downloaded` → `downloading` → `ready`) and the engine selector only routes to models with status `ready`.
+
+---
+
+## Diarization Pipeline
+
+Adding speaker diarization (`speaker_detection: "diarize"`) changes the pipeline shape and resource requirements significantly depending on which transcription engine you use.
+
+### Pipeline shape depends on the transcriber
+
+The orchestrator's DAG builder (`dag.py`) automatically determines whether the alignment stage is needed:
+
+```
+Parakeet (nemo/nemo-onnx):  prepare → transcribe → diarize → merge
+                            (native word timestamps — alignment skipped)
+
+faster-whisper:             prepare → transcribe → align → diarize → merge
+                            (no native word timestamps — alignment required)
+
+vllm-asr:                   prepare → transcribe → align → diarize → merge
+                            (text only — alignment required)
+```
+
+Parakeet models produce native word-level timestamps, so the `phoneme-align` stage is skipped entirely. faster-whisper and vllm-asr don't produce word timestamps, so `phoneme-align` must run first to give the diarizer word-level timing for speaker assignment.
+
+### Stage resource requirements (from catalog)
+
+| Stage | Engine | VRAM (GPU) | RTF (GPU) | RTF (CPU) | RAM |
+|-------|--------|-----------|-----------|-----------|-----|
+| align | phoneme-align | 2 GB | 0.02 | 0.3 | 4 GB |
+| diarize | pyannote-4.0 | 2 GB | 0.08 | 1.2 | 6 GB |
+| diarize | nemo-msdd | 4 GB | 0.05 | 2.0 | 8 GB |
+
+### Impact on GPU VRAM budget
+
+**English with Parakeet + diarization** (best case — no alignment needed):
+
+| Component | VRAM |
+|-----------|------|
+| nemo (parakeet-tdt-1.1b) | ~6 GB |
+| pyannote-4.0 | ~2 GB |
+| **Total** | **~8 GB** |
+
+Fits easily on 24 GB. Leaves 14+ GB for realtime engines or other models.
+
+**Multilingual with faster-whisper + diarization** (alignment required):
+
+| Component | VRAM |
+|-----------|------|
+| faster-whisper (large-v3-turbo) | ~4 GB |
+| phoneme-align | ~2 GB |
+| pyannote-4.0 | ~2 GB |
+| **Total** | **~8 GB** |
+
+Also fits on 24 GB. The alignment stage adds ~2 GB VRAM and processing time (RTF 0.02 on GPU — negligible).
+
+**Combined English + multilingual + diarization** (both transcribers loaded):
+
+| Component | VRAM |
+|-----------|------|
+| nemo (parakeet-tdt-1.1b) | ~6 GB |
+| faster-whisper (large-v3-turbo) | ~4 GB |
+| phoneme-align | ~2 GB |
+| pyannote-4.0 | ~2 GB |
+| **Total** | **~14 GB** |
+
+Fits on 24 GB with ~8 GB headroom — room for a realtime engine too.
+
+### Impact on processing time
+
+For a 10-minute audio file:
+
+| Pipeline | GPU time | CPU time |
+|----------|----------|----------|
+| Parakeet → diarize (pyannote) | ~5s | ~14 min |
+| Parakeet → diarize (nemo-msdd) | ~3s | ~22 min |
+| faster-whisper → align → diarize (pyannote) | ~7s | ~18 min |
+| faster-whisper → align → diarize (nemo-msdd) | ~5s | ~26 min |
+
+On GPU, diarization adds seconds. On CPU, it adds **minutes** — pyannote runs at 1.2x realtime (10-min file takes 12 min to diarize), nemo-msdd at 2.0x realtime (20 min). This is the main reason **diarization pushes you toward GPU**.
+
+### How this changes the recommendation
+
+| Scenario | Diarization viability |
+|----------|----------------------|
+| **1 (CPU-only)** | Technically works but painfully slow. A 10-min file takes 12-22 min just for diarization. Only acceptable for occasional, non-urgent use. |
+| **2 (g5.xlarge)** | Sweet spot. Both diarizers fit in VRAM alongside transcription. Processing time is seconds, not minutes. |
+| **3 (g5.2xlarge)** | Same GPU — no VRAM benefit. Extra CPU helps if running align on CPU while GPU diarizes. |
+| **4 (g5.12xlarge)** | Diarization gets its own GPU. Transcribe + diarize run in parallel on different files. |
+| **5 (Split CPU/GPU)** | Run align + diarize on GPU worker (15x faster). If GPU is off, tasks queue in Redis until the GPU starts — don't bother with CPU diarize/align. |
+
+**Bottom line**: If you need diarization on every job, you need GPU (Scenario 2+). If diarization is occasional, CPU works but plan for 10-20 min per file.
+
+### Choosing a diarizer
+
+| | pyannote-4.0 | nemo-msdd |
+|---|---|---|
+| License | Gated (needs HF_TOKEN) | Open CC-BY-4.0 |
+| VRAM | 2 GB | 4 GB |
+| GPU speed | RTF 0.08 | RTF 0.05 (faster) |
+| CPU speed | RTF 1.2 (faster) | RTF 2.0 |
+| Overlap detection | Via VBx clustering | Built-in neural MSDD |
+| Speaker counting | Good | Good |
+
+**pyannote-4.0**: Smaller VRAM, faster on CPU, battle-tested. Requires `HF_TOKEN` for gated model access.
+
+**nemo-msdd**: Slightly faster on GPU, better overlap detection, fully open license. Uses more VRAM (4 GB vs 2 GB).
+
+For Scenario 5 (split), diarization runs on the GPU worker — so pick based on GPU performance and license. nemo-msdd's speed (RTF 0.05) and open CC-BY-4.0 license make it the simpler choice. pyannote is battle-tested but requires `HF_TOKEN` for gated model access.
+
+### Whisper + diarization: the alignment tax
+
+When using faster-whisper or vllm-asr with diarization, the `phoneme-align` stage is automatically inserted. This is the "alignment tax":
+
+- **On GPU**: Negligible. RTF 0.02 — a 10-min file aligns in ~12 seconds. 2 GB VRAM.
+- **On CPU**: Noticeable but tolerable. RTF 0.3 — a 10-min file takes ~3 minutes. The alignment model (wav2vec2, ~1.2 GB) fits in RAM.
+
+The alignment tax matters most on CPU. On GPU, it's invisible. This is another reason diarization workflows benefit from GPU — both the diarizer and the aligner run fast.
+
+**Parakeet avoids this entirely** — native word timestamps mean no alignment stage. For English diarization, `nemo + pyannote` is the most efficient pipeline: two stages instead of three, less VRAM, less processing time.
 
 ---
 
@@ -559,18 +874,28 @@ The `/data/models` volume needs enough space for downloaded weights. Sizes from 
 ## Upgrade Path
 
 ```
-Scenario 1 (CPU)          → Just works, slow
+Scenario 1 (CPU)          → EN batch + basic RT, ~$35/mo
     ↓ change instance_type
-Scenario 2 (g5.xlarge)    → Your target: Parakeet + faster-whisper + realtime
+Scenario 2 (g5.xlarge)    → Full batch + EN RT + diarization, ~$100/mo (~$35 spot)
     ↓ change instance_type
-Scenario 3 (g5.2xlarge)   → More CPU headroom, same GPU
+Scenario 3 (g5.2xlarge)   → + voxtral RT or heavy concurrent load, ~$150/mo
     ↓ new terraform module
-Scenario 4 (g5.12xlarge)  → Parallel pipeline, Voxtral, multi-RT
+Scenario 4 (g5.12xlarge)  → Parallel pipeline, audio LLMs, multi-lang RT, ~$500/mo
+    ↓ split into two instances
+Scenario 5 (CPU + GPU)    → Always-on API + GPU on demand, ~$87/mo (spot)
     ↓ architecture change
-Scenario 5 (ECS split)    → Auto-scaling, managed services, production
+Scenario 6 (ECS split)    → Auto-scaling, managed services, production
 ```
 
-Each step is additive. Scenarios 1→3 are literally a one-line Terraform variable change. Scenario 4 needs a compose override for GPU pinning. Scenario 5 is a new Terraform module.
+Each step is additive. Scenarios 1→3 are a one-line Terraform variable change. Scenario 4 needs a compose override for GPU pinning. Scenario 5 is a second EC2 instance. Scenario 6 is a new Terraform module with ECS.
+
+**Decision axes**:
+- Batch only, English? → Scenario 1 (CPU) is fine
+- Batch + English RT? → Scenario 2
+- Multilingual RT or voxtral RT? → Scenario 2-3
+- Parallel pipeline + audio LLMs? → Scenario 4
+- Always-on API, GPU only when processing? → Scenario 5
+- Multi-user, scale-to-zero? → Scenario 6
 
 ---
 
@@ -682,7 +1007,7 @@ Traces show the full path: API request → job creation → task scheduling → 
 
 ### Per-scenario recommendations
 
-#### Scenario 1-3: Built-in stack is sufficient
+#### Scenario 1-3, 5: Built-in stack is sufficient
 
 The `observability` compose profile runs Prometheus, Grafana, and Jaeger on the same instance alongside your engines. Resource overhead is minimal:
 
@@ -712,7 +1037,7 @@ services:
       - /data/prometheus:/prometheus  # Persist to data volume
 ```
 
-#### Scenario 4-5: Consider managed services
+#### Scenario 4, 6: Consider managed services
 
 For multi-GPU or split architecture, co-located monitoring has limitations:
 
@@ -913,7 +1238,7 @@ Spot termination kills active WebSocket connections. This is disruptive for real
 
 1. **Accept it**: If you use realtime infrequently, a 2-minute interruption every few days is tolerable. The client reconnects and starts a new session.
 
-2. **Hybrid spot/on-demand** (Scenario 5 territory): Run gateway + realtime workers on a small on-demand instance, batch engines on spot. Realtime sessions survive interruptions; batch tasks auto-retry.
+2. **Hybrid spot/on-demand** (Scenario 5): Run gateway + realtime workers on a small on-demand CPU instance, batch/GPU engines on spot. Realtime sessions survive interruptions; batch tasks auto-retry. This is exactly the split CPU/GPU pattern.
 
 For your use case (primarily batch with occasional realtime), approach 1 is fine.
 
