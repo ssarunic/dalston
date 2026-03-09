@@ -108,7 +108,7 @@ def _load_json_object(path: Path) -> dict[str, Any]:
 
 
 def _worker_execute(request_path: Path, output_path: Path) -> int:
-    from dalston.engine_sdk import local_runner
+    from dalston.engine_sdk.engine_loader import load_engine
 
     request_data = _load_json_object(request_path)
     executor = InProcExecutor(output_dir=Path(request_data["output_dir"]))
@@ -126,7 +126,7 @@ def _worker_execute(request_path: Path, output_path: Path) -> int:
                 slot: Path(locator)
                 for slot, locator in request_data.get("artifacts", {}).items()
             },
-            engine=local_runner._load_engine(request_data["engine_ref"]),
+            engine=load_engine(request_data["engine_ref"]),
             engine_ref=request_data["engine_ref"],
             metadata=request_data.get("metadata", {}),
         )
