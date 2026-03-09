@@ -1,421 +1,701 @@
-# Pipeline Simplification: Implementation Plan
+# Architecture Simplification: Full Implementation Plan
 
-## Goal
+## Scope
 
-Refactor the batch pipeline to use a shared `Transcript` model that stages
-progressively enrich, reducing the 1,141-line merge engine to a thin assembler
-(or eliminating it for mono pipelines).
+This plan covers ALL seven workstreams from the complexity review, not just
+pipeline/merge simplification. They are sequenced so each builds on the
+previous, and each step is the smallest possible change with tests.
 
 ## Guiding Principles
 
 - **One logical change per step.** Each step is a single commit.
-- **Tests before and after.** Add characterization tests first, then refactor.
-- **No behavior change until Phase 4.** Phases 1-3 are pure refactors.
-- **Run `make test` after every commit.** Red = stop and fix before proceeding.
-- **Backward-compatible API output.** Gateway consumers see identical JSON.
+- **Tests first.** Add characterization tests before refactoring.
+- **`make test` after every commit.** Red = stop and fix before proceeding.
+- **`make lint` after every commit.** No regressions.
+- **Backward-compatible API output.** Gateway consumers see identical JSON
+  throughout the entire refactor.
+- **No big bang.** Old and new code coexist during transition.
 
 ---
 
-## Phase 1: Harden the Safety Net
+## Workstream 1: Linear Pipeline + Merge Elimination
 
-*Add characterization tests that lock down current behavior so we can refactor
-with confidence. No production code changes.*
+*Highest-leverage change. Replace fork-join DAG with linear pipeline.
+Eliminate the 1,141-line merge engine. ~1,800 LOC deleted, ~200 LOC added.*
 
-### Step 1.1 — Unit tests for merge helper functions
+### Phase 1.0: Harden the Safety Net
 
-Add `tests/unit/test_merge_helpers.py` covering:
+*No production code changes. Lock down current behavior.*
 
-- `_find_speaker_by_overlap(seg_start, seg_end, turns)` — exact overlap
-  calculation with edge cases (no turns, full overlap, partial overlap,
-  multiple speakers, ties)
-- `_normalize_words(words)` — dict-to-Word conversion, empty list, missing
-  fields
-- `_apply_known_speaker_names(segments, speakers, names)` — relabeling by
-  first appearance, more names than speakers, fewer names than speakers
-- `_redact_mono_segment_text(...)` — PII entity time-overlap matching
-- `_redact_segment_text(...)` — per-channel PII matching
+#### Step 1.0.1 — Unit tests for merge helper functions
 
-These functions are currently private in `engine.py`. To test them without
-exposing internals, import them directly from the module (Python allows
-importing `_`-prefixed names). This is acceptable for characterization tests
-that will be replaced later.
+Add `tests/unit/test_merge_helpers.py` testing (import `_`-prefixed
+functions directly from the merge engine module):
 
-**Test:** `make test` passes. New tests pass.
+- `_find_speaker_by_overlap()` — no turns, full overlap, partial overlap,
+  multi-speaker, tie-breaking
+- `_normalize_words()` — dict→Word, empty list, missing fields
+- `_apply_known_speaker_names()` — relabel by first appearance, more/fewer
+  names than speakers
+- `_redact_mono_segment_text()` — PII time-overlap matching
+- `_redact_segment_text()` — per-channel PII matching
 
-### Step 1.2 — Contract test for merge engine output shape
+**Verify:** `make test` passes.
+
+#### Step 1.0.2 — Contract tests for merge engine output
 
 Add `tests/unit/test_merge_output_contract.py`:
 
-- Construct representative `EngineInput` fixtures for each pipeline variant:
+- Build `EngineInput` fixtures for each variant:
   1. Mono, no diarization, no PII
-  2. Mono, with diarization, no PII
-  3. Mono, with diarization, with PII
+  2. Mono + diarization, no PII
+  3. Mono + diarization + PII
   4. Per-channel (2ch), no PII
-  5. Per-channel (2ch), with PII + audio redaction
-- Call `FinalMergerEngine.process()` with each fixture
-- Assert output JSON structure matches expected schema:
-  - `job_id`, `version`, `metadata`, `text`, `segments`, `speakers`
-  - Each segment has `id`, `start`, `end`, `text`, `speaker` (when diarized)
-  - Metadata has `audio_duration`, `audio_channels`, `language`,
-    `pipeline_stages`
-- Snapshot the output JSON for regression comparison
+  5. Per-channel (2ch) + PII + audio redaction
+- Call `FinalMergerEngine.process()`, assert output JSON structure:
+  `job_id`, `version`, `metadata`, `text`, `segments[]`, `speakers[]`
+- Snapshot output for regression comparison
 
-This test proves we haven't broken the API contract at any point during
-the refactor.
+**Verify:** `make test` passes.
 
-**Test:** `make test` passes. Contract tests pass.
-
-### Step 1.3 — DAG structure snapshot tests
+#### Step 1.0.3 — DAG structure snapshot tests
 
 Add `tests/unit/test_dag_snapshots.py`:
 
-- For each pipeline variant (mono, mono+diarize, per-channel,
-  per-channel+PII), call `build_task_dag_for_test` and snapshot:
-  - Stage names in topological order
-  - Dependency edges
-  - Task count
-- These overlap with existing `test_dag.py` but are more explicit about the
-  full graph shape.
+- For each variant (mono, mono+diarize, mono+diarize+PII, per-channel,
+  per-channel+PII), snapshot: stage names, dependency edges, task count
+- More explicit than existing `test_dag.py` about full graph shape
 
-**Test:** `make test` passes.
+**Verify:** `make test` passes.
 
 ---
 
-## Phase 2: Extract Merge Helpers into a Shared Module
+### Phase 1.1: Extract Merge Helpers
 
-*Pure refactor. Move functions out of the 1,141-line merge engine into
-reusable modules. Merge engine delegates to them. No behavior change.*
+*Pure refactor. Move functions out of merge engine into reusable modules.
+No behavior change.*
 
-### Step 2.1 — Create `dalston/common/transcript_ops.py`
+#### Step 1.1.1 — Create `dalston/common/transcript_ops.py`
 
-Extract these functions from `engines/stt-merge/final-merger/engine.py`:
+Extract from `engines/stt-merge/final-merger/engine.py`:
 
-```
+```python
 find_speaker_by_overlap(seg_start, seg_end, turns) -> str | None
 normalize_words(words: list[dict]) -> list[Word]
-apply_known_speaker_names(segments, speakers, names) -> dict
+apply_known_speaker_names(segments, speakers, names) -> tuple[list, list]
 ```
 
-These are pure functions with no engine dependencies. Move them, update the
-merge engine to import from the new module, update the test imports.
+Update merge engine to import these. Update test imports.
 
-**Test:** `make test` passes. All merge tests still pass. Helper unit tests
-still pass with updated imports.
+**Verify:** `make test` passes.
 
-### Step 2.2 — Extract PII text redaction into `dalston/common/pii_ops.py`
+#### Step 1.1.2 — Create `dalston/common/pii_ops.py`
 
-Extract:
+Extract PII text redaction functions:
 
-```
+```python
 redact_segment_text(segment, pii_entities, ...) -> str | None
 redact_mono_segment_text(segment, pii_entities, ...) -> str | None
 ```
 
-Same pattern: pure functions, no engine deps.
+**Verify:** `make test` passes.
 
-**Test:** `make test` passes.
+#### Step 1.1.3 — Create `dalston/common/audio_ops.py`
 
-### Step 2.3 — Extract per-channel stereo assembly
+Extract FFmpeg stereo assembly:
 
-Extract into `dalston/common/audio_ops.py`:
-
-```
+```python
 assemble_stereo_audio(channel_paths: list[Path], output_path: Path) -> Path
 ```
 
-This wraps the FFmpeg subprocess call. Self-contained.
+**Verify:** `make test` passes.
 
-**Test:** `make test` passes.
+#### Step 1.1.4 — Verify merge engine is now a thin orchestrator
 
-### Step 2.4 — Verify merge engine is now a thin orchestrator
+Merge engine `process()` should read as a short sequence of calls to the
+extracted functions. No new tests — existing tests cover this. Verify
+line count dropped significantly.
 
-At this point, `engine.py` should be significantly shorter. The `process()`
-method should read as:
-
-1. Gather inputs
-2. Determine segment source (align > transcribe > raw)
-3. Build segments with `find_speaker_by_overlap`
-4. Apply PII redaction with `redact_segment_text`
-5. Apply speaker names with `apply_known_speaker_names`
-6. Assemble metadata
-7. Write artifact
-
-No new tests needed — existing tests cover this. Just verify line count
-dropped and readability improved.
-
-**Test:** `make test` passes.
+**Verify:** `make test` passes.
 
 ---
 
-## Phase 3: Define the Transcript Model
+### Phase 1.2: Shared Transcript Model
 
 *Additive change. New model alongside existing ones. Nothing uses it yet.*
 
-### Step 3.1 — Add `Transcript` model to `dalston/common/pipeline_types.py`
-
-Define a new model that represents a transcript at any stage of enrichment:
+#### Step 1.2.1 — Add `Transcript` model to `pipeline_types.py`
 
 ```python
 class Transcript(BaseModel):
-    """Progressively enriched transcript.
+    """Progressively enriched transcript. The single document that
+    flows through the pipeline, getting richer at each stage."""
 
-    Starts with segments from transcription, gains word timestamps
-    from alignment, speaker labels from diarization, PII annotations
-    from detection, and audio redaction references from redaction.
-    """
     job_id: str
     version: str = "1.0"
-
-    # Core content (from transcribe)
-    text: str
-    segments: list[MergedSegment]  # Reuse existing MergedSegment
+    text: str = ""
+    segments: list[MergedSegment] = []
+    speakers: list[Speaker] = []
     language: str | None = None
     language_confidence: float | None = None
-
-    # Speaker info (from diarize)
-    speakers: list[Speaker] = []
-
-    # Audio metadata (from prepare)
     metadata: TranscriptMetadata | None = None
-
-    # PII (from pii_detect + audio_redact)
     redacted_text: str | None = None
     pii_entities: list[PIIEntity] = []
     pii_metadata: PIIMetadata | None = None
-
-    # Enrichment tracking
-    enrichments: list[str] = []  # ["transcribed", "aligned", "diarized", ...]
+    enrichments: list[str] = []
 ```
 
-Add tests in `test_pipeline_types.py` for the new model.
+Add unit tests. Add equivalence test: `Transcript.model_dump()` matches
+`MergeOutput.model_dump()` when fully populated.
 
-Ensure `Transcript.model_dump()` produces JSON that is **structurally
-identical** to `MergeOutput.model_dump()` when fully populated. Add a test
-that proves this equivalence.
+**Verify:** `make test` passes.
 
-**Test:** `make test` passes. New model tests pass.
+#### Step 1.2.2 — Add `Transcript.from_merge_output()` bridge
 
-### Step 3.2 — Add `Transcript.from_merge_output()` factory method
+Class method to convert existing `MergeOutput` → `Transcript`.
+Test round-trip: `MergeOutput → Transcript → dict` == `MergeOutput → dict`.
 
-Add a class method that converts a `MergeOutput` into a `Transcript`. This
-provides the migration bridge: existing code produces `MergeOutput`, new code
-can convert it.
+**Verify:** `make test` passes.
 
-Add test proving round-trip: `MergeOutput → Transcript → dict` produces
-identical JSON to `MergeOutput → dict`.
+#### Step 1.2.3 — Add `Transcript.from_stage_outputs()` factory
 
-**Test:** `make test` passes.
+Builds a `Transcript` directly from stage outputs (same logic as merge
+engine: choose segment source, apply speaker overlap, apply PII). This is
+a parallel implementation — NOT yet used in production.
 
-### Step 3.3 — Add `Transcript.from_stage_outputs()` factory method
+Test: call with same fixtures as Step 1.0.2, assert output matches merge
+engine output.
 
-Add a class method that builds a `Transcript` directly from stage outputs:
-
-```python
-@classmethod
-def from_stage_outputs(
-    cls,
-    job_id: str,
-    prepare: PrepareOutput | None,
-    transcribe: TranscribeOutput | None,
-    align: AlignOutput | None,
-    diarize: DiarizeOutput | None,
-    pii_detect: PIIDetectOutput | None,
-    audio_redact: AudioRedactOutput | None,
-    config: dict | None = None,
-) -> Transcript:
-```
-
-This method contains the **same logic** currently in the merge engine:
-- Choose segment source (align > transcribe)
-- Apply speaker overlap matching
-- Apply PII redaction
-- Build metadata
-
-Critically: this does NOT replace the merge engine yet. It's a parallel
-implementation we can test against merge output for equivalence.
-
-Add test: call `from_stage_outputs()` with the same inputs as the merge
-engine contract tests from Step 1.2, assert output matches.
-
-**Test:** `make test` passes. Equivalence tests pass.
+**Verify:** `make test` passes. Equivalence tests pass.
 
 ---
 
-## Phase 4: Migrate Merge Engine to Use Transcript
+### Phase 1.3: Migrate Merge Engine to Transcript
 
-*First behavior-adjacent change. Merge engine delegates to Transcript model.*
+*Merge engine delegates to Transcript model. API output unchanged.*
 
-### Step 4.1 — Merge engine uses `Transcript.from_stage_outputs()` for mono
+#### Step 1.3.1 — Mono path uses `Transcript.from_stage_outputs()`
 
-Update `FinalMergerEngine.process()` for the **mono (non-per-channel) path
-only**:
+Replace inline logic in `process()` with call to factory.
 
-```python
-# Before: 200+ lines of inline logic
-# After:
-transcript = Transcript.from_stage_outputs(
-    job_id=..., prepare=..., transcribe=..., align=...,
-    diarize=..., pii_detect=..., audio_redact=...,
-    config=input.config,
-)
-```
+**Verify:** `make test` passes. Contract tests produce identical output.
 
-Convert `Transcript` to `MergeOutput` for the return value (API contract
-unchanged).
+#### Step 1.3.2 — Per-channel path uses Transcript
 
-**Test:** `make test` passes. Contract tests from Step 1.2 still produce
-identical output.
+Build per-channel Transcript objects, interleave, combine speakers,
+handle stereo audio assembly.
 
-### Step 4.2 — Merge engine uses `Transcript` for per-channel path
+**Verify:** `make test` passes.
 
-Same approach for `_merge_per_channel()`. This is more complex because of
-multi-channel segment interleaving and stereo audio assembly.
+#### Step 1.3.3 — Return `Transcript` instead of `MergeOutput`
 
-Update per-channel logic to:
-1. Build per-channel `Transcript` objects
-2. Merge them (interleave by time, combine speakers)
-3. Handle stereo audio assembly (still uses `audio_ops.assemble_stereo_audio`)
+Transparent to gateway (identical JSON proven by equivalence tests).
 
-**Test:** `make test` passes. Per-channel contract tests produce identical
-output.
-
-### Step 4.3 — Merge engine returns `Transcript` directly
-
-Change `EngineOutput.data` from `MergeOutput` to `Transcript`.
-
-Since `Transcript` and `MergeOutput` produce identical JSON (proven by Step
-3.2 tests), this is transparent to the gateway.
-
-Update the merge output contract tests to assert on `Transcript` type.
-
-**Test:** `make test` passes. Export tests pass. Gateway integration tests
-pass.
+**Verify:** `make test` passes. Export tests pass.
 
 ---
 
-## Phase 5: Make Merge Optional for Mono Pipelines
+### Phase 1.4: Linear Pipeline (Eliminate Merge for Mono)
 
-*Architectural change. For simple mono pipelines, the orchestrator can skip
-merge entirely and have the last stage write the transcript artifact.*
+*Architectural change to DAG structure.*
 
-### Step 5.1 — Add transcript artifact writing to `Transcript` model
+#### Step 1.4.1 — Diarize engine enriches Transcript
 
-Add a method to `Transcript` that serializes to the canonical `transcript.json`
-format expected by the gateway:
+Update diarize engine to:
+1. Run pyannote on audio → get speaker turns (as today)
+2. Read `previous_outputs["transcribe"]` to get transcript segments
+3. Apply `find_speaker_by_overlap()` to assign speakers to segments
+4. Apply `apply_known_speaker_names()` if configured
+5. Output enriched `Transcript` (with `segments[].speaker` populated)
+
+The diarize engine gains ~40 LOC of speaker assignment logic (moved from
+merge). It still outputs `DiarizeOutput` in parallel for backward compat,
+but ALSO writes the enriched `Transcript`.
+
+**Verify:** `make test` passes. Diarize + speaker assignment tested.
+
+#### Step 1.4.2 — Transcribe engine outputs Transcript
+
+Update transcribe engines to output a `Transcript` object (segments,
+text, language) in addition to their current `TranscribeOutput`.
+
+The `Transcript` written by transcribe is the initial document that
+flows through the pipeline.
+
+**Verify:** `make test` passes.
+
+#### Step 1.4.3 — Orchestrator assembles transcript when no merge task
+
+In `handlers.py`, when the last task completes and there's no merge task
+in the DAG:
 
 ```python
-def to_artifact_json(self) -> bytes:
-    return self.model_dump_json(indent=2).encode()
+async def _assemble_transcript(job_id, tasks, settings):
+    # Read the last stage's output — it IS the Transcript
+    last_task = find_last_completed_task(tasks)
+    transcript = await get_task_output(job_id, last_task.id, settings)
+    await store_transcript(job_id, transcript, settings)
 ```
 
-**Test:** Output matches what merge engine currently writes.
+Integration test: mono DAG (no merge) produces identical transcript.
 
-### Step 5.2 — Orchestrator: build Transcript from stage outputs when merge is skipped
+**Verify:** `make test` passes.
 
-In `dalston/orchestrator/handlers.py`, add logic for when the DAG has no
-merge task:
-
-```python
-async def _assemble_transcript(job_id, completed_tasks, settings):
-    """Build and store transcript directly from stage outputs."""
-    outputs = await _gather_all_outputs(job_id, completed_tasks, settings)
-    transcript = Transcript.from_stage_outputs(job_id=str(job_id), **outputs)
-    await store_transcript_artifact(job_id, transcript, settings)
-```
-
-This runs after the last task completes (when there's no merge task).
-
-**Test:** Integration test with a mono DAG (no merge task) produces
-identical transcript to one that goes through merge.
-
-### Step 5.3 — DAG builder: skip merge for mono pipelines
+#### Step 1.4.4 — DAG builder: omit merge for mono pipelines
 
 Update `build_task_dag` in `dag.py`:
+- When `speaker_detection != per_channel`: omit merge task
+- Pipeline becomes: `prepare → transcribe → [diarize]`
+- Each stage writes `Transcript` forward; last stage's output is final
 
-- When `speaker_detection != per_channel` AND `redact_pii_audio` is false:
-  omit the merge task from the DAG
-- The orchestrator's job-completion handler assembles the transcript instead
+Update DAG tests for new pipeline shapes.
 
-Update DAG tests to reflect new pipeline shapes. Existing snapshot tests
-from Step 1.3 will need updating — this is expected since the DAG shape
-changed.
+**Verify:** `make test` passes.
 
-**Test:** `make test` passes. Mono pipeline produces identical output.
-Per-channel pipeline still uses merge engine.
+#### Step 1.4.5 — Remove mono logic from merge engine
 
-### Step 5.4 — Simplify merge engine to per-channel + audio assembly only
+Merge engine now only handles per-channel. Remove mono path.
+Optionally rename to `ChannelMergerEngine`.
 
-Now that mono pipelines don't need merge:
-
-- Remove mono path from `FinalMergerEngine.process()`
-- Merge engine only handles per-channel segment interleaving and stereo
-  audio assembly
-- Rename to `ChannelMergerEngine` (optional, cosmetic)
-
-**Test:** `make test` passes. Per-channel pipeline still works.
+**Verify:** `make test` passes.
 
 ---
 
-## Phase 6: Clean Up
+### Phase 1.5: Per-Channel as Pre-Processing Split
 
-### Step 6.1 — Remove `MergeOutput` model
+*Replace per-channel DAG variant with parent-child jobs. ~1,200 LOC deleted.*
 
-If all consumers now use `Transcript`:
-- Remove `MergeOutput` from `pipeline_types.py`
-- Remove `from_merge_output()` bridge method from `Transcript`
-- Update any remaining references
+#### Step 1.5.1 — Add `split_channels()` utility
 
-**Test:** `make test` passes. `make lint` passes.
+Add to `dalston/common/audio_ops.py`:
 
-### Step 6.2 — Update `MergeInput` for per-channel only
+```python
+def split_channels(input_path: Path, output_dir: Path) -> list[Path]:
+    """Split stereo WAV into N mono WAVs using FFmpeg."""
+```
 
-Rename `MergeInput` → `ChannelMergeInput` if merge was renamed. Remove
-fields that only applied to mono merging (e.g., `merge_strategy`).
+~20 LOC. Unit test with a test WAV file.
 
-**Test:** `make test` passes.
+**Verify:** `make test` passes.
 
-### Step 6.3 — Update documentation
+#### Step 1.5.2 — Add parent-child job relationship
 
-- Update `CLAUDE.md` pipeline stage list
-- Update `docs/` architecture docs
-- Update API docs if transcript schema changed
+In gateway/orchestrator, when `speaker_detection=per_channel`:
+1. Gateway splits stereo file into N mono files
+2. Submits N child jobs (each running normal mono pipeline)
+3. Parent job tracks children
+4. Gateway presents parent job as single status endpoint
 
-**Test:** Review only, no code tests needed.
+Add DB fields: `parent_job_id`, `child_job_ids` on job model.
+
+**Verify:** `make test` passes.
+
+#### Step 1.5.3 — Add `stitch_per_channel_results()` post-processor
+
+When all child jobs complete:
+1. Read each child's `Transcript`
+2. Interleave segments by timestamp
+3. Label speakers by channel index
+4. Optionally reassemble stereo redacted audio
+
+~80 LOC. Test against current per-channel merge output.
+
+**Verify:** `make test` passes.
+
+#### Step 1.5.4 — Remove per-channel DAG code
+
+Delete:
+- `_build_per_channel_dag_with_engines()` (~210 LOC)
+- Per-channel branches in dag builder (~15 LOC)
+- Per-channel merge logic in merge engine (~670 LOC)
+- `_ch{N}` suffix parsing in handlers.py (~30 LOC)
+- Per-channel PII logic in merger (~100 LOC)
+
+Update/remove per-channel tests.
+
+**Verify:** `make test` passes.
+
+#### Step 1.5.5 — Delete merge engine entirely
+
+With mono handled by linear pipeline and per-channel handled by
+parent-child jobs + stitcher, the merge engine has no remaining purpose.
+
+Delete `engines/stt-merge/final-merger/` directory and Docker service.
+
+**Verify:** `make test` passes.
 
 ---
+
+### Phase 1.6: Clean Up
+
+#### Step 1.6.1 — Remove `MergeOutput`, `MergeInput` from pipeline_types
+
+Replace all references with `Transcript`.
+
+**Verify:** `make test && make lint` passes.
+
+#### Step 1.6.2 — Simplify `_gather_previous_outputs`
+
+With a linear pipeline, this becomes "read the previous stage's output"
+instead of querying a dependency graph. Simplify accordingly.
+
+**Verify:** `make test` passes.
+
+#### Step 1.6.3 — Drop `task_dependencies` junction table
+
+DB migration to remove the now-unused table. Remove
+`TaskModel.dependency_links` relationship.
+
+**Verify:** `make test` passes.
+
+---
+
+## Workstream 2: Unify Engine SDK
+
+*Single base class with optional streaming. ~3,000-4,000 LOC duplication
+eliminated.*
+
+### Phase 2.0: Characterization Tests
+
+#### Step 2.0.1 — Contract tests for batch Engine base class
+
+Test the current `Engine` base class contract: `__init__`, `process()`,
+health check, model loading, heartbeat registration.
+
+#### Step 2.0.2 — Contract tests for RealtimeEngine base class
+
+Test the current `RealtimeEngine` contract: `__init__`, `process_chunk()`,
+session lifecycle, WebSocket handling.
+
+**Verify:** `make test` passes.
+
+---
+
+### Phase 2.1: Unified Engine Interface
+
+#### Step 2.1.1 — Define unified `Engine` ABC
+
+```python
+class Engine(ABC):
+    @abstractmethod
+    def load_model(self, model_id: str) -> None: ...
+
+    @abstractmethod
+    def process_file(self, audio_path: Path, config: dict) -> Transcript: ...
+
+    def process_chunk(self, audio: np.ndarray, config: dict) -> ChunkResult:
+        raise NotImplementedError("Streaming not supported")
+
+    def supports_streaming(self) -> bool:
+        return False
+```
+
+New file `dalston/engine_sdk/unified.py`. Nothing uses it yet.
+
+**Verify:** `make test` passes.
+
+#### Step 2.1.2 — Unified `EngineRunner` with dual I/O
+
+Runner that checks `supports_streaming()`:
+- Always: start Redis queue consumer (batch)
+- If streaming: also start WebSocket server (realtime)
+
+New file `dalston/engine_sdk/unified_runner.py`.
+
+**Verify:** `make test` passes.
+
+#### Step 2.1.3 — Migrate faster-whisper batch engine to unified ABC
+
+Update `engines/stt-transcribe/faster-whisper/engine.py` to extend unified
+`Engine`. Keep old import paths working via re-export.
+
+**Verify:** `make test` passes. Batch transcription produces identical output.
+
+#### Step 2.1.4 — Migrate faster-whisper RT engine to unified ABC
+
+Merge `engines/stt-rt/faster-whisper/engine.py` into the batch engine by
+implementing `process_chunk()` and `supports_streaming() → True`.
+
+This eliminates ~335 LOC of the duplicate RT implementation.
+
+**Verify:** `make test` passes. RT transcription works.
+
+#### Step 2.1.5 — Migrate remaining batch engines
+
+One commit per engine (prepare, diarize, pii-detect, audio-redact).
+These are batch-only so they only implement `process_file()`.
+
+**Verify:** `make test` after each.
+
+#### Step 2.1.6 — Migrate remaining RT engines
+
+One commit per RT runtime (nemo, nemo-onnx, hf-asr, vllm-asr).
+Merge into corresponding batch engine where one exists.
+
+**Verify:** `make test` after each.
+
+#### Step 2.1.7 — Remove old SDK base classes
+
+Delete `dalston/engine_sdk/engine.py` (old batch Engine) and
+`dalston/realtime_sdk/engine.py` (old RealtimeEngine) once all engines
+are migrated.
+
+**Verify:** `make test && make lint` passes.
+
+---
+
+## Workstream 3: Declarative Engine.yaml
+
+*Engines declare their inputs/outputs. Pipeline auto-wires.*
+
+### Phase 3.1: Schema Extension
+
+#### Step 3.1.1 — Extend engine.yaml with input/output declarations
+
+Add optional fields to existing engine.yaml schema:
+
+```yaml
+stage:
+  name: transcribe
+  inputs:
+    - kind: audio
+      role: prepared
+  outputs:
+    - kind: transcript
+      role: enriched
+  subsumes: [align]  # native word timestamps
+```
+
+Existing engines continue working — new fields are optional.
+
+**Verify:** `make test` passes.
+
+#### Step 3.1.2 — Add engine.yaml declarations to each engine
+
+Update each engine's `engine.yaml` with input/output declarations.
+One commit per engine or batch if trivial.
+
+**Verify:** `make test` passes.
+
+---
+
+### Phase 3.2: Generic Pipeline Builder
+
+#### Step 3.2.1 — New pipeline builder using engine declarations
+
+Replace the hardcoded `build_task_dag` with a generic builder:
+
+```python
+def build_pipeline(job_params, available_engines):
+    requested_outputs = derive_requested_outputs(job_params)
+    stages = resolve_stage_sequence(requested_outputs, available_engines)
+    return [make_task(stage) for stage in stages]
+```
+
+Run in parallel with old builder, assert identical output.
+
+**Verify:** `make test` passes.
+
+#### Step 3.2.2 — Switch to new builder, delete old dag.py
+
+**Verify:** `make test` passes.
+
+---
+
+## Workstream 4: Unify Registry
+
+*Single async EngineRegistry replacing BatchEngineRegistry + WorkerRegistry.*
+
+#### Step 4.1 — Define unified `EngineRegistry`
+
+Single async class. Stores capabilities including `supports_streaming`.
+New file, nothing uses it yet.
+
+**Verify:** `make test` passes.
+
+#### Step 4.2 — Engines register via unified registry
+
+Update unified `EngineRunner` to use new registry.
+Run old + new registries in parallel during transition.
+
+**Verify:** `make test` passes.
+
+#### Step 4.3 — Orchestrator uses unified registry
+
+Switch orchestrator to query unified registry.
+
+**Verify:** `make test` passes.
+
+#### Step 4.4 — Session router uses unified registry
+
+Switch session router to query unified registry for streaming-capable
+engines.
+
+**Verify:** `make test` passes.
+
+#### Step 4.5 — Remove old registries
+
+Delete `BatchEngineRegistry` and `WorkerRegistry`.
+
+**Verify:** `make test && make lint` passes.
+
+---
+
+## Workstream 5: Collapse Session Router into Orchestrator
+
+*Unified engine discovery and allocation. ~1,300 LOC eliminated.*
+
+#### Step 5.1 — Add session allocation to orchestrator
+
+Move `acquire_worker()` / `release_worker()` logic into orchestrator's
+registry. ~100 LOC.
+
+**Verify:** `make test` passes.
+
+#### Step 5.2 — Gateway calls orchestrator for RT sessions
+
+Update gateway's WebSocket handlers to request RT sessions from
+orchestrator instead of session router.
+
+**Verify:** `make test` passes. RT sessions work.
+
+#### Step 5.3 — Delete session router
+
+Remove `dalston/session_router/` (~1,300 LOC).
+Remove Docker service.
+
+**Verify:** `make test && make lint` passes.
+
+---
+
+## Workstream 6: Extract WebSocket Proxy Core
+
+*Reduce 3,860 LOC of WS handlers to ~300 LOC core + ~200 LOC per adapter.*
+
+#### Step 6.1 — Extract `RealtimeProxy` core
+
+Common logic: worker allocation, audio forwarding, transcript collection,
+session lifecycle. ~300 LOC.
+
+**Verify:** `make test` passes.
+
+#### Step 6.2 — Dalston native WS adapter
+
+Refactor `realtime.py` to thin adapter over `RealtimeProxy`.
+~200 LOC (down from 1,412).
+
+**Verify:** `make test` passes. Native WS protocol works.
+
+#### Step 6.3 — OpenAI compat WS adapter
+
+Refactor `openai_realtime.py` to thin adapter.
+~200 LOC (down from 1,354).
+
+**Verify:** `make test` passes.
+
+#### Step 6.4 — ElevenLabs compat adapter
+
+Refactor `speech_to_text.py` to thin adapter.
+~200 LOC (down from 1,094).
+
+**Verify:** `make test` passes.
+
+---
+
+## Workstream 7: New Stages (Unlocked by Previous Work)
+
+*After declarative engine.yaml, adding new stages is trivial.*
+
+Each new stage requires ONLY:
+1. Write `engine.py` + `engine.yaml` declaring inputs/outputs
+2. Write Dockerfile
+3. Done — no orchestrator/DAG/selector changes
+
+Future stages (noise removal, VAD, emotion, non-verbal events, LLM
+cleanup) follow this pattern. No plan detail needed — the framework
+handles them automatically.
+
+---
+
+## Execution Order Summary
+
+```
+Workstream 1: Linear Pipeline + Merge Elimination
+  Phase 1.0: Safety net tests (3 steps)
+  Phase 1.1: Extract merge helpers (4 steps)
+  Phase 1.2: Transcript model (3 steps)
+  Phase 1.3: Migrate merge engine (3 steps)
+  Phase 1.4: Linear pipeline (5 steps)
+  Phase 1.5: Per-channel as pre-processing (5 steps)
+  Phase 1.6: Clean up (3 steps)
+
+Workstream 2: Unify Engine SDK
+  Phase 2.0: Characterization tests (2 steps)
+  Phase 2.1: Unified interface + migration (7 steps)
+
+Workstream 3: Declarative Engine.yaml
+  Phase 3.1: Schema extension (2 steps)
+  Phase 3.2: Generic pipeline builder (2 steps)
+
+Workstream 4: Unify Registry (5 steps)
+
+Workstream 5: Collapse Session Router (3 steps)
+
+Workstream 6: WebSocket Proxy Core (4 steps)
+
+Workstream 7: New Stages (unlocked, no fixed steps)
+```
+
+## Dependencies Between Workstreams
+
+```
+WS1 (Linear Pipeline) ──────┐
+                              ├──→ WS3 (Declarative engine.yaml) ──→ WS7 (New Stages)
+WS2 (Unify Engine SDK) ──────┘
+                              │
+                              ├──→ WS4 (Unify Registry)
+                              │
+                              └──→ WS5 (Collapse Session Router)
+
+WS6 (WebSocket Proxy) is independent — can run in parallel with anything
+```
+
+- **WS1 and WS2 can run in parallel** (different code areas)
+- **WS3 depends on WS1 + WS2** (needs linear pipeline + unified engine)
+- **WS4 depends on WS2** (needs unified SDK for single registration)
+- **WS5 depends on WS4** (needs unified registry)
+- **WS6 is independent** — pure gateway refactor, no pipeline/engine deps
+- **WS7 depends on WS3** (needs declarative engine.yaml)
 
 ## Risk Register
 
-| Risk | Mitigation |
-|------|-----------|
-| Transcript ≠ MergeOutput JSON shape | Step 3.2 equivalence test catches this before any migration |
-| Per-channel stereo assembly breaks | Step 1.2 contract test with audio fixture catches this |
-| Gateway expects MergeOutput-specific fields | Step 1.2 contract test covers gateway's `get_transcript()` path |
-| Export formats break (SRT/VTT/TXT) | Existing `test_export.py` catches this — run after every step |
-| DAG change breaks orchestrator job completion | Step 5.2 integration test covers the new completion path |
-| Engine SDK `get_merge_output()` helper breaks | Add deprecation, keep working via `get_raw_output("merge")` fallback |
+| Risk | Impact | Mitigation |
+|------|--------|-----------|
+| Transcript ≠ MergeOutput JSON | API break | Equivalence test (Step 1.2.2) catches before migration |
+| Per-channel parent-child jobs add latency | UX | Benchmark; FFmpeg split is ~10ms, job overhead is the concern |
+| Unified engine breaks RT latency | UX | Benchmark `process_chunk()` before/after |
+| Declarative pipeline builder misses edge case | Wrong DAG | Run old + new builders in parallel (Step 3.2.1) |
+| Session router collapse breaks RT allocation | Outage | Feature flag, gradual rollout |
+| Export formats break (SRT/VTT/TXT) | API break | Existing test_export.py runs after every step |
 
-## Files Modified (by phase)
+## Estimated Total
 
-| Phase | Files | Type |
-|-------|-------|------|
-| 1 | `tests/unit/test_merge_helpers.py` (new) | Test |
-| 1 | `tests/unit/test_merge_output_contract.py` (new) | Test |
-| 1 | `tests/unit/test_dag_snapshots.py` (new) | Test |
-| 2 | `dalston/common/transcript_ops.py` (new) | Production |
-| 2 | `dalston/common/pii_ops.py` (new) | Production |
-| 2 | `dalston/common/audio_ops.py` (new) | Production |
-| 2 | `engines/stt-merge/final-merger/engine.py` | Production |
-| 3 | `dalston/common/pipeline_types.py` | Production |
-| 3 | `tests/unit/test_pipeline_types.py` | Test |
-| 4 | `engines/stt-merge/final-merger/engine.py` | Production |
-| 4 | `tests/unit/test_merge_output_contract.py` | Test |
-| 5 | `dalston/orchestrator/handlers.py` | Production |
-| 5 | `dalston/orchestrator/dag.py` | Production |
-| 5 | `engines/stt-merge/final-merger/engine.py` | Production |
-| 5 | `tests/unit/test_dag.py` | Test |
-| 5 | `tests/integration/test_capability_driven_dag.py` | Test |
-| 6 | `dalston/common/pipeline_types.py` | Production |
-| 6 | Docs | Documentation |
+- **Workstream 1:** ~26 steps (~26 commits)
+- **Workstream 2:** ~9 steps
+- **Workstream 3:** ~4 steps
+- **Workstream 4:** ~5 steps
+- **Workstream 5:** ~3 steps
+- **Workstream 6:** ~4 steps
+- **Total:** ~51 steps / commits
 
-## Estimated Commits: ~16 (one per step)
+## LOC Impact Estimate
+
+| Workstream | Deleted | Added | Net |
+|-----------|---------|-------|-----|
+| WS1: Linear pipeline | ~3,500 | ~500 | -3,000 |
+| WS2: Unify SDK | ~4,000 | ~1,500 | -2,500 |
+| WS3: Declarative yaml | ~700 | ~300 | -400 |
+| WS4: Unify registry | ~800 | ~300 | -500 |
+| WS5: Session router | ~1,300 | ~100 | -1,200 |
+| WS6: WS proxy | ~3,000 | ~900 | -2,100 |
+| **Total** | **~13,300** | **~3,600** | **~-9,700** |
