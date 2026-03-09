@@ -53,6 +53,7 @@ from dalston.config import Settings
 from dalston.gateway.api.v1.openai_audio import (
     OPENAI_MAX_FILE_SIZE,
     OpenAIEndpoint,
+    attach_openai_rate_limit_headers,
     format_openai_response,
     is_openai_model,
     map_openai_model,
@@ -311,8 +312,9 @@ async def create_transcription(
             response_format = "json"
 
         if known_speaker_names:
+            parsed_known_speaker_names_payload: Any = None
             try:
-                parsed = json.loads(known_speaker_names)
+                parsed_known_speaker_names_payload = json.loads(known_speaker_names)
             except json.JSONDecodeError as e:
                 raise_openai_error(
                     400,
@@ -321,8 +323,9 @@ async def create_transcription(
                     code="invalid_request",
                 )
 
-            if not isinstance(parsed, list) or not all(
-                isinstance(name, str) and name.strip() for name in parsed
+            if not isinstance(parsed_known_speaker_names_payload, list) or not all(
+                isinstance(name, str) and name.strip()
+                for name in parsed_known_speaker_names_payload
             ):
                 raise_openai_error(
                     400,
@@ -330,7 +333,9 @@ async def create_transcription(
                     param="known_speaker_names",
                     code="invalid_request",
                 )
-            parsed_known_speaker_names = [name.strip() for name in parsed]
+            parsed_known_speaker_names = [
+                name.strip() for name in parsed_known_speaker_names_payload
+            ]
 
         if chunking_strategy:
             try:
@@ -679,11 +684,7 @@ async def create_transcription(
             export_service,
             model=model,
         )
-        if openai_rate_headers:
-            if isinstance(payload, Response):
-                payload.headers.update(openai_rate_headers)
-            else:
-                response.headers.update(openai_rate_headers)
+        attach_openai_rate_limit_headers(payload, response, openai_rate_headers)
         return payload
 
     # Publish event for orchestrator (include request_id for correlation)
@@ -715,11 +716,7 @@ async def create_transcription(
             export_service,
             model=model,
         )
-        if openai_rate_headers:
-            if isinstance(payload, Response):
-                payload.headers.update(openai_rate_headers)
-            else:
-                response.headers.update(openai_rate_headers)
+        attach_openai_rate_limit_headers(payload, response, openai_rate_headers)
         return payload
 
     if result.failed:

@@ -27,6 +27,7 @@ from dalston.common.model_selection_keys import MODEL_PARAM_TRANSCRIBE
 from dalston.gateway.api.v1.openai_audio import (
     OPENAI_MAX_FILE_SIZE,
     OpenAIEndpoint,
+    attach_openai_rate_limit_headers,
     format_openai_response,
     map_openai_model,
     map_openai_runtime_model,
@@ -220,11 +221,7 @@ async def create_translation_openai(
             model=model,
             task="translate",
         )
-        if openai_rate_headers:
-            if isinstance(payload, Response):
-                payload.headers.update(openai_rate_headers)
-            else:
-                response.headers.update(openai_rate_headers)
+        attach_openai_rate_limit_headers(payload, response, openai_rate_headers)
         return payload
 
     if result.failed:

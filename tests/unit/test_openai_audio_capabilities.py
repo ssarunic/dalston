@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import builtins
+import sys
+
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 
 from dalston.gateway.api.v1.openai_audio import (
     OpenAIEndpoint,
+    _estimate_prompt_tokens,
+    attach_openai_rate_limit_headers,
     build_openai_rate_limit_headers,
     is_openai_model_supported_for_endpoint,
     map_openai_runtime_model,
@@ -117,3 +122,58 @@ def test_validate_openai_request_accepts_known_speaker_names_for_diarize_model()
 def test_map_openai_runtime_model_returns_configured_default_variant() -> None:
     runtime_model_id = map_openai_runtime_model("whisper-1")
     assert runtime_model_id == "Systran/faster-whisper-base"
+
+
+def test_attach_openai_rate_limit_headers_updates_response_for_json_payload() -> None:
+    response = Response()
+    payload = {"text": "ok"}
+
+    attach_openai_rate_limit_headers(
+        payload,
+        response,
+        {"X-RateLimit-Remaining-Requests": "59"},
+    )
+
+    assert response.headers["X-RateLimit-Remaining-Requests"] == "59"
+
+
+def test_attach_openai_rate_limit_headers_updates_payload_response() -> None:
+    payload = Response()
+    response = Response()
+
+    attach_openai_rate_limit_headers(
+        payload,
+        response,
+        {"X-RateLimit-Remaining-Requests": "42"},
+    )
+
+    assert payload.headers["X-RateLimit-Remaining-Requests"] == "42"
+    assert "X-RateLimit-Remaining-Requests" not in response.headers
+
+
+def test_estimate_prompt_tokens_uses_fallback_when_tiktoken_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_import = builtins.__import__
+
+    def _patched_import(name, *args, **kwargs):
+        if name == "tiktoken":
+            raise ImportError("tiktoken unavailable")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _patched_import)
+
+    assert _estimate_prompt_tokens("one two three") >= 3
+
+
+def test_estimate_prompt_tokens_surfaces_tiktoken_runtime_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _BrokenTokenizer:
+        @staticmethod
+        def get_encoding(_name: str):
+            raise RuntimeError("broken tokenizer")
+
+    monkeypatch.setitem(sys.modules, "tiktoken", _BrokenTokenizer())
+    with pytest.raises(RuntimeError, match="broken tokenizer"):
+        _estimate_prompt_tokens("hello")

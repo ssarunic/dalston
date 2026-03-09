@@ -68,8 +68,9 @@ class _NoopRedis:
     async def close(self) -> None:
         return None
 
-    def __getattr__(self, _name: str):
+    def __getattr__(self, method_name: str):
         async def _noop(*_args, **_kwargs):
+            logger.debug("noop_redis_method_called", method=method_name)
             return None
 
         return _noop

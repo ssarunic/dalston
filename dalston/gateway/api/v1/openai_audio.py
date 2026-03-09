@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Literal, NoReturn
 
+import structlog
 from fastapi import HTTPException, Response
 from pydantic import BaseModel, Field
 
@@ -24,6 +25,7 @@ from dalston.gateway.services.export import ExportService
 # Maximum file size for OpenAI compatibility (25MB)
 OPENAI_MAX_FILE_SIZE = 25 * 1024 * 1024
 OPENAI_PROMPT_MAX_TOKENS = 224
+logger = structlog.get_logger()
 
 
 # =============================================================================
@@ -298,6 +300,20 @@ def build_openai_rate_limit_headers(
     return headers
 
 
+def attach_openai_rate_limit_headers(
+    payload: Response | dict[str, Any],
+    response: Response,
+    headers: dict[str, str] | None,
+) -> None:
+    """Attach OpenAI rate-limit headers to either raw payload or response."""
+    if not headers:
+        return
+    if isinstance(payload, Response):
+        payload.headers.update(headers)
+    else:
+        response.headers.update(headers)
+
+
 def _estimate_prompt_tokens(prompt: str) -> int:
     """Estimate prompt tokens with tokenizer fallback."""
     try:
@@ -305,8 +321,13 @@ def _estimate_prompt_tokens(prompt: str) -> int:
 
         encoding = tiktoken.get_encoding("cl100k_base")
         return len(encoding.encode(prompt))
-    except Exception:
-        # Conservative fallback when tokenizer support is unavailable.
+    except (ImportError, ModuleNotFoundError):
+        # Conservative fallback only when tokenizer support is unavailable.
+        logger.warning(
+            "openai_prompt_tokenizer_unavailable",
+            tokenizer="tiktoken",
+            fallback="word_or_char_heuristic",
+        )
         return max(len(prompt.split()), math.ceil(len(prompt) / 3))
 
 

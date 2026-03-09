@@ -35,7 +35,6 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.audio_defaults import DEFAULT_SAMPLE_RATE
-from dalston.common.redis import get_redis as _get_redis
 from dalston.common.timeouts import (
     WS_CLOSE_TIMEOUT,
     WS_OPEN_TIMEOUT,
@@ -165,13 +164,12 @@ async def _check_realtime_rate_limits(
 ) -> bool:
     """Check rate limits for realtime WebSocket connections."""
     settings = get_settings()
-    redis = await _get_redis()
-    rate_limiter = RedisRateLimiter(
-        redis=redis,
-        requests_per_minute=settings.rate_limit_requests_per_minute,
-        max_concurrent_jobs=settings.rate_limit_concurrent_jobs,
-        max_concurrent_sessions=settings.rate_limit_concurrent_sessions,
-    )
+    db_gen = _get_db()
+    try:
+        db = await db_gen.__anext__()
+        rate_limiter = await get_rate_limiter(settings=settings, db=db)
+    finally:
+        await db_gen.aclose()
 
     sessions_result = await rate_limiter.check_concurrent_sessions(tenant_id)
     if not sessions_result.allowed:

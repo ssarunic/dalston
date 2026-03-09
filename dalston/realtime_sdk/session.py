@@ -272,6 +272,8 @@ class AudioBuffer:
         if self.client_sample_rate == self.sample_rate or len(samples) == 0:
             return samples
 
+        # TODO(m61): Linear interpolation is fast but can alias when downsampling.
+        # Replace with low-pass + polyphase resampling for production-quality fidelity.
         target_len = max(
             1,
             int(len(samples) * self.sample_rate / self.client_sample_rate),
