@@ -61,8 +61,9 @@ Dependency clarification:
 Freeze supported channels and platform scope before implementation:
 
 1. pip/wheel path (mandatory)
-2. optional binary/installer path (scoped by platform readiness)
-3. runtime scope per channel (`lite core` first-run path; distributed path documented separately)
+2. Docker lite container (`dalston:lite` / `dalston:lite-gpu`) — single-container deployment with no compose or external infra
+3. optional binary/installer path (scoped by platform readiness)
+4. runtime scope per channel (`lite core` first-run path; distributed path documented separately)
 
 ### Strategy 2: Reproducible packaging pipeline
 
@@ -85,7 +86,8 @@ No artifact publish without passing install + first-run smoke tests on supported
 Define upgrade/rollback semantics separately per channel:
 
 1. pip channel (`pip install --upgrade`, pinned-version rollback)
-2. installer/binary channel (versioned install directory + explicit rollback command/path)
+2. Docker channel (`docker pull` for upgrade, tag-pinned rollback)
+3. installer/binary channel (versioned install directory + explicit rollback command/path)
 
 ---
 
@@ -148,7 +150,33 @@ Expected files:
 - `tests/integration/test_install_pip_smoke.py` (new)
 - `.github/workflows/ci.yml`
 
-### Phase 2: Installer/Binary Channel (Scoped)
+### Phase 2: Docker Lite Container Channel
+
+Single-container image that bundles `DALSTON_MODE=lite` with gateway, orchestrator, and
+engine runtimes — no compose, no external Redis/Postgres, zero host dependencies beyond Docker.
+
+1. Build `dalston:lite` (CPU) and `dalston:lite-gpu` (NVIDIA runtime) images:
+   - Base: `python:3.11-slim` (CPU) / `nvidia/cuda:...-runtime` (GPU)
+   - Installs `dalston[lite]`, pre-creates `.dalston/` structure
+   - Entrypoint: `dalston serve --host 0.0.0.0`
+   - `DALSTON_MODE=lite` baked in; profile/S3/model config via env vars
+2. Persistence via volume mount (`-v /data/dalston:/app/.dalston`): SQLite DB, model cache, artifacts.
+3. S3 integration via environment variables (optional — local filesystem default for non-AWS use).
+4. First-run model auto-download behavior inherited from M57 bootstrap path.
+5. Health check endpoint for container orchestrators (`HEALTHCHECK CMD curl -f http://localhost:8000/health`).
+6. GPU variant adds NVIDIA runtime requirement and enables GPU-accelerated engine profiles.
+7. Add smoke test: `docker run --rm dalston:lite dalston transcribe --smoke`.
+8. Integrate with `dalston-aws setup --lite` as primary deployment path for single-instance AWS.
+
+Expected files:
+
+- `docker/Dockerfile.lite` (new)
+- `docker/Dockerfile.lite-gpu` (new)
+- `.github/workflows/docker-lite.yml` (new)
+- `tests/integration/test_docker_lite_smoke.py` (new)
+- `docs/guides/installation.md` (new/updated)
+
+### Phase 3: Installer/Binary Channel (Scoped)
 
 1. Implement installer script and/or packaged binary build path for selected targets.
 2. Ensure install places CLI and required runtime assets predictably for scoped lite-core bootstrap.
@@ -159,10 +187,10 @@ Expected files:
 
 - `scripts/install.sh` (new)
 - `scripts/uninstall.sh` (new)
-- `docs/guides/installation.md` (new)
+- `docs/guides/installation.md` (new/updated)
 - CI workflow files for packaging (new/updated)
 
-### Phase 3: Release Automation and Provenance
+### Phase 4: Release Automation and Provenance
 
 1. Automate multi-package build and publication with explicit order and compatibility checks.
 2. Automate checksum/signature generation and publication manifests.
@@ -179,7 +207,7 @@ Expected files:
 - `.github/workflows/ci.yml` (release gate integration, if needed)
 - `docs/reports/M60-distribution-release-readiness.md` (new)
 
-### Phase 4: Documentation and Migration Guidance
+### Phase 5: Documentation and Migration Guidance
 
 1. Update quick-start snippets to one-line install + one-command transcribe.
 2. Add troubleshooting by install channel, including first-run model auto-pull behavior.
@@ -202,11 +230,14 @@ Expected files:
 
 1. Packaging tests:
    - wheel/sdist build/install for `dalston`, `dalston-sdk`, `dalston-cli`
+   - Docker lite image build and layer validation
    - CLI invocation sanity
 2. Cross-platform smoke tests:
-   - install command succeeds
+   - install command succeeds (pip and Docker channels)
    - `dalston --version` works
+   - `docker run --rm dalston:lite dalston --version` works
    - first-run transcribe smoke path works on supported targets (including default model auto-ensure path from M57)
+   - Docker lite container starts, serves health endpoint, and processes a test file
 3. Release pipeline tests:
    - checksum/signature verification
    - SBOM/provenance artifact presence and verification
@@ -224,17 +255,21 @@ pytest -q
 
 ### Manual verification
 
-1. Fresh machine install on each supported channel and platform.
-2. Upgrade from previous release and verify backward-compatible behavior.
-3. Rollback to previous version works per channel contract.
-4. Uninstall/cleanup path leaves no broken shell bindings or stale service state.
+1. Fresh machine install on each supported channel and platform (pip, Docker, installer).
+2. Docker lite: `docker run dalston:lite` starts and serves `/health` within 30s.
+3. Docker lite: volume-mounted data survives container restart.
+4. Docker lite on AWS: `dalston-aws setup --lite` provisions and runs end-to-end.
+5. Upgrade from previous release and verify backward-compatible behavior.
+6. Rollback to previous version works per channel contract.
+7. Uninstall/cleanup path leaves no broken shell bindings or stale service state.
 
 ---
 
 ## Exit Criteria
 
-1. Supported distribution channels are implemented and documented.
+1. Supported distribution channels (pip, Docker lite, installer) are implemented and documented.
 2. Cross-platform install + first-run smoke tests are release-gated.
-3. Artifacts are reproducible and integrity-verified.
-4. Quick-start docs reflect real, validated install/run path.
+3. Artifacts (wheels, Docker images, installer scripts) are reproducible and integrity-verified.
+4. Quick-start docs reflect real, validated install/run path including `docker run dalston:lite`.
 5. Multi-package release coordination and channel-specific upgrade/rollback behavior are documented and validated.
+6. Docker lite images integrate with `dalston-aws setup --lite` for single-container AWS deployment.
