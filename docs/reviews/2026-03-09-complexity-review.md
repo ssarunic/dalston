@@ -86,7 +86,8 @@ stream**. The difference is purely in the I/O transport layer.
 ```
 
 **What this eliminates:**
-- Two separate SDKs (~2,500 LOC combined) collapse to one (~1,500 LOC)
+- Two separate SDKs (~9,000 LOC combined; see section 8c) share ~3,000-
+  4,000 LOC of duplicated patterns that collapse into one unified SDK
 - Two registry protocols collapse to one
 - Duplicate engine implementations per model disappear
 - Duplicate container images disappear (halves image build/push time)
@@ -215,13 +216,14 @@ DAG. This covers all the stages you mentioned (VAD, noise reduction, speaker
 recognition, emotion, non-verbal events) without needing a full graph solver.
 
 ```
-PREPARE → [VAD] → [NOISE_REDUCE] → TRANSCRIBE → [ALIGN] → [DIARIZE]
-    → [SPEAKER_VERIFY] → [EMOTION] → [NONVERBAL] → [PII_DETECT]
-    → [AUDIO_REDACT] → MERGE
+PREPARE → [NOISE_REDUCE] → [VAD] → TRANSCRIBE → [DIARIZE]
+    → [SPEAKER_ID] → [EMOTION] → [NONVERBAL] → [PII_DETECT → AUDIO_REDACT]
 ```
 
 Each optional stage declares its position and is auto-inserted when its
-engine is available AND the user requests its output.
+engine is available AND the user requests its output. No merge stage --
+the last stage's output is the final transcript. PII stages only
+present when audio redaction is requested (see section 8a).
 
 ---
 
@@ -361,26 +363,30 @@ stereo.wav → channel-split ───┤
 Parent job: stitch Job A + Job B results, label speakers by channel
 ```
 
-**What gets deleted (~275 LOC):**
+**What gets deleted (~1,200 LOC; see section 8b for full breakdown):**
 
 | Component | LOC |
 |---|---|
-| `_build_per_channel_dag_with_engines()` | ~160 |
+| `_build_per_channel_dag_with_engines()` | ~210 |
 | `per_channel` branches in `_build_dag_with_engines()` | ~15 |
 | `_process_split_channels()` in audio-prepare engine | ~50 |
-| per-channel merge logic in final-merger (stereo reassembly) | ~40 |
-| `_ch{N}` stage name parsing in handlers.py | ~10 |
+| per-channel merge logic in final-merger | ~670 |
+| per-channel PII + audio redaction in merger | ~100 |
+| `_ch{N}` stage name parsing in handlers.py | ~30 |
+| audio-redactor channel-specific key resolution | ~12 |
+| Integration tests (test_per_channel.py) | ~375 |
 
-**What gets added (~110 LOC):**
+**What gets added (~200 LOC):**
 
 | Component | LOC |
 |---|---|
 | `split_channels()` utility (FFmpeg one-liner per channel) | ~20 |
-| Parent-child job relationship in gateway | ~50 |
-| `stitch_per_channel_results()` post-processor | ~40 |
+| Parent-child job relationship in gateway | ~60 |
+| `stitch_per_channel_results()` post-processor | ~80 |
+| Tests for parent-child jobs + stitcher | ~40 |
 
-**Net savings:** ~165 LOC, plus elimination of all future per-channel
-stage variants. Scales to N channels with zero DAG changes (current
+**Net savings:** ~1,000 LOC, plus elimination of all future per-channel
+stage variants. Scales to N channels with zero pipeline changes (current
 implementation hard-caps at 2).
 
 **What you give up:** Single job ID atomicity (now parent + N children).
@@ -398,14 +404,29 @@ you can eliminate the align stage entirely.
 **Saves:** An entire pipeline stage, ~200 LOC in dag.py + selector,
 one engine directory, one docker service.
 
-### 5c. Make PII detection a post-processing hook, not a pipeline stage
+### 5c. Make PII text redaction post-processing; keep audio redaction in pipeline
 
 PII detection and audio redaction are the only stages that don't improve
-the transcript -- they're compliance features. Making them a post-merge
-webhook or async job (rather than pipeline stages that block the merge)
-simplifies the core pipeline without losing the feature.
+the transcript -- they're compliance features.
 
-**Saves:** Two pipeline stages from the DAG builder, ~100 LOC.
+**PII text redaction** (inserting `[PERSON]` markers) can move to a
+post-processing hook -- it only needs the transcript text and entity
+positions.
+
+**PII audio redaction** must stay in the pipeline. The `audio-redactor`
+engine creates a new audio file via FFmpeg with silence/beep over PII
+segments. It needs the original audio file, which isn't available after
+job completion. When requested, these stages append linearly:
+
+```
+... → [diarize] → [pii_detect → audio_redact]
+```
+
+**Saves:** If only text redaction: two stages from the core pipeline,
+~100 LOC. If audio redaction requested: stages stay, but are still
+linear (no DAG branching needed).
+
+**⚠ See section 8a for full analysis of this blind spot.**
 
 ### 5d. Eliminate the merge stage entirely
 
@@ -699,12 +720,170 @@ is batch-only. With Riva as a real-time engine:
 
 ---
 
-## 8. Risk Assessment
+## 8. Blind Spots and Corrections (Cross-Check Against Codebase)
+
+Systematic verification of every claim in this review against the actual
+codebase. Each section's conclusions were cross-checked with LOC counts,
+dependency analysis, and feasibility assessment.
+
+### 8a. CRITICAL: PII audio redaction cannot be post-processing
+
+Section 5c proposes making PII detection a "post-processing hook".
+This is **partially wrong**.
+
+**PII text redaction** (inserting `[PERSON]` markers into transcript
+text) CAN be post-processing -- it only needs the transcript.
+
+**PII audio redaction** CANNOT be post-processing. The `audio-redactor`
+engine (`engines/stt-redact/audio-redactor/engine.py`) creates a **new
+audio file** with FFmpeg, applying silence/beep over PII time ranges.
+This requires:
+- Access to the original audio file (not available after job completion
+  and cleanup)
+- In per_channel mode: per-channel redacted WAVs for stereo reassembly
+
+**Corrected proposal:** If audio redaction is requested, keep it as a
+pipeline stage (`pii_detect → audio_redact`) that runs after diarize
+and before job completion. It enriches the `Transcript` document with
+`redacted_audio_artifact_id` and produces a parallel audio artifact.
+Text-only PII redaction can be post-processing.
+
+Updated pipeline with audio redaction:
+```
+prepare → transcribe → [diarize] → [pii_detect → audio_redact]
+```
+
+This is still linear. PII stages are appended when requested, not
+branched.
+
+### 8b. per_channel scope is 4-5x larger than claimed
+
+Section 5a claims ~275 LOC deleted. Actual per_channel footprint is
+**~1,200-1,400 LOC**:
+
+| Component | Claimed | Actual |
+|---|---|---|
+| `_build_per_channel_dag_with_engines()` | 160 | **210** |
+| per_channel merge logic in final-merger | 40 | **~670** (the bulk of merge IS per_channel) |
+| per_channel PII + audio redaction in merge | — | ~100 |
+| `_process_split_channels()` in audio-prepare | 50 | ~50 |
+| `_ch{N}` stage name parsing in handlers.py | 10 | ~30 |
+| audio-redactor channel-specific key resolution | — | ~12 |
+| Integration tests (test_per_channel.py) | — | ~375 |
+
+The pre-processing split saves MORE than estimated (~1,200 LOC removed),
+but the replacement parent-child job mechanism also needs more work
+(~200 LOC, not ~110) because the stitcher must handle what merge
+currently does for per-channel: interleave segments by timestamp,
+remap speakers by channel, optionally reassemble redacted stereo audio.
+
+### 8c. SDK totals are ~9,000 LOC, not ~2,500
+
+Section 1 table claims ~2,500 LOC combined for both SDKs. The actual
+totals count all supporting infrastructure:
+
+| SDK | Claimed | Actual |
+|---|---|---|
+| `dalston/engine_sdk/` | ~1,200 | **4,810** |
+| `dalston/realtime_sdk/` | ~1,300 | **4,179** |
+| **Combined** | **~2,500** | **~9,000** |
+
+The difference: model managers (faster_whisper, hf_transformers, nemo),
+materializer, executors (venv, inproc, env_manager), model storage/
+caching, VAD processing. These are shared infrastructure that would
+remain in a unified SDK -- the claim was only counting base classes +
+runners.
+
+**Impact on unification estimate:** The unified SDK would be ~5,000-
+6,000 LOC (not ~1,500), because much of the 9,000 LOC is shared
+infrastructure that stays. But duplication savings are also larger:
+~3,000-4,000 LOC eliminated (not ~1,000).
+
+### 8d. Database has a `task_dependencies` junction table
+
+Not mentioned anywhere in the review. The DB schema (`dalston/db/
+models.py:300`) has a `TaskDependency` junction table storing DAG edges
+between tasks. The orchestrator's `_check_task_completed` handler
+(handlers.py:538) resolves dependencies via this table.
+
+With a linear pipeline:
+- This table becomes unnecessary (next task = next in ordered list)
+- Requires a DB migration to drop the table
+- `TaskModel.dependency_links` relationship can be removed
+- The `_gather_previous_outputs()` function (handlers.py:1023-1061)
+  simplifies: instead of querying dependencies, just read the
+  previous task's output
+- The handler's dependency resolution loop (handlers.py:534-590)
+  reduces to "start next task in sequence"
+
+Stage names are free-form `String(50)`, not enums, so adding/removing
+stages doesn't need schema changes.
+
+### 8e. Function-level LOC claims off by significant margins
+
+| Function | Claimed | Actual | Error |
+|---|---|---|---|
+| `_build_per_channel_dag_with_engines()` | 160 | 210 | -24% |
+| `_build_dag_with_engines()` | ~540 | 331 | +39% |
+| `dag.py` total | 700+ | 740 | OK |
+| `final-merger engine.py` | 1141 | 1141 | Exact |
+| `engine_selector.py` | 935 | 935 | Exact |
+| Session router total | ~1,300 | 1,381 | OK |
+| Gateway WS total | 3,800+ | 3,860 | OK |
+
+The `_build_dag_with_engines()` overestimate and
+`_build_per_channel_dag_with_engines()` underestimate roughly cancel
+out at the file level, so the top-level claim (700+ LOC) holds.
+
+### 8f. Shared `_realtime_common.py` already exists
+
+Section 3b implies the three WS implementations share nothing. In fact,
+`dalston/gateway/api/v1/_realtime_common.py` (200 LOC) already provides
+shared session counting, lag handling, and common error types. The three
+implementations import from it. The duplication is still substantial
+(3,860 LOC across three files) but there IS a foundation to build the
+proposed `RealtimeProxy` core on.
+
+### 8g. Handlers.py has significant dependency resolution logic (1,301 LOC)
+
+Not called out explicitly in the review. `handlers.py` (1,301 LOC)
+contains:
+- `_gather_previous_outputs()` -- reads S3 outputs from completed
+  dependency tasks, with per_channel `_chN` suffix normalization
+- `_check_task_completed()` -- dependency resolution loop that checks
+  if all deps are met, then queues dependents
+- `_populate_job_result_stats()` -- reads `transcript.json` from S3
+  (hardcoded to merge output path)
+
+With a linear pipeline, ~200 LOC of dependency resolution in handlers.py
+simplifies to "start next stage in list". The
+`_gather_previous_outputs()` function (which reads from S3 per
+dependency) becomes "read the single previous stage's output" -- or
+with a shared Transcript document, just "pass the Transcript forward".
+
+### 8h. Section 2 pipeline diagram still shows MERGE and ALIGN
+
+The pipeline example in section 2 still shows the old stages:
+```
+PREPARE → [VAD] → [NOISE_REDUCE] → TRANSCRIBE → [ALIGN] → [DIARIZE]
+    → [SPEAKER_VERIFY] → [EMOTION] → [NONVERBAL] → [PII_DETECT]
+    → [AUDIO_REDACT] → MERGE
+```
+
+This should be updated to match the section 6 conclusions (no align,
+no merge, PII only when audio redaction requested).
+
+---
+
+## 9. Risk Assessment
 
 | Change | Risk | Mitigation |
 |---|---|---|
-| SDK unification | High -- touches every engine | Feature-flag: engines can opt into unified mode gradually |
+| Linear pipeline + merge elimination | Medium -- changes orchestrator core + all engines | Shared Transcript schema versioned; engines adopt incrementally; DB migration to drop task_dependencies |
+| SDK unification | High -- touches every engine (~9,000 LOC surface) | Feature-flag: engines can opt into unified mode gradually |
 | Registry unification | Low -- internal protocol | Run old + new in parallel, cut over |
-| Declarative pipeline | Medium -- changes orchestrator core | Keep hardcoded path as fallback during transition |
+| Declarative engine.yaml | Medium -- new stage registration contract | Keep hardcoded fallback during transition |
+| per_channel pre-processing split | Medium -- larger scope than initially estimated (~1,200 LOC) | Implement behind feature flag; keep old path until fully tested |
+| PII pipeline rework | Low-Medium -- audio redaction must stay in pipeline | Separate text-only PII (post-processing) from audio redaction (pipeline stage) |
 | Session router merge | Medium -- affects realtime latency | Benchmark allocation latency before/after |
-| Gateway WS refactor | Low -- protocol adapters are well-defined | Contract tests per API compatibility layer |
+| Gateway WS refactor | Low -- shared `_realtime_common.py` is a starting point | Contract tests per API compatibility layer |
