@@ -126,7 +126,7 @@ class TestSpeakerProfileEndToEnd:
         )
         assert diarize_output.exists(), "Diarize stage must write output.json"
         data = json.loads(diarize_output.read_text())
-        assert "segments" in data
+        assert "turns" in data or "segments" in data
         assert "speakers" in data
 
 

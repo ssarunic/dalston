@@ -47,6 +47,7 @@ logger = structlog.get_logger()
 # Maximum wall-clock seconds allowed for a single lite job across all stages.
 _JOB_TIMEOUT_S = 120.0
 _DEFAULT_LITE_TRANSCRIBE_RUNTIME = "faster-whisper"
+_DEFAULT_LITE_DIARIZE_RUNTIME = "nemo-msdd"
 
 
 # ---------------------------------------------------------------------------
@@ -170,13 +171,23 @@ def _build_default_stage_bindings(settings: Settings) -> dict[str, _LiteStageBin
             compute=_compute_transcribe,
         )
 
-    return {
-        "transcribe": transcribe,
-        "diarize": _make_stage_binding(
+    if settings.lite_diarize_backend == "real":
+        diarize = _make_engine_ref_binding(
+            stage="diarize",
+            runtime=_DEFAULT_LITE_DIARIZE_RUNTIME,
+            engine_ref=settings.lite_diarize_engine_ref,
+            execution_profile="venv",
+        )
+    else:
+        diarize = _make_stage_binding(
             stage="diarize",
             runtime="lite-diarize",
             compute=_compute_diarize,
-        ),
+        )
+
+    return {
+        "transcribe": transcribe,
+        "diarize": diarize,
         "pii_detect": _make_stage_binding(
             stage="pii_detect",
             runtime="lite-pii-detect",
@@ -236,6 +247,7 @@ class LitePipeline:
         self._ephemeral_mode = ephemeral_mode
         self._profile = cap.profile
         self._profile_cap = cap
+        self._lite_diarize_runtime_model_id = settings.lite_diarize_runtime_model_id
         self._stage_outputs: dict[str, dict[str, dict[str, Any]]] = {}
         self._stage_bindings = dict(
             _build_default_stage_bindings(settings)
@@ -506,6 +518,19 @@ class LitePipeline:
                 f"No lite runtime binding configured for stage '{stage}'"
             )
 
+        stage_config = dict(parameters)
+        if stage == "diarize":
+            stage_config.setdefault(
+                "runtime_model_id", self._lite_diarize_runtime_model_id
+            )
+            num_speakers = stage_config.get("num_speakers")
+            if (
+                isinstance(num_speakers, int)
+                and num_speakers > 0
+                and "max_speakers" not in stage_config
+            ):
+                stage_config["max_speakers"] = num_speakers
+
         previous_outputs = dict(self._stage_outputs.get(envelope.job_id, {}))
         if (
             self._ephemeral_mode
@@ -517,10 +542,14 @@ class LitePipeline:
                 task_id=envelope.task_id,
                 job_id=envelope.job_id,
                 stage=stage,
-                config=parameters,
+                config=stage_config,
                 payload=audio_bytes,
                 previous_outputs=previous_outputs,
-                audio_path=transcribe_audio_path if stage == "transcribe" else None,
+                audio_path=(
+                    transcribe_audio_path
+                    if stage in {"transcribe", "diarize"}
+                    else None
+                ),
                 materialized_artifacts={},
             )
             ctx = BatchTaskContext(
@@ -547,7 +576,7 @@ class LitePipeline:
             )
 
         artifacts: dict[str, Path] = {}
-        if stage == "transcribe":
+        if stage in {"transcribe", "diarize"}:
             artifacts["audio"] = transcribe_audio_path
 
         request = ExecutionRequest(
@@ -556,7 +585,7 @@ class LitePipeline:
             stage=stage,
             runtime=binding.entry.runtime,
             instance=f"lite-{self._profile.value}",
-            config=parameters,
+            config=stage_config,
             previous_outputs=previous_outputs,
             payload=None,
             artifacts=artifacts,
@@ -603,6 +632,113 @@ class LitePipeline:
         return [segment for segment in raw if isinstance(segment, dict)]
 
     @staticmethod
+    def _normalize_turns(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        raw = payload.get("turns")
+        if not isinstance(raw, list):
+            return []
+        return [turn for turn in raw if isinstance(turn, dict)]
+
+    @staticmethod
+    def _ordered_unique_strings(values: list[Any]) -> list[str]:
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for value in values:
+            if not isinstance(value, str) or value in seen:
+                continue
+            seen.add(value)
+            ordered.append(value)
+        return ordered
+
+    @staticmethod
+    def _to_float(value: Any) -> float | None:
+        if isinstance(value, int | float):
+            return float(value)
+        return None
+
+    @classmethod
+    def _find_best_speaker(
+        cls, segment: dict[str, Any], turns: list[dict[str, Any]]
+    ) -> str | None:
+        segment_start = cls._to_float(segment.get("start"))
+        segment_end = cls._to_float(segment.get("end"))
+        if segment_start is None or segment_end is None or segment_end <= segment_start:
+            return None
+
+        best_speaker: str | None = None
+        best_overlap = 0.0
+        for turn in turns:
+            speaker = turn.get("speaker")
+            if not isinstance(speaker, str):
+                continue
+            turn_start = cls._to_float(turn.get("start"))
+            turn_end = cls._to_float(turn.get("end"))
+            if turn_start is None or turn_end is None or turn_end <= turn_start:
+                continue
+            overlap = min(segment_end, turn_end) - max(segment_start, turn_start)
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_speaker = speaker
+        return best_speaker
+
+    @classmethod
+    def _apply_speaker_labels(
+        cls, segments: list[dict[str, Any]], turns: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        if not segments:
+            return segments
+
+        speaker_turns = [turn for turn in turns if isinstance(turn.get("speaker"), str)]
+        if not speaker_turns:
+            return [dict(segment) for segment in segments]
+
+        labeled: list[dict[str, Any]] = []
+        for index, segment in enumerate(segments):
+            merged = dict(segment)
+            speaker = cls._find_best_speaker(merged, speaker_turns)
+            if speaker is None and index < len(speaker_turns):
+                fallback = speaker_turns[index].get("speaker")
+                if isinstance(fallback, str):
+                    speaker = fallback
+            if speaker is not None:
+                merged["speaker"] = speaker
+            labeled.append(merged)
+        return labeled
+
+    @classmethod
+    def _derive_turns(cls, diarize_payload: dict[str, Any]) -> list[dict[str, Any]]:
+        turns = cls._normalize_turns(diarize_payload)
+        if turns:
+            return turns
+
+        return [
+            {
+                "speaker": segment.get("speaker"),
+                "start": segment.get("start"),
+                "end": segment.get("end"),
+            }
+            for segment in cls._normalize_segments(diarize_payload)
+            if isinstance(segment.get("speaker"), str)
+        ]
+
+    @classmethod
+    def _resolve_speakers(
+        cls, diarize_payload: dict[str, Any], segments: list[dict[str, Any]]
+    ) -> list[str]:
+        raw_speakers = diarize_payload.get("speakers")
+        if isinstance(raw_speakers, list):
+            return cls._ordered_unique_strings(raw_speakers)
+
+        turn_speakers = [
+            turn.get("speaker") for turn in cls._derive_turns(diarize_payload)
+        ]
+        speakers = cls._ordered_unique_strings(turn_speakers)
+        if speakers:
+            return speakers
+
+        segment_speakers = [segment.get("speaker") for segment in segments]
+        return cls._ordered_unique_strings(segment_speakers)
+
+    @staticmethod
     def _resolve_text(payload: dict[str, Any], segments: list[dict[str, Any]]) -> str:
         text = payload.get("text")
         if isinstance(text, str) and text.strip():
@@ -628,18 +764,25 @@ class LitePipeline:
                 "status": "completed",
                 "text": self._resolve_text(transcribe_payload, segments),
                 "profile": LiteProfile.SPEAKER.value,
-                "segments": segments,
+                "segments": [dict(segment) for segment in segments],
             }
             diarize_payload = stage_outputs.get("diarize")
             if isinstance(diarize_payload, dict):
-                diarize_segments = self._normalize_segments(diarize_payload)
-                if diarize_segments:
-                    transcript["segments"] = diarize_segments
-                speakers = diarize_payload.get("speakers")
-                if isinstance(speakers, list):
-                    transcript["speakers"] = [
-                        speaker for speaker in speakers if isinstance(speaker, str)
-                    ]
+                turns = self._derive_turns(diarize_payload)
+                if turns:
+                    transcript["segments"] = self._apply_speaker_labels(
+                        transcript["segments"],
+                        turns,
+                    )
+                elif self._normalize_segments(diarize_payload):
+                    # Legacy stub-only fallback for deterministic tests.
+                    transcript["segments"] = self._normalize_segments(diarize_payload)
+                speakers = self._resolve_speakers(
+                    diarize_payload,
+                    transcript["segments"],
+                )
+                if speakers:
+                    transcript["speakers"] = speakers
         elif self._profile == LiteProfile.COMPLIANCE:
             transcript = {
                 "job_id": job_id,

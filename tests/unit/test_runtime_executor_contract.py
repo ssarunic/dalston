@@ -208,6 +208,43 @@ async def test_lite_pipeline_initializes_only_requested_profile_executor(
     assert "venv" not in pipeline._executors
 
 
+@pytest.mark.asyncio
+async def test_lite_diarize_stage_injects_default_runtime_model_and_audio(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("DALSTON_MODE", "lite")
+    monkeypatch.setenv(
+        "DALSTON_LITE_DIARIZE_RUNTIME_MODEL_ID",
+        "nvidia/diar-msdd-telephonic",
+    )
+
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"audio")
+    artifacts = LocalFilesystemArtifactStoreAdapter(str(tmp_path / "artifacts"))
+    executor = _RecordingExecutor(payload={"speakers": ["SPEAKER_00"], "turns": []})
+    pipeline = LitePipeline(
+        artifacts,
+        profile="speaker",
+        stage_bindings={"diarize": _binding("diarize", "venv")},
+        executors={"venv": executor},
+    )
+
+    envelope = SimpleNamespace(task_id="task-1", job_id="job-1", message_id="msg-1")
+    await pipeline._handle_stage(
+        "diarize",
+        envelope,
+        {"speaker_detection": "diarize", "num_speakers": 3},
+        b"audio",
+        audio,
+    )
+
+    request = executor.requests[0]
+    assert request.config["runtime_model_id"] == "nvidia/diar-msdd-telephonic"
+    assert request.config["max_speakers"] == 3
+    assert request.artifacts["audio"] == audio
+
+
 def test_default_lite_pipeline_uses_real_transcribe_binding(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -223,3 +260,20 @@ def test_default_lite_pipeline_uses_real_transcribe_binding(
     assert binding.entry.runtime == "faster-whisper"
     assert binding.engine_ref is not None
     assert binding.engine_ref.endswith("engine.py:WhisperEngine")
+
+
+def test_default_lite_pipeline_uses_real_diarize_binding(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("DALSTON_MODE", "lite")
+    monkeypatch.setenv("DALSTON_LITE_DIARIZE_BACKEND", "real")
+    monkeypatch.setenv("DALSTON_LITE_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+
+    pipeline = build_default_pipeline()
+    binding = pipeline._stage_bindings["diarize"]
+
+    assert binding.entry.execution_profile == "venv"
+    assert binding.entry.runtime == "nemo-msdd"
+    assert binding.engine_ref is not None
+    assert binding.engine_ref.endswith("engine.py:NemoMSDDEngine")

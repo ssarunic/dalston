@@ -97,6 +97,25 @@ class Settings(BaseSettings):
         alias="DALSTON_LITE_TRANSCRIBE_ENGINE_REF",
         description="Engine reference used by lite transcribe backend when backend='real'.",
     )
+    lite_diarize_backend: Literal["real", "stub"] = Field(
+        default="real",
+        alias="DALSTON_LITE_DIARIZE_BACKEND",
+        description=(
+            "Lite diarize backend. "
+            "'real': execute a local engine runtime (default). "
+            "'stub': use deterministic placeholder diarization."
+        ),
+    )
+    lite_diarize_engine_ref: str = Field(
+        default="engines/stt-diarize/nemo-msdd/engine.py:NemoMSDDEngine",
+        alias="DALSTON_LITE_DIARIZE_ENGINE_REF",
+        description="Engine reference used by lite diarize backend when backend='real'.",
+    )
+    lite_diarize_runtime_model_id: str = Field(
+        default="nvidia/diar-msdd-telephonic",
+        alias="DALSTON_LITE_DIARIZE_RUNTIME_MODEL_ID",
+        description="Default runtime_model_id injected into lite diarize config when omitted.",
+    )
     lite_venv_python: str | None = Field(
         default=None,
         alias="DALSTON_LITE_VENV_PYTHON",
