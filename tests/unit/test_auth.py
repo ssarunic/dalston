@@ -709,6 +709,16 @@ class TestSessionTokenModel:
         assert data["token_hash"] == "def456abc789"
         assert data["scopes"] == "realtime"
         assert data["tenant_id"] == str(sample_session_token.tenant_id)
+        assert "consumed_at" not in data
+
+    def test_to_dict_includes_consumed_at_when_set(
+        self, sample_session_token: SessionToken
+    ):
+        consumed_at = datetime.now(UTC)
+        sample_session_token.consumed_at = consumed_at
+
+        data = sample_session_token.to_dict()
+        assert data["consumed_at"] == consumed_at.isoformat()
 
     def test_from_dict(self, sample_session_token: SessionToken):
         data = {
@@ -722,6 +732,23 @@ class TestSessionTokenModel:
         token = SessionToken.from_dict(data)
         assert token.token_hash == "def456abc789"
         assert token.scopes == [Scope.REALTIME]
+
+    def test_from_dict_treats_legacy_empty_consumed_at_as_unconsumed(
+        self, sample_session_token: SessionToken
+    ):
+        data = {
+            "token_hash": "def456abc789",
+            "tenant_id": str(sample_session_token.tenant_id),
+            "parent_key_id": str(sample_session_token.parent_key_id),
+            "scopes": "realtime",
+            "expires_at": sample_session_token.expires_at.isoformat(),
+            "created_at": sample_session_token.created_at.isoformat(),
+            "single_use": "true",
+            "consumed_at": "",
+        }
+        token = SessionToken.from_dict(data)
+        assert token.single_use is True
+        assert token.consumed_at is None
 
 
 class TestSessionTokenService:
@@ -792,6 +819,19 @@ class TestSessionTokenService:
         mock_redis.expire.assert_called()
         call_args = mock_redis.expire.call_args
         assert call_args[0][1] == 300
+
+    @pytest.mark.asyncio
+    async def test_create_single_use_session_token_omits_consumed_at_field(
+        self, auth_service: AuthService, mock_redis, sample_api_key: APIKey
+    ):
+        await auth_service.create_session_token(
+            api_key=sample_api_key,
+            single_use=True,
+        )
+
+        mapping = mock_redis.hset.call_args.kwargs["mapping"]
+        assert mapping["single_use"] == "true"
+        assert "consumed_at" not in mapping
 
     @pytest.mark.asyncio
     async def test_create_session_token_scope_validation(
@@ -906,7 +946,6 @@ class TestSessionTokenService:
             "expires_at": (datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
             "created_at": datetime.now(UTC).isoformat(),
             "single_use": "true",
-            "consumed_at": "",
         }
         mock_redis.hsetnx.return_value = 1
 

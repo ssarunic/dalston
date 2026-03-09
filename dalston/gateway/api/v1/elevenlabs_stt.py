@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import HTTPException
 
@@ -219,7 +219,7 @@ def get_realtime_audio_format_spec(
     return ELEVENLABS_REALTIME_AUDIO_FORMATS.get(audio_format)
 
 
-def validate_elevenlabs_keyterms(terms: list[str]) -> None:
+def validate_elevenlabs_keyterms(terms: list[Any]) -> None:
     """Validate ElevenLabs keyterms inventory and limits."""
     if len(terms) > ELEVENLABS_MAX_KEYTERMS:
         raise HTTPException(
@@ -228,6 +228,11 @@ def validate_elevenlabs_keyterms(terms: list[str]) -> None:
         )
 
     for term in terms:
+        if not isinstance(term, str):
+            raise HTTPException(
+                status_code=400,
+                detail="Each keyterm must be a string",
+            )
         if len(term) > ELEVENLABS_MAX_KEYTERM_CHARS:
             raise HTTPException(
                 status_code=400,

@@ -20,27 +20,31 @@ def _resolve_audio_fixture() -> Path:
     ]
     audio_file = next((p for p in candidates if p.exists()), None)
     if audio_file is None:
-        raise RuntimeError("No audio fixture found for ElevenLabs SDK e2e test")
+        pytest.skip("No audio fixture found for ElevenLabs SDK e2e test")
     return audio_file
 
 
 def _resolve_stereo_audio_fixture() -> Path:
     stereo = Path(__file__).parent.parent / "audio" / "test_stereo_speakers.wav"
     if not stereo.exists():
-        raise RuntimeError(
+        pytest.skip(
             "Stereo audio fixture tests/audio/test_stereo_speakers.wav not found"
         )
     return stereo
 
 
+def _resolve_sdk_env() -> tuple[str, str]:
+    api_key = os.getenv("DALSTON_API_KEY")
+    if not api_key:
+        pytest.skip("DALSTON_API_KEY environment variable is not set")
+    base_url = os.getenv("DALSTON_ELEVENLABS_BASE_URL", "http://localhost:8000")
+    return api_key, base_url
+
+
 @pytest.mark.e2e
 def test_elevenlabs_sdk_batch_convert_get_delete():
     """Run convert/get/delete flow with real transcript output."""
-    api_key = os.getenv("DALSTON_API_KEY")
-    if not api_key:
-        raise RuntimeError("DALSTON_API_KEY environment variable must be set")
-
-    base_url = os.getenv("DALSTON_ELEVENLABS_BASE_URL", "http://localhost:8000")
+    api_key, base_url = _resolve_sdk_env()
     client = elevenlabs.ElevenLabs(api_key=api_key, base_url=base_url)
     audio_file = _resolve_audio_fixture()
 
@@ -63,11 +67,7 @@ def test_elevenlabs_sdk_batch_convert_get_delete():
 @pytest.mark.e2e
 def test_elevenlabs_sdk_async_convert_polling():
     """Run async convert and poll until transcript is materialized."""
-    api_key = os.getenv("DALSTON_API_KEY")
-    if not api_key:
-        raise RuntimeError("DALSTON_API_KEY environment variable must be set")
-
-    base_url = os.getenv("DALSTON_ELEVENLABS_BASE_URL", "http://localhost:8000")
+    api_key, base_url = _resolve_sdk_env()
     client = elevenlabs.ElevenLabs(api_key=api_key, base_url=base_url)
     audio_file = _resolve_audio_fixture()
 
@@ -98,11 +98,7 @@ def test_elevenlabs_sdk_async_convert_polling():
 @pytest.mark.e2e
 def test_elevenlabs_sdk_single_use_token_contract():
     """Verify SDK single-use token helper works against Dalston endpoint."""
-    api_key = os.getenv("DALSTON_API_KEY")
-    if not api_key:
-        raise RuntimeError("DALSTON_API_KEY environment variable must be set")
-
-    base_url = os.getenv("DALSTON_ELEVENLABS_BASE_URL", "http://localhost:8000")
+    api_key, base_url = _resolve_sdk_env()
     client = elevenlabs.ElevenLabs(api_key=api_key, base_url=base_url)
 
     token = client.tokens.single_use.create("realtime_scribe")
@@ -112,11 +108,7 @@ def test_elevenlabs_sdk_single_use_token_contract():
 @pytest.mark.e2e
 def test_elevenlabs_sdk_multichannel_convert():
     """Run multichannel convert and assert SDK parses transcripts[] shape."""
-    api_key = os.getenv("DALSTON_API_KEY")
-    if not api_key:
-        raise RuntimeError("DALSTON_API_KEY environment variable must be set")
-
-    base_url = os.getenv("DALSTON_ELEVENLABS_BASE_URL", "http://localhost:8000")
+    api_key, base_url = _resolve_sdk_env()
     client = elevenlabs.ElevenLabs(api_key=api_key, base_url=base_url)
     stereo_audio = _resolve_stereo_audio_fixture()
 

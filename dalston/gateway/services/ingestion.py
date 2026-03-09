@@ -21,6 +21,8 @@ from dalston.gateway.services.audio_url import (
     download_audio_from_url,
 )
 
+READ_CHUNK_SIZE_BYTES = 1024 * 1024  # 1MB
+
 
 @dataclass
 class IngestedAudio:
@@ -43,7 +45,6 @@ class AudioIngestionService:
 
     def __init__(self, settings: Settings):
         self.settings = settings
-        self._read_chunk_size = 1024 * 1024  # 1MB
 
     async def ingest(
         self,
@@ -167,7 +168,7 @@ class AudioIngestionService:
         chunks: list[bytes] = []
         total_size = 0
         while True:
-            chunk = await file.read(self._read_chunk_size)
+            chunk = await file.read(READ_CHUNK_SIZE_BYTES)
             if not chunk:
                 break
             total_size += len(chunk)

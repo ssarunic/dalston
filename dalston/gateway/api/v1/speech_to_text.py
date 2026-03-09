@@ -8,18 +8,22 @@ Note: ElevenLabs uses xi-api-key header for authentication.
 This is supported by the auth middleware alongside Bearer tokens.
 """
 
+from __future__ import annotations
+
 import json
 import re
 from json import JSONDecodeError
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
+import structlog
 from fastapi import (
     APIRouter,
     Depends,
     File,
     Form,
     HTTPException,
+    Path,
     Query,
     Request,
     Response,
@@ -68,6 +72,7 @@ from dalston.gateway.services.rate_limiter import RedisRateLimiter
 from dalston.gateway.services.storage import StorageService
 
 router = APIRouter(prefix="/speech-to-text", tags=["speech-to-text", "elevenlabs"])
+logger = structlog.get_logger()
 
 
 # =============================================================================
@@ -280,7 +285,8 @@ async def create_transcription(
     security_manager.require_permission(principal, Permission.JOB_CREATE)
     request_id = getattr(request.state, "request_id", None)
 
-    # Enforce docs-backed field location contract (query vs multipart).
+    # Enforce a strict frozen contract: unknown params and wrong locations fail fast.
+    # This is intentionally stricter than permissive "ignore unknown" behavior.
     for query_field in request.query_params.keys():
         ensure_field_location_supported(ElevenLabsEndpoint.BATCH, "query", query_field)
     form_payload = await request.form()
@@ -408,18 +414,15 @@ async def create_transcription(
                     status_code=400,
                     detail=Err.KEYTERMS_MUST_BE_ARRAY,
                 )
-            if len(parsed_keyterms) > 100:
-                raise HTTPException(
-                    status_code=400,
-                    detail=Err.KEYTERMS_EXCEED_LIMIT,
-                )
-            for term in parsed_keyterms:
-                if not isinstance(term, str):
-                    raise HTTPException(
-                        status_code=400,
-                        detail=Err.KEYTERMS_MUST_BE_STRINGS,
-                    )
-            validate_elevenlabs_keyterms(parsed_keyterms)
+            try:
+                validate_elevenlabs_keyterms(parsed_keyterms)
+            except HTTPException as e:
+                detail = str(e.detail)
+                if "cannot exceed" in detail:
+                    detail = Err.KEYTERMS_EXCEED_LIMIT
+                elif "must be a string" in detail:
+                    detail = Err.KEYTERMS_MUST_BE_STRINGS
+                raise HTTPException(status_code=400, detail=detail) from e
             if parsed_keyterms:
                 parameters["vocabulary"] = parsed_keyterms
         except JSONDecodeError as e:
@@ -501,7 +504,9 @@ async def create_transcription(
     if result.failed:
         raise HTTPException(
             status_code=500,
-            detail=Err.TRANSCRIPTION_FAILED.format(error=job.error or "Unknown error"),
+            detail=Err.TRANSCRIPTION_FAILED.format(
+                error=result.job.error or "Unknown error"
+            ),
         )
 
     if result.cancelled:
@@ -781,7 +786,11 @@ def _filter_entities_for_channel(
     channel: int,
     speaker_channel_map: dict[str, int],
 ) -> list[dict[str, Any]] | None:
-    """Filter transcript-level entities down to one channel transcript."""
+    """Filter transcript-level entities down to one channel transcript.
+
+    Falls back to speaker-name suffix matching for legacy payloads that do not
+    carry explicit channel metadata on entities.
+    """
     filtered: list[dict[str, Any]] = []
     for entity in entities:
         explicit_channel = entity.get("channel")
@@ -990,7 +999,11 @@ async def delete_transcript(
     try:
         await storage.delete_job_artifacts(transcription_id)
     except Exception:
-        pass
+        logger.warning(
+            "artifact_cleanup_failed",
+            transcription_id=str(transcription_id),
+            exc_info=True,
+        )
 
     return Response(status_code=204)
 
@@ -1019,7 +1032,9 @@ async def delete_transcript(
 )
 async def export_transcript(
     transcription_id: UUID,
-    format: str,
+    export_path_format: Annotated[
+        str, Path(alias="format", description="Export format")
+    ],
     principal: Annotated[Principal, Depends(get_principal)],
     security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     include_speakers: Annotated[
@@ -1050,7 +1065,7 @@ async def export_transcript(
     Enforces ownership: non-admin principals can only access their own transcripts.
     """
     # Validate format
-    export_format = export_service.validate_format(format)
+    export_format = export_service.validate_format(export_path_format)
 
     # Get job with authorization (transcription_id maps to job_id internally)
     job = await jobs_service.get_job_authorized(

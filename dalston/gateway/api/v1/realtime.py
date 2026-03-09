@@ -609,6 +609,13 @@ async def elevenlabs_realtime_transcription(
     - commit_strategy: "vad" (auto) or "manual"
     - include_timestamps: Include word-level timing
     - keyterms: JSON array of terms to boost recognition
+    - include_language_detection: Include detected language metadata
+    - previous_text: Context hint for continuation prompts
+    - vad_threshold: Voice activity threshold override
+    - min_speech_duration_ms: Minimum speech duration for VAD commits
+    - min_silence_duration_ms: Minimum silence duration for VAD commits
+    - prefix_padding_ms: Pre-speech padding for VAD segmentation
+    - token: Single-use token for browser-safe auth
     """
     # Validate field locations for the ElevenLabs WS query contract.
     for query_field in websocket.query_params.keys():
@@ -675,9 +682,6 @@ async def elevenlabs_realtime_transcription(
                 parsed_vocabulary = json.loads(keyterms)
                 if not isinstance(parsed_vocabulary, list):
                     raise ValueError("keyterms must be a JSON array of strings")
-                for term in parsed_vocabulary:
-                    if not isinstance(term, str):
-                        raise ValueError("keyterms must contain only strings")
                 validate_elevenlabs_keyterms(parsed_vocabulary)
                 # Set to None if empty array
                 if not parsed_vocabulary:
@@ -1206,7 +1210,10 @@ async def _elevenlabs_client_to_worker(
                             if audio_b64:
                                 audio_bytes = base64.b64decode(audio_b64)
                                 if decode_ulaw_to_pcm16:
-                                    audio_bytes = _decode_ulaw_to_pcm16(audio_bytes)
+                                    # Keep CPU-heavy mu-law decoding off the event loop.
+                                    audio_bytes = await asyncio.to_thread(
+                                        _decode_ulaw_to_pcm16, audio_bytes
+                                    )
                                 await worker_ws.send(audio_bytes)
 
                             # Handle commit flag

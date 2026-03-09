@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import UUID, uuid4
@@ -133,7 +133,7 @@ class SessionToken:
 
     def to_dict(self) -> dict:
         """Convert to dictionary for Redis storage."""
-        return {
+        data = {
             "token_hash": self.token_hash,
             "tenant_id": str(self.tenant_id),
             "parent_key_id": str(self.parent_key_id),
@@ -142,13 +142,17 @@ class SessionToken:
             "created_at": self.created_at.isoformat(),
             "token_type": self.token_type,
             "single_use": "true" if self.single_use else "false",
-            "consumed_at": self.consumed_at.isoformat() if self.consumed_at else "",
         }
+        # Keep consumed_at absent until the token is actually consumed so HSETNX
+        # can be used as an atomic first-consumer guard.
+        if self.consumed_at is not None:
+            data["consumed_at"] = self.consumed_at.isoformat()
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> SessionToken:
         """Create from dictionary (Redis storage)."""
-        consumed_at_raw = data.get("consumed_at", "")
+        consumed_at_raw = data.get("consumed_at")
         return cls(
             token_hash=data["token_hash"],
             tenant_id=UUID(data["tenant_id"]),
@@ -514,6 +518,7 @@ class AuthService:
         # Double-check expiry (Redis TTL handles cleanup, but be safe)
         if session_token.is_expired:
             return None
+        # consumed_at is written exactly once by consume_session_token.
         if session_token.single_use and session_token.consumed_at is not None:
             return None
 
@@ -535,12 +540,13 @@ class AuthService:
         token_hash = hash_api_key(raw_token)
         token_key = REDIS_SESSION_TOKEN.format(hash=token_hash)
         consumed_at = datetime.now(UTC).isoformat()
+        # Atomic first-consumer guard for single-use tokens. A concurrent caller
+        # may pass validate_session_token, but only one request can set consumed_at.
         marked = await self.redis.hsetnx(token_key, "consumed_at", consumed_at)
         if marked != 1:
             return None
 
-        session_token.consumed_at = datetime.fromisoformat(consumed_at)
-        return session_token
+        return replace(session_token, consumed_at=datetime.fromisoformat(consumed_at))
 
     async def revoke_session_token(self, raw_token: str) -> bool:
         """Revoke a session token immediately.
