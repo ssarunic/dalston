@@ -92,11 +92,14 @@ async def test_nemo_msdd_routes_through_venv_profile_from_catalog(
     )
 
     envelope = SimpleNamespace(task_id="task-1", job_id="job-1", message_id="msg-1")
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"audio")
     await pipeline._handle_stage(
         "diarize",
         envelope,
         {"speaker_detection": "diarize", "runtime_model_id": "nemo-msdd-test"},
         b"audio",
+        audio,
     )
 
     output_path = (

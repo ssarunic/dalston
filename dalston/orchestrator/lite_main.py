@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,7 +15,7 @@ from uuid import uuid4
 import structlog
 
 from dalston.common.queue_backends import InMemoryQueue, QueueEnvelope
-from dalston.config import get_settings
+from dalston.config import Settings, get_settings
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.executors import (
@@ -44,6 +46,7 @@ logger = structlog.get_logger()
 
 # Maximum wall-clock seconds allowed for a single lite job across all stages.
 _JOB_TIMEOUT_S = 120.0
+_DEFAULT_LITE_TRANSCRIBE_RUNTIME = "faster-whisper"
 
 
 # ---------------------------------------------------------------------------
@@ -130,23 +133,56 @@ def _make_stage_binding(
     )
 
 
-_DEFAULT_STAGE_BINDINGS: dict[str, _LiteStageBinding] = {
-    "transcribe": _make_stage_binding(
-        stage="transcribe",
-        runtime="lite-transcribe",
-        compute=_compute_transcribe,
-    ),
-    "diarize": _make_stage_binding(
-        stage="diarize",
-        runtime="lite-diarize",
-        compute=_compute_diarize,
-    ),
-    "pii_detect": _make_stage_binding(
-        stage="pii_detect",
-        runtime="lite-pii-detect",
-        compute=_compute_pii_detect,
-    ),
-}
+def _make_engine_ref_binding(
+    *,
+    stage: str,
+    runtime: str,
+    engine_ref: str,
+    execution_profile: str = "venv",
+) -> _LiteStageBinding:
+    return _LiteStageBinding(
+        entry=CatalogEntry(
+            runtime=runtime,
+            image=f"dalston/lite-{stage}:{execution_profile}",
+            capabilities=EngineCapabilities(
+                runtime=runtime,
+                version="lite",
+                stages=[stage],
+            ),
+            execution_profile=execution_profile,
+        ),
+        engine_ref=engine_ref,
+    )
+
+
+def _build_default_stage_bindings(settings: Settings) -> dict[str, _LiteStageBinding]:
+    if settings.lite_transcribe_backend == "real":
+        transcribe = _make_engine_ref_binding(
+            stage="transcribe",
+            runtime=_DEFAULT_LITE_TRANSCRIBE_RUNTIME,
+            engine_ref=settings.lite_transcribe_engine_ref,
+            execution_profile="venv",
+        )
+    else:
+        transcribe = _make_stage_binding(
+            stage="transcribe",
+            runtime="lite-transcribe",
+            compute=_compute_transcribe,
+        )
+
+    return {
+        "transcribe": transcribe,
+        "diarize": _make_stage_binding(
+            stage="diarize",
+            runtime="lite-diarize",
+            compute=_compute_diarize,
+        ),
+        "pii_detect": _make_stage_binding(
+            stage="pii_detect",
+            runtime="lite-pii-detect",
+            compute=_compute_pii_detect,
+        ),
+    }
 
 
 @dataclass
@@ -193,22 +229,36 @@ class LitePipeline:
             if missing:
                 raise LitePrerequisiteMissingError(cap.profile, missing)
 
+        settings = get_settings()
         self._queue = InMemoryQueue()
         self._artifacts = artifacts
         self._persist_artifacts = persist_artifacts
         self._ephemeral_mode = ephemeral_mode
         self._profile = cap.profile
         self._profile_cap = cap
+        self._stage_outputs: dict[str, dict[str, dict[str, Any]]] = {}
         self._stage_bindings = dict(
-            _DEFAULT_STAGE_BINDINGS if stage_bindings is None else stage_bindings
+            _build_default_stage_bindings(settings)
+            if stage_bindings is None
+            else stage_bindings
         )
         if executors is None:
-            lite_output_dir = Path(get_settings().lite_artifacts_dir)
+            lite_output_dir = Path(settings.lite_artifacts_dir)
+            lite_venv_python = Path(
+                settings.lite_venv_python or sys.executable
+            ).expanduser()
+            venv_runtimes = {
+                binding.entry.runtime: lite_venv_python
+                for binding in self._stage_bindings.values()
+                if binding.entry.execution_profile == "venv"
+            }
             self._executors: dict[str, RuntimeExecutor] = {}
             self._executor_factories: dict[str, Callable[[], RuntimeExecutor]] = {
                 "inproc": lambda: InProcExecutor(output_dir=lite_output_dir),
                 "venv": lambda: VenvExecutor(
-                    env_manager=VenvEnvironmentManager(),
+                    env_manager=VenvEnvironmentManager(
+                        runtime_pythons=venv_runtimes,
+                    ),
                     output_dir=lite_output_dir,
                 ),
             }
@@ -252,10 +302,25 @@ class LitePipeline:
         validate_request(self._profile, parameters)
 
         job_id = job_id or str(uuid4())
+        self._stage_outputs[job_id] = {}
+
+        transcribe_audio_path: Path | None = None
+        temp_audio_path: Path | None = None
         if self._persist_artifacts:
-            await self._artifacts.write_bytes(
+            audio_uri = await self._artifacts.write_bytes(
                 f"jobs/{job_id}/audio/original.wav", audio_bytes
             )
+            transcribe_audio_path = self._artifact_uri_to_path(audio_uri)
+
+        if transcribe_audio_path is None:
+            with tempfile.NamedTemporaryFile(
+                prefix="dalston-lite-audio-",
+                suffix=".wav",
+                delete=False,
+            ) as handle:
+                handle.write(audio_bytes)
+                temp_audio_path = Path(handle.name)
+            transcribe_audio_path = temp_audio_path
 
         logger.info(
             "lite_job_started",
@@ -263,7 +328,17 @@ class LitePipeline:
             profile=self._profile.value,
         )
 
-        result = await self._run_loop(job_id, parameters, audio_bytes)
+        try:
+            result = await self._run_loop(
+                job_id,
+                parameters,
+                audio_bytes,
+                transcribe_audio_path,
+            )
+        finally:
+            self._stage_outputs.pop(job_id, None)
+            if temp_audio_path is not None:
+                temp_audio_path.unlink(missing_ok=True)
 
         logger.info(
             "lite_job_completed",
@@ -278,7 +353,11 @@ class LitePipeline:
     # ------------------------------------------------------------------
 
     async def _run_loop(
-        self, job_id: str, parameters: dict, audio_bytes: bytes
+        self,
+        job_id: str,
+        parameters: dict,
+        audio_bytes: bytes,
+        transcribe_audio_path: Path,
     ) -> dict:
         """Drive the stage queue for the active profile with a deadline.
 
@@ -303,6 +382,7 @@ class LitePipeline:
                         envelope,
                         parameters,
                         audio_bytes,
+                        transcribe_audio_path,
                     )
                     await self._queue.ack(stage=stage, message_id=envelope.message_id)
                     if result is not None:
@@ -315,6 +395,7 @@ class LitePipeline:
         envelope: QueueEnvelope,
         parameters: dict,
         audio_bytes: bytes,
+        transcribe_audio_path: Path,
     ) -> dict | None:
         """Process one stage envelope.
 
@@ -335,8 +416,13 @@ class LitePipeline:
 
         if stage == "transcribe":
             payload = await self._execute_stage(
-                stage, envelope, parameters, audio_bytes
+                stage,
+                envelope,
+                parameters,
+                audio_bytes,
+                transcribe_audio_path,
             )
+            self._record_stage_output(job_id, stage, payload)
             if self._persist_artifacts:
                 await self._artifacts.write_bytes(
                     f"jobs/{job_id}/tasks/transcribe/output.json",
@@ -359,8 +445,13 @@ class LitePipeline:
 
         if stage == "diarize":
             diarize_payload = await self._execute_stage(
-                stage, envelope, parameters, audio_bytes
+                stage,
+                envelope,
+                parameters,
+                audio_bytes,
+                transcribe_audio_path,
             )
+            self._record_stage_output(job_id, stage, diarize_payload)
             if self._persist_artifacts:
                 await self._artifacts.write_bytes(
                     f"jobs/{job_id}/tasks/diarize/output.json",
@@ -377,8 +468,13 @@ class LitePipeline:
 
         if stage == "pii_detect":
             pii_payload = await self._execute_stage(
-                stage, envelope, parameters, audio_bytes
+                stage,
+                envelope,
+                parameters,
+                audio_bytes,
+                transcribe_audio_path,
             )
+            self._record_stage_output(job_id, stage, pii_payload)
             if self._persist_artifacts:
                 await self._artifacts.write_bytes(
                     f"jobs/{job_id}/tasks/pii_detect/output.json",
@@ -394,7 +490,7 @@ class LitePipeline:
             return None
 
         # merge — assemble profile-specific transcript and return.
-        return await self._handle_merge(job_id, parameters)
+        return await self._handle_merge(job_id)
 
     async def _execute_stage(
         self,
@@ -402,6 +498,7 @@ class LitePipeline:
         envelope: QueueEnvelope,
         parameters: dict,
         audio_bytes: bytes,
+        transcribe_audio_path: Path,
     ) -> dict[str, Any]:
         binding = self._stage_bindings.get(stage)
         if binding is None:
@@ -409,6 +506,7 @@ class LitePipeline:
                 f"No lite runtime binding configured for stage '{stage}'"
             )
 
+        previous_outputs = dict(self._stage_outputs.get(envelope.job_id, {}))
         if (
             self._ephemeral_mode
             and binding.entry.execution_profile == "inproc"
@@ -421,7 +519,8 @@ class LitePipeline:
                 stage=stage,
                 config=parameters,
                 payload=audio_bytes,
-                previous_outputs={},
+                previous_outputs=previous_outputs,
+                audio_path=transcribe_audio_path if stage == "transcribe" else None,
                 materialized_artifacts={},
             )
             ctx = BatchTaskContext(
@@ -447,6 +546,10 @@ class LitePipeline:
                 f"(runtime '{binding.entry.runtime}', stage '{stage}')"
             )
 
+        artifacts: dict[str, Path] = {}
+        if stage == "transcribe":
+            artifacts["audio"] = transcribe_audio_path
+
         request = ExecutionRequest(
             task_id=envelope.task_id,
             job_id=envelope.job_id,
@@ -454,9 +557,9 @@ class LitePipeline:
             runtime=binding.entry.runtime,
             instance=f"lite-{self._profile.value}",
             config=parameters,
-            previous_outputs={},
+            previous_outputs=previous_outputs,
             payload=None,
-            artifacts={},
+            artifacts=artifacts,
             engine=binding.engine_factory() if binding.engine_factory else None,
             engine_ref=binding.engine_ref,
             metadata={
@@ -481,41 +584,87 @@ class LitePipeline:
         self._executors[profile] = executor
         return executor
 
-    async def _handle_merge(self, job_id: str, parameters: dict) -> dict:
+    @staticmethod
+    def _artifact_uri_to_path(uri: str | None) -> Path | None:
+        if uri is None or not uri.startswith("file://"):
+            return None
+        return Path(uri.removeprefix("file://"))
+
+    def _record_stage_output(
+        self, job_id: str, stage: str, payload: dict[str, Any]
+    ) -> None:
+        self._stage_outputs.setdefault(job_id, {})[stage] = payload
+
+    @staticmethod
+    def _normalize_segments(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        raw = payload.get("segments")
+        if not isinstance(raw, list):
+            return []
+        return [segment for segment in raw if isinstance(segment, dict)]
+
+    @staticmethod
+    def _resolve_text(payload: dict[str, Any], segments: list[dict[str, Any]]) -> str:
+        text = payload.get("text")
+        if isinstance(text, str) and text.strip():
+            return text
+        derived = " ".join(
+            segment.get("text", "").strip()
+            for segment in segments
+            if isinstance(segment.get("text"), str)
+        ).strip()
+        return derived
+
+    async def _handle_merge(self, job_id: str) -> dict:
         """Assemble final transcript and return result metadata."""
+        stage_outputs = self._stage_outputs.get(job_id, {})
+        transcribe_payload = stage_outputs.get("transcribe")
+        if not isinstance(transcribe_payload, dict):
+            raise RuntimeError("Missing transcribe output for lite merge")
+
+        segments = self._normalize_segments(transcribe_payload)
         if self._profile == LiteProfile.SPEAKER:
-            num_speakers = parameters.get("num_speakers") or 2
             transcript: dict = {
                 "job_id": job_id,
                 "status": "completed",
-                "text": "lite transcript",
+                "text": self._resolve_text(transcribe_payload, segments),
                 "profile": LiteProfile.SPEAKER.value,
-                "segments": [
-                    {
-                        "text": "lite transcript",
-                        "speaker": "SPEAKER_00",
-                        "start": 0.0,
-                        "end": 2.0,
-                    }
-                ],
-                "speakers": [f"SPEAKER_{i:02d}" for i in range(num_speakers)],
+                "segments": segments,
             }
+            diarize_payload = stage_outputs.get("diarize")
+            if isinstance(diarize_payload, dict):
+                diarize_segments = self._normalize_segments(diarize_payload)
+                if diarize_segments:
+                    transcript["segments"] = diarize_segments
+                speakers = diarize_payload.get("speakers")
+                if isinstance(speakers, list):
+                    transcript["speakers"] = [
+                        speaker for speaker in speakers if isinstance(speaker, str)
+                    ]
         elif self._profile == LiteProfile.COMPLIANCE:
             transcript = {
                 "job_id": job_id,
                 "status": "completed",
-                "text": "lite transcript",
+                "text": self._resolve_text(transcribe_payload, segments),
                 "profile": LiteProfile.COMPLIANCE.value,
-                "segments": [{"text": "lite transcript"}],
-                "pii_entities": [],
+                "segments": segments,
             }
+            pii_payload = stage_outputs.get("pii_detect")
+            entities: list[Any] = []
+            if isinstance(pii_payload, dict):
+                raw_entities = pii_payload.get("entities")
+                if isinstance(raw_entities, list):
+                    entities = raw_entities
+                anonymized_text = pii_payload.get("anonymized_text")
+                if isinstance(anonymized_text, str) and anonymized_text.strip():
+                    transcript["text"] = anonymized_text
+            transcript["pii_entities"] = entities
         else:  # core
             transcript = {
                 "job_id": job_id,
                 "status": "completed",
-                "text": "lite transcript",
+                "text": self._resolve_text(transcribe_payload, segments),
                 "profile": LiteProfile.CORE.value,
-                "segments": [{"text": "lite transcript"}],
+                "segments": segments,
             }
 
         output_uri: str | None = None

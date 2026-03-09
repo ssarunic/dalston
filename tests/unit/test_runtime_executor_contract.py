@@ -18,7 +18,11 @@ from dalston.engine_sdk.local_runner import LocalRunner
 from dalston.engine_sdk.types import EngineCapabilities, EngineInput, EngineOutput
 from dalston.gateway.services.artifact_store import LocalFilesystemArtifactStoreAdapter
 from dalston.orchestrator.catalog import CatalogEntry
-from dalston.orchestrator.lite_main import LitePipeline, _LiteStageBinding
+from dalston.orchestrator.lite_main import (
+    LitePipeline,
+    _LiteStageBinding,
+    build_default_pipeline,
+)
 
 
 class _EchoEngine(Engine):
@@ -110,6 +114,8 @@ def test_inproc_executor_matches_local_runner_contract(tmp_path: Path) -> None:
 async def test_lite_pipeline_selects_executor_from_execution_profile(
     tmp_path: Path,
 ) -> None:
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"audio")
     artifacts = LocalFilesystemArtifactStoreAdapter(str(tmp_path / "artifacts"))
     executor = _RecordingExecutor(
         payload={
@@ -130,6 +136,7 @@ async def test_lite_pipeline_selects_executor_from_execution_profile(
         envelope,
         {"language": "en"},
         b"audio",
+        audio,
     )
 
     assert len(executor.requests) == 1
@@ -152,6 +159,8 @@ async def test_lite_pipeline_selects_executor_from_execution_profile(
 async def test_lite_pipeline_raises_when_profile_executor_is_missing(
     tmp_path: Path,
 ) -> None:
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"audio")
     artifacts = LocalFilesystemArtifactStoreAdapter(str(tmp_path / "artifacts"))
     pipeline = LitePipeline(
         artifacts,
@@ -167,6 +176,7 @@ async def test_lite_pipeline_raises_when_profile_executor_is_missing(
             envelope,
             {"language": "en"},
             b"audio",
+            audio,
         )
 
 
@@ -174,6 +184,8 @@ async def test_lite_pipeline_raises_when_profile_executor_is_missing(
 async def test_lite_pipeline_initializes_only_requested_profile_executor(
     tmp_path: Path,
 ) -> None:
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"audio")
     artifacts = LocalFilesystemArtifactStoreAdapter(str(tmp_path / "artifacts"))
     pipeline = LitePipeline(
         artifacts,
@@ -189,7 +201,25 @@ async def test_lite_pipeline_initializes_only_requested_profile_executor(
         envelope,
         {"language": "en"},
         b"audio",
+        audio,
     )
 
     assert "inproc" in pipeline._executors
     assert "venv" not in pipeline._executors
+
+
+def test_default_lite_pipeline_uses_real_transcribe_binding(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("DALSTON_MODE", "lite")
+    monkeypatch.setenv("DALSTON_LITE_TRANSCRIBE_BACKEND", "real")
+    monkeypatch.setenv("DALSTON_LITE_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+
+    pipeline = build_default_pipeline()
+    binding = pipeline._stage_bindings["transcribe"]
+
+    assert binding.entry.execution_profile == "venv"
+    assert binding.entry.runtime == "faster-whisper"
+    assert binding.engine_ref is not None
+    assert binding.engine_ref.endswith("engine.py:WhisperEngine")

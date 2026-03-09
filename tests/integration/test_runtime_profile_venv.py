@@ -81,6 +81,9 @@ async def test_lite_pipeline_routes_venv_stage_execution(tmp_path: Path) -> None
 
     transcript_path = Path(result["transcript_uri"].removeprefix("file://"))
     assert transcript_path.exists()
+    transcript_data = json.loads(transcript_path.read_text())
+    assert transcript_data["text"] == "venv transcript"
+    assert transcript_data["segments"][0]["text"] == "venv transcript"
 
     transcribe_output = (
         tmp_path

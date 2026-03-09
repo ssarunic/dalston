@@ -76,3 +76,9 @@ def _reset_db_session() -> Generator[None, None, None]:
     reset_session_state()
     yield
     reset_session_state()
+
+
+@pytest.fixture(autouse=True)
+def _default_lite_stub_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep tests deterministic by avoiding heavyweight local ASR defaults."""
+    monkeypatch.setenv("DALSTON_LITE_TRANSCRIBE_BACKEND", "stub")

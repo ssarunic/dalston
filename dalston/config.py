@@ -83,6 +83,28 @@ class Settings(BaseSettings):
         default="./.dalston/artifacts",
         alias="DALSTON_LITE_ARTIFACTS_DIR",
     )
+    lite_transcribe_backend: Literal["real", "stub"] = Field(
+        default="real",
+        alias="DALSTON_LITE_TRANSCRIBE_BACKEND",
+        description=(
+            "Lite transcribe backend. "
+            "'real': execute a local engine runtime (default). "
+            "'stub': use deterministic placeholder transcript."
+        ),
+    )
+    lite_transcribe_engine_ref: str = Field(
+        default="engines/stt-transcribe/faster-whisper/engine.py:WhisperEngine",
+        alias="DALSTON_LITE_TRANSCRIBE_ENGINE_REF",
+        description="Engine reference used by lite transcribe backend when backend='real'.",
+    )
+    lite_venv_python: str | None = Field(
+        default=None,
+        alias="DALSTON_LITE_VENV_PYTHON",
+        description=(
+            "Python executable used for lite venv runtimes. "
+            "Defaults to the current interpreter when unset."
+        ),
+    )
 
     # Webhooks
     webhook_secret: str = Field(
