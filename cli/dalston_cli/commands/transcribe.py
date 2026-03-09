@@ -265,13 +265,16 @@ def transcribe(
         ),
     ] = None,
     retention: Annotated[
-        int,
+        int | None,
         typer.Option(
             "--retention",
             "-r",
-            help="Retention in days. 0=transient (no storage), -1=permanent, 1-3650=days.",
+            help=(
+                "Retention in days. 0=transient (no storage), -1=permanent, "
+                "1-3650=days. Omit to use server default."
+            ),
         ),
-    ] = 30,
+    ] = None,
     # Lite mode profile selection (M58).  Ignored in distributed mode.
     profile: Annotated[
         str,
@@ -500,8 +503,13 @@ def transcribe(
                 output_job_created(job, json_output)
                 continue
 
-            # Wait for completion with progress
-            result = wait_with_progress(client, job.id, quiet or json_output)
+            # Retention=0 in lite mode can return an inline terminal response.
+            job_status = getattr(job.status, "value", str(job.status)).lower()
+            if job_status in {"completed", "failed", "cancelled"}:
+                result = job
+            else:
+                # Wait for completion with progress
+                result = wait_with_progress(client, job.id, quiet or json_output)
 
             if result.status.value == "failed":
                 error_console.print(

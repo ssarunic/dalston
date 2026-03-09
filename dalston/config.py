@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Webhook constants
@@ -186,6 +186,16 @@ class Settings(BaseSettings):
             "'user' (future user auth)"
         ),
     )
+
+    @model_validator(mode="after")
+    def _apply_lite_mode_defaults(self) -> "Settings":
+        """Apply mode-specific defaults when fields are not explicitly set."""
+        if (
+            self.runtime_mode == "lite"
+            and "retention_default_days" not in self.model_fields_set
+        ):
+            self.retention_default_days = 0
+        return self
 
 
 @lru_cache

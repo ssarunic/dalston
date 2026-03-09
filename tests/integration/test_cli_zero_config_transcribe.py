@@ -16,6 +16,10 @@ class _PendingStatus:
     value = "pending"
 
 
+class _CompletedStatus:
+    value = "completed"
+
+
 @dataclass
 class _FakeJob:
     id: str
@@ -45,6 +49,34 @@ class _FakeDalston:
             status=_PendingStatus(),
             created_at=datetime.now(UTC),
         )
+
+
+@dataclass
+class _FakeCompletedJob:
+    id: str
+    status: _CompletedStatus
+    created_at: datetime
+    display_name: str | None = None
+
+
+class _FakeDalstonInlineComplete(_FakeDalston):
+    def __init__(
+        self, base_url: str, api_key: str | None = None, timeout: float = 120.0
+    ):
+        super().__init__(base_url=base_url, api_key=api_key, timeout=timeout)
+        self.wait_for_completion_calls = 0
+
+    def transcribe(self, **kwargs):
+        self.transcribe_models.append(kwargs["model"])
+        return _FakeCompletedJob(
+            id="job_inline",
+            status=_CompletedStatus(),
+            created_at=datetime.now(UTC),
+        )
+
+    def wait_for_completion(self, *_args, **_kwargs):
+        self.wait_for_completion_calls += 1
+        return self.transcribe()
 
 
 def test_local_zero_config_bootstrap_uses_default_model(
@@ -258,8 +290,42 @@ def test_bootstrap_disabled_validates_explicit_model_readiness(
     )
 
     assert result.exit_code == 0
-    assert len(_FakeDalston.instances) == 1
-    assert _FakeDalston.instances[0].transcribe_models == ["distil-small"]
+
+
+def test_wait_skips_polling_for_inline_completed_response(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    audio_file = tmp_path / "sample.wav"
+    audio_file.write_bytes(b"RIFF....WAVEfmt ")
+
+    _FakeDalstonInlineComplete.instances.clear()
+    monkeypatch.setattr(cli_main, "Dalston", _FakeDalstonInlineComplete)
+
+    mock_preflight = Mock(return_value=None)
+    monkeypatch.setattr(cli_main.transcribe, "run_preflight", mock_preflight)
+    monkeypatch.setattr(
+        cli_main.transcribe,
+        "ensure_local_server_ready",
+        Mock(
+            return_value=ServerReadyResult(started=False, skipped=False, managed=False)
+        ),
+    )
+    monkeypatch.setattr(cli_main.transcribe, "ensure_model_ready", Mock())
+    monkeypatch.setattr(cli_main.transcribe, "output_transcript", Mock())
+
+    result = runner.invoke(
+        cli_main.app,
+        [
+            "--server",
+            "http://127.0.0.1:8000",
+            "--quiet",
+            "transcribe",
+            str(audio_file),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert len(_FakeDalstonInlineComplete.instances) == 1
+    assert _FakeDalstonInlineComplete.instances[0].wait_for_completion_calls == 0
     mock_preflight.assert_called_once()
-    mock_server_ready.assert_not_called()
-    mock_read_model_status.assert_called_once()

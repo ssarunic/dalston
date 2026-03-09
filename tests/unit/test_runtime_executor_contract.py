@@ -125,7 +125,12 @@ async def test_lite_pipeline_selects_executor_from_execution_profile(
     )
 
     envelope = SimpleNamespace(task_id="task-1", job_id="job-1", message_id="msg-1")
-    await pipeline._handle_stage("transcribe", envelope, {"language": "en"})
+    await pipeline._handle_stage(
+        "transcribe",
+        envelope,
+        {"language": "en"},
+        b"audio",
+    )
 
     assert len(executor.requests) == 1
     request = executor.requests[0]
@@ -157,7 +162,12 @@ async def test_lite_pipeline_raises_when_profile_executor_is_missing(
 
     envelope = SimpleNamespace(task_id="task-1", job_id="job-1", message_id="msg-1")
     with pytest.raises(RuntimeError, match="No executor configured for profile 'venv'"):
-        await pipeline._handle_stage("transcribe", envelope, {"language": "en"})
+        await pipeline._handle_stage(
+            "transcribe",
+            envelope,
+            {"language": "en"},
+            b"audio",
+        )
 
 
 @pytest.mark.asyncio
@@ -174,7 +184,12 @@ async def test_lite_pipeline_initializes_only_requested_profile_executor(
     assert pipeline._executors == {}
 
     envelope = SimpleNamespace(task_id="task-1", job_id="job-1", message_id="msg-1")
-    await pipeline._handle_stage("transcribe", envelope, {"language": "en"})
+    await pipeline._handle_stage(
+        "transcribe",
+        envelope,
+        {"language": "en"},
+        b"audio",
+    )
 
     assert "inproc" in pipeline._executors
     assert "venv" not in pipeline._executors

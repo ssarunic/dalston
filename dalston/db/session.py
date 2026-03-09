@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from uuid import UUID
@@ -25,6 +26,8 @@ DEFAULT_TENANT_NAME = "default"
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 _mode: str | None = None
+_initialized_database_url: str | None = None
+_db_init_lock: asyncio.Lock | None = None
 
 
 class _EngineProxy:
@@ -59,9 +62,7 @@ def _ensure_sqlite_parent_dir(database_url: str) -> None:
 def _build_engine() -> tuple[AsyncEngine, str]:
     settings = get_settings()
     mode = settings.runtime_mode
-    database_url = (
-        settings.database_url if mode == "distributed" else settings.lite_database_url
-    )
+    database_url = _database_url_for_settings()
     _ensure_sqlite_parent_dir(database_url)
     created_engine = create_async_engine(
         database_url,
@@ -69,6 +70,22 @@ def _build_engine() -> tuple[AsyncEngine, str]:
         pool_pre_ping=mode == "distributed",
     )
     return created_engine, mode
+
+
+def _database_url_for_settings() -> str:
+    settings = get_settings()
+    return (
+        settings.database_url
+        if settings.runtime_mode == "distributed"
+        else settings.lite_database_url
+    )
+
+
+def _get_init_lock() -> asyncio.Lock:
+    global _db_init_lock
+    if _db_init_lock is None:
+        _db_init_lock = asyncio.Lock()
+    return _db_init_lock
 
 
 def get_engine() -> AsyncEngine:
@@ -97,6 +114,7 @@ def async_session() -> AsyncSession:
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Yield an async database session."""
+    await init_db()
     async with async_session() as session:
         try:
             yield session
@@ -108,14 +126,20 @@ async def init_db() -> None:
     """Initialize mode-specific database schema and defaults via Alembic."""
     from dalston.db.migrate import upgrade_to_head
 
-    settings = get_settings()
-    database_url = (
-        settings.database_url
-        if settings.runtime_mode == "distributed"
-        else settings.lite_database_url
-    )
-    await upgrade_to_head(database_url)
-    await _ensure_default_tenant()
+    global _initialized_database_url
+    database_url = _database_url_for_settings()
+
+    # Fast path for already-initialized database URL.
+    if _initialized_database_url == database_url:
+        return
+
+    # Concurrency-safe one-time init per process and DB URL.
+    async with _get_init_lock():
+        if _initialized_database_url == database_url:
+            return
+        await upgrade_to_head(database_url)
+        await _ensure_default_tenant()
+        _initialized_database_url = database_url
 
 
 async def _ensure_default_tenant() -> None:
@@ -139,7 +163,9 @@ async def _ensure_default_tenant() -> None:
 
 def reset_session_state() -> None:
     """Testing utility for resetting lazy globals."""
-    global _engine, _session_factory, _mode
+    global _engine, _session_factory, _mode, _initialized_database_url, _db_init_lock
     _engine = None
     _session_factory = None
     _mode = None
+    _initialized_database_url = None
+    _db_init_lock = None

@@ -108,7 +108,6 @@ class LocalFilesystemArtifactStoreAdapter:
 
     def __init__(self, root_dir: str):
         self._root = Path(root_dir).expanduser().resolve()
-        self._root.mkdir(parents=True, exist_ok=True)
 
     def _ensure_within_root(self, path: Path, source: str) -> Path:
         resolved = path.expanduser().resolve()
@@ -164,6 +163,73 @@ class LocalFilesystemArtifactStoreAdapter:
         return await self.write_bytes(
             key, json.dumps(payload).encode("utf-8"), "application/json"
         )
+
+
+class InMemoryArtifactStoreAdapter:
+    """Ephemeral adapter backed by in-memory bytes.
+
+    Intended for request-scoped lite mode flows where artifacts should never
+    touch disk. The store can be discarded after request completion.
+    """
+
+    def __init__(self):
+        self._objects: dict[str, bytes] = {}
+
+    @staticmethod
+    def _normalize_key(key: str) -> str:
+        normalized = key.lstrip("/")
+        if not normalized:
+            raise ValueError("Artifact key cannot be empty")
+        return normalized
+
+    @classmethod
+    def _key_for_uri(cls, uri: str) -> str:
+        if not uri.startswith("memory://"):
+            raise ValueError("Unsupported in-memory artifact URI")
+        key = uri.removeprefix("memory://").lstrip("/")
+        return cls._normalize_key(key)
+
+    @classmethod
+    def _prefix_matches(cls, key: str, prefix: str) -> bool:
+        clean_prefix = prefix.rstrip("/")
+        if not clean_prefix:
+            return True
+        return key == clean_prefix or key.startswith(f"{clean_prefix}/")
+
+    async def uri_for_key(self, key: str) -> str:
+        return f"memory://{self._normalize_key(key)}"
+
+    async def write_bytes(
+        self, key: str, payload: bytes, content_type: str | None = None
+    ) -> str:
+        del content_type
+        normalized = self._normalize_key(key)
+        self._objects[normalized] = bytes(payload)
+        return await self.uri_for_key(normalized)
+
+    async def read_bytes(self, uri: str) -> bytes:
+        key = self._key_for_uri(uri)
+        if key not in self._objects:
+            raise FileNotFoundError(uri)
+        return self._objects[key]
+
+    async def exists(self, uri: str) -> bool:
+        key = self._key_for_uri(uri)
+        return key in self._objects
+
+    async def has_prefix(self, prefix: str) -> bool:
+        normalized_prefix = prefix.lstrip("/")
+        return any(
+            self._prefix_matches(key, normalized_prefix) for key in self._objects
+        )
+
+    async def delete_prefix(self, prefix: str) -> None:
+        normalized_prefix = prefix.lstrip("/")
+        keys = [
+            key for key in self._objects if self._prefix_matches(key, normalized_prefix)
+        ]
+        for key in keys:
+            self._objects.pop(key, None)
 
 
 def build_artifact_store(settings: Settings) -> ArtifactStore:

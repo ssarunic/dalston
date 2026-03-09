@@ -302,7 +302,7 @@ class Dalston:
         pii_entity_types: list[str] | None = None,
         redact_pii_audio: bool = False,
         pii_redaction_mode: PIIRedactionMode | str | None = None,
-        retention: int = 30,
+        retention: int | None = None,
         lite_profile: str = "core",
     ) -> Job:
         """Submit audio for transcription.
@@ -326,12 +326,13 @@ class Dalston:
             redact_pii_audio: Generate redacted audio file with PII removed.
             pii_redaction_mode: Audio redaction mode (silence or beep).
             retention: Retention in days. 0=transient (no storage), -1=permanent
-                (never delete), 1-3650=days. Default 30.
+                (never delete), 1-3650=days. If omitted, server default applies.
             lite_profile: Pipeline profile for lite mode servers: "core" (default),
                 "speaker", or "compliance". Ignored by distributed mode servers.
 
         Returns:
-            Job object with ID and initial status.
+            Job object returned by the server (pending for async workflows,
+            completed when the server responds inline).
 
         Raises:
             ValidationError: If neither file nor audio_url provided, or invalid model.
@@ -389,8 +390,9 @@ class Dalston:
                 else pii_redaction_mode
             )
 
-        # Retention: 0=transient, -1=permanent, N=days
-        data["retention"] = retention
+        # Retention: 0=transient, -1=permanent, N=days. Omit to use server default.
+        if retention is not None:
+            data["retention"] = retention
 
         # Lite mode profile selection (M58). Ignored by distributed servers.
         data["lite_profile"] = lite_profile or "core"
@@ -426,7 +428,7 @@ class Dalston:
             if opened_file is not None:
                 opened_file.close()
 
-        if response.status_code != 201:
+        if response.status_code not in (200, 201):
             _handle_error(response)
 
         return _parse_job(response.json())
@@ -1249,7 +1251,7 @@ class AsyncDalston:
         pii_entity_types: list[str] | None = None,
         redact_pii_audio: bool = False,
         pii_redaction_mode: PIIRedactionMode | str | None = None,
-        retention: int = 30,
+        retention: int | None = None,
         lite_profile: str = "core",
     ) -> Job:
         """Submit audio for transcription.
@@ -1272,13 +1274,14 @@ class AsyncDalston:
                 If not specified, uses default entity types.
             redact_pii_audio: Generate redacted audio file with PII removed.
             retention: Retention in days. 0=transient (no storage), -1=permanent
-                (never delete), 1-3650=days. Default 30.
+                (never delete), 1-3650=days. If omitted, server default applies.
             pii_redaction_mode: Audio redaction mode (silence or beep).
             lite_profile: Pipeline profile for lite mode servers: "core" (default),
                 "speaker", or "compliance". Ignored by distributed mode servers.
 
         Returns:
-            Job object with ID and initial status.
+            Job object returned by the server (pending for async workflows,
+            completed when the server responds inline).
         """
         if file is None and audio_url is None:
             raise ValidationError("Either file or audio_url must be provided")
@@ -1332,8 +1335,9 @@ class AsyncDalston:
                 else pii_redaction_mode
             )
 
-        # Retention: 0=transient, -1=permanent, N=days
-        data["retention"] = retention
+        # Retention: 0=transient, -1=permanent, N=days. Omit to use server default.
+        if retention is not None:
+            data["retention"] = retention
 
         # Lite mode profile selection (M58). Ignored by distributed servers.
         data["lite_profile"] = lite_profile or "core"
@@ -1368,7 +1372,7 @@ class AsyncDalston:
             if opened_file:
                 opened_file.close()
 
-        if response.status_code != 201:
+        if response.status_code not in (200, 201):
             _handle_error(response)
 
         return _parse_job(response.json())

@@ -24,7 +24,11 @@ from dalston.engine_sdk.executors import (
     VenvExecutor,
 )
 from dalston.engine_sdk.types import EngineCapabilities, EngineInput, EngineOutput
-from dalston.gateway.services.artifact_store import LocalFilesystemArtifactStoreAdapter
+from dalston.gateway.services.artifact_store import (
+    ArtifactStore,
+    InMemoryArtifactStoreAdapter,
+    LocalFilesystemArtifactStoreAdapter,
+)
 from dalston.orchestrator.catalog import CatalogEntry
 from dalston.orchestrator.lite_capabilities import (
     DEFAULT_PROFILE,
@@ -174,9 +178,11 @@ class LitePipeline:
 
     def __init__(
         self,
-        artifacts: LocalFilesystemArtifactStoreAdapter,
+        artifacts: ArtifactStore,
         *,
         profile: str = DEFAULT_PROFILE,
+        persist_artifacts: bool = True,
+        ephemeral_mode: bool = False,
         stage_bindings: dict[str, _LiteStageBinding] | None = None,
         executors: dict[str, RuntimeExecutor] | None = None,
     ) -> None:
@@ -189,6 +195,8 @@ class LitePipeline:
 
         self._queue = InMemoryQueue()
         self._artifacts = artifacts
+        self._persist_artifacts = persist_artifacts
+        self._ephemeral_mode = ephemeral_mode
         self._profile = cap.profile
         self._profile_cap = cap
         self._stage_bindings = dict(
@@ -228,7 +236,9 @@ class LitePipeline:
                 configuration (e.g., ``speaker_detection``, ``num_speakers``).
 
         Returns:
-            Dict with ``job_id`` and ``transcript_uri`` keys.
+            Dict with ``job_id`` and final transcript payload metadata. For
+            persistent mode this includes ``transcript_uri``; for ephemeral mode
+            ``transcript`` is returned inline.
 
         Raises:
             LiteUnsupportedFeatureError: If *parameters* request features that
@@ -242,9 +252,10 @@ class LitePipeline:
         validate_request(self._profile, parameters)
 
         job_id = job_id or str(uuid4())
-        await self._artifacts.write_bytes(
-            f"jobs/{job_id}/audio/original.wav", audio_bytes
-        )
+        if self._persist_artifacts:
+            await self._artifacts.write_bytes(
+                f"jobs/{job_id}/audio/original.wav", audio_bytes
+            )
 
         logger.info(
             "lite_job_started",
@@ -252,7 +263,7 @@ class LitePipeline:
             profile=self._profile.value,
         )
 
-        result = await self._run_loop(job_id, parameters)
+        result = await self._run_loop(job_id, parameters, audio_bytes)
 
         logger.info(
             "lite_job_completed",
@@ -266,7 +277,9 @@ class LitePipeline:
     # Shared stage loop
     # ------------------------------------------------------------------
 
-    async def _run_loop(self, job_id: str, parameters: dict) -> dict:
+    async def _run_loop(
+        self, job_id: str, parameters: dict, audio_bytes: bytes
+    ) -> dict:
         """Drive the stage queue for the active profile with a deadline.
 
         Enqueues the ``prepare`` task, then polls each stage in order until
@@ -285,7 +298,12 @@ class LitePipeline:
                     )
                     if envelope is None:
                         continue
-                    result = await self._handle_stage(stage, envelope, parameters)
+                    result = await self._handle_stage(
+                        stage,
+                        envelope,
+                        parameters,
+                        audio_bytes,
+                    )
                     await self._queue.ack(stage=stage, message_id=envelope.message_id)
                     if result is not None:
                         return result
@@ -296,6 +314,7 @@ class LitePipeline:
         stage: str,
         envelope: QueueEnvelope,
         parameters: dict,
+        audio_bytes: bytes,
     ) -> dict | None:
         """Process one stage envelope.
 
@@ -315,12 +334,15 @@ class LitePipeline:
             return None
 
         if stage == "transcribe":
-            payload = await self._execute_stage(stage, envelope, parameters)
-            await self._artifacts.write_bytes(
-                f"jobs/{job_id}/tasks/transcribe/output.json",
-                json.dumps(payload).encode("utf-8"),
-                content_type="application/json",
+            payload = await self._execute_stage(
+                stage, envelope, parameters, audio_bytes
             )
+            if self._persist_artifacts:
+                await self._artifacts.write_bytes(
+                    f"jobs/{job_id}/tasks/transcribe/output.json",
+                    json.dumps(payload).encode("utf-8"),
+                    content_type="application/json",
+                )
             # Next stage depends on profile.
             next_stage = {
                 LiteProfile.CORE: "merge",
@@ -336,12 +358,15 @@ class LitePipeline:
             return None
 
         if stage == "diarize":
-            diarize_payload = await self._execute_stage(stage, envelope, parameters)
-            await self._artifacts.write_bytes(
-                f"jobs/{job_id}/tasks/diarize/output.json",
-                json.dumps(diarize_payload).encode("utf-8"),
-                content_type="application/json",
+            diarize_payload = await self._execute_stage(
+                stage, envelope, parameters, audio_bytes
             )
+            if self._persist_artifacts:
+                await self._artifacts.write_bytes(
+                    f"jobs/{job_id}/tasks/diarize/output.json",
+                    json.dumps(diarize_payload).encode("utf-8"),
+                    content_type="application/json",
+                )
             await self._queue.enqueue(
                 stage="merge",
                 task_id=str(uuid4()),
@@ -351,12 +376,15 @@ class LitePipeline:
             return None
 
         if stage == "pii_detect":
-            pii_payload = await self._execute_stage(stage, envelope, parameters)
-            await self._artifacts.write_bytes(
-                f"jobs/{job_id}/tasks/pii_detect/output.json",
-                json.dumps(pii_payload).encode("utf-8"),
-                content_type="application/json",
+            pii_payload = await self._execute_stage(
+                stage, envelope, parameters, audio_bytes
             )
+            if self._persist_artifacts:
+                await self._artifacts.write_bytes(
+                    f"jobs/{job_id}/tasks/pii_detect/output.json",
+                    json.dumps(pii_payload).encode("utf-8"),
+                    content_type="application/json",
+                )
             await self._queue.enqueue(
                 stage="merge",
                 task_id=str(uuid4()),
@@ -373,12 +401,43 @@ class LitePipeline:
         stage: str,
         envelope: QueueEnvelope,
         parameters: dict,
+        audio_bytes: bytes,
     ) -> dict[str, Any]:
         binding = self._stage_bindings.get(stage)
         if binding is None:
             raise RuntimeError(
                 f"No lite runtime binding configured for stage '{stage}'"
             )
+
+        if (
+            self._ephemeral_mode
+            and binding.entry.execution_profile == "inproc"
+            and binding.engine_factory is not None
+        ):
+            engine = binding.engine_factory()
+            engine_input = EngineInput(
+                task_id=envelope.task_id,
+                job_id=envelope.job_id,
+                stage=stage,
+                config=parameters,
+                payload=audio_bytes,
+                previous_outputs={},
+                materialized_artifacts={},
+            )
+            ctx = BatchTaskContext(
+                runtime=binding.entry.runtime,
+                instance=f"lite-{self._profile.value}",
+                task_id=envelope.task_id,
+                job_id=envelope.job_id,
+                stage=stage,
+                metadata={
+                    "mode": "lite",
+                    "execution_profile": binding.entry.execution_profile,
+                    "artifact_persistence": "ephemeral",
+                },
+            )
+            output = await asyncio.to_thread(engine.process, engine_input, ctx)
+            return output.to_dict()
 
         executor = self._resolve_executor(binding.entry.execution_profile)
         if executor is None:
@@ -423,7 +482,7 @@ class LitePipeline:
         return executor
 
     async def _handle_merge(self, job_id: str, parameters: dict) -> dict:
-        """Write the final transcript artifact and return the result dict."""
+        """Assemble final transcript and return result metadata."""
         if self._profile == LiteProfile.SPEAKER:
             num_speakers = parameters.get("num_speakers") or 2
             transcript: dict = {
@@ -459,12 +518,18 @@ class LitePipeline:
                 "segments": [{"text": "lite transcript"}],
             }
 
-        output_uri = await self._artifacts.write_bytes(
-            f"jobs/{job_id}/transcript.json",
-            json.dumps(transcript).encode("utf-8"),
-            content_type="application/json",
-        )
-        return {"job_id": job_id, "transcript_uri": output_uri}
+        output_uri: str | None = None
+        if self._persist_artifacts:
+            output_uri = await self._artifacts.write_bytes(
+                f"jobs/{job_id}/transcript.json",
+                json.dumps(transcript).encode("utf-8"),
+                content_type="application/json",
+            )
+        return {
+            "job_id": job_id,
+            "transcript_uri": output_uri,
+            "transcript": transcript,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -472,14 +537,18 @@ class LitePipeline:
 # ---------------------------------------------------------------------------
 
 
-def build_pipeline(profile: str = DEFAULT_PROFILE) -> LitePipeline:
+def build_pipeline(
+    profile: str = DEFAULT_PROFILE,
+    *,
+    retention_days: int | None = None,
+) -> LitePipeline:
     """Build a ``LitePipeline`` for *profile*.
 
     Args:
         profile: Profile name (``"core"``, ``"speaker"``, ``"compliance"``).
-
-    Returns:
-        Ready-to-use ``LitePipeline`` instance.
+        retention_days: Retention policy in days. ``0`` enables ephemeral
+            in-memory artifacts, ``-1``/``N`` persist to local filesystem. If
+            omitted, defaults to ``settings.retention_default_days``.
 
     Raises:
         RuntimeError: If called outside DALSTON_MODE=lite.
@@ -489,9 +558,23 @@ def build_pipeline(profile: str = DEFAULT_PROFILE) -> LitePipeline:
     settings = get_settings()
     if settings.runtime_mode != "lite":
         raise RuntimeError(LiteMsg.LITE_MODE_REQUIRED)
+
+    effective_retention = (
+        settings.retention_default_days if retention_days is None else retention_days
+    )
+    ephemeral = effective_retention == 0
+
+    artifacts: ArtifactStore
+    if ephemeral:
+        artifacts = InMemoryArtifactStoreAdapter()
+    else:
+        artifacts = LocalFilesystemArtifactStoreAdapter(settings.lite_artifacts_dir)
+
     return LitePipeline(
-        LocalFilesystemArtifactStoreAdapter(settings.lite_artifacts_dir),
+        artifacts,
         profile=profile,
+        persist_artifacts=not ephemeral,
+        ephemeral_mode=ephemeral,
     )
 
 

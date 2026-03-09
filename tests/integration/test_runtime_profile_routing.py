@@ -96,6 +96,7 @@ async def test_nemo_msdd_routes_through_venv_profile_from_catalog(
         "diarize",
         envelope,
         {"speaker_detection": "diarize", "runtime_model_id": "nemo-msdd-test"},
+        b"audio",
     )
 
     output_path = (

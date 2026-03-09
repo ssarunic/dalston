@@ -19,7 +19,7 @@ from dalston.common.redis import (
     set_provider,
 )
 from dalston.common.s3 import ensure_bucket_exists
-from dalston.config import get_settings
+from dalston.config import Settings, get_settings
 from dalston.db.session import DEFAULT_TENANT_ID, engine, init_db
 from dalston.gateway.api.auth import router as auth_router
 from dalston.gateway.api.console import router as console_router
@@ -47,6 +47,21 @@ dalston.metrics.init_session_router_metrics()
 
 # Global session router instance (initialized in lifespan)
 session_router: SessionRouter | None = None
+
+
+def _should_eager_init_db(settings: Settings) -> bool:
+    """Decide whether to initialize DB eagerly at startup.
+
+    Lite mode with transient-by-default retention and security disabled can run
+    fully in-memory for POST /audio/transcriptions requests, so eager DB init is
+    skipped to avoid creating local state. DB remains available via lazy init on
+    first DB-backed request.
+    """
+    return not (
+        settings.runtime_mode == "lite"
+        and settings.retention_default_days == 0
+        and settings.security_mode == "none"
+    )
 
 
 async def _ensure_admin_key_exists() -> None:
@@ -134,8 +149,11 @@ async def lifespan(app: FastAPI):
         logger.info("lite_mode_startup", mode=settings.runtime_mode)
 
     # Initialize database
-    logger.info("Initializing database...")
-    await init_db()
+    if _should_eager_init_db(settings):
+        logger.info("Initializing database...")
+        await init_db()
+    else:
+        logger.info("skip_eager_database_init_ephemeral_lite_mode")
 
     # Seed model registry from YAML files
     if settings.runtime_mode == "distributed":

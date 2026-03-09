@@ -105,13 +105,43 @@ router = APIRouter(prefix="/audio/transcriptions", tags=["transcriptions"])
 logger = structlog.get_logger()
 
 
+def _build_retention_info(
+    retention_days: int,
+    *,
+    purge_after: datetime | None = None,
+    purged_at: datetime | None = None,
+) -> RetentionInfo:
+    """Map integer retention sentinel values to API retention payload."""
+    if retention_days == 0:
+        mode = "none"
+        hours = None
+    elif retention_days == -1:
+        mode = "keep"
+        hours = None
+    else:
+        mode = "auto_delete"
+        hours = retention_days * 24
+
+    return RetentionInfo(
+        mode=mode,
+        hours=hours,
+        purge_after=purge_after,
+        purged_at=purged_at,
+    )
+
+
 @router.post(
     "",
     response_model=None,
     summary="Create transcription job",
-    description="Upload an audio file for transcription. Returns a job ID to poll for results (Dalston native) or the transcript directly (OpenAI compatible).",
+    description=(
+        "Upload an audio file for transcription. Returns a job ID to poll for "
+        "results (Dalston native), except in lite mode with retention=0 where "
+        "the completed transcript is returned inline. OpenAI-compatible requests "
+        "always return inline."
+    ),
     responses={
-        200: {"description": "Transcription result (OpenAI mode)"},
+        200: {"description": "Inline transcription result"},
         201: {"description": "Job created (Dalston native mode)"},
         400: {"description": "Invalid request"},
         401: {"description": "Invalid API key"},
@@ -279,7 +309,7 @@ async def create_transcription(
     ingestion_service: AudioIngestionService = Depends(get_ingestion_service),
     export_service: ExportService = Depends(get_export_service),
     storage: StorageService = Depends(get_storage_service),
-) -> JobCreatedResponse | Response | dict[str, Any]:
+) -> JobCreatedResponse | JobResponse | Response | dict[str, Any]:
     """Create a new transcription job.
 
     Accepts either:
@@ -291,7 +321,8 @@ async def create_transcription(
     is handled in OpenAI mode: synchronous response with OpenAI response formats.
 
     **Dalston Native Mode:**
-    Returns job ID immediately for async polling.
+    Returns job ID immediately for async polling, except lite mode with
+    ``retention=0`` which returns completed transcript inline.
     """
     security_manager.require_permission(principal, Permission.JOB_CREATE)
 
@@ -555,10 +586,123 @@ async def create_transcription(
                 detail=exc.to_dict(),
             ) from exc
 
-    # Generate job ID upfront so we can upload to the correct S3 path
+    # Generate display name: user-provided name > filename > URL segment > "Untitled"
+    display_name = (
+        name.strip()[:255]
+        if name and name.strip()
+        else generate_display_name(
+            filename=ingested.filename,
+            url=audio_url,
+        )
+    )
+
+    request_id = getattr(request.state, "request_id", None)
+
+    # Lite + transient retention: run fully in-process and return inline result.
+    # No audio/job persistence is performed in this branch.
+    if settings.runtime_mode == "lite" and retention == 0:
+        from dalston.orchestrator.lite_capabilities import LitePrerequisiteMissingError
+        from dalston.orchestrator.lite_main import build_pipeline
+
+        job_id = uuid4()
+        started_at = datetime.now(UTC)
+        completed_at: datetime
+
+        try:
+            pipeline = build_pipeline(profile=lite_profile, retention_days=retention)
+            result = await pipeline.run_job(
+                ingested.content,
+                job_id=str(job_id),
+                parameters=parameters,
+            )
+            completed_at = datetime.now(UTC)
+        except LitePrerequisiteMissingError as exc:
+            raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
+        except Exception as e:
+            if openai_mode:
+                raise_openai_error(
+                    500,
+                    Err.TRANSCRIPTION_FAILED.format(error=str(e)),
+                    error_type="server_error",
+                    code="processing_failed",
+                )
+            raise HTTPException(
+                status_code=500,
+                detail=Err.LITE_TRANSCRIPTION_FAILED.format(error=e),
+            ) from e
+
+        transcript = result.get("transcript")
+        if not isinstance(transcript, dict):
+            raise HTTPException(
+                status_code=500,
+                detail=Err.TRANSCRIPT_LOAD_FAILED,
+            )
+
+        if openai_mode:
+            payload = format_openai_response(
+                transcript,
+                response_format,
+                timestamp_granularities,
+                export_service,
+                model=model,
+            )
+            attach_openai_rate_limit_headers(payload, response, openai_rate_headers)
+            return payload
+
+        pii_enabled = bool(parameters.get("pii_detection"))
+        pii_meta = transcript.get("pii_metadata") or {}
+        model_for_response = parameters.get(ENGINE_PARAM_TRANSCRIBE) or parameters.get(
+            MODEL_PARAM_TRANSCRIBE
+        )
+
+        response.status_code = 200
+        return JobResponse(
+            id=job_id,
+            status=JobStatus.COMPLETED,
+            display_name=display_name,
+            created_at=started_at,
+            started_at=started_at,
+            completed_at=completed_at,
+            model=model_for_response,
+            text=transcript.get("text"),
+            words=transcript.get("words"),
+            segments=transcript.get("segments"),
+            speakers=transcript.get("speakers"),
+            retention=_build_retention_info(0),
+            redacted_text=transcript.get("redacted_text"),
+            entities=transcript.get("pii_entities"),
+            pii=(
+                PIIInfo(
+                    enabled=pii_enabled or bool(pii_meta),
+                    entities_detected=pii_meta.get(
+                        "entities_detected", len(transcript.get("pii_entities", []))
+                    ),
+                    entity_summary=pii_meta.get("entity_count_by_type"),
+                    redacted_audio_available=(
+                        pii_meta.get("redacted_audio_artifact_id") is not None
+                        or pii_meta.get("redacted_audio_uri") is not None
+                    ),
+                )
+                if pii_meta or pii_enabled
+                else None
+            ),
+            audio_duration_seconds=ingested.metadata.duration,
+            result_language_code=(
+                transcript.get("metadata", {}).get("language")
+                or transcript.get("language_code")
+            ),
+            result_word_count=len(transcript.get("words") or []),
+            result_segment_count=len(transcript.get("segments") or []),
+            result_speaker_count=len(transcript.get("speakers") or []),
+            result_character_count=(
+                len(transcript.get("text")) if transcript.get("text") else None
+            ),
+        )
+
+    # Generate job ID upfront so we can upload to the correct artifact path.
     job_id = uuid4()
 
-    # Upload audio to S3
+    # Upload audio to configured artifact backend (S3 in distributed, file in lite).
     audio_uri = await storage.upload_audio(
         job_id=job_id,
         file_content=ingested.content,
@@ -569,16 +713,6 @@ async def create_transcription(
     pii_entity_types_list: list[str] | None = None
     if pii_detection and pii_entity_types:
         pii_entity_types_list = parameters.get("pii_entity_types")
-
-    # Generate display name: user-provided name > filename > URL segment > "Untitled"
-    display_name = (
-        name.strip()[:255]
-        if name and name.strip()
-        else generate_display_name(
-            filename=ingested.filename,
-            url=audio_url,
-        )
-    )
 
     # Create job in database
     job = await jobs_service.create_job(
@@ -604,7 +738,6 @@ async def create_transcription(
         created_by_key_id=principal.id,
     )
 
-    request_id = getattr(request.state, "request_id", None)
     await audit_service.log_job_created(
         job_id=job.id,
         tenant_id=principal.tenant_id,
@@ -625,7 +758,10 @@ async def create_transcription(
             job.started_at = datetime.now(UTC)
             await db.commit()
 
-            pipeline = build_pipeline(profile=lite_profile)
+            pipeline = build_pipeline(
+                profile=lite_profile,
+                retention_days=retention,
+            )
             await pipeline.run_job(
                 ingested.content,
                 job_id=str(job.id),
@@ -791,23 +927,8 @@ async def get_transcription(
             for task in sorted_tasks
         ]
 
-    # Build retention info from integer retention field
-    # retention: 0=transient, -1=permanent, N=days
-    retention_days = job.retention if job.retention is not None else 30
-
-    if retention_days == 0:
-        mode = "none"
-        hours = None
-    elif retention_days == -1:
-        mode = "keep"
-        hours = None
-    else:
-        mode = "auto_delete"
-        hours = retention_days * 24
-
-    retention_info = RetentionInfo(
-        mode=mode,
-        hours=hours,
+    retention_info = _build_retention_info(
+        job.retention if job.retention is not None else 30,
         purge_after=job.purge_after,
         purged_at=job.purged_at,
     )

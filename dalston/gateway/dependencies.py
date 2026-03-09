@@ -17,7 +17,7 @@ from dalston.common.redis import get_redis as _get_redis_client
 from dalston.config import Settings
 from dalston.config import get_settings as _get_settings
 from dalston.db.models import APIKeyModel
-from dalston.db.session import async_session
+from dalston.db.session import async_session, init_db
 from dalston.gateway.error_codes import Err
 from dalston.gateway.middleware.auth import authenticate_request
 from dalston.gateway.security.manager import SecurityManager
@@ -76,8 +76,55 @@ class _NoopRedis:
         return _noop
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
+class _NoopSession:
+    """Sentinel DB session for request paths that must remain DB-free."""
+
+    async def close(self) -> None:
+        return None
+
+    def __getattr__(self, method_name: str):
+        raise RuntimeError(
+            "DB session was requested for a transient lite request. "
+            f"Unexpected method call: {method_name}"
+        )
+
+
+async def _is_lite_transient_transcription_request(request: Request) -> bool:
+    settings = _get_settings()
+    if settings.runtime_mode != "lite":
+        return False
+    if request.method.upper() != "POST":
+        return False
+    if request.url.path.rstrip("/") != "/v1/audio/transcriptions":
+        return False
+
+    retention = settings.retention_default_days
+    content_type = request.headers.get("content-type", "")
+    if (
+        "multipart/form-data" in content_type
+        or "application/x-www-form-urlencoded" in content_type
+    ):
+        try:
+            form = await request.form()
+        except Exception:
+            return False
+        raw_retention = form.get("retention")
+        if raw_retention not in (None, ""):
+            try:
+                retention = int(str(raw_retention))
+            except ValueError:
+                return False
+
+    return retention == 0
+
+
+async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
     """Yield an async database session."""
+    if await _is_lite_transient_transcription_request(request):
+        yield _NoopSession()  # type: ignore[misc]
+        return
+
+    await init_db()
     async with async_session() as session:
         try:
             yield session
@@ -271,7 +318,6 @@ async def _ensure_dev_api_key_record(db: AsyncSession, api_key: APIKey) -> None:
 
 async def require_auth(
     request: Request,
-    db: AsyncSession = Depends(get_db),
 ) -> APIKey:
     """Dependency that requires a valid API key.
 
@@ -293,14 +339,16 @@ async def require_auth(
         # Development mode: return dev API key with admin access
         dev_key = _get_dev_api_key()
         if _get_settings().runtime_mode != "lite":
-            await _ensure_dev_api_key_record(db, dev_key)
+            async with async_session() as db:
+                await _ensure_dev_api_key_record(db, dev_key)
         request.state.api_key = dev_key
         request.state.tenant_id = dev_key.tenant_id
         return dev_key
 
     redis = await _get_redis_client()
-    auth_service = AuthService(db, redis)
-    return await authenticate_request(request, auth_service)
+    async with async_session() as db:
+        auth_service = AuthService(db, redis)
+        return await authenticate_request(request, auth_service)
 
 
 # =============================================================================
@@ -424,7 +472,6 @@ def reset_rate_limiter() -> None:
 
 async def get_rate_limiter(
     settings: Settings = Depends(get_settings),
-    db: AsyncSession = Depends(get_db),
 ) -> RateLimiter:
     """Get RateLimiter instance.
 
@@ -456,15 +503,16 @@ async def get_rate_limiter(
         from dalston.gateway.services.settings import SettingsService
 
         svc = SettingsService()
-        _rate_limiter._requests_per_minute = await svc.get_effective_value(
-            db, "rate_limits", "requests_per_minute"
-        )
-        _rate_limiter._max_concurrent_jobs = await svc.get_effective_value(
-            db, "rate_limits", "concurrent_jobs"
-        )
-        _rate_limiter._max_concurrent_sessions = await svc.get_effective_value(
-            db, "rate_limits", "concurrent_sessions"
-        )
+        async with async_session() as db:
+            _rate_limiter._requests_per_minute = await svc.get_effective_value(
+                db, "rate_limits", "requests_per_minute"
+            )
+            _rate_limiter._max_concurrent_jobs = await svc.get_effective_value(
+                db, "rate_limits", "concurrent_jobs"
+            )
+            _rate_limiter._max_concurrent_sessions = await svc.get_effective_value(
+                db, "rate_limits", "concurrent_sessions"
+            )
     except (OSError, TimeoutError) as e:
         # Transient errors (network, timeout) - keep existing limits
         logger.warning("failed_to_refresh_rate_limits", error=str(e))

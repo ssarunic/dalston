@@ -19,6 +19,17 @@ class _ScalarResult:
         return self._value
 
 
+class _SessionContext:
+    def __init__(self, session):
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
 def _request() -> Request:
     return Request(
         {
@@ -35,6 +46,7 @@ async def test_require_auth_none_creates_dev_key_record(monkeypatch) -> None:
     db = AsyncMock()
     db.add = Mock()
     db.execute.return_value = _ScalarResult(None)
+    monkeypatch.setattr(deps, "async_session", lambda: _SessionContext(db))
     monkeypatch.setattr(
         deps,
         "_get_security_manager",
@@ -46,7 +58,7 @@ async def test_require_auth_none_creates_dev_key_record(monkeypatch) -> None:
         lambda: type("Settings", (), {"runtime_mode": "distributed"})(),
     )
 
-    api_key = await deps.require_auth(request=_request(), db=db)
+    api_key = await deps.require_auth(request=_request())
 
     assert api_key.id == UUID("00000000-0000-0000-0000-000000000002")
     db.add.assert_called_once()
@@ -61,6 +73,7 @@ async def test_require_auth_none_skips_dev_key_insert_when_present(monkeypatch) 
     db = AsyncMock()
     db.add = Mock()
     db.execute.return_value = _ScalarResult("present")
+    monkeypatch.setattr(deps, "async_session", lambda: _SessionContext(db))
     monkeypatch.setattr(
         deps,
         "_get_security_manager",
@@ -72,7 +85,7 @@ async def test_require_auth_none_skips_dev_key_insert_when_present(monkeypatch) 
         lambda: type("Settings", (), {"runtime_mode": "distributed"})(),
     )
 
-    await deps.require_auth(request=_request(), db=db)
+    await deps.require_auth(request=_request())
 
     db.add.assert_not_called()
     db.commit.assert_not_awaited()
@@ -82,6 +95,8 @@ async def test_require_auth_none_skips_dev_key_insert_when_present(monkeypatch) 
 async def test_require_auth_none_skips_dev_key_insert_in_lite_mode(monkeypatch) -> None:
     db = AsyncMock()
     db.add = Mock()
+    async_session = Mock(return_value=_SessionContext(db))
+    monkeypatch.setattr(deps, "async_session", async_session)
     monkeypatch.setattr(
         deps,
         "_get_security_manager",
@@ -93,8 +108,9 @@ async def test_require_auth_none_skips_dev_key_insert_in_lite_mode(monkeypatch) 
         lambda: type("Settings", (), {"runtime_mode": "lite"})(),
     )
 
-    await deps.require_auth(request=_request(), db=db)
+    await deps.require_auth(request=_request())
 
+    async_session.assert_not_called()
     db.execute.assert_not_awaited()
     db.add.assert_not_called()
     db.commit.assert_not_awaited()

@@ -102,6 +102,53 @@ class TestDalston:
         assert b"diarize" in request.content
         assert job.status == JobStatus.PENDING
 
+    def test_transcribe_accepts_inline_completed_response(
+        self, client, httpx_mock, tmp_path
+    ):
+        """Lite mode with transient retention can return inline completed job."""
+        audio_file = tmp_path / "test.mp3"
+        audio_file.write_bytes(b"fake audio data")
+
+        httpx_mock.add_response(
+            method="POST",
+            url="http://test/v1/audio/transcriptions",
+            json={
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "status": "completed",
+                "created_at": "2024-01-01T00:00:00Z",
+                "completed_at": "2024-01-01T00:00:02Z",
+                "text": "Hello world",
+                "segments": [{"text": "Hello world", "start": 0.0, "end": 1.0}],
+            },
+            status_code=200,
+        )
+
+        job = client.transcribe(file=str(audio_file), retention=0)
+
+        assert job.status == JobStatus.COMPLETED
+        assert job.transcript is not None
+        assert job.transcript.text == "Hello world"
+
+    def test_transcribe_omits_retention_when_unset(self, client, httpx_mock, tmp_path):
+        audio_file = tmp_path / "test.mp3"
+        audio_file.write_bytes(b"fake audio data")
+
+        httpx_mock.add_response(
+            method="POST",
+            url="http://test/v1/audio/transcriptions",
+            json={
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "status": "pending",
+                "created_at": "2024-01-01T00:00:00Z",
+            },
+            status_code=201,
+        )
+
+        client.transcribe(file=str(audio_file))
+
+        request = httpx_mock.get_request()
+        assert b'name="retention"' not in request.content
+
     def test_transcribe_without_file_raises(self, client):
         """Test that transcribe without file or URL raises error."""
         with pytest.raises(ValidationError, match="Either file or audio_url"):
@@ -280,6 +327,57 @@ class TestAsyncDalston:
         job = await async_client.transcribe(file=str(audio_file))
 
         assert job.status == JobStatus.PENDING
+
+    @pytest.mark.asyncio
+    async def test_transcribe_accepts_inline_completed_response(
+        self, async_client, httpx_mock, tmp_path
+    ):
+        """Async client accepts status 200 inline completed responses."""
+        audio_file = tmp_path / "test.mp3"
+        audio_file.write_bytes(b"fake audio data")
+
+        httpx_mock.add_response(
+            method="POST",
+            url="http://test/v1/audio/transcriptions",
+            json={
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "status": "completed",
+                "created_at": "2024-01-01T00:00:00Z",
+                "completed_at": "2024-01-01T00:00:02Z",
+                "text": "Hello world",
+                "segments": [{"text": "Hello world", "start": 0.0, "end": 1.0}],
+            },
+            status_code=200,
+        )
+
+        job = await async_client.transcribe(file=str(audio_file), retention=0)
+
+        assert job.status == JobStatus.COMPLETED
+        assert job.transcript is not None
+        assert job.transcript.text == "Hello world"
+
+    @pytest.mark.asyncio
+    async def test_transcribe_omits_retention_when_unset(
+        self, async_client, httpx_mock, tmp_path
+    ):
+        audio_file = tmp_path / "test.mp3"
+        audio_file.write_bytes(b"fake audio data")
+
+        httpx_mock.add_response(
+            method="POST",
+            url="http://test/v1/audio/transcriptions",
+            json={
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "status": "pending",
+                "created_at": "2024-01-01T00:00:00Z",
+            },
+            status_code=201,
+        )
+
+        await async_client.transcribe(file=str(audio_file))
+
+        request = httpx_mock.get_request()
+        assert b'name="retention"' not in request.content
 
     @pytest.mark.asyncio
     async def test_get_job(self, async_client, httpx_mock):

@@ -19,6 +19,7 @@ from dalston.orchestrator.lite_main import build_pipeline
 @pytest.fixture(autouse=True)
 def _lite_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("DALSTON_MODE", "lite")
+    monkeypatch.setenv("DALSTON_RETENTION_DEFAULT_DAYS", "30")
     monkeypatch.setenv("DALSTON_LITE_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
     get_settings.cache_clear()
     yield
