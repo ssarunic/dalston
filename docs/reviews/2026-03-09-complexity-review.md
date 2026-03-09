@@ -417,7 +417,7 @@ registry stores capabilities including whether the engine accepts streaming.
 
 ---
 
-## 6. Combined Effect: DAG Collapses to a Linear Pipeline
+## 6. Combined Effect: DAG Becomes a Linear Pipeline (Queue)
 
 Applying all simplifications from section 5, the current DAG:
 
@@ -428,7 +428,7 @@ prepare ──────┤                                             ├─
               (+ per_channel variant: entirely different DAG shape)
 ```
 
-...reduces to:
+...reduces to a **fully linear pipeline**:
 
 ```
 prepare → transcribe → [diarize] → merge
@@ -437,95 +437,169 @@ prepare → transcribe → [diarize] → merge
 - **per_channel branching**: gone (pre-processing split, section 5a)
 - **align stage**: gone (modern transcribers produce native word timestamps, section 5b)
 - **pii_detect + audio_redact**: gone from core pipeline (post-processing hook, section 5c)
+- **diarize ∥ transcribe parallelism**: dropped (see rationale below)
 
-The one remaining piece of non-linearity is **diarize running in parallel
-with transcribe** (both depend only on prepare). This parallelism matters
-on CPU where pyannote runs at 1.2x realtime (a 10-min file takes 12 min
-to diarize). Running them sequentially would add that to the critical path.
+### Why fully linear over a fork-join
 
-### Option A: Keep the single fork-join (recommended)
+The current DAG runs diarize in parallel with transcribe (both depend
+only on prepare). In theory this saves time. In practice:
 
-```
-              ┌─ transcribe ─┐
-prepare ──────┤               ├─ merge
-              └─ [diarize] ──┘
-```
+- **CPU**: You can't run transcribe + diarize in parallel on a single
+  machine -- both are compute-intensive and will thrash each other.
+  Parallel execution only helps if they're on different instances (cloud).
+- **GPU**: Diarization takes seconds. The parallelism saves negligible time.
+- **Riva/Parakeet with Sortformer**: NVIDIA's latest models bundle
+  transcription + streaming diarization in a single inference call
+  (see section 6b). No pipeline parallelism needed -- it's one engine.
 
-This is technically still a DAG, but it's a trivially simple one -- a
-pipeline with one optional parallel branch. The "DAG builder" becomes
-~30 lines:
+A fully linear pipeline means the orchestrator becomes a **simple FIFO
+queue processor** with zero dependency tracking:
 
 ```python
+PIPELINE_STAGES = ["prepare", "transcribe", "diarize", "merge"]
+
 def build_pipeline(job_params, engines):
-    tasks = [make_task("prepare")]
-    tasks.append(make_task("transcribe", after="prepare"))
+    stages = ["prepare", "transcribe"]
     if job_params.get("speaker_detection") == "diarize":
-        tasks.append(make_task("diarize", after="prepare"))  # parallel with transcribe
-    tasks.append(make_task("merge", after=all_previous))
-    return tasks
+        stages.append("diarize")
+    stages.append("merge")
+    return [make_task(stage) for stage in stages]
 ```
 
-Compare to the current 700+ LOC `dag.py`.
+Compare to the current 700+ LOC `dag.py`. No dependency graph, no
+fork-join scheduling, no merge dependency accumulation.
 
-### Option B: Fully linear (simpler, slower)
+### What this eliminates from the orchestrator
 
-```
-prepare → transcribe → [diarize] → merge
-```
-
-Diarize runs after transcribe. Simpler scheduling (pure FIFO queue, no
-dependency tracking needed), but adds diarization time to the critical
-path. On GPU this is seconds; on CPU it's minutes.
-
-### Option C: Diarize as a post-merge enrichment
-
-```
-prepare → transcribe → merge → [diarize enrichment]
-```
-
-The core pipeline produces a transcript without speaker labels. If
-diarization was requested, a post-merge step adds speaker labels to the
-existing transcript. This is fully linear AND doesn't block the user
-from getting initial results quickly. The transcript appears fast, then
-gets enriched with speaker labels asynchronously.
-
-**Recommendation:** Option A for now (minimal code, preserves GPU
-parallelism). Option C is worth exploring later as it enables a
-"progressive results" UX.
-
-### What this means for the orchestrator
-
-With Option A, `dag.py` no longer needs:
 - `_build_per_channel_dag_with_engines()` (160 LOC)
+- `_build_dag_with_engines()` dependency graph construction
 - Stage-specific `if` branches for align, pii_detect, audio_redact
 - Complex merge dependency accumulation
 - The concept of "skip_alignment" / "skip_diarization" capability checks
+- All dependency resolution logic in the scheduler -- just run the next
+  stage when the current one completes
 
-The orchestrator's scheduler still needs to resolve dependencies (for
-the transcribe ∥ diarize fork), but the dependency graph is static per
-job configuration -- it doesn't need a "builder", just a lookup table.
+### 6a. Future Stages Keep It Linear
+
+Adding new processing stages does NOT reintroduce DAG complexity. Every
+foreseeable stage fits naturally into a linear pipeline because each
+depends on the output of the previous:
+
+```
+prepare → [noise_removal] → [VAD] → transcribe → [diarize] → [emotion] → [non_verbal] → merge
+           ↑ pre-processing          core          ↑ post-transcribe enrichments
+```
+
+| Future Stage | Position | Depends On | Why Linear |
+|---|---|---|---|
+| Noise removal | Before transcribe | Audio from prepare | Cleans audio for better transcription |
+| VAD (voice activity detection) | Before transcribe | Audio (or denoised audio) | Segments audio into speech regions |
+| Speaker fingerprint/ID | After diarize | Diarization segments + audio | Matches speakers to known identities |
+| Emotion detection | After transcribe | Transcript segments + audio | Labels segments with emotion |
+| Non-verbal events | After transcribe | Audio segments | Detects laughter, cough, applause, etc. |
+| LLM cleanup/summarization | After merge | Full transcript | Post-processing on final output |
+
+Could emotion and non-verbal run in parallel? Yes, they're independent.
+But on a single GPU they'd contend for resources anyway. If you ever
+need that parallelism (multi-GPU cloud), you can add a single fork-join
+at that point -- but don't build the infrastructure until you need it.
+
+**Key insight: the pipeline is ordered by data dependency, and each
+stage refines or enriches the output of the previous. This is inherently
+sequential.**
+
+### 6b. Multi-capability Engines Collapse the Pipeline Further
+
+The trend in speech AI is toward models that handle multiple stages in
+a single inference call. This makes the pipeline even shorter:
+
+**NVIDIA Riva with Streaming Sortformer:**
+- Single gRPC/WebSocket call produces: transcription + word timestamps +
+  speaker diarization labels, all in streaming mode.
+- VAD is built-in (Silero VAD integrated into the pipeline).
+- Effectively collapses `[VAD] → transcribe → diarize` into one engine.
+- Currently supports Parakeet-CTC and Conformer-CTC models.
+- Streaming diarization is beta, supports up to 8 concurrent requests.
+- Sources: [Riva ASR Overview](https://docs.nvidia.com/deeplearning/riva/user-guide/docs/asr/asr-overview.html),
+  [Streaming Sortformer](https://developer.nvidia.com/blog/identify-speakers-in-meetings-calls-and-voice-apps-in-real-time-with-nvidia-streaming-sortformer/),
+  [Riva Speaker Diarization](https://docs.nvidia.com/deeplearning/riva/user-guide/docs/tutorials/asr-speaker-diarization.html),
+  [Riva Realtime WebSocket API](https://docs.nvidia.com/nim/riva/asr/latest/realtime-asr.html)
+
+**Alibaba SenseVoice:**
+- Single model produces: transcription + emotion labels + non-verbal
+  event tags (laughter, cough, applause, crying, etc.).
+- 70ms to process 10 seconds of audio (15x faster than Whisper-Large).
+- Collapses `transcribe → [emotion] → [non_verbal]` into one engine.
+- Source: [SenseVoice on GitHub](https://github.com/FunAudioLLM/SenseVoice)
+
+**NVIDIA Multitalker Parakeet:**
+- Streaming ASR that takes diarization output as context to produce
+  speaker-attributed transcripts. No speaker enrollment needed.
+- Source: [Multitalker Parakeet on HuggingFace](https://huggingface.co/nvidia/multitalker-parakeet-streaming-0.6b-v1)
+
+With these engines, the actual pipeline for a typical job might be:
+
+```
+prepare → riva_transcribe_with_diarization → merge
+```
+
+Or with SenseVoice:
+
+```
+prepare → sensevoice_transcribe_with_emotions → merge
+```
+
+The pipeline framework doesn't need to know about internal engine
+stages -- it just runs whatever stages the engine.yaml declares. If an
+engine covers multiple stages, fewer pipeline steps execute. This is
+where the declarative engine.yaml approach (section 5, execution order
+step 3) pays off: engines declare what they produce, the pipeline skips
+stages already covered.
+
+### 6c. Implications for Real-time Architecture
+
+Riva's streaming Sortformer diarization changes the real-time story too.
+Currently, Dalston's real-time mode can only do transcription -- diarization
+is batch-only. With Riva as a real-time engine:
+
+- **Real-time diarization becomes possible** via Riva's WebSocket API
+  with `speaker_diarization.enable_speaker_diarization: true`.
+- The session router can allocate Riva workers that stream back
+  speaker-labeled transcripts in real-time.
+- This eliminates the need for "hybrid mode" (real-time transcription +
+  batch diarization enrichment) for Riva-backed deployments.
+- Riva deploys on Kubernetes via Helm chart, fitting the existing
+  containerized engine model.
 
 ---
 
 ## 7. Recommended Execution Order
 
-1. **Unify the engine SDK** -- single base class with optional streaming.
-   This is the highest-impact change and unblocks everything else.
+1. **Replace DAG with linear pipeline** -- rewrite `dag.py` as a simple
+   ordered stage list. This is now the highest-leverage change: 700 LOC
+   replaced with ~30 LOC, and it unblocks everything else by removing
+   the complexity that makes other changes scary.
 
-2. **Unify the registry** -- single registration protocol for all engines.
+2. **Unify the engine SDK** -- single base class with optional streaming.
+   High-impact, touches every engine.
+
+3. **Make engine.yaml declarative** -- engines declare what stages they
+   cover (e.g., Riva covers transcribe+diarize+VAD). Pipeline skips
+   stages already handled. This is how multi-capability engines like
+   Riva and SenseVoice integrate cleanly.
+
+4. **Unify the registry** -- single registration protocol for all engines.
    Quick win after SDK unification.
 
-3. **Make pipeline stages declarative** -- engine.yaml declares
-   inputs/outputs. DAG builder resolves from declarations.
-   Necessary before adding new stages.
+5. **Collapse session router into orchestrator** -- unified engine
+   discovery and allocation. Now more valuable since Riva can do
+   streaming diarization (real-time workers gain diarization capability).
 
-4. **Collapse session router into orchestrator** -- unified engine
-   discovery and allocation.
+6. **Extract WebSocket proxy core** -- reduce gateway WS duplication.
 
-5. **Extract WebSocket proxy core** -- reduce gateway WS duplication.
-
-6. **Add new stages** (VAD, emotion, etc.) -- now trivial with
-   declarative pipeline.
+7. **Add new stages** (noise removal, VAD, emotion, non-verbal events) --
+   trivial with declarative pipeline. Just add engine.yaml + engine.py,
+   declare position in pipeline.
 
 ---
 
