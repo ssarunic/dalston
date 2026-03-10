@@ -16,6 +16,7 @@ from dalston.common.transcript import (
     _extract_audio_metadata,
     _find_speaker_by_overlap,
     _select_segments,
+    assemble_per_channel_transcript,
     assemble_transcript,
     determine_terminal_stage,
 )
@@ -576,3 +577,287 @@ class TestDetermineTerminalStage:
             determine_terminal_stage(has_diarize=True, speaker_detection="none")
             == "transcribe"
         )
+
+
+# ---------------------------------------------------------------------------
+# assemble_per_channel_transcript
+# ---------------------------------------------------------------------------
+
+
+class TestAssemblePerChannelTranscript:
+    """Tests for per-channel transcript assembly."""
+
+    def test_basic_two_channel(self):
+        """Assemble transcript from two channel transcriptions."""
+        stage_outputs = {
+            "prepare": {
+                "channel_files": [
+                    {
+                        "artifact_id": "a1",
+                        "format": "wav",
+                        "duration": 10.0,
+                        "sample_rate": 16000,
+                        "channels": 2,
+                    }
+                ],
+            },
+            "transcribe_ch0": {
+                "text": "Hello from channel zero.",
+                "language": "en",
+                "segments": [
+                    {"start": 0.0, "end": 2.0, "text": "Hello from channel zero."},
+                ],
+                "runtime": "faster-whisper",
+            },
+            "transcribe_ch1": {
+                "text": "Hi from channel one.",
+                "language": "en",
+                "segments": [
+                    {"start": 1.0, "end": 3.0, "text": "Hi from channel one."},
+                ],
+                "runtime": "faster-whisper",
+            },
+        }
+
+        result = assemble_per_channel_transcript(
+            job_id="job-pc-1",
+            stage_outputs=stage_outputs,
+            channel_count=2,
+        )
+
+        assert result.job_id == "job-pc-1"
+        assert len(result.segments) == 2
+        # Segments are sorted by start time
+        assert result.segments[0].start == 0.0
+        assert result.segments[0].speaker == "SPEAKER_00"
+        assert result.segments[1].start == 1.0
+        assert result.segments[1].speaker == "SPEAKER_01"
+        # Speakers array has channel attribute
+        assert len(result.speakers) == 2
+        assert result.speakers[0].id == "SPEAKER_00"
+        assert result.speakers[0].channel == 0
+        assert result.speakers[1].id == "SPEAKER_01"
+        assert result.speakers[1].channel == 1
+        # Metadata
+        assert result.metadata.speaker_detection.value == "per_channel"
+        assert result.metadata.speaker_count == 2
+        assert result.metadata.audio_duration == 10.0
+
+    def test_interleaved_segments_sorted_by_time(self):
+        """Segments from multiple channels are interleaved by start time."""
+        stage_outputs = {
+            "prepare": {"duration": 10.0, "channels": 2, "sample_rate": 16000},
+            "transcribe_ch0": {
+                "text": "A. C.",
+                "language": "en",
+                "segments": [
+                    {"start": 0.0, "end": 1.0, "text": "A."},
+                    {"start": 4.0, "end": 5.0, "text": "C."},
+                ],
+                "runtime": "faster-whisper",
+            },
+            "transcribe_ch1": {
+                "text": "B.",
+                "language": "en",
+                "segments": [
+                    {"start": 2.0, "end": 3.0, "text": "B."},
+                ],
+                "runtime": "faster-whisper",
+            },
+        }
+
+        result = assemble_per_channel_transcript(
+            job_id="job-pc-2",
+            stage_outputs=stage_outputs,
+            channel_count=2,
+        )
+
+        assert len(result.segments) == 3
+        assert [s.text for s in result.segments] == ["A.", "B.", "C."]
+        assert [s.speaker for s in result.segments] == [
+            "SPEAKER_00",
+            "SPEAKER_01",
+            "SPEAKER_00",
+        ]
+        assert [s.id for s in result.segments] == ["seg_000", "seg_001", "seg_002"]
+
+    def test_with_alignment(self):
+        """Per-channel assembly uses align output when available."""
+        stage_outputs = {
+            "prepare": {"duration": 5.0, "channels": 2, "sample_rate": 16000},
+            "transcribe_ch0": {
+                "text": "Hello",
+                "language": "en",
+                "segments": [{"start": 0.0, "end": 2.0, "text": "Hello"}],
+                "runtime": "faster-whisper",
+            },
+            "align_ch0": {
+                "segments": [
+                    {
+                        "start": 0.1,
+                        "end": 1.8,
+                        "text": "Hello",
+                        "words": [{"text": "Hello", "start": 0.1, "end": 1.8}],
+                    },
+                ],
+                "text": "Hello",
+                "language": "en",
+                "word_timestamps": True,
+                "unaligned_ratio": 0.0,
+                "granularity_achieved": "word",
+                "runtime": "phoneme-align",
+            },
+            "transcribe_ch1": {
+                "text": "World",
+                "language": "en",
+                "segments": [{"start": 1.0, "end": 3.0, "text": "World"}],
+                "runtime": "faster-whisper",
+            },
+        }
+
+        result = assemble_per_channel_transcript(
+            job_id="job-pc-3",
+            stage_outputs=stage_outputs,
+            channel_count=2,
+            word_timestamps_requested=True,
+        )
+
+        assert len(result.segments) == 2
+        # Channel 0 uses aligned timestamps
+        assert result.segments[0].start == 0.1
+        assert result.segments[0].end == 1.8
+        assert result.metadata.word_timestamps is True
+
+    def test_known_speaker_names(self):
+        """Per-channel assembly applies known speaker names."""
+        stage_outputs = {
+            "prepare": {"duration": 5.0, "channels": 2, "sample_rate": 16000},
+            "transcribe_ch0": {
+                "text": "Hi",
+                "language": "en",
+                "segments": [{"start": 0.0, "end": 1.0, "text": "Hi"}],
+                "runtime": "faster-whisper",
+            },
+            "transcribe_ch1": {
+                "text": "Hello",
+                "language": "en",
+                "segments": [{"start": 1.0, "end": 2.0, "text": "Hello"}],
+                "runtime": "faster-whisper",
+            },
+        }
+
+        result = assemble_per_channel_transcript(
+            job_id="job-pc-4",
+            stage_outputs=stage_outputs,
+            channel_count=2,
+            known_speaker_names=["Alice", "Bob"],
+        )
+
+        assert result.speakers[0].label == "Alice"
+        assert result.speakers[1].label == "Bob"
+
+    def test_full_text_from_interleaved(self):
+        """Full text is built from interleaved segments."""
+        stage_outputs = {
+            "prepare": {"duration": 5.0, "channels": 2, "sample_rate": 16000},
+            "transcribe_ch0": {
+                "text": "Hello.",
+                "language": "en",
+                "segments": [{"start": 0.0, "end": 1.0, "text": "Hello."}],
+                "runtime": "faster-whisper",
+            },
+            "transcribe_ch1": {
+                "text": "Hi there.",
+                "language": "en",
+                "segments": [{"start": 2.0, "end": 3.0, "text": "Hi there."}],
+                "runtime": "faster-whisper",
+            },
+        }
+
+        result = assemble_per_channel_transcript(
+            job_id="job-pc-5",
+            stage_outputs=stage_outputs,
+            channel_count=2,
+        )
+
+        assert result.text == "Hello. Hi there."
+
+    def test_no_pii_fields(self):
+        """Per-channel assembly has no PII fields set."""
+        stage_outputs = {
+            "transcribe_ch0": {
+                "text": "Test",
+                "language": "en",
+                "segments": [{"start": 0.0, "end": 1.0, "text": "Test"}],
+                "runtime": "faster-whisper",
+            },
+            "transcribe_ch1": {
+                "text": "Data",
+                "language": "en",
+                "segments": [{"start": 1.0, "end": 2.0, "text": "Data"}],
+                "runtime": "faster-whisper",
+            },
+        }
+
+        result = assemble_per_channel_transcript(
+            job_id="job-pc-6",
+            stage_outputs=stage_outputs,
+            channel_count=2,
+        )
+
+        assert result.redacted_text is None
+        assert result.pii_entities is None
+
+    def test_empty_channel(self):
+        """Assembly handles a channel with no output gracefully."""
+        stage_outputs = {
+            "prepare": {"duration": 5.0, "channels": 2, "sample_rate": 16000},
+            "transcribe_ch0": {
+                "text": "Hello",
+                "language": "en",
+                "segments": [{"start": 0.0, "end": 1.0, "text": "Hello"}],
+                "runtime": "faster-whisper",
+            },
+            # transcribe_ch1 is missing
+        }
+
+        result = assemble_per_channel_transcript(
+            job_id="job-pc-7",
+            stage_outputs=stage_outputs,
+            channel_count=2,
+        )
+
+        assert len(result.segments) == 1
+        assert result.segments[0].speaker == "SPEAKER_00"
+        # Speakers array still has both channels
+        assert len(result.speakers) == 2
+
+    def test_explicit_pipeline_stages(self):
+        """Pipeline stages can be explicitly provided."""
+        stage_outputs = {
+            "transcribe_ch0": {
+                "text": "Hi",
+                "language": "en",
+                "segments": [],
+                "runtime": "faster-whisper",
+            },
+            "transcribe_ch1": {
+                "text": "Hey",
+                "language": "en",
+                "segments": [],
+                "runtime": "faster-whisper",
+            },
+        }
+
+        result = assemble_per_channel_transcript(
+            job_id="job-pc-8",
+            stage_outputs=stage_outputs,
+            channel_count=2,
+            pipeline_stages=["prepare", "transcribe_ch0", "transcribe_ch1"],
+        )
+
+        assert result.metadata.pipeline_stages == [
+            "prepare",
+            "transcribe_ch0",
+            "transcribe_ch1",
+        ]

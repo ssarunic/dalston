@@ -1,8 +1,8 @@
 """Transcript assembly from stage outputs (M68).
 
 Assembles MergeOutput from individual stage outputs without requiring
-a merge engine. Called by the orchestrator on job completion for mono
-pipelines. Per-channel pipelines still use a merge engine.
+a merge engine. Called by the orchestrator on job completion for both
+mono and per-channel pipelines.
 """
 
 from __future__ import annotations
@@ -155,6 +155,209 @@ def assemble_transcript(
     )
 
     return transcript
+
+
+def assemble_per_channel_transcript(
+    *,
+    job_id: str,
+    stage_outputs: dict[str, Any],
+    channel_count: int = 2,
+    word_timestamps_requested: bool = False,
+    known_speaker_names: list[str] | None = None,
+    pipeline_stages: list[str] | None = None,
+) -> MergeOutput:
+    """Assemble a MergeOutput transcript from per-channel stage outputs.
+
+    This replaces the merge engine for per-channel pipelines. Each audio
+    channel is treated as a separate speaker. Segments from all channels
+    are interleaved by start time.
+
+    Stage outputs are expected to have channel-suffixed keys:
+    ``transcribe_ch0``, ``transcribe_ch1``, ``align_ch0``, ``align_ch1``, etc.
+
+    Args:
+        job_id: The job identifier.
+        stage_outputs: Dict mapping stage name to output data (raw dicts).
+            Expected keys: ``prepare``, ``transcribe_ch0``, ``transcribe_ch1``,
+            and optionally ``align_ch0``, ``align_ch1``, etc.
+        channel_count: Number of audio channels.
+        word_timestamps_requested: Whether word timestamps were requested.
+        known_speaker_names: Optional speaker name mapping.
+        pipeline_stages: Explicit list of stages that ran.
+
+    Returns:
+        MergeOutput with assembled transcript.
+    """
+    prepare_data = stage_outputs.get("prepare", {})
+    audio_duration, audio_channels, sample_rate = _extract_audio_metadata(prepare_data)
+
+    # Collect segments from each channel, annotated with speaker
+    all_channel_segments: list[dict[str, Any]] = []
+    word_timestamps_available = False
+    pipeline_warnings: list[str] = []
+    language = "en"
+    language_confidence = 1.0
+
+    for channel in range(channel_count):
+        transcribe_key = f"transcribe_ch{channel}"
+        align_key = f"align_ch{channel}"
+        speaker_id = f"SPEAKER_{channel:02d}"
+
+        transcribe_data = stage_outputs.get(transcribe_key, {})
+        align_data = stage_outputs.get(align_key)
+
+        # Use first channel's language info
+        if channel == 0 and transcribe_data:
+            language = transcribe_data.get("language", "en")
+            lc_raw = transcribe_data.get("language_confidence")
+            language_confidence = lc_raw if lc_raw is not None else 1.0
+
+        # Select best segment source for this channel
+        transcribe_output = _try_parse_transcribe(transcribe_data) if transcribe_data else None
+        align_output = _try_parse_align(align_data) if align_data else None
+        raw_segments = transcribe_data.get("segments", []) if transcribe_data else []
+
+        segments_source, ch_word_ts, ch_warnings = _select_segments(
+            transcribe_output=transcribe_output,
+            align_output=align_output,
+            raw_segments=raw_segments,
+        )
+        if ch_word_ts:
+            word_timestamps_available = True
+        pipeline_warnings.extend(ch_warnings)
+
+        # Build annotated segment dicts with channel/speaker info
+        for seg in segments_source:
+            seg_dict = _extract_segment_fields(seg)
+            seg_dict["speaker"] = speaker_id
+            seg_dict["channel"] = channel
+            seg_dict["_word_ts"] = ch_word_ts
+            all_channel_segments.append(seg_dict)
+
+    # Sort all segments by start time to interleave channels
+    all_channel_segments.sort(key=lambda s: s["start"])
+
+    # Build MergedSegment list
+    segments: list[MergedSegment] = []
+    for idx, seg_dict in enumerate(all_channel_segments):
+        words: list[Word] | None = None
+        if seg_dict["_word_ts"] and seg_dict.get("words"):
+            words = _normalize_words(seg_dict["words"])
+
+        segment = MergedSegment(
+            id=f"seg_{idx:03d}",
+            start=seg_dict["start"],
+            end=seg_dict["end"],
+            text=seg_dict["text"],
+            speaker=seg_dict["speaker"],
+            words=words,
+            tokens=seg_dict.get("tokens") if isinstance(seg_dict.get("tokens"), list) else None,
+            temperature=seg_dict.get("temperature"),
+            avg_logprob=seg_dict.get("avg_logprob"),
+            compression_ratio=seg_dict.get("compression_ratio"),
+            no_speech_prob=seg_dict.get("no_speech_prob"),
+            emotion=None,
+            emotion_confidence=None,
+            events=[],
+        )
+        segments.append(segment)
+
+    # Build full text from interleaved segments
+    text = " ".join(seg.text.strip() for seg in segments if seg.text.strip())
+
+    # Build speakers with channel attribute
+    speakers = [
+        Speaker(id=f"SPEAKER_{ch:02d}", label=None, channel=ch)
+        for ch in range(channel_count)
+    ]
+
+    # Apply known speaker names
+    if isinstance(known_speaker_names, list) and known_speaker_names:
+        _apply_known_speaker_names(segments, speakers, known_speaker_names)
+
+    # Build metadata
+    now = datetime.now(UTC).isoformat()
+    metadata = TranscriptMetadata(
+        audio_duration=audio_duration,
+        audio_channels=audio_channels or channel_count,
+        sample_rate=sample_rate,
+        language=language,
+        language_confidence=round(language_confidence, 3),
+        word_timestamps=word_timestamps_available,
+        word_timestamps_requested=word_timestamps_requested,
+        speaker_detection=SpeakerDetectionMode.PER_CHANNEL,
+        speaker_count=channel_count,
+        created_at=now,
+        completed_at=now,
+        pipeline_stages=pipeline_stages or [],
+        pipeline_warnings=pipeline_warnings,
+    )
+
+    transcript = MergeOutput(
+        job_id=job_id,
+        version="1.0",
+        metadata=metadata,
+        text=text,
+        speakers=speakers,
+        segments=segments,
+        paragraphs=[],
+        summary=None,
+        redacted_text=None,
+        pii_entities=None,
+        pii_metadata=None,
+    )
+
+    logger.info(
+        "per_channel_transcript_assembled",
+        job_id=job_id,
+        channel_count=channel_count,
+        segment_count=len(segments),
+        char_count=len(text),
+        language=language,
+        word_timestamps=word_timestamps_available,
+    )
+
+    return transcript
+
+
+def _extract_segment_fields(seg: Any) -> dict[str, Any]:
+    """Extract segment fields into a plain dict from any segment type."""
+    if isinstance(seg, Segment):
+        return {
+            "start": seg.start,
+            "end": seg.end,
+            "text": seg.text,
+            "words": seg.words,
+            "tokens": seg.tokens,
+            "temperature": seg.temperature,
+            "avg_logprob": seg.avg_logprob,
+            "compression_ratio": seg.compression_ratio,
+            "no_speech_prob": seg.no_speech_prob,
+        }
+    elif hasattr(seg, "start"):
+        return {
+            "start": seg.start,
+            "end": seg.end,
+            "text": seg.text,
+            "words": getattr(seg, "words", None),
+            "tokens": getattr(seg, "tokens", None),
+            "temperature": getattr(seg, "temperature", None),
+            "avg_logprob": getattr(seg, "avg_logprob", None),
+            "compression_ratio": getattr(seg, "compression_ratio", None),
+            "no_speech_prob": getattr(seg, "no_speech_prob", None),
+        }
+    else:
+        return {
+            "start": seg.get("start", 0.0),
+            "end": seg.get("end", 0.0),
+            "text": seg.get("text", ""),
+            "words": seg.get("words"),
+            "tokens": seg.get("tokens"),
+            "temperature": seg.get("temperature"),
+            "avg_logprob": seg.get("avg_logprob"),
+            "compression_ratio": seg.get("compression_ratio"),
+            "no_speech_prob": seg.get("no_speech_prob"),
+        }
 
 
 def determine_terminal_stage(

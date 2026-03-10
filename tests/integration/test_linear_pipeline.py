@@ -1,10 +1,9 @@
 """Integration tests for the linear pipeline DAG.
 
 Tests that the DAG builder produces the correct task structure:
-- No merge stage in mono pipelines (orchestrator assembles transcript.json)
+- No merge stage in any pipeline (orchestrator assembles transcript.json)
 - Sequential diarize (depends on transcribe/align, not parallel)
 - Terminal stage is deterministic
-- Per-channel pipelines still use merge
 """
 
 from uuid import uuid4
@@ -129,15 +128,15 @@ class TestSequentialDiarize:
 
 
 # ---------------------------------------------------------------------------
-# Per-channel pipelines always use merge
+# Per-channel pipelines have no merge
 # ---------------------------------------------------------------------------
 
 
-class TestPerChannelAlwaysMerge:
-    """Tests that per_channel pipelines use merge."""
+class TestPerChannelNoMerge:
+    """Tests that per_channel pipelines do not use merge."""
 
-    def test_per_channel_has_merge(self, job_id, audio_uri):
-        """Per-channel pipelines always include merge."""
+    def test_per_channel_no_merge(self, job_id, audio_uri):
+        """Per-channel pipelines do not include merge."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
@@ -145,7 +144,7 @@ class TestPerChannelAlwaysMerge:
         )
 
         stages = [t.stage for t in tasks]
-        assert "merge" in stages
+        assert "merge" not in stages
 
 
 # ---------------------------------------------------------------------------
