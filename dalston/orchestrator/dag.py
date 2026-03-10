@@ -5,6 +5,14 @@ Each task represents a processing step executed by a specific engine.
 
 M31/M36: Uses capability-driven engine selection. The selector resolves
 model IDs (e.g., "parakeet-tdt-1.1b") to runtime + runtime_model_id.
+
+Mono pipeline (non-per-channel):
+    prepare → transcribe → [align] → [diarize]
+
+Diarize is sequential (depends on transcribe/align).
+The orchestrator assembles transcript.json on job completion.
+
+Per-channel pipelines retain a merge stage (see _build_per_channel_dag_with_engines).
 """
 
 from __future__ import annotations
@@ -99,15 +107,18 @@ async def build_task_dag(
     Creates a pipeline with optional speaker detection:
 
     Mode: none (default)
-        prepare → transcribe → [align] → merge
+        prepare → transcribe → [align]
 
     Mode: diarize
-        prepare → transcribe → [align] → merge
-                ↘ diarize ─────────────↗
+        prepare → transcribe → [align] → diarize
 
     Mode: per_channel (stereo audio)
         prepare ─┬→ transcribe_ch0 → [align_ch0] ─┬→ merge
                  └→ transcribe_ch1 → [align_ch1] ─┘
+
+    For mono pipelines, transcript.json is assembled by the orchestrator on
+    job completion (see _assemble_linear_transcript in handlers.py).
+    Per-channel pipelines still use a merge engine.
 
     PII detection and audio redaction are always deferred to async
     post-processing after the core pipeline completes (see ``post_processor.py``).
@@ -210,8 +221,18 @@ def _build_dag_with_engines(
     Internal function used by build_task_dag to create the actual
     task graph with capability-driven engine selection.
 
-    PII detection and audio redaction are always handled by post-processing
-    after the core pipeline completes.
+    Mono pipeline shape:
+        prepare → transcribe → [align] → [diarize]
+
+    Diarize runs sequentially after transcribe/align (depends on transcribe
+    or align, whichever is last). The orchestrator assembles transcript.json
+    on job completion via _assemble_linear_transcript.
+
+    Per-channel pipelines (speaker_detection="per_channel") are handled by
+    _build_per_channel_dag_with_engines and include their own merge stage.
+
+    PII detection and audio redaction are always deferred to post-processing
+    after the core pipeline completes (see ``post_processor.py``).
 
     Args:
         job_id: The job's UUID
@@ -356,27 +377,6 @@ def _build_dag_with_engines(
             stage_runtime_model_ids=stage_runtime_model_ids,
         )
 
-    # Diarization (if requested and not skipped due to native support)
-    if speaker_detection == "diarize" and not skip_diarization:
-        if "diarize" in stage_runtime_model_ids:
-            diarize_config["runtime_model_id"] = stage_runtime_model_ids["diarize"]
-        diarize_task = Task(
-            id=uuid4(),
-            job_id=job_id,
-            stage="diarize",
-            runtime=engines.get("diarize", DEFAULT_ENGINES["diarize"]),
-            status=TaskStatus.PENDING,
-            dependencies=[prepare_task.id],
-            input_bindings=_audio_input_binding(),
-            config=diarize_config,
-            input_uri=None,
-            output_uri=None,
-            retries=0,
-            max_retries=DEFAULT_TASK_MAX_RETRIES,
-            required=True,
-        )
-        tasks.append(diarize_task)
-
     # Transcription
     transcribe_task = Task(
         id=uuid4(),
@@ -418,39 +418,53 @@ def _build_dag_with_engines(
         )
         tasks.append(align_task)
 
-    # Merge
-    merge_dependencies = [prepare_task.id, transcribe_task.id]
-    if align_task is not None:
-        merge_dependencies.append(align_task.id)
-    if diarize_task is not None:
-        merge_dependencies.append(diarize_task.id)
+    # Diarize runs sequentially after transcribe/align so it receives their outputs.
+    # Depends on prepare (for audio) and the last transcription stage (align or transcribe).
+    if speaker_detection == "diarize" and not skip_diarization:
+        diarize_dependencies = [prepare_task.id]
+        if align_task is not None:
+            diarize_dependencies.append(align_task.id)
+        else:
+            diarize_dependencies.append(transcribe_task.id)
+        diarize_task = _create_diarize_task(
+            job_id=job_id,
+            engines=engines,
+            diarize_config=diarize_config,
+            stage_runtime_model_ids=stage_runtime_model_ids,
+            dependencies=diarize_dependencies,
+        )
+        tasks.append(diarize_task)
 
-    merge_config: dict = {
-        "word_timestamps": word_timestamps,
-        "speaker_detection": speaker_detection,
-    }
-    if parameters.get("known_speaker_names"):
-        merge_config["known_speaker_names"] = parameters["known_speaker_names"]
-    merge_bindings: list[dict] = []
+    return tasks
 
-    merge_task = Task(
+
+def _create_diarize_task(
+    *,
+    job_id: UUID,
+    engines: dict[str, str],
+    diarize_config: dict,
+    stage_runtime_model_ids: dict[str, str],
+    dependencies: list[UUID],
+) -> Task:
+    """Create a diarize task with the given dependencies."""
+    config = dict(diarize_config)
+    if "diarize" in stage_runtime_model_ids:
+        config["runtime_model_id"] = stage_runtime_model_ids["diarize"]
+    return Task(
         id=uuid4(),
         job_id=job_id,
-        stage="merge",
-        runtime=engines.get("merge", DEFAULT_ENGINES["merge"]),
+        stage="diarize",
+        runtime=engines.get("diarize", DEFAULT_ENGINES["diarize"]),
         status=TaskStatus.PENDING,
-        dependencies=merge_dependencies,
-        input_bindings=merge_bindings,
-        config=merge_config,
+        dependencies=dependencies,
+        input_bindings=_audio_input_binding(),
+        config=config,
         input_uri=None,
         output_uri=None,
         retries=0,
         max_retries=DEFAULT_TASK_MAX_RETRIES,
         required=True,
     )
-    tasks.append(merge_task)
-
-    return tasks
 
 
 def _build_per_channel_dag_with_engines(

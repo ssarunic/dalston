@@ -141,7 +141,8 @@ class TestParakeetEngineDagIntegration:
 
         assert "align" not in stages
         assert "transcribe" in stages
-        assert "merge" in stages
+        # Mono pipeline: no merge stage
+        assert "merge" not in stages
 
 
 class TestParakeetHypothesisParsing:

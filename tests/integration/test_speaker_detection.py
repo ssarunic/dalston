@@ -2,6 +2,10 @@
 
 Tests DAG structure, dependency wiring, and merge configuration for all
 speaker_detection modes: none, diarize, and per_channel.
+
+Mono pipelines (none, diarize) do NOT have a merge stage. Transcript assembly
+is handled by _assemble_linear_transcript in handlers.py on job completion.
+Per-channel pipelines (per_channel) retain a merge stage.
 """
 
 from uuid import uuid4
@@ -30,7 +34,7 @@ class TestDiarizeDAG:
     """Tests for speaker_detection=diarize DAG structure."""
 
     def test_diarize_dag_creates_correct_stages(self, job_id, audio_uri):
-        """Diarize mode creates prepare, transcribe, align, diarize, merge."""
+        """Diarize mode creates prepare, transcribe, align, diarize (no merge)."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
@@ -38,7 +42,11 @@ class TestDiarizeDAG:
         )
 
         stages = [t.stage for t in tasks]
-        assert stages == ["prepare", "diarize", "transcribe", "align", "merge"]
+        assert "prepare" in stages
+        assert "transcribe" in stages
+        assert "align" in stages
+        assert "diarize" in stages
+        assert "merge" not in stages
 
     def test_diarize_dag_without_alignment(self, job_id, audio_uri):
         """Diarize without word timestamps skips align stage."""
@@ -55,11 +63,11 @@ class TestDiarizeDAG:
         assert "diarize" in stages
         assert "transcribe" in stages
         assert "align" not in stages
-        assert "merge" in stages
-        assert len(tasks) == 4
+        assert "merge" not in stages
+        assert len(tasks) == 3  # prepare, transcribe, diarize
 
-    def test_diarize_runs_parallel_to_transcribe(self, job_id, audio_uri):
-        """Diarize and transcribe both depend only on prepare (run in parallel)."""
+    def test_diarize_is_sequential_after_transcribe_and_align(self, job_id, audio_uri):
+        """Diarize depends on prepare and align (sequential, not parallel)."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
@@ -68,9 +76,10 @@ class TestDiarizeDAG:
 
         by_stage = {t.stage: t for t in tasks}
         prepare_id = by_stage["prepare"].id
+        align_id = by_stage["align"].id
 
-        assert by_stage["transcribe"].dependencies == [prepare_id]
-        assert by_stage["diarize"].dependencies == [prepare_id]
+        assert prepare_id in by_stage["diarize"].dependencies
+        assert align_id in by_stage["diarize"].dependencies
 
     def test_align_depends_on_transcribe(self, job_id, audio_uri):
         """Align stage depends on transcribe."""
@@ -81,31 +90,12 @@ class TestDiarizeDAG:
         )
 
         by_stage = {t.stage: t for t in tasks}
-        assert by_stage["align"].dependencies == [by_stage["transcribe"].id]
+        assert by_stage["transcribe"].id in by_stage["align"].dependencies
 
-    def test_merge_depends_on_prepare_transcribe_align_and_diarize(
+    def test_diarize_without_align_depends_on_prepare_and_transcribe(
         self, job_id, audio_uri
     ):
-        """Merge depends on prepare, transcribe, align, and diarize."""
-        tasks = build_task_dag_for_test(
-            job_id=job_id,
-            audio_uri=audio_uri,
-            parameters={"speaker_detection": "diarize"},
-        )
-
-        by_stage = {t.stage: t for t in tasks}
-        merge_deps = set(by_stage["merge"].dependencies)
-
-        assert by_stage["prepare"].id in merge_deps
-        assert by_stage["transcribe"].id in merge_deps
-        assert by_stage["align"].id in merge_deps
-        assert by_stage["diarize"].id in merge_deps
-        assert len(merge_deps) == 4
-
-    def test_merge_depends_on_transcribe_and_diarize_without_align(
-        self, job_id, audio_uri
-    ):
-        """Without alignment, merge depends on prepare, transcribe, diarize."""
+        """Without alignment, diarize depends on prepare and transcribe."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
@@ -116,23 +106,11 @@ class TestDiarizeDAG:
         )
 
         by_stage = {t.stage: t for t in tasks}
-        merge_deps = set(by_stage["merge"].dependencies)
+        diarize_deps = set(by_stage["diarize"].dependencies)
 
-        assert by_stage["prepare"].id in merge_deps
-        assert by_stage["transcribe"].id in merge_deps
-        assert by_stage["diarize"].id in merge_deps
-        assert len(merge_deps) == 3
-
-    def test_merge_config_has_diarize_speaker_detection(self, job_id, audio_uri):
-        """Merge task config records speaker_detection=diarize."""
-        tasks = build_task_dag_for_test(
-            job_id=job_id,
-            audio_uri=audio_uri,
-            parameters={"speaker_detection": "diarize"},
-        )
-
-        by_stage = {t.stage: t for t in tasks}
-        assert by_stage["merge"].config["speaker_detection"] == "diarize"
+        assert by_stage["prepare"].id in diarize_deps
+        assert by_stage["transcribe"].id in diarize_deps
+        assert len(diarize_deps) == 2
 
     def test_diarize_uses_correct_engine(self, job_id, audio_uri):
         """Diarize task uses the pyannote engine."""
@@ -218,7 +196,7 @@ class TestNoSpeakerDetectionDAG:
     """Tests for speaker_detection=none (default) DAG structure."""
 
     def test_default_dag_has_no_diarize(self, job_id, audio_uri):
-        """Default mode (none) does not include diarize stage."""
+        """Default mode (none) does not include diarize or merge stages."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
@@ -228,10 +206,22 @@ class TestNoSpeakerDetectionDAG:
         stages = [t.stage for t in tasks]
         assert "diarize" not in stages
         assert "transcribe_ch0" not in stages
-        assert stages == ["prepare", "transcribe", "align", "merge"]
+        assert "merge" not in stages
+        assert stages == ["prepare", "transcribe", "align"]
 
-    def test_default_merge_config_has_none_speaker_detection(self, job_id, audio_uri):
-        """Default merge config has speaker_detection=none."""
+    def test_default_dag_has_no_merge(self, job_id, audio_uri):
+        """Default (none) mode has no merge stage; assembly is done in handlers."""
+        tasks = build_task_dag_for_test(
+            job_id=job_id,
+            audio_uri=audio_uri,
+            parameters={},
+        )
+
+        stages = [t.stage for t in tasks]
+        assert "merge" not in stages
+
+    def test_default_align_depends_on_transcribe(self, job_id, audio_uri):
+        """Default pipeline: align depends on transcribe."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
@@ -239,25 +229,8 @@ class TestNoSpeakerDetectionDAG:
         )
 
         by_stage = {t.stage: t for t in tasks}
-        assert by_stage["merge"].config["speaker_detection"] == "none"
 
-    def test_default_merge_depends_on_prepare_transcribe_and_align(
-        self, job_id, audio_uri
-    ):
-        """Default merge depends on prepare, transcribe, and align."""
-        tasks = build_task_dag_for_test(
-            job_id=job_id,
-            audio_uri=audio_uri,
-            parameters={},
-        )
-
-        by_stage = {t.stage: t for t in tasks}
-        merge_deps = set(by_stage["merge"].dependencies)
-
-        assert by_stage["prepare"].id in merge_deps
-        assert by_stage["transcribe"].id in merge_deps
-        assert by_stage["align"].id in merge_deps
-        assert len(merge_deps) == 3
+        assert by_stage["transcribe"].id in by_stage["align"].dependencies
 
     def test_invalid_speaker_detection_defaults_to_none(self, job_id, audio_uri):
         """Unknown speaker_detection value falls back to 'none' mode."""
@@ -292,28 +265,33 @@ class TestSpeakerDetectionModeComparison:
             assert len(prepare) == 1, f"mode={mode}"
             assert prepare[0].dependencies == [], f"mode={mode}"
 
-    def test_all_modes_end_with_merge(self, job_id, audio_uri):
-        """Every mode ends with a merge task."""
-        for mode in ("none", "diarize", "per_channel"):
+    def test_only_per_channel_has_merge(self, job_id, audio_uri):
+        """Only per_channel mode has a merge task; mono pipelines assemble in handlers."""
+        for mode in ("none", "diarize"):
             tasks = build_task_dag_for_test(
                 job_id=job_id,
                 audio_uri=audio_uri,
                 parameters={"speaker_detection": mode},
             )
-            assert tasks[-1].stage == "merge", f"mode={mode}"
+            stages = [t.stage for t in tasks]
+            assert "merge" not in stages, f"mode={mode} should not have merge"
 
-    def test_all_modes_include_speaker_detection_in_merge_config(
-        self, job_id, audio_uri
-    ):
-        """Merge config always records the speaker_detection mode."""
-        for mode in ("none", "diarize", "per_channel"):
-            tasks = build_task_dag_for_test(
-                job_id=job_id,
-                audio_uri=audio_uri,
-                parameters={"speaker_detection": mode},
-            )
-            merge = tasks[-1]
-            assert merge.config["speaker_detection"] == mode, f"mode={mode}"
+        per_channel_tasks = build_task_dag_for_test(
+            job_id=job_id,
+            audio_uri=audio_uri,
+            parameters={"speaker_detection": "per_channel"},
+        )
+        assert "merge" in [t.stage for t in per_channel_tasks]
+
+    def test_per_channel_merge_has_speaker_detection_in_config(self, job_id, audio_uri):
+        """per_channel merge config records speaker_detection=per_channel."""
+        tasks = build_task_dag_for_test(
+            job_id=job_id,
+            audio_uri=audio_uri,
+            parameters={"speaker_detection": "per_channel"},
+        )
+        merge = next(t for t in tasks if t.stage == "merge")
+        assert merge.config["speaker_detection"] == "per_channel"
 
     def test_per_channel_has_most_tasks_with_alignment(self, job_id, audio_uri):
         """per_channel mode produces the most tasks (parallel channels)."""
@@ -326,8 +304,8 @@ class TestSpeakerDetectionModeComparison:
             )
             counts[mode] = len(tasks)
 
-        assert counts["none"] == 4  # prepare, transcribe, align, merge
-        assert counts["diarize"] == 5  # + diarize
+        assert counts["none"] == 3  # prepare, transcribe, align
+        assert counts["diarize"] == 4  # prepare, transcribe, align, diarize
         assert counts["per_channel"] == 6  # prepare, 2x transcribe, 2x align, merge
 
     def test_prepare_only_splits_channels_for_per_channel(self, job_id, audio_uri):

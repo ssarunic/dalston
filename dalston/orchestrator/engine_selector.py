@@ -898,15 +898,17 @@ async def select_pipeline_engines(
                     db=db,
                 )
 
-        # Merge (always required)
-        selections["merge"] = await select_engine(
-            "merge",
-            {},  # No special requirements for merge
-            registry,
-            catalog,
-            user_preference=effective_parameters.get("engine_merge"),
-            db=db,
-        )
+        # Merge (required only for per-channel pipelines; mono pipelines use
+        # in-orchestrator transcript assembly instead of a merge engine)
+        if effective_parameters.get("speaker_detection") == "per_channel":
+            selections["merge"] = await select_engine(
+                "merge",
+                {},  # No special requirements for merge
+                registry,
+                catalog,
+                user_preference=effective_parameters.get("engine_merge"),
+                db=db,
+            )
 
         # Record selection results on span
         transcribe_sel = selections["transcribe"]

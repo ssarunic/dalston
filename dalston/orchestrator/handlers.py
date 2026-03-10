@@ -29,6 +29,7 @@ from dalston.common.models import ArtifactOwnerType, JobStatus, TaskStatus
 from dalston.common.registry import UnifiedEngineRegistry
 from dalston.common.s3 import get_s3_client
 from dalston.common.streams import mark_job_cancelled
+from dalston.common.transcript import assemble_transcript
 from dalston.config import Settings, get_settings
 from dalston.db.models import JobModel, TaskDependency, TaskModel
 from dalston.gateway.services.artifacts import ArtifactService
@@ -1089,6 +1090,78 @@ async def _gather_previous_outputs(
     return previous_outputs
 
 
+async def _assemble_linear_transcript(
+    job: JobModel,
+    all_tasks: list[TaskModel],
+    settings: Settings,
+    log: structlog.stdlib.BoundLogger,
+) -> None:
+    """Assemble transcript.json from stage outputs for mono pipelines.
+
+    Mono pipelines have no merge engine. The orchestrator reads outputs
+    from completed stages and assembles the canonical transcript.json
+    using the shared transcript assembly module.
+
+    On failure the job is marked FAILED — a COMPLETED job without
+    transcript.json would confuse downstream consumers.
+
+    Args:
+        job: Completed job model.
+        all_tasks: All tasks for this job.
+        settings: Application settings.
+        log: Logger instance.
+    """
+    # Gather outputs from all completed tasks
+    stage_outputs: dict[str, Any] = {}
+    completed_stages: list[str] = []
+    for task in all_tasks:
+        if task.status == TaskStatus.COMPLETED.value:
+            output = await get_task_output(
+                job_id=task.job_id,
+                task_id=task.id,
+                settings=settings,
+            )
+            if output and "data" in output:
+                stage_outputs[task.stage] = output["data"]
+                completed_stages.append(task.stage)
+
+    # Get job parameters for speaker detection and word timestamps config
+    parameters = job.parameters or {}
+    speaker_detection = parameters.get("speaker_detection", "none")
+    word_timestamps_requested = parameters.get("word_timestamps", True)
+    if "timestamps_granularity" in parameters:
+        word_timestamps_requested = parameters["timestamps_granularity"] == "word"
+    known_speaker_names = parameters.get("known_speaker_names")
+
+    # Assemble transcript
+    transcript = assemble_transcript(
+        job_id=str(job.id),
+        stage_outputs=stage_outputs,
+        speaker_detection=speaker_detection,
+        word_timestamps_requested=word_timestamps_requested,
+        known_speaker_names=known_speaker_names,
+        pipeline_stages=completed_stages,
+    )
+
+    # Write transcript.json to S3
+    transcript_json = transcript.model_dump_json()
+    key = f"jobs/{job.id}/transcript.json"
+    async with get_s3_client(settings) as s3:
+        await s3.put_object(
+            Bucket=settings.s3_bucket,
+            Key=key,
+            Body=transcript_json.encode("utf-8"),
+            ContentType="application/json",
+        )
+
+    log.info(
+        "linear_transcript_assembled",
+        segment_count=len(transcript.segments),
+        speaker_count=len(transcript.speakers),
+        stages=completed_stages,
+    )
+
+
 async def _populate_job_result_stats(job: JobModel, log) -> None:
     """Fetch transcript and populate result stats on job.
 
@@ -1200,10 +1273,29 @@ async def _check_job_completion(
     if any_failed:
         job.status = JobStatus.FAILED.value
         job.error = job.error or "One or more required tasks failed"
-        dalston.metrics.inc_orchestrator_jobs("failed")
         log.error("job_failed", reason=job.error)
     else:
         job.status = JobStatus.COMPLETED.value
+        log.info("job_completed")
+
+        # For mono pipelines (no merge stage), assemble transcript.json from stage outputs.
+        # Per-channel pipelines have a merge task that handles assembly.
+        if not any(t.stage == "merge" for t in all_tasks):
+            try:
+                await _assemble_linear_transcript(job, all_tasks, get_settings(), log)
+            except Exception as e:
+                log.error(
+                    "linear_transcript_assembly_failed",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+                job.status = JobStatus.FAILED.value
+                job.error = f"Transcript assembly failed: {e}"
+
+    # Record final outcome metrics after all status mutations (including assembly).
+    if job.status == JobStatus.FAILED.value:
+        dalston.metrics.inc_orchestrator_jobs("failed")
+    else:
         dalston.metrics.inc_orchestrator_jobs("completed")
         # Record job duration with runtime/model from transcribe task
         if job.started_at:
@@ -1216,7 +1308,6 @@ async def _check_job_completion(
             dalston.metrics.observe_orchestrator_job_duration(
                 job_runtime, job_model, duration
             )
-        log.info("job_completed")
 
         # Extract and store result stats from transcript
         await _populate_job_result_stats(job, log)
@@ -1238,8 +1329,10 @@ async def _check_job_completion(
     # Decrement concurrent job count for rate limiting
     await _decrement_concurrent_jobs(redis, job_id, job.tenant_id)
 
-    # Publish job completion event for webhook delivery
-    if any_failed:
+    # Publish job completion event for webhook delivery.
+    # Check final job.status rather than any_failed so that a transcript
+    # assembly failure (set above) is correctly reported as failed.
+    if job.status == JobStatus.FAILED.value:
         await publish_job_failed(redis, job_id, job.error or "Unknown error")
     else:
         await publish_job_completed(redis, job_id)

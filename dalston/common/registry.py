@@ -19,11 +19,16 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import redis.asyncio as aioredis
 import structlog
 
-from dalston.engine_sdk.types import EngineCapabilities
+if TYPE_CHECKING:
+    # EngineCapabilities is only needed for type annotations and for parsing in
+    # _build_engine_record().  Importing engine_sdk.types at module level would
+    # trigger engine_sdk/__init__.py → runner.py → registry.py (circular).
+    from dalston.engine_sdk.types import EngineCapabilities
 
 logger = structlog.get_logger()
 
@@ -224,6 +229,10 @@ def _mapping_to_record(instance: str, data: dict[str, str]) -> EngineRecord | No
     caps_json = data.get("capabilities")
     if caps_json:
         try:
+            from dalston.engine_sdk.types import (
+                EngineCapabilities,  # local import avoids circular dep at module level
+            )
+
             capabilities = EngineCapabilities.model_validate_json(caps_json)
         except Exception:
             logger.warning(
@@ -470,9 +479,15 @@ class UnifiedEngineRegistry:
 
             if model is not None:
                 if record.models_loaded and model in record.models_loaded:
-                    pass  # Model loaded
+                    pass  # Model already loaded
                 elif runtime and record.runtime == runtime:
-                    pass  # Runtime matches, can load model
+                    pass  # Runtime matches, can load model dynamically
+                elif (
+                    record.capabilities
+                    and record.capabilities.model_variants
+                    and model in record.capabilities.model_variants
+                ):
+                    pass  # Engine declares model as supported variant
                 else:
                     continue
 

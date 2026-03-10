@@ -496,6 +496,57 @@ class TestUnifiedEngineRegistry:
         assert len(en_available) == 2
 
     @pytest.mark.asyncio
+    async def test_get_available_model_via_capabilities_model_variants(
+        self, registry, mock_redis
+    ):
+        """Workers declaring a model in capabilities.model_variants should be
+        included even when runtime is not provided and model is not yet loaded."""
+        now = datetime.now(UTC).isoformat()
+        caps = EngineCapabilities(
+            runtime="faster-whisper",
+            version="1.0",
+            stages=["transcribe"],
+            model_variants=["large-v3", "large-v3-turbo", "base"],
+        )
+        mock_redis.smembers.return_value = {"fw-dynamic"}
+
+        async def mock_hgetall(key):
+            if "fw-dynamic" in key:
+                return {
+                    "runtime": "faster-whisper",
+                    "stage": "transcribe",
+                    "status": "idle",
+                    "interfaces": '["realtime"]',
+                    "capacity": "4",
+                    "active_batch": "0",
+                    "active_realtime": "0",
+                    # Model NOT in models_loaded — only large-v3 is warm
+                    "models_loaded": '["large-v3"]',
+                    "capabilities": caps.model_dump_json(),
+                    "last_heartbeat": now,
+                }
+            return {}
+
+        mock_redis.hgetall.side_effect = mock_hgetall
+
+        # Request large-v3-turbo without runtime hint — should match via model_variants
+        available = await registry.get_available(
+            interface="realtime",
+            model="large-v3-turbo",
+        )
+
+        assert len(available) == 1
+        assert available[0].instance == "fw-dynamic"
+
+        # Request a model NOT in model_variants — should return empty
+        available_none = await registry.get_available(
+            interface="realtime",
+            model="nonexistent-model",
+        )
+
+        assert len(available_none) == 0
+
+    @pytest.mark.asyncio
     async def test_get_available_sorted_by_capacity(self, registry, mock_redis):
         now = datetime.now(UTC).isoformat()
         mock_redis.smembers.return_value = {"low-cap", "high-cap"}

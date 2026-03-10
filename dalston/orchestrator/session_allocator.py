@@ -22,6 +22,7 @@ from dalston.orchestrator.realtime_registry import (
     ACTIVE_SESSIONS_KEY,
     INSTANCE_KEY_PREFIX,
     INSTANCE_SESSIONS_SUFFIX,
+    INSTANCE_SET_KEY,
     SESSION_KEY_PREFIX,
 )
 
@@ -191,11 +192,12 @@ class SessionAllocator:
                 client_ip=client_ip,
             )
 
-            # Add to instance's session set
+            # Add to instance's session set and instance index
             sessions_key = (
                 f"{INSTANCE_KEY_PREFIX}{worker.instance}{INSTANCE_SESSIONS_SUFFIX}"
             )
             await self._redis.sadd(sessions_key, session_id)
+            await self._redis.sadd(INSTANCE_SET_KEY, worker.instance)
 
             # Add to active sessions index
             await self._redis.sadd(ACTIVE_SESSIONS_KEY, session_id)
@@ -254,6 +256,7 @@ class SessionAllocator:
                     f"{INSTANCE_KEY_PREFIX}{worker.instance}{INSTANCE_SESSIONS_SUFFIX}"
                 )
                 await self._redis.sadd(sessions_key, session_id)
+                await self._redis.sadd(INSTANCE_SET_KEY, worker.instance)
                 await self._redis.sadd(ACTIVE_SESSIONS_KEY, session_id)
 
                 logger.info(
