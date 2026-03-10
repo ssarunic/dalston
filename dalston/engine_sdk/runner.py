@@ -29,10 +29,12 @@ from dalston.common.streams_sync import (
     ack_task,
     claim_stale_from_dead_engines,
     is_job_cancelled,
+    read_own_pending,
     read_task,
 )
 from dalston.common.streams_types import WAITING_ENGINE_TASKS_KEY
 from dalston.engine_sdk import io
+from dalston.engine_sdk.admission import TaskDeferredError
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.materializer import ArtifactMaterializer, S3ArtifactStore
 from dalston.engine_sdk.registry import BatchEngineInfo, BatchEngineRegistry
@@ -324,7 +326,15 @@ class EngineRunner:
             time.sleep(self.HEARTBEAT_INTERVAL)
 
     def _setup_signal_handlers(self) -> None:
-        """Setup handlers for graceful shutdown."""
+        """Setup handlers for graceful shutdown.
+
+        Signal handlers can only be installed from the main thread.
+        When the runner is started in a background thread (e.g. by the
+        unified runner), signal handling is the caller's responsibility.
+        """
+        if threading.current_thread() is not threading.main_thread():
+            logger.debug("skip_signal_handlers", reason="not_main_thread")
+            return
 
         def handle_signal(signum, frame):
             logger.info("shutdown_signal_received", signal=signum)
@@ -366,7 +376,24 @@ class EngineRunner:
             dalston.metrics.inc_task_redelivery(self._stage, reason="engine_crash")
 
         if message is None:
-            # 2. No stale tasks - read new ones
+            # 1b. Check for our own deferred (unACKed) messages.
+            # When admission control rejects a task, we skip the ACK so it
+            # stays in the PEL.  Re-read it here before fetching new work.
+            message = read_own_pending(
+                self.redis_client,
+                stage=stream_id,
+                consumer=self.instance,
+            )
+            if message is not None:
+                logger.info(
+                    "reclaimed_deferred_task",
+                    task_id=message.task_id,
+                    stream_id=stream_id,
+                )
+                dalston.metrics.inc_task_redelivery(self._stage, reason="deferred")
+
+        if message is None:
+            # 2. No stale or deferred tasks - read new ones
             # Use instance_id as consumer for proper PEL tracking
             message = read_task(
                 self.redis_client,
@@ -450,8 +477,18 @@ class EngineRunner:
 
         try:
             self._process_task(message.task_id)
-        finally:
-            # 4. Always ACK - failure handling is via task.failed event
+        except TaskDeferredError:
+            # Task was deferred (e.g. admission control rejection).
+            # Skip ACK so the message stays in the PEL for redelivery.
+            logger.info(
+                "task_deferred_skipping_ack",
+                task_id=message.task_id,
+                stream_id=self._current_stream_id or self.runtime,
+            )
+            self._current_message_id = None
+            self._current_stream_id = None
+        else:
+            # 4. ACK on success or failure — failure handling is via task.failed event
             if self._current_message_id:
                 ack_task(
                     self.redis_client,
@@ -614,6 +651,13 @@ class EngineRunner:
                 self._publish_task_completed(task_id, job_id)
 
                 logger.info("task_completed", processing_time=round(total_task_time, 2))
+
+            except TaskDeferredError:
+                # Task was deferred (e.g. admission control rejection).
+                # Re-raise so _poll_and_process skips the ACK, leaving the
+                # message in the PEL for later redelivery.
+                logger.info("task_deferred", task_id=task_id)
+                raise
 
             except Exception as e:
                 dalston.telemetry.record_exception(e)

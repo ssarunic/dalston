@@ -53,7 +53,8 @@ def test_temperature_list_is_forwarded_to_faster_whisper_decoder() -> None:
 
     mock_manager = MagicMock()
     mock_manager.acquire.return_value = mock_model
-    engine._manager = mock_manager
+    # M63: Engine now delegates to TranscribeCore which owns the manager
+    engine._core._manager = mock_manager
 
     task_id = str(uuid4())
     job_id = str(uuid4())

@@ -116,6 +116,53 @@ def read_task(
     return None
 
 
+def read_own_pending(
+    r: redis.Redis,
+    stage: str,
+    consumer: str,
+) -> StreamMessage | None:
+    """Read this consumer's own pending (unACKed) messages.
+
+    Uses XREADGROUP with id "0" to retrieve messages already delivered
+    to this consumer but not yet acknowledged. This reclaims tasks that
+    were deferred (e.g. by admission control) without waiting for
+    stale-task claiming.
+
+    Args:
+        r: Sync Redis client
+        stage: Pipeline stage name
+        consumer: Consumer ID
+
+    Returns:
+        StreamMessage if a pending task exists, None otherwise
+    """
+    stream_key = _stream_key(stage)
+
+    try:
+        results = r.xreadgroup(
+            CONSUMER_GROUP,
+            consumer,
+            {stream_key: "0"},
+            count=1,
+        )
+    except ResponseError as e:
+        if "NOGROUP" in str(e):
+            return None
+        raise
+
+    if not results:
+        return None
+
+    for _stream_name, messages in results:  # type: ignore[union-attr]
+        for msg_id, fields in messages:
+            if not fields:
+                # Empty fields = message already ACKed but still in history
+                continue
+            return _parse_message(msg_id, fields, delivery_count=2)
+
+    return None
+
+
 def get_pending(r: redis.Redis, stage: str) -> list[PendingTask]:
     """Get all pending tasks with metadata.
 
