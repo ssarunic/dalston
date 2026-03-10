@@ -96,6 +96,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
         instead of creating a new one. This is how the unified runner shares
         a single model instance between batch and RT adapters.
         """
+        is_shared = self._core is not None
         if self._core is None:
             # Standalone mode — create own core
             self._core = ParakeetCore.from_env()
@@ -109,7 +110,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
             ttl_seconds=self._core.manager.ttl_seconds,
             device=self._core.device,
             preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
-            shared_core=self._core is not None,
+            shared_core=is_shared,
             rnnt_streaming_enabled=self._rnnt_streaming_enabled,
             rnnt_chunk_ms=self._rnnt_chunk_ms,
         )
@@ -266,6 +267,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
             "parakeet-rnnt-1.1b": "parakeet-rnnt-1.1b",
             "parakeet-ctc-0.6b": "parakeet-ctc-0.6b",
             "parakeet-ctc-1.1b": "parakeet-ctc-1.1b",
+            "parakeet-tdt-0.6b-v3": "parakeet-tdt-0.6b-v3",
             "parakeet-tdt-1.1b": "parakeet-tdt-1.1b",
             # Short variants
             "0.6b": "parakeet-rnnt-0.6b",
@@ -274,12 +276,14 @@ class ParakeetStreamingEngine(RealtimeEngine):
             "rnnt-1.1b": "parakeet-rnnt-1.1b",
             "ctc-0.6b": "parakeet-ctc-0.6b",
             "ctc-1.1b": "parakeet-ctc-1.1b",
+            "tdt-0.6b-v3": "parakeet-tdt-0.6b-v3",
             "tdt-1.1b": "parakeet-tdt-1.1b",
             # NGC model IDs
             "nvidia/parakeet-rnnt-0.6b": "parakeet-rnnt-0.6b",
             "nvidia/parakeet-rnnt-1.1b": "parakeet-rnnt-1.1b",
             "nvidia/parakeet-ctc-0.6b": "parakeet-ctc-0.6b",
             "nvidia/parakeet-ctc-1.1b": "parakeet-ctc-1.1b",
+            "nvidia/parakeet-tdt-0.6b-v3": "parakeet-tdt-0.6b-v3",
             "nvidia/parakeet-tdt-1.1b": "parakeet-tdt-1.1b",
         }
         return mappings.get(model_id, model_id)

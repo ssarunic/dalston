@@ -110,7 +110,7 @@ class NeMoModelManager(ModelManager[NeMoASRModel]):
 
         super().__init__(**kwargs)
 
-    def _get_architecture(self, model_id: str) -> str:
+    def get_architecture(self, model_id: str) -> str:
         """Determine architecture from model ID.
 
         Args:
@@ -169,7 +169,7 @@ class NeMoModelManager(ModelManager[NeMoASRModel]):
             ) from e
 
         # Determine architecture and get appropriate loader
-        architecture = self._get_architecture(model_id)
+        architecture = self.get_architecture(model_id)
         loader_name = self.ARCHITECTURE_LOADERS[architecture]
         loader = getattr(nemo_asr.models, loader_name)
 

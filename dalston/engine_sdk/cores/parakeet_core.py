@@ -219,7 +219,7 @@ class ParakeetCore:
         Returns:
             Decoder type string: "rnnt", "ctc", or "tdt"
         """
-        return self._manager._get_architecture(model_id)
+        return self._manager.get_architecture(model_id)
 
     def supports_streaming_decode(self, model_id: str) -> bool:
         """Check whether a model supports cache-aware streaming inference.
@@ -320,8 +320,7 @@ class ParakeetCore:
             else torch.inference_mode()
         )
 
-        previous_text = ""
-        session_offset = 0.0
+        emitted_word_count = 0
 
         with autocast_ctx:
             for hypothesis in model.transcribe_streaming(audio_iter, cfg):
@@ -334,8 +333,7 @@ class ParakeetCore:
                     else str(hypothesis)
                 )
 
-                # Detect new words by comparing against previous text
-                if not current_text or current_text == previous_text:
+                if not current_text:
                     continue
 
                 # Parse full hypothesis and yield only new words
@@ -343,19 +341,18 @@ class ParakeetCore:
                     hypothesis, current_text
                 )
 
-                # Determine how many words are new
-                prev_word_count = len(previous_text.split()) if previous_text else 0
-                new_words = all_words[prev_word_count:]
+                # Only yield words we haven't emitted yet
+                new_words = all_words[emitted_word_count:]
 
                 for w in new_words:
                     yield NeMoWordResult(
                         word=w.word,
-                        start=round(session_offset + w.start, 3),
-                        end=round(session_offset + w.end, 3),
+                        start=round(w.start, 3),
+                        end=round(w.end, 3),
                         confidence=w.confidence,
                     )
 
-                previous_text = current_text
+                emitted_word_count = len(all_words)
 
     # -- Hypothesis parsing --------------------------------------------------
 

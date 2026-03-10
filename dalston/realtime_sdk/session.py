@@ -402,6 +402,7 @@ class SessionHandler:
         self._streaming_decode_task: asyncio.Task[None] | None = None
         self._streaming_word_count = 0
         self._streaming_session_text_parts: list[str] = []
+        self._streaming_word_results: list[Word] = []
 
         # Storage adapter (initialized in run() when storage is enabled)
         self._session_storage: SessionStorage | None = None
@@ -428,7 +429,7 @@ class SessionHandler:
 
         # M71: Start streaming decode background task if active
         if self._streaming_decode_active:
-            self._streaming_chunk_queue = asyncio.Queue()
+            self._streaming_chunk_queue = asyncio.Queue(maxsize=100)
             self._streaming_decode_task = asyncio.create_task(
                 self._streaming_decode_loop()
             )
@@ -649,41 +650,41 @@ class SessionHandler:
         if self._streaming_decode_fn is None or self._streaming_chunk_queue is None:
             return
 
+        # Capture the event loop reference for thread-safe bridging.
+        # Must be captured here (in async context), not inside threads.
+        loop = asyncio.get_running_loop()
+
         def _chunk_iterator() -> Iterator[np.ndarray]:
             """Blocking iterator that reads from the async queue."""
-            # The queue.get() is called from a thread, so we need
-            # to bridge async → sync via run_coroutine_threadsafe.
             while True:
-                # Block until chunk is available (called from thread)
-                chunk = self._streaming_chunk_queue_get_sync()
+                future = asyncio.run_coroutine_threadsafe(
+                    self._streaming_chunk_queue.get(), loop  # type: ignore[union-attr]
+                )
+                chunk = future.result()
                 if chunk is None:
-                    # Sentinel — session ending
                     return
                 yield chunk
 
         try:
-            # Run the blocking streaming decode in a thread pool
             async for result in self._run_streaming_in_thread(
-                _chunk_iterator
+                _chunk_iterator, loop
             ):
                 if self._ended:
                     break
 
-                if result.text:
+                if result.text and result.words:
                     self._streaming_session_text_parts.append(result.text)
+                    self._streaming_word_results.extend(result.words)
                     self._streaming_word_count += 1
 
                     # Send partial transcript event
                     if self.config.interim_results:
-                        # Build cumulative text for partial
                         cumulative_text = " ".join(
                             self._streaming_session_text_parts
                         )
                         start_time = self._assembler.current_time
-                        word = result.words[0] if result.words else None
-                        end_time = (
-                            start_time + (word.end if word else 0.1)
-                        )
+                        word = result.words[0]
+                        end_time = start_time + word.end
 
                         await self._send(
                             TranscriptPartialMessage(
@@ -697,20 +698,15 @@ class SessionHandler:
             if not self._ended:
                 logger.error("streaming_decode_error", error=str(e))
 
-    def _streaming_chunk_queue_get_sync(self) -> np.ndarray | None:
-        """Blocking get from the async chunk queue (called from thread)."""
-        import asyncio as _asyncio
-
-        loop = _asyncio.get_event_loop()
-        future = _asyncio.run_coroutine_threadsafe(
-            self._streaming_chunk_queue.get(), loop  # type: ignore[union-attr]
-        )
-        return future.result()
-
     async def _run_streaming_in_thread(
-        self, chunk_iterator_factory: Any
+        self, chunk_iterator_factory: Any, loop: asyncio.AbstractEventLoop
     ) -> Any:
-        """Run streaming decode in thread and yield results asynchronously."""
+        """Run streaming decode in thread and yield results asynchronously.
+
+        Args:
+            chunk_iterator_factory: Callable returning a blocking chunk iterator
+            loop: The event loop for thread-safe coroutine scheduling
+        """
         result_queue: asyncio.Queue[TranscribeResult | None] = asyncio.Queue()
 
         def _thread_target() -> None:
@@ -722,70 +718,56 @@ class SessionHandler:
                     self.config.language,
                     self.config.model,
                 ):
-                    # Put result into async queue from thread
-                    import asyncio as _asyncio
-
-                    loop = _asyncio.get_event_loop()
-                    _asyncio.run_coroutine_threadsafe(
+                    asyncio.run_coroutine_threadsafe(
                         result_queue.put(result), loop
                     )
             except Exception as e:
                 logger.error("streaming_thread_error", error=str(e))
             finally:
-                import asyncio as _asyncio
-
-                loop = _asyncio.get_event_loop()
-                _asyncio.run_coroutine_threadsafe(
+                asyncio.run_coroutine_threadsafe(
                     result_queue.put(None), loop
                 )
 
-        # Start thread
-        thread = asyncio.get_event_loop().run_in_executor(
-            None, _thread_target
-        )
+        thread = loop.run_in_executor(None, _thread_target)
 
-        # Yield results as they arrive
         while True:
             result = await result_queue.get()
             if result is None:
                 break
             yield result
 
-        # Wait for thread to finish
         await thread
 
     async def _flush_streaming_final(self) -> None:
         """Send a final transcript from accumulated streaming words.
 
         Called when VAD detects an endpoint during streaming decode.
-        Combines all streaming words into a single final segment.
+        Combines all streaming words into a single final segment,
+        using the real timestamps accumulated from the decoder.
         """
         if not self._streaming_session_text_parts:
             return
 
         full_text = " ".join(self._streaming_session_text_parts)
-        word_count = len(self._streaming_session_text_parts)
 
-        # Create a synthetic TranscribeResult for the assembler
-        words = [
-            Word(
-                word=w,
-                start=i * 0.1,  # Approximate timing
-                end=(i + 1) * 0.1,
-                confidence=0.95,
-            )
-            for i, w in enumerate(self._streaming_session_text_parts)
-        ]
+        # Use real word results from the streaming decoder
+        words = list(self._streaming_word_results)
+
+        # Calculate confidence from word results
+        confidences = [w.confidence for w in words if w.confidence]
+        avg_confidence = (
+            sum(confidences) / len(confidences) if confidences else 0.95
+        )
 
         result = TranscribeResult(
             text=full_text,
             words=words,
             language="en",
-            confidence=0.95,
+            confidence=avg_confidence,
         )
 
-        # Estimate audio duration from word count
-        audio_duration = word_count * 0.3  # ~300ms per word approximation
+        # Calculate audio duration from word timestamps
+        audio_duration = words[-1].end if words else 0.0
 
         # Add to assembler for timeline tracking
         segment = self._assembler.add_utterance(result, audio_duration)
@@ -815,6 +797,7 @@ class SessionHandler:
 
         # Reset for next utterance
         self._streaming_session_text_parts = []
+        self._streaming_word_results = []
         self._streaming_word_count = 0
 
     async def _stop_streaming_decode(self) -> None:

@@ -82,7 +82,7 @@ class TestParakeetCoreDecoderType:
         """Create a ParakeetCore with a mocked manager."""
         core = object.__new__(ParakeetCore)
         core._manager = MagicMock()
-        core._manager._get_architecture = MagicMock(
+        core._manager.get_architecture = MagicMock(
             side_effect=lambda model_id: (
                 "rnnt"
                 if "rnnt" in model_id
@@ -138,8 +138,8 @@ class TestParakeetCoreTranscribeStreaming:
         core._manager = MagicMock()
         core._manager.device = "cpu"
 
-        # Setup _get_architecture to return rnnt
-        core._manager._get_architecture = MagicMock(return_value="rnnt")
+        # Setup get_architecture to return rnnt
+        core._manager.get_architecture = MagicMock(return_value="rnnt")
 
         return core
 
@@ -147,7 +147,7 @@ class TestParakeetCoreTranscribeStreaming:
         """CTC variant must raise RuntimeError if streaming is attempted."""
         core = object.__new__(ParakeetCore)
         core._manager = MagicMock()
-        core._manager._get_architecture = MagicMock(return_value="ctc")
+        core._manager.get_architecture = MagicMock(return_value="ctc")
 
         chunks = iter([np.zeros(1600, dtype=np.float32)])
 
@@ -158,7 +158,7 @@ class TestParakeetCoreTranscribeStreaming:
         """Verify model acquire/release lifecycle during streaming."""
         core = object.__new__(ParakeetCore)
         core._manager = MagicMock()
-        core._manager._get_architecture = MagicMock(return_value="rnnt")
+        core._manager.get_architecture = MagicMock(return_value="rnnt")
         core._manager.device = "cpu"
 
         # Mock _run_streaming_inference to yield nothing
@@ -179,7 +179,7 @@ class TestParakeetCoreTranscribeStreaming:
         """Model must be released even if streaming raises an exception."""
         core = object.__new__(ParakeetCore)
         core._manager = MagicMock()
-        core._manager._get_architecture = MagicMock(return_value="rnnt")
+        core._manager.get_architecture = MagicMock(return_value="rnnt")
         core._manager.device = "cpu"
 
         def _failing_stream(*args, **kwargs):
@@ -202,7 +202,7 @@ class TestParakeetCoreTranscribeStreaming:
         """TDT models should also be accepted for streaming."""
         core = object.__new__(ParakeetCore)
         core._manager = MagicMock()
-        core._manager._get_architecture = MagicMock(return_value="tdt")
+        core._manager.get_architecture = MagicMock(return_value="tdt")
         core._manager.device = "cpu"
 
         with patch.object(
