@@ -29,6 +29,7 @@ from dalston.common.models import ArtifactOwnerType, JobStatus, TaskStatus
 from dalston.common.registry import UnifiedEngineRegistry
 from dalston.common.s3 import get_s3_client
 from dalston.common.streams import mark_job_cancelled
+from dalston.common.transcript import assemble_transcript
 from dalston.config import Settings, get_settings
 from dalston.db.models import JobModel, TaskDependency, TaskModel
 from dalston.gateway.services.artifacts import ArtifactService
@@ -1061,6 +1062,82 @@ async def _gather_previous_outputs(
     return previous_outputs
 
 
+async def _assemble_linear_transcript(
+    job: JobModel,
+    all_tasks: list[TaskModel],
+    settings: Settings,
+    log,
+) -> None:
+    """Assemble transcript.json from stage outputs for linear pipeline (M68).
+
+    In linear pipeline mode, there is no merge engine. The orchestrator
+    reads outputs from completed stages and assembles the canonical
+    transcript.json using the shared transcript assembly module.
+
+    Args:
+        job: Completed job model.
+        all_tasks: All tasks for this job.
+        settings: Application settings.
+        log: Logger instance.
+    """
+    try:
+        # Gather outputs from all completed tasks
+        stage_outputs: dict[str, Any] = {}
+        completed_stages: list[str] = []
+        for task in all_tasks:
+            if task.status == TaskStatus.COMPLETED.value:
+                output = await get_task_output(
+                    job_id=task.job_id,
+                    task_id=task.id,
+                    settings=settings,
+                )
+                if output and "data" in output:
+                    stage_outputs[task.stage] = output["data"]
+                    completed_stages.append(task.stage)
+
+        # Get job parameters for speaker detection and word timestamps config
+        parameters = job.parameters or {}
+        speaker_detection = parameters.get("speaker_detection", "none")
+        word_timestamps_requested = parameters.get("word_timestamps", True)
+        if "timestamps_granularity" in parameters:
+            word_timestamps_requested = parameters["timestamps_granularity"] == "word"
+        known_speaker_names = parameters.get("known_speaker_names")
+
+        # Assemble transcript
+        transcript = assemble_transcript(
+            job_id=str(job.id),
+            stage_outputs=stage_outputs,
+            speaker_detection=speaker_detection,
+            word_timestamps_requested=word_timestamps_requested,
+            known_speaker_names=known_speaker_names,
+            pipeline_stages=completed_stages,
+        )
+
+        # Write transcript.json to S3
+        transcript_json = transcript.model_dump_json()
+        key = f"jobs/{job.id}/transcript.json"
+        async with get_s3_client(settings) as s3:
+            await s3.put_object(
+                Bucket=settings.s3_bucket,
+                Key=key,
+                Body=transcript_json.encode("utf-8"),
+                ContentType="application/json",
+            )
+
+        log.info(
+            "linear_transcript_assembled",
+            segment_count=len(transcript.segments),
+            speaker_count=len(transcript.speakers),
+            stages=completed_stages,
+        )
+    except Exception as e:
+        log.error(
+            "linear_transcript_assembly_failed",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+
+
 async def _populate_job_result_stats(job: JobModel, log) -> None:
     """Fetch transcript and populate result stats on job.
 
@@ -1166,6 +1243,13 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
                 job_runtime, job_model, duration
             )
         log.info("job_completed")
+
+        # M68: If linear pipeline is enabled and no merge task exists,
+        # assemble transcript.json from stage outputs.
+        settings = get_settings()
+        has_merge_task = any(t.stage == "merge" for t in all_tasks)
+        if settings.linear_pipeline_enabled and not has_merge_task:
+            await _assemble_linear_transcript(job, all_tasks, settings, log)
 
         # Extract and store result stats from transcript
         await _populate_job_result_stats(job, log)

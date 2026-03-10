@@ -5,6 +5,12 @@ Each task represents a processing step executed by a specific engine.
 
 M31/M36: Uses capability-driven engine selection. The selector resolves
 model IDs (e.g., "parakeet-tdt-1.1b") to runtime + runtime_model_id.
+
+M68: Adds linear pipeline mode where merge is eliminated for mono pipelines.
+When DALSTON_LINEAR_PIPELINE_ENABLED=true, the pipeline is:
+    prepare → transcribe → [align] → [diarize]
+Diarize becomes sequential (depends on transcribe/align) instead of parallel.
+The orchestrator assembles transcript.json on job completion.
 """
 
 from __future__ import annotations
@@ -169,6 +175,12 @@ async def build_task_dag(
         stages=list(selections.keys()),
     )
 
+    # M68: Check if linear pipeline mode is enabled
+    from dalston.config import get_settings
+
+    settings = get_settings()
+    linear_pipeline = settings.linear_pipeline_enabled
+
     # Build the DAG with selected engines
     with dalston.telemetry.create_span(
         "orchestrator.dag_build",
@@ -180,6 +192,7 @@ async def build_task_dag(
             "dalston.dag.task_count": len(selections),
             "dalston.dag.has_alignment": not skip_alignment,
             "dalston.dag.has_diarization": not skip_diarization,
+            "dalston.dag.linear_pipeline": linear_pipeline,
         },
     ):
         tasks = _build_dag_with_engines(
@@ -191,6 +204,7 @@ async def build_task_dag(
             skip_diarization=skip_diarization,
             runtime_model_id=runtime_model_id,
             stage_runtime_model_ids=stage_runtime_model_ids,
+            linear_pipeline=linear_pipeline,
         )
         dalston.telemetry.set_span_attribute("dalston.dag.task_count", len(tasks))
         return tasks
@@ -205,11 +219,17 @@ def _build_dag_with_engines(
     skip_diarization: bool,
     runtime_model_id: str | None = None,
     stage_runtime_model_ids: dict[str, str] | None = None,
+    linear_pipeline: bool = False,
 ) -> list[Task]:
     """Build DAG with pre-selected engines.
 
     Internal function used by build_task_dag to create the actual
     task graph with capability-driven engine selection.
+
+    When linear_pipeline=True (M68), the pipeline omits the merge stage
+    for mono (non-per-channel) pipelines. Diarize becomes sequential,
+    depending on transcribe/align instead of running parallel to them.
+    The orchestrator assembles transcript.json on job completion.
 
     Args:
         job_id: The job's UUID
@@ -222,6 +242,8 @@ def _build_dag_with_engines(
                          (e.g., "nvidia/parakeet-tdt-1.1b"). Already resolved by selector.
         stage_runtime_model_ids: Runtime model IDs keyed by stage
             (e.g., {"transcribe": "...", "align": "..."}).
+        linear_pipeline: Whether to use linear pipeline mode (M68).
+            When True, merge is omitted and diarize is sequential.
 
     Returns:
         List of Task objects with dependencies wired
@@ -355,7 +377,10 @@ def _build_dag_with_engines(
         )
 
     # Diarization (if requested and not skipped due to native support)
-    if speaker_detection == "diarize" and not skip_diarization:
+    # In legacy mode: diarize depends only on prepare (runs parallel to transcribe).
+    # In linear mode (M68): diarize is deferred until after transcribe/align,
+    # so it's added after the transcribe/align tasks below.
+    if speaker_detection == "diarize" and not skip_diarization and not linear_pipeline:
         if "diarize" in stage_runtime_model_ids:
             diarize_config["runtime_model_id"] = stage_runtime_model_ids["diarize"]
         diarize_task = Task(
@@ -415,6 +440,34 @@ def _build_dag_with_engines(
             required=True,
         )
         tasks.append(align_task)
+
+    # M68: In linear pipeline mode, add diarize AFTER transcribe/align (sequential).
+    # Diarize depends on prepare (for audio) and on the last transcription stage
+    # (transcribe or align) so it receives previous outputs for enrichment.
+    if speaker_detection == "diarize" and not skip_diarization and linear_pipeline:
+        if "diarize" in stage_runtime_model_ids:
+            diarize_config["runtime_model_id"] = stage_runtime_model_ids["diarize"]
+        diarize_dependencies = [prepare_task.id]
+        if align_task is not None:
+            diarize_dependencies.append(align_task.id)
+        else:
+            diarize_dependencies.append(transcribe_task.id)
+        diarize_task = Task(
+            id=uuid4(),
+            job_id=job_id,
+            stage="diarize",
+            runtime=engines.get("diarize", DEFAULT_ENGINES["diarize"]),
+            status=TaskStatus.PENDING,
+            dependencies=diarize_dependencies,
+            input_bindings=_audio_input_binding(),
+            config=diarize_config,
+            input_uri=None,
+            output_uri=None,
+            retries=0,
+            max_retries=DEFAULT_TASK_MAX_RETRIES,
+            required=True,
+        )
+        tasks.append(diarize_task)
 
     # PII Detection
     pii_detect_task = None
@@ -483,7 +536,12 @@ def _build_dag_with_engines(
             )
             tasks.append(audio_redact_task)
 
-    # Merge
+    # M68: In linear pipeline mode, skip merge for mono pipelines.
+    # The orchestrator assembles transcript.json on job completion instead.
+    if linear_pipeline:
+        return tasks
+
+    # Merge (legacy path)
     merge_dependencies = [prepare_task.id, transcribe_task.id]
     if align_task is not None:
         merge_dependencies.append(align_task.id)

@@ -217,6 +217,26 @@ class Settings(BaseSettings):
         description="Default max utterance duration (seconds) before forcing chunk in realtime sessions",
     )
 
+    # Linear Pipeline (M68)
+    linear_pipeline_enabled: bool = Field(
+        default=False,
+        alias="DALSTON_LINEAR_PIPELINE_ENABLED",
+        description=(
+            "Enable linear core pipeline (prepare → transcribe → [align] → [diarize]) "
+            "without a merge stage. The orchestrator assembles transcript.json on job "
+            "completion instead. When False, the legacy merge-based pipeline is used."
+        ),
+    )
+    merge_engine_enabled: bool = Field(
+        default=True,
+        alias="DALSTON_MERGE_ENGINE_ENABLED",
+        description=(
+            "Enable the merge engine in pipelines. Set to False to remove merge from "
+            "all mono pipelines. Only effective when linear_pipeline_enabled=True. "
+            "Per-channel pipelines always use merge regardless of this setting."
+        ),
+    )
+
     # Security Mode (M45)
     security_mode: Literal["none", "api_key", "user"] = Field(
         default="api_key",
