@@ -205,7 +205,6 @@ async def handle_job_created(
             registry=registry,
             catalog=catalog,
             db=db,
-            pii_mode=settings.pii_mode,
         )
     except NoDownloadedModelError as e:
         # No downloaded models for the auto-selected runtime
@@ -496,14 +495,23 @@ async def handle_task_completed(
             _get_runtime_execution_profile(task.runtime),
         )
 
-    # M67: Track post-processing enrichment status
-    if is_post_processing_task(task):
+    # M67: Track post-processing enrichment status.
+    # Only mark COMPLETED if the task actually completed (not SKIPPED from failure).
+    if is_post_processing_task(task) and task.status == TaskStatus.COMPLETED.value:
         await mark_enrichment_status(
             job_id, task.stage, EnrichmentStatus.COMPLETED, redis
         )
         all_enrichments_done = await check_post_processing_completion(job_id, db, redis)
         if all_enrichments_done:
             log.info("post_processing_complete")
+            # Update transcript with PII results
+            from dalston.orchestrator.post_processor import update_transcript_with_pii
+
+            settings = get_settings()
+            try:
+                await update_transcript_with_pii(job_id, db, settings)
+            except Exception as e:
+                log.error("transcript_pii_update_failed", error=str(e))
 
     # Update job audio_duration from prepare stage output if not already set
     # This handles enhancement jobs that don't have duration set at creation time
@@ -639,7 +647,7 @@ async def handle_task_completed(
             )
 
     # 5. Check if job is complete
-    await _check_job_completion(job_id, db, redis, registry)
+    await _check_job_completion(job_id, db, redis, settings, registry)
 
 
 async def handle_task_failed(
@@ -1141,18 +1149,20 @@ async def _check_job_completion(
     job_id: UUID,
     db: AsyncSession,
     redis: Redis,
+    settings: Settings,
     registry: UnifiedEngineRegistry | None = None,
 ) -> None:
     """Check if all tasks are done and mark job as completed.
 
-    When ``pii_mode=post_process`` and the job has PII detection enabled,
-    this also schedules asynchronous post-processing enrichment tasks
-    after the core pipeline completes.
+    When the job has PII detection enabled, this also schedules
+    asynchronous post-processing enrichment tasks after the core
+    pipeline completes.
 
     Args:
         job_id: Job UUID to check
         db: Database session
         redis: Redis client for publishing webhook events
+        settings: Application settings
         registry: Engine registry (needed for post-processing scheduling)
     """
     log = logger.bind(job_id=str(job_id))
@@ -1246,8 +1256,7 @@ async def _check_job_completion(
         await publish_job_completed(redis, job_id)
 
     # M67: Schedule post-processing enrichments if needed
-    settings = get_settings()
-    if not any_failed and needs_post_processing(job, settings.pii_mode):
+    if not any_failed and needs_post_processing(job):
         if registry is None:
             log.warning("post_processing_skipped_no_registry")
             return

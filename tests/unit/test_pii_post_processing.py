@@ -1,10 +1,10 @@
-"""Unit tests for M67 PII post-processing migration.
+"""Unit tests for M67 PII post-processing.
 
 Tests cover:
-- DAG builder dual-mode behaviour (pipeline vs post_process)
+- DAG builder never includes PII stages (PII is post-processing only)
 - PostProcessor task creation and dependency wiring
 - Parity comparison helpers
-- Feature flag routing
+- Enrichment status tracking
 """
 
 from uuid import UUID, uuid4
@@ -28,12 +28,12 @@ from dalston.orchestrator.post_processor import (
 from tests.dag_test_helpers import build_task_dag_for_test
 
 # =============================================================================
-# DAG Builder Dual-Mode Tests
+# DAG Builder: PII stages never in DAG
 # =============================================================================
 
 
-class TestDagBuilderPostProcessMode:
-    """Tests for DAG builder with pii_mode=post_process."""
+class TestDagBuilderNoPiiStages:
+    """Verify PII stages are never created in the DAG."""
 
     @pytest.fixture
     def job_id(self) -> UUID:
@@ -43,31 +43,14 @@ class TestDagBuilderPostProcessMode:
     def audio_uri(self) -> str:
         return "s3://test-bucket/audio/test.wav"
 
-    def test_pipeline_mode_includes_pii_stages(self, job_id: UUID, audio_uri: str):
-        """Default pipeline mode includes PII detection and audio redaction."""
+    def test_pii_enabled_no_pii_stages_in_dag(self, job_id: UUID, audio_uri: str):
+        """Even with pii_detection=True, no PII stages appear in the DAG."""
         parameters = {
             "pii_detection": True,
             "redact_pii_audio": True,
         }
 
-        tasks = build_task_dag_for_test(
-            job_id, audio_uri, parameters, pii_mode="pipeline"
-        )
-
-        stages = [t.stage for t in tasks]
-        assert "pii_detect" in stages
-        assert "audio_redact" in stages
-
-    def test_post_process_mode_omits_pii_stages(self, job_id: UUID, audio_uri: str):
-        """Post-process mode omits PII stages from the DAG."""
-        parameters = {
-            "pii_detection": True,
-            "redact_pii_audio": True,
-        }
-
-        tasks = build_task_dag_for_test(
-            job_id, audio_uri, parameters, pii_mode="post_process"
-        )
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         stages = [t.stage for t in tasks]
         assert "pii_detect" not in stages
@@ -77,36 +60,28 @@ class TestDagBuilderPostProcessMode:
         assert "transcribe" in stages
         assert "merge" in stages
 
-    def test_post_process_mode_merge_has_no_pii_config(
-        self, job_id: UUID, audio_uri: str
-    ):
-        """Merge task should not include PII config in post-process mode."""
+    def test_merge_has_no_pii_config(self, job_id: UUID, audio_uri: str):
+        """Merge task should not include PII config."""
         parameters = {
             "pii_detection": True,
             "redact_pii_audio": True,
         }
 
-        tasks = build_task_dag_for_test(
-            job_id, audio_uri, parameters, pii_mode="post_process"
-        )
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         merge_task = next(t for t in tasks if t.stage == "merge")
         assert "pii_detection" not in merge_task.config
         assert merge_task.input_bindings == []
 
-    def test_post_process_mode_merge_depends_only_on_core_stages(
-        self, job_id: UUID, audio_uri: str
-    ):
-        """Merge should not depend on PII tasks in post-process mode."""
+    def test_merge_depends_only_on_core_stages(self, job_id: UUID, audio_uri: str):
+        """Merge should only depend on core pipeline tasks."""
         parameters = {
             "pii_detection": True,
             "redact_pii_audio": True,
             "timestamps_granularity": "word",
         }
 
-        tasks = build_task_dag_for_test(
-            job_id, audio_uri, parameters, pii_mode="post_process"
-        )
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         task_by_stage = {t.stage: t for t in tasks}
         merge_deps = task_by_stage["merge"].dependencies
@@ -115,45 +90,25 @@ class TestDagBuilderPostProcessMode:
         assert task_by_stage["transcribe"].id in merge_deps
         assert task_by_stage["align"].id in merge_deps
 
-    def test_post_process_mode_fewer_tasks(self, job_id: UUID, audio_uri: str):
-        """Post-process mode should have fewer tasks than pipeline mode."""
-        parameters = {
-            "pii_detection": True,
-            "redact_pii_audio": True,
-            "timestamps_granularity": "word",
-        }
-
-        pipeline_tasks = build_task_dag_for_test(
-            job_id, audio_uri, parameters, pii_mode="pipeline"
-        )
-        post_process_tasks = build_task_dag_for_test(
-            job_id, audio_uri, parameters, pii_mode="post_process"
-        )
-
-        # Pipeline has pii_detect + audio_redact = 2 extra tasks
-        assert len(pipeline_tasks) == len(post_process_tasks) + 2
-
-    def test_post_process_mode_no_pii_stages_no_effect(
+    def test_core_pipeline_task_count_unchanged_by_pii(
         self, job_id: UUID, audio_uri: str
     ):
-        """When PII is not enabled, post_process mode has no effect on DAG."""
-        parameters = {"timestamps_granularity": "word"}
+        """PII flags should not affect task count."""
+        params_no_pii = {"timestamps_granularity": "word"}
+        params_with_pii = {
+            "timestamps_granularity": "word",
+            "pii_detection": True,
+            "redact_pii_audio": True,
+        }
 
-        pipeline_tasks = build_task_dag_for_test(
-            job_id, audio_uri, parameters, pii_mode="pipeline"
-        )
-        post_process_tasks = build_task_dag_for_test(
-            job_id, audio_uri, parameters, pii_mode="post_process"
-        )
+        tasks_no_pii = build_task_dag_for_test(job_id, audio_uri, params_no_pii)
+        tasks_with_pii = build_task_dag_for_test(job_id, audio_uri, params_with_pii)
 
-        assert len(pipeline_tasks) == len(post_process_tasks)
-        pipeline_stages = {t.stage for t in pipeline_tasks}
-        post_process_stages = {t.stage for t in post_process_tasks}
-        assert pipeline_stages == post_process_stages
+        assert len(tasks_no_pii) == len(tasks_with_pii)
 
 
-class TestDagBuilderPerChannelPostProcessMode:
-    """Tests for per-channel DAG with pii_mode=post_process."""
+class TestDagBuilderPerChannelNoPiiStages:
+    """Verify per-channel DAGs never include PII stages."""
 
     @pytest.fixture
     def job_id(self) -> UUID:
@@ -163,10 +118,8 @@ class TestDagBuilderPerChannelPostProcessMode:
     def audio_uri(self) -> str:
         return "s3://test-bucket/audio/test.wav"
 
-    def test_per_channel_post_process_omits_pii_stages(
-        self, job_id: UUID, audio_uri: str
-    ):
-        """Per-channel post-process mode omits per-channel PII stages."""
+    def test_per_channel_no_pii_stages(self, job_id: UUID, audio_uri: str):
+        """Per-channel pipelines should not include PII stages."""
         parameters = {
             "speaker_detection": "per_channel",
             "num_channels": 2,
@@ -174,9 +127,7 @@ class TestDagBuilderPerChannelPostProcessMode:
             "redact_pii_audio": True,
         }
 
-        tasks = build_task_dag_for_test(
-            job_id, audio_uri, parameters, pii_mode="post_process"
-        )
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         stages = [t.stage for t in tasks]
         assert "pii_detect_ch0" not in stages
@@ -188,10 +139,8 @@ class TestDagBuilderPerChannelPostProcessMode:
         assert "transcribe_ch1" in stages
         assert "merge" in stages
 
-    def test_per_channel_post_process_merge_no_pii_flags(
-        self, job_id: UUID, audio_uri: str
-    ):
-        """Per-channel merge should not have PII flags in post-process mode."""
+    def test_per_channel_merge_no_pii_flags(self, job_id: UUID, audio_uri: str):
+        """Per-channel merge should not have PII flags."""
         parameters = {
             "speaker_detection": "per_channel",
             "num_channels": 2,
@@ -199,36 +148,34 @@ class TestDagBuilderPerChannelPostProcessMode:
             "redact_pii_audio": True,
         }
 
-        tasks = build_task_dag_for_test(
-            job_id, audio_uri, parameters, pii_mode="post_process"
-        )
+        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         merge_task = next(t for t in tasks if t.stage == "merge")
         assert "pii_detection" not in merge_task.config
         assert "redact_pii_audio" not in merge_task.config
         assert merge_task.input_bindings == []
 
-    def test_per_channel_post_process_task_count(self, job_id: UUID, audio_uri: str):
-        """Per-channel post-process should have fewer tasks."""
-        parameters = {
+    def test_per_channel_task_count_unaffected_by_pii(
+        self, job_id: UUID, audio_uri: str
+    ):
+        """Per-channel with PII should have same task count as without PII."""
+        params_no_pii = {
             "speaker_detection": "per_channel",
             "num_channels": 2,
             "timestamps_granularity": "word",
+        }
+        params_with_pii = {
+            **params_no_pii,
             "pii_detection": True,
             "redact_pii_audio": True,
         }
 
-        pipeline_tasks = build_task_dag_for_test(
-            job_id, audio_uri, parameters, pii_mode="pipeline"
-        )
-        post_process_tasks = build_task_dag_for_test(
-            job_id, audio_uri, parameters, pii_mode="post_process"
-        )
+        tasks_no_pii = build_task_dag_for_test(job_id, audio_uri, params_no_pii)
+        tasks_with_pii = build_task_dag_for_test(job_id, audio_uri, params_with_pii)
 
-        # Pipeline: 10 tasks (prepare + 2*transcribe + 2*align + 2*pii_detect + 2*audio_redact + merge)
-        # Post-process: 6 tasks (prepare + 2*transcribe + 2*align + merge)
-        assert len(pipeline_tasks) == 10
-        assert len(post_process_tasks) == 6
+        # prepare + 2*transcribe + 2*align + merge = 6
+        assert len(tasks_no_pii) == 6
+        assert len(tasks_with_pii) == 6
 
 
 # =============================================================================
@@ -248,21 +195,17 @@ class _FakeJobModel:
 class TestNeedsPostProcessing:
     """Tests for needs_post_processing helper."""
 
-    def test_pipeline_mode_returns_false(self):
+    def test_pii_enabled_returns_true(self):
         job = _FakeJobModel(uuid4(), {"pii_detection": True})
-        assert needs_post_processing(job, "pipeline") is False
+        assert needs_post_processing(job) is True
 
-    def test_post_process_mode_with_pii_returns_true(self):
-        job = _FakeJobModel(uuid4(), {"pii_detection": True})
-        assert needs_post_processing(job, "post_process") is True
-
-    def test_post_process_mode_without_pii_returns_false(self):
+    def test_pii_disabled_returns_false(self):
         job = _FakeJobModel(uuid4(), {})
-        assert needs_post_processing(job, "post_process") is False
+        assert needs_post_processing(job) is False
 
-    def test_post_process_mode_pii_false_returns_false(self):
+    def test_pii_false_returns_false(self):
         job = _FakeJobModel(uuid4(), {"pii_detection": False})
-        assert needs_post_processing(job, "post_process") is False
+        assert needs_post_processing(job) is False
 
 
 class TestBuildPostProcessingTasks:

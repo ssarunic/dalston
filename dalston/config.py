@@ -217,17 +217,6 @@ class Settings(BaseSettings):
         description="Default max utterance duration (seconds) before forcing chunk in realtime sessions",
     )
 
-    # PII Processing Mode (M67)
-    pii_mode: Literal["pipeline", "post_process"] = Field(
-        default="pipeline",
-        alias="DALSTON_PII_MODE",
-        description=(
-            "PII processing mode. "
-            "'pipeline' (default): PII detection/redaction runs as blocking pipeline stages. "
-            "'post_process': PII runs asynchronously after core pipeline completes."
-        ),
-    )
-
     # Security Mode (M45)
     security_mode: Literal["none", "api_key", "user"] = Field(
         default="api_key",
