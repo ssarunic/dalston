@@ -115,13 +115,13 @@ build-cpu:
 	docker compose build \
 		stt-batch-prepare \
 		stt-batch-transcribe-faster-whisper \
-		stt-batch-transcribe-nemo-cpu \
+		stt-unified-nemo-cpu \
+		stt-unified-nemo-onnx-cpu \
 		stt-batch-align-phoneme-cpu \
 		stt-batch-diarize-pyannote-4.0-cpu \
 		stt-batch-diarize-nemo-msdd-cpu \
 		stt-batch-pii-detect-presidio \
-		stt-batch-merge \
-		stt-rt-transcribe-parakeet-rnnt-0.6b-cpu
+		stt-batch-merge
 
 # Build GPU engine variants
 build-gpu:

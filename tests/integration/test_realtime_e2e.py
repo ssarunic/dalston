@@ -15,7 +15,11 @@ from fastapi.testclient import TestClient
 
 from dalston.gateway.api.v1.realtime_status import router as status_router
 from dalston.gateway.services.auth import DEFAULT_EXPIRES_AT, APIKey, Scope
-from dalston.session_router import CapacityInfo, SessionRouter, WorkerStatus
+from dalston.orchestrator.session_coordinator import (
+    CapacityInfo,
+    SessionCoordinator,
+    WorkerStatus,
+)
 
 
 class TestRealtimeManagementEndpoints:
@@ -23,7 +27,7 @@ class TestRealtimeManagementEndpoints:
 
     @pytest.fixture
     def mock_session_router(self):
-        router = AsyncMock(spec=SessionRouter)
+        router = AsyncMock(spec=SessionCoordinator)
         return router
 
     @pytest.fixture

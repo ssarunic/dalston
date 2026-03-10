@@ -31,7 +31,7 @@ from dalston.gateway.middleware.security_error_handler import (
     SecurityErrorHandlerMiddleware,
 )
 from dalston.gateway.services.auth import AuthService, Scope
-from dalston.session_router import SessionRouter
+from dalston.orchestrator.session_coordinator import SessionCoordinator
 
 # Configure structured logging
 dalston.logging.configure("gateway")
@@ -45,8 +45,8 @@ dalston.metrics.configure_metrics("gateway")
 # Gateway also hosts session router, so initialize those metrics too
 dalston.metrics.init_session_router_metrics()
 
-# Global session router instance (initialized in lifespan)
-session_router: SessionRouter | None = None
+# Global session coordinator instance (initialized in lifespan).
+session_router: SessionCoordinator | None = None
 
 
 async def _ensure_admin_key_exists() -> None:
@@ -169,9 +169,9 @@ async def lifespan(app: FastAPI):
             logger.error("S3 bucket check failed: %s", e)
             raise
 
-        # Start Session Router for real-time transcription
-        logger.info("Starting Session Router...")
-        session_router = SessionRouter(redis_url=settings.redis_url)
+        # Start session coordinator for real-time transcription.
+        logger.info("Starting SessionCoordinator...")
+        session_router = SessionCoordinator(redis_url=settings.redis_url)
         await session_router.start()
 
     # Auto-bootstrap admin key if no keys exist
@@ -184,7 +184,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down Dalston Gateway...")
 
-    # Stop Session Router
+    # Stop session coordinator
     if session_router:
         await session_router.stop()
 

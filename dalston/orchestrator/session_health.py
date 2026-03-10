@@ -1,4 +1,4 @@
-"""Health monitoring for real-time workers.
+"""Health monitoring for real-time workers (moved from session_router, M66).
 
 Monitors worker heartbeats and marks stale workers as offline.
 """
@@ -13,7 +13,7 @@ import redis.asyncio as redis
 import structlog
 
 import dalston.metrics
-from dalston.session_router.registry import (
+from dalston.orchestrator.realtime_registry import (
     ACTIVE_SESSIONS_KEY,
     EVENTS_CHANNEL,
     INSTANCE_KEY_PREFIX,

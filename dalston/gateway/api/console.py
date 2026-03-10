@@ -50,7 +50,7 @@ from dalston.orchestrator.registry import (
     ENGINE_KEY_PREFIX,
     ENGINE_SET_KEY,
 )
-from dalston.session_router import SessionRouter
+from dalston.orchestrator.session_coordinator import SessionCoordinator
 
 logger = structlog.get_logger()
 
@@ -141,7 +141,7 @@ class DashboardResponse(BaseModel):
 async def get_dashboard(
     principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
-    session_router: SessionRouter = Depends(get_session_router),
+    session_router: SessionCoordinator = Depends(get_session_router),
     console_service: ConsoleService = Depends(get_console_service),
 ) -> DashboardResponse:
     """Get aggregated dashboard data in a single call."""
@@ -406,7 +406,7 @@ HEARTBEAT_STALE_THRESHOLD = 30  # Mark as stale after 30s without heartbeat
 async def get_engines(
     principal: Annotated[Principal, Depends(get_principal)],
     redis: Redis = Depends(get_redis),
-    session_router: SessionRouter = Depends(get_session_router),
+    session_router: SessionCoordinator = Depends(get_session_router),
 ) -> EnginesResponse:
     """Get status of all engines.
 

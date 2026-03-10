@@ -6,7 +6,7 @@
 | **Duration** | 1 week |
 | **Dependencies** | M63, M64 (recommended) |
 | **Primary Deliverable** | `RealtimeProxy` service used by all WS adapters with protocol-parity tests |
-| **Status** | Proposed |
+| **Status** | Complete |
 
 ## Outcomes
 
@@ -130,8 +130,8 @@ pytest -m e2e
 
 ## Rollback and Safety Controls
 
-- `DALSTON_REALTIME_PROXY_CORE_ENABLED=true|false`
-- Rollback: disable proxy-core flag and route handlers to legacy logic.
+The per-handler legacy lifecycle code was deleted as part of T3/T4. There is no
+runtime flag for rollback; revert via `git revert` if needed.
 
 ## Success Criteria
 

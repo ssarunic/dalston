@@ -18,7 +18,7 @@ from dalston.gateway.dependencies import (
 from dalston.gateway.error_codes import Err
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
-from dalston.session_router import SessionRouter
+from dalston.orchestrator.session_coordinator import SessionCoordinator
 
 router = APIRouter(prefix="/realtime", tags=["realtime"])
 
@@ -61,7 +61,7 @@ class WorkersListResponse(BaseModel):
 )
 async def get_realtime_status(
     principal: Annotated[Principal, Depends(get_principal)],
-    session_router: SessionRouter = Depends(get_session_router),
+    session_router: SessionCoordinator = Depends(get_session_router),
 ) -> RealtimeStatusResponse:
     """Get real-time transcription system status."""
     security_manager = get_security_manager()
@@ -95,7 +95,7 @@ async def get_realtime_status(
 )
 async def list_realtime_workers(
     principal: Annotated[Principal, Depends(get_principal)],
-    session_router: SessionRouter = Depends(get_session_router),
+    session_router: SessionCoordinator = Depends(get_session_router),
 ) -> WorkersListResponse:
     """List all real-time workers."""
     security_manager = get_security_manager()
@@ -130,7 +130,7 @@ async def list_realtime_workers(
 async def get_worker_status(
     instance: str,
     principal: Annotated[Principal, Depends(get_principal)],
-    session_router: SessionRouter = Depends(get_session_router),
+    session_router: SessionCoordinator = Depends(get_session_router),
 ) -> WorkerStatusResponse:
     """Get specific worker status."""
     security_manager = get_security_manager()

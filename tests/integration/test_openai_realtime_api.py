@@ -499,11 +499,11 @@ def test_openai_realtime_endpoint_sends_session_created_event():
             side_effect=_fake_proxy_to_worker_openai,
         ),
         patch(
-            "dalston.gateway.api.v1.openai_realtime._keep_session_alive",
+            "dalston.gateway.services.realtime_proxy.keep_session_alive",
             side_effect=_fake_keepalive,
         ),
         patch(
-            "dalston.gateway.api.v1.openai_realtime._get_db",
+            "dalston.gateway.services.realtime_proxy._get_db",
             side_effect=lambda: _db_gen(),
         ),
         patch(
@@ -511,7 +511,7 @@ def test_openai_realtime_endpoint_sends_session_created_event():
             side_effect=_fake_decrement_session_count,
         ),
         patch(
-            "dalston.gateway.api.v1.openai_realtime.RealtimeSessionService",
+            "dalston.gateway.services.realtime_proxy.RealtimeSessionService",
             return_value=session_service,
         ),
     ):
@@ -611,11 +611,11 @@ def test_openai_realtime_endpoint_persists_lag_exceeded_reason():
             side_effect=_fake_proxy_to_worker_openai,
         ),
         patch(
-            "dalston.gateway.api.v1.openai_realtime._keep_session_alive",
+            "dalston.gateway.services.realtime_proxy.keep_session_alive",
             side_effect=_fake_keepalive,
         ),
         patch(
-            "dalston.gateway.api.v1.openai_realtime._get_db",
+            "dalston.gateway.services.realtime_proxy._get_db",
             side_effect=lambda: _db_gen(),
         ),
         patch(
@@ -623,7 +623,7 @@ def test_openai_realtime_endpoint_persists_lag_exceeded_reason():
             side_effect=_fake_decrement_session_count,
         ),
         patch(
-            "dalston.gateway.api.v1.openai_realtime.RealtimeSessionService",
+            "dalston.gateway.services.realtime_proxy.RealtimeSessionService",
             return_value=session_service,
         ),
     ):

@@ -1,4 +1,4 @@
-"""Session allocation for real-time transcription.
+"""Session allocation for real-time transcription (moved from session_router, M66).
 
 Implements least-loaded allocation strategy for distributing
 sessions across available workers.
@@ -17,7 +17,7 @@ import structlog
 import dalston.metrics
 import dalston.telemetry
 from dalston.common.timeouts import REALTIME_SESSION_TTL_SECONDS
-from dalston.session_router.registry import (
+from dalston.orchestrator.realtime_registry import (
     ACTIVE_SESSIONS_KEY,
     INSTANCE_KEY_PREFIX,
     INSTANCE_SESSIONS_SUFFIX,

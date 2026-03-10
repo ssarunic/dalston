@@ -6,7 +6,7 @@
 | **Duration** | 1-2 weeks |
 | **Dependencies** | M64, M65 |
 | **Primary Deliverable** | `SessionCoordinator` in orchestrator with parity-validated acquire/release/TTL/orphan/offline behavior |
-| **Status** | Proposed |
+| **Status** | Complete |
 
 ## Outcomes
 

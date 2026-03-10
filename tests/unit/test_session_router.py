@@ -5,13 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from dalston.session_router.allocator import (
-    SessionAllocator,
-    SessionState,
-    WorkerAllocation,
-)
-from dalston.session_router.health import HealthMonitor
-from dalston.session_router.registry import (
+from dalston.orchestrator.realtime_registry import (
     ACTIVE_SESSIONS_KEY,
     INSTANCE_KEY_PREFIX,
     INSTANCE_SESSIONS_SUFFIX,
@@ -19,6 +13,12 @@ from dalston.session_router.registry import (
     WorkerRegistry,
     WorkerState,
 )
+from dalston.orchestrator.session_allocator import (
+    SessionAllocator,
+    SessionState,
+    WorkerAllocation,
+)
+from dalston.orchestrator.session_health import HealthMonitor
 
 
 class TestWorkerState:
@@ -696,7 +696,7 @@ class TestHealthMonitor:
         assert mock_redis.exists.call_count == 2
 
     @pytest.mark.asyncio
-    @patch("dalston.session_router.health.dalston.metrics")
+    @patch("dalston.orchestrator.session_health.dalston.metrics")
     async def test_reconcile_orphaned_session_cleanup(
         self, mock_metrics, health_monitor: HealthMonitor, mock_redis
     ):
@@ -742,7 +742,7 @@ class TestHealthMonitor:
         )
 
     @pytest.mark.asyncio
-    @patch("dalston.session_router.health.dalston.metrics")
+    @patch("dalston.orchestrator.session_health.dalston.metrics")
     async def test_reconcile_negative_counter_clamped(
         self, mock_metrics, health_monitor: HealthMonitor, mock_redis
     ):
@@ -773,7 +773,7 @@ class TestHealthMonitor:
         )
 
     @pytest.mark.asyncio
-    @patch("dalston.session_router.health.dalston.metrics")
+    @patch("dalston.orchestrator.session_health.dalston.metrics")
     async def test_reconcile_multiple_orphaned_sessions(
         self, mock_metrics, health_monitor: HealthMonitor, mock_redis
     ):
@@ -799,7 +799,7 @@ class TestHealthMonitor:
         assert mock_redis.srem.call_count == 6  # 3 from worker set + 3 from active set
 
     @pytest.mark.asyncio
-    @patch("dalston.session_router.health.dalston.metrics")
+    @patch("dalston.orchestrator.session_health.dalston.metrics")
     async def test_reconcile_session_not_in_any_worker(
         self, mock_metrics, health_monitor: HealthMonitor, mock_redis
     ):
@@ -843,7 +843,7 @@ class TestHealthMonitor:
         mock_redis.exists.side_effect = mock_exists
         mock_redis.sismember.return_value = False
 
-        with patch("dalston.session_router.health.dalston.metrics"):
+        with patch("dalston.orchestrator.session_health.dalston.metrics"):
             cleaned = await health_monitor.reconcile_orphaned_sessions()
 
         assert cleaned == 1

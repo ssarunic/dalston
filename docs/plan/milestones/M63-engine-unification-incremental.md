@@ -6,7 +6,7 @@
 | **Duration** | 2-3 weeks (incremental rollout) |
 | **Dependencies** | M36, M40, M43, M44 |
 | **Primary Deliverable** | Unified runtime core + dual interfaces with QoS/admission control |
-| **Status** | In Progress (phase 1 complete, phase 2 partial) |
+| **Status** | In Progress (phase 1 complete, phase 2 complete) |
 
 ## Outcomes
 
@@ -226,6 +226,11 @@ pytest -m e2e
   (`engines/stt-unified/parakeet-onnx/runner.py`) — same structure as the
   faster-whisper runner (one core, batch thread + RT async loop, shared
   admission controller).
+- **Dockerfiles created**: `engines/stt-unified/parakeet/Dockerfile` and
+  `engines/stt-unified/parakeet-onnx/Dockerfile` with GPU/CPU build-arg variants.
+- **Promoted to docker-compose**: 8 legacy split services (`stt-batch-transcribe-nemo*`,
+  `stt-rt-nemo*`) replaced by 4 unified services (`stt-unified-nemo`,
+  `stt-unified-nemo-cpu`, `stt-unified-nemo-onnx-cpu`, `stt-unified-nemo-onnx`).
 - **hf-asr, vllm-asr, voxtral**: batch-only runtimes with no RT counterpart to
   unify — no core extraction needed.
 
@@ -233,12 +238,6 @@ pytest -m e2e
 
 - Unified engine registry (M64) handles dual-write, consumer migration, and
   interface-aware routing. Phase 3 cutover (legacy removal) tracked by M69.
-
-### Remaining
-
-- Write unified runners for Parakeet and Parakeet-ONNX (template from
-  faster-whisper unified runner).
-- Canary deploy and promote remaining runtimes.
 
 ## References
 

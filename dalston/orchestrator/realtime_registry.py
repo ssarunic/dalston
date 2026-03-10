@@ -1,9 +1,9 @@
-"""Server-side worker registry for Session Router.
+"""Server-side worker registry for realtime transcription (moved from session_router, M66).
 
 Reads worker state from Redis (written by realtime_sdk's WorkerRegistry client).
 
-M64: When DALSTON_REGISTRY_UNIFIED_READ_ENABLED=true, reads from the unified
-registry first with legacy fallback for RT worker discovery.
+When DALSTON_REGISTRY_UNIFIED_READ_ENABLED=true, reads from the unified
+registry first with legacy fallback for RT worker discovery (M64).
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ class WorkerState:
         status: Current status (ready, busy, draining, offline)
         capacity: Maximum concurrent sessions
         active_sessions: Current active session count
-        models_loaded: List of currently loaded model variants (M43: dynamic)
+        models_loaded: List of currently loaded model variants
         languages_supported: List of supported language codes
         runtime: The inference framework (e.g., "faster-whisper", "parakeet")
         supports_vocabulary: Whether this engine supports vocabulary boosting
@@ -77,13 +77,14 @@ class WorkerState:
 class WorkerRegistry:
     """Server-side registry for reading worker pool state.
 
-    Used by Session Router to:
+    Used by SessionCoordinator to:
     - List all registered workers
     - Find workers with available capacity
     - Check worker health status
     - Mark workers offline
 
-    Example:
+    Example::
+
         registry = WorkerRegistry(redis_client)
 
         # Get all workers
@@ -91,8 +92,8 @@ class WorkerRegistry:
 
         # Find available workers for a request
         available = await registry.get_available_workers(
-            model=None,  # None = auto, or specific model name
-            language="en"
+            model=None,
+            language="en",
         )
 
         # Mark stale worker offline
@@ -108,13 +109,12 @@ class WorkerRegistry:
         """Initialize registry with Redis client.
 
         Args:
-            redis_client: Async Redis client (shared with allocator/router)
+            redis_client: Async Redis client.
             unified_read_enabled: Read from unified registry first (M64).
-                If None, reads from DALSTON_REGISTRY_UNIFIED_READ_ENABLED env var.
+                If None, reads from ``DALSTON_REGISTRY_UNIFIED_READ_ENABLED`` env var.
         """
         self._redis = redis_client
 
-        # M64: Optionally read from unified registry
         if unified_read_enabled is None:
             import os
 
@@ -128,12 +128,7 @@ class WorkerRegistry:
         )
 
     async def get_workers(self) -> list[WorkerState]:
-        """Get all registered workers.
-
-        Returns:
-            List of all worker states
-        """
-        # M64: Try unified registry first (filter to realtime-interface engines)
+        """Get all registered workers."""
         if self._unified:
             try:
                 records = await self._unified.get_all()
@@ -141,48 +136,30 @@ class WorkerRegistry:
                 if rt_records:
                     return [_engine_record_to_worker_state(r) for r in rt_records]
             except Exception:
-                logger.debug(
-                    "unified_registry_read_fallback",
-                    method="get_workers",
-                )
+                logger.debug("unified_registry_read_fallback", method="get_workers")
 
         instances = await self._redis.smembers(INSTANCE_SET_KEY)
         workers = []
-
         for instance in instances:
             worker = await self.get_worker(instance)
             if worker is not None:
                 workers.append(worker)
-
         return workers
 
     async def get_worker(self, instance: str) -> WorkerState | None:
-        """Get specific worker state.
-
-        Args:
-            instance: Worker identifier
-
-        Returns:
-            WorkerState if found, None otherwise
-        """
-        # M64: Try unified registry first
+        """Get specific worker state."""
         if self._unified:
             try:
                 record = await self._unified.get_by_instance(instance)
                 if record is not None and record.supports_interface("realtime"):
                     return _engine_record_to_worker_state(record)
             except Exception:
-                logger.debug(
-                    "unified_registry_read_fallback",
-                    method="get_worker",
-                )
+                logger.debug("unified_registry_read_fallback", method="get_worker")
 
         worker_key = f"{INSTANCE_KEY_PREFIX}{instance}"
         data = await self._redis.hgetall(worker_key)
-
         if not data:
             return None
-
         return self._parse_worker_state(instance, data)
 
     async def get_available_workers(
@@ -192,21 +169,7 @@ class WorkerRegistry:
         runtime: str | None = None,
         valid_runtimes: set[str] | None = None,
     ) -> list[WorkerState]:
-        """Get workers with capacity that support requested model/language/runtime.
-
-        Args:
-            model: Exact model name (e.g., "parakeet-tdt-0.6b-v3") or None for any
-            language: Language code or "auto"
-            runtime: Model runtime (e.g., "faster-whisper") for routing when model
-                     isn't pre-loaded. Workers matching runtime can load the model.
-            valid_runtimes: When model=None and runtime=None, only consider workers
-                     whose runtime is in this set. Used for "Any available" routing
-                     to filter by runtimes that have downloaded models in registry.
-
-        Returns:
-            List of available workers matching criteria, sorted by available capacity
-        """
-        # M64: Try unified registry first for RT worker discovery
+        """Get workers with capacity matching the requested model/language/runtime."""
         if self._unified:
             try:
                 records = await self._unified.get_available(
@@ -231,43 +194,31 @@ class WorkerRegistry:
             if not worker.is_available:
                 continue
 
-            # Model/Runtime filtering:
-            # - model=None, runtime=None: any worker (or filter by valid_runtimes)
-            # - model specified: prefer workers with model loaded, fallback to runtime match
-            # - runtime specified: workers with matching runtime (can load any model)
             if model is not None:
-                # First check if model is already loaded
                 if model in worker.models_loaded:
-                    pass  # Model loaded, worker matches
+                    pass
                 elif runtime and worker.runtime == runtime:
-                    pass  # Model not loaded but runtime matches, worker can load it
+                    pass
                 else:
-                    continue  # No match
+                    continue
             elif runtime is not None:
-                # No specific model, but filter by runtime
                 if worker.runtime != runtime:
                     continue
             elif valid_runtimes is not None:
-                # No specific model or runtime, but filter by valid runtimes from registry
-                # This ensures "Any available" only routes to workers whose runtime
-                # has downloaded models in the registry
                 if worker.runtime not in valid_runtimes:
                     continue
 
-            # Language filtering
             if language != "auto" and "auto" not in worker.languages_supported:
                 if language not in worker.languages_supported:
                     continue
 
             available.append(worker)
 
-        # Sort: prefer workers with model loaded, then by available capacity
         if model:
             available.sort(
                 key=lambda w: (model not in w.models_loaded, -w.available_capacity)
             )
         else:
-            # Prefer workers that have models loaded (ready to go) over empty workers
             available.sort(
                 key=lambda w: (len(w.models_loaded) == 0, -w.available_capacity)
             )
@@ -275,15 +226,10 @@ class WorkerRegistry:
         return available
 
     async def mark_worker_offline(self, instance: str) -> None:
-        """Mark worker as offline due to stale heartbeat.
-
-        Args:
-            instance: Worker identifier
-        """
+        """Mark worker as offline due to stale heartbeat."""
         worker_key = f"{INSTANCE_KEY_PREFIX}{instance}"
         await self._redis.hset(worker_key, "status", "offline")
 
-        # M64: Also mark offline in unified registry
         if self._unified:
             try:
                 await self._unified.mark_instance_offline(instance)
@@ -293,24 +239,16 @@ class WorkerRegistry:
         logger.warning("worker_marked_offline", instance=instance)
 
     async def get_worker_session_ids(self, instance: str) -> set[str]:
-        """Get active session IDs for a worker.
-
-        Args:
-            instance: Worker identifier
-
-        Returns:
-            Set of session IDs
-        """
+        """Get active session IDs for a worker."""
         sessions_key = f"{INSTANCE_KEY_PREFIX}{instance}{INSTANCE_SESSIONS_SUFFIX}"
         return await self._redis.smembers(sessions_key)
 
     def _parse_worker_state(self, instance: str, data: dict) -> WorkerState | None:
         """Parse worker state from Redis hash data.
 
-        Returns None if critical fields are missing/invalid, which quarantines
+        Returns None if critical fields are missing/invalid, quarantining
         the worker from the pool until the issue is resolved.
         """
-        # Critical fields - worker is unusable without these
         endpoint = data.get("endpoint")
         if not endpoint:
             logger.error(
@@ -343,7 +281,6 @@ class WorkerRegistry:
             )
             return None
 
-        # Parse JSON fields with validation
         try:
             models_loaded = json.loads(data.get("models_loaded", "[]"))
             if not isinstance(models_loaded, list):
@@ -401,19 +338,10 @@ class WorkerRegistry:
         )
 
     def _parse_datetime(self, instance: str, field: str, value: str | None) -> datetime:
-        """Parse ISO datetime string.
-
-        Returns epoch (1970-01-01) on parse failure, which will cause the worker
-        to be flagged as stale by health checks rather than appearing fresh.
-        """
+        """Parse ISO datetime string, returning epoch on failure."""
         if not value:
-            logger.warning(
-                "worker_missing_timestamp",
-                instance=instance,
-                field=field,
-            )
+            logger.warning("worker_missing_timestamp", instance=instance, field=field)
             return datetime.min.replace(tzinfo=UTC)
-
         try:
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError as e:
@@ -428,11 +356,7 @@ class WorkerRegistry:
 
 
 def _engine_record_to_worker_state(record: EngineRecord) -> WorkerState:
-    """Convert unified EngineRecord to WorkerState for backward compat.
-
-    M64: This bridge allows the session router to read from the unified
-    registry while keeping its existing interfaces unchanged.
-    """
+    """Convert unified EngineRecord to WorkerState (M64 bridge)."""
     return WorkerState(
         instance=record.instance,
         endpoint=record.endpoint or "",
@@ -442,7 +366,7 @@ def _engine_record_to_worker_state(record: EngineRecord) -> WorkerState:
         models_loaded=record.models_loaded or [],
         languages_supported=record.languages or [],
         runtime=record.runtime,
-        supports_vocabulary=False,  # Not tracked in unified registry yet
+        supports_vocabulary=False,
         gpu_memory_used=record.gpu_memory_used,
         gpu_memory_total=record.gpu_memory_total,
         last_heartbeat=record.last_heartbeat or datetime.now(UTC),

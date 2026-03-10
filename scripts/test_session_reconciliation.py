@@ -117,8 +117,8 @@ async def main():
 
     # Step 4: Run reconciliation
     print("\n--- Step 4: Run reconciliation ---")
-    from dalston.session_router.health import HealthMonitor
-    from dalston.session_router.registry import WorkerRegistry
+    from dalston.orchestrator.realtime_registry import WorkerRegistry
+    from dalston.orchestrator.session_health import HealthMonitor
 
     registry = WorkerRegistry(r)
     monitor = HealthMonitor(r, registry)
