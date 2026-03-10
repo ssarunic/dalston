@@ -1066,7 +1066,7 @@ async def _assemble_linear_transcript(
     job: JobModel,
     all_tasks: list[TaskModel],
     settings: Settings,
-    log,
+    log: structlog.stdlib.BoundLogger,
 ) -> None:
     """Assemble transcript.json from stage outputs for linear pipeline (M68).
 
@@ -1074,68 +1074,64 @@ async def _assemble_linear_transcript(
     reads outputs from completed stages and assembles the canonical
     transcript.json using the shared transcript assembly module.
 
+    On failure the job is marked FAILED — a COMPLETED job without
+    transcript.json would confuse downstream consumers.
+
     Args:
         job: Completed job model.
         all_tasks: All tasks for this job.
         settings: Application settings.
         log: Logger instance.
     """
-    try:
-        # Gather outputs from all completed tasks
-        stage_outputs: dict[str, Any] = {}
-        completed_stages: list[str] = []
-        for task in all_tasks:
-            if task.status == TaskStatus.COMPLETED.value:
-                output = await get_task_output(
-                    job_id=task.job_id,
-                    task_id=task.id,
-                    settings=settings,
-                )
-                if output and "data" in output:
-                    stage_outputs[task.stage] = output["data"]
-                    completed_stages.append(task.stage)
-
-        # Get job parameters for speaker detection and word timestamps config
-        parameters = job.parameters or {}
-        speaker_detection = parameters.get("speaker_detection", "none")
-        word_timestamps_requested = parameters.get("word_timestamps", True)
-        if "timestamps_granularity" in parameters:
-            word_timestamps_requested = parameters["timestamps_granularity"] == "word"
-        known_speaker_names = parameters.get("known_speaker_names")
-
-        # Assemble transcript
-        transcript = assemble_transcript(
-            job_id=str(job.id),
-            stage_outputs=stage_outputs,
-            speaker_detection=speaker_detection,
-            word_timestamps_requested=word_timestamps_requested,
-            known_speaker_names=known_speaker_names,
-            pipeline_stages=completed_stages,
-        )
-
-        # Write transcript.json to S3
-        transcript_json = transcript.model_dump_json()
-        key = f"jobs/{job.id}/transcript.json"
-        async with get_s3_client(settings) as s3:
-            await s3.put_object(
-                Bucket=settings.s3_bucket,
-                Key=key,
-                Body=transcript_json.encode("utf-8"),
-                ContentType="application/json",
+    # Gather outputs from all completed tasks
+    stage_outputs: dict[str, Any] = {}
+    completed_stages: list[str] = []
+    for task in all_tasks:
+        if task.status == TaskStatus.COMPLETED.value:
+            output = await get_task_output(
+                job_id=task.job_id,
+                task_id=task.id,
+                settings=settings,
             )
+            if output and "data" in output:
+                stage_outputs[task.stage] = output["data"]
+                completed_stages.append(task.stage)
 
-        log.info(
-            "linear_transcript_assembled",
-            segment_count=len(transcript.segments),
-            speaker_count=len(transcript.speakers),
-            stages=completed_stages,
+    # Get job parameters for speaker detection and word timestamps config
+    parameters = job.parameters or {}
+    speaker_detection = parameters.get("speaker_detection", "none")
+    word_timestamps_requested = parameters.get("word_timestamps", True)
+    if "timestamps_granularity" in parameters:
+        word_timestamps_requested = parameters["timestamps_granularity"] == "word"
+    known_speaker_names = parameters.get("known_speaker_names")
+
+    # Assemble transcript
+    transcript = assemble_transcript(
+        job_id=str(job.id),
+        stage_outputs=stage_outputs,
+        speaker_detection=speaker_detection,
+        word_timestamps_requested=word_timestamps_requested,
+        known_speaker_names=known_speaker_names,
+        pipeline_stages=completed_stages,
+    )
+
+    # Write transcript.json to S3
+    transcript_json = transcript.model_dump_json()
+    key = f"jobs/{job.id}/transcript.json"
+    async with get_s3_client(settings) as s3:
+        await s3.put_object(
+            Bucket=settings.s3_bucket,
+            Key=key,
+            Body=transcript_json.encode("utf-8"),
+            ContentType="application/json",
         )
-    except Exception as e:
-        log.error(
-            "linear_transcript_assembly_failed",
-            error=str(e),
-            error_type=type(e).__name__,
-        )
+
+    log.info(
+        "linear_transcript_assembled",
+        segment_count=len(transcript.segments),
+        speaker_count=len(transcript.speakers),
+        stages=completed_stages,
+    )
 
 
 async def _populate_job_result_stats(job: JobModel, log) -> None:
@@ -1249,7 +1245,17 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
         settings = get_settings()
         has_merge_task = any(t.stage == "merge" for t in all_tasks)
         if settings.linear_pipeline_enabled and not has_merge_task:
-            await _assemble_linear_transcript(job, all_tasks, settings, log)
+            try:
+                await _assemble_linear_transcript(job, all_tasks, settings, log)
+            except Exception as e:
+                log.error(
+                    "linear_transcript_assembly_failed",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+                job.status = JobStatus.FAILED.value
+                job.error = f"Transcript assembly failed: {e}"
+                dalston.metrics.inc_orchestrator_jobs("failed")
 
         # Extract and store result stats from transcript
         await _populate_job_result_stats(job, log)

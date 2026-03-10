@@ -381,22 +381,12 @@ def _build_dag_with_engines(
     # In linear mode (M68): diarize is deferred until after transcribe/align,
     # so it's added after the transcribe/align tasks below.
     if speaker_detection == "diarize" and not skip_diarization and not linear_pipeline:
-        if "diarize" in stage_runtime_model_ids:
-            diarize_config["runtime_model_id"] = stage_runtime_model_ids["diarize"]
-        diarize_task = Task(
-            id=uuid4(),
+        diarize_task = _create_diarize_task(
             job_id=job_id,
-            stage="diarize",
-            runtime=engines.get("diarize", DEFAULT_ENGINES["diarize"]),
-            status=TaskStatus.PENDING,
+            engines=engines,
+            diarize_config=diarize_config,
+            stage_runtime_model_ids=stage_runtime_model_ids,
             dependencies=[prepare_task.id],
-            input_bindings=_audio_input_binding(),
-            config=diarize_config,
-            input_uri=None,
-            output_uri=None,
-            retries=0,
-            max_retries=DEFAULT_TASK_MAX_RETRIES,
-            required=True,
         )
         tasks.append(diarize_task)
 
@@ -445,27 +435,17 @@ def _build_dag_with_engines(
     # Diarize depends on prepare (for audio) and on the last transcription stage
     # (transcribe or align) so it receives previous outputs for enrichment.
     if speaker_detection == "diarize" and not skip_diarization and linear_pipeline:
-        if "diarize" in stage_runtime_model_ids:
-            diarize_config["runtime_model_id"] = stage_runtime_model_ids["diarize"]
         diarize_dependencies = [prepare_task.id]
         if align_task is not None:
             diarize_dependencies.append(align_task.id)
         else:
             diarize_dependencies.append(transcribe_task.id)
-        diarize_task = Task(
-            id=uuid4(),
+        diarize_task = _create_diarize_task(
             job_id=job_id,
-            stage="diarize",
-            runtime=engines.get("diarize", DEFAULT_ENGINES["diarize"]),
-            status=TaskStatus.PENDING,
+            engines=engines,
+            diarize_config=diarize_config,
+            stage_runtime_model_ids=stage_runtime_model_ids,
             dependencies=diarize_dependencies,
-            input_bindings=_audio_input_binding(),
-            config=diarize_config,
-            input_uri=None,
-            output_uri=None,
-            retries=0,
-            max_retries=DEFAULT_TASK_MAX_RETRIES,
-            required=True,
         )
         tasks.append(diarize_task)
 
@@ -584,6 +564,35 @@ def _build_dag_with_engines(
     tasks.append(merge_task)
 
     return tasks
+
+
+def _create_diarize_task(
+    *,
+    job_id: UUID,
+    engines: dict[str, str],
+    diarize_config: dict,
+    stage_runtime_model_ids: dict[str, str],
+    dependencies: list[UUID],
+) -> Task:
+    """Create a diarize task with the given dependencies."""
+    config = dict(diarize_config)
+    if "diarize" in stage_runtime_model_ids:
+        config["runtime_model_id"] = stage_runtime_model_ids["diarize"]
+    return Task(
+        id=uuid4(),
+        job_id=job_id,
+        stage="diarize",
+        runtime=engines.get("diarize", DEFAULT_ENGINES["diarize"]),
+        status=TaskStatus.PENDING,
+        dependencies=dependencies,
+        input_bindings=_audio_input_binding(),
+        config=config,
+        input_uri=None,
+        output_uri=None,
+        retries=0,
+        max_retries=DEFAULT_TASK_MAX_RETRIES,
+        required=True,
+    )
 
 
 def _build_per_channel_dag_with_engines(

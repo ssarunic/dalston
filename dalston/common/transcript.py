@@ -204,7 +204,7 @@ def determine_terminal_stage(
 
 
 def _extract_audio_metadata(
-    prepare_data: dict[str, Any],
+    prepare_data: dict[str, Any] | None,
 ) -> tuple[float, int, int]:
     """Extract audio duration, channels, and sample rate from prepare output."""
     if not prepare_data:
@@ -341,6 +341,11 @@ def _find_speaker_by_overlap(
     """Find the speaker with maximum overlap for a segment time range.
 
     This is the same overlap-matching logic previously in the merge engine.
+
+    Complexity is O(segments * turns). For very long recordings with many
+    diarization turns, an interval tree (e.g. ``intervaltree``) would
+    reduce per-segment lookup to O(log n + k). Not needed at current
+    workload sizes.
     """
     best_speaker = None
     best_overlap = 0.0
@@ -454,7 +459,10 @@ def _apply_known_speaker_names(
     speakers: list[Speaker],
     known_speaker_names: list[str],
 ) -> dict[str, str]:
-    """Apply known speaker names to speakers and segments.
+    """Apply known speaker names to speakers.
+
+    Sets the label on each Speaker object. Segment speaker fields keep the
+    original speaker ID; consumers resolve labels via the speakers array.
 
     Returns:
         Mapping of original speaker ID to new label.
@@ -463,15 +471,8 @@ def _apply_known_speaker_names(
 
     for idx, speaker in enumerate(speakers):
         if idx < len(known_speaker_names):
-            old_id = speaker.id
+            remapped[speaker.id] = known_speaker_names[idx]
             speaker.label = known_speaker_names[idx]
-            remapped[old_id] = known_speaker_names[idx]
-
-    # Update segment speaker references with labels
-    for segment in segments:
-        if segment.speaker and segment.speaker in remapped:
-            # Keep the speaker ID, label is on the Speaker object
-            pass
 
     return remapped
 
