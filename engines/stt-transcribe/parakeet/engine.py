@@ -27,7 +27,6 @@ Environment variables:
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
 """
 
-import gc
 import os
 import tempfile
 from pathlib import Path
@@ -47,6 +46,7 @@ from dalston.engine_sdk import (
     TranscribeOutput,
     Word,
 )
+from dalston.engine_sdk.cores.parakeet_core import ParakeetCore
 
 
 class ParakeetEngine(Engine):
@@ -83,10 +83,16 @@ class ParakeetEngine(Engine):
     # for Parakeet since it's English-only, so use the highest quality model)
     DEFAULT_MODEL_ID = "nvidia/parakeet-tdt-1.1b"
 
-    def __init__(self) -> None:
+    def __init__(self, core: ParakeetCore | None = None) -> None:
+        """Initialize the engine.
+
+        Args:
+            core: Optional shared ParakeetCore. If provided, the engine uses
+                  it instead of creating its own. This is how the unified
+                  runner shares a single model between batch and RT adapters.
+        """
         super().__init__()
-        self._model = None
-        self._loaded_model_id: str | None = None
+        self._core = core if core is not None else ParakeetCore.from_env()
 
         # Get default model from environment, with fallback to class default
         self._default_model_id = os.environ.get(
@@ -96,154 +102,32 @@ class ParakeetEngine(Engine):
         # Get engine ID from environment for registration (runtime ID, not variant ID)
         self._runtime = os.environ.get("DALSTON_RUNTIME", "nemo")
 
-        # Determine device from environment or availability
-        requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
-        cuda_available = torch.cuda.is_available()
-
-        if requested_device == "cpu":
-            self._device = "cpu"
-            self.logger.warning(
-                "using_cpu_device",
-                message="Running on CPU - Parakeet inference will be significantly slower",
-            )
-        elif requested_device in ("", "auto", "cuda"):
-            if cuda_available:
-                self._device = "cuda"
-                self.logger.info(
-                    "cuda_available", device_count=torch.cuda.device_count()
-                )
-            else:
-                if requested_device == "cuda":
-                    raise RuntimeError(
-                        "DEVICE=cuda requested but CUDA is not available. "
-                        "Set DEVICE=cpu for CPU inference."
-                    )
-                self._device = "cpu"
-                self.logger.warning(
-                    "cuda_not_available",
-                    message="CUDA not available, falling back to CPU - inference will be slower",
-                )
-        else:
-            raise ValueError(
-                f"Unknown device: {requested_device}. Use 'cuda' or 'cpu'."
-            )
-
         self.logger.info(
             "engine_init",
             runtime=self._runtime,
             default_model=self._default_model_id,
-            device=self._device,
+            device=self._core.device,
+            shared_core=core is not None,
         )
 
-    def _ensure_model_loaded(self, runtime_model_id: str) -> None:
-        """Ensure the requested model is loaded, swapping if necessary.
-
-        This method implements the model lifecycle management for Phase 1.
-        If the requested model is already loaded, it returns immediately.
-        Otherwise, it unloads the current model (with GPU memory cleanup)
-        and loads the requested one.
+    def _normalize_model_id(self, runtime_model_id: str) -> str:
+        """Normalize NGC model IDs to NeMoModelManager format.
 
         Args:
-            runtime_model_id: NeMo model identifier (e.g., "nvidia/parakeet-tdt-1.1b")
+            runtime_model_id: Model identifier, possibly in NGC format
+                (e.g. "nvidia/parakeet-tdt-1.1b")
 
-        Raises:
-            ValueError: If the runtime_model_id is not in SUPPORTED_MODELS
-            RuntimeError: If NeMo toolkit is not installed
+        Returns:
+            Normalized model ID for NeMoModelManager
+                (e.g. "parakeet-tdt-1.1b")
         """
-        # Fast path: requested model is already loaded
-        if runtime_model_id == self._loaded_model_id:
-            return
-
-        # Validate the requested model
-        if runtime_model_id not in self.SUPPORTED_MODELS:
-            raise ValueError(
-                f"Unknown model: {runtime_model_id}. "
-                f"Supported models: {sorted(self.SUPPORTED_MODELS)}"
-            )
-
-        # Unload current model if one is loaded
-        if self._model is not None:
-            self.logger.info(
-                "unloading_model",
-                current=self._loaded_model_id,
-                requested=runtime_model_id,
-            )
-            self._set_runtime_state(status="unloading")
-
-            # Delete model reference
-            del self._model
-            self._model = None
-            self._loaded_model_id = None
-
-            # GPU memory cleanup
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-            gc.collect()
-
-            self.logger.info("model_unloaded")
-
-        # Extract decoder type from model ID for logging
-        # Format: "nvidia/parakeet-{decoder}-{size}" e.g., "nvidia/parakeet-tdt-1.1b"
-        model_parts = runtime_model_id.split("/")[-1].split("-")
-        decoder_type = model_parts[1] if len(model_parts) > 1 else "unknown"
-
-        # Load the requested model
-        self._set_runtime_state(status="loading")
-        self.logger.info(
-            "loading_parakeet_model",
-            runtime_model_id=runtime_model_id,
-            decoder_type=decoder_type,
-        )
-
-        # Import NeMo ASR module
-        try:
-            import nemo.collections.asr as nemo_asr
-        except ImportError as e:
-            self._set_runtime_state(loaded_model=None, status="error")
-            raise RuntimeError(
-                "NeMo toolkit not installed. Install with: pip install nemo_toolkit[asr]"
-            ) from e
-
-        # Load pre-trained model from NGC/HuggingFace
-        # This will download to the cache dir if not already present
-        self._model = nemo_asr.models.ASRModel.from_pretrained(runtime_model_id)
-        self._model = self._model.to(self._device)
-        self._model.eval()
-        self._loaded_model_id = runtime_model_id
-
-        # Enable local attention for long audio support (up to 3 hours)
-        # This reduces memory from O(n²) to O(n), essential for T4/A10g GPUs
-        # See: https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
-        try:
-            self._model.change_attention_model(
-                self_attention_model="rel_pos_local_attn",
-                att_context_size=[256, 256],
-            )
-            # Enable subsampling chunking for additional memory savings
-            self._model.change_subsampling_conv_chunking_factor(1)
-            self.logger.info(
-                "local_attention_enabled",
-                att_context_size=[256, 256],
-                message="Long audio support enabled (up to 3 hours)",
-            )
-        except Exception as e:
-            self.logger.warning(
-                "local_attention_failed",
-                error=str(e),
-                message="Falling back to full attention (limited to ~24min on A100)",
-            )
-
-        # Update runtime state for heartbeat reporting
-        self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
-        self.logger.info(
-            "model_loaded_successfully",
-            runtime_model_id=runtime_model_id,
-            device=self._device,
-        )
+        # Strip "nvidia/" prefix if present — NeMoModelManager uses short IDs
+        if "/" in runtime_model_id:
+            return runtime_model_id.split("/", 1)[1]
+        return runtime_model_id
 
     def _configure_vocabulary_boosting(
-        self, vocabulary: list[str], boosting_alpha: float = 0.5
+        self, model: Any, vocabulary: list[str], boosting_alpha: float = 0.5
     ) -> Path | None:
         """Configure GPU-PB vocabulary boosting for the model.
 
@@ -251,6 +135,7 @@ class ParakeetEngine(Engine):
         decoding strategy to use GPU-PB (GPU-accelerated Phrase Boosting).
 
         Args:
+            model: The acquired NeMo ASR model to configure.
             vocabulary: List of terms to boost recognition for.
             boosting_alpha: Weight of boosting during decoding (0.0-1.0).
                 Higher values = stronger boosting. Default 0.5.
@@ -263,7 +148,7 @@ class ParakeetEngine(Engine):
             both uppercase and lowercase variants. This method automatically generates
             common case variants for each term.
         """
-        if not vocabulary or self._model is None:
+        if not vocabulary or model is None:
             return None
 
         try:
@@ -294,7 +179,7 @@ class ParakeetEngine(Engine):
 
             # Configure decoding strategy with boosting tree
             # The config path is the same for CTC and TDT models
-            decoding_cfg = self._model.cfg.decoding
+            decoding_cfg = model.cfg.decoding
             decoding_cfg.strategy = "greedy_batch"
             decoding_cfg.greedy.boosting_tree.key_phrases_file = str(vocab_path)
             decoding_cfg.greedy.boosting_tree.context_score = 1.0
@@ -302,10 +187,10 @@ class ParakeetEngine(Engine):
             decoding_cfg.greedy.boosting_tree_alpha = boosting_alpha
 
             # Apply the new decoding strategy
-            self._model.change_decoding_strategy(decoding_cfg)
+            model.change_decoding_strategy(decoding_cfg)
 
-            # Extract decoder type from loaded model for logging
-            model_parts = (self._loaded_model_id or "").split("/")[-1].split("-")
+            # Extract decoder type from model for logging
+            model_parts = str(getattr(model, "model_name", "")).split("-")
             decoder_type = model_parts[1] if len(model_parts) > 1 else "unknown"
 
             self.logger.info(
@@ -325,28 +210,49 @@ class ParakeetEngine(Engine):
             )
             return None
 
-    def _reset_decoding_strategy(self) -> None:
+    @staticmethod
+    def _reset_decoding_strategy(model: Any) -> None:
         """Reset decoding strategy to default (no vocabulary boosting)."""
-        if self._model is None:
+        if model is None:
             return
 
         try:
-            decoding_cfg = self._model.cfg.decoding
+            decoding_cfg = model.cfg.decoding
             decoding_cfg.strategy = "greedy_batch"
             # Clear boosting tree config
             if hasattr(decoding_cfg.greedy, "boosting_tree"):
                 decoding_cfg.greedy.boosting_tree.key_phrases_file = None
                 decoding_cfg.greedy.boosting_tree_alpha = 0.0
 
-            self._model.change_decoding_strategy(decoding_cfg)
+            model.change_decoding_strategy(decoding_cfg)
+        except Exception:
+            pass  # Best-effort reset; model will be released anyway
+
+    def _enable_local_attention(self, model: Any) -> None:
+        """Enable local attention for long audio support (up to 3 hours).
+
+        Reduces memory from O(n²) to O(n), essential for T4/A10g GPUs.
+        """
+        try:
+            model.change_attention_model(
+                self_attention_model="rel_pos_local_attn",
+                att_context_size=[256, 256],
+            )
+            model.change_subsampling_conv_chunking_factor(1)
+            self.logger.info(
+                "local_attention_enabled",
+                att_context_size=[256, 256],
+                message="Long audio support enabled (up to 3 hours)",
+            )
         except Exception as e:
             self.logger.warning(
-                "reset_decoding_failed",
+                "local_attention_failed",
                 error=str(e),
+                message="Falling back to full attention (limited to ~24min on A100)",
             )
 
     def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
-        """Transcribe audio using Parakeet CTC or TDT.
+        """Transcribe audio using Parakeet CTC or TDT via shared ParakeetCore.
 
         Args:
             engine_input: Task input with audio file path and config
@@ -356,191 +262,79 @@ class ParakeetEngine(Engine):
         """
         audio_path = engine_input.audio_path
         config = engine_input.config
-        channel = config.get("channel")  # For per_channel mode
-        vocabulary = config.get("vocabulary")  # Terms to boost
+        channel = config.get("channel")
+        vocabulary = config.get("vocabulary")
 
-        # Get model to use from task config, falling back to default
-        # Phase 1: runtime_model_id is the NeMo model identifier (e.g., "nvidia/parakeet-tdt-1.1b")
         runtime_model_id = config.get("runtime_model_id", self._default_model_id)
+        model_id = self._normalize_model_id(runtime_model_id)
 
-        # Load model (with swapping if needed)
-        self._ensure_model_loaded(runtime_model_id)
-
-        # Extract decoder type from loaded model for alignment method
-        model_parts = runtime_model_id.split("/")[-1].split("-")
+        # Extract decoder type for alignment method
+        model_parts = model_id.split("-")
         decoder_type = model_parts[1] if len(model_parts) > 1 else "ctc"
 
-        # Configure vocabulary boosting if provided
-        vocab_file: Path | None = None
-        vocabulary_enabled = False
-        if vocabulary:
-            vocab_file = self._configure_vocabulary_boosting(vocabulary)
-            vocabulary_enabled = vocab_file is not None
-
-        self.logger.info(
-            "transcribing",
-            audio_path=str(audio_path),
-            vocabulary_enabled=vocabulary_enabled,
-        )
-
-        # Transcribe with word-level timestamps
-        # NeMo RNNT models can return word timestamps via the alignment
-        # Use autocast for GPU, no-op context for CPU
-        autocast_ctx = (
-            torch.cuda.amp.autocast()
-            if self._device == "cuda"
-            else torch.inference_mode()
-        )
-        try:
-            with autocast_ctx:
-                # Use transcribe method with timestamps=True for word-level timing
-                transcriptions = self._model.transcribe(
-                    [str(audio_path)],
-                    batch_size=1,
-                    return_hypotheses=True,
-                    timestamps=True,  # Enable word-level timestamps
-                )
-        finally:
-            # Clean up vocabulary boosting
-            if vocab_file is not None:
-                try:
-                    vocab_file.unlink(missing_ok=True)
-                    self._reset_decoding_strategy()
-                except Exception:
-                    pass  # Best effort cleanup
-
-        # Process the hypothesis
-        if not transcriptions:
-            return EngineOutput(
-                data=TranscribeOutput(
-                    text="",
-                    segments=[],
-                    language="en",
-                    language_confidence=1.0,
-                    channel=channel,
-                    runtime=self._runtime,
-                    skipped=False,
-                    warnings=[],
-                )
-            )
-
-        # Handle both current and future NeMo API formats:
-        # - Current: transcriptions[batch_idx][decode_strategy_idx] - nested lists
-        #   where inner index selects greedy (0) vs beam (1) decoding
-        # - Future: transcriptions[batch_idx] - list of Hypothesis objects directly
-        #   (per deprecation warning for _transcribe_output_processing)
-        # See: https://github.com/NVIDIA-NeMo/NeMo/issues/7677
-        first_result = transcriptions[0]
-        if isinstance(first_result, list):
-            # Current format: nested list [batch][strategy]
-            hypothesis = first_result[0]
-        else:
-            # Future format: direct Hypothesis object
-            hypothesis = first_result
-
-        # Extract text from Hypothesis object
-        full_text = hypothesis.text
-
-        # Determine alignment method based on decoder type
         if decoder_type == "ctc":
             alignment_method = AlignmentMethod.CTC
-        else:  # tdt
+        else:
             alignment_method = AlignmentMethod.TDT
 
-        # Build segments with word-level timestamps
+        # If vocabulary boosting is needed, acquire model directly for
+        # decoding strategy modification; otherwise use core.transcribe()
+        vocab_file: Path | None = None
+        vocabulary_enabled = False
+
+        if vocabulary:
+            model = self._core.manager.acquire(model_id)
+            try:
+                self._enable_local_attention(model)
+                vocab_file = self._configure_vocabulary_boosting(model, vocabulary)
+                vocabulary_enabled = vocab_file is not None
+
+                self.logger.info(
+                    "transcribing",
+                    audio_path=str(audio_path),
+                    vocabulary_enabled=vocabulary_enabled,
+                )
+
+                core_result = self._core.transcribe_with_model(model, str(audio_path))
+            finally:
+                if vocab_file is not None:
+                    try:
+                        vocab_file.unlink(missing_ok=True)
+                        self._reset_decoding_strategy(model)
+                    except Exception:
+                        pass
+                self._core.manager.release(model_id)
+        else:
+            self.logger.info(
+                "transcribing",
+                audio_path=str(audio_path),
+                vocabulary_enabled=False,
+            )
+            core_result = self._core.transcribe(str(audio_path), model_id)
+
+        # Convert core result to batch output format
         segments: list[Segment] = []
         all_words: list[Word] = []
 
-        # Check for timestep dict (TDT models with timestamps=True)
-        # NeMo returns hypothesis.timestep with 'word', 'segment', 'char' keys
-        if hasattr(hypothesis, "timestep") and isinstance(hypothesis.timestep, dict):
-            word_timestamps = hypothesis.timestep.get("word", [])
-            segment_timestamps = hypothesis.timestep.get("segment", [])
-
-            # Extract word-level data
-            for wt in word_timestamps:
+        for core_seg in core_result.segments:
+            seg_words: list[Word] = []
+            for w in core_seg.words:
                 word = Word(
-                    text=wt.get("word", ""),
-                    start=round(wt.get("start", 0.0), 3),
-                    end=round(wt.get("end", 0.0), 3),
-                    confidence=None,  # TDT doesn't provide per-word confidence
+                    text=w.word,
+                    start=w.start,
+                    end=w.end,
+                    confidence=w.confidence,
                     alignment_method=alignment_method,
                 )
+                seg_words.append(word)
                 all_words.append(word)
 
-            # Use segment timestamps if available, otherwise create from words
-            if segment_timestamps:
-                for seg in segment_timestamps:
-                    seg_start = seg.get("start", 0.0)
-                    seg_end = seg.get("end", 0.0)
-                    seg_text = seg.get("segment", "")
-                    # Find words that fall within this segment
-                    seg_words = [
-                        w
-                        for w in all_words
-                        if w.start >= seg_start - 0.01 and w.end <= seg_end + 0.01
-                    ]
-                    segments.append(
-                        Segment(
-                            start=round(seg_start, 3),
-                            end=round(seg_end, 3),
-                            text=seg_text,
-                            words=seg_words if seg_words else None,
-                        )
-                    )
-            elif all_words:
-                # Create a single segment with all words
-                segments.append(
-                    Segment(
-                        start=all_words[0].start,
-                        end=all_words[-1].end,
-                        text=full_text.strip(),
-                        words=all_words,
-                    )
-                )
-
-        # Fallback: check for legacy timestep format (RNNT models)
-        elif hasattr(hypothesis, "timestep") and hypothesis.timestep is not None:
-            timesteps = hypothesis.timestep
-            tokens = hypothesis.text.split()
-            frame_shift_seconds = 0.01
-
-            current_words: list[Word] = []
-            for i, (token, frame_idx) in enumerate(
-                zip(tokens, timesteps, strict=False)
-            ):
-                word_start = frame_idx * frame_shift_seconds
-                if i + 1 < len(timesteps):
-                    word_end = timesteps[i + 1] * frame_shift_seconds
-                else:
-                    word_end = word_start + 0.1
-
-                word = Word(
-                    text=token,
-                    start=round(word_start, 3),
-                    end=round(word_end, 3),
-                    confidence=None,
-                    alignment_method=alignment_method,
-                )
-                current_words.append(word)
-                all_words.append(word)
-
-            if current_words:
-                segments.append(
-                    Segment(
-                        start=current_words[0].start,
-                        end=current_words[-1].end,
-                        text=full_text.strip(),
-                        words=current_words,
-                    )
-                )
-        else:
-            # Fallback: create segment without word timestamps
             segments.append(
                 Segment(
-                    start=0.0,
-                    end=0.0,
-                    text=full_text.strip(),
+                    start=core_seg.start,
+                    end=core_seg.end,
+                    text=core_seg.text,
+                    words=seg_words if seg_words else None,
                 )
             )
 
@@ -548,10 +342,9 @@ class ParakeetEngine(Engine):
             "transcription_complete",
             segment_count=len(segments),
             word_count=len(all_words),
-            char_count=len(full_text),
+            char_count=len(core_result.text),
         )
 
-        # Determine actual granularity produced
         has_word_timestamps = any(seg.words for seg in segments)
         timestamp_granularity_actual = (
             TimestampGranularity.WORD
@@ -559,7 +352,6 @@ class ParakeetEngine(Engine):
             else TimestampGranularity.SEGMENT
         )
 
-        # Build warnings list
         warnings: list[str] = []
         if vocabulary and not vocabulary_enabled:
             warnings.append(
@@ -567,9 +359,9 @@ class ParakeetEngine(Engine):
             )
 
         output = TranscribeOutput(
-            text=full_text.strip(),
+            text=core_result.text,
             segments=segments,
-            language="en",  # Parakeet is English-only
+            language="en",
             language_confidence=1.0,
             timestamp_granularity_requested=TimestampGranularity.WORD,
             timestamp_granularity_actual=timestamp_granularity_actual,
@@ -594,12 +386,14 @@ class ParakeetEngine(Engine):
             cuda_memory_allocated = torch.cuda.memory_allocated() / 1e9
             cuda_memory_total = torch.cuda.get_device_properties(0).total_memory / 1e9
 
+        model_stats = self._core.get_stats()
+
         return {
             "status": "healthy",
             "runtime": self._runtime,
-            "device": self._device,
-            "model_loaded": self._model is not None,
-            "loaded_model_id": self._loaded_model_id,
+            "device": self._core.device,
+            "models_loaded": model_stats.get("loaded_models", []),
+            "model_count": model_stats.get("model_count", 0),
             "cuda_available": cuda_available,
             "cuda_device_count": cuda_device_count,
             "cuda_memory_allocated_gb": round(cuda_memory_allocated, 2),

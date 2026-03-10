@@ -98,7 +98,7 @@ class TestParakeetEngineHealthCheck:
         assert "status" in health
         assert "cuda_available" in health
         assert "cuda_device_count" in health
-        assert "model_loaded" in health
+        assert "models_loaded" in health
 
     def test_health_check_reports_healthy_with_cuda(self, mock_cuda_available):
         """Test that health check reports healthy when CUDA available."""

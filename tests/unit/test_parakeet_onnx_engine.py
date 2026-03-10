@@ -76,7 +76,7 @@ class TestParakeetOnnxEngineHealthCheck:
         assert "status" in health
         assert "runtime" in health
         assert "device" in health
-        assert "model_loaded" in health
+        assert "models_loaded" in health
         assert "quantization" in health
 
     def test_health_check_reports_healthy(self):
@@ -86,8 +86,7 @@ class TestParakeetOnnxEngineHealthCheck:
         health = engine.health_check()
 
         assert health["status"] == "healthy"
-        assert health["model_loaded"] is False
-        assert health["loaded_model_id"] is None
+        assert health["model_count"] == 0
 
     def test_health_check_reports_runtime(self):
         """Test that health check reports correct runtime."""
@@ -153,21 +152,21 @@ class TestParakeetOnnxEngineCapabilities:
 class TestParakeetOnnxEngineModelLoading:
     """Tests for model loading and validation."""
 
-    def test_ensure_model_loaded_rejects_unsupported(self):
+    def test_core_manager_rejects_unsupported(self):
         """Test that loading a model without ONNX conversion raises ValueError."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        from dalston.engine_sdk.managers import NeMoOnnxModelManager
 
+        manager = NeMoOnnxModelManager(device="cpu")
         with pytest.raises(ValueError, match="Unknown model"):
-            engine._ensure_model_loaded("nvidia/parakeet-tdt-1.1b")
+            manager.acquire("nvidia/parakeet-tdt-1.1b")
 
-    def test_ensure_model_loaded_rejects_unknown(self):
+    def test_core_manager_rejects_unknown(self):
         """Test that loading a completely unknown model raises ValueError."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        from dalston.engine_sdk.managers import NeMoOnnxModelManager
 
+        manager = NeMoOnnxModelManager(device="cpu")
         with pytest.raises(ValueError, match="Unknown model"):
-            engine._ensure_model_loaded("some-random-model")
+            manager.acquire("some-random-model")
 
 
 class TestParakeetOnnxDecoderTypeDetection:
@@ -316,11 +315,11 @@ class TestParakeetOnnxTokensToWords:
         tokens = ["\u2581Hello", "\u2581world"]
         timestamps = [0.0, 0.3]
 
-        words = engine._tokens_to_words(tokens, timestamps)
+        words = engine._core._tokens_to_words(tokens, timestamps)
 
         assert len(words) == 2
-        assert words[0].text == "Hello"
-        assert words[1].text == "world"
+        assert words[0].word == "Hello"
+        assert words[1].word == "world"
 
     def test_tokens_to_words_basic_space(self):
         """Test basic subword token grouping with space word boundaries (onnx-asr style)."""
@@ -331,11 +330,11 @@ class TestParakeetOnnxTokensToWords:
         tokens = [" Hello", " world"]
         timestamps = [0.0, 0.3]
 
-        words = engine._tokens_to_words(tokens, timestamps)
+        words = engine._core._tokens_to_words(tokens, timestamps)
 
         assert len(words) == 2
-        assert words[0].text == "Hello"
-        assert words[1].text == "world"
+        assert words[0].word == "Hello"
+        assert words[1].word == "world"
 
     def test_tokens_to_words_multipiece(self):
         """Test grouping multi-piece words from subword tokens."""
@@ -346,20 +345,20 @@ class TestParakeetOnnxTokensToWords:
         tokens = [" trans", "crip", "tion", " is"]
         timestamps = [0.0, 0.2, 0.4, 0.6]
 
-        words = engine._tokens_to_words(tokens, timestamps)
+        words = engine._core._tokens_to_words(tokens, timestamps)
 
         assert len(words) == 2
-        assert words[0].text == "transcription"
+        assert words[0].word == "transcription"
         assert words[0].start == 0.0
         assert words[0].end == 0.6  # End is start of next word
-        assert words[1].text == "is"
+        assert words[1].word == "is"
 
     def test_tokens_to_words_empty(self):
         """Test that empty token list returns empty word list."""
         ParakeetOnnxEngine = load_parakeet_onnx_engine()
         engine = ParakeetOnnxEngine()
 
-        words = engine._tokens_to_words([], [])
+        words = engine._core._tokens_to_words([], [])
         assert words == []
 
     def test_tokens_to_words_timestamps_preserved(self):
@@ -371,7 +370,7 @@ class TestParakeetOnnxTokensToWords:
         tokens = [" good", " morn", "ing"]
         timestamps = [1.0, 1.3, 1.5]
 
-        words = engine._tokens_to_words(tokens, timestamps)
+        words = engine._core._tokens_to_words(tokens, timestamps)
 
         assert len(words) == 2
         assert words[0].start == 1.0
@@ -388,14 +387,14 @@ class TestParakeetOnnxWordsToSegments:
         ParakeetOnnxEngine = load_parakeet_onnx_engine()
         engine = ParakeetOnnxEngine()
 
-        from dalston.engine_sdk import Word
+        from dalston.engine_sdk.cores.parakeet_onnx_core import OnnxWordResult
 
         words = [
-            Word(text="Hello", start=0.0, end=0.3, confidence=None),
-            Word(text="world.", start=0.3, end=0.6, confidence=None),
+            OnnxWordResult(word="Hello", start=0.0, end=0.3),
+            OnnxWordResult(word="world.", start=0.3, end=0.6),
         ]
 
-        segments = engine._words_to_segments(words, "Hello world.")
+        segments = engine._core._words_to_segments(words, "Hello world.")
 
         assert len(segments) == 1
         assert segments[0].text == "Hello world."
@@ -406,16 +405,16 @@ class TestParakeetOnnxWordsToSegments:
         ParakeetOnnxEngine = load_parakeet_onnx_engine()
         engine = ParakeetOnnxEngine()
 
-        from dalston.engine_sdk import Word
+        from dalston.engine_sdk.cores.parakeet_onnx_core import OnnxWordResult
 
         words = [
-            Word(text="Hello.", start=0.0, end=0.3, confidence=None),
-            Word(text="How", start=0.5, end=0.7, confidence=None),
-            Word(text="are", start=0.7, end=0.9, confidence=None),
-            Word(text="you?", start=0.9, end=1.2, confidence=None),
+            OnnxWordResult(word="Hello.", start=0.0, end=0.3),
+            OnnxWordResult(word="How", start=0.5, end=0.7),
+            OnnxWordResult(word="are", start=0.7, end=0.9),
+            OnnxWordResult(word="you?", start=0.9, end=1.2),
         ]
 
-        segments = engine._words_to_segments(words, "Hello. How are you?")
+        segments = engine._core._words_to_segments(words, "Hello. How are you?")
 
         assert len(segments) == 2
         assert segments[0].text == "Hello."
@@ -426,14 +425,14 @@ class TestParakeetOnnxWordsToSegments:
         ParakeetOnnxEngine = load_parakeet_onnx_engine()
         engine = ParakeetOnnxEngine()
 
-        from dalston.engine_sdk import Word
+        from dalston.engine_sdk.cores.parakeet_onnx_core import OnnxWordResult
 
         words = [
-            Word(text="What?", start=0.0, end=0.3, confidence=None),
-            Word(text="Really!", start=0.5, end=0.8, confidence=None),
+            OnnxWordResult(word="What?", start=0.0, end=0.3),
+            OnnxWordResult(word="Really!", start=0.5, end=0.8),
         ]
 
-        segments = engine._words_to_segments(words, "What? Really!")
+        segments = engine._core._words_to_segments(words, "What? Really!")
 
         assert len(segments) == 2
         assert segments[0].text == "What?"
@@ -444,14 +443,14 @@ class TestParakeetOnnxWordsToSegments:
         ParakeetOnnxEngine = load_parakeet_onnx_engine()
         engine = ParakeetOnnxEngine()
 
-        from dalston.engine_sdk import Word
+        from dalston.engine_sdk.cores.parakeet_onnx_core import OnnxWordResult
 
         words = [
-            Word(text="hello", start=0.0, end=0.2, confidence=None),
-            Word(text="world", start=0.2, end=0.4, confidence=None),
+            OnnxWordResult(word="hello", start=0.0, end=0.2),
+            OnnxWordResult(word="world", start=0.2, end=0.4),
         ]
 
-        segments = engine._words_to_segments(words, "hello world")
+        segments = engine._core._words_to_segments(words, "hello world")
 
         assert len(segments) == 1
         assert segments[0].text == "hello world"
@@ -461,25 +460,25 @@ class TestParakeetOnnxWordsToSegments:
         ParakeetOnnxEngine = load_parakeet_onnx_engine()
         engine = ParakeetOnnxEngine()
 
-        segments = engine._words_to_segments([], "Some text")
+        segments = engine._core._words_to_segments([], "Some text")
 
         assert len(segments) == 1
         assert segments[0].text == "Some text"
-        assert segments[0].words is None
+        assert segments[0].words == []
 
     def test_words_to_segments_timestamps_preserved(self):
         """Test that segment timestamps match first/last word times."""
         ParakeetOnnxEngine = load_parakeet_onnx_engine()
         engine = ParakeetOnnxEngine()
 
-        from dalston.engine_sdk import Word
+        from dalston.engine_sdk.cores.parakeet_onnx_core import OnnxWordResult
 
         words = [
-            Word(text="First.", start=1.0, end=1.5, confidence=None),
-            Word(text="Second.", start=2.0, end=2.5, confidence=None),
+            OnnxWordResult(word="First.", start=1.0, end=1.5),
+            OnnxWordResult(word="Second.", start=2.0, end=2.5),
         ]
 
-        segments = engine._words_to_segments(words, "First. Second.")
+        segments = engine._core._words_to_segments(words, "First. Second.")
 
         assert len(segments) == 2
         assert segments[0].start == 1.0

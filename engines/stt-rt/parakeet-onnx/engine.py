@@ -1,16 +1,13 @@
 """Real-time Parakeet ONNX streaming transcription engine.
 
 Uses ONNX Runtime via the onnx-asr library for low-latency transcription
-of VAD-segmented utterances. The SessionHandler provides VAD-based chunking,
-and this engine transcribes each utterance using Parakeet CTC/TDT/RNNT via ONNX.
+of VAD-segmented utterances. Delegates inference to ParakeetOnnxCore
+(shared with the batch engine).
 
 Unlike the NeMo-based real-time engine, this uses ONNX Runtime which
 doesn't support native streaming but works well with VAD-chunked audio.
 The tradeoff is simpler deployment (no NeMo/PyTorch) at the cost of
 slightly higher per-utterance latency.
-
-M44: Uses NeMoOnnxModelManager for dynamic model loading. A single container
-can serve any Parakeet ONNX model variant without rebuild.
 
 Environment variables:
     DALSTON_INSTANCE: Unique identifier for this worker (required)
@@ -30,7 +27,7 @@ from typing import Any
 import numpy as np
 import structlog
 
-from dalston.engine_sdk.managers import NeMoOnnxModelManager
+from dalston.engine_sdk.cores.parakeet_onnx_core import ParakeetOnnxCore
 from dalston.realtime_sdk import (
     AsyncModelManager,
     RealtimeEngine,
@@ -42,94 +39,56 @@ logger = structlog.get_logger()
 
 
 class ParakeetOnnxStreamingEngine(RealtimeEngine):
-    """Real-time transcription using Parakeet via ONNX Runtime with dynamic model loading.
+    """Real-time transcription using Parakeet via ONNX Runtime.
 
-    M44: Models are loaded on-demand using NeMoOnnxModelManager with TTL-based eviction.
-    This allows a single container to serve any Parakeet ONNX model variant.
+    Delegates inference to ParakeetOnnxCore, which is shared with the batch
+    ONNX engine. The RT adapter handles:
+    - Model ID normalization
+    - VAD-chunked audio input (numpy arrays)
+    - Output formatting to TranscribeResult
 
-    Uses VAD-chunked transcription (not native streaming). The SDK's
-    SessionHandler accumulates audio until a speech endpoint, then
-    calls transcribe() on the accumulated chunk.
+    When run standalone, creates its own ParakeetOnnxCore in load_models().
+    When used within a unified runner, accepts an injected core to share a
+    single loaded model with the batch adapter.
 
     Supports CTC, TDT, and RNNT decoder variants.
-
-    Environment variables:
-        DALSTON_INSTANCE: Unique identifier for this worker (required)
-        DALSTON_WORKER_PORT: WebSocket server port (default: 9000)
-        DALSTON_MAX_SESSIONS: Maximum concurrent sessions (default: 4)
-        REDIS_URL: Redis connection URL (default: redis://localhost:6379)
-        DALSTON_MODEL_TTL_SECONDS: Idle model TTL in seconds (default: 3600)
-        DALSTON_MAX_LOADED_MODELS: Max models in memory (default: 2)
-        DALSTON_MODEL_PRELOAD: Model to preload on startup (e.g., parakeet-onnx-tdt-0.6b-v3)
-        DALSTON_DEVICE: Device to use (cuda, cpu). Defaults to cpu.
-        DALSTON_QUANTIZATION: ONNX quantization level (none, int8). Defaults to none.
     """
 
     # Default model when client doesn't specify
     DEFAULT_MODEL = "parakeet-onnx-ctc-0.6b"
 
-    def __init__(self) -> None:
-        """Initialize the engine."""
+    def __init__(self, core: ParakeetOnnxCore | None = None) -> None:
+        """Initialize the engine.
+
+        Args:
+            core: Optional shared ParakeetOnnxCore. If provided, load_models()
+                  skips creating its own core and uses the injected one.
+        """
         super().__init__()
-
-        # Device configuration
-        requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
-
-        if requested_device == "cuda":
-            self._device = "cuda"
-        elif requested_device in ("", "auto", "cpu"):
-            self._device = "cpu"
-            if requested_device in ("", "auto"):
-                try:
-                    import onnxruntime as ort
-
-                    if "CUDAExecutionProvider" in ort.get_available_providers():
-                        self._device = "cuda"
-                except ImportError:
-                    pass
-        else:
-            raise ValueError(
-                f"Unknown device: {requested_device}. Use 'cuda' or 'cpu'."
-            )
-
-        # Quantization
-        self._quantization = os.environ.get("DALSTON_QUANTIZATION", "none").lower()
-
-        logger.info(
-            "parakeet_onnx_engine_init",
-            device=self._device,
-            quantization=self._quantization,
-        )
+        self._core: ParakeetOnnxCore | None = core
 
     def load_models(self) -> None:
-        """Initialize NeMoOnnxModelManager with optional preloading.
+        """Initialize ParakeetOnnxCore with optional preloading.
 
-        M44: Models are loaded on-demand, not all at once. This method sets up
-        the NeMoOnnxModelManager and optionally preloads a default model.
+        If a ParakeetOnnxCore was injected via __init__, this method uses it
+        instead of creating a new one. This is how the unified runner shares
+        a single model instance between batch and RT adapters.
         """
-        logger.info(
-            "initializing_nemo_onnx_model_manager",
-            device=self._device,
-            quantization=self._quantization,
-        )
+        if self._core is None:
+            # Standalone mode — create own core
+            self._core = ParakeetOnnxCore.from_env()
 
-        # Create sync model manager
-        sync_manager = NeMoOnnxModelManager(
-            device=self._device,
-            quantization=self._quantization,
-            ttl_seconds=int(os.environ.get("DALSTON_MODEL_TTL_SECONDS", "3600")),
-            max_loaded=int(os.environ.get("DALSTON_MAX_LOADED_MODELS", "2")),
-            preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
-        )
-
-        # Wrap in async manager
-        self._model_manager = AsyncModelManager(sync_manager)
+        # Wrap the core's manager in AsyncModelManager for heartbeat reporting
+        self._model_manager = AsyncModelManager(self._core.manager)
 
         logger.info(
-            "nemo_onnx_model_manager_initialized",
-            max_loaded=sync_manager.max_loaded,
-            ttl_seconds=sync_manager.ttl_seconds,
+            "model_manager_initialized",
+            max_loaded=self._core.manager.max_loaded,
+            ttl_seconds=self._core.manager.ttl_seconds,
+            device=self._core.device,
+            quantization=self._core.quantization,
             preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
+            shared_core=self._core is not None,
         )
 
     def transcribe(
@@ -139,10 +98,7 @@ class ParakeetOnnxStreamingEngine(RealtimeEngine):
         model_variant: str,
         vocabulary: list[str] | None = None,
     ) -> TranscribeResult:
-        """Transcribe an audio segment.
-
-        M44: Acquires the requested model (loading if needed), transcribes,
-        then releases the model reference.
+        """Transcribe an audio segment via shared ParakeetOnnxCore.
 
         Args:
             audio: Audio samples as float32 numpy array, mono, 16kHz
@@ -153,9 +109,9 @@ class ParakeetOnnxStreamingEngine(RealtimeEngine):
         Returns:
             TranscribeResult with text, words, language, confidence
         """
-        if self._model_manager is None:
+        if self._core is None:
             raise RuntimeError(
-                "Model manager not initialized. Call load_models() first."
+                "ParakeetOnnxCore not initialized — call load_models() first"
             )
 
         # Use default if no model specified
@@ -178,26 +134,31 @@ class ParakeetOnnxStreamingEngine(RealtimeEngine):
                 using="en",
             )
 
-        # Note: transcribe is called from sync context in SessionHandler
-        # We need to use the sync manager directly since we're in a sync method
-        sync_manager = self._model_manager.manager
+        # Delegate to shared core
+        result = self._core.transcribe(audio, model_id)
 
-        model = sync_manager.acquire(model_id)
-        try:
-            return self._transcribe_with_model(model, audio)
-        finally:
-            sync_manager.release(model_id)
+        # Format core result into RT output contract
+        words: list[Word] = []
+        for seg in result.segments:
+            for w in seg.words:
+                words.append(
+                    Word(
+                        word=w.word,
+                        start=w.start,
+                        end=w.end,
+                        confidence=w.confidence or 0.95,
+                    )
+                )
+
+        return TranscribeResult(
+            text=result.text,
+            words=words,
+            language="en",
+            confidence=1.0,
+        )
 
     def _normalize_model_id(self, model_id: str) -> str:
-        """Normalize model ID to NeMoOnnxModelManager supported format.
-
-        Args:
-            model_id: Model identifier from client
-
-        Returns:
-            Normalized model ID
-        """
-        # Handle various naming formats
+        """Normalize model ID to NeMoOnnxModelManager supported format."""
         mappings = {
             # Full names
             "parakeet-onnx-ctc-0.6b": "parakeet-onnx-ctc-0.6b",
@@ -205,7 +166,7 @@ class ParakeetOnnxStreamingEngine(RealtimeEngine):
             "parakeet-onnx-tdt-0.6b-v2": "parakeet-onnx-tdt-0.6b-v2",
             "parakeet-onnx-tdt-0.6b-v3": "parakeet-onnx-tdt-0.6b-v3",
             "parakeet-onnx-rnnt-0.6b": "parakeet-onnx-rnnt-0.6b",
-            # Short variants (from legacy per-model containers)
+            # Short variants
             "ctc-0.6b": "ctc-0.6b",
             "ctc-1.1b": "ctc-1.1b",
             "tdt-0.6b-v2": "tdt-0.6b-v2",
@@ -214,81 +175,13 @@ class ParakeetOnnxStreamingEngine(RealtimeEngine):
         }
         return mappings.get(model_id, model_id)
 
-    def _transcribe_with_model(
-        self,
-        model,
-        audio: np.ndarray,
-    ) -> TranscribeResult:
-        """Perform transcription with the given model.
-
-        Args:
-            model: The onnx-asr model to use
-            audio: Audio samples as float32 numpy array
-
-        Returns:
-            TranscribeResult
-        """
-        # Prepare audio for onnx-asr (expects float32 numpy array)
-        if audio.dtype != np.float32:
-            audio = audio.astype(np.float32)
-        if audio.ndim > 1:
-            audio = audio.squeeze()
-
-        # Transcribe using onnx-asr
-        result = model.recognize(audio, sample_rate=16000)
-
-        # Extract text
-        if hasattr(result, "text"):
-            text = str(result.text).strip()
-        else:
-            text = str(result).strip()
-
-        if not text:
-            return TranscribeResult(
-                text="",
-                words=[],
-                language="en",
-                confidence=1.0,
-            )
-
-        # Extract word timestamps if available
-        words: list[Word] = []
-        if hasattr(result, "words") and result.words:
-            for w in result.words:
-                word_text = str(w.word if hasattr(w, "word") else w.text).strip()
-                if word_text:
-                    words.append(
-                        Word(
-                            word=word_text,
-                            start=float(w.start),
-                            end=float(w.end),
-                            confidence=0.95,
-                        )
-                    )
-
-        return TranscribeResult(
-            text=text,
-            words=words,
-            language="en",
-            confidence=1.0,
-        )
-
     def supports_streaming(self) -> bool:
         """ONNX models don't support native streaming (use VAD-chunked mode)."""
         return False
 
     def get_models(self) -> list[str]:
-        """Return list of supported model identifiers.
-
-        M44: Returns all models the NeMoOnnxModelManager can load dynamically.
-        """
-        return [
-            "parakeet-onnx-ctc-0.6b",
-            "parakeet-onnx-ctc-1.1b",
-            "parakeet-onnx-tdt-0.6b-v2",
-            "parakeet-onnx-tdt-0.6b-v3",
-            "parakeet-onnx-rnnt-0.6b",
-        ]
+        """Return list of supported model identifiers."""
+        return ParakeetOnnxCore.SUPPORTED_MODELS
 
     def get_languages(self) -> list[str]:
         """Return list of supported languages."""
@@ -318,18 +211,20 @@ class ParakeetOnnxStreamingEngine(RealtimeEngine):
         """Return health status including model and device info."""
         base_health = super().health_check()
 
-        # Get model manager stats
         model_stats = {}
         if self._model_manager is not None:
             model_stats = self._model_manager.get_stats()
+
+        device = self._core.device if self._core else "unknown"
+        quantization = self._core.quantization if self._core else "unknown"
 
         return {
             **base_health,
             "models_loaded": model_stats.get("loaded_models", []),
             "model_count": model_stats.get("model_count", 0),
             "max_loaded": model_stats.get("max_loaded", 0),
-            "device": self._device,
-            "quantization": self._quantization,
+            "device": device,
+            "quantization": quantization,
         }
 
 
