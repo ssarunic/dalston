@@ -1,3 +1,4 @@
+import React from 'react'
 import { ExternalLink, TrendingUp, Clock, BarChart3, Mic } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -28,8 +29,8 @@ function ThroughputChart({ buckets }: { buckets: ThroughputBucket[] }) {
   )
 
   return (
-    <div className="space-y-2">
-      <div className="flex h-48">
+    <div className="flex flex-col h-full space-y-2">
+      <div className="flex flex-1 min-h-[12rem]">
         {/* Y-axis labels */}
         <div className="flex flex-col justify-between text-[10px] text-muted-foreground pr-2">
           {ticks.map((tick, i) => (
@@ -102,11 +103,31 @@ function ThroughputChart({ buckets }: { buckets: ThroughputBucket[] }) {
   )
 }
 
+const STAGE_LABELS: Record<string, string> = {
+  prepare: 'Prepare',
+  transcribe: 'Transcribe',
+  align: 'Align',
+  diarize: 'Diarize',
+  pii_detect: 'PII Detect',
+  audio_redact: 'Audio Redact',
+}
+
 function EngineTable({ engines }: { engines: EngineMetric[] }) {
   if (engines.length === 0) {
     return (
       <p className="text-sm text-muted-foreground text-center py-2">No engines registered</p>
     )
+  }
+
+  // Group engines by stage (preserving backend sort order)
+  const grouped: { stage: string; engines: EngineMetric[] }[] = []
+  let currentStage: string | null = null
+  for (const e of engines) {
+    if (e.stage !== currentStage) {
+      grouped.push({ stage: e.stage, engines: [] })
+      currentStage = e.stage
+    }
+    grouped[grouped.length - 1].engines.push(e)
   }
 
   return (
@@ -122,35 +143,46 @@ function EngineTable({ engines }: { engines: EngineMetric[] }) {
             <th className="pb-2 font-medium text-muted-foreground text-right">Queue</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-border">
-          {engines.map((e) => (
-            <tr key={e.runtime} className="hover:bg-accent/50 transition-colors">
-              <td className="py-1.5">
-                <span className="font-mono text-xs">{e.runtime}</span>
-                <span className="text-muted-foreground text-xs ml-1.5">({e.stage})</span>
-              </td>
-              <td className="py-1.5 text-right tabular-nums">{e.completed}</td>
-              <td className="py-1.5 text-right tabular-nums">
-                {e.failed > 0 ? (
-                  <span className="text-destructive">{e.failed}</span>
-                ) : (
-                  <span className="text-muted-foreground">0</span>
-                )}
-              </td>
-              <td className="py-1.5 text-right tabular-nums text-muted-foreground">
-                {formatDuration(e.avg_duration_ms)}
-              </td>
-              <td className="py-1.5 text-right tabular-nums text-muted-foreground">
-                {formatDuration(e.p95_duration_ms)}
-              </td>
-              <td className="py-1.5 text-right tabular-nums">
-                {e.queue_depth > 0 ? (
-                  <span className="text-amber-500 font-medium">{e.queue_depth}</span>
-                ) : (
-                  <span className="text-muted-foreground">0</span>
-                )}
-              </td>
-            </tr>
+        <tbody>
+          {grouped.map((group) => (
+            <React.Fragment key={group.stage}>
+              <tr>
+                <td
+                  colSpan={6}
+                  className="pt-3 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider"
+                >
+                  {STAGE_LABELS[group.stage] ?? group.stage}
+                </td>
+              </tr>
+              {group.engines.map((e) => (
+                <tr key={e.runtime} className="hover:bg-accent/50 transition-colors border-t border-border">
+                  <td className="py-1.5">
+                    <span className="font-mono text-xs">{e.runtime}</span>
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums">{e.completed}</td>
+                  <td className="py-1.5 text-right tabular-nums">
+                    {e.failed > 0 ? (
+                      <span className="text-destructive">{e.failed}</span>
+                    ) : (
+                      <span className="text-muted-foreground">0</span>
+                    )}
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums text-muted-foreground">
+                    {formatDuration(e.avg_duration_ms)}
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums text-muted-foreground">
+                    {formatDuration(e.p95_duration_ms)}
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums">
+                    {e.queue_depth > 0 ? (
+                      <span className="text-amber-500 font-medium">{e.queue_depth}</span>
+                    ) : (
+                      <span className="text-muted-foreground">0</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </React.Fragment>
           ))}
         </tbody>
       </table>
@@ -275,7 +307,7 @@ export function MetricsPanel({
 
       {/* Throughput chart + Engine table */}
       <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
-        <Card>
+        <Card className="flex flex-col">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>Job Throughput (24h)</CardTitle>
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
@@ -289,7 +321,7 @@ export function MetricsPanel({
               </span>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex-1">
             <ThroughputChart buckets={metrics.throughput} />
           </CardContent>
         </Card>
