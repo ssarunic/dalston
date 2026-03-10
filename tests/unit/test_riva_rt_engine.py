@@ -296,3 +296,41 @@ class TestRivaRtInitialization:
         audio = np.zeros(16000, dtype=np.float32)
         with pytest.raises(RuntimeError, match="not initialized"):
             engine.transcribe(audio, "en", "")
+
+    def test_shutdown_closes_channel(self, engine_with_mock) -> None:
+        engine, _ = engine_with_mock
+
+        assert engine._channel is not None
+        assert engine._asr is not None
+
+        engine.shutdown()
+
+        assert engine._channel is None
+        assert engine._asr is None
+
+    def test_shutdown_idempotent(self, riva_rt_engine_class) -> None:
+        engine = riva_rt_engine_class()
+        # shutdown before load_models should not raise
+        engine.shutdown()
+
+
+class TestRivaRtWordConfidence:
+    """Verify per-word confidence from Riva response."""
+
+    def test_word_confidence_uses_per_word_value(self, engine_with_mock) -> None:
+        engine, _ = engine_with_mock
+
+        words = [
+            _make_mock_word("hello", 0.0, 0.5, 0.99),
+            _make_mock_word("world", 0.5, 1.0, 0.85),
+        ]
+        alt = _make_mock_alternative(confidence=0.90, words=words)
+        response = _make_mock_response(results=[_make_mock_result(alternatives=[alt])])
+        engine._asr.offline_recognize.return_value = response
+
+        audio = np.zeros(16000, dtype=np.float32)
+        result = engine.transcribe(audio, "en", "")
+
+        # Word confidence should come from the word, not the alternative
+        assert result.words[0].confidence == 0.99
+        assert result.words[1].confidence == 0.85

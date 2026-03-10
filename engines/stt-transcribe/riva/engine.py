@@ -36,6 +36,8 @@ from dalston.engine_sdk import (
 _SAMPLE_RATE = 16000
 # Bytes per sample (int16 = 2 bytes)
 _BYTES_PER_SAMPLE = 2
+# gRPC streaming timeout (2 hours matches max_audio_duration)
+_GRPC_TIMEOUT_S = 7200
 
 
 class RivaBatchEngine(Engine):
@@ -116,6 +118,7 @@ class RivaBatchEngine(Engine):
         try:
             responses = self._asr.streaming_response_gen(
                 audio_chunks=self._audio_chunk_iter(audio_bytes, streaming_config),
+                timeout=_GRPC_TIMEOUT_S,
             )
 
             segments = self._collect_segments(responses, language)
@@ -131,13 +134,16 @@ class RivaBatchEngine(Engine):
             # Estimate duration from audio bytes (int16 mono 16kHz)
             duration = len(audio_bytes) / (_SAMPLE_RATE * _BYTES_PER_SAMPLE)
 
+            has_words = any(s.words for s in segments)
             output = TranscribeOutput(
                 text=full_text,
                 segments=segments,
                 language=language,
                 duration=duration,
                 timestamp_granularity_requested=TimestampGranularity.WORD,
-                timestamp_granularity_actual=TimestampGranularity.WORD,
+                timestamp_granularity_actual=(
+                    TimestampGranularity.WORD if has_words else TimestampGranularity.SEGMENT
+                ),
                 runtime=self._runtime,
             )
 
@@ -183,7 +189,7 @@ class RivaBatchEngine(Engine):
                             text=w.word,
                             start=word_start,
                             end=word_end,
-                            confidence=alt.confidence,
+                            confidence=w.confidence,
                         )
                     )
 
@@ -203,6 +209,10 @@ class RivaBatchEngine(Engine):
                 )
 
         return segments
+
+    def get_runtime(self) -> str:
+        """Return the runtime identifier."""
+        return self._runtime
 
     def health_check(self) -> dict[str, Any]:
         """Check NIM connectivity via gRPC."""

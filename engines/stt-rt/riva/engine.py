@@ -1,15 +1,11 @@
 """Riva NIM real-time transcription engine.
 
-Accepts WebSocket sessions, pipes audio chunks to a Riva NIM sidecar via
-gRPC streaming_recognize(interim_results=True), and forwards partial and
-final transcript events back to the client.
+Uses offline_recognize() via the SessionHandler's periodic re-transcription
+pattern. SessionHandler calls transcribe() on accumulated audio periodically
+during speech and at utterance boundaries (supports_streaming=True).
 
-In Phase 1 (supports_streaming=True with offline_recognize pattern),
-SessionHandler calls transcribe() on accumulated audio periodically
-during speech and at utterance boundaries.
-
-Phase 2 can replace this with native gRPC streaming where NIM itself
-emits incremental partial results.
+Phase 2 can replace this with native gRPC streaming_recognize() where NIM
+itself emits incremental partial results.
 
 Environment variables:
     DALSTON_RIVA_URI: gRPC endpoint for Riva NIM (default: localhost:50051)
@@ -121,7 +117,7 @@ class RivaRealtimeEngine(RealtimeEngine):
                         word=w.word,
                         start=w.start_time,
                         end=w.end_time,
-                        confidence=alt.confidence,
+                        confidence=w.confidence,
                     )
                 )
 
@@ -175,6 +171,14 @@ class RivaRealtimeEngine(RealtimeEngine):
             "nim": nim_status,
             "nim_uri": self._uri,
         }
+
+    def shutdown(self) -> None:
+        """Close gRPC channel on shutdown."""
+        logger.info("riva_rt_shutdown")
+        if self._channel is not None:
+            self._channel.close()
+            self._channel = None
+            self._asr = None
 
 
 if __name__ == "__main__":

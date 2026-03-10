@@ -426,3 +426,85 @@ class TestRivaBatchHealthCheck:
         health = engine.health_check()
         assert health["status"] == "unhealthy"
         assert health["nim"] == "unreachable"
+
+
+class TestRivaBatchShutdown:
+    """Verify shutdown behavior."""
+
+    def test_shutdown_closes_channel(self, engine_with_mock) -> None:
+        engine, _ = engine_with_mock
+        mock_channel = MagicMock()
+        engine._channel = mock_channel
+        engine.shutdown()
+        mock_channel.close.assert_called_once()
+
+    def test_get_runtime(self, engine_with_mock) -> None:
+        engine, _ = engine_with_mock
+        assert engine.get_runtime() == "riva"
+
+
+class TestRivaBatchWordConfidence:
+    """Verify per-word confidence from Riva response."""
+
+    def test_word_confidence_uses_per_word_value(
+        self, engine_with_mock, tmp_path
+    ) -> None:
+        engine, _ = engine_with_mock
+
+        audio_file = tmp_path / "test.wav"
+        audio_file.write_bytes(b"\x00\x00" * 16000)
+
+        words = [
+            _make_mock_word("hello", 0.0, 0.5, 0.99),
+            _make_mock_word("world", 0.5, 1.0, 0.85),
+        ]
+        alt = _make_mock_alternative(confidence=0.90, words=words)
+        response = _make_mock_response(
+            results=[_make_mock_result(alternatives=[alt])]
+        )
+        _setup_streaming_responses(engine, [response])
+
+        task_id = str(uuid4())
+        job_id = str(uuid4())
+        result = engine.process(
+            EngineInput(
+                task_id=task_id,
+                job_id=job_id,
+                audio_path=audio_file,
+                config={"language": "en"},
+            ),
+            _ctx(task_id, job_id),
+        )
+
+        seg = result.data.segments[0]
+        # Word confidence should come from the word, not the alternative
+        assert seg.words[0].confidence == 0.99
+        assert seg.words[1].confidence == 0.85
+
+    def test_timestamp_granularity_segment_when_no_words(
+        self, engine_with_mock, tmp_path
+    ) -> None:
+        engine, _ = engine_with_mock
+
+        audio_file = tmp_path / "test.wav"
+        audio_file.write_bytes(b"\x00\x00" * 16000)
+
+        alt = _make_mock_alternative(transcript="hello world", words=[])
+        response = _make_mock_response(
+            results=[_make_mock_result(alternatives=[alt])]
+        )
+        _setup_streaming_responses(engine, [response])
+
+        task_id = str(uuid4())
+        job_id = str(uuid4())
+        result = engine.process(
+            EngineInput(
+                task_id=task_id,
+                job_id=job_id,
+                audio_path=audio_file,
+                config={"language": "en"},
+            ),
+            _ctx(task_id, job_id),
+        )
+
+        assert result.data.timestamp_granularity_actual.value == "segment"
