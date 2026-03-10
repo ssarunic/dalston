@@ -16,8 +16,6 @@ def build_task_dag_for_test(
     job_id: UUID,
     audio_uri: str,
     parameters: dict,
-    *,
-    pii_mode: str = "pipeline",
 ) -> list:
     """Test helper that wraps _build_dag_with_engines with sensible defaults.
 
@@ -105,5 +103,4 @@ def build_task_dag_for_test(
         skip_diarization=skip_diarization,
         runtime_model_id=stage_runtime_model_ids.get("transcribe"),
         stage_runtime_model_ids=stage_runtime_model_ids,
-        pii_mode=pii_mode,
     )

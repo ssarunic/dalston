@@ -205,7 +205,6 @@ async def handle_job_created(
             registry=registry,
             catalog=catalog,
             db=db,
-            pii_mode=settings.pii_mode,
         )
     except NoDownloadedModelError as e:
         # No downloaded models for the auto-selected runtime
@@ -1145,9 +1144,9 @@ async def _check_job_completion(
 ) -> None:
     """Check if all tasks are done and mark job as completed.
 
-    When ``pii_mode=post_process`` and the job has PII detection enabled,
-    this also schedules asynchronous post-processing enrichment tasks
-    after the core pipeline completes.
+    When the job has PII detection enabled, this also schedules
+    asynchronous post-processing enrichment tasks after the core
+    pipeline completes.
 
     Args:
         job_id: Job UUID to check
@@ -1247,7 +1246,7 @@ async def _check_job_completion(
 
     # M67: Schedule post-processing enrichments if needed
     settings = get_settings()
-    if not any_failed and needs_post_processing(job, settings.pii_mode):
+    if not any_failed and needs_post_processing(job):
         if registry is None:
             log.warning("post_processing_skipped_no_registry")
             return

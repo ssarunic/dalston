@@ -1,8 +1,8 @@
 """Post-processing orchestration for async enrichment jobs (M67).
 
-Manages PII detection and audio redaction as post-completion enrichments
-when ``pii_mode=post_process``.  The core pipeline finishes without PII
-stages, then the PostProcessor schedules them asynchronously.
+Manages PII detection and audio redaction as post-completion enrichments.
+The core pipeline finishes without PII stages, then the PostProcessor
+schedules them asynchronously.
 
 Enrichment ordering:  ``pii_detect -> audio_redact``
 
@@ -56,18 +56,15 @@ class EnrichmentStatus(StrEnum):
 _ENRICHMENT_KEY_PREFIX = "dalston:job:{job_id}:enrichments"
 
 
-def needs_post_processing(job: JobModel, pii_mode: str) -> bool:
+def needs_post_processing(job: JobModel) -> bool:
     """Check if a completed job requires post-processing enrichments.
 
     Args:
         job: The completed job model.
-        pii_mode: Current PII mode setting (``pipeline`` or ``post_process``).
 
     Returns:
         True if post-processing tasks should be scheduled.
     """
-    if pii_mode != "post_process":
-        return False
     params = job.parameters or {}
     return bool(params.get("pii_detection", False))
 
