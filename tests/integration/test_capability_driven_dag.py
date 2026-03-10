@@ -426,7 +426,6 @@ class TestDagPerChannelWithCapabilities:
                         "languages": ["en"],
                     },
                 },
-                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -443,7 +442,8 @@ class TestDagPerChannelWithCapabilities:
         assert "transcribe_ch1" in stages
         assert "align_ch0" not in stages  # Skipped - native timestamps
         assert "align_ch1" not in stages
-        assert len(tasks) == 4  # prepare, transcribe_ch0, transcribe_ch1, merge
+        assert "merge" not in stages
+        assert len(tasks) == 3  # prepare, transcribe_ch0, transcribe_ch1
 
     @pytest.mark.asyncio
     async def test_per_channel_without_native_timestamps_includes_alignment(
@@ -458,7 +458,6 @@ class TestDagPerChannelWithCapabilities:
                     "capabilities": {"supports_word_timestamps": False},
                 },
                 "align": {"runtime": "phoneme-align"},
-                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -475,7 +474,8 @@ class TestDagPerChannelWithCapabilities:
         assert "transcribe_ch1" in stages
         assert "align_ch0" in stages
         assert "align_ch1" in stages
-        assert len(tasks) == 6  # prepare, 2x transcribe, 2x align, merge
+        assert "merge" not in stages
+        assert len(tasks) == 5  # prepare, 2x transcribe, 2x align
 
 
 class TestEngineRanking:
@@ -1084,7 +1084,7 @@ class TestStereoSpeakersWavScenarios:
 
     @pytest.mark.asyncio
     async def test_per_channel_creates_channel_tasks(self, mock_catalog):
-        """Per-channel mode creates separate tasks for each channel."""
+        """Per-channel mode creates separate tasks for each channel (no merge)."""
         job_id = uuid4()
         registry = create_mock_registry(
             {
@@ -1097,7 +1097,6 @@ class TestStereoSpeakersWavScenarios:
                     },
                 },
                 "align": {"runtime": "phoneme-align"},
-                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -1114,7 +1113,7 @@ class TestStereoSpeakersWavScenarios:
         assert "transcribe_ch1" in stages
         assert "align_ch0" in stages
         assert "align_ch1" in stages
-        assert "merge" in stages
+        assert "merge" not in stages
         # No single "transcribe" or "align" stage
         assert "transcribe" not in stages
         assert "align" not in stages
@@ -1133,7 +1132,6 @@ class TestStereoSpeakersWavScenarios:
                         "supports_word_timestamps": True,
                     },
                 },
-                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -1148,14 +1146,14 @@ class TestStereoSpeakersWavScenarios:
         stages = [t.stage for t in tasks]
         assert "transcribe_ch0" in stages
         assert "transcribe_ch1" in stages
-        # No alignment - parakeet has native timestamps
         assert "align_ch0" not in stages
         assert "align_ch1" not in stages
-        assert len(tasks) == 4  # prepare, transcribe_ch0, transcribe_ch1, merge
+        assert "merge" not in stages
+        assert len(tasks) == 3  # prepare, transcribe_ch0, transcribe_ch1
 
     @pytest.mark.asyncio
-    async def test_per_channel_merge_depends_on_all_channels(self, mock_catalog):
-        """Merge task depends on prepare and all channel tasks."""
+    async def test_per_channel_all_transcribes_depend_on_prepare(self, mock_catalog):
+        """All per-channel transcribe tasks depend on prepare."""
         job_id = uuid4()
         registry = create_mock_registry(
             {
@@ -1168,7 +1166,6 @@ class TestStereoSpeakersWavScenarios:
                     },
                 },
                 "align": {"runtime": "phoneme-align"},
-                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -1181,12 +1178,7 @@ class TestStereoSpeakersWavScenarios:
         )
 
         by_stage = {t.stage: t for t in tasks}
-        merge_deps = set(by_stage["merge"].dependencies)
+        prepare_id = by_stage["prepare"].id
 
-        # Merge depends on prepare + all channel tasks
-        assert by_stage["prepare"].id in merge_deps
-        assert by_stage["transcribe_ch0"].id in merge_deps
-        assert by_stage["transcribe_ch1"].id in merge_deps
-        assert by_stage["align_ch0"].id in merge_deps
-        assert by_stage["align_ch1"].id in merge_deps
-        assert len(merge_deps) == 5
+        assert by_stage["transcribe_ch0"].dependencies == [prepare_id]
+        assert by_stage["transcribe_ch1"].dependencies == [prepare_id]

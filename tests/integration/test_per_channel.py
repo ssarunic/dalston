@@ -1,7 +1,8 @@
 """Integration tests for per-channel speaker detection pipeline.
 
 Tests the full per-channel flow: DAG building, previous_outputs key
-normalization, dependency wiring, and merge task assembly.
+normalization, dependency wiring, and orchestrator transcript assembly
+(no merge engine).
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -25,7 +26,7 @@ class TestPerChannelDAG:
         return "s3://test-bucket/audio/stereo.wav"
 
     def test_per_channel_dag_creates_correct_stages(self, job_id, audio_uri):
-        """per_channel mode creates prepare, transcribe_ch0/1, align_ch0/1, merge."""
+        """per_channel mode creates prepare, transcribe_ch0/1, align_ch0/1 (no merge)."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
@@ -38,8 +39,8 @@ class TestPerChannelDAG:
         assert "transcribe_ch1" in stages
         assert "align_ch0" in stages
         assert "align_ch1" in stages
-        assert "merge" in stages
-        assert len(tasks) == 6
+        assert "merge" not in stages
+        assert len(tasks) == 5
 
     def test_per_channel_dag_without_alignment(self, job_id, audio_uri):
         """per_channel without word timestamps skips align tasks."""
@@ -57,8 +58,8 @@ class TestPerChannelDAG:
         assert "transcribe_ch1" in stages
         assert "align_ch0" not in stages
         assert "align_ch1" not in stages
-        assert "merge" in stages
-        assert len(tasks) == 4  # prepare + 2 transcribe + merge
+        assert "merge" not in stages
+        assert len(tasks) == 3  # prepare + 2 transcribe
 
     def test_per_channel_transcribe_depends_on_prepare(self, job_id, audio_uri):
         """Both transcribe_ch tasks depend on prepare."""
@@ -87,58 +88,6 @@ class TestPerChannelDAG:
         assert by_stage["align_ch0"].dependencies == [by_stage["transcribe_ch0"].id]
         assert by_stage["align_ch1"].dependencies == [by_stage["transcribe_ch1"].id]
 
-    def test_merge_depends_on_all_channel_tasks(self, job_id, audio_uri):
-        """Merge task depends on prepare and ALL per-channel tasks."""
-        tasks = build_task_dag_for_test(
-            job_id=job_id,
-            audio_uri=audio_uri,
-            parameters={"speaker_detection": "per_channel"},
-        )
-
-        by_stage = {t.stage: t for t in tasks}
-        merge_deps = set(by_stage["merge"].dependencies)
-
-        # Merge must depend on prepare + both transcribe + both align
-        assert by_stage["prepare"].id in merge_deps
-        assert by_stage["transcribe_ch0"].id in merge_deps
-        assert by_stage["transcribe_ch1"].id in merge_deps
-        assert by_stage["align_ch0"].id in merge_deps
-        assert by_stage["align_ch1"].id in merge_deps
-        assert len(merge_deps) == 5
-
-    def test_merge_depends_on_transcribe_when_no_alignment(self, job_id, audio_uri):
-        """Without alignment, merge depends on prepare + both transcribe tasks."""
-        tasks = build_task_dag_for_test(
-            job_id=job_id,
-            audio_uri=audio_uri,
-            parameters={
-                "speaker_detection": "per_channel",
-                "timestamps_granularity": "segment",
-            },
-        )
-
-        by_stage = {t.stage: t for t in tasks}
-        merge_deps = set(by_stage["merge"].dependencies)
-
-        assert by_stage["prepare"].id in merge_deps
-        assert by_stage["transcribe_ch0"].id in merge_deps
-        assert by_stage["transcribe_ch1"].id in merge_deps
-        assert len(merge_deps) == 3
-
-    def test_merge_config_has_per_channel_metadata(self, job_id, audio_uri):
-        """Merge task config contains per_channel speaker_detection and channel_count."""
-        tasks = build_task_dag_for_test(
-            job_id=job_id,
-            audio_uri=audio_uri,
-            parameters={"speaker_detection": "per_channel"},
-        )
-
-        by_stage = {t.stage: t for t in tasks}
-        merge_config = by_stage["merge"].config
-
-        assert merge_config["speaker_detection"] == "per_channel"
-        assert merge_config["channel_count"] == 2
-
     def test_per_channel_transcribe_config_includes_channel(self, job_id, audio_uri):
         """Each transcribe_chN has the channel index in its config."""
         tasks = build_task_dag_for_test(
@@ -161,6 +110,17 @@ class TestPerChannelDAG:
 
         by_stage = {t.stage: t for t in tasks}
         assert by_stage["prepare"].config.get("split_channels") is True
+
+    def test_per_channel_no_merge_stage(self, job_id, audio_uri):
+        """Per-channel pipelines no longer include a merge stage."""
+        tasks = build_task_dag_for_test(
+            job_id=job_id,
+            audio_uri=audio_uri,
+            parameters={"speaker_detection": "per_channel"},
+        )
+
+        stages = [t.stage for t in tasks]
+        assert "merge" not in stages
 
 
 class TestPerChannelPreviousOutputs:
@@ -272,8 +232,8 @@ class TestPerChannelPreviousOutputs:
         assert len(result) == 1  # No duplicate key
 
     @pytest.mark.asyncio
-    async def test_merge_receives_both_channel_and_base_keys(self, mock_settings):
-        """Merge task gets transcribe_ch0, transcribe_ch1, align_ch0, align_ch1, and base keys."""
+    async def test_both_channel_and_base_keys_present(self, mock_settings):
+        """Both channel-specific and base keys are present in gathered outputs."""
         from dalston.orchestrator.handlers import _gather_previous_outputs
 
         job_id = uuid4()
@@ -348,31 +308,28 @@ class TestPerChannelTaskCompletion:
         mock_db = AsyncMock()
         mock_db.get = AsyncMock(return_value=mock_task)
 
-        # Per-channel jobs have a merge task; include one so _check_job_completion
-        # skips linear transcript assembly (which requires real S3).
-        mock_merge_task = MagicMock()
-        mock_merge_task.id = uuid4()
-        mock_merge_task.job_id = job_id
-        mock_merge_task.stage = "merge"
-        mock_merge_task.status = TaskStatus.COMPLETED.value
-        mock_merge_task.required = True
-        mock_merge_task.dependencies = [task_id]
-
+        # All tasks completed; assembly will be attempted.
         mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [mock_task, mock_merge_task]
-        mock_result.scalar_one_or_none.return_value = mock_task  # For job query
+        mock_result.scalars.return_value.all.return_value = [mock_task]
+        mock_result.scalar_one_or_none.return_value = mock_task
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         mock_redis = AsyncMock()
-        mock_redis.decr = AsyncMock(return_value=0)  # Rate limiter decrement
+        mock_redis.decr = AsyncMock(return_value=0)
         mock_settings = MagicMock()
         mock_registry = AsyncMock()
         mock_registry.is_engine_available = AsyncMock(return_value=True)
 
-        # Patch artifact service to avoid TTL issues with MagicMock
-        with patch(
-            "dalston.orchestrator.handlers.ArtifactService.mark_owner_artifacts_available",
-            new=AsyncMock(return_value=0),
+        # Patch both artifact service and transcript assembly (no real S3)
+        with (
+            patch(
+                "dalston.orchestrator.handlers.ArtifactService.mark_owner_artifacts_available",
+                new=AsyncMock(return_value=0),
+            ),
+            patch(
+                "dalston.orchestrator.handlers._assemble_linear_transcript",
+                new=AsyncMock(),
+            ),
         ):
             await handle_task_completed(
                 task_id, mock_db, mock_redis, mock_settings, mock_registry

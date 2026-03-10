@@ -6,7 +6,7 @@
 | **Duration** | 2 weeks |
 | **Dependencies** | M63, M64, M66, M67 |
 | **Primary Deliverable** | Core flow `prepare -> transcribe -> [align] -> [diarize]` with merge removed and deterministic terminal stage handling |
-| **Status** | Partial — mono pipeline is linear (merge eliminated); per-channel pipelines still use merge |
+| **Status** | Complete — merge eliminated from both mono and per-channel pipelines |
 
 ## Outcomes
 
@@ -149,19 +149,23 @@ pytest -m e2e
 
 ## Implementation Status
 
-### Partial
+### Complete
 
-**Mono pipeline (complete):** `dalston/orchestrator/dag.py` — the default mono
+**Mono pipeline:** `dalston/orchestrator/dag.py` — the default mono
 pipeline is `prepare → transcribe → [align] → [diarize]` with no merge stage.
-The orchestrator assembles `transcript.json` on job completion directly from the
-terminal stage output. `DALSTON_LINEAR_PIPELINE_ENABLED` and
-`DALSTON_MERGE_ENGINE_ENABLED` flags were not added; linear behavior is
-hardcoded for the mono path.
+The orchestrator assembles `transcript.json` on job completion directly from
+stage outputs.
 
-**Per-channel pipeline (remaining):** Per-channel pipelines retain a merge
-stage. Merge wiring in `dag.py` (lines handling per-channel fan-in) is still
-present. Removing merge from the per-channel path is the remaining scope of
-this milestone.
+**Per-channel pipeline:** Per-channel pipelines no longer use a merge stage.
+The DAG is `prepare → transcribe_ch0 → [align_ch0] / transcribe_ch1 → [align_ch1]`.
+The orchestrator assembles `transcript.json` using `assemble_per_channel_transcript`
+in `dalston/common/transcript.py`, which collects segments from each channel,
+assigns `SPEAKER_XX` IDs based on channel index, and interleaves segments by
+start time.
+
+Feature flags `DALSTON_LINEAR_PIPELINE_ENABLED` and
+`DALSTON_MERGE_ENGINE_ENABLED` were not added; linear behavior is
+hardcoded for all pipeline shapes.
 
 ## References
 

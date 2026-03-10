@@ -1,11 +1,10 @@
 """Integration tests for speaker detection modes (diarize and per_channel).
 
-Tests DAG structure, dependency wiring, and merge configuration for all
+Tests DAG structure, dependency wiring, and configuration for all
 speaker_detection modes: none, diarize, and per_channel.
 
-Mono pipelines (none, diarize) do NOT have a merge stage. Transcript assembly
-is handled by _assemble_linear_transcript in handlers.py on job completion.
-Per-channel pipelines (per_channel) retain a merge stage.
+No pipeline shape uses a merge stage. Transcript assembly is handled by
+the orchestrator on job completion for all modes.
 """
 
 from uuid import uuid4
@@ -265,9 +264,9 @@ class TestSpeakerDetectionModeComparison:
             assert len(prepare) == 1, f"mode={mode}"
             assert prepare[0].dependencies == [], f"mode={mode}"
 
-    def test_only_per_channel_has_merge(self, job_id, audio_uri):
-        """Only per_channel mode has a merge task; mono pipelines assemble in handlers."""
-        for mode in ("none", "diarize"):
+    def test_no_mode_has_merge(self, job_id, audio_uri):
+        """No speaker detection mode produces a merge task."""
+        for mode in ("none", "diarize", "per_channel"):
             tasks = build_task_dag_for_test(
                 job_id=job_id,
                 audio_uri=audio_uri,
@@ -275,23 +274,6 @@ class TestSpeakerDetectionModeComparison:
             )
             stages = [t.stage for t in tasks]
             assert "merge" not in stages, f"mode={mode} should not have merge"
-
-        per_channel_tasks = build_task_dag_for_test(
-            job_id=job_id,
-            audio_uri=audio_uri,
-            parameters={"speaker_detection": "per_channel"},
-        )
-        assert "merge" in [t.stage for t in per_channel_tasks]
-
-    def test_per_channel_merge_has_speaker_detection_in_config(self, job_id, audio_uri):
-        """per_channel merge config records speaker_detection=per_channel."""
-        tasks = build_task_dag_for_test(
-            job_id=job_id,
-            audio_uri=audio_uri,
-            parameters={"speaker_detection": "per_channel"},
-        )
-        merge = next(t for t in tasks if t.stage == "merge")
-        assert merge.config["speaker_detection"] == "per_channel"
 
     def test_per_channel_has_most_tasks_with_alignment(self, job_id, audio_uri):
         """per_channel mode produces the most tasks (parallel channels)."""
@@ -306,7 +288,7 @@ class TestSpeakerDetectionModeComparison:
 
         assert counts["none"] == 3  # prepare, transcribe, align
         assert counts["diarize"] == 4  # prepare, transcribe, align, diarize
-        assert counts["per_channel"] == 6  # prepare, 2x transcribe, 2x align, merge
+        assert counts["per_channel"] == 5  # prepare, 2x transcribe, 2x align
 
     def test_prepare_only_splits_channels_for_per_channel(self, job_id, audio_uri):
         """Only per_channel mode sets split_channels on prepare."""
@@ -336,7 +318,7 @@ class TestPerChannelParameterization:
     """Tests that num_channels is parameterized and naming is consistent."""
 
     def test_per_channel_dag_defaults_to_two_channels(self, job_id, audio_uri):
-        """Default per_channel DAG creates 2 channels."""
+        """Default per_channel DAG creates 2 channels (no merge)."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
@@ -348,10 +330,11 @@ class TestPerChannelParameterization:
         assert "transcribe_ch1" in stages
         assert "align_ch0" in stages
         assert "align_ch1" in stages
-        assert len(tasks) == 6  # prepare + 2 transcribe + 2 align + merge
+        assert "merge" not in stages
+        assert len(tasks) == 5  # prepare + 2 transcribe + 2 align
 
     def test_per_channel_dag_respects_num_channels_parameter(self, job_id, audio_uri):
-        """num_channels=3 creates 3 transcribe + 3 align tasks."""
+        """num_channels=3 creates 3 transcribe + 3 align tasks (no merge)."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
@@ -363,12 +346,9 @@ class TestPerChannelParameterization:
             assert f"transcribe_ch{ch}" in stages
             assert f"align_ch{ch}" in stages
 
-        # prepare + 3 transcribe + 3 align + merge = 8
-        assert len(tasks) == 8
-
-        # Merge config should reflect 3 channels
-        merge = tasks[-1]
-        assert merge.config["channel_count"] == 3
+        assert "merge" not in stages
+        # prepare + 3 transcribe + 3 align = 7
+        assert len(tasks) == 7
 
     def test_per_channel_single_channel_uses_ch0_naming(self, job_id, audio_uri):
         """num_channels=1 creates transcribe_ch0 (not transcribe), consistent naming."""
@@ -384,10 +364,11 @@ class TestPerChannelParameterization:
         # Must NOT have plain "transcribe" — per_channel always uses _chN suffix
         assert "transcribe" not in stages
         assert "align" not in stages
-        assert len(tasks) == 4  # prepare + transcribe_ch0 + align_ch0 + merge
+        assert "merge" not in stages
+        assert len(tasks) == 3  # prepare + transcribe_ch0 + align_ch0
 
-    def test_per_channel_three_channels_merge_depends_on_all(self, job_id, audio_uri):
-        """Merge depends on prepare and all 3 transcribe + 3 align tasks."""
+    def test_per_channel_all_transcribes_depend_on_prepare(self, job_id, audio_uri):
+        """All per-channel transcribe tasks depend on prepare."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
@@ -395,12 +376,7 @@ class TestPerChannelParameterization:
         )
 
         by_stage = {t.stage: t for t in tasks}
-        merge_deps = set(by_stage["merge"].dependencies)
+        prepare_id = by_stage["prepare"].id
 
-        assert by_stage["prepare"].id in merge_deps
         for ch in range(3):
-            assert by_stage[f"transcribe_ch{ch}"].id in merge_deps
-            assert by_stage[f"align_ch{ch}"].id in merge_deps
-
-        # prepare + 3 transcribe + 3 align = 7
-        assert len(merge_deps) == 7
+            assert by_stage[f"transcribe_ch{ch}"].dependencies == [prepare_id]

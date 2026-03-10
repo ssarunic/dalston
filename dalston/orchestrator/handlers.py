@@ -29,7 +29,10 @@ from dalston.common.models import ArtifactOwnerType, JobStatus, TaskStatus
 from dalston.common.registry import UnifiedEngineRegistry
 from dalston.common.s3 import get_s3_client
 from dalston.common.streams import mark_job_cancelled
-from dalston.common.transcript import assemble_transcript
+from dalston.common.transcript import (
+    assemble_per_channel_transcript,
+    assemble_transcript,
+)
 from dalston.config import Settings, get_settings
 from dalston.db.models import JobModel, TaskDependency, TaskModel
 from dalston.gateway.services.artifacts import ArtifactService
@@ -1104,11 +1107,11 @@ async def _assemble_linear_transcript(
     settings: Settings,
     log: structlog.stdlib.BoundLogger,
 ) -> None:
-    """Assemble transcript.json from stage outputs for mono pipelines.
+    """Assemble transcript.json from stage outputs for all pipelines.
 
-    Mono pipelines have no merge engine. The orchestrator reads outputs
-    from completed stages and assembles the canonical transcript.json
-    using the shared transcript assembly module.
+    Both mono and per-channel pipelines use this path. The orchestrator
+    reads outputs from completed stages and assembles the canonical
+    transcript.json using the shared transcript assembly module.
 
     On failure the job is marked FAILED — a COMPLETED job without
     transcript.json would confuse downstream consumers.
@@ -1141,15 +1144,26 @@ async def _assemble_linear_transcript(
         word_timestamps_requested = parameters["timestamps_granularity"] == "word"
     known_speaker_names = parameters.get("known_speaker_names")
 
-    # Assemble transcript
-    transcript = assemble_transcript(
-        job_id=str(job.id),
-        stage_outputs=stage_outputs,
-        speaker_detection=speaker_detection,
-        word_timestamps_requested=word_timestamps_requested,
-        known_speaker_names=known_speaker_names,
-        pipeline_stages=completed_stages,
-    )
+    # Choose assembly path based on speaker detection mode
+    if speaker_detection == "per_channel":
+        num_channels = parameters.get("num_channels", 2)
+        transcript = assemble_per_channel_transcript(
+            job_id=str(job.id),
+            stage_outputs=stage_outputs,
+            channel_count=num_channels,
+            word_timestamps_requested=word_timestamps_requested,
+            known_speaker_names=known_speaker_names,
+            pipeline_stages=completed_stages,
+        )
+    else:
+        transcript = assemble_transcript(
+            job_id=str(job.id),
+            stage_outputs=stage_outputs,
+            speaker_detection=speaker_detection,
+            word_timestamps_requested=word_timestamps_requested,
+            known_speaker_names=known_speaker_names,
+            pipeline_stages=completed_stages,
+        )
 
     # Write transcript.json to S3
     transcript_json = transcript.model_dump_json()
@@ -1163,9 +1177,10 @@ async def _assemble_linear_transcript(
         )
 
     log.info(
-        "linear_transcript_assembled",
+        "transcript_assembled",
         segment_count=len(transcript.segments),
         speaker_count=len(transcript.speakers),
+        speaker_detection=speaker_detection,
         stages=completed_stages,
     )
 
@@ -1288,19 +1303,17 @@ async def _check_job_completion(
         job.status = JobStatus.COMPLETED.value
         log.info("job_completed")
 
-        # For mono pipelines (no merge stage), assemble transcript.json from stage outputs.
-        # Per-channel pipelines have a merge task that handles assembly.
-        if not any(t.stage == "merge" for t in all_tasks):
-            try:
-                await _assemble_linear_transcript(job, all_tasks, get_settings(), log)
-            except Exception as e:
-                log.error(
-                    "linear_transcript_assembly_failed",
-                    error=str(e),
-                    error_type=type(e).__name__,
-                )
-                job.status = JobStatus.FAILED.value
-                job.error = f"Transcript assembly failed: {e}"
+        # Assemble transcript.json from stage outputs for all pipelines.
+        try:
+            await _assemble_linear_transcript(job, all_tasks, get_settings(), log)
+        except Exception as e:
+            log.error(
+                "transcript_assembly_failed",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            job.status = JobStatus.FAILED.value
+            job.error = f"Transcript assembly failed: {e}"
 
     # Record final outcome metrics after all status mutations (including assembly).
     if job.status == JobStatus.FAILED.value:

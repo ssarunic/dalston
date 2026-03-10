@@ -9,10 +9,14 @@ model IDs (e.g., "parakeet-tdt-1.1b") to runtime + runtime_model_id.
 Mono pipeline (non-per-channel):
     prepare → transcribe → [align] → [diarize]
 
-Diarize is sequential (depends on transcribe/align).
-The orchestrator assembles transcript.json on job completion.
+Per-channel pipeline:
+    prepare (split_channels=true)
+        ↓
+    transcribe_ch0 → [align_ch0]
+    transcribe_ch1 → [align_ch1]
 
-Per-channel pipelines retain a merge stage (see _build_per_channel_dag_with_engines).
+The orchestrator assembles transcript.json on job completion for all
+pipeline shapes. No merge engine is used.
 """
 
 from __future__ import annotations
@@ -112,12 +116,11 @@ async def build_task_dag(
         prepare → transcribe → [align] → diarize
 
     Mode: per_channel (stereo audio)
-        prepare ─┬→ transcribe_ch0 → [align_ch0] ─┬→ merge
-                 └→ transcribe_ch1 → [align_ch1] ─┘
+        prepare ─┬→ transcribe_ch0 → [align_ch0]
+                 └→ transcribe_ch1 → [align_ch1]
 
-    For mono pipelines, transcript.json is assembled by the orchestrator on
-    job completion (see _assemble_linear_transcript in handlers.py).
-    Per-channel pipelines still use a merge engine.
+    transcript.json is assembled by the orchestrator on job completion
+    for all pipeline shapes (see handlers.py). No merge engine is used.
 
     PII detection and audio redaction are always deferred to async
     post-processing after the core pipeline completes (see ``post_processor.py``).
@@ -228,7 +231,7 @@ def _build_dag_with_engines(
     on job completion via _assemble_linear_transcript.
 
     Per-channel pipelines (speaker_detection="per_channel") are handled by
-    _build_per_channel_dag_with_engines and include their own merge stage.
+    _build_per_channel_dag_with_engines (no merge stage).
 
     PII detection and audio redaction are always deferred to post-processing
     after the core pipeline completes (see ``post_processor.py``).
@@ -478,14 +481,16 @@ def _build_per_channel_dag_with_engines(
     parameters: dict | None = None,
     stage_runtime_model_ids: dict[str, str] | None = None,
 ) -> list[Task]:
-    """Build per-channel DAG with pre-selected engines (M31).
+    """Build per-channel DAG with pre-selected engines (M31/M68).
 
     Creates parallel processing pipelines for each audio channel:
         prepare (split_channels=true)
             ↓
-        transcribe_ch0 → [align_ch0] ─┐
-                                      ├─ merge
-        transcribe_ch1 → [align_ch1] ─┘
+        transcribe_ch0 → [align_ch0]
+        transcribe_ch1 → [align_ch1]
+
+    The orchestrator assembles transcript.json on job completion using
+    ``assemble_per_channel_transcript``. No merge engine is needed.
 
     PII detection and audio redaction are always deferred to post-processing.
 
@@ -502,11 +507,9 @@ def _build_per_channel_dag_with_engines(
         stage_runtime_model_ids: Runtime model IDs keyed by stage
 
     Returns:
-        Complete task list including merge
+        Complete task list (no merge stage)
     """
-    parameters = parameters or {}
     stage_runtime_model_ids = stage_runtime_model_ids or {}
-    all_channel_tasks: list[Task] = []
 
     for channel in range(num_channels):
         channel_transcribe_config = {
@@ -530,7 +533,6 @@ def _build_per_channel_dag_with_engines(
             required=True,
         )
         tasks.append(transcribe_task)
-        all_channel_tasks.append(transcribe_task)
 
         # Alignment task for this channel
         if word_timestamps and not skip_alignment:
@@ -553,35 +555,5 @@ def _build_per_channel_dag_with_engines(
                 required=True,
             )
             tasks.append(align_task)
-            all_channel_tasks.append(align_task)
-
-    # Merge depends on prepare and all per-channel tasks
-    merge_dependencies = [prepare_task.id] + [t.id for t in all_channel_tasks]
-
-    merge_config: dict = {
-        "word_timestamps": word_timestamps,
-        "speaker_detection": "per_channel",
-        "channel_count": num_channels,
-    }
-    if parameters.get("known_speaker_names"):
-        merge_config["known_speaker_names"] = parameters["known_speaker_names"]
-    merge_bindings: list[dict] = []
-
-    merge_task = Task(
-        id=uuid4(),
-        job_id=job_id,
-        stage="merge",
-        runtime=engines.get("merge", DEFAULT_ENGINES["merge"]),
-        status=TaskStatus.PENDING,
-        dependencies=merge_dependencies,
-        input_bindings=merge_bindings,
-        config=merge_config,
-        input_uri=None,
-        output_uri=None,
-        retries=0,
-        max_retries=DEFAULT_TASK_MAX_RETRIES,
-        required=True,
-    )
-    tasks.append(merge_task)
 
     return tasks
