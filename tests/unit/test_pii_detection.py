@@ -60,20 +60,8 @@ class TestPIIDAGBuilder:
         assert "pii_detect" not in stages
         assert "audio_redact" not in stages
 
-    def test_pii_detection_enabled(self, job_id, audio_uri):
-        """Test that PII detection task is added when enabled."""
-        parameters = {
-            "pii_detection": True,
-        }
-
-        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
-
-        stages = [t.stage for t in tasks]
-        assert "pii_detect" in stages
-        assert "audio_redact" not in stages  # Not enabled by default
-
-    def test_pii_detection_with_audio_redaction(self, job_id, audio_uri):
-        """Test that audio redaction task is added when enabled."""
+    def test_pii_detection_does_not_add_stages_to_dag(self, job_id, audio_uri):
+        """PII detection and audio redaction are post-processing; not in the DAG."""
         parameters = {
             "pii_detection": True,
             "redact_pii_audio": True,
@@ -82,143 +70,9 @@ class TestPIIDAGBuilder:
         tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         stages = [t.stage for t in tasks]
-        assert "pii_detect" in stages
-        assert "audio_redact" in stages
-
-    def test_pii_detection_depends_on_align(self, job_id, audio_uri):
-        """Test that PII detection depends on alignment when available."""
-        parameters = {
-            "pii_detection": True,
-            "timestamps_granularity": "word",  # Enables align stage
-        }
-
-        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
-
-        task_by_stage = {t.stage: t for t in tasks}
-        pii_task = task_by_stage["pii_detect"]
-
-        # PII should depend on align (and transcribe)
-        assert task_by_stage["transcribe"].id in pii_task.dependencies
-        assert task_by_stage["align"].id in pii_task.dependencies
-
-    def test_pii_detection_depends_on_diarize(self, job_id, audio_uri):
-        """Test that PII detection depends on diarization when enabled."""
-        parameters = {
-            "pii_detection": True,
-            "speaker_detection": "diarize",
-        }
-
-        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
-
-        task_by_stage = {t.stage: t for t in tasks}
-        pii_task = task_by_stage["pii_detect"]
-
-        # PII should depend on diarize
-        assert task_by_stage["diarize"].id in pii_task.dependencies
-
-    def test_audio_redact_depends_on_pii_detect(self, job_id, audio_uri):
-        """Test that audio redaction depends on PII detection."""
-        parameters = {
-            "pii_detection": True,
-            "redact_pii_audio": True,
-        }
-
-        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
-
-        task_by_stage = {t.stage: t for t in tasks}
-        redact_task = task_by_stage["audio_redact"]
-
-        # Audio redact should depend on pii_detect
-        assert task_by_stage["pii_detect"].id in redact_task.dependencies
-
-    def test_pii_and_redact_are_final_stages_in_mono_pipeline(self, job_id, audio_uri):
-        """Test that mono pipeline has pii_detect and audio_redact as final stages (no merge)."""
-        parameters = {
-            "pii_detection": True,
-            "redact_pii_audio": True,
-        }
-
-        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
-
-        stages = [t.stage for t in tasks]
-        # Mono pipeline: no merge stage
-        assert "merge" not in stages
-        # PII pipeline is in place
-        assert "pii_detect" in stages
-        assert "audio_redact" in stages
-
-    def test_pii_detection_config_has_no_tier(self, job_id, audio_uri):
-        """Test that PII detection config does not include a detection tier."""
-        parameters = {
-            "pii_detection": True,
-        }
-
-        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
-
-        pii_task = next(t for t in tasks if t.stage == "pii_detect")
-        assert "detection_tier" not in pii_task.config
-
-    def test_pii_entity_types_config(self, job_id, audio_uri):
-        """Test that PII entity types are passed to config."""
-        parameters = {
-            "pii_detection": True,
-            "pii_entity_types": ["credit_card_number", "phone_number"],
-        }
-
-        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
-
-        pii_task = next(t for t in tasks if t.stage == "pii_detect")
-        assert pii_task.config["entity_types"] == ["credit_card_number", "phone_number"]
-
-    def test_pii_runtime_model_id_config(self, job_id, audio_uri):
-        """Test that selected PII runtime_model_id is passed to config."""
-        parameters = {
-            "pii_detection": True,
-            "model_pii_detect": "urchade/gliner_multi-v2.1",
-        }
-
-        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
-        pii_task = next(t for t in tasks if t.stage == "pii_detect")
-        assert pii_task.config["runtime_model_id"] == "urchade/gliner_multi-v2.1"
-
-    def test_audio_redaction_mode_config(self, job_id, audio_uri):
-        """Test that audio redaction mode is passed to config."""
-        parameters = {
-            "pii_detection": True,
-            "redact_pii_audio": True,
-            "pii_redaction_mode": "beep",
-        }
-
-        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
-
-        redact_task = next(t for t in tasks if t.stage == "audio_redact")
-        assert redact_task.config["redaction_mode"] == "beep"
-
-    def test_audio_redaction_mode_default(self, job_id, audio_uri):
-        """Test that audio redaction mode defaults to silence."""
-        parameters = {
-            "pii_detection": True,
-            "redact_pii_audio": True,
-        }
-
-        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
-
-        redact_task = next(t for t in tasks if t.stage == "audio_redact")
-        assert redact_task.config["redaction_mode"] == "silence"
-
-    def test_pii_flag_not_in_merge_for_mono_pipeline(self, job_id, audio_uri):
-        """Mono pipeline has no merge task; pii_detection flag is not in any merge config."""
-        parameters = {
-            "pii_detection": True,
-        }
-
-        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
-
-        stages = [t.stage for t in tasks]
-        # Mono pipeline: no merge stage
-        assert "merge" not in stages
-        # PII detect task is present
-        assert "pii_detect" in stages
+        assert "pii_detect" not in stages
+        assert "audio_redact" not in stages
+        assert "merge" not in stages  # Mono pipeline uses _assemble_linear_transcript
 
     def test_valid_pii_redaction_modes(self):
         """Test that valid PII redaction modes are defined."""

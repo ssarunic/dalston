@@ -60,37 +60,8 @@ class TestDagBuilderPiiStages:
         stages = [t.stage for t in tasks]
         assert "prepare" in stages
         assert "transcribe" in stages
-        assert "merge" in stages
-
-    def test_merge_has_no_pii_config(self, job_id: UUID, audio_uri: str):
-        """Merge task should not include PII config."""
-        parameters = {
-            "pii_detection": True,
-            "redact_pii_audio": True,
-        }
-
-        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
-
-        merge_task = next(t for t in tasks if t.stage == "merge")
-        assert "pii_detection" not in merge_task.config
-        assert merge_task.input_bindings == []
-
-    def test_merge_depends_only_on_core_stages(self, job_id: UUID, audio_uri: str):
-        """Merge should not depend on PII tasks."""
-        parameters = {
-            "pii_detection": True,
-            "redact_pii_audio": True,
-            "timestamps_granularity": "word",
-        }
-
-        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
-
-        task_by_stage = {t.stage: t for t in tasks}
-        merge_deps = task_by_stage["merge"].dependencies
-
-        assert task_by_stage["prepare"].id in merge_deps
-        assert task_by_stage["transcribe"].id in merge_deps
-        assert task_by_stage["align"].id in merge_deps
+        # Mono pipeline uses _assemble_linear_transcript; no merge task
+        assert "merge" not in stages
 
     def test_pii_disabled_dag_unchanged(self, job_id: UUID, audio_uri: str):
         """When PII is not enabled, the DAG is unaffected."""
