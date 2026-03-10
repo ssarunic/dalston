@@ -1,6 +1,10 @@
 """Server-side batch engine registry for orchestrator.
 
 Reads engine state from Redis (written by engine_sdk's BatchEngineRegistry client).
+
+M64: When DALSTON_REGISTRY_UNIFIED_READ_ENABLED=true, reads from the unified
+registry first with legacy fallback. The unified registry is populated by
+dual-write from engine runners.
 """
 
 from __future__ import annotations
@@ -11,6 +15,7 @@ from datetime import UTC, datetime
 import redis.asyncio as redis
 import structlog
 
+from dalston.common.registry import EngineRecord, UnifiedEngineRegistry
 from dalston.engine_sdk.types import EngineCapabilities
 
 logger = structlog.get_logger()
@@ -109,13 +114,33 @@ class BatchEngineRegistry:
         transcribers = await registry.get_engines_for_stage("transcribe")
     """
 
-    def __init__(self, redis_client: redis.Redis) -> None:
+    def __init__(
+        self,
+        redis_client: redis.Redis,
+        *,
+        unified_read_enabled: bool | None = None,
+    ) -> None:
         """Initialize registry with Redis client.
 
         Args:
             redis_client: Async Redis client
+            unified_read_enabled: Read from unified registry first (M64).
+                If None, reads from DALSTON_REGISTRY_UNIFIED_READ_ENABLED env var.
         """
         self._redis = redis_client
+
+        # M64: Optionally read from unified registry
+        if unified_read_enabled is None:
+            import os
+
+            unified_read_enabled = (
+                os.environ.get("DALSTON_REGISTRY_UNIFIED_READ_ENABLED", "false").lower()
+                == "true"
+            )
+        self._unified_read_enabled = unified_read_enabled
+        self._unified = (
+            UnifiedEngineRegistry(redis_client) if unified_read_enabled else None
+        )
 
     async def get_engines(self) -> list[BatchEngineState]:
         """Get all registered engines.
@@ -125,6 +150,16 @@ class BatchEngineRegistry:
         Returns:
             List of all engine instance states
         """
+        # M64: Try unified registry first (filter to batch-interface engines)
+        if self._unified:
+            try:
+                records = await self._unified.get_all()
+                batch_records = [r for r in records if r.supports_interface("batch")]
+                if batch_records:
+                    return [_engine_record_to_state(r) for r in batch_records]
+            except Exception:
+                logger.debug("unified_registry_read_fallback", method="get_engines")
+
         runtimes = await self._redis.smembers(ENGINE_SET_KEY)
         engines = []
 
@@ -146,6 +181,20 @@ class BatchEngineRegistry:
         Returns:
             BatchEngineState of first available instance, or None if no instances
         """
+        # M64: Try unified registry first (batch-interface only)
+        if self._unified:
+            try:
+                records = await self._unified.get_by_runtime(runtime)
+                batch_records = [r for r in records if r.supports_interface("batch")]
+                if batch_records:
+                    # Return first available, or first if none available
+                    for r in batch_records:
+                        if r.is_available:
+                            return _engine_record_to_state(r)
+                    return _engine_record_to_state(batch_records[0])
+            except Exception:
+                logger.debug("unified_registry_read_fallback", method="get_engine")
+
         instances = await self.get_engine_instances(runtime)
         if not instances:
             return None
@@ -202,6 +251,19 @@ class BatchEngineRegistry:
         Returns:
             List of engines for the given stage
         """
+        # M64: Try unified registry first (has stage index, filter to batch)
+        if self._unified:
+            try:
+                records = await self._unified.get_by_stage(stage)
+                batch_records = [r for r in records if r.supports_interface("batch")]
+                if batch_records:
+                    return [_engine_record_to_state(r) for r in batch_records]
+            except Exception:
+                logger.debug(
+                    "unified_registry_read_fallback",
+                    method="get_engines_for_stage",
+                )
+
         engines = await self.get_engines()
         return [e for e in engines if e.stage == stage]
 
@@ -214,6 +276,22 @@ class BatchEngineRegistry:
         Returns:
             True if at least one instance is available for task routing
         """
+        # M64: Try unified registry first (batch-interface only)
+        if self._unified:
+            try:
+                records = await self._unified.get_available(
+                    runtime=runtime, interface="batch"
+                )
+                if records:
+                    return True
+                # Empty result: fall through to legacy (batch engines may
+                # not be in unified registry yet during dual migration)
+            except Exception:
+                logger.debug(
+                    "unified_registry_read_fallback",
+                    method="is_engine_available",
+                )
+
         instances = await self.get_engine_instances(runtime)
         return any(inst.is_available for inst in instances)
 
@@ -225,6 +303,14 @@ class BatchEngineRegistry:
         """
         instance_key = f"{ENGINE_KEY_PREFIX}{instance}"
         await self._redis.hset(instance_key, "status", "offline")
+
+        # M64: Also mark offline in unified registry
+        if self._unified:
+            try:
+                await self._unified.mark_instance_offline(instance)
+            except Exception:
+                logger.debug("unified_registry_mark_offline_failed", instance=instance)
+
         logger.warning("batch_engine_instance_marked_offline", instance=instance)
 
     async def mark_engine_offline(self, runtime: str) -> None:
@@ -292,3 +378,24 @@ class BatchEngineRegistry:
             except ValueError:
                 pass
         return datetime.now(UTC)
+
+
+def _engine_record_to_state(record: EngineRecord) -> BatchEngineState:
+    """Convert unified EngineRecord to BatchEngineState for backward compat.
+
+    M64: This bridge allows consumers to read from the unified registry
+    while keeping their existing interfaces unchanged.
+    """
+    return BatchEngineState(
+        runtime=record.runtime,
+        instance=record.instance,
+        stage=record.stage,
+        stream_name=record.stream_name or "",
+        status=record.status,
+        current_task=None,
+        last_heartbeat=record.last_heartbeat or datetime.now(UTC),
+        registered_at=record.registered_at or datetime.now(UTC),
+        capabilities=record.capabilities,
+        loaded_model=record.loaded_model,
+        execution_profile=record.execution_profile,
+    )

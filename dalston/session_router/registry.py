@@ -1,6 +1,9 @@
 """Server-side worker registry for Session Router.
 
 Reads worker state from Redis (written by realtime_sdk's WorkerRegistry client).
+
+M64: When DALSTON_REGISTRY_UNIFIED_READ_ENABLED=true, reads from the unified
+registry first with legacy fallback for RT worker discovery.
 """
 
 from __future__ import annotations
@@ -11,6 +14,8 @@ from datetime import UTC, datetime
 
 import redis.asyncio as redis
 import structlog
+
+from dalston.common.registry import EngineRecord, UnifiedEngineRegistry
 
 logger = structlog.get_logger()
 
@@ -94,13 +99,33 @@ class WorkerRegistry:
         await registry.mark_worker_offline("stt-rt-transcribe-whisper-1")
     """
 
-    def __init__(self, redis_client: redis.Redis) -> None:
+    def __init__(
+        self,
+        redis_client: redis.Redis,
+        *,
+        unified_read_enabled: bool | None = None,
+    ) -> None:
         """Initialize registry with Redis client.
 
         Args:
             redis_client: Async Redis client (shared with allocator/router)
+            unified_read_enabled: Read from unified registry first (M64).
+                If None, reads from DALSTON_REGISTRY_UNIFIED_READ_ENABLED env var.
         """
         self._redis = redis_client
+
+        # M64: Optionally read from unified registry
+        if unified_read_enabled is None:
+            import os
+
+            unified_read_enabled = (
+                os.environ.get("DALSTON_REGISTRY_UNIFIED_READ_ENABLED", "false").lower()
+                == "true"
+            )
+        self._unified_read_enabled = unified_read_enabled
+        self._unified = (
+            UnifiedEngineRegistry(redis_client) if unified_read_enabled else None
+        )
 
     async def get_workers(self) -> list[WorkerState]:
         """Get all registered workers.
@@ -108,6 +133,19 @@ class WorkerRegistry:
         Returns:
             List of all worker states
         """
+        # M64: Try unified registry first (filter to realtime-interface engines)
+        if self._unified:
+            try:
+                records = await self._unified.get_all()
+                rt_records = [r for r in records if r.supports_interface("realtime")]
+                if rt_records:
+                    return [_engine_record_to_worker_state(r) for r in rt_records]
+            except Exception:
+                logger.debug(
+                    "unified_registry_read_fallback",
+                    method="get_workers",
+                )
+
         instances = await self._redis.smembers(INSTANCE_SET_KEY)
         workers = []
 
@@ -127,6 +165,18 @@ class WorkerRegistry:
         Returns:
             WorkerState if found, None otherwise
         """
+        # M64: Try unified registry first
+        if self._unified:
+            try:
+                record = await self._unified.get_by_instance(instance)
+                if record is not None and record.supports_interface("realtime"):
+                    return _engine_record_to_worker_state(record)
+            except Exception:
+                logger.debug(
+                    "unified_registry_read_fallback",
+                    method="get_worker",
+                )
+
         worker_key = f"{INSTANCE_KEY_PREFIX}{instance}"
         data = await self._redis.hgetall(worker_key)
 
@@ -156,6 +206,24 @@ class WorkerRegistry:
         Returns:
             List of available workers matching criteria, sorted by available capacity
         """
+        # M64: Try unified registry first for RT worker discovery
+        if self._unified:
+            try:
+                records = await self._unified.get_available(
+                    interface="realtime",
+                    language=language,
+                    model=model,
+                    runtime=runtime,
+                    valid_runtimes=valid_runtimes,
+                )
+                if records:
+                    return [_engine_record_to_worker_state(r) for r in records]
+            except Exception:
+                logger.debug(
+                    "unified_registry_read_fallback",
+                    method="get_available_workers",
+                )
+
         workers = await self.get_workers()
         available = []
 
@@ -214,6 +282,14 @@ class WorkerRegistry:
         """
         worker_key = f"{INSTANCE_KEY_PREFIX}{instance}"
         await self._redis.hset(worker_key, "status", "offline")
+
+        # M64: Also mark offline in unified registry
+        if self._unified:
+            try:
+                await self._unified.mark_instance_offline(instance)
+            except Exception:
+                logger.debug("unified_registry_mark_offline_failed", instance=instance)
+
         logger.warning("worker_marked_offline", instance=instance)
 
     async def get_worker_session_ids(self, instance: str) -> set[str]:
@@ -349,3 +425,26 @@ class WorkerRegistry:
                 error=str(e),
             )
             return datetime.min.replace(tzinfo=UTC)
+
+
+def _engine_record_to_worker_state(record: EngineRecord) -> WorkerState:
+    """Convert unified EngineRecord to WorkerState for backward compat.
+
+    M64: This bridge allows the session router to read from the unified
+    registry while keeping its existing interfaces unchanged.
+    """
+    return WorkerState(
+        instance=record.instance,
+        endpoint=record.endpoint or "",
+        status=record.status,
+        capacity=record.capacity,
+        active_sessions=record.active_realtime,
+        models_loaded=record.models_loaded or [],
+        languages_supported=record.languages or [],
+        runtime=record.runtime,
+        supports_vocabulary=False,  # Not tracked in unified registry yet
+        gpu_memory_used=record.gpu_memory_used,
+        gpu_memory_total=record.gpu_memory_total,
+        last_heartbeat=record.last_heartbeat or datetime.now(UTC),
+        started_at=record.registered_at or datetime.now(UTC),
+    )
