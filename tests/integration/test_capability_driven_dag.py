@@ -175,7 +175,6 @@ class TestDagShapeWithNativeWordTimestamps:
                         "languages": ["en"],
                     },
                 },
-                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -191,8 +190,8 @@ class TestDagShapeWithNativeWordTimestamps:
         assert "prepare" in stages
         assert "transcribe" in stages
         assert "align" not in stages  # Skipped due to native support
-        assert "merge" in stages
-        assert len(tasks) == 3  # prepare, transcribe, merge (no align)
+        assert "merge" not in stages
+        assert len(tasks) == 2  # prepare, transcribe
 
     @pytest.mark.asyncio
     async def test_includes_alignment_without_native_timestamps(
@@ -207,7 +206,6 @@ class TestDagShapeWithNativeWordTimestamps:
                     "capabilities": {"supports_word_timestamps": False},
                 },
                 "align": {"runtime": "phoneme-align"},
-                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -221,7 +219,8 @@ class TestDagShapeWithNativeWordTimestamps:
 
         stages = [t.stage for t in tasks]
         assert "align" in stages  # Included because transcriber lacks native support
-        assert len(tasks) == 4  # prepare, transcribe, align, merge
+        assert "merge" not in stages
+        assert len(tasks) == 3  # prepare, transcribe, align
 
 
 class TestDagShapeWithNativeDiarization:
@@ -242,7 +241,6 @@ class TestDagShapeWithNativeDiarization:
                         "includes_diarization": True,
                     },
                 },
-                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -257,7 +255,8 @@ class TestDagShapeWithNativeDiarization:
         stages = [t.stage for t in tasks]
         assert "diarize" not in stages  # Skipped - transcriber has native diarization
         assert "align" not in stages  # Skipped - transcriber has native timestamps
-        assert len(tasks) == 3  # prepare, transcribe, merge
+        assert "merge" not in stages
+        assert len(tasks) == 2  # prepare, transcribe
 
     @pytest.mark.asyncio
     async def test_includes_diarization_without_native_support(
@@ -276,7 +275,6 @@ class TestDagShapeWithNativeDiarization:
                 },
                 "align": {"runtime": "phoneme-align"},
                 "diarize": {"runtime": "pyannote-4.0"},
-                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -291,7 +289,8 @@ class TestDagShapeWithNativeDiarization:
         stages = [t.stage for t in tasks]
         assert "diarize" in stages  # Included when requested
         assert "align" in stages
-        assert len(tasks) == 5  # prepare, diarize, transcribe, align, merge
+        assert "merge" not in stages
+        assert len(tasks) == 4  # prepare, transcribe, align, diarize
 
 
 class TestDagShapeWithLanguageRequirements:
@@ -310,7 +309,6 @@ class TestDagShapeWithLanguageRequirements:
                     "capabilities": {"languages": None},  # Universal
                 },
                 "align": {"runtime": "phoneme-align"},
-                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -337,7 +335,6 @@ class TestDagShapeWithLanguageRequirements:
                     "runtime": "parakeet",
                     "capabilities": {"languages": ["en"]},  # English only
                 },
-                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -369,7 +366,6 @@ class TestDagWithTimestampGranularity:
                     "runtime": "faster-whisper",
                     "capabilities": {"supports_word_timestamps": False},
                 },
-                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -397,7 +393,6 @@ class TestDagWithTimestampGranularity:
                     "capabilities": {"supports_word_timestamps": False},
                 },
                 "align": {"runtime": "phoneme-align"},
-                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -519,9 +514,6 @@ class TestEngineRanking:
             if stage == "prepare":
                 caps = make_capabilities("audio-prepare", stage="prepare")
                 return [make_engine_state("audio-prepare", "prepare", caps)]
-            if stage == "merge":
-                caps = make_capabilities("final-merger", stage="merge")
-                return [make_engine_state("final-merger", "merge", caps)]
             return []
 
         registry.get_by_stage.side_effect = get_by_stage
@@ -573,9 +565,6 @@ class TestEngineRanking:
             if stage == "align":
                 caps = make_capabilities("phoneme-align", stage="align")
                 return [make_engine_state("phoneme-align", "align", caps)]
-            if stage == "merge":
-                caps = make_capabilities("final-merger", stage="merge")
-                return [make_engine_state("final-merger", "merge", caps)]
             return []
 
         registry.get_by_stage.side_effect = get_by_stage
@@ -596,38 +585,6 @@ class TestDagDependencies:
     """Tests that DAG dependencies are correctly wired with capability-driven selection."""
 
     @pytest.mark.asyncio
-    async def test_merge_depends_on_correct_stages(
-        self, job_id, audio_uri, mock_catalog
-    ):
-        """Merge depends on all prior stages (prepare, transcribe, optional align)."""
-        registry = create_mock_registry(
-            {
-                "prepare": {"runtime": "audio-prepare"},
-                "transcribe": {
-                    "runtime": "faster-whisper",
-                    "capabilities": {"supports_word_timestamps": False},
-                },
-                "align": {"runtime": "phoneme-align"},
-                "merge": {"runtime": "final-merger"},
-            }
-        )
-
-        tasks = await build_task_dag(
-            job_id=job_id,
-            audio_uri=audio_uri,
-            parameters={},
-            registry=registry,
-            catalog=mock_catalog,
-        )
-
-        by_stage = {t.stage: t for t in tasks}
-        merge_deps = set(by_stage["merge"].dependencies)
-
-        assert by_stage["prepare"].id in merge_deps
-        assert by_stage["transcribe"].id in merge_deps
-        assert by_stage["align"].id in merge_deps
-
-    @pytest.mark.asyncio
     async def test_align_depends_on_transcribe(self, job_id, audio_uri, mock_catalog):
         """Align stage depends on transcribe."""
         registry = create_mock_registry(
@@ -638,7 +595,6 @@ class TestDagDependencies:
                     "capabilities": {"supports_word_timestamps": False},
                 },
                 "align": {"runtime": "phoneme-align"},
-                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -654,10 +610,8 @@ class TestDagDependencies:
         assert by_stage["align"].dependencies == [by_stage["transcribe"].id]
 
     @pytest.mark.asyncio
-    async def test_diarize_depends_only_on_prepare(
-        self, job_id, audio_uri, mock_catalog
-    ):
-        """Diarize runs parallel to transcribe, both depend on prepare."""
+    async def test_diarize_depends_on_align(self, job_id, audio_uri, mock_catalog):
+        """Diarize runs sequentially after transcribe/align."""
         registry = create_mock_registry(
             {
                 "prepare": {"runtime": "audio-prepare"},
@@ -667,7 +621,6 @@ class TestDagDependencies:
                 },
                 "align": {"runtime": "phoneme-align"},
                 "diarize": {"runtime": "pyannote-4.0"},
-                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -680,10 +633,12 @@ class TestDagDependencies:
         )
 
         by_stage = {t.stage: t for t in tasks}
-        prepare_id = by_stage["prepare"].id
+        diarize_deps = set(by_stage["diarize"].dependencies)
 
-        assert by_stage["diarize"].dependencies == [prepare_id]
-        assert by_stage["transcribe"].dependencies == [prepare_id]
+        # Diarize depends on prepare (audio) and align (last transcription stage)
+        assert by_stage["prepare"].id in diarize_deps
+        assert by_stage["align"].id in diarize_deps
+        assert by_stage["transcribe"].dependencies == [by_stage["prepare"].id]
 
 
 # =============================================================================
@@ -716,7 +671,6 @@ class TestMergedWavScenarios:
                     "capabilities": {"languages": None},  # Universal
                 },
                 "align": {"runtime": "phoneme-align"},
-                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -810,7 +764,6 @@ class TestMergedWavScenarios:
                 },
                 "align": {"runtime": "phoneme-align"},
                 "diarize": {"runtime": "pyannote-4.0"},
-                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -825,7 +778,8 @@ class TestMergedWavScenarios:
         stages = [t.stage for t in tasks]
         assert "diarize" in stages
         assert "align" in stages
-        assert len(tasks) == 5  # prepare, diarize, transcribe, align, merge
+        assert "merge" not in stages
+        assert len(tasks) == 4  # prepare, transcribe, align, diarize
 
     @pytest.mark.asyncio
     async def test_without_diarization_no_diarize_stage(self, mock_catalog):
@@ -839,7 +793,6 @@ class TestMergedWavScenarios:
                     "capabilities": {"languages": None},
                 },
                 "align": {"runtime": "phoneme-align"},
-                "merge": {"runtime": "final-merger"},
             }
         )
 
@@ -853,7 +806,8 @@ class TestMergedWavScenarios:
 
         stages = [t.stage for t in tasks]
         assert "diarize" not in stages
-        assert len(tasks) == 4  # prepare, transcribe, align, merge
+        assert "merge" not in stages
+        assert len(tasks) == 3  # prepare, transcribe, align
 
     @pytest.mark.asyncio
     async def test_segment_timestamps_skips_alignment(self, mock_catalog):
@@ -869,7 +823,6 @@ class TestMergedWavScenarios:
                         "supports_word_timestamps": False,
                     },
                 },
-                "merge": {"runtime": "final-merger"},
             }
         )
 

@@ -348,9 +348,18 @@ class TestPerChannelTaskCompletion:
         mock_db = AsyncMock()
         mock_db.get = AsyncMock(return_value=mock_task)
 
-        # No other tasks in the job (just this one for simplicity)
+        # Per-channel jobs have a merge task; include one so _check_job_completion
+        # skips linear transcript assembly (which requires real S3).
+        mock_merge_task = MagicMock()
+        mock_merge_task.id = uuid4()
+        mock_merge_task.job_id = job_id
+        mock_merge_task.stage = "merge"
+        mock_merge_task.status = TaskStatus.COMPLETED.value
+        mock_merge_task.required = True
+        mock_merge_task.dependencies = [task_id]
+
         mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [mock_task]
+        mock_result.scalars.return_value.all.return_value = [mock_task, mock_merge_task]
         mock_result.scalar_one_or_none.return_value = mock_task  # For job query
         mock_db.execute = AsyncMock(return_value=mock_result)
 

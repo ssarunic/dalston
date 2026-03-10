@@ -650,7 +650,6 @@ class TestSelectPipelineEngines:
                     "faster-whisper", supports_word_timestamps=False
                 ),
                 "align": make_capabilities("phoneme-align"),
-                "merge": make_capabilities("final-merger"),
             }
             caps = stages_caps.get(stage)
             if caps:
@@ -672,7 +671,8 @@ class TestSelectPipelineEngines:
         assert (
             "align" in selections
         )  # Needed because faster-whisper lacks native timestamps
-        assert "merge" in selections
+        # Mono pipelines no longer select merge (assembly is done in handlers)
+        assert "merge" not in selections
 
     @pytest.mark.asyncio
     async def test_prefers_model_transcribe_over_engine_transcribe(
@@ -725,7 +725,6 @@ class TestSelectPipelineEngines:
                 "transcribe": make_capabilities(
                     "parakeet", languages=["en"], supports_word_timestamps=True
                 ),
-                "merge": make_capabilities("final-merger"),
             }
             caps = stages_caps.get(stage)
             if caps:
@@ -747,7 +746,8 @@ class TestSelectPipelineEngines:
         assert "prepare" in selections
         assert "transcribe" in selections
         assert "align" not in selections  # Parakeet has native timestamps
-        assert "merge" in selections
+        # Mono pipeline: no merge
+        assert "merge" not in selections
 
     @pytest.mark.asyncio
     async def test_adds_diarization_when_requested(self, mock_registry, mock_catalog):
@@ -802,11 +802,6 @@ class TestSelectPipelineEngines:
                     selection_reason="transcribe",
                 ),
                 NoDownloadedModelError(runtime="phoneme-align", stage="align"),
-                EngineSelectionResult(
-                    runtime="final-merger",
-                    capabilities=make_capabilities("final-merger"),
-                    selection_reason="merge",
-                ),
             ]
 
             selection = await select_pipeline_engines(
@@ -816,7 +811,8 @@ class TestSelectPipelineEngines:
 
         assert "align" not in selections
         assert selections["transcribe"].runtime == "faster-whisper"
-        assert selections["merge"].runtime == "final-merger"
+        # Mono pipeline: no merge selected
+        assert "merge" not in selections
         assert "timestamps_granularity" not in parameters
         assert selection.effective_parameters["timestamps_granularity"] == "segment"
         assert selection.effective_parameters["word_timestamps"] is False

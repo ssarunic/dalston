@@ -71,7 +71,6 @@ from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.local_runner import LocalRunner
 from dalston.engine_sdk.model_manager import LoadedModel, ModelManager
-from dalston.engine_sdk.runner import EngineRunner
 from dalston.engine_sdk.types import (
     EngineCapabilities,
     EngineInput,
@@ -82,7 +81,6 @@ __all__ = [
     # Core SDK
     "Engine",
     "EngineCapabilities",
-    "EngineRunner",
     "LocalRunner",
     "EngineInput",
     "EngineOutput",

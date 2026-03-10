@@ -262,7 +262,8 @@ class TestParakeetOnnxCatalogIntegration:
 
         assert "align" not in stages
         assert "transcribe" in stages
-        assert "merge" in stages
+        # Mono pipeline: no merge stage
+        assert "merge" not in stages
 
     def test_dag_skips_align_for_onnx_tdt(self):
         """Test that DAG builder skips align stage for ONNX TDT models."""

@@ -141,7 +141,11 @@ class TestBuildTaskDagModelSelection:
         assert transcribe_task.config["prompt"] == "ACME quarterly earnings call"
         assert transcribe_task.config["temperature"] == 0.0
 
-    def test_known_speaker_names_reach_merge_config(self, job_id: UUID, audio_uri: str):
+    def test_known_speaker_names_not_in_task_configs(
+        self, job_id: UUID, audio_uri: str
+    ):
+        """For mono pipelines, known_speaker_names are passed to assemble_transcript
+        in handlers, not stored in individual task configs."""
         tasks = build_task_dag_for_test(
             job_id,
             audio_uri,
@@ -151,8 +155,13 @@ class TestBuildTaskDagModelSelection:
             },
         )
 
-        merge_task = next(t for t in tasks if t.stage == "merge")
-        assert merge_task.config["known_speaker_names"] == ["Alice", "Bob"]
+        # Mono pipeline has no merge task
+        stages = [t.stage for t in tasks]
+        assert "merge" not in stages
+
+        # known_speaker_names should not appear in individual task configs
+        for task in tasks:
+            assert "known_speaker_names" not in task.config
 
 
 class TestBuildTaskDagPipeline:
@@ -167,7 +176,7 @@ class TestBuildTaskDagPipeline:
         return "s3://test-bucket/audio/test.wav"
 
     def test_basic_pipeline_structure(self, job_id: UUID, audio_uri: str):
-        """Test basic pipeline: prepare → transcribe → align → merge."""
+        """Test basic pipeline: prepare → transcribe → align (no merge for mono)."""
         tasks = build_task_dag_for_test(
             job_id, audio_uri, {"timestamps_granularity": "word"}
         )
@@ -176,7 +185,7 @@ class TestBuildTaskDagPipeline:
         assert "prepare" in stages
         assert "transcribe" in stages
         assert "align" in stages
-        assert "merge" in stages
+        assert "merge" not in stages
 
     def test_no_align_when_segment_granularity(self, job_id: UUID, audio_uri: str):
         """Test that align stage is skipped with segment granularity."""
@@ -247,11 +256,8 @@ class TestBuildTaskDagPipeline:
         # Align depends on transcribe
         assert task_by_stage["transcribe"].id in task_by_stage["align"].dependencies
 
-        # Merge depends on multiple tasks
-        merge_deps = task_by_stage["merge"].dependencies
-        assert task_by_stage["prepare"].id in merge_deps
-        assert task_by_stage["transcribe"].id in merge_deps
-        assert task_by_stage["align"].id in merge_deps
+        # No merge in mono pipeline
+        assert "merge" not in task_by_stage
 
 
 class TestBuildTaskDagNemo:
@@ -281,10 +287,12 @@ class TestBuildTaskDagNemo:
         stages = [t.stage for t in tasks]
         # NeMo models have native word timestamps, so no align stage
         assert "align" not in stages
-        # But should have other stages
+        # Mono pipeline: prepare and transcribe only (2 tasks)
         assert "prepare" in stages
         assert "transcribe" in stages
-        assert "merge" in stages
+        # No merge for mono pipeline
+        assert "merge" not in stages
+        assert len(tasks) == 2
 
     def test_nemo_with_diarization(self, job_id: UUID, audio_uri: str):
         """Test that NeMo/Parakeet works with diarization (no align, but diarize)."""
@@ -332,8 +340,8 @@ class TestBuildTaskDagNemo:
         # Whisper should have align stage (no native word timestamps)
         assert "align" in stages
 
-    def test_nemo_merge_dependencies_correct(self, job_id: UUID, audio_uri: str):
-        """Test that merge dependencies are correct when align is skipped."""
+    def test_nemo_no_merge_in_mono_pipeline(self, job_id: UUID, audio_uri: str):
+        """Test that mono pipeline has no merge stage when align is skipped."""
         parameters = {
             "engine_transcribe": "nvidia/parakeet-tdt-1.1b",
             "timestamps_granularity": "word",
@@ -342,12 +350,12 @@ class TestBuildTaskDagNemo:
         tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         task_by_stage = {t.stage: t for t in tasks}
-        merge_deps = task_by_stage["merge"].dependencies
 
-        # Merge should depend on prepare and transcribe (but NOT align since it's skipped)
-        assert task_by_stage["prepare"].id in merge_deps
-        assert task_by_stage["transcribe"].id in merge_deps
-        assert len([t for t in tasks if t.stage == "align"]) == 0
+        # No align or merge in mono pipeline with native timestamps
+        assert "align" not in task_by_stage
+        assert "merge" not in task_by_stage
+        # Transcribe depends on prepare
+        assert task_by_stage["prepare"].id in task_by_stage["transcribe"].dependencies
 
     def test_nemo_transcribe_task_uses_nemo_runtime(self, job_id: UUID, audio_uri: str):
         """Test that transcribe task uses NeMo runtime when a parakeet model is specified.
