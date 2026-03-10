@@ -37,7 +37,7 @@ from dalston.gateway.services.storage import StorageService
 
 if TYPE_CHECKING:
     from dalston.common.audit import AuditService
-    from dalston.session_router import SessionRouter
+    from dalston.orchestrator.session_coordinator import SessionCoordinator
 
 logger = structlog.get_logger()
 
@@ -231,10 +231,10 @@ def get_audit_service() -> AuditService:
     return _audit_service
 
 
-def get_session_router() -> SessionRouter:
-    """Get SessionRouter instance.
+def get_session_router() -> SessionCoordinator:
+    """Get session coordinator instance.
 
-    The router is initialized in main.py lifespan and stored globally.
+    The coordinator is initialised in main.py lifespan and stored globally.
     """
     from dalston.gateway.main import session_router
 

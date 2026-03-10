@@ -26,8 +26,8 @@ from dalston.orchestrator.defaults import (
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from dalston.common.registry import UnifiedEngineRegistry
     from dalston.orchestrator.catalog import EngineCatalog
-    from dalston.orchestrator.registry import BatchEngineRegistry
 
 logger = structlog.get_logger()
 
@@ -94,7 +94,7 @@ async def build_task_dag(
     job_id: UUID,
     audio_uri: str,
     parameters: dict,
-    registry: BatchEngineRegistry,
+    registry: UnifiedEngineRegistry,
     catalog: EngineCatalog,
     db: AsyncSession | None = None,
 ) -> list[Task]:

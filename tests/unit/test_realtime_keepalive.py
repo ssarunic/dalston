@@ -5,7 +5,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from dalston.gateway.api.v1.realtime import _keep_session_alive
+from dalston.gateway.api.v1._realtime_common import (
+    keep_session_alive as _keep_session_alive,
+)
 
 
 class TestKeepSessionAlive:

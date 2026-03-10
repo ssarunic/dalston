@@ -4,8 +4,8 @@ Uses NVIDIA NeMo Parakeet FastConformer with cache-aware streaming
 for low-latency real-time transcription. Achieves ~100ms end-to-end
 latency with native word-level timestamps.
 
-M44: Uses NeMoModelManager for dynamic model loading. A single container
-can serve any Parakeet RNNT/CTC model variant without rebuild.
+Delegates inference to ParakeetCore (shared with the batch engine).
+Supports dynamic model loading via NeMoModelManager (M44).
 
 Environment variables:
     DALSTON_INSTANCE: Unique identifier for this worker (required)
@@ -25,7 +25,7 @@ import numpy as np
 import structlog
 import torch
 
-from dalston.engine_sdk.managers import NeMoModelManager
+from dalston.engine_sdk.cores.parakeet_core import ParakeetCore
 from dalston.realtime_sdk import (
     AsyncModelManager,
     RealtimeEngine,
@@ -39,14 +39,15 @@ logger = structlog.get_logger()
 class ParakeetStreamingEngine(RealtimeEngine):
     """Real-time streaming transcription using Parakeet with dynamic model loading.
 
-    M44: Models are loaded on-demand using NeMoModelManager with TTL-based eviction.
-    This allows a single container to serve any Parakeet RNNT/CTC model variant.
+    Delegates inference to ParakeetCore, which is shared with the batch
+    Parakeet engine. The RT adapter handles:
+    - Model ID normalization
+    - VAD-chunked audio input (numpy arrays)
+    - Output formatting to TranscribeResult
 
-    Uses cache-aware FastConformer encoder for true streaming inference
-    without chunked re-encoding, achieving lower latency than Whisper.
-
-    Supports both GPU (CUDA) and CPU inference. GPU is strongly
-    recommended for real-time use due to latency requirements.
+    When run standalone, creates its own ParakeetCore in load_models().
+    When used within a unified runner, accepts an injected core to share a
+    single loaded model with the batch adapter.
 
     Environment variables:
         DALSTON_INSTANCE: Unique identifier for this worker (required)
@@ -62,68 +63,37 @@ class ParakeetStreamingEngine(RealtimeEngine):
     # Default model when client doesn't specify
     DEFAULT_MODEL = "parakeet-rnnt-0.6b"
 
-    def __init__(self) -> None:
-        """Initialize the engine."""
+    def __init__(self, core: ParakeetCore | None = None) -> None:
+        """Initialize the engine.
+
+        Args:
+            core: Optional shared ParakeetCore. If provided, load_models()
+                  skips creating its own core and uses the injected one.
+        """
         super().__init__()
-        self._device: str = "cuda"
-
-        # Determine device from environment or availability
-        requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
-        cuda_available = torch.cuda.is_available()
-
-        if requested_device == "cpu":
-            self._device = "cpu"
-            logger.warning(
-                "using_cpu_device",
-                message="Running on CPU - real-time latency may not be achievable",
-            )
-        elif requested_device in ("", "auto", "cuda"):
-            if cuda_available:
-                self._device = "cuda"
-                logger.info("cuda_available", device_count=torch.cuda.device_count())
-            else:
-                if requested_device == "cuda":
-                    raise RuntimeError(
-                        "CUDA requested but not available. Set DALSTON_DEVICE=cpu "
-                        "only for local development/testing."
-                    )
-                self._device = "cpu"
-                logger.warning(
-                    "cuda_not_available",
-                    message="CUDA not available, falling back to CPU - latency will be higher",
-                )
-        else:
-            raise ValueError(
-                f"Unknown device: {requested_device}. Use 'cuda' or 'cpu'."
-            )
+        self._core: ParakeetCore | None = core
 
     def load_models(self) -> None:
-        """Initialize NeMoModelManager with optional preloading.
+        """Initialize ParakeetCore with optional preloading.
 
-        M44: Models are loaded on-demand, not all at once. This method sets up
-        the NeMoModelManager and optionally preloads a default model.
+        If a ParakeetCore was injected via __init__, this method uses it
+        instead of creating a new one. This is how the unified runner shares
+        a single model instance between batch and RT adapters.
         """
-        logger.info(
-            "initializing_nemo_model_manager",
-            device=self._device,
-        )
+        if self._core is None:
+            # Standalone mode — create own core
+            self._core = ParakeetCore.from_env()
 
-        # Create sync model manager
-        sync_manager = NeMoModelManager(
-            device=self._device,
-            ttl_seconds=int(os.environ.get("DALSTON_MODEL_TTL_SECONDS", "3600")),
-            max_loaded=int(os.environ.get("DALSTON_MAX_LOADED_MODELS", "2")),
-            preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
-        )
-
-        # Wrap in async manager
-        self._model_manager = AsyncModelManager(sync_manager)
+        # Wrap the core's manager in AsyncModelManager for heartbeat reporting
+        self._model_manager = AsyncModelManager(self._core.manager)
 
         logger.info(
-            "nemo_model_manager_initialized",
-            max_loaded=sync_manager.max_loaded,
-            ttl_seconds=sync_manager.ttl_seconds,
+            "model_manager_initialized",
+            max_loaded=self._core.manager.max_loaded,
+            ttl_seconds=self._core.manager.ttl_seconds,
+            device=self._core.device,
             preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
+            shared_core=self._core is not None,
         )
 
     def transcribe(
@@ -133,10 +103,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
         model_variant: str,
         vocabulary: list[str] | None = None,
     ) -> TranscribeResult:
-        """Transcribe an audio segment.
-
-        M44: Acquires the requested model (loading if needed), transcribes,
-        then releases the model reference.
+        """Transcribe an audio segment via shared ParakeetCore.
 
         Args:
             audio: Audio samples as float32 numpy array, mono, 16kHz
@@ -147,9 +114,9 @@ class ParakeetStreamingEngine(RealtimeEngine):
         Returns:
             TranscribeResult with text, words, language, confidence
         """
-        if self._model_manager is None:
+        if self._core is None:
             raise RuntimeError(
-                "Model manager not initialized. Call load_models() first."
+                "ParakeetCore not initialized — call load_models() first"
             )
 
         # Use default if no model specified
@@ -174,15 +141,28 @@ class ParakeetStreamingEngine(RealtimeEngine):
                 using="en",
             )
 
-        # Note: transcribe is called from sync context in SessionHandler
-        # We need to use the sync manager directly since we're in a sync method
-        sync_manager = self._model_manager.manager
+        # Delegate to shared core
+        result = self._core.transcribe(audio, model_id)
 
-        model = sync_manager.acquire(model_id)
-        try:
-            return self._transcribe_with_model(model, audio)
-        finally:
-            sync_manager.release(model_id)
+        # Format core result into RT output contract
+        words: list[Word] = []
+        for seg in result.segments:
+            for w in seg.words:
+                words.append(
+                    Word(
+                        word=w.word,
+                        start=w.start,
+                        end=w.end,
+                        confidence=w.confidence or 0.95,
+                    )
+                )
+
+        return TranscribeResult(
+            text=result.text,
+            words=words,
+            language="en",
+            confidence=1.0,
+        )
 
     def _normalize_model_id(self, model_id: str) -> str:
         """Normalize model ID to NeMoModelManager supported format.
@@ -193,7 +173,6 @@ class ParakeetStreamingEngine(RealtimeEngine):
         Returns:
             Normalized model ID
         """
-        # Handle various naming formats
         mappings = {
             # Full names
             "parakeet-rnnt-0.6b": "parakeet-rnnt-0.6b",
@@ -201,7 +180,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
             "parakeet-ctc-0.6b": "parakeet-ctc-0.6b",
             "parakeet-ctc-1.1b": "parakeet-ctc-1.1b",
             "parakeet-tdt-1.1b": "parakeet-tdt-1.1b",
-            # Short variants (from legacy per-model containers)
+            # Short variants
             "0.6b": "parakeet-rnnt-0.6b",
             "1.1b": "parakeet-rnnt-1.1b",
             "rnnt-0.6b": "parakeet-rnnt-0.6b",
@@ -218,116 +197,16 @@ class ParakeetStreamingEngine(RealtimeEngine):
         }
         return mappings.get(model_id, model_id)
 
-    def _transcribe_with_model(
-        self,
-        model,
-        audio: np.ndarray,
-    ) -> TranscribeResult:
-        """Perform transcription with the given model.
-
-        Args:
-            model: The NeMo ASRModel to use
-            audio: Audio samples as float32 numpy array
-
-        Returns:
-            TranscribeResult
-        """
-        # Prepare audio for NeMo (expects float32 numpy array)
-        if audio.dtype != np.float32:
-            audio = audio.astype(np.float32)
-
-        # Ensure audio is 1D (NeMo expects shape (samples,))
-        if audio.ndim > 1:
-            audio = audio.squeeze()
-
-        # Transcribe using NeMo's transcribe method
-        # NeMo expects a list of numpy arrays or file paths
-        with torch.inference_mode():
-            if self._device == "cuda":
-                with torch.cuda.amp.autocast():
-                    hypotheses = model.transcribe(
-                        [audio],  # Pass as list of numpy arrays
-                        batch_size=1,
-                        return_hypotheses=True,
-                    )
-            else:
-                hypotheses = model.transcribe(
-                    [audio],  # Pass as list of numpy arrays
-                    batch_size=1,
-                    return_hypotheses=True,
-                )
-
-        if not hypotheses:
-            return TranscribeResult(
-                text="",
-                words=[],
-                language="en",
-                confidence=1.0,
-            )
-
-        hypothesis = hypotheses[0]
-
-        # Extract text
-        if hasattr(hypothesis, "text"):
-            text = hypothesis.text
-        else:
-            text = str(hypothesis)
-
-        # Extract word-level timestamps if available
-        words: list[Word] = []
-
-        if hasattr(hypothesis, "timestep") and hypothesis.timestep is not None:
-            tokens = text.split()
-            timesteps = hypothesis.timestep
-            frame_shift_seconds = 0.01  # 10ms frame shift
-
-            for i, (token, frame_idx) in enumerate(
-                zip(tokens, timesteps, strict=False)
-            ):
-                word_start = frame_idx * frame_shift_seconds
-                if i + 1 < len(timesteps):
-                    word_end = timesteps[i + 1] * frame_shift_seconds
-                else:
-                    word_end = word_start + 0.1
-
-                words.append(
-                    Word(
-                        word=token,
-                        start=word_start,
-                        end=word_end,
-                        confidence=0.95,
-                    )
-                )
-
-        return TranscribeResult(
-            text=text.strip(),
-            words=words,
-            language="en",
-            confidence=1.0,  # Parakeet is English-only, confidence is implicit
-        )
-
     def supports_streaming(self) -> bool:
         """Parakeet supports native streaming with partial results."""
         return True
 
     def get_models(self) -> list[str]:
-        """Return list of supported model identifiers.
-
-        M44: Returns all models the NeMoModelManager can load dynamically.
-        """
-        return [
-            "parakeet-rnnt-0.6b",
-            "parakeet-rnnt-1.1b",
-            "parakeet-ctc-0.6b",
-            "parakeet-ctc-1.1b",
-            "parakeet-tdt-1.1b",
-        ]
+        """Return list of supported model identifiers."""
+        return ParakeetCore.SUPPORTED_MODELS
 
     def get_languages(self) -> list[str]:
-        """Return list of supported languages.
-
-        Parakeet only supports English.
-        """
+        """Return list of supported languages. Parakeet only supports English."""
         return ["en"]
 
     def get_runtime(self) -> str:
@@ -363,12 +242,14 @@ class ParakeetStreamingEngine(RealtimeEngine):
         if self._model_manager is not None:
             model_stats = self._model_manager.get_stats()
 
+        device = self._core.device if self._core else "unknown"
+
         return {
             **base_health,
             "models_loaded": model_stats.get("loaded_models", []),
             "model_count": model_stats.get("model_count", 0),
             "max_loaded": model_stats.get("max_loaded", 0),
-            "device": self._device,
+            "device": device,
             "cuda_available": cuda_available,
             "cuda_device_count": cuda_device_count,
             "cuda_memory_allocated_gb": round(cuda_memory_allocated, 2),

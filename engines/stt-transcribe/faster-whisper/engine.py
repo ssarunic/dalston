@@ -3,6 +3,8 @@
 Uses the faster-whisper library (CTranslate2-based) for efficient
 speech-to-text transcription with GPU acceleration.
 
+Delegates inference to TranscribeCore (shared with the realtime engine).
+
 Features:
     - Runtime model swapping via config["runtime_model_id"]
     - TTL-based model eviction for idle models
@@ -33,17 +35,24 @@ from dalston.engine_sdk import (
     TranscribeOutput,
     Word,
 )
-from dalston.engine_sdk.managers import FasterWhisperModelManager
+from dalston.engine_sdk.cores.faster_whisper_core import (
+    TranscribeConfig,
+    TranscribeCore,
+)
 
 
 class WhisperEngine(Engine):
     """Faster-Whisper transcription engine with TTL-based model management.
 
-    This engine uses FasterWhisperModelManager to handle model lifecycle:
-    - Models are loaded on first request for that model
-    - Multiple models can be loaded simultaneously (up to max_loaded)
-    - Idle models are evicted after TTL expires
-    - When at capacity, least-recently-used models are evicted first
+    This engine delegates inference to TranscribeCore, which is shared
+    with the realtime faster-whisper engine. The batch adapter handles:
+    - Task config parsing
+    - Output formatting to TranscribeOutput
+    - Heartbeat state reporting
+
+    When run standalone, creates its own TranscribeCore. When used within
+    a unified runner, accepts an injected core to share a single loaded
+    model with the realtime adapter.
 
     Automatically detects GPU availability and selects appropriate compute type:
     - GPU (CUDA): float16 for maximum performance
@@ -54,7 +63,7 @@ class WhisperEngine(Engine):
     DEFAULT_VAD_FILTER = True
     DEFAULT_MODEL_ID = "large-v3-turbo"
 
-    def __init__(self) -> None:
+    def __init__(self, core: TranscribeCore | None = None) -> None:
         super().__init__()
 
         # Get configuration from environment
@@ -63,82 +72,26 @@ class WhisperEngine(Engine):
         )
         self._runtime = os.environ.get("DALSTON_RUNTIME", "faster-whisper")
 
-        # Auto-detect device and compute type
-        self._device, self._compute_type = self._detect_device()
-
-        # Configure S3 storage if bucket is set
-        model_storage = None
-        s3_bucket = os.environ.get("DALSTON_S3_BUCKET")
-        if s3_bucket:
-            from dalston.engine_sdk.model_storage import S3ModelStorage
-
-            model_storage = S3ModelStorage.from_env()
-            self.logger.info("s3_model_storage_enabled", bucket=s3_bucket)
-
-        # Initialize model manager with TTL eviction
-        self._manager = FasterWhisperModelManager(
-            device=self._device,
-            compute_type=self._compute_type,
-            model_storage=model_storage,
-            ttl_seconds=int(os.environ.get("DALSTON_MODEL_TTL_SECONDS", "3600")),
-            max_loaded=int(os.environ.get("DALSTON_MAX_LOADED_MODELS", "2")),
-            preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
-        )
+        # Use injected core (unified runner) or create own (standalone)
+        self._core = core if core is not None else TranscribeCore.from_env()
 
         self.logger.info(
             "engine_init",
             runtime=self._runtime,
             default_model=self._default_model_id,
-            device=self._device,
-            compute_type=self._compute_type,
-            ttl_seconds=self._manager.ttl_seconds,
-            max_loaded=self._manager.max_loaded,
+            device=self._core.device,
+            compute_type=self._core.compute_type,
+            ttl_seconds=self._core.manager.ttl_seconds,
+            max_loaded=self._core.manager.max_loaded,
+            shared_core=core is not None,
         )
-
-    def _detect_device(self) -> tuple[str, str]:
-        """Detect the best available device and compute type.
-
-        Returns:
-            Tuple of (device, compute_type)
-        """
-        requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
-
-        if requested_device == "cpu":
-            self.logger.info(
-                "using_cpu_device",
-                message="Running on CPU with int8 compute - inference will be slower than GPU",
-            )
-            return "cpu", "int8"
-
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                return "cuda", "float16"
-        except ImportError:
-            pass
-
-        if requested_device == "cuda":
-            raise RuntimeError(
-                "DALSTON_DEVICE=cuda but CUDA is not available for faster-whisper."
-            )
-
-        if requested_device not in ("", "auto"):
-            raise ValueError(
-                f"Unknown DALSTON_DEVICE value: {requested_device}. Use cuda or cpu."
-            )
-
-        self.logger.info(
-            "cuda_not_available",
-            message="CUDA not available, falling back to CPU with int8 compute",
-        )
-        return "cpu", "int8"
 
     def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
-        """Transcribe audio using Faster-Whisper.
+        """Transcribe audio using Faster-Whisper via shared TranscribeCore.
 
         Args:
             engine_input: Task input with audio file path and config
+            ctx: Batch task context for tracing/logging
 
         Returns:
             EngineOutput with TranscribeOutput containing text, segments, and language
@@ -146,17 +99,12 @@ class WhisperEngine(Engine):
         audio_path = engine_input.audio_path
         config = engine_input.config
 
-        # Handle language: None or "auto" means auto-detect
-        language = config.get("language")
-        if language == "auto" or language == "":
-            language = None
-        beam_size = config.get("beam_size", self.DEFAULT_BEAM_SIZE)
-        vad_filter = config.get("vad_filter", self.DEFAULT_VAD_FILTER)
+        # Parse config into TranscribeConfig
         channel = config.get("channel")
         vocabulary = config.get("vocabulary")
         prompt = config.get("prompt")
-        task = config.get("task", "transcribe")
         raw_temperature = config.get("temperature", 0.0)
+
         if isinstance(raw_temperature, list):
             parsed_temperatures = [float(value) for value in raw_temperature]
             decode_temperature: float | list[float] = (
@@ -172,101 +120,75 @@ class WhisperEngine(Engine):
         # Get model to use from task config
         runtime_model_id = config.get("runtime_model_id", self._default_model_id)
 
-        # Acquire model from manager (loads if needed, updates LRU)
-        model = self._manager.acquire(runtime_model_id)
+        # Build transcribe config
+        hotwords = " ".join(vocabulary) if vocabulary else None
+        transcribe_config = TranscribeConfig(
+            language=config.get("language"),
+            beam_size=config.get("beam_size", self.DEFAULT_BEAM_SIZE),
+            vad_filter=config.get("vad_filter", self.DEFAULT_VAD_FILTER),
+            word_timestamps=True,
+            temperature=decode_temperature,
+            task=config.get("task", "transcribe"),
+            initial_prompt=prompt,
+            hotwords=hotwords,
+        )
+
+        # Update runtime state for heartbeat reporting
+        self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
+
+        self.logger.info("transcribing", audio_path=str(audio_path))
+        self.logger.info(
+            "transcribe_config",
+            runtime_model_id=runtime_model_id,
+            language=transcribe_config.language,
+            beam_size=transcribe_config.beam_size,
+            vad_filter=transcribe_config.vad_filter,
+            vocabulary_terms=len(vocabulary) if vocabulary else 0,
+            has_prompt=bool(prompt),
+            task=transcribe_config.task,
+            temperature=decode_temperature,
+        )
+
         try:
-            # Update runtime state for heartbeat reporting
-            self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
-
-            self.logger.info("transcribing", audio_path=str(audio_path))
-            self.logger.info(
-                "transcribe_config",
-                runtime_model_id=runtime_model_id,
-                language=language,
-                beam_size=beam_size,
-                vad_filter=vad_filter,
-                vocabulary_terms=len(vocabulary) if vocabulary else 0,
-                has_prompt=bool(prompt),
-                task=task,
-                temperature=decode_temperature,
+            # Delegate to shared core
+            result = self._core.transcribe(
+                audio=audio_path,
+                model_id=runtime_model_id,
+                config=transcribe_config,
             )
 
-            # Build transcribe kwargs
-            transcribe_kwargs: dict = {
-                "language": language,
-                "beam_size": beam_size,
-                "vad_filter": vad_filter,
-                "word_timestamps": True,
-                "temperature": decode_temperature,
-            }
-            if task in {"transcribe", "translate"}:
-                transcribe_kwargs["task"] = task
-
-            if prompt:
-                transcribe_kwargs["initial_prompt"] = prompt
-
-            if vocabulary:
-                transcribe_kwargs["hotwords"] = " ".join(vocabulary)
-                self.logger.info(
-                    "vocabulary_enabled",
-                    terms=vocabulary[:5],
-                    total_terms=len(vocabulary),
-                )
-
-            # Transcribe audio
-            segments_generator, info = model.transcribe(
-                str(audio_path),
-                **transcribe_kwargs,
-            )
-
-            # Collect segments
+            # Format core result into batch output contract
             segments: list[Segment] = []
             full_text_parts: list[str] = []
 
-            for segment in segments_generator:
+            for seg in result.segments:
                 words: list[Word] | None = None
-                raw_tokens = getattr(segment, "tokens", None)
-                raw_avg_logprob = getattr(segment, "avg_logprob", None)
-                raw_compression_ratio = getattr(segment, "compression_ratio", None)
-                raw_no_speech_prob = getattr(segment, "no_speech_prob", None)
-                if segment.words:
+                if seg.words:
                     words = [
                         Word(
-                            text=word.word.strip(),
-                            start=round(word.start, 3),
-                            end=round(word.end, 3),
-                            confidence=round(word.probability, 3),
+                            text=w.word,
+                            start=w.start,
+                            end=w.end,
+                            confidence=w.probability,
                             alignment_method=AlignmentMethod.ATTENTION,
                         )
-                        for word in segment.words
+                        for w in seg.words
                     ]
 
                 segments.append(
                     Segment(
-                        start=round(segment.start, 3),
-                        end=round(segment.end, 3),
-                        text=segment.text.strip(),
+                        start=seg.start,
+                        end=seg.end,
+                        text=seg.text,
                         words=words,
-                        tokens=list(raw_tokens) if raw_tokens else None,
+                        tokens=seg.tokens,
                         temperature=segment_temperature,
-                        avg_logprob=(
-                            round(raw_avg_logprob, 4)
-                            if raw_avg_logprob is not None
-                            else None
-                        ),
-                        compression_ratio=(
-                            round(raw_compression_ratio, 4)
-                            if raw_compression_ratio is not None
-                            else None
-                        ),
-                        no_speech_prob=(
-                            round(raw_no_speech_prob, 4)
-                            if raw_no_speech_prob is not None
-                            else None
-                        ),
+                        avg_logprob=seg.avg_logprob,
+                        compression_ratio=seg.compression_ratio,
+                        no_speech_prob=seg.no_speech_prob,
                     )
                 )
-                full_text_parts.append(segment.text.strip())
+                full_text_parts.append(seg.text)
 
             full_text = " ".join(full_text_parts)
 
@@ -277,8 +199,8 @@ class WhisperEngine(Engine):
             )
             self.logger.info(
                 "detected_language",
-                language=info.language,
-                confidence=round(info.language_probability, 2),
+                language=result.language,
+                confidence=round(result.language_probability, 2),
             )
 
             has_word_timestamps = any(seg.words for seg in segments)
@@ -291,9 +213,9 @@ class WhisperEngine(Engine):
             output = TranscribeOutput(
                 text=full_text,
                 segments=segments,
-                language=info.language,
-                language_confidence=round(info.language_probability, 3),
-                duration=info.duration,
+                language=result.language,
+                language_confidence=round(result.language_probability, 3),
+                duration=result.duration,
                 timestamp_granularity_requested=TimestampGranularity.WORD,
                 timestamp_granularity_actual=timestamp_granularity_actual,
                 alignment_method=(
@@ -309,8 +231,6 @@ class WhisperEngine(Engine):
             return EngineOutput(data=output)
 
         finally:
-            # Always release the model reference
-            self._manager.release(runtime_model_id)
             self._set_runtime_state(status="idle")
 
     def health_check(self) -> dict[str, Any]:
@@ -326,29 +246,26 @@ class WhisperEngine(Engine):
         except ImportError:
             pass
 
-        manager_stats = self._manager.get_stats()
+        manager_stats = self._core.get_stats()
 
         return {
             "status": "healthy",
             "runtime": self._runtime,
-            "device": self._device,
-            "compute_type": self._compute_type,
+            "device": self._core.device,
+            "compute_type": self._core.compute_type,
             "cuda_available": cuda_available,
             "cuda_device_count": cuda_device_count,
             "model_manager": manager_stats,
         }
 
     def get_local_cache_stats(self) -> dict[str, Any] | None:
-        """Get local model cache statistics for heartbeat reporting.
-
-        Returns cache stats from S3ModelStorage if configured.
-        """
-        return self._manager.get_local_cache_stats()
+        """Get local model cache statistics for heartbeat reporting."""
+        return self._core.get_local_cache_stats()
 
     def shutdown(self) -> None:
         """Shutdown engine and cleanup resources."""
         self.logger.info("engine_shutdown")
-        self._manager.shutdown()
+        self._core.shutdown()
         super().shutdown()
 
 

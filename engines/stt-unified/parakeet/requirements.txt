@@ -1,0 +1,22 @@
+# Unified Parakeet Engine Dependencies (batch + realtime)
+# Union of engines/stt-transcribe/parakeet/requirements.txt
+# and  engines/stt-rt/parakeet/requirements.txt
+
+# NeMo toolkit for ASR models
+nemo_toolkit[asr]>=1.23.0
+
+# Pin Lhotse to version compatible with NeMo (prevents __init__ TypeError)
+lhotse>=1.24.2,<1.30.0
+
+# Pin transformers to version compatible with PyTorch 2.5.0a0 in NGC container
+# Newer versions require torch._dynamo APIs not present in NGC 24.12
+transformers>=4.40.0,<4.46.0
+
+# Audio processing
+# Pin NumPy < 2.0 for NeMo compatibility (np.sctypes removed in NumPy 2.0)
+numpy>=1.24.0,<2.0.0
+librosa>=0.10.0
+soundfile>=0.12.0
+
+# Required by Silero VAD (realtime adapter)
+torchaudio

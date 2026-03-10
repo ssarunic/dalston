@@ -1,4 +1,4 @@
-"""Session allocation for real-time transcription.
+"""Session allocation for real-time transcription (moved from session_router, M66).
 
 Implements least-loaded allocation strategy for distributing
 sessions across available workers.
@@ -16,13 +16,13 @@ import structlog
 
 import dalston.metrics
 import dalston.telemetry
+from dalston.common.registry import UnifiedEngineRegistry
 from dalston.common.timeouts import REALTIME_SESSION_TTL_SECONDS
-from dalston.session_router.registry import (
+from dalston.orchestrator.realtime_registry import (
     ACTIVE_SESSIONS_KEY,
     INSTANCE_KEY_PREFIX,
     INSTANCE_SESSIONS_SUFFIX,
     SESSION_KEY_PREFIX,
-    WorkerRegistry,
 )
 
 logger = structlog.get_logger()
@@ -101,13 +101,13 @@ class SessionAllocator:
     def __init__(
         self,
         redis_client: redis.Redis,
-        registry: WorkerRegistry,
+        registry: UnifiedEngineRegistry,
     ) -> None:
         """Initialize allocator.
 
         Args:
             redis_client: Async Redis client
-            registry: Worker registry for reading worker state
+            registry: Engine registry for reading worker state
         """
         self._redis = redis_client
         self._registry = registry
@@ -146,8 +146,12 @@ class SessionAllocator:
             },
         ):
             # Find available workers
-            available = await self._registry.get_available_workers(
-                model, language, runtime, valid_runtimes
+            available = await self._registry.get_available(
+                interface="realtime",
+                language=language,
+                runtime=runtime,
+                model=model,
+                valid_runtimes=valid_runtimes,
             )
 
             if not available:

@@ -117,10 +117,10 @@ async def main():
 
     # Step 4: Run reconciliation
     print("\n--- Step 4: Run reconciliation ---")
-    from dalston.session_router.health import HealthMonitor
-    from dalston.session_router.registry import WorkerRegistry
+    from dalston.common.registry import UnifiedEngineRegistry
+    from dalston.orchestrator.session_health import HealthMonitor
 
-    registry = WorkerRegistry(r)
+    registry = UnifiedEngineRegistry(r)
     monitor = HealthMonitor(r, registry)
 
     cleaned = await monitor.reconcile_orphaned_sessions()

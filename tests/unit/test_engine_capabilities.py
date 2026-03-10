@@ -12,22 +12,19 @@ import json
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
+from dalston.common.registry import EngineRecord, UnifiedEngineRegistry
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.context import BatchTaskContext
-from dalston.engine_sdk.registry import BatchEngineInfo
-from dalston.engine_sdk.registry import BatchEngineRegistry as ClientRegistry
 from dalston.engine_sdk.types import EngineCapabilities, EngineInput, EngineOutput
 from dalston.orchestrator.catalog import EngineCatalog
 from dalston.orchestrator.exceptions import (
     CatalogValidationError,
     EngineCapabilityError,
 )
-from dalston.orchestrator.registry import BatchEngineRegistry as ServerRegistry
-from dalston.orchestrator.registry import BatchEngineState
 
 
 class TestEngineCapabilities:
@@ -143,77 +140,8 @@ class TestEngineGetCapabilities:
         assert caps.supports_word_timestamps is True
 
 
-class TestRegistryWithCapabilities:
-    """Tests for registry with capabilities support."""
-
-    @pytest.fixture
-    def mock_redis(self):
-        """Create mock Redis client."""
-        mock = MagicMock()
-        mock.hset = MagicMock()
-        mock.expire = MagicMock()
-        mock.sadd = MagicMock()
-        return mock
-
-    @pytest.fixture
-    def registry(self, mock_redis):
-        """Create registry with mock Redis."""
-        reg = ClientRegistry("redis://localhost:6379")
-        reg._redis = mock_redis
-        return reg
-
-    def test_register_with_capabilities(self, registry, mock_redis):
-        """Test registration includes capabilities."""
-        caps = EngineCapabilities(
-            runtime="test",
-            version="1.0.0",
-            stages=["transcribe"],
-            languages=["en"],
-        )
-
-        info = BatchEngineInfo(
-            runtime="test",
-            instance="test-abc123def456",
-            stage="transcribe",
-            stream_name="dalston:stream:test",
-            capabilities=caps,
-        )
-
-        registry.register(info)
-
-        call_args = mock_redis.hset.call_args
-        mapping = call_args[1]["mapping"]
-        assert "capabilities" in mapping
-        # Parse the stored JSON to verify
-        stored_caps = json.loads(mapping["capabilities"])
-        assert stored_caps["runtime"] == "test"
-        assert stored_caps["languages"] == ["en"]
-
-    def test_heartbeat_with_capabilities(self, registry, mock_redis):
-        """Test heartbeat can include capabilities."""
-        caps = EngineCapabilities(
-            runtime="test",
-            version="1.0.0",
-            stages=["transcribe"],
-        )
-
-        # Simulate key exists (normal heartbeat path)
-        mock_redis.hget.return_value = "test"
-
-        registry.heartbeat(
-            instance="test-abc123def456",
-            status="idle",
-            current_task=None,
-            capabilities=caps,
-        )
-
-        call_args = mock_redis.hset.call_args
-        mapping = call_args[1]["mapping"]
-        assert "capabilities" in mapping
-
-
-class TestBatchEngineStateWithCapabilities:
-    """Tests for BatchEngineState with capabilities."""
+class TestEngineRecordWithCapabilities:
+    """Tests for EngineRecord with capabilities."""
 
     def test_supports_language_with_capabilities(self):
         """Test language support check with capabilities."""
@@ -224,13 +152,14 @@ class TestBatchEngineStateWithCapabilities:
             languages=["en", "de"],
         )
 
-        state = BatchEngineState(
+        state = EngineRecord(
             runtime="test",
             instance="test-abc123",
             stage="transcribe",
+            interfaces=["batch"],
             stream_name="dalston:stream:test",
             status="idle",
-            current_task=None,
+            languages=["en", "de"],
             last_heartbeat=datetime.now(UTC),
             registered_at=datetime.now(UTC),
             capabilities=caps,
@@ -249,13 +178,14 @@ class TestBatchEngineStateWithCapabilities:
             languages=["EN", "De"],
         )
 
-        state = BatchEngineState(
+        state = EngineRecord(
             runtime="test",
             instance="test-abc123",
             stage="transcribe",
+            interfaces=["batch"],
             stream_name="dalston:stream:test",
             status="idle",
-            current_task=None,
+            languages=["EN", "De"],
             last_heartbeat=datetime.now(UTC),
             registered_at=datetime.now(UTC),
             capabilities=caps,
@@ -273,13 +203,13 @@ class TestBatchEngineStateWithCapabilities:
             languages=None,  # All languages
         )
 
-        state = BatchEngineState(
+        state = EngineRecord(
             runtime="test",
             instance="test-abc123",
             stage="transcribe",
+            interfaces=["batch"],
             stream_name="dalston:stream:test",
             status="idle",
-            current_task=None,
             last_heartbeat=datetime.now(UTC),
             registered_at=datetime.now(UTC),
             capabilities=caps,
@@ -291,13 +221,13 @@ class TestBatchEngineStateWithCapabilities:
 
     def test_supports_language_no_capabilities(self):
         """Test backward compatibility - no capabilities means all supported."""
-        state = BatchEngineState(
+        state = EngineRecord(
             runtime="test",
             instance="test-abc123",
             stage="transcribe",
+            interfaces=["batch"],
             stream_name="dalston:stream:test",
             status="idle",
-            current_task=None,
             last_heartbeat=datetime.now(UTC),
             registered_at=datetime.now(UTC),
             capabilities=None,  # No capabilities (M28 engine)
@@ -516,7 +446,7 @@ class TestServerRegistryCapabilities:
     @pytest.fixture
     def registry(self, mock_redis):
         """Create registry with mock Redis."""
-        return ServerRegistry(mock_redis)
+        return UnifiedEngineRegistry(mock_redis)
 
     @pytest.mark.asyncio
     async def test_get_engine_with_capabilities(self, registry, mock_redis):

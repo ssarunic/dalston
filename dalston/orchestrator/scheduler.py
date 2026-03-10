@@ -21,6 +21,7 @@ from dalston.common.artifacts import ArtifactReference, ArtifactSelector, InputB
 from dalston.common.events import publish_engine_needed
 from dalston.common.models import Task
 from dalston.common.pipeline_types import AudioMedia, TaskInputData
+from dalston.common.registry import UnifiedEngineRegistry
 from dalston.common.s3 import get_s3_client
 from dalston.common.streams import add_task, add_task_once
 from dalston.common.streams_types import WAITING_ENGINE_TASKS_KEY
@@ -34,7 +35,6 @@ from dalston.orchestrator.exceptions import (
     ErrorDetails,
     build_engine_suggestion,
 )
-from dalston.orchestrator.registry import BatchEngineRegistry
 
 logger = structlog.get_logger()
 
@@ -71,7 +71,7 @@ def _build_engine_info(
 
 async def _build_error_details(
     catalog: EngineCatalog,
-    registry: BatchEngineRegistry,
+    registry: UnifiedEngineRegistry,
     stage: str,
     language: str | None = None,
     word_timestamps: bool | None = None,
@@ -89,7 +89,7 @@ async def _build_error_details(
         ErrorDetails with available engines and suggestions
     """
     # Get running engine states
-    running_engines = await registry.get_engines()
+    running_engines = await registry.get_all()
     running_ids = {e.runtime for e in running_engines if e.is_available}
     unhealthy_ids = {e.runtime for e in running_engines if not e.is_available}
 
@@ -233,7 +233,7 @@ async def queue_task(
     redis: Redis,
     task: Task,
     settings: Settings,
-    registry: BatchEngineRegistry,
+    registry: UnifiedEngineRegistry,
     previous_outputs: dict[str, Any] | None = None,
     audio_metadata: dict[str, Any] | None = None,
     catalog: EngineCatalog | None = None,
@@ -365,7 +365,7 @@ async def queue_task(
             raise EngineCapabilityError(
                 f"Engine '{task.runtime}' is running but does not support "
                 f"language '{language}'. Supported languages: "
-                f"{engine_state.capabilities.languages if engine_state.capabilities else 'unknown'}",
+                f"{engine_state.languages or 'unknown'}",
                 runtime=task.runtime,
                 stage=task.stage,
                 language=language,

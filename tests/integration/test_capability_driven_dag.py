@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import pytest
 
+from dalston.common.registry import EngineRecord
 from dalston.engine_sdk.types import EngineCapabilities
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog
 from dalston.orchestrator.dag import build_task_dag
@@ -20,7 +21,6 @@ from dalston.orchestrator.engine_selector import (
     ModelSelectionError,
     NoCapableEngineError,
 )
-from dalston.orchestrator.registry import BatchEngineState
 
 # =============================================================================
 # Test Fixtures
@@ -54,16 +54,16 @@ def make_engine_state(
     stage: str,
     capabilities: EngineCapabilities | None = None,
     is_available: bool = True,
-) -> BatchEngineState:
-    """Create BatchEngineState for testing."""
+) -> EngineRecord:
+    """Create EngineRecord for testing."""
     now = datetime.now(UTC)
-    return BatchEngineState(
+    return EngineRecord(
         runtime=runtime,
         instance=f"{runtime}-test-instance",
         stage=stage,
+        interfaces=["batch"],
         stream_name=f"dalston:stream:{runtime}",
         status="idle" if is_available else "offline",
-        current_task=None,
         last_heartbeat=now,
         registered_at=now,
         capabilities=capabilities,
@@ -112,11 +112,11 @@ def create_mock_registry(engine_configs: dict[str, dict]) -> AsyncMock:
             - capabilities: EngineCapabilities or dict with capability options
 
     Returns:
-        Mock BatchEngineRegistry
+        Mock UnifiedEngineRegistry
     """
     registry = AsyncMock()
 
-    engines_by_stage: dict[str, list[BatchEngineState]] = {}
+    engines_by_stage: dict[str, list[EngineRecord]] = {}
 
     for stage, config in engine_configs.items():
         runtime = config["runtime"]
@@ -134,10 +134,10 @@ def create_mock_registry(engine_configs: dict[str, dict]) -> AsyncMock:
         engine = make_engine_state(runtime, stage, caps)
         engines_by_stage.setdefault(stage, []).append(engine)
 
-    async def get_engines_for_stage(stage: str):
+    async def get_by_stage(stage: str):
         return engines_by_stage.get(stage, [])
 
-    registry.get_engines_for_stage.side_effect = get_engines_for_stage
+    registry.get_by_stage.side_effect = get_by_stage
 
     return registry
 
@@ -513,7 +513,7 @@ class TestEngineRanking:
             ),
         )
 
-        async def get_engines_for_stage(stage: str):
+        async def get_by_stage(stage: str):
             if stage == "transcribe":
                 return [slow_engine, fast_engine]
             if stage == "prepare":
@@ -524,7 +524,7 @@ class TestEngineRanking:
                 return [make_engine_state("final-merger", "merge", caps)]
             return []
 
-        registry.get_engines_for_stage.side_effect = get_engines_for_stage
+        registry.get_by_stage.side_effect = get_by_stage
 
         tasks = await build_task_dag(
             job_id=job_id,
@@ -564,7 +564,7 @@ class TestEngineRanking:
             ),
         )
 
-        async def get_engines_for_stage(stage: str):
+        async def get_by_stage(stage: str):
             if stage == "transcribe":
                 return [universal, english_specific]
             if stage == "prepare":
@@ -578,7 +578,7 @@ class TestEngineRanking:
                 return [make_engine_state("final-merger", "merge", caps)]
             return []
 
-        registry.get_engines_for_stage.side_effect = get_engines_for_stage
+        registry.get_by_stage.side_effect = get_by_stage
 
         tasks = await build_task_dag(
             job_id=job_id,
@@ -756,7 +756,7 @@ class TestMergedWavScenarios:
             ),
         )
 
-        async def get_engines_for_stage(stage: str):
+        async def get_by_stage(stage: str):
             if stage == "transcribe":
                 return [universal, english_only]
             if stage == "prepare":
@@ -777,7 +777,7 @@ class TestMergedWavScenarios:
                 ]
             return []
 
-        registry.get_engines_for_stage.side_effect = get_engines_for_stage
+        registry.get_by_stage.side_effect = get_by_stage
 
         tasks = await build_task_dag(
             job_id=job_id,

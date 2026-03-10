@@ -15,11 +15,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from dalston.common.registry import EngineRecord
 from dalston.engine_sdk.types import EngineCapabilities
 from dalston.gateway.api.v1.engines import router
 from dalston.gateway.services.auth import DEFAULT_EXPIRES_AT, APIKey, Scope
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog
-from dalston.orchestrator.registry import BatchEngineState
 
 
 @pytest.fixture
@@ -87,17 +87,17 @@ def mock_catalog() -> EngineCatalog:
 
 
 @pytest.fixture
-def mock_running_engines() -> list[BatchEngineState]:
+def mock_running_engines() -> list[EngineRecord]:
     """Create mock running engine states."""
     return [
-        BatchEngineState(
+        EngineRecord(
             runtime="faster-whisper",
             instance="faster-whisper-test-instance",
             stage="transcribe",
+            interfaces=["batch"],
             stream_name="dalston:stream:faster-whisper",
             execution_profile="container",
             status="idle",
-            current_task=None,
             last_heartbeat=datetime.now(UTC),
             registered_at=datetime.now(UTC),
             capabilities=EngineCapabilities(
@@ -171,7 +171,7 @@ class TestListEngines:
     ):
         """Should return all engines from catalog with status."""
         mock_registry = AsyncMock()
-        mock_registry.get_engines = AsyncMock(return_value=mock_running_engines)
+        mock_registry.get_all = AsyncMock(return_value=mock_running_engines)
 
         mock_model_service = AsyncMock()
         mock_model_service.list_models = AsyncMock(return_value=[])
@@ -181,7 +181,7 @@ class TestListEngines:
                 "dalston.gateway.api.v1.engines.get_catalog", return_value=mock_catalog
             ),
             patch(
-                "dalston.gateway.api.v1.engines.BatchEngineRegistry",
+                "dalston.gateway.api.v1.engines.UnifiedEngineRegistry",
                 return_value=mock_registry,
             ),
             patch(
@@ -218,7 +218,7 @@ class TestListEngines:
     ):
         """Engine response should include capabilities."""
         mock_registry = AsyncMock()
-        mock_registry.get_engines = AsyncMock(return_value=mock_running_engines)
+        mock_registry.get_all = AsyncMock(return_value=mock_running_engines)
 
         mock_model_service = AsyncMock()
         mock_model_service.list_models = AsyncMock(return_value=[])
@@ -228,7 +228,7 @@ class TestListEngines:
                 "dalston.gateway.api.v1.engines.get_catalog", return_value=mock_catalog
             ),
             patch(
-                "dalston.gateway.api.v1.engines.BatchEngineRegistry",
+                "dalston.gateway.api.v1.engines.UnifiedEngineRegistry",
                 return_value=mock_registry,
             ),
             patch(
@@ -252,7 +252,7 @@ class TestListEngines:
     ):
         """Engine response should include hardware and performance info."""
         mock_registry = AsyncMock()
-        mock_registry.get_engines = AsyncMock(return_value=mock_running_engines)
+        mock_registry.get_all = AsyncMock(return_value=mock_running_engines)
 
         mock_model_service = AsyncMock()
         mock_model_service.list_models = AsyncMock(return_value=[])
@@ -262,7 +262,7 @@ class TestListEngines:
                 "dalston.gateway.api.v1.engines.get_catalog", return_value=mock_catalog
             ),
             patch(
-                "dalston.gateway.api.v1.engines.BatchEngineRegistry",
+                "dalston.gateway.api.v1.engines.UnifiedEngineRegistry",
                 return_value=mock_registry,
             ),
             patch(
@@ -289,14 +289,14 @@ class TestGetCapabilities:
     ):
         """Should aggregate capabilities from running engines only."""
         mock_registry = AsyncMock()
-        mock_registry.get_engines = AsyncMock(return_value=mock_running_engines)
+        mock_registry.get_all = AsyncMock(return_value=mock_running_engines)
 
         with (
             patch(
                 "dalston.gateway.api.v1.engines.get_catalog", return_value=mock_catalog
             ),
             patch(
-                "dalston.gateway.api.v1.engines.BatchEngineRegistry",
+                "dalston.gateway.api.v1.engines.UnifiedEngineRegistry",
                 return_value=mock_registry,
             ),
         ):
@@ -321,14 +321,14 @@ class TestGetCapabilities:
     ):
         """Stage capabilities should include engine list and features."""
         mock_registry = AsyncMock()
-        mock_registry.get_engines = AsyncMock(return_value=mock_running_engines)
+        mock_registry.get_all = AsyncMock(return_value=mock_running_engines)
 
         with (
             patch(
                 "dalston.gateway.api.v1.engines.get_catalog", return_value=mock_catalog
             ),
             patch(
-                "dalston.gateway.api.v1.engines.BatchEngineRegistry",
+                "dalston.gateway.api.v1.engines.UnifiedEngineRegistry",
                 return_value=mock_registry,
             ),
         ):
@@ -344,14 +344,14 @@ class TestGetCapabilities:
     def test_empty_capabilities_when_no_engines_running(self, client, mock_catalog):
         """Should return empty stages when no engines are running."""
         empty_registry = AsyncMock()
-        empty_registry.get_engines = AsyncMock(return_value=[])
+        empty_registry.get_all = AsyncMock(return_value=[])
 
         with (
             patch(
                 "dalston.gateway.api.v1.engines.get_catalog", return_value=mock_catalog
             ),
             patch(
-                "dalston.gateway.api.v1.engines.BatchEngineRegistry",
+                "dalston.gateway.api.v1.engines.UnifiedEngineRegistry",
                 return_value=empty_registry,
             ),
         ):

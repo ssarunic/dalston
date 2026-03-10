@@ -1,4 +1,4 @@
-"""Health monitoring for real-time workers.
+"""Health monitoring for real-time workers (moved from session_router, M66).
 
 Monitors worker heartbeats and marks stale workers as offline.
 """
@@ -13,14 +13,14 @@ import redis.asyncio as redis
 import structlog
 
 import dalston.metrics
-from dalston.session_router.registry import (
+from dalston.common.registry import UnifiedEngineRegistry
+from dalston.orchestrator.realtime_registry import (
     ACTIVE_SESSIONS_KEY,
     EVENTS_CHANNEL,
     INSTANCE_KEY_PREFIX,
     INSTANCE_SESSIONS_SUFFIX,
     INSTANCE_SET_KEY,
     SESSION_KEY_PREFIX,
-    WorkerRegistry,
 )
 
 logger = structlog.get_logger()
@@ -50,13 +50,13 @@ class HealthMonitor:
     def __init__(
         self,
         redis_client: redis.Redis,
-        registry: WorkerRegistry,
+        registry: UnifiedEngineRegistry,
     ) -> None:
         """Initialize health monitor.
 
         Args:
             redis_client: Async Redis client (for publishing events)
-            registry: Worker registry for reading worker state
+            registry: Engine registry for reading worker state
         """
         self._redis = redis_client
         self._registry = registry
@@ -102,7 +102,11 @@ class HealthMonitor:
 
         Called periodically by the background loop.
         """
-        workers = await self._registry.get_workers()
+        workers = [
+            e
+            for e in await self._registry.get_all()
+            if e.supports_interface("realtime")
+        ]
         now = datetime.now(UTC)
 
         # Track worker counts for metrics
@@ -115,6 +119,8 @@ class HealthMonitor:
                 continue
 
             # Calculate heartbeat age
+            if worker.last_heartbeat is None:
+                continue
             age = (now - worker.last_heartbeat).total_seconds()
 
             if age > self.HEARTBEAT_TIMEOUT:
@@ -126,12 +132,13 @@ class HealthMonitor:
                 )
 
                 # Mark offline
-                await self._registry.mark_worker_offline(worker.instance)
+                await self._registry.mark_instance_offline(worker.instance)
 
-                # Get affected sessions
-                session_ids = await self._registry.get_worker_session_ids(
-                    worker.instance
+                # Get affected sessions via direct Redis (session tracking keys)
+                sessions_key = (
+                    f"{INSTANCE_KEY_PREFIX}{worker.instance}{INSTANCE_SESSIONS_SUFFIX}"
                 )
+                session_ids = await self._redis.smembers(sessions_key)
 
                 # Publish event for each affected session
                 for session_id in session_ids:

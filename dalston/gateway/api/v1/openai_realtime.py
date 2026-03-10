@@ -29,7 +29,6 @@ from fastapi import (
     Request,
     Response,
     WebSocket,
-    WebSocketDisconnect,
 )
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,9 +61,6 @@ from dalston.gateway.api.v1._realtime_common import (
     get_worker_close_code as _get_worker_close_code,
 )
 from dalston.gateway.api.v1._realtime_common import (
-    keep_session_alive as _keep_session_alive,
-)
-from dalston.gateway.api.v1._realtime_common import (
     resolve_rt_routing as _resolve_rt_routing,
 )
 from dalston.gateway.api.v1.openai_audio import (
@@ -89,7 +85,10 @@ from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.auth import APIKey, AuthService, Scope, SessionToken
 from dalston.gateway.services.rate_limiter import RedisRateLimiter
-from dalston.gateway.services.realtime_sessions import RealtimeSessionService
+from dalston.gateway.services.realtime_proxy import (
+    ProxySessionParams,
+    get_realtime_proxy,
+)
 
 logger = structlog.get_logger()
 
@@ -591,30 +590,55 @@ async def openai_realtime_transcription(
     # Accept connection
     await websocket.accept()
 
-    # Check rate limits
+    # Check rate limits – increments the counter
     if not await _check_realtime_rate_limits(websocket, api_key.tenant_id):
         return
 
-    session_tenant_id = api_key.tenant_id
-
-    allocation = None
+    # Everything from here must decrement the session counter on exit.
     try:
         # OpenAI model IDs (gpt-4o-transcribe, etc.) are treated as "auto" — resolve
         # via registry to pick the largest ready model and filter valid runtimes (M48)
         rt = await _resolve_rt_routing(None)
-        client_ip = websocket.client.host if websocket.client else "unknown"
 
-        # Acquire worker
-        allocation = await session_router.acquire_worker(
-            language="auto",  # Will be updated via session config
-            model=rt.routing_model,
-            client_ip=client_ip,
-            runtime=rt.model_runtime,
-            valid_runtimes=rt.valid_runtimes,
-        )
+        # The connect callback sends transcription_session.created then proxies.
+        async def _openai_connect(ws, alloc):
+            openai_session_id = generate_session_id()
+            await ws.send_json(
+                {
+                    "type": "transcription_session.created",
+                    "event_id": generate_event_id(),
+                    "session": {
+                        "id": openai_session_id,
+                        "model": model,
+                        "input_audio_format": "pcm16",
+                        "input_audio_transcription": {"model": model},
+                        "turn_detection": None,
+                        "input_audio_noise_reduction": None,
+                    },
+                }
+            )
+            return await _proxy_to_worker_openai(
+                client_ws=ws,
+                worker_endpoint=alloc.endpoint,
+                session_id=alloc.session_id,
+                openai_session_id=openai_session_id,
+                model=rt.effective_model,
+            )
 
-        if allocation is None:
-            await websocket.send_json(
+        await get_realtime_proxy().run(
+            websocket=websocket,
+            session_router=session_router,
+            routing_params=rt,
+            language="auto",  # Updated inside the session via transcription_session.update
+            connect=_openai_connect,
+            session_params=ProxySessionParams(
+                tenant_id=api_key.tenant_id,
+                client_ip=websocket.client.host if websocket.client else "unknown",
+                language="auto",
+                model=model,
+                created_by_key_id=api_key.id,
+            ),
+            on_no_capacity=lambda: websocket.send_json(
                 {
                     "type": "error",
                     "event_id": generate_event_id(),
@@ -624,171 +648,10 @@ async def openai_realtime_transcription(
                         "message": "No realtime workers available. Try again later.",
                     },
                 }
-            )
-            await websocket.close(
-                code=WS_CLOSE_SERVICE_UNAVAILABLE, reason="No capacity"
-            )
-            return
-
-        log = logger.bind(
-            session_id=allocation.session_id,
-            instance=allocation.instance,
-            client_ip=client_ip,
-            protocol="openai",
+            ),
         )
-        log.info("openai_session_allocated")
-
-        # Persist session to database for visibility in console/API
-        session_service = None
-        db_gen = None
-        try:
-            db_gen = _get_db()
-            db_session = await db_gen.__anext__()
-            settings = get_settings()
-            session_service = RealtimeSessionService(db_session, settings)
-
-            await session_service.create_session(
-                session_id=allocation.session_id,
-                tenant_id=api_key.tenant_id,
-                instance=allocation.instance,
-                client_ip=client_ip,
-                language="auto",
-                model=model,
-                runtime=allocation.runtime,
-                created_by_key_id=api_key.id,
-            )
-            log.debug("openai_session_persisted")
-        except Exception as e:
-            log.warning("openai_session_persist_failed", error=str(e))
-            # Continue without persistence - session still works via Redis
-
-        keepalive_task = None
-        session_status = "completed"
-        session_error = None
-        try:
-            # Start keepalive task
-            keepalive_task = asyncio.create_task(
-                _keep_session_alive(session_router, allocation.session_id)
-            )
-
-            # Generate OpenAI-style session ID for client
-            openai_session_id = generate_session_id()
-
-            # Send session created event
-            await websocket.send_json(
-                {
-                    "type": "transcription_session.created",
-                    "event_id": generate_event_id(),
-                    "session": {
-                        "id": openai_session_id,
-                        "model": model,
-                        "input_audio_format": "pcm16",
-                        "input_audio_transcription": {
-                            "model": model,
-                        },
-                        "turn_detection": None,
-                        "input_audio_noise_reduction": None,
-                    },
-                }
-            )
-
-            # Connect to worker with OpenAI protocol translation
-            session_end_data = await _proxy_to_worker_openai(
-                client_ws=websocket,
-                worker_endpoint=allocation.endpoint,
-                session_id=allocation.session_id,
-                openai_session_id=openai_session_id,
-                model=rt.effective_model,  # Auto-selected largest model from registry
-            )
-
-        except RealtimeLagExceededError:
-            log.warning("openai_session_lag_exceeded")
-            session_end_data = None
-            session_status = "error"
-            session_error = "lag_exceeded"
-        except WebSocketDisconnect:
-            log.info("openai_client_disconnected")
-            session_end_data = None
-            session_status = "interrupted"
-        except Exception as e:
-            log.error("openai_session_error", error=str(e))
-            session_end_data = None
-            session_status = "error"
-            session_error = str(e)
-        finally:
-            if keepalive_task:
-                keepalive_task.cancel()
-                try:
-                    await keepalive_task
-                except asyncio.CancelledError:
-                    pass
-
-            if allocation:
-                await session_router.release_worker(allocation.session_id)
-                log.info("openai_session_released")
-
-            # If we didn't get session_end_data but status is still "completed",
-            # the worker connection failed silently - mark as error
-            if session_end_data is None and session_status == "completed":
-                session_status = "error"
-                session_error = session_error or "worker_no_session_end"
-                log.warning(
-                    "openai_session_no_end_data", msg="Worker didn't send session.end"
-                )
-
-            # Update session stats from session.end data
-            if session_service and allocation and session_end_data:
-                try:
-                    audio_duration = session_end_data.get("total_audio_seconds", 0)
-                    segments = session_end_data.get("segments", [])
-                    transcript = session_end_data.get("transcript", "")
-                    word_count = len(transcript.split()) if transcript else 0
-                    transcript_uri = session_end_data.get("transcript_uri")
-
-                    log.info(
-                        "openai_session_stats",
-                        audio_duration=audio_duration,
-                        segment_count=len(segments),
-                        word_count=word_count,
-                        transcript_uri=transcript_uri,
-                    )
-
-                    await session_service.update_stats(
-                        session_id=allocation.session_id,
-                        audio_duration_seconds=audio_duration,
-                        segment_count=len(segments),
-                        word_count=word_count,
-                    )
-                except Exception as e:
-                    log.warning("openai_session_stats_failed", error=str(e))
-
-            # Finalize session in database
-            if session_service and allocation:
-                try:
-                    transcript_uri = (
-                        session_end_data.get("transcript_uri")
-                        if session_end_data
-                        else None
-                    )
-                    await session_service.finalize_session(
-                        session_id=allocation.session_id,
-                        status=session_status,
-                        transcript_uri=transcript_uri,
-                        error=session_error,
-                    )
-                    log.debug("openai_session_finalized", status=session_status)
-                except Exception as e:
-                    log.warning("openai_session_finalize_failed", error=str(e))
-
-            # Clean up DB session
-            if db_gen:
-                try:
-                    await db_gen.aclose()
-                except Exception:
-                    pass
-
     finally:
-        await _decrement_session_count(session_tenant_id)
+        await _decrement_session_count(api_key.tenant_id)
 
 
 # =============================================================================

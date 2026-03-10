@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from dalston.common.registry import EngineRecord
 from dalston.engine_sdk.types import EngineCapabilities
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog
 from dalston.orchestrator.engine_selector import (
@@ -23,7 +24,6 @@ from dalston.orchestrator.engine_selector import (
     select_engine,
     select_pipeline_engines,
 )
-from dalston.orchestrator.registry import BatchEngineState
 
 # =============================================================================
 # Fixtures
@@ -57,16 +57,16 @@ def make_engine_state(
     stage: str = "transcribe",
     capabilities: EngineCapabilities | None = None,
     is_available: bool = True,
-) -> BatchEngineState:
-    """Create BatchEngineState for testing."""
+) -> EngineRecord:
+    """Create EngineRecord for testing."""
     now = datetime.now(UTC)
-    state = BatchEngineState(
+    state = EngineRecord(
         runtime=runtime,
         instance=instance or f"{runtime}-abc123",
         stage=stage,
+        interfaces=["batch"],
         stream_name=f"dalston:stream:{runtime}",
         status="idle" if is_available else "offline",
-        current_task=None,
         last_heartbeat=now,
         registered_at=now,
         capabilities=capabilities,
@@ -265,7 +265,7 @@ class TestSelectEngine:
         caps = make_capabilities("only-one", languages=["en"])
         engine = make_engine_state("only-one", capabilities=caps)
 
-        mock_registry.get_engines_for_stage.return_value = [engine]
+        mock_registry.get_by_stage.return_value = [engine]
 
         result = await select_engine(
             "transcribe", {"language": "en"}, mock_registry, mock_catalog
@@ -287,7 +287,7 @@ class TestSelectEngine:
             "runtime-b", stage="align", capabilities=runtime_b_caps
         )
 
-        mock_registry.get_engines_for_stage.return_value = [runtime_a, runtime_b]
+        mock_registry.get_by_stage.return_value = [runtime_a, runtime_b]
 
         async def _mock_find_best_downloaded_model(*args, **kwargs):
             return None
@@ -317,7 +317,7 @@ class TestSelectEngine:
         caps = make_capabilities("parakeet", languages=["en"])
         engine = make_engine_state("parakeet", capabilities=caps)
 
-        mock_registry.get_engines_for_stage.return_value = [engine]
+        mock_registry.get_by_stage.return_value = [engine]
         mock_catalog.find_engines.return_value = [
             make_catalog_entry("faster-whisper", languages=None)
         ]
@@ -643,7 +643,7 @@ class TestSelectPipelineEngines:
     @pytest.mark.asyncio
     async def test_selects_all_required_stages(self, mock_registry, mock_catalog):
         # Setup engines for each stage
-        async def get_engines_for_stage(stage: str):
+        async def get_by_stage(stage: str):
             stages_caps = {
                 "prepare": make_capabilities("audio-prepare"),
                 "transcribe": make_capabilities(
@@ -662,7 +662,7 @@ class TestSelectPipelineEngines:
                 ]
             return []
 
-        mock_registry.get_engines_for_stage.side_effect = get_engines_for_stage
+        mock_registry.get_by_stage.side_effect = get_by_stage
 
         selection = await select_pipeline_engines({}, mock_registry, mock_catalog)
         selections = selection.stages
@@ -719,7 +719,7 @@ class TestSelectPipelineEngines:
     async def test_skips_alignment_with_native_timestamps(
         self, mock_registry, mock_catalog
     ):
-        async def get_engines_for_stage(stage: str):
+        async def get_by_stage(stage: str):
             stages_caps = {
                 "prepare": make_capabilities("audio-prepare"),
                 "transcribe": make_capabilities(
@@ -737,7 +737,7 @@ class TestSelectPipelineEngines:
                 ]
             return []
 
-        mock_registry.get_engines_for_stage.side_effect = get_engines_for_stage
+        mock_registry.get_by_stage.side_effect = get_by_stage
 
         selection = await select_pipeline_engines(
             {"language": "en"}, mock_registry, mock_catalog
@@ -751,7 +751,7 @@ class TestSelectPipelineEngines:
 
     @pytest.mark.asyncio
     async def test_adds_diarization_when_requested(self, mock_registry, mock_catalog):
-        async def get_engines_for_stage(stage: str):
+        async def get_by_stage(stage: str):
             stages_caps = {
                 "prepare": make_capabilities("audio-prepare"),
                 "transcribe": make_capabilities("faster-whisper"),
@@ -769,7 +769,7 @@ class TestSelectPipelineEngines:
                 ]
             return []
 
-        mock_registry.get_engines_for_stage.side_effect = get_engines_for_stage
+        mock_registry.get_by_stage.side_effect = get_by_stage
 
         selection = await select_pipeline_engines(
             {"speaker_detection": "diarize"}, mock_registry, mock_catalog

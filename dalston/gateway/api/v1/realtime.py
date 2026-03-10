@@ -14,7 +14,7 @@ from typing import Annotated
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, WebSocket
 
 from dalston.common.audio_defaults import DEFAULT_SAMPLE_RATE
 from dalston.common.models import validate_retention
@@ -33,7 +33,6 @@ from dalston.common.ws_close_codes import (
     WS_CLOSE_SERVICE_UNAVAILABLE,
 )
 from dalston.config import get_settings
-from dalston.db.session import get_db as _get_db
 from dalston.gateway.api.v1._realtime_common import (
     RealtimeLagExceededError,
 )
@@ -45,9 +44,6 @@ from dalston.gateway.api.v1._realtime_common import (
 )
 from dalston.gateway.api.v1._realtime_common import (
     get_worker_close_code as _get_worker_close_code,
-)
-from dalston.gateway.api.v1._realtime_common import (
-    keep_session_alive as _keep_session_alive,
 )
 from dalston.gateway.api.v1._realtime_common import (
     resolve_rt_routing as _resolve_rt_routing,
@@ -63,7 +59,10 @@ from dalston.gateway.dependencies import get_session_router
 from dalston.gateway.middleware.auth import authenticate_websocket
 from dalston.gateway.services.auth import Scope
 from dalston.gateway.services.rate_limiter import RedisRateLimiter
-from dalston.gateway.services.realtime_sessions import RealtimeSessionService
+from dalston.gateway.services.realtime_proxy import (
+    ProxySessionParams,
+    get_realtime_proxy,
+)
 
 logger = structlog.get_logger()
 
@@ -242,16 +241,11 @@ async def realtime_transcription(
     # Accept WebSocket connection after successful auth
     await websocket.accept()
 
-    # Check rate limits (concurrent sessions)
+    # Check rate limits (concurrent sessions) – increments the counter
     if not await _check_realtime_rate_limits(websocket, api_key.tenant_id):
         return
 
-    # Track tenant_id for decrementing session count on disconnect
-    session_tenant_id = api_key.tenant_id
-
-    # Wrap everything after rate limit check in try/finally to ensure
-    # the session counter is always decremented on any exit path
-    allocation = None
+    # Everything from here must decrement the session counter on exit.
     try:
         # Apply server default retention if not specified
         settings = get_settings()
@@ -340,102 +334,28 @@ async def realtime_transcription(
 
         rt = await _resolve_rt_routing(model if model else None)
 
-        # Get client IP for logging
-        client_ip = websocket.client.host if websocket.client else "unknown"
-
-        # Acquire worker from Session Router (use alias for matching)
-        allocation = await session_router.acquire_worker(
-            language=language,
-            model=rt.routing_model,
-            client_ip=client_ip,
-            runtime=rt.model_runtime,
-            valid_runtimes=rt.valid_runtimes,
-        )
-
-        if allocation is None:
-            # No capacity - send error and close
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "code": "no_capacity",
-                    "message": "No realtime workers available. Try again later.",
-                }
-            )
-            await websocket.close(
-                code=WS_CLOSE_SERVICE_UNAVAILABLE, reason="No capacity"
-            )
-            return
-
-        log = logger.bind(
-            session_id=allocation.session_id,
-            instance=allocation.instance,
-            client_ip=client_ip,
-        )
-        log.info("session_allocated")
-
-        # Session lifecycle state
-        db_session = None
-        db_gen = None
-        session_service = None
-        session_error = None
-        session_status = "completed"
-        session_end_data = None
-        keepalive_task = None
-
-        try:
-            # Start keepalive task to extend session TTL for long sessions
-            keepalive_task = asyncio.create_task(
-                _keep_session_alive(session_router, allocation.session_id)
-            )
-            # Bind session_id into structlog contextvars for downstream log calls
-            structlog.contextvars.bind_contextvars(session_id=allocation.session_id)
-
-            # Create session record in PostgreSQL for persistence/visibility
-            previous_session_uuid = None
-
-            if resume_session_id:
-                try:
-                    previous_session_uuid = parse_session_id(resume_session_id)
-                except ValueError:
-                    log.warning(
-                        "invalid_resume_session_id", resume_session_id=resume_session_id
-                    )
-
+        # Resolve optional resume session UUID
+        previous_session_uuid = None
+        if resume_session_id:
             try:
-                # Get fresh DB session for persistence
-                db_gen = _get_db()
-                db_session = await db_gen.__anext__()
-                settings = get_settings()
-                session_service = RealtimeSessionService(db_session, settings)
-
-                # Create session record
-                # Store user's original model parameter (e.g., "fast", "parakeet-0.6b")
-                # and the runtime that handled it (e.g., "parakeet", "faster-whisper")
-                await session_service.create_session(
-                    session_id=allocation.session_id,
-                    tenant_id=api_key.tenant_id,
-                    instance=allocation.instance,
-                    client_ip=client_ip,
-                    language=language,
-                    model=model,
-                    runtime=allocation.runtime,
-                    encoding=encoding,
-                    sample_rate=sample_rate,
-                    retention=effective_retention,
-                    previous_session_id=previous_session_uuid,
-                    created_by_key_id=api_key.id,
+                previous_session_uuid = parse_session_id(resume_session_id)
+            except ValueError:
+                logger.warning(
+                    "invalid_resume_session_id", resume_session_id=resume_session_id
                 )
-            except Exception as e:
-                log.warning("session_db_create_failed", error=str(e))
-                # Continue without persistence - session still works via Redis
 
-            # Connect to worker and proxy bidirectionally
-            session_end_data = await _proxy_to_worker(
-                client_ws=websocket,
-                worker_endpoint=allocation.endpoint,
-                session_id=allocation.session_id,
+        # Delegate allocation / keepalive / DB session / release to the proxy.
+        await get_realtime_proxy().run(
+            websocket=websocket,
+            session_router=session_router,
+            routing_params=rt,
+            language=language,
+            connect=lambda ws, alloc: _proxy_to_worker(
+                client_ws=ws,
+                worker_endpoint=alloc.endpoint,
+                session_id=alloc.session_id,
                 language=language,
-                model=rt.effective_model,  # Pass selected model (auto-selected if empty)
+                model=rt.effective_model,
                 encoding=encoding,
                 sample_rate=sample_rate,
                 enable_vad=enable_vad,
@@ -444,102 +364,28 @@ async def realtime_transcription(
                 vocabulary=parsed_vocabulary,
                 store_audio=store_audio,
                 store_transcript=store_transcript,
-            )
-        except RealtimeLagExceededError:
-            log.warning("session_lag_exceeded")
-            session_error = "lag_exceeded"
-            session_status = "error"
-            session_end_data = None
-        except WebSocketDisconnect:
-            log.info("client_disconnected")
-            session_status = "interrupted"
-        except Exception as e:
-            log.error("session_error", error=str(e))
-            session_error = str(e)
-            session_status = "error"
-        finally:
-            # Cancel keepalive task
-            if keepalive_task:
-                keepalive_task.cancel()
-                try:
-                    await keepalive_task
-                except asyncio.CancelledError:
-                    pass
-
-            # Release worker
-            if allocation:
-                await session_router.release_worker(allocation.session_id)
-                log.info("session_released")
-
-            # Update session stats from session.end message
-            audio_uri = None
-            transcript_uri = None
-            if session_service and session_end_data:
-                try:
-                    # Debug: log the full session_end_data
-                    log.debug("session_end_data_content", data=session_end_data)
-
-                    # Extract stats from session.end message
-                    audio_duration = session_end_data.get("total_audio_seconds", 0)
-                    segments = session_end_data.get("segments", [])
-                    transcript = session_end_data.get("transcript", "")
-                    word_count = len(transcript.split()) if transcript else 0
-
-                    # Extract storage URIs
-                    audio_uri = session_end_data.get("audio_uri")
-                    transcript_uri = session_end_data.get("transcript_uri")
-
-                    log.info(
-                        "session_stats_captured",
-                        audio_duration=audio_duration,
-                        segment_count=len(segments),
-                        word_count=word_count,
-                        audio_uri=audio_uri,
-                        transcript_uri=transcript_uri,
-                    )
-
-                    await session_service.update_stats(
-                        session_id=allocation.session_id,
-                        audio_duration_seconds=audio_duration,
-                        segment_count=len(segments),
-                        word_count=word_count,
-                    )
-                except Exception as e:
-                    log.warning("session_stats_update_failed", error=str(e))
-            elif session_service:
-                log.warning(
-                    "session_end_data_missing",
-                    msg="No session.end data received from worker",
-                )
-                if session_status == "completed":
-                    session_status = "error"
-                    session_error = session_error or "worker_no_session_end"
-
-            # Finalize session in PostgreSQL
-            if session_service:
-                try:
-                    await session_service.finalize_session(
-                        session_id=allocation.session_id,
-                        status=session_status,
-                        error=session_error,
-                        audio_uri=audio_uri,
-                        transcript_uri=transcript_uri,
-                    )
-                except Exception as e:
-                    log.warning("session_db_finalize_failed", error=str(e))
-
-            # Close DB session
-            if db_session:
-                try:
-                    await db_gen.aclose()
-                except Exception:
-                    pass
-
+            ),
+            session_params=ProxySessionParams(
+                tenant_id=api_key.tenant_id,
+                client_ip=websocket.client.host if websocket.client else "unknown",
+                language=language,
+                model=model,
+                created_by_key_id=api_key.id,
+                encoding=encoding,
+                sample_rate=sample_rate,
+                retention=effective_retention,
+                previous_session_id=previous_session_uuid,
+            ),
+            on_no_capacity=lambda: websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "no_capacity",
+                    "message": "No realtime workers available. Try again later.",
+                }
+            ),
+        )
     finally:
-        # Always decrement concurrent session count for rate limiting,
-        # regardless of whether we successfully acquired a worker or hit
-        # an early validation error. This ensures no counter leaks.
-        await _decrement_session_count(session_tenant_id)
+        await _decrement_session_count(api_key.tenant_id)
 
 
 # -----------------------------------------------------------------------------
@@ -664,16 +510,11 @@ async def elevenlabs_realtime_transcription(
     # Accept connection
     await websocket.accept()
 
-    # Check rate limits (concurrent sessions)
+    # Check rate limits (concurrent sessions) – increments the counter
     if not await _check_realtime_rate_limits(websocket, api_key.tenant_id):
         return
 
-    # Track tenant_id for decrementing session count on disconnect
-    session_tenant_id = api_key.tenant_id
-
-    # Wrap everything after rate limit check in try/finally to ensure
-    # the session counter is always decremented on any exit path
-    allocation = None
+    # Everything from here must decrement the session counter on exit.
     try:
         # Validate and parse keyterms parameter (ElevenLabs naming → vocabulary)
         parsed_vocabulary: list[str] | None = None
@@ -723,48 +564,14 @@ async def elevenlabs_realtime_transcription(
         # ElevenLabs model_id (scribe_v1, scribe_v2, etc.) is treated as "auto"
         rt = await _resolve_rt_routing(None)
 
-        # Get client IP
-        client_ip = websocket.client.host if websocket.client else "unknown"
-
-        # Acquire worker
-        allocation = await session_router.acquire_worker(
-            language=language_code,
-            model=rt.routing_model,
-            client_ip=client_ip,
-            runtime=rt.model_runtime,
-            valid_runtimes=rt.valid_runtimes,
-        )
-
-        if allocation is None:
-            await websocket.send_json(
-                {"message_type": "error", "error": "No capacity available"}
-            )
-            await websocket.close(
-                code=WS_CLOSE_SERVICE_UNAVAILABLE, reason="No capacity"
-            )
-            return
-
-        log = logger.bind(
-            session_id=allocation.session_id,
-            instance=allocation.instance,
-            client_ip=client_ip,
-            protocol="elevenlabs",
-        )
-        log.info("elevenlabs_session_allocated")
-
-        # Session lifecycle state
-        keepalive_task = None
-        try:
-            # Start keepalive task to extend session TTL for long sessions
-            keepalive_task = asyncio.create_task(
-                _keep_session_alive(session_router, allocation.session_id)
-            )
-
-            # Send session_started message (ElevenLabs format)
-            await websocket.send_json(
+        # Delegate allocation / keepalive / release to the proxy.
+        # ElevenLabs handler sends session_started inside the connect callback
+        # so the session_id is available from the allocation.
+        async def _elevenlabs_connect(ws, alloc):
+            await ws.send_json(
                 {
                     "message_type": "session_started",
-                    "session_id": allocation.session_id,
+                    "session_id": alloc.session_id,
                     "config": {
                         "sample_rate": sample_rate,
                         "audio_format": audio_format,
@@ -775,14 +582,12 @@ async def elevenlabs_realtime_transcription(
                     },
                 }
             )
-
-            # Connect to worker with ElevenLabs protocol translation
             await _proxy_to_worker_elevenlabs(
-                client_ws=websocket,
-                worker_endpoint=allocation.endpoint,
-                session_id=allocation.session_id,
+                client_ws=ws,
+                worker_endpoint=alloc.endpoint,
+                session_id=alloc.session_id,
                 language=language_code,
-                model=rt.effective_model,  # Auto-selected largest model from registry
+                model=rt.effective_model,
                 sample_rate=sample_rate,
                 enable_vad=(commit_strategy == "vad"),
                 interim_results=True,
@@ -796,28 +601,22 @@ async def elevenlabs_realtime_transcription(
                 min_silence_duration_ms=min_silence_duration_ms,
                 prefix_padding_ms=prefix_padding_ms,
             )
-        except WebSocketDisconnect:
-            log.info("elevenlabs_client_disconnected")
-        except Exception as e:
-            log.error("elevenlabs_session_error", error=str(e))
-        finally:
-            # Cancel keepalive task
-            if keepalive_task:
-                keepalive_task.cancel()
-                try:
-                    await keepalive_task
-                except asyncio.CancelledError:
-                    pass
+            return None  # ElevenLabs proxy does not return session_end_data
 
-            if allocation:
-                await session_router.release_worker(allocation.session_id)
-                log.info("elevenlabs_session_released")
-
+        await get_realtime_proxy().run(
+            websocket=websocket,
+            session_router=session_router,
+            routing_params=rt,
+            language=language_code,
+            connect=_elevenlabs_connect,
+            # ElevenLabs adapter does not persist DB session records.
+            session_params=None,
+            on_no_capacity=lambda: websocket.send_json(
+                {"message_type": "error", "error": "No capacity available"}
+            ),
+        )
     finally:
-        # Always decrement concurrent session count for rate limiting,
-        # regardless of whether we successfully acquired a worker or hit
-        # an early error. This ensures no counter leaks.
-        await _decrement_session_count(session_tenant_id)
+        await _decrement_session_count(api_key.tenant_id)
 
 
 async def _proxy_to_worker(

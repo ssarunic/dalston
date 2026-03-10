@@ -33,6 +33,7 @@ from dalston.common.audio_defaults import (
     MAX_SAMPLE_RATE,
     MIN_SAMPLE_RATE,
 )
+from dalston.common.registry import EngineRecord, UnifiedEngineRegistry
 from dalston.common.timeouts import WS_PING_INTERVAL, WS_PING_TIMEOUT
 from dalston.common.ws_close_codes import (
     WS_CLOSE_POLICY_VIOLATION,
@@ -42,11 +43,6 @@ from dalston.common.ws_close_codes import (
 from dalston.engine_sdk.types import EngineCapabilities
 from dalston.realtime_sdk.assembler import TranscribeResult
 from dalston.realtime_sdk.model_manager import AsyncModelManager
-from dalston.realtime_sdk.registry import (
-    WorkerInfo,
-    WorkerPresenceRegistry,
-    WorkerRegistry,
-)
 from dalston.realtime_sdk.session import SessionConfig, SessionHandler
 
 logger = structlog.get_logger()
@@ -142,7 +138,7 @@ class RealtimeEngine(ABC):
             self._worker_endpoint = f"ws://{hostname}:{self.port}"
 
         self._sessions: dict[str, SessionHandler] = {}
-        self._registry: WorkerPresenceRegistry | None = None
+        self._unified_registry: UnifiedEngineRegistry | None = None
         self._running = False
         self._server = None
         self._metrics_runner: web.AppRunner | None = None
@@ -434,26 +430,33 @@ class RealtimeEngine(ABC):
         self.load_models()
         logger.info("models_loaded")
 
-        # Initialize registry client
-        self._registry = WorkerRegistry(self.redis_url)
-
-        # Register with Session Router
         # M50: Get structured capabilities from engine.yaml
         capabilities = self.get_capabilities()
 
-        logger.info("registering_with_session_router", endpoint=self._worker_endpoint)
-        await self._registry.register(
-            WorkerInfo(
+        # Register with unified engine registry
+        import redis.asyncio as aioredis
+
+        unified_redis = aioredis.from_url(
+            self.redis_url, encoding="utf-8", decode_responses=True
+        )
+        self._unified_registry = UnifiedEngineRegistry(unified_redis)
+        await self._unified_registry.register(
+            EngineRecord(
                 instance=self.instance,
-                endpoint=self._worker_endpoint,
-                capacity=self.max_sessions,
-                models=self.get_models(),
-                languages=self.get_languages(),
                 runtime=capabilities.runtime,
-                supports_vocabulary=self.get_supports_vocabulary(),
+                stage="transcribe",
+                status="ready",
+                interfaces=["realtime"],
+                capacity=self.max_sessions,
+                endpoint=self._worker_endpoint,
+                models_loaded=self.get_models(),
+                languages=self.get_languages(),
                 capabilities=capabilities,
+                supports_word_timestamps=capabilities.supports_word_timestamps,
+                includes_diarization=capabilities.includes_diarization,
             )
         )
+        logger.info("engine_registered", instance=self.instance)
 
         self._running = True
 
@@ -513,10 +516,13 @@ class RealtimeEngine(ABC):
         logger.info("shutting_down")
         self._running = False
 
-        # Unregister from Session Router
-        if self._registry:
-            await self._registry.unregister(self.instance)
-            await self._registry.close()
+        if self._unified_registry:
+            try:
+                await self._unified_registry.deregister(self.instance)
+                await self._unified_registry._redis.close()
+            except Exception:
+                pass  # Best effort cleanup
+            self._unified_registry = None
 
         # M43: Shutdown model manager and unload models
         if self._model_manager is not None:
@@ -533,18 +539,22 @@ class RealtimeEngine(ABC):
         """Send periodic heartbeats to Session Router."""
         while self._running:
             try:
-                if self._registry:
-                    status = (
-                        "ready" if len(self._sessions) < self.max_sessions else "busy"
-                    )
-                    # M43: Include dynamically loaded models in heartbeat
-                    await self._registry.heartbeat(
-                        instance=self.instance,
-                        active_sessions=len(self._sessions),
-                        gpu_memory_used=self.get_gpu_memory_usage(),
-                        status=status,
-                        loaded_models=self.get_loaded_models(),
-                    )
+                active = len(self._sessions)
+                status = "ready" if active < self.max_sessions else "busy"
+                loaded_models = self.get_loaded_models()
+                gpu_mem = self.get_gpu_memory_usage()
+
+                if self._unified_registry:
+                    try:
+                        await self._unified_registry.heartbeat(
+                            self.instance,
+                            status=status,
+                            active_realtime=active,
+                            models_loaded=loaded_models,
+                            gpu_memory_used=gpu_mem,
+                        )
+                    except Exception as e:
+                        logger.warning("unified_heartbeat_failed", error=str(e))
             except Exception as e:
                 logger.error("heartbeat_error", error=str(e))
 
@@ -637,10 +647,6 @@ class RealtimeEngine(ABC):
         # Track session
         self._sessions[config.session_id] = handler
 
-        # Notify registry
-        if self._registry:
-            await self._registry.session_started(self.instance, config.session_id)
-
         # Bind session_id to logging context for this session
         structlog.contextvars.bind_contextvars(session_id=config.session_id)
 
@@ -692,14 +698,6 @@ class RealtimeEngine(ABC):
         # Record session metrics (M20)
         dalston.metrics.observe_realtime_session_duration(rt, model or "", duration)
         dalston.metrics.inc_session_router_sessions(status)
-
-        if self._registry:
-            await self._registry.session_ended(
-                instance=self.instance,
-                session_id=session_id,
-                duration=duration,
-                status=status,
-            )
 
     def _parse_connection_params(self, path: str) -> SessionConfig:
         """Parse query parameters from connection path.

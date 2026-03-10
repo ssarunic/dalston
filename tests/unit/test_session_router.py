@@ -5,257 +5,268 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from dalston.session_router.allocator import (
-    SessionAllocator,
-    SessionState,
-    WorkerAllocation,
+from dalston.common.registry import (
+    UNIFIED_INSTANCE_KEY_PREFIX,
+    EngineRecord,
+    UnifiedEngineRegistry,
 )
-from dalston.session_router.health import HealthMonitor
-from dalston.session_router.registry import (
+from dalston.orchestrator.realtime_registry import (
     ACTIVE_SESSIONS_KEY,
     INSTANCE_KEY_PREFIX,
     INSTANCE_SESSIONS_SUFFIX,
     SESSION_KEY_PREFIX,
-    WorkerRegistry,
-    WorkerState,
 )
+from dalston.orchestrator.session_allocator import (
+    SessionAllocator,
+    SessionState,
+    WorkerAllocation,
+)
+from dalston.orchestrator.session_health import HealthMonitor
 
 
-class TestWorkerState:
-    """Tests for WorkerState dataclass."""
+class TestEngineRecord:
+    """Tests for EngineRecord dataclass."""
 
     def test_available_capacity(self):
-        worker = WorkerState(
+        worker = EngineRecord(
             instance="worker-1",
-            endpoint="ws://localhost:9000",
+            runtime="faster-whisper",
+            stage="transcribe",
+            interfaces=["realtime"],
             status="ready",
             capacity=4,
-            active_sessions=2,
-            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
-            languages_supported=["auto"],
-            runtime="faster-whisper",
-            supports_vocabulary=False,
+            active_realtime=2,
+            models_loaded=["Systran/faster-whisper-large-v3"],
+            languages=["auto"],
             gpu_memory_used="2GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
-            started_at=datetime.now(UTC),
+            registered_at=datetime.now(UTC),
         )
 
         assert worker.available_capacity == 2
 
     def test_available_capacity_at_capacity(self):
-        worker = WorkerState(
+        worker = EngineRecord(
             instance="worker-1",
-            endpoint="ws://localhost:9000",
+            runtime="faster-whisper",
+            stage="transcribe",
+            interfaces=["realtime"],
             status="busy",
             capacity=4,
-            active_sessions=4,
-            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
-            languages_supported=["auto"],
-            runtime="faster-whisper",
-            supports_vocabulary=False,
+            active_realtime=4,
+            models_loaded=["Systran/faster-whisper-large-v3"],
+            languages=["auto"],
             gpu_memory_used="4GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
-            started_at=datetime.now(UTC),
+            registered_at=datetime.now(UTC),
         )
 
         assert worker.available_capacity == 0
 
     def test_available_capacity_negative_clamped(self):
-        worker = WorkerState(
+        worker = EngineRecord(
             instance="worker-1",
-            endpoint="ws://localhost:9000",
+            runtime="faster-whisper",
+            stage="transcribe",
+            interfaces=["realtime"],
             status="busy",
             capacity=4,
-            active_sessions=5,  # Over capacity
-            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
-            languages_supported=["auto"],
-            runtime="faster-whisper",
-            supports_vocabulary=False,
+            active_realtime=5,  # Over capacity
+            models_loaded=["Systran/faster-whisper-large-v3"],
+            languages=["auto"],
             gpu_memory_used="4GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
-            started_at=datetime.now(UTC),
+            registered_at=datetime.now(UTC),
         )
 
         assert worker.available_capacity == 0
 
     def test_is_available_ready_with_capacity(self):
-        worker = WorkerState(
+        worker = EngineRecord(
             instance="worker-1",
-            endpoint="ws://localhost:9000",
+            runtime="faster-whisper",
+            stage="transcribe",
+            interfaces=["realtime"],
             status="ready",
             capacity=4,
-            active_sessions=2,
-            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
-            languages_supported=["auto"],
-            runtime="faster-whisper",
-            supports_vocabulary=False,
+            active_realtime=2,
+            models_loaded=["Systran/faster-whisper-large-v3"],
+            languages=["auto"],
             gpu_memory_used="2GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
-            started_at=datetime.now(UTC),
+            registered_at=datetime.now(UTC),
         )
 
         assert worker.is_available is True
 
     def test_is_available_busy_with_capacity(self):
-        worker = WorkerState(
+        worker = EngineRecord(
             instance="worker-1",
-            endpoint="ws://localhost:9000",
+            runtime="faster-whisper",
+            stage="transcribe",
+            interfaces=["realtime"],
             status="busy",
             capacity=4,
-            active_sessions=3,
-            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
-            languages_supported=["auto"],
-            runtime="faster-whisper",
-            supports_vocabulary=False,
+            active_realtime=3,
+            models_loaded=["Systran/faster-whisper-large-v3"],
+            languages=["auto"],
             gpu_memory_used="3GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
-            started_at=datetime.now(UTC),
+            registered_at=datetime.now(UTC),
         )
 
         assert worker.is_available is True
 
     def test_is_not_available_offline(self):
-        worker = WorkerState(
+        worker = EngineRecord(
             instance="worker-1",
-            endpoint="ws://localhost:9000",
+            runtime="faster-whisper",
+            stage="transcribe",
+            interfaces=["realtime"],
             status="offline",
             capacity=4,
-            active_sessions=0,
-            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
-            languages_supported=["auto"],
-            runtime="faster-whisper",
-            supports_vocabulary=False,
+            active_realtime=0,
+            models_loaded=["Systran/faster-whisper-large-v3"],
+            languages=["auto"],
             gpu_memory_used="0GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
-            started_at=datetime.now(UTC),
+            registered_at=datetime.now(UTC),
         )
 
         assert worker.is_available is False
 
     def test_is_not_available_draining(self):
-        worker = WorkerState(
+        worker = EngineRecord(
             instance="worker-1",
-            endpoint="ws://localhost:9000",
+            runtime="faster-whisper",
+            stage="transcribe",
+            interfaces=["realtime"],
             status="draining",
             capacity=4,
-            active_sessions=1,
-            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
-            languages_supported=["auto"],
-            runtime="faster-whisper",
-            supports_vocabulary=False,
+            active_realtime=1,
+            models_loaded=["Systran/faster-whisper-large-v3"],
+            languages=["auto"],
             gpu_memory_used="1GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
-            started_at=datetime.now(UTC),
+            registered_at=datetime.now(UTC),
         )
 
         assert worker.is_available is False
 
     def test_is_not_available_at_capacity(self):
-        worker = WorkerState(
+        worker = EngineRecord(
             instance="worker-1",
-            endpoint="ws://localhost:9000",
+            runtime="faster-whisper",
+            stage="transcribe",
+            interfaces=["realtime"],
             status="busy",
             capacity=4,
-            active_sessions=4,
-            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
-            languages_supported=["auto"],
-            runtime="faster-whisper",
-            supports_vocabulary=False,
+            active_realtime=4,
+            models_loaded=["Systran/faster-whisper-large-v3"],
+            languages=["auto"],
             gpu_memory_used="4GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
-            started_at=datetime.now(UTC),
+            registered_at=datetime.now(UTC),
         )
 
         assert worker.is_available is False
 
 
-class TestWorkerRegistry:
-    """Tests for WorkerRegistry class."""
+class TestUnifiedEngineRegistry:
+    """Tests for UnifiedEngineRegistry class."""
 
     @pytest.fixture
     def mock_redis(self):
         return AsyncMock()
 
     @pytest.fixture
-    def registry(self, mock_redis) -> WorkerRegistry:
-        return WorkerRegistry(mock_redis)
+    def registry(self, mock_redis) -> UnifiedEngineRegistry:
+        return UnifiedEngineRegistry(mock_redis)
 
     @pytest.mark.asyncio
-    async def test_get_worker_found(self, registry: WorkerRegistry, mock_redis):
+    async def test_get_worker_found(self, registry: UnifiedEngineRegistry, mock_redis):
         mock_redis.hgetall.return_value = {
+            "runtime": "faster-whisper",
+            "stage": "transcribe",
+            "interfaces": '["realtime"]',
             "endpoint": "ws://localhost:9000",
             "status": "ready",
             "capacity": "4",
-            "active_sessions": "2",
-            "runtime": "faster-whisper",
+            "active_realtime": "2",
             "models_loaded": '["Systran/faster-whisper-large-v3", "Systran/faster-distil-whisper-large-v3"]',
-            "languages_supported": '["auto"]',
+            "languages": '["auto"]',
             "gpu_memory_used": "2GB",
             "gpu_memory_total": "8GB",
             "last_heartbeat": "2024-01-15T10:30:00+00:00",
-            "started_at": "2024-01-15T10:00:00+00:00",
+            "registered_at": "2024-01-15T10:00:00+00:00",
         }
 
-        worker = await registry.get_worker("worker-1")
+        worker = await registry.get_by_instance("worker-1")
 
         assert worker is not None
         assert worker.instance == "worker-1"
         assert worker.endpoint == "ws://localhost:9000"
         assert worker.status == "ready"
         assert worker.capacity == 4
-        assert worker.active_sessions == 2
+        assert worker.active_realtime == 2
         assert worker.models_loaded == [
             "Systran/faster-whisper-large-v3",
             "Systran/faster-distil-whisper-large-v3",
         ]
-        assert worker.languages_supported == ["auto"]
+        assert worker.languages == ["auto"]
 
     @pytest.mark.asyncio
-    async def test_get_worker_not_found(self, registry: WorkerRegistry, mock_redis):
+    async def test_get_worker_not_found(
+        self, registry: UnifiedEngineRegistry, mock_redis
+    ):
         mock_redis.hgetall.return_value = {}
 
-        worker = await registry.get_worker("nonexistent")
+        worker = await registry.get_by_instance("nonexistent")
 
         assert worker is None
 
     @pytest.mark.asyncio
-    async def test_get_workers(self, registry: WorkerRegistry, mock_redis):
+    async def test_get_workers(self, registry: UnifiedEngineRegistry, mock_redis):
         mock_redis.smembers.return_value = {"worker-1", "worker-2"}
 
         async def mock_hgetall(key):
             if "worker-1" in key:
                 return {
+                    "runtime": "faster-whisper",
+                    "stage": "transcribe",
+                    "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9000",
                     "status": "ready",
                     "capacity": "4",
-                    "active_sessions": "2",
-                    "runtime": "faster-whisper",
+                    "active_realtime": "2",
                     "models_loaded": "[]",
-                    "languages_supported": "[]",
+                    "languages": "[]",
                 }
             elif "worker-2" in key:
                 return {
+                    "runtime": "faster-whisper",
+                    "stage": "transcribe",
+                    "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9001",
                     "status": "busy",
                     "capacity": "4",
-                    "active_sessions": "3",
-                    "runtime": "faster-whisper",
+                    "active_realtime": "3",
                     "models_loaded": "[]",
-                    "languages_supported": "[]",
+                    "languages": "[]",
                 }
             return {}
 
         mock_redis.hgetall.side_effect = mock_hgetall
 
-        workers = await registry.get_workers()
+        workers = await registry.get_all()
 
         assert len(workers) == 2
         endpoints = {w.endpoint for w in workers}
@@ -264,37 +275,45 @@ class TestWorkerRegistry:
 
     @pytest.mark.asyncio
     async def test_get_available_workers_filters_by_capacity(
-        self, registry: WorkerRegistry, mock_redis
+        self, registry: UnifiedEngineRegistry, mock_redis
     ):
         mock_redis.smembers.return_value = {"worker-1", "worker-2"}
 
         async def mock_hgetall(key):
             if "worker-1" in key:
                 return {
+                    "runtime": "faster-whisper",
+                    "stage": "transcribe",
+                    "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9000",
                     "status": "ready",
                     "capacity": "4",
-                    "active_sessions": "4",  # Full
-                    "runtime": "faster-whisper",
+                    "active_realtime": "4",  # Full
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
-                    "languages_supported": '["auto"]',
+                    "languages": '["auto"]',
+                    "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
             elif "worker-2" in key:
                 return {
+                    "runtime": "faster-whisper",
+                    "stage": "transcribe",
+                    "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9001",
                     "status": "ready",
                     "capacity": "4",
-                    "active_sessions": "2",  # Available
-                    "runtime": "faster-whisper",
+                    "active_realtime": "2",  # Available
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
-                    "languages_supported": '["auto"]',
+                    "languages": '["auto"]',
+                    "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
             return {}
 
         mock_redis.hgetall.side_effect = mock_hgetall
 
-        available = await registry.get_available_workers(
-            "Systran/faster-whisper-large-v3", "auto"
+        available = await registry.get_available(
+            interface="realtime",
+            model="Systran/faster-whisper-large-v3",
+            language="auto",
         )
 
         assert len(available) == 1
@@ -302,38 +321,46 @@ class TestWorkerRegistry:
 
     @pytest.mark.asyncio
     async def test_get_available_workers_filters_by_model(
-        self, registry: WorkerRegistry, mock_redis
+        self, registry: UnifiedEngineRegistry, mock_redis
     ):
         mock_redis.smembers.return_value = {"worker-1", "worker-2"}
 
         async def mock_hgetall(key):
             if "worker-1" in key:
                 return {
+                    "runtime": "faster-whisper",
+                    "stage": "transcribe",
+                    "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9000",
                     "status": "ready",
                     "capacity": "4",
-                    "active_sessions": "2",
-                    "runtime": "faster-whisper",
+                    "active_realtime": "2",
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
-                    "languages_supported": '["auto"]',
+                    "languages": '["auto"]',
+                    "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
             elif "worker-2" in key:
                 return {
+                    "runtime": "faster-whisper",
+                    "stage": "transcribe",
+                    "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9001",
                     "status": "ready",
                     "capacity": "4",
-                    "active_sessions": "2",
-                    "runtime": "faster-whisper",
+                    "active_realtime": "2",
                     "models_loaded": '["Systran/faster-distil-whisper-large-v3"]',
-                    "languages_supported": '["auto"]',
+                    "languages": '["auto"]',
+                    "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
             return {}
 
         mock_redis.hgetall.side_effect = mock_hgetall
 
         # Request specific model
-        available = await registry.get_available_workers(
-            "Systran/faster-distil-whisper-large-v3", "auto"
+        available = await registry.get_available(
+            interface="realtime",
+            model="Systran/faster-distil-whisper-large-v3",
+            language="auto",
         )
 
         assert len(available) == 1
@@ -341,47 +368,58 @@ class TestWorkerRegistry:
 
     @pytest.mark.asyncio
     async def test_get_available_workers_sorted_by_capacity(
-        self, registry: WorkerRegistry, mock_redis
+        self, registry: UnifiedEngineRegistry, mock_redis
     ):
         mock_redis.smembers.return_value = {"worker-1", "worker-2", "worker-3"}
 
         async def mock_hgetall(key):
             if "worker-1" in key:
                 return {
+                    "runtime": "faster-whisper",
+                    "stage": "transcribe",
+                    "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9000",
                     "status": "ready",
                     "capacity": "4",
-                    "active_sessions": "3",  # 1 available
-                    "runtime": "faster-whisper",
+                    "active_realtime": "3",  # 1 available
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
-                    "languages_supported": '["auto"]',
+                    "languages": '["auto"]',
+                    "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
             elif "worker-2" in key:
                 return {
+                    "runtime": "faster-whisper",
+                    "stage": "transcribe",
+                    "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9001",
                     "status": "ready",
                     "capacity": "4",
-                    "active_sessions": "1",  # 3 available (most)
-                    "runtime": "faster-whisper",
+                    "active_realtime": "1",  # 3 available (most)
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
-                    "languages_supported": '["auto"]',
+                    "languages": '["auto"]',
+                    "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
             elif "worker-3" in key:
                 return {
+                    "runtime": "faster-whisper",
+                    "stage": "transcribe",
+                    "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9002",
                     "status": "ready",
                     "capacity": "4",
-                    "active_sessions": "2",  # 2 available
-                    "runtime": "faster-whisper",
+                    "active_realtime": "2",  # 2 available
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
-                    "languages_supported": '["auto"]',
+                    "languages": '["auto"]',
+                    "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
             return {}
 
         mock_redis.hgetall.side_effect = mock_hgetall
 
-        available = await registry.get_available_workers(
-            "Systran/faster-whisper-large-v3", "auto"
+        available = await registry.get_available(
+            interface="realtime",
+            model="Systran/faster-whisper-large-v3",
+            language="auto",
         )
 
         # Should be sorted by available capacity descending
@@ -391,16 +429,18 @@ class TestWorkerRegistry:
         assert available[2].endpoint == "ws://localhost:9000"  # 1 available
 
     @pytest.mark.asyncio
-    async def test_mark_worker_offline(self, registry: WorkerRegistry, mock_redis):
-        await registry.mark_worker_offline("worker-1")
+    async def test_mark_worker_offline(
+        self, registry: UnifiedEngineRegistry, mock_redis
+    ):
+        await registry.mark_instance_offline("worker-1")
 
         mock_redis.hset.assert_called_once_with(
-            f"{INSTANCE_KEY_PREFIX}worker-1", "status", "offline"
+            f"{UNIFIED_INSTANCE_KEY_PREFIX}worker-1", "status", "offline"
         )
 
     @pytest.mark.asyncio
     async def test_get_available_workers_model_none_returns_all(
-        self, registry: WorkerRegistry, mock_redis
+        self, registry: UnifiedEngineRegistry, mock_redis
     ):
         """model=None (auto) should return all available workers regardless of models_loaded."""
         mock_redis.smembers.return_value = {"worker-1", "worker-2"}
@@ -408,54 +448,67 @@ class TestWorkerRegistry:
         async def mock_hgetall(key):
             if "worker-1" in key:
                 return {
+                    "runtime": "nemo",
+                    "stage": "transcribe",
+                    "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9000",
                     "status": "ready",
                     "capacity": "4",
-                    "active_sessions": "2",
-                    "runtime": "nemo",
+                    "active_realtime": "2",
                     "models_loaded": '["parakeet-rnnt-0.6b"]',
-                    "languages_supported": '["auto"]',
+                    "languages": '["auto"]',
+                    "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
             elif "worker-2" in key:
                 return {
+                    "runtime": "faster-whisper",
+                    "stage": "transcribe",
+                    "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9001",
                     "status": "ready",
                     "capacity": "4",
-                    "active_sessions": "2",
-                    "runtime": "faster-whisper",
+                    "active_realtime": "2",
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
-                    "languages_supported": '["auto"]',
+                    "languages": '["auto"]',
+                    "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
             return {}
 
         mock_redis.hgetall.side_effect = mock_hgetall
 
         # model=None should return ALL available workers
-        available = await registry.get_available_workers(None, "auto")
+        available = await registry.get_available(
+            interface="realtime", model=None, language="auto"
+        )
 
         assert len(available) == 2
 
     @pytest.mark.asyncio
     async def test_get_available_workers_empty_string_model_no_match(
-        self, registry: WorkerRegistry, mock_redis
+        self, registry: UnifiedEngineRegistry, mock_redis
     ):
         """Empty string model is treated as literal match (no workers have '' in models_loaded)."""
         mock_redis.smembers.return_value = {"worker-1"}
 
         mock_redis.hgetall.return_value = {
+            "runtime": "nemo",
+            "stage": "transcribe",
+            "interfaces": '["realtime"]',
             "endpoint": "ws://localhost:9000",
             "status": "ready",
             "capacity": "4",
-            "active_sessions": "2",
-            "runtime": "nemo",
+            "active_realtime": "2",
             "models_loaded": '["parakeet-rnnt-0.6b"]',
-            "languages_supported": '["auto"]',
+            "languages": '["auto"]',
+            "last_heartbeat": datetime.now(UTC).isoformat(),
         }
 
         # Empty string is a literal value, not None
         # The gateway converts empty string to None before calling the registry
         # This test verifies the registry requires exact model match for non-None
-        available = await registry.get_available_workers("", "auto")
+        available = await registry.get_available(
+            interface="realtime", model="", language="auto"
+        )
 
         # "" is not in models_loaded, so no workers match
         assert len(available) == 0
@@ -473,7 +526,7 @@ class TestSessionAllocator:
 
     @pytest.fixture
     def mock_registry(self):
-        return AsyncMock(spec=WorkerRegistry)
+        return AsyncMock(spec=UnifiedEngineRegistry)
 
     @pytest.fixture
     def allocator(self, mock_redis, mock_registry) -> SessionAllocator:
@@ -484,22 +537,23 @@ class TestSessionAllocator:
         self, allocator: SessionAllocator, mock_redis, mock_registry
     ):
         # Setup available workers
-        worker = WorkerState(
+        worker = EngineRecord(
             instance="worker-1",
-            endpoint="ws://localhost:9000",
+            runtime="faster-whisper",
+            stage="transcribe",
+            interfaces=["realtime"],
             status="ready",
             capacity=4,
-            active_sessions=2,
-            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
-            languages_supported=["auto"],
-            runtime="faster-whisper",
-            supports_vocabulary=False,
+            active_realtime=2,
+            models_loaded=["Systran/faster-whisper-large-v3"],
+            languages=["auto"],
+            endpoint="ws://localhost:9000",
             gpu_memory_used="2GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
-            started_at=datetime.now(UTC),
+            registered_at=datetime.now(UTC),
         )
-        mock_registry.get_available_workers.return_value = [worker]
+        mock_registry.get_available.return_value = [worker]
         mock_redis.hincrby.return_value = 3  # New active session count
 
         result = await allocator.acquire_worker(
@@ -512,16 +566,14 @@ class TestSessionAllocator:
         assert result.instance == "worker-1"
         assert result.endpoint == "ws://localhost:9000"
         assert result.session_id.startswith("sess_")
-        mock_registry.get_available_workers.assert_called_once_with(
-            None, "en", None, None
-        )
+        mock_registry.get_available.assert_called_once()
         mock_redis.hincrby.assert_called()
 
     @pytest.mark.asyncio
     async def test_acquire_worker_no_capacity(
         self, allocator: SessionAllocator, mock_registry
     ):
-        mock_registry.get_available_workers.return_value = []
+        mock_registry.get_available.return_value = []
 
         result = await allocator.acquire_worker(
             language="en",
@@ -536,22 +588,23 @@ class TestSessionAllocator:
         self, allocator: SessionAllocator, mock_redis, mock_registry
     ):
         # Setup worker that will exceed capacity after increment
-        worker = WorkerState(
+        worker = EngineRecord(
             instance="worker-1",
-            endpoint="ws://localhost:9000",
+            runtime="faster-whisper",
+            stage="transcribe",
+            interfaces=["realtime"],
             status="ready",
             capacity=4,
-            active_sessions=4,  # Already at capacity
-            models_loaded=["Systran/Systran/faster-whisper-large-v3"],
-            languages_supported=["auto"],
-            runtime="faster-whisper",
-            supports_vocabulary=False,
+            active_realtime=4,  # Already at capacity
+            models_loaded=["Systran/faster-whisper-large-v3"],
+            languages=["auto"],
+            endpoint="ws://localhost:9000",
             gpu_memory_used="4GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
-            started_at=datetime.now(UTC),
+            registered_at=datetime.now(UTC),
         )
-        mock_registry.get_available_workers.return_value = [worker]
+        mock_registry.get_available.return_value = [worker]
         mock_redis.hincrby.return_value = 5  # Exceeds capacity of 4
 
         result = await allocator.acquire_worker(
@@ -664,7 +717,7 @@ class TestHealthMonitor:
 
     @pytest.fixture
     def mock_registry(self):
-        return AsyncMock(spec=WorkerRegistry)
+        return AsyncMock(spec=UnifiedEngineRegistry)
 
     @pytest.fixture
     def health_monitor(self, mock_redis, mock_registry) -> HealthMonitor:
@@ -696,7 +749,7 @@ class TestHealthMonitor:
         assert mock_redis.exists.call_count == 2
 
     @pytest.mark.asyncio
-    @patch("dalston.session_router.health.dalston.metrics")
+    @patch("dalston.orchestrator.session_health.dalston.metrics")
     async def test_reconcile_orphaned_session_cleanup(
         self, mock_metrics, health_monitor: HealthMonitor, mock_redis
     ):
@@ -742,7 +795,7 @@ class TestHealthMonitor:
         )
 
     @pytest.mark.asyncio
-    @patch("dalston.session_router.health.dalston.metrics")
+    @patch("dalston.orchestrator.session_health.dalston.metrics")
     async def test_reconcile_negative_counter_clamped(
         self, mock_metrics, health_monitor: HealthMonitor, mock_redis
     ):
@@ -773,7 +826,7 @@ class TestHealthMonitor:
         )
 
     @pytest.mark.asyncio
-    @patch("dalston.session_router.health.dalston.metrics")
+    @patch("dalston.orchestrator.session_health.dalston.metrics")
     async def test_reconcile_multiple_orphaned_sessions(
         self, mock_metrics, health_monitor: HealthMonitor, mock_redis
     ):
@@ -799,7 +852,7 @@ class TestHealthMonitor:
         assert mock_redis.srem.call_count == 6  # 3 from worker set + 3 from active set
 
     @pytest.mark.asyncio
-    @patch("dalston.session_router.health.dalston.metrics")
+    @patch("dalston.orchestrator.session_health.dalston.metrics")
     async def test_reconcile_session_not_in_any_worker(
         self, mock_metrics, health_monitor: HealthMonitor, mock_redis
     ):
@@ -843,7 +896,7 @@ class TestHealthMonitor:
         mock_redis.exists.side_effect = mock_exists
         mock_redis.sismember.return_value = False
 
-        with patch("dalston.session_router.health.dalston.metrics"):
+        with patch("dalston.orchestrator.session_health.dalston.metrics"):
             cleaned = await health_monitor.reconcile_orphaned_sessions()
 
         assert cleaned == 1

@@ -25,6 +25,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_cancel_requested
 from dalston.common.models import JobStatus
+from dalston.common.registry import (
+    UNIFIED_INSTANCE_KEY_PREFIX,
+    UNIFIED_INSTANCE_SET_KEY,
+)
 from dalston.common.streams_types import CONSUMER_GROUP
 from dalston.db.session import DEFAULT_TENANT_ID
 from dalston.gateway.dependencies import (
@@ -45,12 +49,7 @@ from dalston.gateway.security.principal import Principal
 from dalston.gateway.services.console import ConsoleService
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
-from dalston.orchestrator.registry import (
-    ENGINE_INSTANCES_PREFIX,
-    ENGINE_KEY_PREFIX,
-    ENGINE_SET_KEY,
-)
-from dalston.session_router import SessionRouter
+from dalston.orchestrator.session_coordinator import SessionCoordinator
 
 logger = structlog.get_logger()
 
@@ -141,7 +140,7 @@ class DashboardResponse(BaseModel):
 async def get_dashboard(
     principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
-    session_router: SessionRouter = Depends(get_session_router),
+    session_router: SessionCoordinator = Depends(get_session_router),
     console_service: ConsoleService = Depends(get_console_service),
 ) -> DashboardResponse:
     """Get aggregated dashboard data in a single call."""
@@ -406,7 +405,7 @@ HEARTBEAT_STALE_THRESHOLD = 30  # Mark as stale after 30s without heartbeat
 async def get_engines(
     principal: Annotated[Principal, Depends(get_principal)],
     redis: Redis = Depends(get_redis),
-    session_router: SessionRouter = Depends(get_session_router),
+    session_router: SessionCoordinator = Depends(get_session_router),
 ) -> EnginesResponse:
     """Get status of all engines.
 
@@ -419,24 +418,15 @@ async def get_engines(
 
     catalog = get_catalog()
 
-    # Fetch heartbeats for all registered runtimes from Redis
-    # Now uses instance-based lookup: runtime -> instance set -> instance heartbeats
-    registered_runtimes = await redis.smembers(ENGINE_SET_KEY)
+    # Fetch heartbeats for all registered instances from unified registry
+    all_instance_ids = await redis.smembers(UNIFIED_INSTANCE_SET_KEY)
     discovered_heartbeats: dict[str, list[dict[str, str]]] = {}
 
-    for runtime in registered_runtimes:
-        # Get all instances for this runtime
-        instances_key = f"{ENGINE_INSTANCES_PREFIX}{runtime}"
-        instance_ids = await redis.smembers(instances_key)
-
-        instance_heartbeats = []
-        for instance_id in instance_ids:
-            data = await redis.hgetall(f"{ENGINE_KEY_PREFIX}{instance_id}")
-            if data and "runtime" in data:
-                instance_heartbeats.append(data)
-
-        if instance_heartbeats:
-            discovered_heartbeats[runtime] = instance_heartbeats
+    for instance_id in all_instance_ids:
+        data = await redis.hgetall(f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance_id}")
+        if data and "runtime" in data:
+            runtime = data["runtime"]
+            discovered_heartbeats.setdefault(runtime, []).append(data)
 
     now = datetime.now(UTC)
     batch_engines = []
