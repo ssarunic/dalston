@@ -103,6 +103,7 @@ target-version = "py311"
 exclude = [
     ".git",
     ".venv",
+    ".venv312",
     "__pycache__",
     "alembic/versions",
 ]
