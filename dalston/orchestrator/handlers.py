@@ -1222,22 +1222,9 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
     if any_failed:
         job.status = JobStatus.FAILED.value
         job.error = job.error or "One or more required tasks failed"
-        dalston.metrics.inc_orchestrator_jobs("failed")
         log.error("job_failed", reason=job.error)
     else:
         job.status = JobStatus.COMPLETED.value
-        dalston.metrics.inc_orchestrator_jobs("completed")
-        # Record job duration with runtime/model from transcribe task
-        if job.started_at:
-            duration = (datetime.now(UTC) - job.started_at).total_seconds()
-            transcribe_task = next(
-                (t for t in all_tasks if t.stage == "transcribe"), None
-            )
-            job_runtime = transcribe_task.runtime if transcribe_task else ""
-            job_model = (job.parameters or {}).get("model", "")
-            dalston.metrics.observe_orchestrator_job_duration(
-                job_runtime, job_model, duration
-            )
         log.info("job_completed")
 
         # For mono pipelines (no merge stage), assemble transcript.json from stage outputs.
@@ -1253,7 +1240,23 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
                 )
                 job.status = JobStatus.FAILED.value
                 job.error = f"Transcript assembly failed: {e}"
-                dalston.metrics.inc_orchestrator_jobs("failed")
+
+    # Record final outcome metrics after all status mutations (including assembly).
+    if job.status == JobStatus.FAILED.value:
+        dalston.metrics.inc_orchestrator_jobs("failed")
+    else:
+        dalston.metrics.inc_orchestrator_jobs("completed")
+        # Record job duration with runtime/model from transcribe task
+        if job.started_at:
+            duration = (datetime.now(UTC) - job.started_at).total_seconds()
+            transcribe_task = next(
+                (t for t in all_tasks if t.stage == "transcribe"), None
+            )
+            job_runtime = transcribe_task.runtime if transcribe_task else ""
+            job_model = (job.parameters or {}).get("model", "")
+            dalston.metrics.observe_orchestrator_job_duration(
+                job_runtime, job_model, duration
+            )
 
         # Extract and store result stats from transcript
         await _populate_job_result_stats(job, log)
