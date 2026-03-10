@@ -12,6 +12,7 @@ responsible for formatting the raw results into its own output contract.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -203,6 +204,158 @@ class ParakeetCore:
             language="en",
             language_probability=1.0,
         )
+
+    # -- Decoder type detection -----------------------------------------------
+
+    # Decoder types that support cache-aware streaming inference
+    STREAMING_DECODER_TYPES = frozenset({"rnnt", "tdt"})
+
+    def decoder_type(self, model_id: str) -> str:
+        """Return the decoder architecture for a model ID.
+
+        Args:
+            model_id: Model identifier (e.g. "parakeet-rnnt-1.1b")
+
+        Returns:
+            Decoder type string: "rnnt", "ctc", or "tdt"
+        """
+        return self._manager._get_architecture(model_id)
+
+    def supports_streaming_decode(self, model_id: str) -> bool:
+        """Check whether a model supports cache-aware streaming inference.
+
+        RNNT and TDT decoders emit tokens frame-by-frame; CTC requires
+        the full sequence and cannot stream.
+
+        Args:
+            model_id: Model identifier
+
+        Returns:
+            True if the model's decoder supports streaming
+        """
+        return self.decoder_type(model_id) in self.STREAMING_DECODER_TYPES
+
+    # -- Streaming transcription ---------------------------------------------
+
+    def transcribe_streaming(
+        self,
+        audio_iter: Iterator[np.ndarray],
+        model_id: str,
+        chunk_ms: int = 160,
+    ) -> Iterator[NeMoWordResult]:
+        """Yield word results incrementally as audio chunks arrive.
+
+        Uses NeMo's ``CacheAwareStreamingConfig`` to run incremental
+        inference on RNNT/TDT models. Each audio chunk from *audio_iter*
+        is fed to the model's streaming decoder, and any newly emitted
+        tokens are yielded as ``NeMoWordResult`` objects.
+
+        Only valid for RNNT and TDT model variants. Raises ``RuntimeError``
+        if called on a CTC model.
+
+        Args:
+            audio_iter: Iterator of float32 numpy arrays (audio chunks)
+            model_id: Model identifier (must be RNNT or TDT)
+            chunk_ms: Chunk duration in milliseconds (default 160,
+                      one FastConformer encoder chunk)
+
+        Yields:
+            NeMoWordResult for each decoded token
+
+        Raises:
+            RuntimeError: If called on a CTC model
+        """
+        decoder = self.decoder_type(model_id)
+        if decoder not in self.STREAMING_DECODER_TYPES:
+            raise RuntimeError(
+                f"Streaming inference is not supported for {decoder!r} "
+                f"decoder (model {model_id!r}). Only RNNT and TDT "
+                f"decoders support cache-aware streaming."
+            )
+
+        model = self._manager.acquire(model_id)
+        try:
+            yield from self._run_streaming_inference(
+                model, audio_iter, chunk_ms
+            )
+        finally:
+            self._manager.release(model_id)
+
+    def _run_streaming_inference(
+        self,
+        model: Any,
+        audio_iter: Iterator[np.ndarray],
+        chunk_ms: int,
+    ) -> Iterator[NeMoWordResult]:
+        """Run cache-aware streaming inference on an acquired model.
+
+        Args:
+            model: Acquired NeMo RNNT/TDT model instance
+            audio_iter: Audio chunk iterator
+            chunk_ms: Chunk duration in ms
+
+        Yields:
+            NeMoWordResult for each decoded token
+        """
+        import torch
+        from nemo.collections.asr.parts.utils.streaming_utils import (
+            CacheAwareStreamingConfig,
+        )
+
+        # Calculate chunk size in encoder frames.
+        # FastConformer uses 10ms frame shift by default.
+        frame_shift_ms = 10
+        chunk_frames = chunk_ms // frame_shift_ms
+
+        cfg = CacheAwareStreamingConfig(
+            chunk_size=chunk_frames,
+            left_chunks=2,
+            max_symbols_per_step=10,
+            return_hypotheses=True,
+        )
+
+        autocast_ctx = (
+            torch.cuda.amp.autocast()
+            if self.device == "cuda"
+            else torch.inference_mode()
+        )
+
+        previous_text = ""
+        session_offset = 0.0
+
+        with autocast_ctx:
+            for hypothesis in model.transcribe_streaming(audio_iter, cfg):
+                if hypothesis is None:
+                    continue
+
+                current_text = (
+                    hypothesis.text
+                    if hasattr(hypothesis, "text")
+                    else str(hypothesis)
+                )
+
+                # Detect new words by comparing against previous text
+                if not current_text or current_text == previous_text:
+                    continue
+
+                # Parse full hypothesis and yield only new words
+                segments, all_words = self._parse_hypothesis(
+                    hypothesis, current_text
+                )
+
+                # Determine how many words are new
+                prev_word_count = len(previous_text.split()) if previous_text else 0
+                new_words = all_words[prev_word_count:]
+
+                for w in new_words:
+                    yield NeMoWordResult(
+                        word=w.word,
+                        start=round(session_offset + w.start, 3),
+                        end=round(session_offset + w.end, 3),
+                        confidence=w.confidence,
+                    )
+
+                previous_text = current_text
 
     # -- Hypothesis parsing --------------------------------------------------
 

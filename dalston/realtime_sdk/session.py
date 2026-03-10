@@ -13,7 +13,7 @@ try:
     import audioop  # Python < 3.13
 except ImportError:
     import audioop_lts as audioop  # Python >= 3.13 (PEP 594)
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -32,6 +32,7 @@ from dalston.common.ws_close_codes import WS_CLOSE_LAG_EXCEEDED
 from dalston.realtime_sdk.assembler import (
     TranscribeResult,
     TranscriptAssembler,
+    Word,
 )
 from dalston.realtime_sdk.context import S3SessionStorage, SessionStorage
 from dalston.realtime_sdk.protocol import (
@@ -289,6 +290,14 @@ TranscribeCallback = Callable[
     TranscribeResult,
 ]
 
+# M71: Type alias for streaming decode callback.
+# Takes an Iterator[np.ndarray] of audio chunks, language, and model,
+# and yields TranscribeResult for each decoded word.
+StreamingDecodeCallback = Callable[
+    ...,  # (audio_iter, language, model) -> Iterator[TranscribeResult]
+    Any,
+]
+
 
 class SessionHandler:
     """Handles one WebSocket transcription session.
@@ -319,6 +328,7 @@ class SessionHandler:
         transcribe_fn: TranscribeCallback,
         on_session_end: Callable[[str, float, str], Awaitable[None]] | None = None,
         supports_streaming: bool = False,
+        streaming_decode_fn: StreamingDecodeCallback | None = None,
     ) -> None:
         """Initialize session handler.
 
@@ -328,12 +338,18 @@ class SessionHandler:
             transcribe_fn: Callback to engine's transcribe method
             on_session_end: Optional async callback when session ends
             supports_streaming: Whether engine supports streaming partial results
+            streaming_decode_fn: M71 callback for cache-aware streaming decode.
+                When set, audio chunks are fed directly to the engine's
+                streaming decoder, bypassing VAD accumulation. VAD still
+                runs for endpoint detection (to know when to flush and
+                send final results).
         """
         self.websocket = websocket
         self.config = config
         self._transcribe_fn = transcribe_fn
         self._on_session_end = on_session_end
         self._supports_streaming = supports_streaming
+        self._streaming_decode_fn = streaming_decode_fn
 
         # Initialize components
         self._buffer = AudioBuffer(
@@ -380,6 +396,13 @@ class SessionHandler:
         self._lag_eval_lock = asyncio.Lock()
         self._next_debug_chunk_sleep_seconds = config.debug_chunk_sleep_initial_seconds
 
+        # M71: Streaming decode state
+        self._streaming_decode_active = streaming_decode_fn is not None
+        self._streaming_chunk_queue: asyncio.Queue[np.ndarray | None] | None = None
+        self._streaming_decode_task: asyncio.Task[None] | None = None
+        self._streaming_word_count = 0
+        self._streaming_session_text_parts: list[str] = []
+
         # Storage adapter (initialized in run() when storage is enabled)
         self._session_storage: SessionStorage | None = None
         self._raw_audio_buffer: list[bytes] = []  # Buffer until S3 client ready
@@ -403,6 +426,22 @@ class SessionHandler:
         await self._init_storage()
         self._lag_monitor_task = asyncio.create_task(self._lag_monitor_loop())
 
+        # M71: Start streaming decode background task if active
+        if self._streaming_decode_active:
+            self._streaming_chunk_queue = asyncio.Queue()
+            self._streaming_decode_task = asyncio.create_task(
+                self._streaming_decode_loop()
+            )
+            logger.info(
+                "streaming_decode_session_start",
+                streaming_path="rnnt_streaming",
+            )
+        else:
+            logger.info(
+                "streaming_decode_session_start",
+                streaming_path="vad_segment",
+            )
+
         try:
             async for message in self.websocket:
                 if isinstance(message, bytes):
@@ -425,6 +464,10 @@ class SessionHandler:
                     recoverable=False,
                 )
         finally:
+            # M71: Stop streaming decode before final cleanup
+            if self._streaming_decode_active:
+                await self._flush_streaming_final()
+                await self._stop_streaming_decode()
             await self._stop_lag_monitor()
             # Send session.end if not already sent
             if not self._ended:
@@ -505,6 +548,14 @@ class SessionHandler:
 
         await self._maybe_apply_debug_chunk_sleep()
 
+        # M71: When streaming decode is active, feed chunks directly
+        # to the background decoder. VAD still runs for endpoint
+        # detection and speech_start/end events, but does not gate
+        # inference.
+        if self._streaming_decode_active:
+            await self._process_chunk_streaming(audio)
+            return
+
         # When VAD is disabled, use time-based chunking only
         if self._vad is None:
             await self._process_chunk_no_vad(audio)
@@ -553,6 +604,232 @@ class SessionHandler:
         # Check for max utterance duration exceeded (prevents unbounded accumulation)
         if self._vad.is_speaking and self.config.max_utterance_duration > 0:
             await self._check_max_utterance_duration()
+
+    # -- M71: Streaming decode methods ----------------------------------------
+
+    async def _process_chunk_streaming(self, audio: np.ndarray) -> None:
+        """Process chunk in streaming decode mode.
+
+        Feeds the audio chunk to the background streaming decoder via
+        the chunk queue. VAD runs in parallel for endpoint detection
+        (speech_start/end events) but does not gate inference.
+
+        Args:
+            audio: Float32 audio samples
+        """
+        # Feed chunk to streaming decoder
+        if self._streaming_chunk_queue is not None:
+            await self._streaming_chunk_queue.put(audio.copy())
+
+        # Run VAD in parallel for endpoint detection events
+        if self._vad is not None:
+            vad_result = self._vad.process_chunk(audio)
+
+            if vad_result.event == "speech_start":
+                await self._send(
+                    VADSpeechStartMessage(timestamp=self._assembler.current_time)
+                )
+
+            elif vad_result.event == "speech_end":
+                await self._send(
+                    VADSpeechEndMessage(timestamp=self._assembler.current_time)
+                )
+
+                # On endpoint, send a final result with accumulated text
+                # from the streaming decoder
+                await self._flush_streaming_final()
+
+    async def _streaming_decode_loop(self) -> None:
+        """Background task: consume audio chunks and emit partial results.
+
+        Runs the engine's streaming decode callback in a thread pool,
+        yielding TranscribeResult for each decoded word, and sends
+        partial transcript events to the client.
+        """
+        if self._streaming_decode_fn is None or self._streaming_chunk_queue is None:
+            return
+
+        def _chunk_iterator() -> Iterator[np.ndarray]:
+            """Blocking iterator that reads from the async queue."""
+            # The queue.get() is called from a thread, so we need
+            # to bridge async → sync via run_coroutine_threadsafe.
+            while True:
+                # Block until chunk is available (called from thread)
+                chunk = self._streaming_chunk_queue_get_sync()
+                if chunk is None:
+                    # Sentinel — session ending
+                    return
+                yield chunk
+
+        try:
+            # Run the blocking streaming decode in a thread pool
+            async for result in self._run_streaming_in_thread(
+                _chunk_iterator
+            ):
+                if self._ended:
+                    break
+
+                if result.text:
+                    self._streaming_session_text_parts.append(result.text)
+                    self._streaming_word_count += 1
+
+                    # Send partial transcript event
+                    if self.config.interim_results:
+                        # Build cumulative text for partial
+                        cumulative_text = " ".join(
+                            self._streaming_session_text_parts
+                        )
+                        start_time = self._assembler.current_time
+                        word = result.words[0] if result.words else None
+                        end_time = (
+                            start_time + (word.end if word else 0.1)
+                        )
+
+                        await self._send(
+                            TranscriptPartialMessage(
+                                text=cumulative_text,
+                                start=start_time,
+                                end=end_time,
+                            )
+                        )
+
+        except Exception as e:
+            if not self._ended:
+                logger.error("streaming_decode_error", error=str(e))
+
+    def _streaming_chunk_queue_get_sync(self) -> np.ndarray | None:
+        """Blocking get from the async chunk queue (called from thread)."""
+        import asyncio as _asyncio
+
+        loop = _asyncio.get_event_loop()
+        future = _asyncio.run_coroutine_threadsafe(
+            self._streaming_chunk_queue.get(), loop  # type: ignore[union-attr]
+        )
+        return future.result()
+
+    async def _run_streaming_in_thread(
+        self, chunk_iterator_factory: Any
+    ) -> Any:
+        """Run streaming decode in thread and yield results asynchronously."""
+        result_queue: asyncio.Queue[TranscribeResult | None] = asyncio.Queue()
+
+        def _thread_target() -> None:
+            """Thread function that runs the blocking streaming decode."""
+            try:
+                chunk_iter = chunk_iterator_factory()
+                for result in self._streaming_decode_fn(  # type: ignore[misc]
+                    chunk_iter,
+                    self.config.language,
+                    self.config.model,
+                ):
+                    # Put result into async queue from thread
+                    import asyncio as _asyncio
+
+                    loop = _asyncio.get_event_loop()
+                    _asyncio.run_coroutine_threadsafe(
+                        result_queue.put(result), loop
+                    )
+            except Exception as e:
+                logger.error("streaming_thread_error", error=str(e))
+            finally:
+                import asyncio as _asyncio
+
+                loop = _asyncio.get_event_loop()
+                _asyncio.run_coroutine_threadsafe(
+                    result_queue.put(None), loop
+                )
+
+        # Start thread
+        thread = asyncio.get_event_loop().run_in_executor(
+            None, _thread_target
+        )
+
+        # Yield results as they arrive
+        while True:
+            result = await result_queue.get()
+            if result is None:
+                break
+            yield result
+
+        # Wait for thread to finish
+        await thread
+
+    async def _flush_streaming_final(self) -> None:
+        """Send a final transcript from accumulated streaming words.
+
+        Called when VAD detects an endpoint during streaming decode.
+        Combines all streaming words into a single final segment.
+        """
+        if not self._streaming_session_text_parts:
+            return
+
+        full_text = " ".join(self._streaming_session_text_parts)
+        word_count = len(self._streaming_session_text_parts)
+
+        # Create a synthetic TranscribeResult for the assembler
+        words = [
+            Word(
+                word=w,
+                start=i * 0.1,  # Approximate timing
+                end=(i + 1) * 0.1,
+                confidence=0.95,
+            )
+            for i, w in enumerate(self._streaming_session_text_parts)
+        ]
+
+        result = TranscribeResult(
+            text=full_text,
+            words=words,
+            language="en",
+            confidence=0.95,
+        )
+
+        # Estimate audio duration from word count
+        audio_duration = word_count * 0.3  # ~300ms per word approximation
+
+        # Add to assembler for timeline tracking
+        segment = self._assembler.add_utterance(result, audio_duration)
+
+        # Send final transcript
+        word_infos = None
+        if self.config.word_timestamps and segment.words:
+            word_infos = [
+                WordInfo(
+                    word=w.word,
+                    start=w.start,
+                    end=w.end,
+                    confidence=w.confidence,
+                )
+                for w in segment.words
+            ]
+
+        await self._send(
+            TranscriptFinalMessage(
+                text=segment.text,
+                start=segment.start,
+                end=segment.end,
+                confidence=segment.confidence,
+                words=word_infos,
+            )
+        )
+
+        # Reset for next utterance
+        self._streaming_session_text_parts = []
+        self._streaming_word_count = 0
+
+    async def _stop_streaming_decode(self) -> None:
+        """Stop the streaming decode background task."""
+        if self._streaming_chunk_queue is not None:
+            # Send sentinel to stop the chunk iterator
+            await self._streaming_chunk_queue.put(None)
+
+        if self._streaming_decode_task is not None:
+            try:
+                await asyncio.wait_for(self._streaming_decode_task, timeout=5.0)
+            except (TimeoutError, asyncio.CancelledError):
+                self._streaming_decode_task.cancel()
+
+    # -- End M71 streaming decode methods ------------------------------------
 
     async def _process_chunk_no_vad(self, audio: np.ndarray) -> None:
         """Process audio chunk without VAD - pure time-based chunking.
@@ -780,19 +1057,25 @@ class SessionHandler:
                     )
 
         elif isinstance(parsed, FlushMessage):
+            # M71: Flush streaming decode state first
+            if self._streaming_decode_active:
+                await self._flush_streaming_final()
+
             # Flush VAD buffer
             if self._vad is not None:
                 remaining = self._vad.flush()
                 if remaining is not None and len(remaining) > 0:
-                    await self._transcribe_and_send(remaining)
+                    if not self._streaming_decode_active:
+                        await self._transcribe_and_send(remaining)
 
             # Flush audio buffer
             remaining = self._buffer.flush()
             if remaining is not None:
                 remaining_duration = self._samples_to_seconds(len(remaining))
                 if remaining_duration > 0.1:
-                    # Only process if > 100ms
-                    await self._transcribe_and_send(remaining)
+                    if not self._streaming_decode_active:
+                        # Only process if > 100ms
+                        await self._transcribe_and_send(remaining)
                     self._record_processed_audio(remaining_duration)
                 else:
                     self._record_discarded_audio(remaining_duration)
@@ -806,6 +1089,9 @@ class SessionHandler:
             # Clear streaming state
             self._speech_audio_buffer = []
             self._chunks_since_partial = 0
+            # M71: Clear streaming decode accumulated text
+            self._streaming_session_text_parts = []
+            self._streaming_word_count = 0
             logger.debug("audio_buffers_cleared")
 
         elif isinstance(parsed, EndMessage):

@@ -274,6 +274,28 @@ class RealtimeEngine(ABC):
             return self._model_manager.loaded_models()
         return None
 
+    def get_streaming_decode_fn(
+        self, model_variant: str | None = None
+    ) -> Any:
+        """Return a streaming decode callback for the given model, or None.
+
+        Override in engines that support cache-aware streaming decode
+        (M71). When a non-None callback is returned, the SessionHandler
+        will feed audio chunks directly to the engine's streaming
+        decoder, bypassing VAD-gated accumulation.
+
+        The callback signature is:
+            (audio_iter: Iterator[np.ndarray], language: str, model: str)
+            -> Iterator[TranscribeResult]
+
+        Args:
+            model_variant: Model name from the session config.
+
+        Returns:
+            Streaming decode callback, or None for VAD-accumulate path.
+        """
+        return None
+
     def get_gpu_memory_usage(self) -> str:
         """Return GPU memory usage string.
 
@@ -635,6 +657,9 @@ class RealtimeEngine(ABC):
             await websocket.close(WS_CLOSE_PROTOCOL_ERROR, f"Invalid parameter: {e}")
             return
 
+        # M71: Check if this model supports streaming decode
+        streaming_decode_fn = self.get_streaming_decode_fn(config.model)
+
         # Create session handler
         handler = SessionHandler(
             websocket=websocket,
@@ -642,6 +667,7 @@ class RealtimeEngine(ABC):
             transcribe_fn=self.transcribe,
             on_session_end=self._on_session_end,
             supports_streaming=self.supports_streaming(),
+            streaming_decode_fn=streaming_decode_fn,
         )
 
         # Track session
