@@ -6,7 +6,7 @@
 | **Duration** | 2-3 days |
 | **Dependencies** | M64 (completed), production parity window on `unified` mode |
 | **Primary Deliverable** | Single registry code path; deleted legacy modules, bridge converters, and migration config |
-| **Status** | Proposed |
+| **Status** | Complete |
 
 ## Context
 
@@ -175,6 +175,24 @@ previous version. The unified registry data in Redis remains valid for both
 old and new code.
 
 **Do not start this milestone until the pre-conditions are satisfied.**
+
+## Implementation Status
+
+### Complete
+
+All tactics (T1–T5) executed:
+
+- `dalston/engine_sdk/registry.py` and `dalston/realtime_sdk/registry.py` deleted.
+- `dalston/realtime_sdk/__init__.py` lazy exports for `WorkerRegistry`, `WorkerInfo`,
+  `WorkerPresenceRegistry` removed.
+- `engine_sdk/runner.py` and `realtime_sdk/base.py` use `UnifiedRegistryWriter`
+  as sole registration path; dual-write and `registry_mode` conditionals removed.
+- `orchestrator/registry.py` is a thin re-export of `UnifiedEngineRegistry`;
+  `BatchEngineState` class and legacy Redis reads deleted.
+- All consumers (`engine_selector.py`, `main.py`, `distributed_main.py`,
+  `handlers.py`, `scheduler.py`, `engines.py`) use `EngineRecord` directly.
+- `engine_registry_mode` and `registry_unified_read_enabled` removed from
+  `dalston/config.py`.
 
 ## Success Criteria
 

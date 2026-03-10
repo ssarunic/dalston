@@ -6,7 +6,7 @@
 | **Duration** | 2–3 days |
 | **Dependencies** | Riva NIM integration (existing) |
 | **Primary Deliverable** | Both `stt-batch-transcribe-riva` and `stt-rt-riva` send audio incrementally; RT gains partial-result events; batch output shape is unchanged |
-| **Status** | Proposed |
+| **Status** | Superseded — Riva engines removed from codebase; engine directories are empty |
 
 ## Outcomes
 
@@ -153,9 +153,16 @@ WebSocket as partial transcript events.
 - A 90-minute audio file completes without gRPC deadline error at default NIM settings.
 - `make lint` and `make test` pass.
 
+## Implementation Status
+
+### Superseded
+
+Both Riva engine directories (`engines/stt-transcribe/riva/` and
+`engines/stt-rt/riva/`) are empty — the Riva engine implementations were
+removed from the codebase. `docker-compose.riva.yml` may retain service
+definitions but there is no engine code to upgrade. This milestone is moot
+unless Riva engines are reintroduced.
+
 ## References
 
-- `engines/stt-transcribe/riva/engine.py` — current batch engine
-- `engines/stt-rt/riva/engine.py` — current RT engine
-- `docker-compose.riva.yml` — Riva overlay (unchanged by this milestone)
 - Riva Python client docs: `riva.client.ASRService.streaming_recognize()`

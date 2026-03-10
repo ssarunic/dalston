@@ -6,7 +6,7 @@
 | **Duration** | 1-2 weeks |
 | **Dependencies** | M63 |
 | **Primary Deliverable** | Unified `EngineRegistry` with dual-read/dual-write migration and clean cutover |
-| **Status** | Complete (phases 0-2); phase 3 cutover tracked by M69 |
+| **Status** | Complete (all phases, including M69 cutover) |
 
 ## Outcomes
 
@@ -172,11 +172,12 @@ pytest -m integration
 - **Writer mode gating**: In `unified` mode, legacy writes are skipped (batch
   runner and RT runner only write to unified registry).
 
-### Remaining (tracked by M69)
+### Phase 3 (complete — M69)
 
-- Phase 3 cutover: remove legacy registry code, bridge converters, and
-  migration config after production parity window. See
-  `docs/plan/milestones/M69-legacy-registry-removal.md`.
+- Legacy registry files (`engine_sdk/registry.py`, `realtime_sdk/registry.py`) deleted.
+- `BatchEngineState`, `WorkerState`, and bridge converters removed from all consumers.
+- Migration config flags (`DALSTON_ENGINE_REGISTRY_MODE`, `DALSTON_REGISTRY_UNIFIED_READ_ENABLED`) removed from `dalston/config.py`.
+- `orchestrator/registry.py` is now a thin re-export of `UnifiedEngineRegistry`.
 
 ## References
 

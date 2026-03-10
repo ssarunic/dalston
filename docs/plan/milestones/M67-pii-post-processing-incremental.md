@@ -6,7 +6,7 @@
 | **Duration** | 1 week |
 | **Dependencies** | M63 |
 | **Primary Deliverable** | `PostProcessor` flow and `pii_mode` rollout (`pipeline` vs `post_process`) |
-| **Status** | Proposed |
+| **Status** | Complete |
 
 ## Outcomes
 
@@ -133,6 +133,23 @@ pytest -m integration
 - Post-process mode delivers equivalent redaction outcomes.
 - No API break for existing consumers.
 - Operational performance improves for core completion path where enabled.
+
+## Implementation Status
+
+### Complete
+
+- **`dalston/orchestrator/post_processor.py`**: `PostProcessor` module with
+  `needs_post_processing()`, `build_post_processing_tasks()`,
+  `schedule_post_processing()`, `check_post_processing_completion()`, and
+  `is_post_processing_task()`.
+- **Core DAG updated**: `dalston/orchestrator/dag.py` — PII stages (`pii_detect`,
+  `audio_redact`) removed from main pipeline DAG. Mono pipeline is now
+  `prepare → transcribe → [align] → [diarize]`.
+- **Post-processing engines wired**: `DEFAULT_ENGINES` retains `"pii_detect":
+  "pii-presidio"` and `"audio_redact": "audio-redactor"` for post-processing
+  dispatch. Pipeline mode (`pii_mode=pipeline`) is no longer the default.
+- Note: the `DALSTON_PII_MODE` flag was not implemented as a runtime toggle;
+  post-process mode is the sole path.
 
 ## References
 

@@ -6,7 +6,7 @@
 | **Duration** | 2 weeks |
 | **Dependencies** | M63, M64, M66, M67 |
 | **Primary Deliverable** | Core flow `prepare -> transcribe -> [align] -> [diarize]` with merge removed and deterministic terminal stage handling |
-| **Status** | Proposed |
+| **Status** | Partial — mono pipeline is linear (merge eliminated); per-channel pipelines still use merge |
 
 ## Outcomes
 
@@ -146,6 +146,22 @@ pytest -m e2e
 - Merge is removed from core mono pipeline without output regressions.
 - Align still runs where native timestamp precision is insufficient.
 - Operational complexity and failure surface of DAG/merge flow is reduced.
+
+## Implementation Status
+
+### Partial
+
+**Mono pipeline (complete):** `dalston/orchestrator/dag.py` — the default mono
+pipeline is `prepare → transcribe → [align] → [diarize]` with no merge stage.
+The orchestrator assembles `transcript.json` on job completion directly from the
+terminal stage output. `DALSTON_LINEAR_PIPELINE_ENABLED` and
+`DALSTON_MERGE_ENGINE_ENABLED` flags were not added; linear behavior is
+hardcoded for the mono path.
+
+**Per-channel pipeline (remaining):** Per-channel pipelines retain a merge
+stage. Merge wiring in `dag.py` (lines handling per-channel fan-in) is still
+present. Removing merge from the per-channel path is the remaining scope of
+this milestone.
 
 ## References
 
