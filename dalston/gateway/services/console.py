@@ -255,9 +255,9 @@ class ConsoleService:
         else:
             query = query.order_by(JobModel.created_at.desc(), JobModel.id.desc())
 
-        query = query.limit(limit + 1)
+        query = query.options(selectinload(JobModel.tasks)).limit(limit + 1)
         result = await db.execute(query)
-        orm_jobs = list(result.scalars().all())
+        orm_jobs = list(result.scalars().unique().all())
 
         has_more = len(orm_jobs) > limit
         if has_more:
@@ -269,9 +269,7 @@ class ConsoleService:
                 id=job.id,
                 status=job.status,
                 display_name=job.display_name,
-                model=job.parameters.get("engine_transcribe")
-                if job.parameters
-                else None,
+                model=self._resolve_model_display(job),
                 audio_uri=job.audio_uri,
                 created_at=job.created_at,
                 started_at=job.started_at,
@@ -567,6 +565,51 @@ class ConsoleService:
                 else None
             ),
         )
+
+    @staticmethod
+    def _resolve_model_display(job: JobModel) -> str | None:
+        """Resolve the model display string for a job.
+
+        Precedence:
+        1. Explicit engine_transcribe parameter → use as-is
+        2. Auto-selected via orchestrator → "Auto (<selected engine>)"
+        3. Pending/running with no selection yet → "Auto (pending selection)"
+        4. Fallback → "Auto"
+        """
+        # Explicit model selection
+        explicit = job.parameters.get("engine_transcribe") if job.parameters else None
+        if explicit:
+            return explicit
+
+        # Look for orchestrator-selected engine from transcribe task
+        transcribe_task = None
+        for task in job.tasks:
+            if task.stage == "transcribe":
+                transcribe_task = task
+                break
+        if transcribe_task is None:
+            for task in job.tasks:
+                if task.stage.startswith("transcribe_ch"):
+                    transcribe_task = task
+                    break
+
+        if transcribe_task is not None:
+            # Prefer runtime_model_id from task config
+            runtime_model_id = (
+                transcribe_task.config.get("runtime_model_id")
+                if transcribe_task.config
+                else None
+            )
+            if runtime_model_id:
+                return f"Auto ({runtime_model_id})"
+            if transcribe_task.runtime:
+                return f"Auto ({transcribe_task.runtime})"
+
+        # No transcribe task yet — check if job is still in progress
+        if job.status in ("pending", "running"):
+            return "Auto (pending selection)"
+
+        return "Auto"
 
     def _encode_job_cursor(self, job: JobModel) -> str:
         """Encode a job into a pagination cursor."""
