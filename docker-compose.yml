@@ -711,6 +711,138 @@ services:
     profiles: [gpu]
     restart: unless-stopped
 
+  # ============================================================
+  # M72: INFERENCE SERVERS (sidecar pattern)
+  # ============================================================
+  # Standalone GPU containers that own model lifecycle.
+  # Batch and RT engines connect as thin gRPC clients.
+
+  # Faster-whisper inference server (GPU, persistent)
+  faster-whisper-server:
+    image: dalston/faster-whisper-server:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-server/faster-whisper/Dockerfile
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_SERVER_PORT: 50052
+      DALSTON_MAX_CONCURRENT: 4
+      DALSTON_DEFAULT_MODEL_ID: large-v3-turbo
+      DALSTON_MODEL_PRELOAD: large-v3-turbo
+    ports:
+      - "50052:50052"
+    volumes:
+      - model-cache:/models
+    deploy: *gpu-deploy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; ch=grpc.insecure_channel('localhost:50052'); grpc.channel_ready_future(ch).result(timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+    profiles: [gpu, sidecar]
+    restart: unless-stopped
+
+  # Parakeet inference server (GPU, persistent)
+  parakeet-server:
+    image: dalston/parakeet-server:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-server/parakeet/Dockerfile
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_SERVER_PORT: 50053
+      DALSTON_MAX_CONCURRENT: 4
+      DALSTON_DEFAULT_MODEL_ID: nvidia/parakeet-tdt-1.1b
+      DALSTON_MODEL_PRELOAD: nvidia/parakeet-tdt-1.1b
+    ports:
+      - "50053:50053"
+    volumes:
+      - model-cache:/models
+    deploy: *gpu-deploy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; ch=grpc.insecure_channel('localhost:50053'); grpc.channel_ready_future(ch).result(timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+    profiles: [gpu, sidecar]
+    restart: unless-stopped
+
+  # M72: Thin batch adapter for faster-whisper (CPU, sidecar mode)
+  stt-batch-transcribe-faster-whisper-sidecar:
+    image: dalston/stt-batch-transcribe-faster-whisper:2.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-transcribe/faster-whisper/Dockerfile
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_RUNTIME: faster-whisper
+      DALSTON_WORKER_ID: fwhisper-batch-sidecar-1
+      DALSTON_INFERENCE_URI: faster-whisper-server:50052
+    depends_on:
+      <<: *batch-depends
+      faster-whisper-server:
+        condition: service_healthy
+    profiles: [sidecar]
+    restart: unless-stopped
+
+  # M72: Thin RT adapter for faster-whisper (CPU, sidecar mode)
+  stt-rt-faster-whisper-sidecar:
+    image: dalston/stt-rt-faster-whisper:2.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-rt/faster-whisper/Dockerfile
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_INSTANCE: stt-rt-faster-whisper-sidecar
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 4
+      DALSTON_INFERENCE_URI: faster-whisper-server:50052
+    depends_on:
+      <<: *realtime-depends
+      faster-whisper-server:
+        condition: service_healthy
+    healthcheck: *ws-healthcheck
+    profiles: [sidecar]
+    restart: unless-stopped
+
+  # M72: Thin batch adapter for parakeet (CPU, sidecar mode)
+  stt-batch-transcribe-parakeet-sidecar:
+    image: dalston/stt-batch-transcribe-parakeet:2.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-transcribe/parakeet/Dockerfile
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_RUNTIME: nemo
+      DALSTON_WORKER_ID: parakeet-batch-sidecar-1
+      DALSTON_INFERENCE_URI: parakeet-server:50053
+    depends_on:
+      <<: *batch-depends
+      parakeet-server:
+        condition: service_healthy
+    profiles: [sidecar]
+    restart: unless-stopped
+
+  # M72: Thin RT adapter for parakeet (CPU, sidecar mode)
+  stt-rt-parakeet-sidecar:
+    image: dalston/stt-rt-parakeet:2.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-rt/parakeet/Dockerfile
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_INSTANCE: stt-rt-parakeet-sidecar
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 4
+      DALSTON_INFERENCE_URI: parakeet-server:50053
+    depends_on:
+      <<: *realtime-depends
+      parakeet-server:
+        condition: service_healthy
+    healthcheck: *ws-healthcheck
+    profiles: [sidecar]
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   redis-data:

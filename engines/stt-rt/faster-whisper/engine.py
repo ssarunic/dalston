@@ -65,13 +65,19 @@ class WhisperStreamingEngine(RealtimeEngine):
     def load_models(self) -> None:
         """Initialize shared TranscribeCore with optional preloading.
 
-        If a TranscribeCore was injected via __init__, this method uses it
-        instead of creating a new one. This is how the unified runner shares
-        a single model instance between batch and RT adapters.
+        Three modes:
+        1. Injected core (unified runner) — use it directly
+        2. DALSTON_INFERENCE_URI set — sidecar mode, gRPC to inference server
+        3. Neither — standalone mode, create own TranscribeCore
         """
         if self._core is None:
-            # Standalone mode — create own core
-            self._core = TranscribeCore.from_env()
+            inference_uri = os.environ.get("DALSTON_INFERENCE_URI")
+            if inference_uri:
+                from dalston.engine_sdk.cores.remote_core import RemoteTranscribeCore
+
+                self._core = RemoteTranscribeCore(inference_uri)
+            else:
+                self._core = TranscribeCore.from_env()
 
         # Wrap the core's manager in AsyncModelManager for heartbeat reporting
         self._model_manager = AsyncModelManager(self._core.manager)
@@ -81,10 +87,11 @@ class WhisperStreamingEngine(RealtimeEngine):
             max_loaded=self._core.manager.max_loaded,
             ttl_seconds=self._core.manager.ttl_seconds,
             device=self._core.device,
-            compute_type=self._core.compute_type,
+            compute_type=getattr(self._core, "compute_type", "remote"),
             preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
-            s3_storage_enabled=self._core.manager.model_storage is not None,
+            s3_storage_enabled=getattr(self._core.manager, "model_storage", None) is not None,
             shared_core=self._core is not None,
+            sidecar_mode=os.environ.get("DALSTON_INFERENCE_URI") is not None,
         )
 
     def transcribe(

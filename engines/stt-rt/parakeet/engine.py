@@ -76,13 +76,19 @@ class ParakeetStreamingEngine(RealtimeEngine):
     def load_models(self) -> None:
         """Initialize ParakeetCore with optional preloading.
 
-        If a ParakeetCore was injected via __init__, this method uses it
-        instead of creating a new one. This is how the unified runner shares
-        a single model instance between batch and RT adapters.
+        Three modes:
+        1. Injected core (unified runner) — use it directly
+        2. DALSTON_INFERENCE_URI set — sidecar mode, gRPC to inference server
+        3. Neither — standalone mode, create own ParakeetCore
         """
         if self._core is None:
-            # Standalone mode — create own core
-            self._core = ParakeetCore.from_env()
+            inference_uri = os.environ.get("DALSTON_INFERENCE_URI")
+            if inference_uri:
+                from dalston.engine_sdk.cores.remote_core import RemoteTranscribeCore
+
+                self._core = RemoteTranscribeCore(inference_uri)
+            else:
+                self._core = ParakeetCore.from_env()
 
         # Wrap the core's manager in AsyncModelManager for heartbeat reporting
         self._model_manager = AsyncModelManager(self._core.manager)
@@ -94,6 +100,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
             device=self._core.device,
             preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
             shared_core=self._core is not None,
+            sidecar_mode=os.environ.get("DALSTON_INFERENCE_URI") is not None,
         )
 
     def transcribe(

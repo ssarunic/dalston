@@ -1,0 +1,5 @@
+grpcio>=1.60.0
+grpcio-tools>=1.60.0
+faster-whisper>=1.0.0
+numpy>=1.24.0
+structlog>=23.1.0

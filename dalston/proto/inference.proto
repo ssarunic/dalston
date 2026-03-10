@@ -1,0 +1,71 @@
+syntax = "proto3";
+package dalston.inference;
+
+service InferenceService {
+  // Synchronous transcription — batch and RT both use this.
+  // RT sends VAD-segmented utterance audio; batch sends full file audio.
+  rpc Transcribe(TranscribeRequest) returns (TranscribeResponse);
+
+  // Health and model info
+  rpc GetStatus(StatusRequest) returns (StatusResponse);
+}
+
+message TranscribeRequest {
+  bytes audio = 1;                // Raw audio bytes
+  AudioFormat format = 2;         // How to interpret the bytes
+  string model_id = 3;            // Model to use (e.g. "large-v3-turbo")
+  TranscribeConfig config = 4;    // Transcription parameters
+}
+
+enum AudioFormat {
+  PCM_S16LE_16K = 0;              // 16-bit signed LE, 16kHz mono
+  PCM_F32LE_16K = 1;              // 32-bit float LE, 16kHz mono
+  FILE = 2;                       // Encoded file (wav, mp3, etc.) — batch
+}
+
+message TranscribeConfig {
+  optional string language = 1;
+  int32 beam_size = 2;
+  bool vad_filter = 3;
+  bool word_timestamps = 4;
+  float temperature = 5;
+  string task = 6;                // "transcribe" or "translate"
+  optional string initial_prompt = 7;
+  optional string hotwords = 8;
+}
+
+message TranscribeResponse {
+  repeated Segment segments = 1;
+  string language = 2;
+  float language_probability = 3;
+  float duration = 4;
+}
+
+message Segment {
+  float start = 1;
+  float end = 2;
+  string text = 3;
+  repeated Word words = 4;
+  float confidence = 5;
+  optional float avg_logprob = 6;
+  optional float compression_ratio = 7;
+  optional float no_speech_prob = 8;
+}
+
+message Word {
+  string word = 1;
+  float start = 2;
+  float end = 3;
+  float probability = 4;
+}
+
+message StatusRequest {}
+
+message StatusResponse {
+  string runtime = 1;             // "faster-whisper" or "parakeet"
+  string device = 2;              // "cuda" or "cpu"
+  repeated string loaded_models = 3;
+  int32 total_capacity = 4;
+  int32 available_capacity = 5;
+  bool healthy = 6;
+}

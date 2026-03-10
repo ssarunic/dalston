@@ -72,18 +72,29 @@ class WhisperEngine(Engine):
         )
         self._runtime = os.environ.get("DALSTON_RUNTIME", "faster-whisper")
 
-        # Use injected core (unified runner) or create own (standalone)
-        self._core = core if core is not None else TranscribeCore.from_env()
+        # Three modes:
+        # 1. Injected core (unified runner) — use it directly
+        # 2. DALSTON_INFERENCE_URI set — sidecar mode, gRPC to inference server
+        # 3. Neither — standalone mode, create own TranscribeCore
+        if core is not None:
+            self._core = core
+        else:
+            inference_uri = os.environ.get("DALSTON_INFERENCE_URI")
+            if inference_uri:
+                from dalston.engine_sdk.cores.remote_core import RemoteTranscribeCore
+
+                self._core = RemoteTranscribeCore(inference_uri)
+            else:
+                self._core = TranscribeCore.from_env()
 
         self.logger.info(
             "engine_init",
             runtime=self._runtime,
             default_model=self._default_model_id,
             device=self._core.device,
-            compute_type=self._core.compute_type,
-            ttl_seconds=self._core.manager.ttl_seconds,
-            max_loaded=self._core.manager.max_loaded,
+            compute_type=getattr(self._core, "compute_type", "remote"),
             shared_core=core is not None,
+            sidecar_mode=os.environ.get("DALSTON_INFERENCE_URI") is not None,
         )
 
     def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:

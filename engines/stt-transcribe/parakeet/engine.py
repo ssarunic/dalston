@@ -92,7 +92,21 @@ class ParakeetEngine(Engine):
                   runner shares a single model between batch and RT adapters.
         """
         super().__init__()
-        self._core = core if core is not None else ParakeetCore.from_env()
+
+        # Three modes:
+        # 1. Injected core (unified runner) — use it directly
+        # 2. DALSTON_INFERENCE_URI set — sidecar mode, gRPC to inference server
+        # 3. Neither — standalone mode, create own ParakeetCore
+        if core is not None:
+            self._core = core
+        else:
+            inference_uri = os.environ.get("DALSTON_INFERENCE_URI")
+            if inference_uri:
+                from dalston.engine_sdk.cores.remote_core import RemoteTranscribeCore
+
+                self._core = RemoteTranscribeCore(inference_uri)
+            else:
+                self._core = ParakeetCore.from_env()
 
         # Get default model from environment, with fallback to class default
         self._default_model_id = os.environ.get(
@@ -108,6 +122,7 @@ class ParakeetEngine(Engine):
             default_model=self._default_model_id,
             device=self._core.device,
             shared_core=core is not None,
+            sidecar_mode=os.environ.get("DALSTON_INFERENCE_URI") is not None,
         )
 
     def _normalize_model_id(self, runtime_model_id: str) -> str:
