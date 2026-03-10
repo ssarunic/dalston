@@ -50,6 +50,14 @@ from dalston.orchestrator.exceptions import (
     EngineCapabilityError,
     EngineUnavailableError,
 )
+from dalston.orchestrator.post_processor import (
+    EnrichmentStatus,
+    check_post_processing_completion,
+    is_post_processing_task,
+    mark_enrichment_status,
+    needs_post_processing,
+    schedule_post_processing,
+)
 from dalston.orchestrator.scheduler import (
     get_task_output,
     queue_task,
@@ -488,6 +496,23 @@ async def handle_task_completed(
             _get_runtime_execution_profile(task.runtime),
         )
 
+    # M67: Track post-processing enrichment status.
+    # Only mark COMPLETED if the task actually completed (not SKIPPED from failure).
+    if is_post_processing_task(task) and task.status == TaskStatus.COMPLETED.value:
+        await mark_enrichment_status(
+            job_id, task.stage, EnrichmentStatus.COMPLETED, redis
+        )
+        all_enrichments_done = await check_post_processing_completion(job_id, db, redis)
+        if all_enrichments_done:
+            log.info("post_processing_complete")
+            # Update transcript with PII results
+            from dalston.orchestrator.post_processor import update_transcript_with_pii
+
+            try:
+                await update_transcript_with_pii(job_id, db, settings)
+            except Exception as e:
+                log.error("transcript_pii_update_failed", error=str(e))
+
     # Update job audio_duration from prepare stage output if not already set
     # This handles enhancement jobs that don't have duration set at creation time
     if task.stage == "prepare":
@@ -622,7 +647,7 @@ async def handle_task_completed(
             )
 
     # 5. Check if job is complete
-    await _check_job_completion(job_id, db, redis)
+    await _check_job_completion(job_id, db, redis, settings, registry)
 
 
 async def handle_task_failed(
@@ -796,6 +821,17 @@ async def handle_task_failed(
         await db.commit()
 
         log.info("skipped_optional_task")
+
+        # M67: Track post-processing enrichment failure
+        if is_post_processing_task(task):
+            await mark_enrichment_status(
+                job_id, task.stage, EnrichmentStatus.FAILED, redis
+            )
+            log.warning(
+                "post_processing_enrichment_failed",
+                stage=task.stage,
+                error=error,
+            )
 
         # Treat as completed for dependency purposes
         await handle_task_completed(task_id, db, redis, settings, registry)
@@ -1181,13 +1217,25 @@ async def _populate_job_result_stats(job: JobModel, log) -> None:
         )
 
 
-async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) -> None:
+async def _check_job_completion(
+    job_id: UUID,
+    db: AsyncSession,
+    redis: Redis,
+    settings: Settings,
+    registry: UnifiedEngineRegistry | None = None,
+) -> None:
     """Check if all tasks are done and mark job as completed.
+
+    When the job has PII detection enabled, this also schedules
+    asynchronous post-processing enrichment tasks after the core
+    pipeline completes.
 
     Args:
         job_id: Job UUID to check
         db: Database session
         redis: Redis client for publishing webhook events
+        settings: Application settings
+        registry: Engine registry (needed for post-processing scheduling)
     """
     log = logger.bind(job_id=str(job_id))
 
@@ -1195,28 +1243,41 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
     result = await db.execute(select(TaskModel).where(TaskModel.job_id == job_id))
     all_tasks = list(result.scalars().all())
 
-    # Check if all tasks are in a terminal state
+    # Separate pipeline tasks from post-processing tasks
+    pipeline_tasks = [t for t in all_tasks if not is_post_processing_task(t)]
+    post_proc_tasks = [t for t in all_tasks if is_post_processing_task(t)]
+
+    # Check if all pipeline tasks are in a terminal state
     terminal_states = {
         TaskStatus.COMPLETED.value,
         TaskStatus.SKIPPED.value,
         TaskStatus.FAILED.value,
     }
 
-    all_done = all(t.status in terminal_states for t in all_tasks)
+    all_done = all(t.status in terminal_states for t in pipeline_tasks)
 
     if not all_done:
-        pending_stages = [t.stage for t in all_tasks if t.status not in terminal_states]
+        pending_stages = [
+            t.stage for t in pipeline_tasks if t.status not in terminal_states
+        ]
         log.debug("job_not_complete_yet", pending_stages=pending_stages)
         return
 
-    # Check if any required task failed
+    # Check if any required pipeline task failed
     any_failed = any(
-        t.status == TaskStatus.FAILED.value and t.required for t in all_tasks
+        t.status == TaskStatus.FAILED.value and t.required for t in pipeline_tasks
     )
 
     job_result = await db.execute(select(JobModel).where(JobModel.id == job_id))
     job = job_result.scalar_one_or_none()
     if job is None:
+        return
+
+    # If job is already completed (e.g. post-processing tasks finishing),
+    # just check post-processing completion status
+    if job.status == JobStatus.COMPLETED.value:
+        if post_proc_tasks:
+            log.debug("post_processing_task_completed_checking_enrichments")
         return
 
     if any_failed:
@@ -1250,7 +1311,7 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
         if job.started_at:
             duration = (datetime.now(UTC) - job.started_at).total_seconds()
             transcribe_task = next(
-                (t for t in all_tasks if t.stage == "transcribe"), None
+                (t for t in pipeline_tasks if t.stage == "transcribe"), None
             )
             job_runtime = transcribe_task.runtime if transcribe_task else ""
             job_model = (job.parameters or {}).get("model", "")
@@ -1285,6 +1346,17 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
         await publish_job_failed(redis, job_id, job.error or "Unknown error")
     else:
         await publish_job_completed(redis, job_id)
+
+    # M67: Schedule post-processing enrichments if needed
+    if not any_failed and needs_post_processing(job):
+        if registry is None:
+            log.warning("post_processing_skipped_no_registry")
+            return
+        try:
+            await schedule_post_processing(job, db, redis, settings, registry)
+        except Exception as e:
+            # Post-processing failure should not affect the completed job
+            log.error("post_processing_scheduling_failed", error=str(e))
 
 
 async def handle_job_cancel_requested(

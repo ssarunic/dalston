@@ -15,3 +15,11 @@ DEFAULT_TASK_MAX_RETRIES = 2  # max retry attempts before task fails permanently
 
 DEFAULT_PII_CONFIDENCE_THRESHOLD = 0.5  # minimum confidence to flag as PII
 DEFAULT_PII_BUFFER_MS = 50  # audio buffer around PII for redaction (milliseconds)
+
+# =============================================================================
+# PII Post-Processing (M67)
+# =============================================================================
+
+# Post-processing retry limits
+POST_PROCESSOR_MAX_RETRIES = 2
+POST_PROCESSOR_RETRY_DELAY_SECONDS = 5
