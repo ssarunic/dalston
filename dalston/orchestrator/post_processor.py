@@ -6,18 +6,20 @@ schedules them asynchronously.
 
 Enrichment ordering:  ``pii_detect -> audio_redact``
 
-The PostProcessor creates new tasks on the existing job, wires their
+The module creates new tasks on the existing job, wires their
 dependencies, and queues them through the standard scheduler.  Task
 completion follows the same ``handle_task_completed`` path as pipeline
 tasks, but the job is already in COMPLETED state so an additional
-``_check_post_processing_completion`` callback finalises the enrichment
+``check_post_processing_completion`` callback finalises the enrichment
 metadata on the job row.
 """
 
 from __future__ import annotations
 
+import json
+import re
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 import structlog
@@ -25,12 +27,19 @@ from sqlalchemy import select
 
 from dalston.common.artifacts import ArtifactSelector, InputBinding
 from dalston.common.models import Task, TaskStatus
-from dalston.orchestrator.dag import DEFAULT_ENGINES, VALID_PII_REDACTION_MODES
+from dalston.orchestrator.dag import DEFAULT_ENGINES
 from dalston.orchestrator.defaults import (
     DEFAULT_PII_BUFFER_MS,
     DEFAULT_PII_CONFIDENCE_THRESHOLD,
     POST_PROCESSOR_MAX_RETRIES,
 )
+
+# Valid PII redaction modes
+VALID_PII_REDACTION_MODES = {"silence", "beep"}
+
+# Matches core pipeline stages that feed PII detect, including per-channel
+# variants (e.g. transcribe_ch0, align_ch1, diarize_ch2).
+_PII_INPUT_STAGE_RE = re.compile(r"^(transcribe|align|diarize)(_ch\d+)?$")
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
@@ -58,6 +67,9 @@ _ENRICHMENT_KEY_PREFIX = "dalston:job:{job_id}:enrichments"
 
 def needs_post_processing(job: JobModel) -> bool:
     """Check if a completed job requires post-processing enrichments.
+
+    PII detection and audio redaction always run via post-processing
+    (never as pipeline stages).
 
     Args:
         job: The completed job model.
@@ -186,7 +198,16 @@ async def schedule_post_processing(
 
     log = logger.bind(job_id=str(job.id))
 
-    tasks = build_post_processing_tasks(job)
+    # Resolve runtime_model_id for PII detection from job parameters
+    params = job.parameters or {}
+    stage_runtime_model_ids: dict[str, str] = {}
+    model_pii = params.get("model_pii_detect")
+    if model_pii:
+        stage_runtime_model_ids["pii_detect"] = model_pii
+
+    tasks = build_post_processing_tasks(
+        job, stage_runtime_model_ids=stage_runtime_model_ids
+    )
     if not tasks:
         return []
 
@@ -251,12 +272,11 @@ async def schedule_post_processing(
     all_tasks_models = list(all_tasks_result.scalars().all())
     task_by_id = {t.id: t for t in all_tasks_models}
 
-    # Find completed pipeline tasks that would feed PII detect
-    pipeline_stages = {"transcribe", "align", "diarize"}
+    # Find completed pipeline tasks that would feed PII detect.
     pipeline_dep_ids = [
         t.id
         for t in all_tasks_models
-        if t.stage in pipeline_stages and t.status == TaskStatus.COMPLETED.value
+        if _PII_INPUT_STAGE_RE.match(t.stage) and t.status == TaskStatus.COMPLETED.value
     ]
 
     previous_outputs = await _gather_previous_outputs(
@@ -309,10 +329,12 @@ async def check_post_processing_completion(
     if not enrichments:
         return True
 
+    terminal_statuses = {
+        EnrichmentStatus.COMPLETED.value,
+        EnrichmentStatus.FAILED.value,
+    }
     all_done = all(
-        v.decode()
-        if isinstance(v, bytes)
-        else v in (EnrichmentStatus.COMPLETED.value, EnrichmentStatus.FAILED.value)
+        (v.decode() if isinstance(v, bytes) else v) in terminal_statuses
         for v in enrichments.values()
     )
 
@@ -344,3 +366,142 @@ def is_post_processing_task(task: TaskModel) -> bool:
     """
     config = task.config if isinstance(task.config, dict) else {}
     return bool(config.get("post_processing", False))
+
+
+async def update_transcript_with_pii(
+    job_id: UUID,
+    db: AsyncSession,
+    settings: Settings,
+) -> None:
+    """Patch the job's transcript.json with PII detection/redaction outputs.
+
+    Called when all post-processing enrichments complete successfully.
+    Reads the ``pii_detect`` task output and merges ``redacted_text``,
+    ``pii_entities``, and ``pii_metadata`` into the existing transcript.
+
+    If ``audio_redact`` also completed, its ``redaction_map`` and
+    ``redacted_audio_artifact_id`` are included in ``pii_metadata``.
+
+    Args:
+        job_id: Job UUID.
+        db: Database session.
+        settings: Application settings (for S3 access).
+    """
+    from dalston.common.s3 import get_s3_client
+    from dalston.db.models import TaskModel
+    from dalston.orchestrator.scheduler import get_task_output
+
+    log = logger.bind(job_id=str(job_id))
+
+    # Find post-processing tasks
+    result = await db.execute(select(TaskModel).where(TaskModel.job_id == job_id))
+    all_tasks = list(result.scalars().all())
+
+    pii_detect_task = next(
+        (
+            t
+            for t in all_tasks
+            if t.stage == "pii_detect"
+            and is_post_processing_task(t)
+            and t.status == TaskStatus.COMPLETED.value
+        ),
+        None,
+    )
+
+    if pii_detect_task is None:
+        log.debug("no_completed_pii_detect_task_for_transcript_update")
+        return
+
+    # Load PII detect output
+    pii_output = await get_task_output(
+        job_id=job_id,
+        task_id=pii_detect_task.id,
+        settings=settings,
+    )
+    if not pii_output or "data" not in pii_output:
+        log.warning("pii_detect_output_missing_or_empty")
+        return
+
+    pii_data: dict[str, Any] = pii_output["data"]
+
+    # Load audio redact output if available
+    audio_redact_task = next(
+        (
+            t
+            for t in all_tasks
+            if t.stage == "audio_redact"
+            and is_post_processing_task(t)
+            and t.status == TaskStatus.COMPLETED.value
+        ),
+        None,
+    )
+
+    redact_data: dict[str, Any] = {}
+    if audio_redact_task is not None:
+        redact_output = await get_task_output(
+            job_id=job_id,
+            task_id=audio_redact_task.id,
+            settings=settings,
+        )
+        if redact_output and "data" in redact_output:
+            redact_data = redact_output["data"]
+
+    # Load existing transcript, merge PII outputs, and write back
+    transcript_key = f"jobs/{job_id}/transcript.json"
+    try:
+        async with get_s3_client(settings) as s3:
+            response = await s3.get_object(
+                Bucket=settings.s3_bucket, Key=transcript_key
+            )
+            body = await response["Body"].read()
+            transcript = json.loads(body.decode("utf-8"))
+
+            # Merge PII outputs into transcript
+            if "redacted_text" in pii_data:
+                transcript["redacted_text"] = pii_data["redacted_text"]
+            if "pii_entities" in pii_data:
+                transcript["pii_entities"] = pii_data["pii_entities"]
+
+            # Build pii_metadata
+            pii_metadata: dict[str, Any] = {
+                "detection_engine": pii_detect_task.runtime,
+                "entities_detected": len(pii_data.get("pii_entities", [])),
+            }
+            if redact_data:
+                pii_metadata["audio_redacted"] = True
+                if "redaction_map" in redact_data:
+                    pii_metadata["redaction_map"] = redact_data["redaction_map"]
+                if "redacted_audio_artifact_id" in redact_data:
+                    pii_metadata["redacted_audio_artifact_id"] = redact_data[
+                        "redacted_audio_artifact_id"
+                    ]
+                if "entities_redacted" in redact_data:
+                    pii_metadata["entities_redacted"] = redact_data["entities_redacted"]
+            transcript["pii_metadata"] = pii_metadata
+
+            # Write updated transcript back to S3
+            await s3.put_object(
+                Bucket=settings.s3_bucket,
+                Key=transcript_key,
+                Body=json.dumps(transcript, ensure_ascii=False).encode("utf-8"),
+                ContentType="application/json",
+            )
+
+        log.info(
+            "transcript_updated_with_pii",
+            entities_detected=pii_metadata["entities_detected"],
+            audio_redacted=pii_metadata.get("audio_redacted", False),
+        )
+    except Exception as e:
+        log.error("transcript_pii_update_failed", error=str(e))
+        return
+
+    # Update job-level PII fields
+    from dalston.db.models import JobModel
+
+    job = await db.get(JobModel, job_id)
+    if job:
+        job.pii_entities_detected = pii_metadata["entities_detected"]
+        if "redacted_audio_artifact_id" in pii_metadata:
+            job.pii_redacted_audio_uri = pii_metadata["redacted_audio_artifact_id"]
+        await db.commit()

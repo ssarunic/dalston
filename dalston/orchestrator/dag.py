@@ -74,7 +74,6 @@ DEFAULT_ENGINES = {
     "merge": "final-merger",
 }
 
-# Valid PII redaction modes
 VALID_PII_REDACTION_MODES = {"silence", "beep"}
 
 # Default transcription config
@@ -104,7 +103,7 @@ async def build_task_dag(
 ) -> list[Task]:
     """Build a task DAG for a job using capability-driven engine selection.
 
-    Creates a pipeline with optional speaker detection:
+    Creates a core pipeline with optional speaker detection:
 
     Mode: none (default)
         prepare → transcribe → [align]
@@ -508,7 +507,6 @@ def _build_per_channel_dag_with_engines(
     parameters = parameters or {}
     stage_runtime_model_ids = stage_runtime_model_ids or {}
     all_channel_tasks: list[Task] = []
-    last_channel_tasks: list[Task] = []
 
     for channel in range(num_channels):
         channel_transcribe_config = {
@@ -534,8 +532,6 @@ def _build_per_channel_dag_with_engines(
         tasks.append(transcribe_task)
         all_channel_tasks.append(transcribe_task)
 
-        last_task = transcribe_task
-
         # Alignment task for this channel
         if word_timestamps and not skip_alignment:
             align_config = {"word_timestamps": True, "channel": channel}
@@ -558,9 +554,6 @@ def _build_per_channel_dag_with_engines(
             )
             tasks.append(align_task)
             all_channel_tasks.append(align_task)
-            last_task = align_task
-
-        last_channel_tasks.append(last_task)
 
     # Merge depends on prepare and all per-channel tasks
     merge_dependencies = [prepare_task.id] + [t.id for t in all_channel_tasks]
