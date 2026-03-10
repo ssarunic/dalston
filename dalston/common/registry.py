@@ -470,9 +470,15 @@ class UnifiedEngineRegistry:
 
             if model is not None:
                 if record.models_loaded and model in record.models_loaded:
-                    pass  # Model loaded
+                    pass  # Model already loaded
                 elif runtime and record.runtime == runtime:
-                    pass  # Runtime matches, can load model
+                    pass  # Runtime matches, can load model dynamically
+                elif (
+                    record.capabilities
+                    and record.capabilities.model_variants
+                    and model in record.capabilities.model_variants
+                ):
+                    pass  # Engine declares model as supported variant
                 else:
                     continue
 

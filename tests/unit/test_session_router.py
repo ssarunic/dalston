@@ -14,6 +14,7 @@ from dalston.orchestrator.realtime_registry import (
     ACTIVE_SESSIONS_KEY,
     INSTANCE_KEY_PREFIX,
     INSTANCE_SESSIONS_SUFFIX,
+    INSTANCE_SET_KEY,
     SESSION_KEY_PREFIX,
 )
 from dalston.orchestrator.session_allocator import (
@@ -568,6 +569,37 @@ class TestSessionAllocator:
         assert result.session_id.startswith("sess_")
         mock_registry.get_available.assert_called_once()
         mock_redis.hincrby.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_acquire_worker_populates_instance_set_key(
+        self, allocator: SessionAllocator, mock_redis, mock_registry
+    ):
+        """INSTANCE_SET_KEY must be populated so orphan reconciliation can find instances."""
+        worker = EngineRecord(
+            instance="worker-1",
+            runtime="faster-whisper",
+            stage="transcribe",
+            interfaces=["realtime"],
+            status="ready",
+            capacity=4,
+            active_realtime=1,
+            endpoint="ws://localhost:9000",
+            last_heartbeat=datetime.now(UTC),
+            registered_at=datetime.now(UTC),
+        )
+        mock_registry.get_available.return_value = [worker]
+        mock_redis.hincrby.return_value = 2
+
+        result = await allocator.acquire_worker(
+            language="en", model=None, client_ip="10.0.0.1"
+        )
+
+        assert result is not None
+        # Verify instance was added to the instance index set
+        sadd_calls = {
+            (call.args[0], call.args[1]) for call in mock_redis.sadd.call_args_list
+        }
+        assert (INSTANCE_SET_KEY, "worker-1") in sadd_calls
 
     @pytest.mark.asyncio
     async def test_acquire_worker_no_capacity(
