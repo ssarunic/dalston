@@ -23,6 +23,7 @@ import dalston.metrics
 import dalston.telemetry
 from dalston.common.artifacts import ArtifactReference
 from dalston.common.durable_events import add_durable_event_sync
+from dalston.common.registry import EngineRecord, UnifiedRegistryWriter
 from dalston.common.streams_sync import (
     STALE_THRESHOLD_MS,
     StreamMessage,
@@ -37,12 +38,10 @@ from dalston.engine_sdk import io
 from dalston.engine_sdk.admission import TaskDeferredError
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.materializer import ArtifactMaterializer, S3ArtifactStore
-from dalston.engine_sdk.registry import BatchEngineInfo, BatchEngineRegistry
 from dalston.engine_sdk.types import EngineInput, EngineOutput
 from dalston.orchestrator.catalog import get_catalog
 
 if TYPE_CHECKING:
-    from dalston.common.registry import UnifiedRegistryWriter
     from dalston.engine_sdk.base import Engine
 
 
@@ -115,7 +114,6 @@ class EngineRunner:
         """
         self.engine = engine
         self._redis: redis.Redis | None = None
-        self._registry: BatchEngineRegistry | None = None
         self._unified_writer: UnifiedRegistryWriter | None = None
         self._running = False
         self._metrics_server: HTTPServer | None = None
@@ -194,58 +192,29 @@ class EngineRunner:
         # Get stage from capabilities (derived from engine.yaml) or fallback to "unknown"
         self._stage = capabilities.stages[0] if capabilities.stages else "unknown"
 
-        # M64: Registry mode determines which registries receive writes
-        registry_mode = os.environ.get("DALSTON_ENGINE_REGISTRY_MODE", "legacy")
-
-        # Legacy registration (legacy and dual modes only)
-        if registry_mode in ("legacy", "dual"):
-            self._registry = BatchEngineRegistry(self.redis_url)
-            self._registry.register(
-                BatchEngineInfo(
-                    runtime=self.runtime,
-                    instance=self.instance,
-                    stage=self._stage,
-                    stream_name=self.stream_key,
-                    capabilities=capabilities,
-                    execution_profile=self._execution_profile,
-                )
-            )
-
-        # Unified registration (dual and unified modes)
-        if registry_mode in ("dual", "unified"):
-            from dalston.common.registry import (
-                EngineRecord as _EngineRecord,
-            )
-            from dalston.common.registry import (
-                UnifiedRegistryWriter as _UnifiedRegistryWriter,
-            )
-
-            self._unified_writer = _UnifiedRegistryWriter(self.redis_url)
-            self._unified_writer.register(
-                _EngineRecord(
-                    instance=self.instance,
-                    runtime=self.runtime,
-                    stage=self._stage,
-                    status="idle",
-                    interfaces=["batch"],
-                    capacity=1,
-                    stream_name=self.stream_key,
-                    capabilities=capabilities,
-                    execution_profile=self._execution_profile,
-                    languages=capabilities.languages if capabilities else None,
-                    supports_word_timestamps=(
-                        capabilities.supports_word_timestamps if capabilities else False
-                    ),
-                    includes_diarization=(
-                        capabilities.includes_diarization if capabilities else False
-                    ),
-                )
-            )
-            logger.info(
-                "unified_registry_registered",
+        # Register with unified engine registry
+        self._unified_writer = UnifiedRegistryWriter(self.redis_url)
+        self._unified_writer.register(
+            EngineRecord(
                 instance=self.instance,
-                registry_mode=registry_mode,
+                runtime=self.runtime,
+                stage=self._stage,
+                status="idle",
+                interfaces=["batch"],
+                capacity=1,
+                stream_name=self.stream_key,
+                capabilities=capabilities,
+                execution_profile=self._execution_profile,
+                languages=capabilities.languages if capabilities else None,
+                supports_word_timestamps=(
+                    capabilities.supports_word_timestamps if capabilities else False
+                ),
+                includes_diarization=(
+                    capabilities.includes_diarization if capabilities else False
+                ),
             )
+        )
+        logger.info("engine_registered", instance=self.instance)
 
         # Start heartbeat thread to advertise engine status
         self._start_heartbeat_thread()
@@ -283,13 +252,6 @@ class EngineRunner:
     def stop(self) -> None:
         """Stop the processing loop."""
         self._running = False
-        # Unregister from registry for immediate offline status
-        if self._registry:
-            try:
-                self._registry.unregister(self.instance)
-            except Exception:
-                pass  # Best effort cleanup
-        # M64: Deregister from unified registry
         if self._unified_writer:
             try:
                 self._unified_writer.deregister(self.instance)
@@ -361,19 +323,6 @@ class EngineRunner:
                 # otherwise use the engine's reported status (loading/unloading/error/idle)
                 status = "processing" if current_task else engine_status
 
-                # M41: Get local cache stats if available
-                local_cache = self.engine.get_local_cache_stats()
-
-                if self._registry:
-                    self._registry.heartbeat(
-                        instance=self.instance,
-                        status=status,
-                        current_task=current_task,
-                        loaded_model=loaded_model,
-                        local_cache=local_cache,
-                    )
-
-                # M64: Dual-write heartbeat to unified registry
                 if self._unified_writer:
                     try:
                         self._unified_writer.heartbeat(

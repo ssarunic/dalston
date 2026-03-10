@@ -176,26 +176,6 @@ class Settings(BaseSettings):
         description="Default max utterance duration (seconds) before forcing chunk in realtime sessions",
     )
 
-    # Engine Registry Mode (M64: Registry Unification)
-    engine_registry_mode: Literal["legacy", "dual", "unified"] = Field(
-        default="legacy",
-        alias="DALSTON_ENGINE_REGISTRY_MODE",
-        description=(
-            "Engine registry mode for M64 migration. "
-            "'legacy': use separate batch/RT registries (default). "
-            "'dual': write to both legacy and unified registries. "
-            "'unified': use unified registry only."
-        ),
-    )
-    registry_unified_read_enabled: bool = Field(
-        default=False,
-        alias="DALSTON_REGISTRY_UNIFIED_READ_ENABLED",
-        description=(
-            "When True, consumers read from unified registry first with "
-            "legacy fallback. When False, consumers read from legacy only."
-        ),
-    )
-
     # Security Mode (M45)
     security_mode: Literal["none", "api_key", "user"] = Field(
         default="api_key",

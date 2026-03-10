@@ -164,7 +164,7 @@ def test_engine_runner_rejects_non_container_runtime() -> None:
     with (
         patch.object(runner, "_setup_signal_handlers"),
         patch.object(runner, "_start_metrics_server"),
-        patch("dalston.engine_sdk.runner.BatchEngineRegistry", return_value=registry),
+        patch("dalston.engine_sdk.runner.UnifiedRegistryWriter", return_value=registry),
         patch("dalston.engine_sdk.runner.get_catalog", return_value=catalog),
     ):
         with pytest.raises(

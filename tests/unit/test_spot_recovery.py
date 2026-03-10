@@ -577,7 +577,10 @@ class TestStaleEngineCleanup:
 
     @pytest.mark.asyncio
     async def test_cleans_stale_instance_from_set(self, mock_redis, mock_settings):
-        """Test cleanup removes stale instances from instance set."""
+        """Test cleanup removes stale instances from unified instance set."""
+        from dalston.common.registry import (
+            UNIFIED_INSTANCE_SET_KEY,
+        )
         from dalston.orchestrator.reconciler import ReconciliationSweeper
 
         sweeper = ReconciliationSweeper(
@@ -586,28 +589,25 @@ class TestStaleEngineCleanup:
             settings=mock_settings,
         )
 
-        # Setup: one engine with one stale instance (key doesn't exist)
-        mock_redis.smembers.side_effect = [
-            {"faster-whisper"},  # ENGINE_SET_KEY
-            {"faster-whisper-abc123"},  # instances for faster-whisper
-        ]
-        mock_redis.exists.return_value = 0  # Instance key doesn't exist (TTL expired)
-        mock_redis.scard.return_value = 0  # No instances remain after cleanup
+        # Setup: one stale instance (hash key returns empty dict)
+        mock_redis.smembers.return_value = {"faster-whisper-abc123"}
+        mock_redis.hgetall.return_value = {}  # Empty = expired/stale
 
         count = await sweeper._cleanup_stale_engine_entries()
 
         assert count == 1
-        # Should remove stale instance from set
-        mock_redis.srem.assert_any_call(
-            "dalston:batch:runtime:instances:faster-whisper",
+        # Should remove stale instance from unified instance set
+        mock_redis.srem.assert_called_once_with(
+            UNIFIED_INSTANCE_SET_KEY,
             "faster-whisper-abc123",
         )
 
     @pytest.mark.asyncio
-    async def test_removes_runtime_when_no_instances_remain(
+    async def test_stale_instance_removed_from_instance_set(
         self, mock_redis, mock_settings
     ):
-        """Test cleanup removes runtime from main set when no instances remain."""
+        """Test that stale instance is removed from UNIFIED_INSTANCE_SET_KEY."""
+        from dalston.common.registry import UNIFIED_INSTANCE_SET_KEY
         from dalston.orchestrator.reconciler import ReconciliationSweeper
 
         sweeper = ReconciliationSweeper(
@@ -616,27 +616,22 @@ class TestStaleEngineCleanup:
             settings=mock_settings,
         )
 
-        mock_redis.smembers.side_effect = [
-            {"faster-whisper"},
-            {"faster-whisper-abc123"},
-        ]
-        mock_redis.exists.return_value = 0  # Instance key doesn't exist
-        mock_redis.scard.return_value = 0  # No instances remain
+        mock_redis.smembers.return_value = {"faster-whisper-abc123"}
+        mock_redis.hgetall.return_value = {}  # Stale
 
         await sweeper._cleanup_stale_engine_entries()
 
-        # Should remove runtime from main set
-        mock_redis.srem.assert_any_call("dalston:batch:runtimes", "faster-whisper")
-        # Should delete the empty instances set
-        mock_redis.delete.assert_called_once_with(
-            "dalston:batch:runtime:instances:faster-whisper"
+        # Only srem on UNIFIED_INSTANCE_SET_KEY expected
+        mock_redis.srem.assert_called_once_with(
+            UNIFIED_INSTANCE_SET_KEY, "faster-whisper-abc123"
         )
 
     @pytest.mark.asyncio
-    async def test_keeps_runtime_when_healthy_instances_exist(
-        self, mock_redis, mock_settings
-    ):
-        """Test cleanup keeps runtime when at least one instance is healthy."""
+    async def test_mixed_instances_only_stale_cleaned(self, mock_redis, mock_settings):
+        """Test cleanup removes only stale instances when healthy ones exist."""
+        from dalston.common.registry import (
+            UNIFIED_INSTANCE_SET_KEY,
+        )
         from dalston.orchestrator.reconciler import ReconciliationSweeper
 
         sweeper = ReconciliationSweeper(
@@ -645,34 +640,30 @@ class TestStaleEngineCleanup:
             settings=mock_settings,
         )
 
-        # Use a list to ensure deterministic ordering
-        mock_redis.smembers.side_effect = [
-            {"faster-whisper"},
-            # Use a list internally to force iteration order
-            ["faster-whisper-stale", "faster-whisper-healthy"],
-        ]
+        mock_redis.smembers.return_value = {
+            "faster-whisper-stale",
+            "faster-whisper-healthy",
+        }
 
-        # Configure exists() to return 0 (stale) for first instance, 1 (healthy) for second
-        def exists_side_effect(key):
+        def hgetall_side_effect(key):
             if "stale" in key:
-                return 0  # Does not exist (stale)
-            return 1  # Exists (healthy)
+                return {}  # Expired
+            return {
+                "runtime": "faster-whisper",
+                "stage": "transcribe",
+                "status": "idle",
+            }  # Alive
 
-        mock_redis.exists.side_effect = exists_side_effect
-        mock_redis.scard.return_value = 1  # One instance remains after cleanup
+        mock_redis.hgetall.side_effect = hgetall_side_effect
 
         count = await sweeper._cleanup_stale_engine_entries()
 
         # Should only remove stale instance
         assert count == 1
         mock_redis.srem.assert_called_once_with(
-            "dalston:batch:runtime:instances:faster-whisper",
+            UNIFIED_INSTANCE_SET_KEY,
             "faster-whisper-stale",
         )
-        # Should NOT remove runtime from main set (still has healthy instance)
-        srem_calls = mock_redis.srem.call_args_list
-        engine_set_calls = [c for c in srem_calls if "dalston:batch:runtimes" in str(c)]
-        assert len(engine_set_calls) == 0
 
     @pytest.mark.asyncio
     async def test_no_cleanup_when_all_instances_healthy(
@@ -687,12 +678,12 @@ class TestStaleEngineCleanup:
             settings=mock_settings,
         )
 
-        mock_redis.smembers.side_effect = [
-            {"faster-whisper"},
-            {"faster-whisper-abc123"},
-        ]
-        mock_redis.exists.return_value = 1  # Instance key exists (healthy)
-        mock_redis.scard.return_value = 1  # Instance count unchanged
+        mock_redis.smembers.return_value = {"faster-whisper-abc123"}
+        mock_redis.hgetall.return_value = {
+            "runtime": "faster-whisper",
+            "stage": "transcribe",
+            "status": "idle",
+        }  # Instance still alive
 
         count = await sweeper._cleanup_stale_engine_entries()
 
@@ -1213,65 +1204,3 @@ class TestHandleTaskFailedIdempotency:
             == f"dalston:task:retry-enqueue:{task_id}:1"
         )
         mock_db_session.commit.assert_called()
-
-
-class TestBatchEngineRegistry:
-    """Tests for BatchEngineRegistry with instance support."""
-
-    def test_register_uses_instance_for_key(self):
-        """Test that registration uses instance for Redis key."""
-        from dalston.engine_sdk.registry import BatchEngineInfo, BatchEngineRegistry
-
-        mock_redis = MagicMock()
-
-        with patch.object(BatchEngineRegistry, "_get_redis", return_value=mock_redis):
-            registry = BatchEngineRegistry("redis://localhost:6379")
-
-            info = BatchEngineInfo(
-                runtime="whisper-cpu",
-                instance="whisper-cpu-abc123def456",
-                stage="transcribe",
-                stream_name="dalston:stream:whisper-cpu",
-            )
-
-            registry.register(info)
-
-            # Verify Redis key includes instance
-            mock_redis.hset.assert_called_once()
-            call_args = mock_redis.hset.call_args
-            key = call_args[0][0]
-            assert "whisper-cpu-abc123def456" in key
-            assert "dalston:batch:instance:" in key
-
-    def test_heartbeat_uses_instance_for_key(self):
-        """Test that heartbeat uses instance for Redis key."""
-        from dalston.engine_sdk.registry import BatchEngineInfo, BatchEngineRegistry
-
-        mock_redis = MagicMock()
-        mock_redis.hget.return_value = "whisper-cpu"  # Key exists
-
-        with patch.object(BatchEngineRegistry, "_get_redis", return_value=mock_redis):
-            registry = BatchEngineRegistry("redis://localhost:6379")
-
-            # First register to populate cache
-            info = BatchEngineInfo(
-                runtime="whisper-cpu",
-                instance="whisper-cpu-abc123def456",
-                stage="transcribe",
-                stream_name="dalston:stream:whisper-cpu",
-            )
-            registry.register(info)
-            mock_redis.reset_mock()
-
-            # Now send heartbeat
-            registry.heartbeat(
-                instance="whisper-cpu-abc123def456",
-                status="idle",
-            )
-
-            # Verify key includes instance
-            mock_redis.hset.assert_called_once()
-            mock_redis.expire.assert_called_once()
-            call_args = mock_redis.expire.call_args
-            key = call_args[0][0]
-            assert "whisper-cpu-abc123def456" in key

@@ -9,9 +9,9 @@ from __future__ import annotations
 from redis import asyncio as aioredis
 
 from dalston.common.durable_events import DurableEventEnvelope
+from dalston.common.registry import UnifiedEngineRegistry
 from dalston.config import Settings, get_settings
 from dalston.orchestrator import distributed_main as _distributed_main
-from dalston.orchestrator.registry import BatchEngineRegistry
 
 # Compatibility re-exports.
 EventSchemaError = _distributed_main.EventSchemaError
@@ -42,7 +42,7 @@ async def _dispatch_event(
     data: str,
     redis: aioredis.Redis,
     settings: Settings,
-    batch_registry: BatchEngineRegistry,
+    batch_registry: UnifiedEngineRegistry,
 ) -> None:
     _sync_distributed_patch_points()
     await _distributed_main._dispatch_event(data, redis, settings, batch_registry)
@@ -52,7 +52,7 @@ async def _process_durable_event(
     envelope: DurableEventEnvelope,
     redis: aioredis.Redis,
     settings: Settings,
-    batch_registry: BatchEngineRegistry,
+    batch_registry: UnifiedEngineRegistry,
     consumer_id: str,
     source: str,
 ) -> None:

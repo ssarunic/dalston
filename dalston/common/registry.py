@@ -1,7 +1,7 @@
-"""Unified engine registry for batch and real-time engines (M64).
+"""Unified engine registry for batch and real-time engines (M64/M69).
 
 Replaces the split batch/RT registry surfaces with one unified model.
-Supports dual-write/dual-read migration via DALSTON_ENGINE_REGISTRY_MODE.
+Migration scaffolding (DALSTON_ENGINE_REGISTRY_MODE) removed in M69.
 
 Redis key schema:
     dalston:engine:instances              SET of all instance IDs
@@ -304,10 +304,7 @@ class UnifiedEngineRegistry:
         self._redis = redis_client
 
     async def register(self, record: EngineRecord) -> None:
-        """Write engine record to unified registry.
-
-        Used by the dual-write path in engine runners.
-        """
+        """Write engine record to unified registry."""
         instance_key = f"{UNIFIED_INSTANCE_KEY_PREFIX}{record.instance}"
         mapping = _record_to_mapping(record)
 

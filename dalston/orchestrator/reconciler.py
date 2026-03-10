@@ -25,6 +25,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.events import publish_event
 from dalston.common.models import TaskStatus
+from dalston.common.registry import (
+    UNIFIED_INSTANCE_KEY_PREFIX,
+    UNIFIED_INSTANCE_SET_KEY,
+)
 from dalston.common.s3 import get_s3_client
 from dalston.common.streams import (
     STREAM_PREFIX,
@@ -37,11 +41,6 @@ from dalston.common.streams import (
 from dalston.common.streams_types import CONSUMER_GROUP, PendingTask
 from dalston.config import Settings
 from dalston.db.models import TaskModel
-from dalston.orchestrator.registry import (
-    ENGINE_INSTANCES_PREFIX,
-    ENGINE_KEY_PREFIX,
-    ENGINE_SET_KEY,
-)
 
 logger = structlog.get_logger()
 
@@ -744,52 +743,33 @@ class ReconciliationSweeper:
 
         Handles the case where engines crash without calling unregister():
         - Engine's Redis hash key expires (TTL)
-        - But ENGINE_INSTANCES_PREFIX{runtime} set still contains the instance
-        - And ENGINE_SET_KEY still contains the runtime
+        - But UNIFIED_INSTANCE_SET_KEY still contains the instance ID
+        - And UNIFIED_RUNTIME_SET_PREFIX + runtime still contains the instance
 
         Action:
-        1. For each runtime in ENGINE_SET_KEY, check its instances
-        2. Remove instances from instance set if their hash key doesn't exist
-        3. Remove runtime from ENGINE_SET_KEY if it has no remaining instances
+        1. For each instance in UNIFIED_INSTANCE_SET_KEY, check if hash exists
+        2. Remove stale instances from the main set and runtime/stage index sets
         """
         cleaned_count = 0
 
-        # Get all logical runtimes
-        runtimes = await self._redis.smembers(ENGINE_SET_KEY)
+        # Get all registered instances
+        instances = await self._redis.smembers(UNIFIED_INSTANCE_SET_KEY)
 
-        for runtime in runtimes:
-            instances_key = f"{ENGINE_INSTANCES_PREFIX}{runtime}"
-            instances = await self._redis.smembers(instances_key)
+        for instance in instances:
+            instance_key = f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance}"
 
-            # Check each instance
-            stale_instances = []
-            for instance in instances:
-                instance_key = f"{ENGINE_KEY_PREFIX}{instance}"
-                # Check if the hash key exists (TTL not expired)
-                exists = await self._redis.exists(instance_key)
-                if not exists:
-                    stale_instances.append(instance)
+            # Read hash before checking existence so we can clean indexes too
+            data = await self._redis.hgetall(instance_key)
+            if data:
+                continue  # Instance hash still alive
 
-            # Remove stale instances from the set
-            for instance in stale_instances:
-                await self._redis.srem(instances_key, instance)
-                cleaned_count += 1
-                logger.info(
-                    "cleaned_stale_engine_instance",
-                    runtime=runtime,
-                    instance=instance,
-                )
-
-            # If no instances remain, remove the runtime from the main set
-            remaining = await self._redis.scard(instances_key)
-            if remaining == 0:
-                await self._redis.srem(ENGINE_SET_KEY, runtime)
-                # Also delete the now-empty instances set
-                await self._redis.delete(instances_key)
-                logger.info(
-                    "cleaned_stale_runtime",
-                    runtime=runtime,
-                    reason="no_remaining_instances",
-                )
+            # Hash expired — read what we can for index cleanup (already gone)
+            # Remove from main instance set
+            await self._redis.srem(UNIFIED_INSTANCE_SET_KEY, instance)
+            cleaned_count += 1
+            logger.info(
+                "cleaned_stale_engine_instance",
+                instance=instance,
+            )
 
         return cleaned_count

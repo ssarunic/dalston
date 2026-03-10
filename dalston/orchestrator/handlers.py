@@ -26,6 +26,7 @@ from dalston.common.events import (
     publish_job_failed,
 )
 from dalston.common.models import ArtifactOwnerType, JobStatus, TaskStatus
+from dalston.common.registry import UnifiedEngineRegistry
 from dalston.common.s3 import get_s3_client
 from dalston.common.streams import mark_job_cancelled
 from dalston.config import Settings, get_settings
@@ -48,7 +49,6 @@ from dalston.orchestrator.exceptions import (
     EngineCapabilityError,
     EngineUnavailableError,
 )
-from dalston.orchestrator.registry import BatchEngineRegistry
 from dalston.orchestrator.scheduler import (
     get_task_output,
     queue_task,
@@ -141,7 +141,7 @@ async def handle_job_created(
     db: AsyncSession,
     redis: Redis,
     settings: Settings,
-    registry: BatchEngineRegistry,
+    registry: UnifiedEngineRegistry,
 ) -> None:
     """Handle job.created event.
 
@@ -426,7 +426,7 @@ async def handle_task_completed(
     db: AsyncSession,
     redis: Redis,
     settings: Settings,
-    registry: BatchEngineRegistry,
+    registry: UnifiedEngineRegistry,
 ) -> None:
     """Handle task.completed event.
 
@@ -630,7 +630,7 @@ async def handle_task_failed(
     db: AsyncSession,
     redis: Redis,
     settings: Settings,
-    registry: BatchEngineRegistry,
+    registry: UnifiedEngineRegistry,
 ) -> None:
     """Handle task.failed event.
 
@@ -834,7 +834,7 @@ async def handle_task_wait_timeout(
     db: AsyncSession,
     redis: Redis,
     settings: Settings,
-    registry: BatchEngineRegistry,
+    registry: UnifiedEngineRegistry,
 ) -> None:
     """Handle task.wait_timeout events for tasks waiting on unavailable engines."""
     log = logger.bind(task_id=str(task_id))
@@ -912,7 +912,7 @@ async def _ensure_retry_enqueued(
     db: AsyncSession,
     redis: Redis,
     settings: Settings,
-    registry: BatchEngineRegistry,
+    registry: UnifiedEngineRegistry,
     log,
 ) -> None:
     """Ensure a retry task is enqueued (replay-safe, no re-increment).

@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dalston.common.registry import UnifiedEngineRegistry
 from dalston.gateway.dependencies import (
     get_db,
     get_principal,
@@ -31,7 +32,6 @@ from dalston.orchestrator.lite_capabilities import (
     get_active_profile_name,
     get_matrix_as_dict,
 )
-from dalston.orchestrator.registry import BatchEngineRegistry
 
 router = APIRouter(prefix="/engines", tags=["engines"])
 
@@ -133,7 +133,7 @@ async def list_engines(
     """
     security_manager.require_permission(principal, Permission.MODEL_READ)
     catalog = get_catalog()
-    registry = BatchEngineRegistry(redis)
+    registry = UnifiedEngineRegistry(redis)
     model_service = ModelRegistryService()
 
     # Load all models from DB, group by runtime for efficient lookup
@@ -145,7 +145,7 @@ async def list_engines(
         models_by_runtime[m.runtime].append(m.id)
 
     # Get running engines from registry
-    running_engines = await registry.get_engines()
+    running_engines = await registry.get_all()
     running_map = {e.runtime: e for e in running_engines}
 
     engines: list[EngineResponse] = []
@@ -228,10 +228,10 @@ async def get_capabilities(
     """
     security_manager.require_permission(principal, Permission.MODEL_READ)
     catalog = get_catalog()
-    registry = BatchEngineRegistry(redis)
+    registry = UnifiedEngineRegistry(redis)
 
     # Get running engines from registry
-    running_engines = await registry.get_engines()
+    running_engines = await registry.get_all()
     running_ids = {e.runtime for e in running_engines if e.is_available}
 
     # Aggregate capabilities from running engines

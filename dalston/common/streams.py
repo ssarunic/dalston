@@ -559,9 +559,9 @@ async def is_engine_alive(redis: Redis, instance: str) -> bool:
     Returns:
         True if instance has recent heartbeat, False otherwise
     """
-    from dalston.engine_sdk.registry import INSTANCE_KEY_PREFIX
+    from dalston.common.registry import UNIFIED_INSTANCE_KEY_PREFIX
 
-    instance_key = f"{INSTANCE_KEY_PREFIX}{instance}"
+    instance_key = f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance}"
     data: dict = await redis.hgetall(instance_key)  # type: ignore[assignment]
 
     if not data:

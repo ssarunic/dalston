@@ -30,12 +30,9 @@ from dataclasses import dataclass
 import redis.asyncio as redis
 import structlog
 
+from dalston.common.registry import EngineRecord, UnifiedEngineRegistry
 from dalston.common.timeouts import REALTIME_SESSION_TTL_SECONDS
-from dalston.orchestrator.realtime_registry import (
-    ACTIVE_SESSIONS_KEY,
-    WorkerRegistry,
-    WorkerState,
-)
+from dalston.orchestrator.realtime_registry import ACTIVE_SESSIONS_KEY
 from dalston.orchestrator.session_allocator import (
     SessionAllocator,
     SessionState,
@@ -65,18 +62,18 @@ class WorkerStatus:
     supports_vocabulary: bool = False
 
     @classmethod
-    def from_worker_state(cls, state: WorkerState) -> WorkerStatus:
-        """Create from WorkerState."""
+    def from_engine_record(cls, record: EngineRecord) -> WorkerStatus:
+        """Create from EngineRecord."""
         return cls(
-            instance=state.instance,
-            endpoint=state.endpoint,
-            status=state.status,
-            capacity=state.capacity,
-            active_sessions=state.active_sessions,
-            models=state.models_loaded,
-            languages=state.languages_supported,
-            runtime=state.runtime,
-            supports_vocabulary=state.supports_vocabulary,
+            instance=record.instance,
+            endpoint=record.endpoint or "",
+            status=record.status,
+            capacity=record.capacity,
+            active_sessions=record.active_realtime,
+            models=record.models_loaded or [],
+            languages=record.languages or [],
+            runtime=record.runtime,
+            supports_vocabulary=False,
         )
 
 
@@ -101,10 +98,9 @@ class SessionCoordinator:
     - Orphan reconciliation (crashed Gateway instances).
     - Offline worker detection + pub/sub fan-out.
 
-    The coordinator reuses the session_router components (WorkerRegistry,
-    SessionAllocator, HealthMonitor) which already share Redis key semantics
-    with the legacy router.  This means both can run concurrently against
-    the same Redis state during the parity window without conflicts.
+    The coordinator uses SessionAllocator and HealthMonitor which share
+    Redis key semantics with the legacy session router, allowing both to run
+    concurrently against the same Redis state during the parity window.
 
     Usage::
 
@@ -128,22 +124,15 @@ class SessionCoordinator:
     def __init__(
         self,
         redis_url: str,
-        *,
-        unified_read_enabled: bool | None = None,
     ) -> None:
         """Initialise coordinator.
 
         Args:
             redis_url: Redis connection URL.
-            unified_read_enabled: When *True* the unified engine registry
-                (M64) is preferred for worker discovery with legacy fallback.
-                When *None* the value of
-                ``DALSTON_REGISTRY_UNIFIED_READ_ENABLED`` is used.
         """
         self._redis_url = redis_url
-        self._unified_read_enabled = unified_read_enabled
         self._redis: redis.Redis | None = None
-        self._registry: WorkerRegistry | None = None
+        self._registry: UnifiedEngineRegistry | None = None
         self._allocator: SessionAllocator | None = None
         self._health: HealthMonitor | None = None
 
@@ -158,10 +147,7 @@ class SessionCoordinator:
             encoding="utf-8",
             decode_responses=True,
         )
-        self._registry = WorkerRegistry(
-            self._redis,
-            unified_read_enabled=self._unified_read_enabled,
-        )
+        self._registry = UnifiedEngineRegistry(self._redis)
         self._allocator = SessionAllocator(self._redis, self._registry)
         self._health = HealthMonitor(self._redis, self._registry)
         await self._health.start()
@@ -278,8 +264,12 @@ class SessionCoordinator:
         """
         if not self._registry:
             raise RuntimeError("SessionCoordinator not started")
-        workers = await self._registry.get_workers()
-        return [WorkerStatus.from_worker_state(w) for w in workers]
+        workers = [
+            e
+            for e in await self._registry.get_all()
+            if e.supports_interface("realtime")
+        ]
+        return [WorkerStatus.from_engine_record(w) for w in workers]
 
     async def get_worker(self, instance: str) -> WorkerStatus | None:
         """Get status for a specific worker instance.
@@ -292,9 +282,9 @@ class SessionCoordinator:
         """
         if not self._registry:
             raise RuntimeError("SessionCoordinator not started")
-        worker = await self._registry.get_worker(instance)
+        worker = await self._registry.get_by_instance(instance)
         if worker:
-            return WorkerStatus.from_worker_state(worker)
+            return WorkerStatus.from_engine_record(worker)
         return None
 
     async def get_capacity(self) -> CapacityInfo:
@@ -305,9 +295,13 @@ class SessionCoordinator:
         """
         if not self._registry:
             raise RuntimeError("SessionCoordinator not started")
-        workers = await self._registry.get_workers()
+        workers = [
+            e
+            for e in await self._registry.get_all()
+            if e.supports_interface("realtime")
+        ]
         total = sum(w.capacity for w in workers)
-        used = sum(w.active_sessions for w in workers)
+        used = sum(w.active_realtime for w in workers)
         ready = sum(1 for w in workers if w.status in ("ready", "busy"))
         return CapacityInfo(
             total_capacity=total,
@@ -394,9 +388,11 @@ class ParityMonitor:
         if registry is None or redis_client is None:
             return
 
-        workers = await registry.get_workers()
+        workers = [
+            e for e in await registry.get_all() if e.supports_interface("realtime")
+        ]
         total = sum(w.capacity for w in workers)
-        used = sum(w.active_sessions for w in workers)
+        used = sum(w.active_realtime for w in workers)
         active_session_count = len(await redis_client.smembers(ACTIVE_SESSIONS_KEY))
 
         logger.info(

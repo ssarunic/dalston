@@ -74,18 +74,6 @@ def __getattr__(name: str):
         from dalston.realtime_sdk.base import RealtimeEngine
 
         return RealtimeEngine
-    elif name == "WorkerRegistry":
-        from dalston.realtime_sdk.registry import WorkerRegistry
-
-        return WorkerRegistry
-    elif name == "WorkerInfo":
-        from dalston.realtime_sdk.registry import WorkerInfo
-
-        return WorkerInfo
-    elif name == "WorkerPresenceRegistry":
-        from dalston.realtime_sdk.registry import WorkerPresenceRegistry
-
-        return WorkerPresenceRegistry
     elif name == "SessionHandler":
         from dalston.realtime_sdk.session import SessionHandler
 
@@ -148,10 +136,7 @@ __all__ = [
     "TranscriptAssembler",
     "Segment",
     "Word",
-    # Worker registry (lazy)
-    "WorkerRegistry",
-    "WorkerPresenceRegistry",
-    "WorkerInfo",
+    # Storage (lazy)
     "SessionStorage",
     "SessionStorageResult",
     # Protocol messages

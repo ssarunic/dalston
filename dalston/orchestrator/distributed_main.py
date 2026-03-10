@@ -31,6 +31,7 @@ from dalston.common.durable_events import (
     move_event_to_dlq,
     read_new_events,
 )
+from dalston.common.registry import UnifiedEngineRegistry
 
 # Note: We now consume from durable stream, not pub/sub EVENTS_CHANNEL
 from dalston.config import Settings, get_settings
@@ -50,7 +51,6 @@ from dalston.orchestrator.handlers import (
     handle_task_wait_timeout,
 )
 from dalston.orchestrator.reconciler import ReconciliationSweeper
-from dalston.orchestrator.registry import BatchEngineRegistry
 from dalston.orchestrator.scanner import StaleTaskScanner
 
 # Configure structured logging via shared module
@@ -212,8 +212,8 @@ async def orchestrator_loop() -> None:
     )
     await _reconciliation_sweeper.start()
 
-    # Initialize batch engine registry
-    batch_registry = BatchEngineRegistry(redis)
+    # Initialize engine registry
+    batch_registry = UnifiedEngineRegistry(redis)
 
     # Generate consumer ID for this orchestrator instance
     # Use HOSTNAME (set by Docker) for stable IDs across restarts, fall back to random
@@ -344,7 +344,7 @@ async def _claim_and_replay_stale_events(
     redis: aioredis.Redis,
     consumer_id: str,
     settings: Settings,
-    batch_registry: BatchEngineRegistry,
+    batch_registry: UnifiedEngineRegistry,
     *,
     is_startup: bool = False,
 ) -> None:
@@ -416,7 +416,7 @@ async def _process_durable_event(
     envelope: DurableEventEnvelope,
     redis: aioredis.Redis,
     settings: Settings,
-    batch_registry: BatchEngineRegistry,
+    batch_registry: UnifiedEngineRegistry,
     *,
     consumer_id: str,
     source: str,
@@ -516,7 +516,7 @@ async def _dispatch_event_dict(
     event: dict[str, Any],
     redis: aioredis.Redis,
     settings: Settings,
-    batch_registry: BatchEngineRegistry,
+    batch_registry: UnifiedEngineRegistry,
 ) -> None:
     """Dispatch a pre-parsed event dict to the appropriate handler.
 
@@ -647,7 +647,7 @@ async def _dispatch_event(
     data: str,
     redis: aioredis.Redis,
     settings: Settings,
-    batch_registry: BatchEngineRegistry,
+    batch_registry: UnifiedEngineRegistry,
 ) -> None:
     """Parse and dispatch an event to the appropriate handler.
 

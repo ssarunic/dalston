@@ -43,11 +43,6 @@ from dalston.common.ws_close_codes import (
 from dalston.engine_sdk.types import EngineCapabilities
 from dalston.realtime_sdk.assembler import TranscribeResult
 from dalston.realtime_sdk.model_manager import AsyncModelManager
-from dalston.realtime_sdk.registry import (
-    WorkerInfo,
-    WorkerPresenceRegistry,
-    WorkerRegistry,
-)
 from dalston.realtime_sdk.session import SessionConfig, SessionHandler
 
 logger = structlog.get_logger()
@@ -143,7 +138,6 @@ class RealtimeEngine(ABC):
             self._worker_endpoint = f"ws://{hostname}:{self.port}"
 
         self._sessions: dict[str, SessionHandler] = {}
-        self._registry: WorkerPresenceRegistry | None = None
         self._unified_registry: UnifiedEngineRegistry | None = None
         self._running = False
         self._server = None
@@ -439,57 +433,30 @@ class RealtimeEngine(ABC):
         # M50: Get structured capabilities from engine.yaml
         capabilities = self.get_capabilities()
 
-        # M64: Registry mode determines which registries receive writes
-        registry_mode = os.environ.get("DALSTON_ENGINE_REGISTRY_MODE", "legacy")
+        # Register with unified engine registry
+        import redis.asyncio as aioredis
 
-        # Legacy registration (legacy and dual modes only)
-        if registry_mode in ("legacy", "dual"):
-            self._registry = WorkerRegistry(self.redis_url)
-            logger.info(
-                "registering_with_session_router", endpoint=self._worker_endpoint
-            )
-            await self._registry.register(
-                WorkerInfo(
-                    instance=self.instance,
-                    endpoint=self._worker_endpoint,
-                    capacity=self.max_sessions,
-                    models=self.get_models(),
-                    languages=self.get_languages(),
-                    runtime=capabilities.runtime,
-                    supports_vocabulary=self.get_supports_vocabulary(),
-                    capabilities=capabilities,
-                )
-            )
-
-        # Unified registration (dual and unified modes)
-        if registry_mode in ("dual", "unified"):
-            import redis.asyncio as aioredis
-
-            unified_redis = aioredis.from_url(
-                self.redis_url, encoding="utf-8", decode_responses=True
-            )
-            self._unified_registry = UnifiedEngineRegistry(unified_redis)
-            await self._unified_registry.register(
-                EngineRecord(
-                    instance=self.instance,
-                    runtime=capabilities.runtime,
-                    stage="transcribe",
-                    status="ready",
-                    interfaces=["realtime"],
-                    capacity=self.max_sessions,
-                    endpoint=self._worker_endpoint,
-                    models_loaded=self.get_models(),
-                    languages=self.get_languages(),
-                    capabilities=capabilities,
-                    supports_word_timestamps=capabilities.supports_word_timestamps,
-                    includes_diarization=capabilities.includes_diarization,
-                )
-            )
-            logger.info(
-                "unified_registry_registered",
+        unified_redis = aioredis.from_url(
+            self.redis_url, encoding="utf-8", decode_responses=True
+        )
+        self._unified_registry = UnifiedEngineRegistry(unified_redis)
+        await self._unified_registry.register(
+            EngineRecord(
                 instance=self.instance,
-                registry_mode=registry_mode,
+                runtime=capabilities.runtime,
+                stage="transcribe",
+                status="ready",
+                interfaces=["realtime"],
+                capacity=self.max_sessions,
+                endpoint=self._worker_endpoint,
+                models_loaded=self.get_models(),
+                languages=self.get_languages(),
+                capabilities=capabilities,
+                supports_word_timestamps=capabilities.supports_word_timestamps,
+                includes_diarization=capabilities.includes_diarization,
             )
+        )
+        logger.info("engine_registered", instance=self.instance)
 
         self._running = True
 
@@ -549,12 +516,6 @@ class RealtimeEngine(ABC):
         logger.info("shutting_down")
         self._running = False
 
-        # Unregister from Session Router
-        if self._registry:
-            await self._registry.unregister(self.instance)
-            await self._registry.close()
-
-        # M64: Deregister from unified registry
         if self._unified_registry:
             try:
                 await self._unified_registry.deregister(self.instance)
@@ -583,17 +544,6 @@ class RealtimeEngine(ABC):
                 loaded_models = self.get_loaded_models()
                 gpu_mem = self.get_gpu_memory_usage()
 
-                if self._registry:
-                    # M43: Include dynamically loaded models in heartbeat
-                    await self._registry.heartbeat(
-                        instance=self.instance,
-                        active_sessions=active,
-                        gpu_memory_used=gpu_mem,
-                        status=status,
-                        loaded_models=loaded_models,
-                    )
-
-                # M64: Dual-write heartbeat to unified registry
                 if self._unified_registry:
                     try:
                         await self._unified_registry.heartbeat(
@@ -697,10 +647,6 @@ class RealtimeEngine(ABC):
         # Track session
         self._sessions[config.session_id] = handler
 
-        # Notify registry
-        if self._registry:
-            await self._registry.session_started(self.instance, config.session_id)
-
         # Bind session_id to logging context for this session
         structlog.contextvars.bind_contextvars(session_id=config.session_id)
 
@@ -752,14 +698,6 @@ class RealtimeEngine(ABC):
         # Record session metrics (M20)
         dalston.metrics.observe_realtime_session_duration(rt, model or "", duration)
         dalston.metrics.inc_session_router_sessions(status)
-
-        if self._registry:
-            await self._registry.session_ended(
-                instance=self.instance,
-                session_id=session_id,
-                duration=duration,
-                status=status,
-            )
 
     def _parse_connection_params(self, path: str) -> SessionConfig:
         """Parse query parameters from connection path.

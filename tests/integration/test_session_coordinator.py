@@ -23,12 +23,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from dalston.common.registry import EngineRecord
 from dalston.orchestrator.realtime_registry import (
     ACTIVE_SESSIONS_KEY,
     EVENTS_CHANNEL,
     INSTANCE_KEY_PREFIX,
     INSTANCE_SESSIONS_SUFFIX,
-    WorkerState,
 )
 from dalston.orchestrator.session_allocator import SessionState, WorkerAllocation
 from dalston.orchestrator.session_coordinator import (
@@ -51,21 +51,22 @@ def _make_worker(
     status: str = "ready",
     runtime: str = "faster-whisper",
     models_loaded: list[str] | None = None,
-) -> WorkerState:
-    return WorkerState(
+) -> EngineRecord:
+    return EngineRecord(
         instance=instance,
+        runtime=runtime,
+        stage="transcribe",
+        interfaces=["realtime"],
         endpoint=endpoint,
         status=status,
         capacity=capacity,
-        active_sessions=active_sessions,
+        active_realtime=active_sessions,
         models_loaded=models_loaded or ["Systran/faster-whisper-large-v3"],
-        languages_supported=["auto"],
-        runtime=runtime,
-        supports_vocabulary=False,
+        languages=["auto"],
         gpu_memory_used="2GB",
         gpu_memory_total="8GB",
         last_heartbeat=datetime.now(UTC),
-        started_at=datetime.now(UTC),
+        registered_at=datetime.now(UTC),
     )
 
 
@@ -78,7 +79,6 @@ def _make_coordinator() -> tuple[SessionCoordinator, AsyncMock]:
     coordinator = SessionCoordinator.__new__(SessionCoordinator)
     redis_mock = AsyncMock()
     coordinator._redis_url = "redis://localhost:6379"
-    coordinator._unified_read_enabled = None
     coordinator._redis = redis_mock
     return coordinator, redis_mock
 
@@ -154,7 +154,6 @@ async def test_acquire_and_release_session() -> None:
     """Full acquire → release lifecycle updates Redis correctly."""
     coordinator = SessionCoordinator.__new__(SessionCoordinator)
     coordinator._redis_url = "redis://localhost:6379"
-    coordinator._unified_read_enabled = None
 
     redis_mock = AsyncMock()
     mock_registry = AsyncMock()
@@ -222,7 +221,6 @@ async def test_acquire_returns_none_when_no_capacity() -> None:
     coordinator._registry = AsyncMock()
     coordinator._health = AsyncMock()
     coordinator._redis_url = "redis://localhost:6379"
-    coordinator._unified_read_enabled = None
 
     mock_allocator = AsyncMock()
     mock_allocator.acquire_worker.return_value = None
@@ -245,10 +243,9 @@ async def test_get_capacity_aggregates_worker_pool() -> None:
     coordinator._allocator = AsyncMock()
     coordinator._health = AsyncMock()
     coordinator._redis_url = "redis://localhost:6379"
-    coordinator._unified_read_enabled = None
 
     mock_registry = AsyncMock()
-    mock_registry.get_workers.return_value = [
+    mock_registry.get_all.return_value = [
         _make_worker("w1", capacity=4, active_sessions=2, status="busy"),
         _make_worker("w2", capacity=4, active_sessions=0, status="ready"),
         _make_worker("w3", capacity=4, active_sessions=4, status="busy"),
@@ -277,7 +274,6 @@ async def test_acquire_rollback_on_race() -> None:
     coordinator._registry = AsyncMock()
     coordinator._health = AsyncMock()
     coordinator._redis_url = "redis://localhost:6379"
-    coordinator._unified_read_enabled = None
 
     # Allocator simulates full capacity on every worker after rollback
     mock_allocator = AsyncMock()
@@ -305,7 +301,6 @@ async def test_orphan_reconciliation(mock_metrics) -> None:
     """Health monitor reconciles orphaned sessions via the coordinator."""
     coordinator = SessionCoordinator.__new__(SessionCoordinator)
     coordinator._redis_url = "redis://localhost:6379"
-    coordinator._unified_read_enabled = None
 
     redis_mock = AsyncMock()
     instance = "worker-1"
@@ -362,21 +357,21 @@ async def test_offline_worker_publishes_events(mock_metrics) -> None:
 
     # Registry returns one stale worker (heartbeat >30 s ago)
     stale_worker = _make_worker("worker-stale", status="ready")
-    stale_worker = WorkerState(
+    stale_worker = EngineRecord(
         **{
             **stale_worker.__dict__,
             "last_heartbeat": datetime.now(UTC) - timedelta(seconds=60),
         }
     )
     mock_registry = AsyncMock()
-    mock_registry.get_workers.return_value = [stale_worker]
-    mock_registry.mark_worker_offline = AsyncMock()
-    mock_registry.get_worker_session_ids.return_value = {"sess_1", "sess_2"}
+    mock_registry.get_all.return_value = [stale_worker]
+    mock_registry.mark_instance_offline = AsyncMock()
+    redis_mock.smembers.return_value = {"sess_1", "sess_2"}
 
     health = HealthMonitor(redis_mock, mock_registry)
     await health.check_workers()
 
-    mock_registry.mark_worker_offline.assert_called_once_with("worker-stale")
+    mock_registry.mark_instance_offline.assert_called_once_with("worker-stale")
     assert redis_mock.publish.call_count == 2  # one event per session
 
     for call in redis_mock.publish.call_args_list:
@@ -395,16 +390,15 @@ async def test_offline_worker_publishes_events(mock_metrics) -> None:
 
 @pytest.mark.asyncio
 async def test_list_workers_returns_status_objects() -> None:
-    """list_workers() converts WorkerState to WorkerStatus."""
+    """list_workers() converts EngineRecord to WorkerStatus."""
     coordinator = SessionCoordinator.__new__(SessionCoordinator)
     coordinator._redis = AsyncMock()
     coordinator._allocator = AsyncMock()
     coordinator._health = AsyncMock()
     coordinator._redis_url = "redis://localhost:6379"
-    coordinator._unified_read_enabled = None
 
     mock_registry = AsyncMock()
-    mock_registry.get_workers.return_value = [
+    mock_registry.get_all.return_value = [
         _make_worker("w1", capacity=4, active_sessions=1),
         _make_worker("w2", capacity=4, active_sessions=2),
     ]
@@ -426,10 +420,9 @@ async def test_get_worker_found() -> None:
     coordinator._allocator = AsyncMock()
     coordinator._health = AsyncMock()
     coordinator._redis_url = "redis://localhost:6379"
-    coordinator._unified_read_enabled = None
 
     mock_registry = AsyncMock()
-    mock_registry.get_worker.return_value = _make_worker("w1")
+    mock_registry.get_by_instance.return_value = _make_worker("w1")
     coordinator._registry = mock_registry
 
     result = await coordinator.get_worker("w1")
@@ -447,10 +440,9 @@ async def test_get_worker_not_found() -> None:
     coordinator._allocator = AsyncMock()
     coordinator._health = AsyncMock()
     coordinator._redis_url = "redis://localhost:6379"
-    coordinator._unified_read_enabled = None
 
     mock_registry = AsyncMock()
-    mock_registry.get_worker.return_value = None
+    mock_registry.get_by_instance.return_value = None
     coordinator._registry = mock_registry
 
     result = await coordinator.get_worker("nonexistent")
@@ -471,7 +463,6 @@ async def test_extend_session_ttl() -> None:
     coordinator._registry = AsyncMock()
     coordinator._health = AsyncMock()
     coordinator._redis_url = "redis://localhost:6379"
-    coordinator._unified_read_enabled = None
 
     mock_allocator = AsyncMock()
     coordinator._allocator = mock_allocator
@@ -482,12 +473,12 @@ async def test_extend_session_ttl() -> None:
 
 
 # ---------------------------------------------------------------------------
-# WorkerStatus.from_worker_state
+# WorkerStatus.from_engine_record
 # ---------------------------------------------------------------------------
 
 
-def test_worker_status_from_worker_state() -> None:
-    """WorkerStatus.from_worker_state maps all fields correctly."""
+def test_worker_status_from_engine_record() -> None:
+    """WorkerStatus.from_engine_record maps all fields correctly."""
     worker = _make_worker(
         instance="w1",
         endpoint="ws://w1:9000",
@@ -497,7 +488,7 @@ def test_worker_status_from_worker_state() -> None:
         runtime="parakeet",
         models_loaded=["parakeet-tdt-0.6b-v3"],
     )
-    status = WorkerStatus.from_worker_state(worker)
+    status = WorkerStatus.from_engine_record(worker)
 
     assert status.instance == "w1"
     assert status.endpoint == "ws://w1:9000"
@@ -544,7 +535,6 @@ async def test_parity_monitor_start_stop() -> None:
     coordinator._allocator = AsyncMock()
     coordinator._health = AsyncMock()
     coordinator._redis_url = "redis://localhost:6379"
-    coordinator._unified_read_enabled = None
 
     monitor = ParityMonitor(coordinator)
     assert not monitor.is_running
@@ -563,10 +553,9 @@ async def test_parity_monitor_does_not_mutate_redis() -> None:
     redis_mock = AsyncMock()
     coordinator._redis = redis_mock
     coordinator._redis_url = "redis://localhost:6379"
-    coordinator._unified_read_enabled = None
 
     mock_registry = AsyncMock()
-    mock_registry.get_workers.return_value = [
+    mock_registry.get_all.return_value = [
         _make_worker("w1", capacity=4, active_sessions=2),
     ]
     coordinator._registry = mock_registry
@@ -579,8 +568,8 @@ async def test_parity_monitor_does_not_mutate_redis() -> None:
     # Trigger a single snapshot directly (not via the background loop)
     await monitor._snapshot()
 
-    # Only read operations: smembers and registry.get_workers
-    mock_registry.get_workers.assert_called_once()
+    # Only read operations: smembers and registry.get_all
+    mock_registry.get_all.assert_called_once()
     redis_mock.smembers.assert_called_once()
 
     # No write operations
@@ -590,7 +579,7 @@ async def test_parity_monitor_does_not_mutate_redis() -> None:
     redis_mock.sadd.assert_not_called()
     redis_mock.publish.assert_not_called()
     redis_mock.expire.assert_not_called()
-    mock_registry.mark_worker_offline.assert_not_called()
+    mock_registry.mark_instance_offline.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -602,10 +591,9 @@ async def test_parity_monitor_tolerates_registry_error() -> None:
     redis_mock = AsyncMock()
     coordinator._redis = redis_mock
     coordinator._redis_url = "redis://localhost:6379"
-    coordinator._unified_read_enabled = None
 
     mock_registry = AsyncMock()
-    mock_registry.get_workers.side_effect = Exception("Redis timeout")
+    mock_registry.get_all.side_effect = Exception("Redis timeout")
     coordinator._registry = mock_registry
     coordinator._allocator = AsyncMock()
     coordinator._health = AsyncMock()
@@ -618,4 +606,4 @@ async def test_parity_monitor_tolerates_registry_error() -> None:
     await monitor.stop()
 
     # Should have attempted multiple snapshots despite errors
-    assert mock_registry.get_workers.call_count >= 2
+    assert mock_registry.get_all.call_count >= 2

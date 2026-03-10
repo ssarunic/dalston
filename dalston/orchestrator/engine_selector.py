@@ -27,10 +27,10 @@ from dalston.common.model_selection_keys import (
     MODEL_PARAM_PII_DETECT,
     MODEL_PARAM_TRANSCRIBE,
 )
+from dalston.common.registry import EngineRecord, UnifiedEngineRegistry
 from dalston.db.models import ModelRegistryModel
 from dalston.engine_sdk.types import EngineCapabilities
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog
-from dalston.orchestrator.registry import BatchEngineRegistry, BatchEngineState
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -144,7 +144,7 @@ class NoCapableEngineError(Exception):
         self,
         stage: str,
         requirements: dict,
-        candidates: list[BatchEngineState],
+        candidates: list[EngineRecord],
         catalog_alternatives: list[CatalogEntry],
     ) -> None:
         """Initialize error with context for debugging.
@@ -189,7 +189,7 @@ class NoCapableEngineError(Exception):
 
         return "\n".join(lines)
 
-    def _explain_mismatch(self, engine: BatchEngineState) -> str:
+    def _explain_mismatch(self, engine: EngineRecord) -> str:
         """Explain why a running engine doesn't match requirements."""
         if engine.capabilities is None:
             return "no capabilities declared"
@@ -385,9 +385,9 @@ def _meets_requirements(caps: EngineCapabilities, requirements: dict) -> bool:
 
 
 def _rank_capable_engines(
-    capable: list[BatchEngineState],
+    capable: list[EngineRecord],
     requirements: dict,
-) -> list[BatchEngineState]:
+) -> list[EngineRecord]:
     """Rank capable engines, best first.
 
     Ranking criteria (in order of priority):
@@ -406,7 +406,7 @@ def _rank_capable_engines(
 
     requested_language = requirements.get("language")
 
-    def score(engine: BatchEngineState) -> tuple:
+    def score(engine: EngineRecord) -> tuple:
         caps = engine.capabilities
         if caps is None:
             return (0, 0, 0, 0, -999.0)
@@ -441,7 +441,7 @@ def _rank_capable_engines(
 
 
 def _rank_and_select(
-    capable: list[BatchEngineState],
+    capable: list[EngineRecord],
     requirements: dict,
 ) -> EngineSelectionResult:
     """Rank capable engines and select best."""
@@ -470,7 +470,7 @@ def _rank_and_select(
 async def select_engine(
     stage: str,
     requirements: dict,
-    registry: BatchEngineRegistry,
+    registry: UnifiedEngineRegistry,
     catalog: EngineCatalog,
     user_preference: str | None = None,
     db: AsyncSession | None = None,
@@ -624,8 +624,10 @@ async def select_engine(
             selection_reason="user preference",
         )
 
-    # 2. Get running engines for stage
-    candidates = await registry.get_engines_for_stage(stage)
+    # 2. Get running batch engines for stage
+    candidates = [
+        e for e in await registry.get_by_stage(stage) if e.supports_interface("batch")
+    ]
 
     # 3. Filter by hard requirements
     capable = [
@@ -769,7 +771,7 @@ def _should_add_diarization(
 
 async def select_pipeline_engines(
     parameters: dict,
-    registry: BatchEngineRegistry,
+    registry: UnifiedEngineRegistry,
     catalog: EngineCatalog,
     db: AsyncSession | None = None,
 ) -> PipelineEngineSelection:
