@@ -507,7 +507,6 @@ async def handle_task_completed(
             # Update transcript with PII results
             from dalston.orchestrator.post_processor import update_transcript_with_pii
 
-            settings = get_settings()
             try:
                 await update_transcript_with_pii(job_id, db, settings)
             except Exception as e:
