@@ -104,26 +104,10 @@ class TestDagBuilderPerChannelPiiStages:
         assert "audio_redact_ch1" not in stages
         assert "transcribe_ch0" in stages
         assert "transcribe_ch1" in stages
-        assert "merge" in stages
-
-    def test_per_channel_merge_no_pii_flags(self, job_id: UUID, audio_uri: str):
-        """Per-channel merge should not have PII flags."""
-        parameters = {
-            "speaker_detection": "per_channel",
-            "num_channels": 2,
-            "pii_detection": True,
-            "redact_pii_audio": True,
-        }
-
-        tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
-
-        merge_task = next(t for t in tasks if t.stage == "merge")
-        assert "pii_detection" not in merge_task.config
-        assert "redact_pii_audio" not in merge_task.config
-        assert merge_task.input_bindings == []
+        assert "merge" not in stages
 
     def test_per_channel_task_count(self, job_id: UUID, audio_uri: str):
-        """Per-channel DAG has correct task count without PII stages."""
+        """Per-channel DAG has correct task count without PII or merge stages."""
         parameters = {
             "speaker_detection": "per_channel",
             "num_channels": 2,
@@ -134,8 +118,8 @@ class TestDagBuilderPerChannelPiiStages:
 
         tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
-        # prepare + 2*transcribe + 2*align + merge = 6
-        assert len(tasks) == 6
+        # prepare + 2*transcribe + 2*align = 5 (merge eliminated by M68)
+        assert len(tasks) == 5
 
 
 # =============================================================================
