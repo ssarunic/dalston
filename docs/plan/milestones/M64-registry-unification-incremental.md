@@ -6,7 +6,7 @@
 | **Duration** | 1-2 weeks |
 | **Dependencies** | M63 |
 | **Primary Deliverable** | Unified `EngineRegistry` with dual-read/dual-write migration and clean cutover |
-| **Status** | Proposed |
+| **Status** | Complete (phases 0-2); phase 3 cutover tracked by M69 |
 
 ## Outcomes
 
@@ -151,8 +151,36 @@ pytest -m integration
 - No worker visibility regression during or after cutover.
 - Legacy registry paths removed only after validated parity window.
 
+## Implementation Status
+
+### Completed (commit 41739ab)
+
+- **Phase 0**: Contract tests for batch registry (pre-existing) and RT worker
+  registry added.
+- **Phase 1 (Shadow mode)**: `dalston/common/registry.py` with `EngineRecord`,
+  `UnifiedEngineRegistry` (async), `UnifiedRegistryWriter` (sync). 41 unit
+  tests in `tests/unit/test_unified_registry.py`. Dual-write enabled in both
+  `engine_sdk/runner.py` (batch) and `realtime_sdk/base.py` (RT).
+- **Phase 2 (Consumer migration)**: Orchestrator (`orchestrator/registry.py`)
+  and session router (`session_router/registry.py`) read unified-first with
+  legacy fallback. All read paths filter by `interface` (batch/realtime) to
+  prevent cross-routing. `mark_instance_offline` / `mark_worker_offline` write
+  to both registries. `is_engine_available` uses `get_available` with batch
+  interface filter.
+- **Config**: `DALSTON_ENGINE_REGISTRY_MODE` (legacy|dual|unified) and
+  `DALSTON_REGISTRY_UNIFIED_READ_ENABLED` (true|false) in `dalston/config.py`.
+- **Writer mode gating**: In `unified` mode, legacy writes are skipped (batch
+  runner and RT runner only write to unified registry).
+
+### Remaining (tracked by M69)
+
+- Phase 3 cutover: remove legacy registry code, bridge converters, and
+  migration config after production parity window. See
+  `docs/plan/milestones/M69-legacy-registry-removal.md`.
+
 ## References
 
 - `docs/plans/pipeline-simplification-plan.md` (PR-2)
 - `docs/plan/milestones/M63-engine-unification-incremental.md`
+- `docs/plan/milestones/M69-legacy-registry-removal.md`
 - `docs/reviews/2026-03-09-complexity-review.md`

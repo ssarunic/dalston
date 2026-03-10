@@ -6,7 +6,7 @@
 | **Duration** | 2-3 weeks (incremental rollout) |
 | **Dependencies** | M36, M40, M43, M44 |
 | **Primary Deliverable** | Unified runtime core + dual interfaces with QoS/admission control |
-| **Status** | Proposed |
+| **Status** | In Progress (phase 1 complete, phase 2 partial) |
 
 ## Outcomes
 
@@ -188,7 +188,57 @@ pytest -m e2e
 - Unified engine instances visible and routable with stable heartbeats.
 - All changes delivered in small, test-gated commits.
 
+## Implementation Status
+
+### Phase 0: Baseline (complete)
+
+- Batch and RT contract test suites for faster-whisper refreshed.
+- Parity fixtures and snapshot comparator helpers in place.
+
+### Phase 1: Faster-Whisper Unification (complete)
+
+- **TranscribeCore** (`dalston/engine_sdk/cores/faster_whisper_core.py`): shared
+  runtime core with `FasterWhisperModelManager`, runtime-neutral result types,
+  `transcribe()` accepting both file paths and numpy arrays.
+- **Batch delegation**: `WhisperEngine` (`engines/stt-transcribe/faster-whisper/engine.py`)
+  delegates to `TranscribeCore` via optional `core=` injection.
+- **RT delegation**: `WhisperStreamingEngine` (`engines/stt-rt/faster-whisper/engine.py`)
+  delegates to `TranscribeCore` via optional `core=` injection.
+- **Unified runner**: `UnifiedFasterWhisperRunner`
+  (`engines/stt-unified/faster-whisper/runner.py`) — single process with one
+  `TranscribeCore`, batch adapter in background thread, RT adapter in async loop.
+  Gated by `DALSTON_UNIFIED_ENGINE_ENABLED=true`.
+- **Admission control**: `AdmissionController`
+  (`dalston/engine_sdk/admission.py`) with `DALSTON_RT_RESERVATION`,
+  `DALSTON_BATCH_MAX_INFLIGHT`, `DALSTON_TOTAL_CAPACITY`. Thread-safe, wired
+  into the unified faster-whisper runner.
+
+### Phase 2: Remaining Runtimes (partial)
+
+- **ParakeetCore** (`dalston/engine_sdk/cores/parakeet_core.py`): shared core
+  with `NeMoModelManager`. Batch (`ParakeetEngine`) and RT
+  (`ParakeetStreamingEngine`) both delegate via `core=` injection.
+- **ParakeetOnnxCore** (`dalston/engine_sdk/cores/parakeet_onnx_core.py`):
+  shared core with `NeMoOnnxModelManager`. Batch (`ParakeetOnnxEngine`) and RT
+  (`ParakeetOnnxStreamingEngine`) both delegate via `core=` injection.
+- **Unified runners not yet implemented** for Parakeet or Parakeet-ONNX. The
+  `core=` plumbing is ready; the runner scripts are missing.
+- **hf-asr, vllm-asr, voxtral**: batch-only runtimes with no RT counterpart to
+  unify — no core extraction needed.
+
+### Phase 3: Registry Cutover (complete — tracked by M64)
+
+- Unified engine registry (M64) handles dual-write, consumer migration, and
+  interface-aware routing. Phase 3 cutover (legacy removal) tracked by M69.
+
+### Remaining
+
+- Write unified runners for Parakeet and Parakeet-ONNX (template from
+  faster-whisper unified runner).
+- Canary deploy and promote remaining runtimes.
+
 ## References
 
 - `docs/plans/pipeline-simplification-plan.md` (PR-1 sequence and dependencies)
 - `docs/reviews/2026-03-09-complexity-review.md` (complexity findings and ordering rationale)
+- `docs/plan/milestones/M64-registry-unification-incremental.md`
