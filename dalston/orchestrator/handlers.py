@@ -1068,11 +1068,11 @@ async def _assemble_linear_transcript(
     settings: Settings,
     log: structlog.stdlib.BoundLogger,
 ) -> None:
-    """Assemble transcript.json from stage outputs for linear pipeline (M68).
+    """Assemble transcript.json from stage outputs for mono pipelines.
 
-    In linear pipeline mode, there is no merge engine. The orchestrator
-    reads outputs from completed stages and assembles the canonical
-    transcript.json using the shared transcript assembly module.
+    Mono pipelines have no merge engine. The orchestrator reads outputs
+    from completed stages and assembles the canonical transcript.json
+    using the shared transcript assembly module.
 
     On failure the job is marked FAILED — a COMPLETED job without
     transcript.json would confuse downstream consumers.
@@ -1240,13 +1240,11 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
             )
         log.info("job_completed")
 
-        # M68: If linear pipeline is enabled and no merge task exists,
-        # assemble transcript.json from stage outputs.
-        settings = get_settings()
-        has_merge_task = any(t.stage == "merge" for t in all_tasks)
-        if settings.linear_pipeline_enabled and not has_merge_task:
+        # For mono pipelines (no merge stage), assemble transcript.json from stage outputs.
+        # Per-channel pipelines have a merge task that handles assembly.
+        if not any(t.stage == "merge" for t in all_tasks):
             try:
-                await _assemble_linear_transcript(job, all_tasks, settings, log)
+                await _assemble_linear_transcript(job, all_tasks, get_settings(), log)
             except Exception as e:
                 log.error(
                     "linear_transcript_assembly_failed",
@@ -1277,8 +1275,10 @@ async def _check_job_completion(job_id: UUID, db: AsyncSession, redis: Redis) ->
     # Decrement concurrent job count for rate limiting
     await _decrement_concurrent_jobs(redis, job_id, job.tenant_id)
 
-    # Publish job completion event for webhook delivery
-    if any_failed:
+    # Publish job completion event for webhook delivery.
+    # Check final job.status rather than any_failed so that a transcript
+    # assembly failure (set above) is correctly reported as failed.
+    if job.status == JobStatus.FAILED.value:
         await publish_job_failed(redis, job_id, job.error or "Unknown error")
     else:
         await publish_job_completed(redis, job_id)

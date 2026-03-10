@@ -1,11 +1,8 @@
-"""Transcript assembly for linear pipeline (M68).
+"""Transcript assembly from stage outputs (M68).
 
 Assembles MergeOutput from individual stage outputs without requiring
-a merge engine. Used by the orchestrator when linear_pipeline_enabled=True.
-
-This module extracts the core transcript-building logic that was previously
-embedded in the merge engine, making it available as a library function
-that the orchestrator can call on job completion.
+a merge engine. Called by the orchestrator on job completion for mono
+pipelines. Per-channel pipelines still use a merge engine.
 """
 
 from __future__ import annotations
@@ -167,13 +164,11 @@ def determine_terminal_stage(
     has_diarize: bool = False,
     has_pii: bool = False,
     has_audio_redact: bool = False,
-    linear_pipeline: bool = False,
 ) -> str:
     """Determine the terminal stage name for a pipeline configuration.
 
     Returns the name of the last stage whose output is the final result.
-    In legacy mode this is always "merge". In linear mode it's the last
-    stage in the chain.
+    PII stages are post-processing and handled separately.
 
     Args:
         speaker_detection: Speaker detection mode.
@@ -181,16 +176,10 @@ def determine_terminal_stage(
         has_diarize: Whether diarization stage is included.
         has_pii: Whether PII detection is included.
         has_audio_redact: Whether audio redaction is included.
-        linear_pipeline: Whether linear pipeline mode is active.
 
     Returns:
         Stage name string.
     """
-    if not linear_pipeline:
-        return "merge"
-
-    # In linear mode, the terminal stage is the last stage in the chain.
-    # PII stages are post-processing (M67) and handled separately.
     if has_diarize and speaker_detection == "diarize":
         return "diarize"
     if has_align:
@@ -234,7 +223,10 @@ def _extract_transcribe_data(
     """Extract text, language, confidence, and raw segments from transcribe output."""
     text = transcribe_data.get("text", "")
     language = transcribe_data.get("language", "en")
-    language_confidence = transcribe_data.get("language_confidence") or 1.0
+    language_confidence_raw = transcribe_data.get("language_confidence")
+    language_confidence = (
+        language_confidence_raw if language_confidence_raw is not None else 1.0
+    )
     raw_segments = transcribe_data.get("segments", [])
     return text, language, language_confidence, raw_segments
 

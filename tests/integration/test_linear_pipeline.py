@@ -1,9 +1,8 @@
-"""Integration tests for M68 linear pipeline DAG.
+"""Integration tests for the linear pipeline DAG.
 
-Tests that the DAG builder produces the correct task structure when
-linear_pipeline=True, including:
-- No merge stage in mono pipelines
-- Sequential diarize (depends on transcribe/align instead of parallel)
+Tests that the DAG builder produces the correct task structure:
+- No merge stage in mono pipelines (orchestrator assembles transcript.json)
+- Sequential diarize (depends on transcribe/align, not parallel)
 - Terminal stage is deterministic
 - Per-channel pipelines still use merge
 """
@@ -26,20 +25,19 @@ def audio_uri():
 
 
 # ---------------------------------------------------------------------------
-# Linear pipeline – no merge in mono pipelines
+# No merge in mono pipelines
 # ---------------------------------------------------------------------------
 
 
-class TestLinearPipelineNoMerge:
-    """Tests that linear pipeline omits merge for mono pipelines."""
+class TestPipelineNoMerge:
+    """Tests that mono pipelines omit the merge stage."""
 
     def test_default_pipeline_no_merge(self, job_id, audio_uri):
-        """Default linear pipeline: prepare → transcribe → align (no merge)."""
+        """Default pipeline: prepare → transcribe → align (no merge)."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={},
-            linear_pipeline=True,
         )
 
         stages = [t.stage for t in tasks]
@@ -52,7 +50,6 @@ class TestLinearPipelineNoMerge:
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"timestamps_granularity": "segment"},
-            linear_pipeline=True,
         )
 
         stages = [t.stage for t in tasks]
@@ -66,7 +63,6 @@ class TestLinearPipelineNoMerge:
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "diarize"},
-            linear_pipeline=True,
         )
 
         stages = [t.stage for t in tasks]
@@ -82,7 +78,6 @@ class TestLinearPipelineNoMerge:
                 "speaker_detection": "diarize",
                 "timestamps_granularity": "segment",
             },
-            linear_pipeline=True,
         )
 
         stages = [t.stage for t in tasks]
@@ -92,20 +87,19 @@ class TestLinearPipelineNoMerge:
 
 
 # ---------------------------------------------------------------------------
-# Linear pipeline – sequential diarize
+# Sequential diarize
 # ---------------------------------------------------------------------------
 
 
-class TestLinearPipelineSequentialDiarize:
-    """Tests that diarize is sequential in linear pipeline mode."""
+class TestSequentialDiarize:
+    """Tests that diarize runs sequentially after transcribe/align."""
 
     def test_diarize_depends_on_align(self, job_id, audio_uri):
-        """In linear mode, diarize depends on prepare and align."""
+        """Diarize depends on prepare and align."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "diarize"},
-            linear_pipeline=True,
         )
 
         by_stage = {t.stage: t for t in tasks}
@@ -124,7 +118,6 @@ class TestLinearPipelineSequentialDiarize:
                 "speaker_detection": "diarize",
                 "timestamps_granularity": "segment",
             },
-            linear_pipeline=True,
         )
 
         by_stage = {t.stage: t for t in tasks}
@@ -136,84 +129,19 @@ class TestLinearPipelineSequentialDiarize:
 
 
 # ---------------------------------------------------------------------------
-# Legacy pipeline – backwards compatibility
-# ---------------------------------------------------------------------------
-
-
-class TestLegacyPipelineUnchanged:
-    """Tests that legacy pipeline (linear_pipeline=False) is unchanged."""
-
-    def test_default_legacy_pipeline(self, job_id, audio_uri):
-        """Legacy pipeline still has merge."""
-        tasks = build_task_dag_for_test(
-            job_id=job_id,
-            audio_uri=audio_uri,
-            parameters={},
-            linear_pipeline=False,
-        )
-
-        stages = [t.stage for t in tasks]
-        assert stages == ["prepare", "transcribe", "align", "merge"]
-
-    def test_diarize_legacy_pipeline_parallel(self, job_id, audio_uri):
-        """Legacy diarize still runs parallel to transcribe."""
-        tasks = build_task_dag_for_test(
-            job_id=job_id,
-            audio_uri=audio_uri,
-            parameters={"speaker_detection": "diarize"},
-            linear_pipeline=False,
-        )
-
-        by_stage = {t.stage: t for t in tasks}
-        # In legacy mode, diarize depends only on prepare (parallel to transcribe)
-        assert by_stage["diarize"].dependencies == [by_stage["prepare"].id]
-        # Merge stage is present
-        assert "merge" in by_stage
-
-    def test_legacy_merge_depends_on_all(self, job_id, audio_uri):
-        """Legacy merge depends on prepare, transcribe, align, diarize."""
-        tasks = build_task_dag_for_test(
-            job_id=job_id,
-            audio_uri=audio_uri,
-            parameters={"speaker_detection": "diarize"},
-            linear_pipeline=False,
-        )
-
-        by_stage = {t.stage: t for t in tasks}
-        merge_deps = set(by_stage["merge"].dependencies)
-        assert by_stage["prepare"].id in merge_deps
-        assert by_stage["transcribe"].id in merge_deps
-        assert by_stage["align"].id in merge_deps
-        assert by_stage["diarize"].id in merge_deps
-
-
-# ---------------------------------------------------------------------------
 # Per-channel pipelines always use merge
 # ---------------------------------------------------------------------------
 
 
 class TestPerChannelAlwaysMerge:
-    """Tests that per_channel pipelines use merge regardless of linear_pipeline flag."""
+    """Tests that per_channel pipelines use merge."""
 
-    def test_per_channel_has_merge_in_linear_mode(self, job_id, audio_uri):
-        """Per-channel pipelines always include merge (even in linear mode)."""
+    def test_per_channel_has_merge(self, job_id, audio_uri):
+        """Per-channel pipelines always include merge."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "per_channel"},
-            linear_pipeline=True,
-        )
-
-        stages = [t.stage for t in tasks]
-        assert "merge" in stages
-
-    def test_per_channel_has_merge_in_legacy_mode(self, job_id, audio_uri):
-        """Per-channel pipelines have merge in legacy mode."""
-        tasks = build_task_dag_for_test(
-            job_id=job_id,
-            audio_uri=audio_uri,
-            parameters={"speaker_detection": "per_channel"},
-            linear_pipeline=False,
         )
 
         stages = [t.stage for t in tasks]
@@ -246,7 +174,6 @@ class TestTerminalStageDeterminism:
                 job_id=job_id,
                 audio_uri=audio_uri,
                 parameters=params,
-                linear_pipeline=True,
             )
             assert tasks[-1].stage == expected_last, (
                 f"params={params}, expected={expected_last}, got={tasks[-1].stage}"
@@ -257,23 +184,21 @@ class TestTerminalStageDeterminism:
         results = set()
         for _ in range(5):
             tasks = build_task_dag_for_test(
-                job_id=uuid4(),  # Different job IDs
+                job_id=uuid4(),
                 audio_uri=audio_uri,
                 parameters={"speaker_detection": "diarize"},
-                linear_pipeline=True,
             )
             results.add(tasks[-1].stage)
 
         assert len(results) == 1, f"Terminal stage varied: {results}"
         assert results.pop() == "diarize"
 
-    def test_pii_stages_present_in_linear_pipeline(self, job_id, audio_uri):
-        """PII stages can still appear in linear pipeline (pending M67 migration)."""
+    def test_pii_stages_present_in_pipeline(self, job_id, audio_uri):
+        """PII stages appear in the pipeline without merge."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"pii_detection": True},
-            linear_pipeline=True,
         )
 
         stages = [t.stage for t in tasks]
@@ -286,42 +211,33 @@ class TestTerminalStageDeterminism:
 # ---------------------------------------------------------------------------
 
 
-class TestLinearPipelineDependencyChain:
-    """Tests correct dependency wiring in linear pipeline."""
+class TestDependencyChain:
+    """Tests correct dependency wiring."""
 
-    def test_full_linear_chain_dependencies(self, job_id, audio_uri):
+    def test_full_chain_dependencies(self, job_id, audio_uri):
         """Verify full dependency chain: prepare → transcribe → align → diarize."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={"speaker_detection": "diarize"},
-            linear_pipeline=True,
         )
 
         by_stage = {t.stage: t for t in tasks}
 
-        # prepare has no dependencies
         assert by_stage["prepare"].dependencies == []
-
-        # transcribe depends on prepare
         assert by_stage["transcribe"].dependencies == [by_stage["prepare"].id]
-
-        # align depends on transcribe
         assert by_stage["align"].dependencies == [by_stage["transcribe"].id]
 
-        # diarize depends on prepare and align
         diarize_deps = set(by_stage["diarize"].dependencies)
         assert by_stage["prepare"].id in diarize_deps
         assert by_stage["align"].id in diarize_deps
 
     def test_prepare_always_first(self, job_id, audio_uri):
         """Prepare is always the first task with no dependencies."""
-        for linear in [True, False]:
-            tasks = build_task_dag_for_test(
-                job_id=job_id,
-                audio_uri=audio_uri,
-                parameters={},
-                linear_pipeline=linear,
-            )
-            assert tasks[0].stage == "prepare"
-            assert tasks[0].dependencies == []
+        tasks = build_task_dag_for_test(
+            job_id=job_id,
+            audio_uri=audio_uri,
+            parameters={},
+        )
+        assert tasks[0].stage == "prepare"
+        assert tasks[0].dependencies == []

@@ -549,59 +549,30 @@ class TestBuildMergedSegments:
 class TestDetermineTerminalStage:
     """Tests for terminal stage determination."""
 
-    def test_legacy_always_merge(self):
-        assert (
-            determine_terminal_stage(linear_pipeline=False)
-            == "merge"
-        )
-        assert (
-            determine_terminal_stage(
-                has_align=True, has_diarize=True, linear_pipeline=False
-            )
-            == "merge"
-        )
+    def test_transcribe_only(self):
+        assert determine_terminal_stage() == "transcribe"
 
-    def test_linear_transcribe_only(self):
-        assert (
-            determine_terminal_stage(linear_pipeline=True)
-            == "transcribe"
-        )
+    def test_with_align(self):
+        assert determine_terminal_stage(has_align=True) == "align"
 
-    def test_linear_with_align(self):
+    def test_with_diarize(self):
         assert (
-            determine_terminal_stage(has_align=True, linear_pipeline=True)
-            == "align"
-        )
-
-    def test_linear_with_diarize(self):
-        assert (
-            determine_terminal_stage(
-                has_diarize=True,
-                speaker_detection="diarize",
-                linear_pipeline=True,
-            )
+            determine_terminal_stage(has_diarize=True, speaker_detection="diarize")
             == "diarize"
         )
 
-    def test_linear_with_align_and_diarize(self):
+    def test_with_align_and_diarize(self):
         """Diarize is terminal when both align and diarize are present."""
         assert (
             determine_terminal_stage(
-                has_align=True,
-                has_diarize=True,
-                speaker_detection="diarize",
-                linear_pipeline=True,
+                has_align=True, has_diarize=True, speaker_detection="diarize"
             )
             == "diarize"
         )
 
-    def test_linear_diarize_without_speaker_detection_mode(self):
+    def test_diarize_without_speaker_detection_mode(self):
         """Diarize is not terminal if speaker_detection is not 'diarize'."""
         assert (
-            determine_terminal_stage(
-                has_diarize=True,
-                speaker_detection="none",
-                linear_pipeline=True,
-            )
+            determine_terminal_stage(has_diarize=True, speaker_detection="none")
             == "transcribe"
         )

@@ -131,8 +131,8 @@ class TestPIIDAGBuilder:
         # Audio redact should depend on pii_detect
         assert task_by_stage["pii_detect"].id in redact_task.dependencies
 
-    def test_merge_depends_on_pii_tasks(self, job_id, audio_uri):
-        """Test that merge depends on PII detection and audio redaction."""
+    def test_pii_and_redact_are_final_stages_in_mono_pipeline(self, job_id, audio_uri):
+        """Test that mono pipeline has pii_detect and audio_redact as final stages (no merge)."""
         parameters = {
             "pii_detection": True,
             "redact_pii_audio": True,
@@ -140,12 +140,12 @@ class TestPIIDAGBuilder:
 
         tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
-        task_by_stage = {t.stage: t for t in tasks}
-        merge_task = task_by_stage["merge"]
-
-        # Merge should depend on both PII tasks
-        assert task_by_stage["pii_detect"].id in merge_task.dependencies
-        assert task_by_stage["audio_redact"].id in merge_task.dependencies
+        stages = [t.stage for t in tasks]
+        # Mono pipeline: no merge stage
+        assert "merge" not in stages
+        # PII pipeline is in place
+        assert "pii_detect" in stages
+        assert "audio_redact" in stages
 
     def test_pii_detection_config_has_no_tier(self, job_id, audio_uri):
         """Test that PII detection config does not include a detection tier."""
@@ -206,16 +206,19 @@ class TestPIIDAGBuilder:
         redact_task = next(t for t in tasks if t.stage == "audio_redact")
         assert redact_task.config["redaction_mode"] == "silence"
 
-    def test_merge_config_includes_pii_flag(self, job_id, audio_uri):
-        """Test that merge config includes pii_detection flag."""
+    def test_pii_flag_not_in_merge_for_mono_pipeline(self, job_id, audio_uri):
+        """Mono pipeline has no merge task; pii_detection flag is not in any merge config."""
         parameters = {
             "pii_detection": True,
         }
 
         tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
-        merge_task = next(t for t in tasks if t.stage == "merge")
-        assert merge_task.config.get("pii_detection") is True
+        stages = [t.stage for t in tasks]
+        # Mono pipeline: no merge stage
+        assert "merge" not in stages
+        # PII detect task is present
+        assert "pii_detect" in stages
 
     def test_valid_pii_redaction_modes(self):
         """Test that valid PII redaction modes are defined."""
