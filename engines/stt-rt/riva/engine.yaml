@@ -1,0 +1,48 @@
+schema_version: "1.1"
+id: stt-rt-riva
+runtime: riva
+stage: transcribe
+mode: realtime
+name: Riva NIM Realtime Transcription
+version: 1.0.0
+description: |
+  Real-time streaming transcription using NVIDIA Riva NIM as a gRPC sidecar.
+  Supports partial results during speech via streaming_recognize(interim_results=True).
+
+  The engine itself is a thin CPU adapter; all GPU inference runs
+  in the Riva NIM sidecar container.
+
+container:
+  gpu: false
+  memory: 1G
+
+capabilities:
+  languages:
+    - en
+    - es
+    - fr
+    - de
+    - it
+    - pt
+    - zh
+    - ja
+    - ko
+    - ru
+  streaming: true
+  word_timestamps: true
+  max_concurrency: 8
+  supports_vocabulary: false
+
+input:
+  encoding: pcm_s16le
+  sample_rate: 16000
+  channels: 1
+
+hardware:
+  supports_cpu: true
+  min_ram_gb: 1
+
+performance:
+  rtf_gpu: 0.05
+  rtf_cpu: 0.05
+  warm_start_latency_ms: 50

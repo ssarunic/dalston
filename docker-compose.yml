@@ -711,10 +711,77 @@ services:
     profiles: [gpu]
     restart: unless-stopped
 
+  # ============================================================
+  # RIVA NIM SIDECAR + ENGINES (M70)
+  # ============================================================
+
+  # Riva NIM container — shared gRPC inference sidecar for Riva engines.
+  # Manages GPU, model loading, and inference scheduling.
+  riva-nim:
+    image: nvcr.io/nim/nvidia/riva-asr:latest
+    environment:
+      NIM_MANIFEST_PROFILE: default
+      NIM_HTTP_API_PORT: 9080
+      NIM_GRPC_API_PORT: 50051
+    ports:
+      - "50051:50051"
+      - "9080:9080"
+    volumes:
+      - riva-model-cache:/opt/nim/.cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles: [riva]
+    restart: unless-stopped
+
+  # Riva batch transcription engine — streams audio to NIM via gRPC
+  stt-batch-transcribe-riva:
+    image: dalston/stt-batch-transcribe-riva:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-transcribe/riva/Dockerfile
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_RUNTIME: riva
+      DALSTON_WORKER_ID: riva-batch-1
+      DALSTON_RIVA_URI: riva-nim:50051
+      DALSTON_RIVA_CHUNK_MS: 100
+    depends_on:
+      <<: *batch-depends
+      riva-nim:
+        condition: service_started
+    profiles: [riva]
+    restart: unless-stopped
+
+  # Riva real-time transcription engine — WebSocket to gRPC bridge
+  stt-rt-riva:
+    image: dalston/stt-rt-riva:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-rt/riva/Dockerfile
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_INSTANCE: stt-rt-riva
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 8
+      DALSTON_RIVA_URI: riva-nim:50051
+    depends_on:
+      <<: *realtime-depends
+      riva-nim:
+        condition: service_started
+    healthcheck: *ws-healthcheck
+    profiles: [riva]
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   redis-data:
   minio-data:
   model-cache:        # M39: Unified model cache for all engines
+  riva-model-cache:   # M70: Riva NIM model cache
   prometheus-data:
   grafana-data:

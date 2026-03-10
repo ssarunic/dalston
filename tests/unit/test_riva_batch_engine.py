@@ -1,0 +1,428 @@
+"""Contract tests for Riva NIM batch transcription engine.
+
+Verifies that the batch engine produces the correct TranscribeOutput
+shape with segments, text, language, and word timestamps when
+communicating with a mocked Riva NIM gRPC sidecar.
+
+These tests mock the Riva client library to avoid GPU/NIM dependencies.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+from uuid import uuid4
+
+import pytest
+
+from dalston.engine_sdk import EngineInput
+from dalston.engine_sdk.context import BatchTaskContext
+
+
+def _ctx(task_id: str, job_id: str) -> BatchTaskContext:
+    return BatchTaskContext(
+        runtime="test-runtime",
+        instance="test-instance",
+        task_id=task_id,
+        job_id=job_id,
+        stage="transcribe",
+    )
+
+
+def _make_mock_word(
+    word: str = "hello",
+    start_time: float = 0.0,
+    end_time: float = 0.5,
+    confidence: float = 0.95,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        word=word,
+        start_time=start_time,
+        end_time=end_time,
+        confidence=confidence,
+    )
+
+
+def _make_mock_alternative(
+    transcript: str = "hello world",
+    confidence: float = 0.95,
+    words: list | None = None,
+) -> SimpleNamespace:
+    if words is None:
+        words = [
+            _make_mock_word("hello", 0.0, 0.5, 0.95),
+            _make_mock_word("world", 0.5, 1.0, 0.92),
+        ]
+    return SimpleNamespace(
+        transcript=transcript,
+        confidence=confidence,
+        words=words,
+    )
+
+
+def _make_mock_result(
+    alternatives: list | None = None,
+    is_final: bool = True,
+) -> SimpleNamespace:
+    if alternatives is None:
+        alternatives = [_make_mock_alternative()]
+    return SimpleNamespace(
+        alternatives=alternatives,
+        is_final=is_final,
+    )
+
+
+def _make_mock_response(
+    results: list | None = None,
+) -> SimpleNamespace:
+    if results is None:
+        results = [_make_mock_result()]
+    return SimpleNamespace(results=results)
+
+
+@pytest.fixture()
+def _mock_riva_modules():
+    """Mock riva.client and related modules so engine.py can be imported."""
+    mock_riva = MagicMock()
+    mock_riva_client = MagicMock()
+    mock_riva_asr_pb2 = MagicMock()
+
+    modules = {
+        "riva": mock_riva,
+        "riva.client": mock_riva_client,
+        "riva.client.proto": MagicMock(),
+        "riva.client.proto.riva_asr_pb2": mock_riva_asr_pb2,
+    }
+
+    with patch.dict(sys.modules, modules):
+        yield mock_riva_client, mock_riva_asr_pb2
+
+
+@pytest.fixture()
+def riva_batch_engine_class(_mock_riva_modules):
+    """Load the RivaBatchEngine class with mocked riva imports."""
+    engine_path = Path("engines/stt-transcribe/riva/engine.py")
+    module_name = "riva_batch_engine_test"
+
+    # Remove any cached version
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+
+    spec = importlib.util.spec_from_file_location(module_name, engine_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module.RivaBatchEngine
+
+
+@pytest.fixture()
+def engine_with_mock(riva_batch_engine_class, _mock_riva_modules):
+    """Create a RivaBatchEngine with a mocked ASR service."""
+    mock_riva_client, _ = _mock_riva_modules
+
+    engine = riva_batch_engine_class()
+
+    return engine, mock_riva_client
+
+
+def _setup_streaming_responses(engine, responses):
+    """Configure mock to return given responses from streaming_response_gen."""
+    engine._asr.streaming_response_gen.return_value = iter(responses)
+
+
+class TestRivaBatchOutputShape:
+    """Verify TranscribeOutput structure from Riva batch engine."""
+
+    def test_output_has_text_segments_and_language(
+        self, engine_with_mock, tmp_path
+    ) -> None:
+        engine, _ = engine_with_mock
+
+        # Create a small WAV-like file (just raw bytes for testing)
+        audio_file = tmp_path / "test.wav"
+        audio_file.write_bytes(b"\x00\x00" * 16000)  # 1 second of silence
+
+        response = _make_mock_response()
+        _setup_streaming_responses(engine, [response])
+
+        task_id = str(uuid4())
+        job_id = str(uuid4())
+        result = engine.process(
+            EngineInput(
+                task_id=task_id,
+                job_id=job_id,
+                audio_path=audio_file,
+                config={"language": "en"},
+            ),
+            _ctx(task_id, job_id),
+        )
+
+        data = result.data
+        assert data.text == "hello world"
+        assert data.language == "en"
+        assert len(data.segments) == 1
+        assert data.runtime == "riva"
+        assert data.skipped is False
+
+    def test_output_segment_has_word_timestamps(
+        self, engine_with_mock, tmp_path
+    ) -> None:
+        engine, _ = engine_with_mock
+
+        audio_file = tmp_path / "test.wav"
+        audio_file.write_bytes(b"\x00\x00" * 16000)
+
+        words = [
+            _make_mock_word("hello", 0.0, 0.5, 0.95),
+            _make_mock_word("world", 0.5, 1.0, 0.92),
+        ]
+        response = _make_mock_response(
+            results=[_make_mock_result(alternatives=[_make_mock_alternative(words=words)])]
+        )
+        _setup_streaming_responses(engine, [response])
+
+        task_id = str(uuid4())
+        job_id = str(uuid4())
+        result = engine.process(
+            EngineInput(
+                task_id=task_id,
+                job_id=job_id,
+                audio_path=audio_file,
+                config={"language": "en"},
+            ),
+            _ctx(task_id, job_id),
+        )
+
+        seg = result.data.segments[0]
+        assert seg.words is not None
+        assert len(seg.words) == 2
+        assert seg.words[0].text == "hello"
+        assert seg.words[0].start == 0.0
+        assert seg.words[0].end == 0.5
+        assert seg.words[1].text == "world"
+
+    def test_multiple_segments(self, engine_with_mock, tmp_path) -> None:
+        engine, _ = engine_with_mock
+
+        audio_file = tmp_path / "test.wav"
+        audio_file.write_bytes(b"\x00\x00" * 32000)
+
+        responses = [
+            _make_mock_response(
+                results=[
+                    _make_mock_result(
+                        alternatives=[
+                            _make_mock_alternative(
+                                transcript="hello world",
+                                words=[
+                                    _make_mock_word("hello", 0.0, 0.5),
+                                    _make_mock_word("world", 0.5, 1.0),
+                                ],
+                            )
+                        ]
+                    )
+                ]
+            ),
+            _make_mock_response(
+                results=[
+                    _make_mock_result(
+                        alternatives=[
+                            _make_mock_alternative(
+                                transcript="good morning",
+                                words=[
+                                    _make_mock_word("good", 2.0, 2.5),
+                                    _make_mock_word("morning", 2.5, 3.0),
+                                ],
+                            )
+                        ]
+                    )
+                ]
+            ),
+        ]
+        _setup_streaming_responses(engine, responses)
+
+        task_id = str(uuid4())
+        job_id = str(uuid4())
+        result = engine.process(
+            EngineInput(
+                task_id=task_id,
+                job_id=job_id,
+                audio_path=audio_file,
+                config={"language": "en"},
+            ),
+            _ctx(task_id, job_id),
+        )
+
+        assert len(result.data.segments) == 2
+        assert result.data.text == "hello world good morning"
+        assert result.data.segments[0].start == 0.0
+        assert result.data.segments[1].start == 2.0
+
+    def test_interim_results_are_ignored(self, engine_with_mock, tmp_path) -> None:
+        engine, _ = engine_with_mock
+
+        audio_file = tmp_path / "test.wav"
+        audio_file.write_bytes(b"\x00\x00" * 16000)
+
+        response = _make_mock_response(
+            results=[
+                _make_mock_result(is_final=False),  # interim — should be ignored
+                _make_mock_result(
+                    is_final=True,
+                    alternatives=[_make_mock_alternative(transcript="hello world")],
+                ),
+            ]
+        )
+        _setup_streaming_responses(engine, [response])
+
+        task_id = str(uuid4())
+        job_id = str(uuid4())
+        result = engine.process(
+            EngineInput(
+                task_id=task_id,
+                job_id=job_id,
+                audio_path=audio_file,
+                config={"language": "en"},
+            ),
+            _ctx(task_id, job_id),
+        )
+
+        assert len(result.data.segments) == 1
+        assert result.data.text == "hello world"
+
+    def test_empty_transcript_is_skipped(self, engine_with_mock, tmp_path) -> None:
+        engine, _ = engine_with_mock
+
+        audio_file = tmp_path / "test.wav"
+        audio_file.write_bytes(b"\x00\x00" * 16000)
+
+        response = _make_mock_response(
+            results=[
+                _make_mock_result(
+                    alternatives=[_make_mock_alternative(transcript="  ")]
+                ),
+            ]
+        )
+        _setup_streaming_responses(engine, [response])
+
+        task_id = str(uuid4())
+        job_id = str(uuid4())
+        result = engine.process(
+            EngineInput(
+                task_id=task_id,
+                job_id=job_id,
+                audio_path=audio_file,
+                config={"language": "en"},
+            ),
+            _ctx(task_id, job_id),
+        )
+
+        assert len(result.data.segments) == 0
+        assert result.data.text == ""
+
+
+class TestRivaBatchConfig:
+    """Verify configuration handling."""
+
+    def test_default_language_is_english(self, engine_with_mock, tmp_path) -> None:
+        engine, _ = engine_with_mock
+
+        audio_file = tmp_path / "test.wav"
+        audio_file.write_bytes(b"\x00\x00" * 16000)
+
+        response = _make_mock_response()
+        _setup_streaming_responses(engine, [response])
+
+        task_id = str(uuid4())
+        job_id = str(uuid4())
+        result = engine.process(
+            EngineInput(
+                task_id=task_id,
+                job_id=job_id,
+                audio_path=audio_file,
+                config={},
+            ),
+            _ctx(task_id, job_id),
+        )
+
+        assert result.data.language == "en"
+
+    def test_duration_calculated_from_audio_bytes(
+        self, engine_with_mock, tmp_path
+    ) -> None:
+        engine, _ = engine_with_mock
+
+        # 2 seconds of int16 mono 16kHz audio = 2 * 16000 * 2 bytes
+        audio_file = tmp_path / "test.wav"
+        audio_file.write_bytes(b"\x00\x00" * 32000)
+
+        response = _make_mock_response()
+        _setup_streaming_responses(engine, [response])
+
+        task_id = str(uuid4())
+        job_id = str(uuid4())
+        result = engine.process(
+            EngineInput(
+                task_id=task_id,
+                job_id=job_id,
+                audio_path=audio_file,
+                config={"language": "en"},
+            ),
+            _ctx(task_id, job_id),
+        )
+
+        assert result.data.duration == pytest.approx(2.0)
+
+    def test_timestamp_granularity_is_word(self, engine_with_mock, tmp_path) -> None:
+        engine, _ = engine_with_mock
+
+        audio_file = tmp_path / "test.wav"
+        audio_file.write_bytes(b"\x00\x00" * 16000)
+
+        response = _make_mock_response()
+        _setup_streaming_responses(engine, [response])
+
+        task_id = str(uuid4())
+        job_id = str(uuid4())
+        result = engine.process(
+            EngineInput(
+                task_id=task_id,
+                job_id=job_id,
+                audio_path=audio_file,
+                config={"language": "en"},
+            ),
+            _ctx(task_id, job_id),
+        )
+
+        assert result.data.timestamp_granularity_requested.value == "word"
+        assert result.data.timestamp_granularity_actual.value == "word"
+
+
+class TestRivaBatchHealthCheck:
+    """Verify health check behavior."""
+
+    def test_healthy_when_nim_reachable(self, engine_with_mock) -> None:
+        engine, _ = engine_with_mock
+        engine._asr.stub.GetRivaSpeechRecognitionConfig.return_value = MagicMock()
+
+        health = engine.health_check()
+        assert health["status"] == "healthy"
+        assert health["nim"] == "connected"
+
+    def test_unhealthy_when_nim_unreachable(self, engine_with_mock) -> None:
+        engine, _ = engine_with_mock
+
+        # Import the mock grpc module that was injected
+        import grpc as mock_grpc
+
+        engine._asr.stub.GetRivaSpeechRecognitionConfig.side_effect = (
+            mock_grpc.RpcError()
+        )
+
+        health = engine.health_check()
+        assert health["status"] == "unhealthy"
+        assert health["nim"] == "unreachable"
