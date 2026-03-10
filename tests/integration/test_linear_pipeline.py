@@ -193,8 +193,8 @@ class TestTerminalStageDeterminism:
         assert len(results) == 1, f"Terminal stage varied: {results}"
         assert results.pop() == "diarize"
 
-    def test_pii_stages_present_in_pipeline(self, job_id, audio_uri):
-        """PII stages appear in the pipeline without merge."""
+    def test_pii_stages_not_in_pipeline(self, job_id, audio_uri):
+        """PII is post-processing; pii_detect is not a DAG task."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
@@ -202,7 +202,7 @@ class TestTerminalStageDeterminism:
         )
 
         stages = [t.stage for t in tasks]
-        assert "pii_detect" in stages
+        assert "pii_detect" not in stages
         assert "merge" not in stages
 
 

@@ -942,10 +942,8 @@ class TestStageModelSelection:
             by_stage["diarize"].config["runtime_model_id"]
             == "pyannote/speaker-diarization-community-1"
         )
-        assert (
-            by_stage["pii_detect"].config["runtime_model_id"]
-            == "urchade/gliner_multi-v2.1"
-        )
+        # pii_detect is post-processing; not a DAG task
+        assert "pii_detect" not in by_stage
 
     @pytest.mark.asyncio
     async def test_stage_mismatch_rejected(self, job_id, audio_uri, mock_catalog):
