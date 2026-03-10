@@ -4,7 +4,7 @@
 #   {type}-{domain}-{stage}-{impl}[-v{version}][-cpu]
 #   - type: batch (file processing) or rt (realtime streaming)
 #   - domain: stt (speech-to-text), tts (text-to-speech, future)
-#   - stage: prepare, transcribe, align, diarize, pii_detect, audio_redact, refine, merge
+#   - stage: prepare, transcribe, align, diarize, pii_detect, audio_redact, refine
 #   - impl: whisper, parakeet, pyannote, presidio, etc.
 #   - version: v31, v40, etc. (only when multiple versions coexist)
 #   - cpu: only when forcing CPU mode (GPU is default for compute-heavy engines)
@@ -283,6 +283,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_RUNTIME: audio-prepare
+      DALSTON_WORKER_ID: prepare-1
     depends_on: *batch-depends
     restart: unless-stopped
 
@@ -359,6 +360,7 @@ services:
       <<: [*common-env, *observability-env]
       DALSTON_RUNTIME: faster-whisper
       DALSTON_DEFAULT_MODEL_ID: "large-v3-turbo"
+      DALSTON_WORKER_ID: fwhisper-1
     volumes:
       - model-cache:/models
     depends_on: *batch-depends
@@ -478,6 +480,7 @@ services:
       <<: [*common-env, *observability-env]
       DALSTON_RUNTIME: hf-asr
       DALSTON_DEFAULT_MODEL_ID: "openai/whisper-large-v3"
+      DALSTON_WORKER_ID: hf-asr-1
     volumes:
       - model-cache:/models
     depends_on: *batch-depends
@@ -494,6 +497,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_RUNTIME: phoneme-align
+      DALSTON_WORKER_ID: palign-cpu-1
     volumes:
       - model-cache:/models
     depends_on: *batch-depends
@@ -505,6 +509,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_RUNTIME: phoneme-align
+      DALSTON_WORKER_ID: palign-gpu-1
     volumes:
       - model-cache:/models
     depends_on: *batch-depends
@@ -523,6 +528,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_RUNTIME: pyannote-4.0
+      DALSTON_WORKER_ID: pyannote-cpu-1
       HF_TOKEN: ${HF_TOKEN:-}
       DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
     volumes:
@@ -536,6 +542,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_RUNTIME: pyannote-4.0
+      DALSTON_WORKER_ID: pyannote-gpu-1
       HF_TOKEN: ${HF_TOKEN:-}
     volumes:
       - model-cache:/models
@@ -555,6 +562,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_RUNTIME: nemo-msdd
+      DALSTON_WORKER_ID: nemo-msdd-gpu1
       DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
       DALSTON_NEMO_ALLOW_CPU: ${DALSTON_NEMO_ALLOW_CPU:-false}
     volumes:
@@ -574,6 +582,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_RUNTIME: nemo-msdd
+      DALSTON_WORKER_ID: nemo-msdd-cpu1
       DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
       DALSTON_NEMO_ALLOW_CPU: "true"
     volumes:
@@ -593,6 +602,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_RUNTIME: pii-presidio
+      DALSTON_WORKER_ID: presidio-cpu1
       DALSTON_DEVICE: cpu
     volumes:
       - model-cache:/models
@@ -609,6 +619,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_RUNTIME: pii-presidio
+      DALSTON_WORKER_ID: presidio-gpu1
       DALSTON_DEVICE: cuda
     volumes:
       - model-cache:/models
@@ -626,18 +637,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_RUNTIME: audio-redactor
-    depends_on: *batch-depends
-    restart: unless-stopped
-
-  # --- MERGE STAGE ---
-  stt-batch-merge:
-    image: dalston/stt-batch-merge:latest
-    build:
-      context: .
-      dockerfile: engines/stt-merge/final-merger/Dockerfile
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_RUNTIME: final-merger
+      DALSTON_WORKER_ID: redactor-1
     depends_on: *batch-depends
     restart: unless-stopped
 

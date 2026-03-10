@@ -425,6 +425,9 @@ async def get_engines(
     for instance_id in all_instance_ids:
         data = await redis.hgetall(f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance_id}")
         if data and "runtime" in data:
+            # Skip realtime-only instances — their "ready" status isn't a valid BatchEngine status
+            if data.get("interfaces") == '["realtime"]':
+                continue
             runtime = data["runtime"]
             discovered_heartbeats.setdefault(runtime, []).append(data)
 

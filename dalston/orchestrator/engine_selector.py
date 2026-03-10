@@ -191,11 +191,19 @@ class NoCapableEngineError(Exception):
 
     def _explain_mismatch(self, engine: EngineRecord) -> str:
         """Explain why a running engine doesn't match requirements."""
+        reasons = []
+
+        if not engine.is_healthy:
+            if engine.status in ("offline", "draining"):
+                reasons.append(f"status={engine.status}")
+            else:
+                reasons.append("heartbeat_stale")
+            return "; ".join(reasons)
+
         if engine.capabilities is None:
             return "no capabilities declared"
 
         caps = engine.capabilities
-        reasons = []
 
         lang = self.requirements.get("language")
         if (
@@ -543,7 +551,7 @@ async def select_engine(
             runtime_model_id = _resolve_runtime_model_id(db_model, stage)
 
             engine = await registry.get_engine(runtime_id)
-            if engine is None or not engine.is_available:
+            if engine is None or not engine.is_healthy:
                 raise ModelSelectionError(
                     code="runtime_unavailable",
                     stage=stage,
@@ -629,11 +637,15 @@ async def select_engine(
         e for e in await registry.get_by_stage(stage) if e.supports_interface("batch")
     ]
 
-    # 3. Filter by hard requirements
+    # 3. Filter by hard requirements.
+    # Use is_healthy (not is_available) so a temporarily-busy engine still routes
+    # new tasks to its queue instead of failing the job immediately.  Capacity
+    # back-pressure is handled by the queue itself; the scheduler already uses
+    # is_healthy via registry.is_engine_available().
     capable = [
         e
         for e in candidates
-        if e.is_available
+        if e.is_healthy
         and (
             e.capabilities is None or _meets_requirements(e.capabilities, requirements)
         )

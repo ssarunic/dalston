@@ -129,9 +129,16 @@ class EngineRunner:
 
         # Load configuration from environment
         self.runtime = os.environ.get("DALSTON_RUNTIME", "unknown")
-        # Instance-unique consumer ID for Redis Streams
-        # This ensures spot instance replacements don't mask old pending tasks
-        self.instance = f"{self.runtime}-{uuid4().hex[:12]}"
+        # Instance ID: prefer a stable ID so container restarts reuse the same Redis key
+        # and don't leave ghost entries in stage/runtime sets.
+        # Priority: DALSTON_WORKER_ID > DALSTON_INSTANCE > random UUID (local/dev fallback)
+        stable_id = os.environ.get("DALSTON_WORKER_ID") or os.environ.get(
+            "DALSTON_INSTANCE"
+        )
+        if stable_id:
+            self.instance = f"{self.runtime}-{stable_id[:12]}"
+        else:
+            self.instance = f"{self.runtime}-{uuid4().hex[:12]}"
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
         self.s3_bucket = os.environ.get("DALSTON_S3_BUCKET", "dalston-artifacts")
         self.metrics_port = int(os.environ.get("DALSTON_METRICS_PORT", "9100"))
@@ -330,6 +337,8 @@ class EngineRunner:
                             status=status,
                             active_batch=1 if current_task else 0,
                             loaded_model=loaded_model,
+                            runtime=self.runtime,
+                            stage=self._stage,
                         )
                     except Exception as e:
                         logger.warning("unified_heartbeat_failed", error=str(e))

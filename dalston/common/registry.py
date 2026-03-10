@@ -570,8 +570,15 @@ class UnifiedRegistryWriter:
         status: str | None = None,
         active_batch: int | None = None,
         loaded_model: str | None = None,
+        runtime: str | None = None,
+        stage: str | None = None,
     ) -> None:
-        """Update heartbeat (sync)."""
+        """Update heartbeat (sync).
+
+        runtime and stage are written on every heartbeat so that if the Redis key
+        expires and is re-created by the heartbeat, the critical static fields are
+        always present (preventing silent quarantine by _mapping_to_record).
+        """
         r = self._get_redis()
         instance_key = f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance}"
         now = datetime.now(UTC).isoformat()
@@ -583,6 +590,10 @@ class UnifiedRegistryWriter:
             mapping["active_batch"] = str(active_batch)
         if loaded_model is not None:
             mapping["loaded_model"] = loaded_model
+        if runtime is not None:
+            mapping["runtime"] = runtime
+        if stage is not None:
+            mapping["stage"] = stage
 
         r.hset(instance_key, mapping=mapping)
         r.expire(instance_key, HEARTBEAT_TTL)

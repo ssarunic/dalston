@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-08T20:49:49.301521+00:00",
+  "generated_at": "2026-03-10T21:26:58.772271+00:00",
   "schema_version": "3.0",
   "engine_count": 12,
   "engines": {
@@ -81,7 +81,7 @@
       "type": null,
       "description": "Speaker diarization using NVIDIA NeMo Multi-scale Diarization Decoder.\nNeural end-to-end system with built-in overlap detection.\n\nNo HuggingFace token required - models are open under CC-BY-4.0 license.\nSupports optional min/max speaker count hints.\nCPU inference supported but slow (~2x realtime).",
       "image": "dalston/stt-batch-diarize-nemo-msdd:1.0.0",
-      "execution_profile": "venv",
+      "execution_profile": "container",
       "capabilities": {
         "stages": [
           "diarize"

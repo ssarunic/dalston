@@ -86,8 +86,9 @@ class TestParakeetStreamingEngineGetModels:
         assert "parakeet-rnnt-1.1b" in models
         assert "parakeet-ctc-0.6b" in models
         assert "parakeet-ctc-1.1b" in models
+        assert "parakeet-tdt-0.6b-v3" in models
         assert "parakeet-tdt-1.1b" in models
-        assert len(models) == 5
+        assert len(models) == 6
 
 
 class TestParakeetStreamingEngineGetLanguages:
