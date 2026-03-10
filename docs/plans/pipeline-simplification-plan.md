@@ -9,9 +9,10 @@ coordination surfaces. Keep current pipeline behavior (DAG, align,
 per_channel, merge) unchanged. Ship PII post-processing behind a feature
 flag.
 
-**Cycle 2 (next iteration):** Replace DAG with linear pipeline, eliminate
-merge engine, collapse align into transcribe, rearchitect per-channel as
-pre-processing split, introduce declarative engine.yaml.
+**Cycle 2 (next iteration):** Move to a mostly linear core pipeline and
+eliminate merge, keep `align` as a capability-gated fallback stage, and
+defer per_channel redesign plus declarative/new-stage expansion until the
+end (or later backlog).
 
 This ordering is deliberate: the pipeline refactor touches every engine's
 output contract. Doing it while the engine layer is also being refactored
@@ -30,6 +31,9 @@ the pipeline on top of it.
 ---
 
 # Cycle 1: Engine Unification + Coordination Consolidation
+
+Detailed execution milestone for this cycle:
+`docs/plan/milestones/M63-engine-unification-incremental.md`
 
 ## PR-1: Shared Faster-Whisper Transcribe Core
 
@@ -91,6 +95,7 @@ This is a new file alongside existing engines. Nothing imports it yet.
 #### Step 1.1.2 — Batch engine delegates to `TranscribeCore`
 
 Update `engines/stt-transcribe/faster-whisper/engine.py` to:
+
 1. Instantiate `TranscribeCore` in `__init__`
 2. Delegate `process()` to `core.transcribe()`
 3. Keep all output formatting and `EngineOutput` construction in the engine
@@ -101,6 +106,7 @@ identical output.
 #### Step 1.1.3 — RT engine delegates to `TranscribeCore`
 
 Update `engines/stt-rt/faster-whisper/engine.py` to:
+
 1. Instantiate `TranscribeCore` in `__init__`
 2. Delegate `process_chunk()` to `core.transcribe_stream()`
 3. Keep all session management and WebSocket protocol in the RT engine
@@ -110,6 +116,7 @@ Update `engines/stt-rt/faster-whisper/engine.py` to:
 #### Step 1.1.4 — Single container serves both adapters
 
 Create a unified entry point that runs both I/O adapters in one process:
+
 - Queue consumer adapter (batch): polls Redis, calls `core.transcribe()`
 - WebSocket adapter (realtime): accepts connections, calls
   `core.transcribe_stream()`
@@ -176,6 +183,9 @@ One commit per runtime. Same pattern.
 ## PR-2: Unified Registry Model (Compat Mode)
 
 *Single registry schema. Dual-read/dual-write during transition.*
+
+Detailed execution milestone:
+`docs/plan/milestones/M64-registry-unification-incremental.md`
 
 ### Phase 2.0: Safety Net
 
@@ -261,11 +271,15 @@ Remove `BatchEngineRegistry` from `dalston/engine_sdk/registry.py`.
 
 *Extract shared allocation/forwarding/session logic from 3 WS handlers.*
 
+Detailed execution milestone:
+`docs/plan/milestones/M65-realtime-proxy-core-incremental.md`
+
 ### Phase 3.0: Safety Net
 
 #### Step 3.0.1 — Contract tests per WebSocket protocol
 
 Add `tests/unit/test_ws_protocol_contracts.py`:
+
 - Test Dalston native protocol message shapes
 - Test OpenAI compat protocol message translation
 - Test ElevenLabs compat protocol message translation
@@ -324,6 +338,9 @@ from 1,094).
 *Migrate all session-router behaviors into orchestrator-owned coordination
 service. This is NOT just moving acquire/release — it includes TTL
 extension, orphan reconciliation, and offline instance fanout.*
+
+Detailed execution milestone:
+`docs/plan/milestones/M66-session-router-consolidation-incremental.md`
 
 ### Behaviors to Migrate (addresses P0 finding #1)
 
@@ -449,6 +466,9 @@ registry).
 *Move PII detection + audio redaction to async post-processing. Ship behind
 feature flag with blocking mode retained for compatibility.*
 
+Detailed execution milestone:
+`docs/plan/milestones/M67-pii-post-processing-incremental.md`
+
 ### Phase 5.0: Design
 
 PII detection and audio redaction are compliance enrichments, not
@@ -503,10 +523,12 @@ class PipelineSettings(BaseSettings):
 #### Step 5.1.3 — DAG builder respects PII mode
 
 When `pii_mode=post_process`:
+
 - Omit `pii_detect` and `audio_redact` tasks from DAG
 - After job completion, schedule post-processing via `PostProcessor`
 
 When `pii_mode=pipeline` (default):
+
 - Current behavior unchanged
 
 **Verify:** `make test` passes. Both modes produce identical transcript.
@@ -531,13 +553,21 @@ Define `Transcript` model in `pipeline_types.py`. Prove equivalence with
 `MergeOutput`. Add `from_stage_outputs()` factory. This is additive —
 nothing in production uses it yet.
 
-## PR-7: Linear Pipeline (Eliminate Merge for Mono)
+## PR-7: Linear Core Pipeline + Merge Elimination (Last Core Refactor)
 
+Detailed execution milestone:
+`docs/plan/milestones/M68-linear-pipeline-merge-elimination-incremental.md`
+
+- Core ordering becomes: `prepare -> transcribe -> [align] -> [diarize]`
+- `align` remains optional and capability-gated (only when native word
+  timestamps are insufficient)
 - Transcribe engines output `Transcript`
 - Diarize engine enriches `Transcript` (adds speaker assignment via
   `find_speaker_by_overlap`, ~40 LOC moved from merge)
 - Orchestrator writes last stage's output as `transcript.json`
 - DAG builder omits merge for mono pipelines
+
+Execute this PR only after Cycle 1 is stable in production.
 
 **Transcript assembly determinism** (addresses P0 finding #2):
 Do NOT use "last completed task" heuristic. Instead, the DAG builder
@@ -554,45 +584,49 @@ On job completion, the orchestrator reads the output of the task whose
 stage matches `terminal_stage`. This is deterministic regardless of
 retry ordering or parallel completion timing.
 
-## PR-8: Per-Channel as Pre-Processing Split
+## PR-8: Align Capability Policy Hardening
 
-**Deferred** pending usage telemetry. Current per-channel DAG works and
-is tested. Rearchitecting as parent-child jobs introduces:
-- API behavior changes (parent_job_id, child_job_ids)
-- Job status semantics changes
-- DB schema additions
+Do not remove align. Formalize capability-driven inclusion:
 
-These require API versioning or compatibility coverage that is out of
-scope for this cycle (addresses P1 finding #6).
+- `supports_precise_word_timestamps=true` -> skip align
+- `supports_precise_word_timestamps=false` -> run align stage
 
-## PR-9: Collapse Align into Transcribe
+Add explicit coverage for both paths in pipeline builder tests and model
+capability fixtures.
 
-Remove align as a separate stage. All modern transcribers (Whisper,
-Parakeet) produce word-level timestamps natively. The align engine
-becomes dead code. Keep it available as an optional post-processing
-enrichment for edge cases (legacy models with poor attention-based
-timestamps).
-
-## PR-10: Declarative Engine.yaml + New Stages
+## PR-9: Declarative Engine.yaml + New Stages (Postponed Backlog)
 
 Engines declare inputs/outputs in `engine.yaml`. Pipeline builder
 auto-wires based on declarations. Adding new stages (VAD, emotion,
 non-verbal) requires only engine.yaml + engine.py.
 
-**Deferred** because it depends on stable Cycle 1 and is the highest-
-risk change to the orchestrator's core loop (addresses P1 finding #4).
+**Postponed** until after the core simplification program is complete and
+stable. It is intentionally out of the current execution path.
 
-## PR-11: Clean Up (task_dependencies, MergeOutput, etc.)
+## PR-10: Clean Up (task_dependencies, MergeOutput, etc.)
 
 **task_dependencies junction table** (addresses P1 finding #5):
 Only dropped AFTER:
+
 1. Linear pipeline is stable in production for ≥1 release cycle
 2. No in-flight jobs exist that use the dependency table
 3. Migration includes a drain check: reject if any active jobs exist
 4. Rollback strategy: re-create table from pipeline stage ordering if
    needed (linear pipeline makes this trivial)
 
-This is the LAST step, not an early cleanup.
+This is a post-stabilization cleanup step, not early work.
+
+## PR-11: Per-Channel as Pre-Processing Split (LAST / Optional)
+
+**Deferred** pending usage telemetry. Current per-channel DAG works and
+is tested. Rearchitecting as parent-child jobs introduces:
+
+- API behavior changes (parent_job_id, child_job_ids)
+- Job status semantics changes
+- DB schema additions
+
+Execute this only after all prior milestones are stable. If telemetry
+shows limited usage, keep existing behavior and skip this PR.
 
 ---
 
@@ -608,11 +642,13 @@ Cycle 1 (this iteration):
 
 Cycle 2 (deferred):
   PR-6:  Shared Transcript model
-  PR-7:  Linear pipeline + merge elimination
-  PR-8:  Per-channel rearchitecture (pending telemetry)
-  PR-9:  Align collapse
-  PR-10: Declarative engine.yaml
-  PR-11: Schema cleanup (task_dependencies, MergeOutput)
+  PR-8:  Align capability policy (retain fallback stage)
+  PR-7:  Linear core pipeline + merge elimination (last core refactor)
+  PR-10: Schema cleanup (task_dependencies, MergeOutput)
+  PR-11: Per-channel rearchitecture (LAST, optional)
+
+Backlog (post-core simplification):
+  PR-9: Declarative engine.yaml + new stages
 ```
 
 ## Dependencies (Cycle 1)

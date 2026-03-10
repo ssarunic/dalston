@@ -49,6 +49,7 @@ That's ~700 lines doing the same thing with different I/O wrappers.
 ### The Riva model: unified engine with dual I/O
 
 NVIDIA Riva runs a single gRPC service per model that accepts both:
+
 - Streaming recognition (bidirectional gRPC stream)
 - Batch recognition (unary RPC, file upload)
 
@@ -86,6 +87,7 @@ stream**. The difference is purely in the I/O transport layer.
 ```
 
 **What this eliminates:**
+
 - Two separate SDKs (~9,000 LOC combined; see section 8c) share ~3,000-
   4,000 LOC of duplicated patterns that collapse into one unified SDK
 - Two registry protocols collapse to one
@@ -93,11 +95,14 @@ stream**. The difference is purely in the I/O transport layer.
 - Duplicate container images disappear (halves image build/push time)
 - The session router can become a thin layer in the orchestrator
 
-**What this requires giving up:**
-- The ability to scale batch and RT workers independently for the same model.
-  In practice this is rarely needed -- GPU memory is the bottleneck, and a
-  loaded model can serve both. If you need isolation, run two instances of
-  the same unified container with different `--mode` flags.
+**What this does NOT require giving up:**
+
+- Independent scaling behavior for batch vs realtime traffic.
+  This is primarily an allocation/QoS concern:
+  - reserve realtime capacity (`rt_reservation`)
+  - cap batch inflight work (`batch_max_inflight`)
+  - use weighted scheduling across batch/RT interfaces
+  - optionally deploy isolated runtime pools when strict isolation is needed
 
 ### Concrete simplification: unified engine interface
 
@@ -163,6 +168,7 @@ timestamps; skip diarize if transcriber includes it).
 
 Riva treats the pipeline as a **directed graph of services**, not a hardcoded
 sequence. Each service declares:
+
 - Input types it consumes (audio, transcript, diarization labels, etc.)
 - Output types it produces
 - Whether it's optional
@@ -203,6 +209,7 @@ def build_dag(job_params, available_engines):
 ```
 
 **Impact:** Adding emotion recognition becomes:
+
 1. Write engine with `engine.yaml` declaring inputs/outputs
 2. Done. No orchestrator changes.
 
@@ -216,14 +223,14 @@ DAG. This covers all the stages you mentioned (VAD, noise reduction, speaker
 recognition, emotion, non-verbal events) without needing a full graph solver.
 
 ```
-PREPARE → [NOISE_REDUCE] → [VAD] → TRANSCRIBE → [DIARIZE]
-    → [SPEAKER_ID] → [EMOTION] → [NONVERBAL] → [PII_DETECT → AUDIO_REDACT]
+PREPARE → [NOISE_REDUCE] → [VAD] → TRANSCRIBE → [ALIGN] → [DIARIZE]
+    → [SPEAKER_ID] → [EMOTION] → [NONVERBAL]
 ```
 
 Each optional stage declares its position and is auto-inserted when its
 engine is available AND the user requests its output. No merge stage --
-the last stage's output is the final transcript. PII stages only
-present when audio redaction is requested (see section 8a).
+the last core stage's output is the final transcript. PII text/audio
+redaction run as post-processing hooks.
 
 ---
 
@@ -284,12 +291,14 @@ infra services)
 
 The session router (`session_router/`) is a complete parallel coordination
 system:
+
 - Its own Redis key schema (`dalston:realtime:*`)
 - Its own registry protocol
 - Its own health monitoring
 - Its own allocation strategy
 
 With unified engines, the orchestrator can handle both modes:
+
 - Batch: enqueue task to Redis stream (as today)
 - Realtime: find available engine instance, return its WebSocket endpoint
 
@@ -314,6 +323,7 @@ For each new stage you're considering:
 | Non-verbal events | Parallel with transcribe? After VAD? | New dependency patterns | `NonVerbalOutput` | `NonVerbalInputPayload` | New service |
 
 Each stage adds complexity to the DAG builder because:
+
 1. It may be conditional on user parameters
 2. It may be skippable based on other engine capabilities
 3. Its position in the pipeline depends on what other stages are active
@@ -337,72 +347,30 @@ The DAG builder, selector, and docker-compose don't change.
 
 ## 5. Specific Simplifications Worth the Flexibility Loss
 
-### 5a. Drop per_channel from the DAG -- model it as a pre-processing split
+### 5a. per_channel refactor is deferred to the final phase
 
-The `per_channel` mode in `dag.py` creates a completely different DAG shape:
-`_build_per_channel_dag_with_engines()` (160 LOC) duplicates the entire
-normal pipeline with `_ch{N}` suffixed stages, parallel branches, and
-channel-aware merge logic. Every future stage added to the pipeline would
-need a per-channel variant too.
+`per_channel` has a large and non-trivial footprint, but it is not the first
+refactor target. For this cycle:
 
-**Replace with a pre-processing split at the gateway level:**
+- Keep current `per_channel` behavior and API semantics unchanged.
+- Prioritize engine unification and runtime/registry simplification first.
+- Re-evaluate per_channel redesign after core unification stabilizes.
 
-1. When `speaker_detection=per_channel`, the gateway splits the stereo file
-   into N mono files using FFmpeg (~10ms, trivial).
-2. It submits N independent child jobs, each running the normal mono pipeline
-   with `speaker_detection=none`. No DAG changes needed.
-3. A parent job tracks the children. When all complete, a lightweight stitcher
-   merges results: interleave segments by timestamp, label speaker = channel
-   index (or `known_speaker_names`).
+Candidate future approach (deferred): gateway pre-split + parent/child jobs +
+stitcher. This remains valid, but intentionally out of the initial sequence.
 
-```
-                              ┌─ Job A (ch0.wav): prepare → transcribe → ... → merge
-stereo.wav → channel-split ───┤
-                              └─ Job B (ch1.wav): prepare → transcribe → ... → merge
+### 5b. Keep align as a capability-gated fallback stage
 
-Parent job: stitch Job A + Job B results, label speakers by channel
-```
+Do not remove `align` unconditionally. Keep it as an optional fallback stage
+for runtimes/models whose native timestamps are not precise enough.
 
-**What gets deleted (~1,200 LOC; see section 8b for full breakdown):**
+Selection policy should be capability-driven:
 
-| Component | LOC |
-|---|---|
-| `_build_per_channel_dag_with_engines()` | ~210 |
-| `per_channel` branches in `_build_dag_with_engines()` | ~15 |
-| `_process_split_channels()` in audio-prepare engine | ~50 |
-| per-channel merge logic in final-merger | ~670 |
-| per-channel PII + audio redaction in merger | ~100 |
-| `_ch{N}` stage name parsing in handlers.py | ~30 |
-| audio-redactor channel-specific key resolution | ~12 |
-| Integration tests (test_per_channel.py) | ~375 |
+- if transcriber advertises precise word timestamps: skip align
+- otherwise: include align
 
-**What gets added (~200 LOC):**
-
-| Component | LOC |
-|---|---|
-| `split_channels()` utility (FFmpeg one-liner per channel) | ~20 |
-| Parent-child job relationship in gateway | ~60 |
-| `stitch_per_channel_results()` post-processor | ~80 |
-| Tests for parent-child jobs + stitcher | ~40 |
-
-**Net savings:** ~1,000 LOC, plus elimination of all future per-channel
-stage variants. Scales to N channels with zero pipeline changes (current
-implementation hard-caps at 2).
-
-**What you give up:** Single job ID atomicity (now parent + N children).
-The gateway can hide this from clients by presenting the parent job as
-the single status endpoint.
-
-### 5b. Collapse align into transcribe
-
-Every modern transcriber (Whisper, Parakeet, Riva) produces word-level
-timestamps. The separate phoneme alignment stage exists for legacy Whisper
-models with inaccurate attention-based timestamps. If you accept
-attention-based timestamps (or require engines that produce accurate ones),
-you can eliminate the align stage entirely.
-
-**Saves:** An entire pipeline stage, ~200 LOC in dag.py + selector,
-one engine directory, one docker service.
+This preserves quality and backward compatibility while still allowing
+progressive simplification where capable engines exist.
 
 ### 5c. Make PII detection a post-processing hook, not a pipeline stage
 
@@ -464,7 +432,7 @@ needed.
 |---|---|
 | Combine transcribe + diarize outputs | Diarize stage enriches transcript directly |
 | Speaker assignment via overlap matching | Diarize stage does this inline |
-| Word-level timestamp merging from align | Eliminated (transcribe produces native timestamps, section 5b) |
+| Word-level timestamp enrichment | Align stage enriches Transcript when included (capability-gated fallback) |
 | PII entity splicing into text | Post-processing hook (section 5c) |
 | Stereo audio assembly via FFmpeg | Pre-processing split handles this (section 5a) |
 | `known_speaker_names` remapping | Diarize stage or gateway response formatter |
@@ -501,9 +469,10 @@ class Segment(BaseModel):
 ```
 
 **Saves:** 1141 LOC (the entire final-merger engine), one Docker
-service, one engine directory. Also eliminates the artifact fan-in
-pattern in the materializer and the `input_bindings` / `previous_outputs`
-plumbing that exists solely to feed merge.
+service, one engine directory. Also reduces artifact fan-in complexity in
+the materializer. `input_bindings` / `previous_outputs` remain useful for
+stage-to-stage handoff during migration and should not be removed as part of
+merge elimination alone.
 
 **What you give up:** The ability to run stages in parallel on separate
 outputs (already given up by choosing a linear pipeline). Also, stages
@@ -521,72 +490,60 @@ registry stores capabilities including whether the engine accepts streaming.
 
 ---
 
-## 6. Combined Effect: DAG Becomes a Linear Pipeline (Queue)
+## 6. Target End-State of Pipeline Simplification (Executed Last)
 
-Applying all simplifications from section 5, the current DAG:
+After engine/runtime unification work is stable, the batch DAG can be
+restructured toward a mostly linear core pipeline.
+
+Current DAG:
 
 ```
               ┌─ transcribe → [align] ─────────────────────┐
 prepare ──────┤                                             ├─ [pii_detect] → [audio_redact] → merge
               └─ [diarize] ────────────────────────────────┘
-              (+ per_channel variant: entirely different DAG shape)
+              (+ per_channel variant)
 ```
 
-...reduces to a **fully linear pipeline**:
+Target core pipeline:
 
 ```
-prepare → transcribe → [diarize]
+prepare → transcribe → [align] → [diarize]
+                      ↓ job completes
+        post-processing (async): [pii_detect → audio_redact]
 ```
 
-- **per_channel branching**: gone (pre-processing split, section 5a)
-- **align stage**: gone (modern transcribers produce native word timestamps, section 5b)
-- **pii_detect + audio_redact**: gone from core pipeline (post-processing hook, section 5c)
-- **merge stage**: gone (each stage enriches a shared Transcript document, section 5d)
-- **diarize ∥ transcribe parallelism**: dropped (see rationale below)
+- **align**: retained as capability-gated fallback stage (section 5b)
+- **pii_detect + audio_redact**: moved out of core pipeline to post-processing
+- **merge**: eliminated when stages enrich a shared `Transcript` document
+- **per_channel**: intentionally deferred to the final phase
 
-### Why fully linear over a fork-join
+### Why mostly linear over fork-join
 
-The current DAG runs diarize in parallel with transcribe (both depend
-only on prepare). In theory this saves time. In practice:
-
-- **CPU**: You can't run transcribe + diarize in parallel on a single
-  machine -- both are compute-intensive and will thrash each other.
-  Parallel execution only helps if they're on different instances (cloud).
-- **GPU**: Diarization takes seconds. The parallelism saves negligible time.
-- **Riva/Parakeet with Sortformer**: NVIDIA's latest models bundle
-  transcription + streaming diarization in a single inference call
-  (see section 6b). No pipeline parallelism needed -- it's one engine.
-
-A fully linear pipeline means the orchestrator becomes a **simple FIFO
-queue processor** with zero dependency tracking:
+The current DAG parallelizes diarize with transcribe. In practice this often
+adds orchestration complexity with limited throughput benefit on single-node
+deployments. A mostly linear flow simplifies scheduling and observability,
+while still allowing capability-based stage skipping.
 
 ```python
-def build_pipeline(job_params, engines):
+def build_pipeline(job_params, capabilities):
     stages = ["prepare", "transcribe"]
-    if job_params.get("speaker_detection") == "diarize":
+    if needs_align(job_params, capabilities):
+        stages.append("align")
+    if needs_diarize(job_params, capabilities):
         stages.append("diarize")
     return [make_task(stage) for stage in stages]
 ```
 
-Compare to the current 700+ LOC `dag.py` + 1141 LOC merge engine. No
-dependency graph, no fork-join scheduling, no merge dependency
-accumulation, no artifact fan-in. Each stage reads the previous stage's
-`Transcript` object, enriches it, and writes it forward. The last
-stage's output is the final `transcript.json`.
+### What this removes (final DAG phase)
 
-### What this eliminates from the orchestrator
+- Most of `_build_dag_with_engines()` branch complexity
+- Merge dependency fan-in and merge-specific task wiring
+- Core-pipeline PII stage wiring (`pii_detect`, `audio_redact`)
+- The merge engine and its Docker service
+- A large portion of dependency-resolution complexity in handlers/scheduler
 
-- `_build_per_channel_dag_with_engines()` (160 LOC)
-- `_build_dag_with_engines()` dependency graph construction (~540 LOC)
-- Stage-specific `if` branches for align, pii_detect, audio_redact
-- Complex merge dependency accumulation
-- The concept of "skip_alignment" / "skip_diarization" capability checks
-- All dependency resolution logic in the scheduler
-- The entire merge engine (1141 LOC) and its Docker service
-- The `input_bindings` / `previous_outputs` plumbing in the engine SDK
-- Artifact fan-in logic in the materializer
-
-The orchestrator just runs the next stage when the current one completes.
+`previous_outputs` / stage handoff remains during migration and can be
+simplified incrementally rather than removed wholesale.
 
 ### 6a. Future Stages Keep It Linear
 
@@ -595,8 +552,8 @@ foreseeable stage fits naturally into a linear pipeline because each
 depends on the output of the previous:
 
 ```
-prepare → [noise_removal] → [VAD] → transcribe → [diarize] → [speaker_id] → [emotion] → [non_verbal]
-           ↑ pre-processing          core          ↑ post-transcribe enrichments
+prepare → [noise_removal] → [VAD] → transcribe → [align] → [diarize] → [speaker_id] → [emotion] → [non_verbal]
+           ↑ pre-processing          core (align is capability-gated fallback)          ↑ post-transcribe enrichments
 ```
 
 Each stage enriches the same `Transcript` document. The last stage's
@@ -627,6 +584,7 @@ The trend in speech AI is toward models that handle multiple stages in
 a single inference call. This makes the pipeline even shorter:
 
 **NVIDIA Riva with Streaming Sortformer:**
+
 - Single gRPC/WebSocket call produces: transcription + word timestamps +
   speaker diarization labels, all in streaming mode.
 - VAD is built-in (Silero VAD integrated into the pipeline).
@@ -639,6 +597,7 @@ a single inference call. This makes the pipeline even shorter:
   [Riva Realtime WebSocket API](https://docs.nvidia.com/nim/riva/asr/latest/realtime-asr.html)
 
 **Alibaba SenseVoice:**
+
 - Single model produces: transcription + emotion labels + non-verbal
   event tags (laughter, cough, applause, crying, etc.).
 - 70ms to process 10 seconds of audio (15x faster than Whisper-Large).
@@ -646,6 +605,7 @@ a single inference call. This makes the pipeline even shorter:
 - Source: [SenseVoice on GitHub](https://github.com/FunAudioLLM/SenseVoice)
 
 **NVIDIA Multitalker Parakeet:**
+
 - Streaming ASR that takes diarization output as context to produce
   speaker-attributed transcripts. No speaker enrollment needed.
 - Source: [Multitalker Parakeet on HuggingFace](https://huggingface.co/nvidia/multitalker-parakeet-streaming-0.6b-v1)
@@ -688,34 +648,40 @@ is batch-only. With Riva as a real-time engine:
 
 ## 7. Recommended Execution Order
 
-1. **Replace DAG with linear pipeline + eliminate merge** -- rewrite
-   `dag.py` as a simple ordered stage list, introduce a shared
-   `Transcript` schema that flows through the pipeline. This is the
-   highest-leverage change: ~700 LOC in dag.py + 1141 LOC merge engine
-   replaced with ~30 LOC pipeline builder + ~100 LOC shared schema.
-   Unblocks everything else by removing the complexity that makes other
-   changes scary.
+1. **Unify engine runtimes first (smallest increments)** -- shared
+   batch/RT engine architecture runtime-by-runtime, with strict
+   characterization tests and no API changes.
 
-2. **Unify the engine SDK** -- single base class with optional streaming.
-   High-impact, touches every engine.
+2. **Unify registry protocol** -- introduce unified engine registration
+   with compatibility mode (old + new side-by-side during cutover).
 
-3. **Make engine.yaml declarative** -- engines declare what stages they
-   cover (e.g., Riva covers transcribe+diarize+VAD). Pipeline skips
-   stages already handled. This is how multi-capability engines like
-   Riva and SenseVoice integrate cleanly.
+3. **Extract WebSocket proxy core** -- reduce gateway duplication while
+   preserving Dalston/OpenAI/ElevenLabs protocol behavior.
 
-4. **Unify the registry** -- single registration protocol for all engines.
-   Quick win after SDK unification.
+4. **Collapse session router into orchestrator (with parity checks)** --
+   only after registry unification; preserve TTL extension, orphan cleanup,
+   and offline event semantics.
 
-5. **Collapse session router into orchestrator** -- unified engine
-   discovery and allocation. Now more valuable since Riva can do
-   streaming diarization (real-time workers gain diarization capability).
+5. **Move PII detection/audio redaction to post-processing hook** --
+   feature-flagged rollout; keep in-pipeline compatibility path until
+   parity and compliance sign-off.
 
-6. **Extract WebSocket proxy core** -- reduce gateway WS duplication.
+6. **Restructure DAG last** -- move to mostly linear core pipeline with a
+   shared `Transcript` document and merge elimination.
+   Keep `align` as capability-gated fallback.
 
-7. **Add new stages** (noise removal, VAD, emotion, non-verbal events) --
-   trivial with declarative pipeline. Just add engine.yaml + engine.py,
-   declare position in pipeline.
+7. **Revisit per_channel last** -- only after core unification and DAG
+   simplification are stable in production.
+
+8. **Declarative engine.yaml + new stages** -- follow-on expansion once
+   the core refactor is complete and operationally stable.
+
+Execution discipline for all steps:
+
+- one logical change per commit
+- characterization tests before refactor
+- `make test` and `make lint` on every step
+- stop-and-fix on first regression (no batching failures)
 
 ---
 
@@ -739,15 +705,16 @@ can read it just like any pipeline stage does.
 See section 8i for full analysis.
 
 The core pipeline remains:
+
 ```
-prepare → transcribe → [diarize]
+prepare → transcribe → [align] → [diarize]
 ```
 
 PII runs asynchronously after job completion when requested.
 
-### 8b. per_channel scope is 4-5x larger than claimed
+### 8b. per_channel scope is large (deferred to final phase)
 
-Section 5a claims ~275 LOC deleted. Actual per_channel footprint is
+Section 5a now treats per_channel as deferred. The measured per_channel footprint is
 **~1,200-1,400 LOC**:
 
 | Component | Claimed | Actual |
@@ -796,6 +763,7 @@ between tasks. The orchestrator's `_check_task_completed` handler
 (handlers.py:538) resolves dependencies via this table.
 
 With a linear pipeline:
+
 - This table becomes unnecessary (next task = next in ordered list)
 - Requires a DB migration to drop the table
 - `TaskModel.dependency_links` relationship can be removed
@@ -837,6 +805,7 @@ proposed `RealtimeProxy` core on.
 
 Not called out explicitly in the review. `handlers.py` (1,301 LOC)
 contains:
+
 - `_gather_previous_outputs()` -- reads S3 outputs from completed
   dependency tasks, with per_channel `_chN` suffix normalization
 - `_check_task_completed()` -- dependency resolution loop that checks
@@ -915,6 +884,7 @@ The original audio from the prepare stage persists in S3 as
 explicit job cleanup. Any post-processing job can read it.
 
 Audio redaction needs:
+
 1. The prepared audio file → available in S3 throughout job lifecycle
 2. PII entity positions with timestamps → available in the Transcript
 3. Redaction config (mode, buffer_ms) → available in job parameters
@@ -967,11 +937,11 @@ real-time system. This de-risks the pipeline refactor significantly.
 
 | Change | Risk | Mitigation |
 |---|---|---|
-| Linear pipeline + merge elimination | Medium -- changes orchestrator core + all engines | Shared Transcript schema versioned; engines adopt incrementally; DB migration to drop task_dependencies |
-| SDK unification | High -- touches every engine (~9,000 LOC surface) | Feature-flag: engines can opt into unified mode gradually |
+| Engine unification (batch+RT shared runtime) | High -- touches every engine (~9,000 LOC surface) | Incremental runtime-by-runtime migration, strict characterization tests, QoS guards (`rt_reservation`, `batch_max_inflight`) |
+| Linear pipeline + merge elimination (executed last) | Medium -- orchestrator/schema migration complexity | Shared Transcript schema versioned; compatibility bridge; DB migration sequenced after dual-path validation |
 | Registry unification | Low -- internal protocol | Run old + new in parallel, cut over |
 | Declarative engine.yaml | Medium -- new stage registration contract | Keep hardcoded fallback during transition |
-| per_channel pre-processing split | Medium -- larger scope than initially estimated (~1,200 LOC) | Implement behind feature flag; keep old path until fully tested |
+| per_channel redesign (deferred) | Medium -- larger scope (~1,200 LOC) and behavioral complexity | Execute last, behind feature flag, only after core stability |
 | PII as post-processing | Low -- both text and audio redaction can be async | Only risk: compliance requiring no unredacted audio in storage (deployment policy, not architecture) |
 | Session router merge | Medium -- affects realtime latency | Benchmark allocation latency before/after |
 | Gateway WS refactor | Low -- shared `_realtime_common.py` is a starting point | Contract tests per API compatibility layer |
