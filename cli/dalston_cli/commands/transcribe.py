@@ -333,10 +333,10 @@ def transcribe(
     # Validate: must provide either files or url, not both or neither
     if not files and not url:
         error_console.print(CLIMsg.ERR_NO_INPUT)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=2)
     if files and url:
         error_console.print(CLIMsg.ERR_FILES_AND_URL)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=2)
 
     # Validate lite profile name client-side (fail fast before network request).
     runtime_mode = os.getenv("DALSTON_MODE", "distributed").strip().lower()

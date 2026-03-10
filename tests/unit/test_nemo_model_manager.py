@@ -39,6 +39,7 @@ class TestNeMoModelManagerInit:
         assert "parakeet-rnnt-1.1b" in NeMoModelManager.SUPPORTED_MODELS
         assert "parakeet-ctc-0.6b" in NeMoModelManager.SUPPORTED_MODELS
         assert "parakeet-ctc-1.1b" in NeMoModelManager.SUPPORTED_MODELS
+        assert "parakeet-tdt-0.6b-v3" in NeMoModelManager.SUPPORTED_MODELS
         assert "parakeet-tdt-1.1b" in NeMoModelManager.SUPPORTED_MODELS
 
     def test_architecture_detection(self):
@@ -52,6 +53,7 @@ class TestNeMoModelManagerInit:
 
             assert manager._get_architecture("parakeet-rnnt-0.6b") == "rnnt"
             assert manager._get_architecture("parakeet-ctc-1.1b") == "ctc"
+            assert manager._get_architecture("parakeet-tdt-0.6b-v3") == "tdt"
             assert manager._get_architecture("parakeet-tdt-1.1b") == "tdt"
 
             manager.shutdown()

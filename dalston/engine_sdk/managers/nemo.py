@@ -13,6 +13,7 @@ Supported models:
     - parakeet-ctc-1.1b: nvidia/parakeet-ctc-1.1b
 
     TDT (non-streaming):
+    - parakeet-tdt-0.6b-v3: nvidia/parakeet-tdt-0.6b-v3
     - parakeet-tdt-1.1b: nvidia/parakeet-tdt-1.1b
 
 Example usage:
@@ -79,6 +80,7 @@ class NeMoModelManager(ModelManager[NeMoASRModel]):
         "parakeet-ctc-0.6b": "nvidia/parakeet-ctc-0.6b",
         "parakeet-ctc-1.1b": "nvidia/parakeet-ctc-1.1b",
         # TDT models (non-streaming, use RNNT base)
+        "parakeet-tdt-0.6b-v3": "nvidia/parakeet-tdt-0.6b-v3",
         "parakeet-tdt-1.1b": "nvidia/parakeet-tdt-1.1b",
     }
 
