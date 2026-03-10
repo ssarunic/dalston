@@ -97,6 +97,8 @@ async def build_task_dag(
     registry: UnifiedEngineRegistry,
     catalog: EngineCatalog,
     db: AsyncSession | None = None,
+    *,
+    pii_mode: str = "pipeline",
 ) -> list[Task]:
     """Build a task DAG for a job using capability-driven engine selection.
 
@@ -112,6 +114,10 @@ async def build_task_dag(
     Mode: per_channel (stereo audio)
         prepare ─┬→ transcribe_ch0 → [align_ch0] ─┬→ merge
                  └→ transcribe_ch1 → [align_ch1] ─┘
+
+    When ``pii_mode="post_process"``, PII detection and audio redaction
+    stages are omitted from the DAG.  They run asynchronously after the
+    core pipeline completes (see ``post_processor.py``).
 
     The DAG shape is determined by selected engine capabilities:
     - If transcriber has supports_word_timestamps=True, skip align stage
@@ -129,6 +135,7 @@ async def build_task_dag(
         registry: Batch engine registry (running engines)
         catalog: Engine catalog (all available engines)
         db: Optional database session for HF model lookup
+        pii_mode: PII processing mode (``pipeline`` or ``post_process``).
 
     Returns:
         List of Task objects with dependencies wired
@@ -191,6 +198,7 @@ async def build_task_dag(
             skip_diarization=skip_diarization,
             runtime_model_id=runtime_model_id,
             stage_runtime_model_ids=stage_runtime_model_ids,
+            pii_mode=pii_mode,
         )
         dalston.telemetry.set_span_attribute("dalston.dag.task_count", len(tasks))
         return tasks
@@ -205,6 +213,7 @@ def _build_dag_with_engines(
     skip_diarization: bool,
     runtime_model_id: str | None = None,
     stage_runtime_model_ids: dict[str, str] | None = None,
+    pii_mode: str = "pipeline",
 ) -> list[Task]:
     """Build DAG with pre-selected engines.
 
@@ -222,6 +231,9 @@ def _build_dag_with_engines(
                          (e.g., "nvidia/parakeet-tdt-1.1b"). Already resolved by selector.
         stage_runtime_model_ids: Runtime model IDs keyed by stage
             (e.g., {"transcribe": "...", "align": "..."}).
+        pii_mode: PII processing mode.  When ``post_process``, PII stages
+            are omitted from the DAG (handled by PostProcessor after
+            pipeline completion).
 
     Returns:
         List of Task objects with dependencies wired
@@ -352,6 +364,7 @@ def _build_dag_with_engines(
             num_channels=num_channels,
             parameters=parameters,
             stage_runtime_model_ids=stage_runtime_model_ids,
+            pii_mode=pii_mode,
         )
 
     # Diarization (if requested and not skipped due to native support)
@@ -417,11 +430,14 @@ def _build_dag_with_engines(
         tasks.append(align_task)
 
     # PII Detection
+    # M67: When pii_mode=post_process, PII stages are deferred to
+    # async post-processing after the core pipeline completes.
     pii_detect_task = None
     audio_redact_task = None
     pii_detection_enabled = parameters.get("pii_detection", False)
+    skip_pii_in_dag = pii_mode == "post_process"
 
-    if pii_detection_enabled:
+    if pii_detection_enabled and not skip_pii_in_dag:
         pii_dependencies = [transcribe_task.id]
         if align_task is not None:
             pii_dependencies.append(align_task.id)
@@ -500,7 +516,8 @@ def _build_dag_with_engines(
     }
     if parameters.get("known_speaker_names"):
         merge_config["known_speaker_names"] = parameters["known_speaker_names"]
-    if pii_detection_enabled:
+    # M67: Only set PII merge config when PII runs in-pipeline
+    if pii_detection_enabled and not skip_pii_in_dag:
         merge_config["pii_detection"] = True
     merge_bindings: list[dict] = []
     if audio_redact_task is not None:
@@ -539,6 +556,7 @@ def _build_per_channel_dag_with_engines(
     num_channels: int = 2,
     parameters: dict | None = None,
     stage_runtime_model_ids: dict[str, str] | None = None,
+    pii_mode: str = "pipeline",
 ) -> list[Task]:
     """Build per-channel DAG with pre-selected engines (M31).
 
@@ -548,6 +566,9 @@ def _build_per_channel_dag_with_engines(
         transcribe_ch0 → align_ch0 → pii_detect_ch0 → audio_redact_ch0 ─┐
                                                                          ├─ merge
         transcribe_ch1 → align_ch1 → pii_detect_ch1 → audio_redact_ch1 ─┘
+
+    When ``pii_mode="post_process"``, PII stages are omitted from each
+    channel pipeline.
 
     Args:
         tasks: List with prepare_task already added
@@ -559,6 +580,7 @@ def _build_per_channel_dag_with_engines(
         skip_alignment: Whether to skip alignment (transcriber has native support)
         num_channels: Number of audio channels
         parameters: Original job parameters (for PII config)
+        pii_mode: PII processing mode (``pipeline`` or ``post_process``).
 
     Returns:
         Complete task list including merge
@@ -569,8 +591,10 @@ def _build_per_channel_dag_with_engines(
     last_channel_tasks: list[Task] = []
 
     # Check if PII detection is enabled
+    # M67: skip PII stages in post_process mode
     pii_detection_enabled = parameters.get("pii_detection", False)
     redact_pii_audio = parameters.get("redact_pii_audio", False)
+    skip_pii_in_dag = pii_mode == "post_process"
 
     for channel in range(num_channels):
         channel_transcribe_config = {
@@ -623,7 +647,7 @@ def _build_per_channel_dag_with_engines(
             last_task = align_task
 
         # PII detection task for this channel
-        if pii_detection_enabled:
+        if pii_detection_enabled and not skip_pii_in_dag:
             pii_detect_config = {
                 "entity_types": parameters.get("pii_entity_types"),
                 "confidence_threshold": parameters.get(
@@ -700,12 +724,13 @@ def _build_per_channel_dag_with_engines(
     }
     if parameters.get("known_speaker_names"):
         merge_config["known_speaker_names"] = parameters["known_speaker_names"]
-    if pii_detection_enabled:
+    # M67: Only set PII merge flags when PII runs in-pipeline
+    if pii_detection_enabled and not skip_pii_in_dag:
         merge_config["pii_detection"] = True
-    if redact_pii_audio:
+    if redact_pii_audio and not skip_pii_in_dag:
         merge_config["redact_pii_audio"] = True
     merge_bindings: list[dict] = []
-    if redact_pii_audio:
+    if redact_pii_audio and not skip_pii_in_dag:
         for channel in range(num_channels):
             merge_bindings.append(
                 InputBinding(
