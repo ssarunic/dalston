@@ -133,17 +133,17 @@ pytest -m integration
 pytest -m e2e
 ```
 
-## Rollback and Safety Controls
+## Outcome (Phase 3 complete)
 
-- `DALSTON_SESSION_COORDINATOR_ENABLED=true|false`
-- `DALSTON_SESSION_PARITY_MONITOR_ENABLED=true|false`
-- Rollback: disable coordinator flag and route back to legacy router.
+- Feature flags (`DALSTON_SESSION_COORDINATOR_ENABLED`, `DALSTON_SESSION_PARITY_MONITOR_ENABLED`)
+  and the parity monitor removed; `SessionCoordinator` is the sole implementation.
+- `dalston/session_router/` package deleted; all imports use `dalston.orchestrator.*`.
 
 ## Success Criteria
 
 - No session leaks, capacity leaks, or missing offline events.
 - Realtime allocation latency and failure rate non-regressed.
-- Legacy session-router removed after verified parity.
+- Legacy session-router removed after verified parity. ✓
 
 ## References
 

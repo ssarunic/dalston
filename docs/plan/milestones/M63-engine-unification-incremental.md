@@ -213,7 +213,7 @@ pytest -m e2e
   `DALSTON_BATCH_MAX_INFLIGHT`, `DALSTON_TOTAL_CAPACITY`. Thread-safe, wired
   into the unified faster-whisper runner.
 
-### Phase 2: Remaining Runtimes (partial)
+### Phase 2: Remaining Runtimes (complete)
 
 - **ParakeetCore** (`dalston/engine_sdk/cores/parakeet_core.py`): shared core
   with `NeMoModelManager`. Batch (`ParakeetEngine`) and RT
