@@ -15,6 +15,7 @@ from dalston.common.pipeline_types import (
     DiarizeOutput,
     PIIDetectOutput,
     PrepareOutput,
+    TranscribeInput,
     Transcript,
 )
 
@@ -91,6 +92,10 @@ class EngineInput(Generic[PayloadT]):
     def get_transcript(self, key: str = "transcribe") -> Transcript | None:
         """Get transcribe output as Transcript."""
         return self._get_typed_output(key, Transcript)
+
+    def get_transcribe_params(self) -> TranscribeInput:
+        """Validate and return typed transcribe parameters from config."""
+        return TranscribeInput.model_validate(self.config)
 
     def get_align_output(self, key: str = "align") -> AlignOutput | None:
         return self._get_typed_output(key, AlignOutput)

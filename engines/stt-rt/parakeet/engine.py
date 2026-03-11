@@ -4,7 +4,7 @@ Uses NVIDIA NeMo Parakeet FastConformer with cache-aware streaming
 for low-latency real-time transcription. Achieves ~100ms end-to-end
 latency with native word-level timestamps.
 
-Delegates inference to ParakeetCore (shared with the batch engine).
+Delegates inference to NemoCore (shared with the batch engine).
 Supports dynamic model loading via NeMoModelManager (M44).
 
 M71: RNNT/TDT models use cache-aware streaming inference to emit
@@ -32,26 +32,27 @@ import torch
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
+    TranscribeInput,
     Transcript,
     TranscriptWord,
 )
-from dalston.engine_sdk.cores.parakeet_core import ParakeetCore
+from dalston.engine_sdk.cores.nemo_core import NemoCore
 from dalston.realtime_sdk import AsyncModelManager
 from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
 
 logger = structlog.get_logger()
 
 
-class ParakeetStreamingEngine(BaseRealtimeTranscribeEngine):
+class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
     """Real-time streaming transcription using Parakeet with dynamic model loading.
 
-    Delegates inference to ParakeetCore, which is shared with the batch
+    Delegates inference to NemoCore, which is shared with the batch
     Parakeet engine. The RT adapter handles:
     - Model ID normalization
     - VAD-chunked audio input (numpy arrays)
     - Output formatting to Transcript
 
-    When run standalone, creates its own ParakeetCore in load_models().
+    When run standalone, creates its own NemoCore in load_models().
     When used within a unified runner, accepts an injected core to share a
     single loaded model with the batch adapter.
 
@@ -69,30 +70,30 @@ class ParakeetStreamingEngine(BaseRealtimeTranscribeEngine):
     # Default model when client doesn't specify
     DEFAULT_MODEL = "parakeet-rnnt-0.6b"
 
-    def __init__(self, core: ParakeetCore | None = None) -> None:
+    def __init__(self, core: NemoCore | None = None) -> None:
         """Initialize the engine.
 
         Args:
-            core: Optional shared ParakeetCore. If provided, load_models()
+            core: Optional shared NemoCore. If provided, load_models()
                   skips creating its own core and uses the injected one.
         """
         super().__init__()
-        self._core: ParakeetCore | None = core
+        self._core: NemoCore | None = core
 
         # M71: Cache-aware streaming configuration
         self._rnnt_chunk_ms = int(os.environ.get("DALSTON_RNNT_CHUNK_MS", "160"))
 
     def load_models(self) -> None:
-        """Initialize ParakeetCore with optional preloading.
+        """Initialize NemoCore with optional preloading.
 
-        If a ParakeetCore was injected via __init__, this method uses it
+        If a NemoCore was injected via __init__, this method uses it
         instead of creating a new one. This is how the unified runner shares
         a single model instance between batch and RT adapters.
         """
         is_shared = self._core is not None
         if self._core is None:
             # Standalone mode — create own core
-            self._core = ParakeetCore.from_env()
+            self._core = NemoCore.from_env()
 
         # Wrap the core's manager in AsyncModelManager for heartbeat reporting
         self._model_manager = AsyncModelManager(self._core.manager)
@@ -107,31 +108,23 @@ class ParakeetStreamingEngine(BaseRealtimeTranscribeEngine):
             rnnt_chunk_ms=self._rnnt_chunk_ms,
         )
 
-    def transcribe_v1(
-        self,
-        audio: np.ndarray,
-        language: str,
-        model_variant: str,
-        vocabulary: list[str] | None = None,
-    ) -> Transcript:
-        """Transcribe an audio segment via shared ParakeetCore.
+    def transcribe_v1(self, audio: np.ndarray, params: TranscribeInput) -> Transcript:
+        """Transcribe an audio segment via shared NemoCore.
 
         Args:
             audio: Audio samples as float32 numpy array, mono, 16kHz
-            language: Language code (ignored - Parakeet is English-only)
-            model_variant: Model name (e.g., "parakeet-rnnt-1.1b")
-            vocabulary: List of terms to boost recognition (not yet supported)
+            params: Typed transcriber parameters for this utterance
 
         Returns:
             Transcript with text, words, language, confidence
         """
         if self._core is None:
-            raise RuntimeError(
-                "ParakeetCore not initialized — call load_models() first"
-            )
+            raise RuntimeError("NemoCore not initialized — call load_models() first")
 
         # Use default if no model specified
-        model_id = model_variant or self.DEFAULT_MODEL
+        model_id = params.runtime_model_id or self.DEFAULT_MODEL
+        language = params.language or "auto"
+        vocabulary = params.vocabulary
 
         # Normalize model ID
         model_id = self._normalize_model_id(model_id)
@@ -232,9 +225,7 @@ class ParakeetStreamingEngine(BaseRealtimeTranscribeEngine):
             Transcript for each newly decoded word
         """
         if self._core is None:
-            raise RuntimeError(
-                "ParakeetCore not initialized — call load_models() first"
-            )
+            raise RuntimeError("NemoCore not initialized — call load_models() first")
 
         model_id = self._normalize_model_id(model_variant or self.DEFAULT_MODEL)
 
@@ -268,7 +259,7 @@ class ParakeetStreamingEngine(BaseRealtimeTranscribeEngine):
                     )
                 ],
                 language="en",
-                runtime="parakeet",
+                runtime="nemo",
                 language_confidence=confidence,
             )
 
@@ -328,7 +319,7 @@ class ParakeetStreamingEngine(BaseRealtimeTranscribeEngine):
 
     def get_models(self) -> list[str]:
         """Return list of supported model identifiers."""
-        return ParakeetCore.SUPPORTED_MODELS
+        return NemoCore.SUPPORTED_MODELS
 
     def get_languages(self) -> list[str]:
         """Return list of supported languages. Parakeet only supports English."""
@@ -385,5 +376,5 @@ class ParakeetStreamingEngine(BaseRealtimeTranscribeEngine):
 if __name__ == "__main__":
     import asyncio
 
-    engine = ParakeetStreamingEngine()
+    engine = NemoRealtimeEngine()
     asyncio.run(engine.run())

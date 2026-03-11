@@ -1,6 +1,6 @@
 """Unified Parakeet runner: one process, one model, both interfaces.
 
-This runner creates a single ParakeetCore (one loaded NeMo model) and passes
+This runner creates a single NemoCore (one loaded NeMo model) and passes
 it to both the batch engine adapter (queue polling) and the realtime engine
 adapter (WebSocket server). An AdmissionController gates both paths to
 prevent realtime starvation under batch load.
@@ -32,7 +32,7 @@ from dalston.engine_sdk.admission import (
     AdmissionController,
     TaskDeferredError,
 )
-from dalston.engine_sdk.cores.parakeet_core import ParakeetCore
+from dalston.engine_sdk.cores.nemo_core import NemoCore
 
 logger = structlog.get_logger()
 
@@ -41,7 +41,7 @@ class UnifiedParakeetRunner:
     """Runs batch + realtime Parakeet adapters in a single process.
 
     Key properties:
-    - ONE ParakeetCore instance (one NeMo model in GPU memory)
+    - ONE NemoCore instance (one NeMo model in GPU memory)
     - ONE AdmissionController (shared QoS policy)
     - Batch adapter runs in a background thread (sync queue polling)
     - RT adapter runs in the async event loop (WebSocket server)
@@ -52,7 +52,7 @@ class UnifiedParakeetRunner:
 
     def __init__(self) -> None:
         # Create single shared core
-        self._core = ParakeetCore.from_env()
+        self._core = NemoCore.from_env()
 
         # Create admission controller
         self._admission = AdmissionController(AdmissionConfig.from_env())
@@ -85,12 +85,12 @@ class UnifiedParakeetRunner:
         self._running = True
 
         # Import adapters here to avoid circular imports at module level
-        from engines.stt_rt_parakeet import ParakeetStreamingEngine
-        from engines.stt_transcribe_parakeet import ParakeetEngine
+        from engines.stt_rt_parakeet import NemoRealtimeEngine
+        from engines.stt_transcribe_parakeet import NemoBatchEngine
 
-        # Create adapters sharing the same ParakeetCore
-        self._batch_engine = ParakeetEngine(core=self._core)
-        self._rt_engine = ParakeetStreamingEngine(core=self._core)
+        # Create adapters sharing the same NemoCore
+        self._batch_engine = NemoBatchEngine(core=self._core)
+        self._rt_engine = NemoRealtimeEngine(core=self._core)
 
         # Wrap batch engine's process to check admission
         original_process = self._batch_engine.process

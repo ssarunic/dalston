@@ -3,7 +3,7 @@
 Verifies that the RT engine produces the correct output shape
 (Transcript with text, segments, language) and
 that session lifecycle behavior is preserved after delegation
-to TranscribeCore.
+to FasterWhisperCore.
 
 These tests mock the faster-whisper model to avoid GPU/model dependencies.
 """
@@ -19,6 +19,8 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
+from dalston.common.pipeline_types import TranscribeInput
+
 
 @pytest.fixture(autouse=True)
 def _cleanup_injected_modules():
@@ -31,14 +33,14 @@ def _cleanup_injected_modules():
 
 
 def _load_rt_engine():
-    """Load WhisperStreamingEngine from file to avoid import path issues."""
+    """Load FasterWhisperRealtimeEngine from file to avoid import path issues."""
     engine_path = Path("engines/stt-rt/faster-whisper/engine.py")
     spec = importlib.util.spec_from_file_location("m63_whisper_rt_engine", engine_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules["m63_whisper_rt_engine"] = module
     spec.loader.exec_module(module)
-    return module.WhisperStreamingEngine
+    return module.FasterWhisperRealtimeEngine
 
 
 def _make_mock_segment(
@@ -78,19 +80,19 @@ def _make_mock_info(
 
 
 def _build_rt_engine_with_mock(segments, info):
-    """Create a WhisperStreamingEngine with a mocked TranscribeCore."""
-    WhisperStreamingEngine = _load_rt_engine()
-    engine = WhisperStreamingEngine()
+    """Create a FasterWhisperRealtimeEngine with a mocked FasterWhisperCore."""
+    FasterWhisperRealtimeEngine = _load_rt_engine()
+    engine = FasterWhisperRealtimeEngine()
 
     # Simulate load_models() by creating a mock core
     from dalston.engine_sdk.cores.faster_whisper_core import (
+        FasterWhisperCore,
         SegmentResult,
-        TranscribeCore,
         TranscriptionResult,
         WordResult,
     )
 
-    engine._core = MagicMock(spec=TranscribeCore)
+    engine._core = MagicMock(spec=FasterWhisperCore)
     engine._core.manager = MagicMock()
     engine._core.manager.model_storage = None
     engine._core.device = "cpu"
@@ -136,6 +138,19 @@ def _make_audio(duration_seconds: float = 1.0, sample_rate: int = 16000) -> np.n
     return np.zeros(int(duration_seconds * sample_rate), dtype=np.float32)
 
 
+def _make_params(
+    language: str = "auto",
+    model_variant: str = "large-v3-turbo",
+    vocabulary: list[str] | None = None,
+) -> TranscribeInput:
+    """Create typed transcribe params for RT calls."""
+    return TranscribeInput(
+        language=language,
+        runtime_model_id=model_variant,
+        vocabulary=vocabulary,
+    )
+
+
 class TestRTOutputShape:
     """Verify Transcript structure from RT engine."""
 
@@ -144,11 +159,7 @@ class TestRTOutputShape:
         info = _make_mock_info()
         engine = _build_rt_engine_with_mock(segments, info)
 
-        result = engine.transcribe(
-            audio=_make_audio(),
-            language="auto",
-            model_variant="large-v3-turbo",
-        )
+        result = engine.transcribe(_make_audio(), _make_params(language="auto"))
 
         assert result.text == "hello world"
         assert result.language == "en"
@@ -165,11 +176,7 @@ class TestRTOutputShape:
         info = _make_mock_info()
         engine = _build_rt_engine_with_mock(segments, info)
 
-        result = engine.transcribe(
-            audio=_make_audio(),
-            language="en",
-            model_variant="large-v3-turbo",
-        )
+        result = engine.transcribe(_make_audio(), _make_params(language="en"))
 
         words = [w for seg in result.segments for w in (seg.words or [])]
         assert len(words) == 2
@@ -184,11 +191,7 @@ class TestRTOutputShape:
         info = _make_mock_info(duration=0.0)
         engine = _build_rt_engine_with_mock(segments, info)
 
-        result = engine.transcribe(
-            audio=_make_audio(0.0),
-            language="auto",
-            model_variant="large-v3-turbo",
-        )
+        result = engine.transcribe(_make_audio(0.0), _make_params(language="auto"))
 
         assert result.text == ""
         assert result.segments == []
@@ -201,28 +204,20 @@ class TestRTOutputShape:
         info = _make_mock_info(duration=2.0)
         engine = _build_rt_engine_with_mock(segments, info)
 
-        result = engine.transcribe(
-            audio=_make_audio(2.0),
-            language="en",
-            model_variant="large-v3-turbo",
-        )
+        result = engine.transcribe(_make_audio(2.0), _make_params(language="en"))
 
         assert result.text == "hello world"
 
 
 class TestRTConfigPassthrough:
-    """Verify config values reach TranscribeCore correctly."""
+    """Verify config values reach FasterWhisperCore correctly."""
 
     def test_language_auto_passed_through(self) -> None:
         segments = [_make_mock_segment()]
         info = _make_mock_info()
         engine = _build_rt_engine_with_mock(segments, info)
 
-        engine.transcribe(
-            audio=_make_audio(),
-            language="auto",
-            model_variant="large-v3-turbo",
-        )
+        engine.transcribe(_make_audio(), _make_params(language="auto"))
 
         # Verify core.transcribe was called with correct config
         call_kwargs = engine._core.transcribe.call_args
@@ -234,11 +229,7 @@ class TestRTConfigPassthrough:
         info = _make_mock_info()
         engine = _build_rt_engine_with_mock(segments, info)
 
-        engine.transcribe(
-            audio=_make_audio(),
-            language="en",
-            model_variant="large-v3-turbo",
-        )
+        engine.transcribe(_make_audio(), _make_params(language="en"))
 
         call_kwargs = engine._core.transcribe.call_args
         config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
@@ -250,10 +241,12 @@ class TestRTConfigPassthrough:
         engine = _build_rt_engine_with_mock(segments, info)
 
         engine.transcribe(
-            audio=_make_audio(),
-            language="en",
-            model_variant="large-v3-turbo",
-            vocabulary=["Dalston", "Redis"],
+            _make_audio(),
+            _make_params(
+                language="en",
+                model_variant="large-v3-turbo",
+                vocabulary=["Dalston", "Redis"],
+            ),
         )
 
         call_kwargs = engine._core.transcribe.call_args
@@ -266,9 +259,8 @@ class TestRTConfigPassthrough:
         engine = _build_rt_engine_with_mock(segments, info)
 
         engine.transcribe(
-            audio=_make_audio(),
-            language="en",
-            model_variant="faster-whisper-large-v3",
+            _make_audio(),
+            _make_params(language="en", model_variant="faster-whisper-large-v3"),
         )
 
         # Core should have been called — model normalization happens inside core
@@ -280,9 +272,8 @@ class TestRTConfigPassthrough:
         engine = _build_rt_engine_with_mock(segments, info)
 
         engine.transcribe(
-            audio=_make_audio(),
-            language="en",
-            model_variant="",
+            _make_audio(),
+            _make_params(language="en", model_variant=""),
         )
 
         call_kwargs = engine._core.transcribe.call_args

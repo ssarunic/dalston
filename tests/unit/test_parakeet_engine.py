@@ -1,6 +1,6 @@
 """Unit tests for Parakeet batch transcription engine.
 
-Tests the ParakeetEngine implementation with mocked NeMo models and CUDA.
+Tests the NemoBatchEngine implementation with mocked NeMo models and CUDA.
 Run with: uv run --extra dev pytest tests/unit/test_parakeet_engine.py
 """
 
@@ -16,7 +16,7 @@ torch = pytest.importorskip("torch")
 
 
 def load_parakeet_engine():
-    """Load ParakeetEngine from engines directory using importlib."""
+    """Load NemoBatchEngine from engines directory using importlib."""
     engine_path = Path("engines/stt-transcribe/parakeet/engine.py")
     if not engine_path.exists():
         pytest.skip("Parakeet engine not found")
@@ -28,7 +28,7 @@ def load_parakeet_engine():
     module = importlib.util.module_from_spec(spec)
     sys.modules["parakeet_engine"] = module
     spec.loader.exec_module(module)
-    return module.ParakeetEngine
+    return module.NemoBatchEngine
 
 
 @pytest.fixture
@@ -73,17 +73,17 @@ class TestParakeetEngineModelVariants:
 
     def test_default_model_id_is_tdt_1_1b(self, mock_cuda_available):
         """Test that default model is nvidia/parakeet-tdt-1.1b (M36)."""
-        ParakeetEngine = load_parakeet_engine()
-        assert ParakeetEngine.DEFAULT_MODEL_ID == "nvidia/parakeet-tdt-1.1b"
+        NemoBatchEngine = load_parakeet_engine()
+        assert NemoBatchEngine.DEFAULT_MODEL_ID == "nvidia/parakeet-tdt-1.1b"
 
     def test_supported_models(self, mock_cuda_available):
         """Test that expected NeMo model IDs are supported (M36)."""
-        ParakeetEngine = load_parakeet_engine()
+        NemoBatchEngine = load_parakeet_engine()
         # CTC and TDT model variants using full NeMo model IDs
-        assert "nvidia/parakeet-ctc-0.6b" in ParakeetEngine.SUPPORTED_MODELS
-        assert "nvidia/parakeet-ctc-1.1b" in ParakeetEngine.SUPPORTED_MODELS
-        assert "nvidia/parakeet-tdt-0.6b-v3" in ParakeetEngine.SUPPORTED_MODELS
-        assert "nvidia/parakeet-tdt-1.1b" in ParakeetEngine.SUPPORTED_MODELS
+        assert "nvidia/parakeet-ctc-0.6b" in NemoBatchEngine.SUPPORTED_MODELS
+        assert "nvidia/parakeet-ctc-1.1b" in NemoBatchEngine.SUPPORTED_MODELS
+        assert "nvidia/parakeet-tdt-0.6b-v3" in NemoBatchEngine.SUPPORTED_MODELS
+        assert "nvidia/parakeet-tdt-1.1b" in NemoBatchEngine.SUPPORTED_MODELS
 
 
 class TestParakeetEngineHealthCheck:
@@ -91,8 +91,8 @@ class TestParakeetEngineHealthCheck:
 
     def test_health_check_returns_required_fields(self, mock_cuda_available):
         """Test that health check includes GPU information."""
-        ParakeetEngine = load_parakeet_engine()
-        engine = ParakeetEngine()
+        NemoBatchEngine = load_parakeet_engine()
+        engine = NemoBatchEngine()
         health = engine.health_check()
 
         assert "status" in health
@@ -102,8 +102,8 @@ class TestParakeetEngineHealthCheck:
 
     def test_health_check_reports_healthy_with_cuda(self, mock_cuda_available):
         """Test that health check reports healthy when CUDA available."""
-        ParakeetEngine = load_parakeet_engine()
-        engine = ParakeetEngine()
+        NemoBatchEngine = load_parakeet_engine()
+        engine = NemoBatchEngine()
         health = engine.health_check()
 
         assert health["status"] == "healthy"

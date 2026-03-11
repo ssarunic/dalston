@@ -1,8 +1,8 @@
 """Tests for M71: Parakeet RNNT/TDT cache-aware streaming inference.
 
 Covers:
-- ParakeetCore.decoder_type() and supports_streaming_decode()
-- ParakeetCore.transcribe_streaming() with mock chunk iterator
+- NemoCore.decoder_type() and supports_streaming_decode()
+- NemoCore.transcribe_streaming() with mock chunk iterator
 - CTC variant raises RuntimeError if transcribe_streaming() called
 - RT engine decoder-aware dispatch (use_streaming_decode, get_streaming_decode_fn)
 - SessionHandler streaming decode integration
@@ -19,11 +19,12 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from dalston.engine_sdk.cores.parakeet_core import (
+from dalston.common.pipeline_types import TranscribeInput
+from dalston.engine_sdk.cores.nemo_core import (
+    NemoCore,
     NeMoSegmentResult,
     NeMoTranscriptionResult,
     NeMoWordResult,
-    ParakeetCore,
 )
 
 # ---------------------------------------------------------------------------
@@ -56,8 +57,8 @@ def _load_rt_engine_module():
 
 
 def _make_mock_core() -> MagicMock:
-    """Create a mocked ParakeetCore with sensible defaults."""
-    mock_core = MagicMock(spec=ParakeetCore)
+    """Create a mocked NemoCore with sensible defaults."""
+    mock_core = MagicMock(spec=NemoCore)
     mock_core.device = "cpu"
     mock_core.manager = MagicMock()
     mock_core.transcribe.return_value = NeMoTranscriptionResult(
@@ -78,16 +79,16 @@ def _make_mock_core() -> MagicMock:
 
 
 # ---------------------------------------------------------------------------
-# T1: ParakeetCore decoder_type and supports_streaming_decode
+# T1: NemoCore decoder_type and supports_streaming_decode
 # ---------------------------------------------------------------------------
 
 
 class TestParakeetCoreDecoderType:
     """Verify decoder_type() returns correct architecture for each model."""
 
-    def _make_core(self) -> ParakeetCore:
-        """Create a ParakeetCore with a mocked manager."""
-        core = object.__new__(ParakeetCore)
+    def _make_core(self) -> NemoCore:
+        """Create a NemoCore with a mocked manager."""
+        core = object.__new__(NemoCore)
         core._manager = MagicMock()
         core._manager.get_architecture = MagicMock(
             side_effect=lambda model_id: (
@@ -122,16 +123,16 @@ class TestParakeetCoreDecoderType:
 
 
 # ---------------------------------------------------------------------------
-# T1: ParakeetCore.transcribe_streaming()
+# T1: NemoCore.transcribe_streaming()
 # ---------------------------------------------------------------------------
 
 
 class TestParakeetCoreTranscribeStreaming:
     """Verify transcribe_streaming() behavior with mocked NeMo model."""
 
-    def _make_core_with_mock_streaming(self) -> ParakeetCore:
+    def _make_core_with_mock_streaming(self) -> NemoCore:
         """Create a core with a mock manager configured for RNNT streaming."""
-        core = object.__new__(ParakeetCore)
+        core = object.__new__(NemoCore)
         core._manager = MagicMock()
         core._manager.device = "cpu"
 
@@ -142,7 +143,7 @@ class TestParakeetCoreTranscribeStreaming:
 
     def test_ctc_raises_runtime_error(self) -> None:
         """CTC variant must raise RuntimeError if streaming is attempted."""
-        core = object.__new__(ParakeetCore)
+        core = object.__new__(NemoCore)
         core._manager = MagicMock()
         core._manager.get_architecture = MagicMock(return_value="ctc")
 
@@ -153,14 +154,14 @@ class TestParakeetCoreTranscribeStreaming:
 
     def test_rnnt_acquires_and_releases_model(self) -> None:
         """Verify model acquire/release lifecycle during streaming."""
-        core = object.__new__(ParakeetCore)
+        core = object.__new__(NemoCore)
         core._manager = MagicMock()
         core._manager.get_architecture = MagicMock(return_value="rnnt")
         core._manager.device = "cpu"
 
         # Mock _run_streaming_inference to yield nothing
         with patch.object(
-            ParakeetCore,
+            NemoCore,
             "_run_streaming_inference",
             return_value=iter([]),
         ):
@@ -176,7 +177,7 @@ class TestParakeetCoreTranscribeStreaming:
 
     def test_model_released_on_error(self) -> None:
         """Model must be released even if streaming raises an exception."""
-        core = object.__new__(ParakeetCore)
+        core = object.__new__(NemoCore)
         core._manager = MagicMock()
         core._manager.get_architecture = MagicMock(return_value="rnnt")
         core._manager.device = "cpu"
@@ -185,7 +186,7 @@ class TestParakeetCoreTranscribeStreaming:
             raise ValueError("test error")
 
         with patch.object(
-            ParakeetCore,
+            NemoCore,
             "_run_streaming_inference",
             side_effect=_failing_stream,
         ):
@@ -201,13 +202,13 @@ class TestParakeetCoreTranscribeStreaming:
 
     def test_tdt_also_accepted(self) -> None:
         """TDT models should also be accepted for streaming."""
-        core = object.__new__(ParakeetCore)
+        core = object.__new__(NemoCore)
         core._manager = MagicMock()
         core._manager.get_architecture = MagicMock(return_value="tdt")
         core._manager.device = "cpu"
 
         with patch.object(
-            ParakeetCore,
+            NemoCore,
             "_run_streaming_inference",
             return_value=iter([]),
         ):
@@ -237,7 +238,7 @@ class TestRTEngineStreamingDispatch:
         self,
         mock_core: MagicMock | None = None,
     ):
-        """Build a ParakeetStreamingEngine with controlled env."""
+        """Build a NemoRealtimeEngine with controlled env."""
         module = _load_rt_engine_module()
 
         if mock_core is None:
@@ -249,7 +250,7 @@ class TestRTEngineStreamingDispatch:
                 "DALSTON_RNNT_CHUNK_MS": "160",
             },
         ):
-            engine = module.ParakeetStreamingEngine(core=mock_core)
+            engine = module.NemoRealtimeEngine(core=mock_core)
         return engine
 
     def test_use_streaming_decode_rnnt(self) -> None:
@@ -324,7 +325,7 @@ class TestRTEngineTranscribeStreaming:
                 "DALSTON_RNNT_CHUNK_MS": "160",
             },
         ):
-            engine = module.ParakeetStreamingEngine(core=mock_core)
+            engine = module.NemoRealtimeEngine(core=mock_core)
         return engine
 
     def test_yields_transcribe_results(self) -> None:
@@ -388,7 +389,7 @@ class TestRTEngineExistingPathUnchanged:
         module = _load_rt_engine_module()
         mock_core = _make_mock_core()
 
-        engine = module.ParakeetStreamingEngine(core=mock_core)
+        engine = module.NemoRealtimeEngine(core=mock_core)
         return engine, mock_core
 
     def test_transcribe_still_works(self) -> None:
@@ -396,7 +397,10 @@ class TestRTEngineExistingPathUnchanged:
         engine, mock_core = self._build_engine()
         audio = np.zeros(16000, dtype=np.float32)
 
-        result = engine.transcribe(audio, "en", "parakeet-tdt-1.1b")
+        result = engine.transcribe(
+            audio,
+            TranscribeInput(language="en", runtime_model_id="parakeet-tdt-1.1b"),
+        )
 
         assert result.text == "hello world"
         mock_core.transcribe.assert_called_once()
@@ -406,7 +410,10 @@ class TestRTEngineExistingPathUnchanged:
         engine, mock_core = self._build_engine()
         audio = np.zeros(16000, dtype=np.float32)
 
-        result = engine.transcribe(audio, "en", "parakeet-ctc-0.6b")
+        result = engine.transcribe(
+            audio,
+            TranscribeInput(language="en", runtime_model_id="parakeet-ctc-0.6b"),
+        )
 
         assert result.text == "hello world"
         mock_core.transcribe.assert_called_once()
@@ -429,7 +436,7 @@ class TestChunkMSConfig:
             import os
 
             os.environ.pop("DALSTON_RNNT_CHUNK_MS", None)
-            engine = module.ParakeetStreamingEngine(core=mock_core)
+            engine = module.NemoRealtimeEngine(core=mock_core)
 
         assert engine._rnnt_chunk_ms == 160
 
@@ -443,7 +450,7 @@ class TestChunkMSConfig:
                 "DALSTON_RNNT_CHUNK_MS": "320",
             },
         ):
-            engine = module.ParakeetStreamingEngine(core=mock_core)
+            engine = module.NemoRealtimeEngine(core=mock_core)
 
         assert engine._rnnt_chunk_ms == 320
 
@@ -454,11 +461,11 @@ class TestChunkMSConfig:
 
 
 class TestBatchEngineUnaffected:
-    """Verify ParakeetCore.transcribe() is unchanged (batch path)."""
+    """Verify NemoCore.transcribe() is unchanged (batch path)."""
 
     def test_transcribe_unchanged(self) -> None:
-        """ParakeetCore.transcribe() should work as before."""
-        core = object.__new__(ParakeetCore)
+        """NemoCore.transcribe() should work as before."""
+        core = object.__new__(NemoCore)
         core._manager = MagicMock()
 
         mock_model = MagicMock()

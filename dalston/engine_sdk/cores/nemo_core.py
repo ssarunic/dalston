@@ -60,11 +60,11 @@ class NeMoTranscriptionResult:
 
 
 # ---------------------------------------------------------------------------
-# ParakeetCore — shared inference logic
+# NemoCore — shared inference logic
 # ---------------------------------------------------------------------------
 
 
-class ParakeetCore:
+class NemoCore:
     """Shared inference logic for NeMo Parakeet batch and realtime.
 
     Owns the NeMoModelManager and provides a unified transcription interface.
@@ -93,7 +93,7 @@ class ParakeetCore:
         )
 
         logger.info(
-            "parakeet_core_init",
+            "nemo_core_init",
             device=device,
             ttl_seconds=ttl_seconds,
             max_loaded=max_loaded,
@@ -467,14 +467,14 @@ class ParakeetCore:
 
     def shutdown(self) -> None:
         """Shutdown core and release all models."""
-        logger.info("parakeet_core_shutdown")
+        logger.info("nemo_core_shutdown")
         self._manager.shutdown()
 
     # -- Factory -------------------------------------------------------------
 
     @classmethod
-    def from_env(cls) -> ParakeetCore:
-        """Create a ParakeetCore configured from environment variables.
+    def from_env(cls) -> NemoCore:
+        """Create a NemoCore configured from environment variables.
 
         Environment variables:
             DALSTON_DEVICE: Device ("cuda" or "cpu", default: auto-detect)

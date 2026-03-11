@@ -259,7 +259,7 @@ def test_default_lite_pipeline_uses_real_transcribe_binding(
     assert binding.entry.execution_profile == "venv"
     assert binding.entry.runtime == "faster-whisper"
     assert binding.engine_ref is not None
-    assert binding.engine_ref.endswith("engine.py:WhisperEngine")
+    assert binding.engine_ref.endswith("engine.py:FasterWhisperBatchEngine")
 
 
 def test_default_lite_pipeline_uses_real_diarize_binding(

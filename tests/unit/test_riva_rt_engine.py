@@ -18,6 +18,8 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
+from dalston.common.pipeline_types import TranscribeInput
+
 
 def _make_mock_word(
     word: str = "hello",
@@ -66,6 +68,11 @@ def _make_mock_response(
     if results is None:
         results = [_make_mock_result()]
     return SimpleNamespace(results=results)
+
+
+def _make_params(language: str = "en") -> TranscribeInput:
+    """Build typed realtime transcribe params."""
+    return TranscribeInput(language=language)
 
 
 @pytest.fixture(autouse=True)
@@ -136,7 +143,7 @@ class TestRivaRtTranscript:
 
         # Create 1 second of float32 audio
         audio = np.zeros(16000, dtype=np.float32)
-        result = engine.transcribe(audio, "en", "")
+        result = engine.transcribe(audio, _make_params("en"))
 
         assert result.text == "hello world"
         assert len(result.segments) == 1
@@ -154,7 +161,7 @@ class TestRivaRtTranscript:
         engine._asr.offline_recognize.return_value = response
 
         audio = np.zeros(16000, dtype=np.float32)
-        result = engine.transcribe(audio, "auto", "")
+        result = engine.transcribe(audio, _make_params("auto"))
 
         # "auto" should map to "en" (default fallback)
         assert result.language == "en"
@@ -166,7 +173,7 @@ class TestRivaRtTranscript:
         engine._asr.offline_recognize.return_value = response
 
         audio = np.zeros(16000, dtype=np.float32)
-        result = engine.transcribe(audio, "es", "")
+        result = engine.transcribe(audio, _make_params("es"))
 
         assert result.language == "es"
 
@@ -177,7 +184,7 @@ class TestRivaRtTranscript:
         engine._asr.offline_recognize.return_value = response
 
         audio = np.zeros(16000, dtype=np.float32)
-        result = engine.transcribe(audio, "en", "")
+        result = engine.transcribe(audio, _make_params("en"))
 
         assert result.text == ""
         assert result.segments == []
@@ -191,7 +198,7 @@ class TestRivaRtTranscript:
 
         # Create audio with known values
         audio = np.array([0.5, -0.5, 1.0, -1.0], dtype=np.float32)
-        engine.transcribe(audio, "en", "")
+        engine.transcribe(audio, _make_params("en"))
 
         # Verify the audio was converted and passed to offline_recognize
         call_args = engine._asr.offline_recognize.call_args
@@ -226,7 +233,7 @@ class TestRivaRtTranscript:
         engine._asr.offline_recognize.return_value = response
 
         audio = np.zeros(16000, dtype=np.float32)
-        result = engine.transcribe(audio, "en", "")
+        result = engine.transcribe(audio, _make_params("en"))
 
         assert result.text == "hello world"
         words = [w for seg in result.segments for w in (seg.words or [])]
@@ -313,7 +320,7 @@ class TestRivaRtInitialization:
 
         audio = np.zeros(16000, dtype=np.float32)
         with pytest.raises(RuntimeError, match="not initialized"):
-            engine.transcribe(audio, "en", "")
+            engine.transcribe(audio, _make_params("en"))
 
     def test_shutdown_closes_channel(self, engine_with_mock) -> None:
         engine, _ = engine_with_mock
@@ -347,7 +354,7 @@ class TestRivaRtWordConfidence:
         engine._asr.offline_recognize.return_value = response
 
         audio = np.zeros(16000, dtype=np.float32)
-        result = engine.transcribe(audio, "en", "")
+        result = engine.transcribe(audio, _make_params("en"))
 
         # Word confidence should come from the word, not the alternative
         words = result.segments[0].words

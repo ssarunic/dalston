@@ -42,7 +42,7 @@ from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 from dalston.engine_sdk.managers import HFTransformersModelManager
 
 
-class HFASREngine(BaseBatchTranscribeEngine):
+class HfAsrBatchEngine(BaseBatchTranscribeEngine):
     """Generic HuggingFace ASR pipeline engine.
 
     This engine uses HFTransformersModelManager to handle model lifecycle:
@@ -142,17 +142,17 @@ class HFASREngine(BaseBatchTranscribeEngine):
         Returns:
             Transcript with text, segments, and language
         """
-        config = engine_input.config
+        params = engine_input.get_transcribe_params()
 
         # Get model to use from task config
-        runtime_model_id = config.get("runtime_model_id", self._default_model_id)
+        runtime_model_id = params.runtime_model_id or self._default_model_id
 
         # Handle language: None or "auto" means auto-detect
-        language = config.get("language")
+        language = params.language
         if language == "auto" or language == "":
             language = None
 
-        channel = config.get("channel")
+        channel = params.channel
 
         # Acquire pipeline from manager (loads if needed, updates LRU)
         pipe = self._manager.acquire(runtime_model_id)
@@ -328,5 +328,5 @@ class HFASREngine(BaseBatchTranscribeEngine):
 
 
 if __name__ == "__main__":
-    engine = HFASREngine()
+    engine = HfAsrBatchEngine()
     engine.run()

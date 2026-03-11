@@ -2,7 +2,7 @@
 
 Verifies that the RT engine produces the correct Transcript
 shape and that word timestamp behavior is preserved after delegation
-to ParakeetOnnxCore.
+to NemoOnnxCore.
 """
 
 from __future__ import annotations
@@ -14,11 +14,12 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
-from dalston.engine_sdk.cores.parakeet_onnx_core import (
+from dalston.common.pipeline_types import TranscribeInput
+from dalston.engine_sdk.cores.nemo_onnx_core import (
+    NemoOnnxCore,
     OnnxSegmentResult,
     OnnxTranscriptionResult,
     OnnxWordResult,
-    ParakeetOnnxCore,
 )
 
 
@@ -55,13 +56,13 @@ def _build_rt_engine(core_result: OnnxTranscriptionResult):
     sys.modules["m63_parakeet_onnx_rt"] = module
     spec.loader.exec_module(module)
 
-    mock_core = MagicMock(spec=ParakeetOnnxCore)
+    mock_core = MagicMock(spec=NemoOnnxCore)
     mock_core.device = "cpu"
     mock_core.quantization = "none"
     mock_core.transcribe.return_value = core_result
     mock_core.manager = MagicMock()
 
-    engine = module.ParakeetOnnxStreamingEngine(core=mock_core)
+    engine = module.NemoOnnxRealtimeEngine(core=mock_core)
     return engine
 
 
@@ -73,7 +74,10 @@ class TestOnnxRTOutputShape:
         engine = _build_rt_engine(result)
 
         audio = np.zeros(16000, dtype=np.float32)
-        output = engine.transcribe(audio, "en", "parakeet-onnx-ctc-0.6b")
+        output = engine.transcribe(
+            audio,
+            TranscribeInput(language="en", runtime_model_id="parakeet-onnx-ctc-0.6b"),
+        )
 
         assert output.text == "hello world"
         assert output.language == "en"
@@ -90,7 +94,10 @@ class TestOnnxRTOutputShape:
         engine = _build_rt_engine(result)
 
         audio = np.zeros(16000, dtype=np.float32)
-        output = engine.transcribe(audio, "en", "parakeet-onnx-ctc-0.6b")
+        output = engine.transcribe(
+            audio,
+            TranscribeInput(language="en", runtime_model_id="parakeet-onnx-ctc-0.6b"),
+        )
 
         words = [w for seg in output.segments for w in (seg.words or [])]
         assert len(words) == 2
@@ -103,7 +110,10 @@ class TestOnnxRTOutputShape:
         engine = _build_rt_engine(result)
 
         audio = np.zeros(16000, dtype=np.float32)
-        output = engine.transcribe(audio, "en", "parakeet-onnx-ctc-0.6b")
+        output = engine.transcribe(
+            audio,
+            TranscribeInput(language="en", runtime_model_id="parakeet-onnx-ctc-0.6b"),
+        )
 
         assert output.text == ""
         assert output.segments == []
@@ -113,7 +123,12 @@ class TestOnnxRTOutputShape:
         engine = _build_rt_engine(result)
 
         audio = np.zeros(16000, dtype=np.float32)
-        engine.transcribe(audio, "en", "parakeet-onnx-tdt-0.6b-v3")
+        engine.transcribe(
+            audio,
+            TranscribeInput(
+                language="en", runtime_model_id="parakeet-onnx-tdt-0.6b-v3"
+            ),
+        )
 
         call_args = engine._core.transcribe.call_args
         assert call_args[0][1] == "parakeet-onnx-tdt-0.6b-v3"

@@ -33,6 +33,7 @@ from dalston.common.audio_defaults import (
 from dalston.common.pipeline_types import (
     AlignmentMethod,
     TimestampGranularity,
+    TranscribeInput,
     Transcript,
     TranscriptSegment,
     TranscriptWord,
@@ -317,7 +318,7 @@ class AudioBuffer:
 
 # Type alias for transcribe callback
 TranscribeCallback = Callable[
-    [np.ndarray, str, str, list[str] | None],  # audio, language, model, vocabulary
+    [np.ndarray, TranscribeInput],  # audio, typed params
     Transcript,
 ]
 
@@ -353,7 +354,7 @@ class SessionHandler:
     Coordinates the pipeline: Audio → Buffer → VAD → ASR → Assembler → Output
 
     Example:
-        async def transcribe(audio, language, model):
+        async def transcribe(audio, params):
             # Call ASR engine
             return Transcript(...)
 
@@ -918,6 +919,17 @@ class SessionHandler:
                 self._speech_audio_buffer = []
                 self._chunks_since_partial = 0
 
+    def _build_transcribe_params(self) -> TranscribeInput:
+        """Build typed transcriber params from current session state."""
+        return TranscribeInput(
+            runtime_model_id=self.config.model,
+            language=self.config.language,
+            vocabulary=self.config.vocabulary,
+            word_timestamps=self.config.word_timestamps,
+            vad_filter=self.config.enable_vad,
+            task="transcribe",
+        )
+
     async def _send_partial_result(self) -> None:
         """Send partial transcription result during speech.
 
@@ -929,14 +941,13 @@ class SessionHandler:
         try:
             # Concatenate accumulated audio
             audio = np.concatenate(self._speech_audio_buffer)
+            params = self._build_transcribe_params()
 
             # Transcribe in thread pool to avoid blocking event loop
             result = await asyncio.to_thread(
                 self._transcribe_fn,
                 audio,
-                self.config.language,
-                self.config.model,
-                self.config.vocabulary,
+                params,
             )
 
             if self._ended or not result.text:
@@ -1008,15 +1019,14 @@ class SessionHandler:
             return
 
         try:
+            params = self._build_transcribe_params()
             # Call ASR in thread pool to avoid blocking event loop
             # This is critical for slow models (e.g., CPU inference) to
             # prevent WebSocket keepalive ping timeouts
             result = await asyncio.to_thread(
                 self._transcribe_fn,
                 audio,
-                self.config.language,
-                self.config.model,
-                self.config.vocabulary,
+                params,
             )
 
             if self._ended or not result.text:

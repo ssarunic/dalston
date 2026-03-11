@@ -11,7 +11,7 @@ Example usage:
             from faster_whisper import WhisperModel
             self.model = WhisperModel("large-v3", device="cuda")
 
-        def transcribe_v1(self, audio, language, model_variant, vocabulary=None):
+        def transcribe_v1(self, audio, params):
             segments, info = self.model.transcribe(audio, word_timestamps=True)
             seg_list = []
             for segment in segments:

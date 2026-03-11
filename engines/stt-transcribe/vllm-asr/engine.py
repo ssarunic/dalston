@@ -55,7 +55,7 @@ from adapters import ADAPTER_REGISTRY, get_adapter
 logger = structlog.get_logger()
 
 
-class VLLMASREngine(BaseBatchTranscribeEngine):
+class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
     """vLLM-based ASR engine for audio-capable LLMs.
 
     This engine uses vLLM to serve audio LLMs (Voxtral, Qwen2-Audio) for
@@ -222,10 +222,10 @@ class VLLMASREngine(BaseBatchTranscribeEngine):
             Transcript with text and segments
         """
         audio_path = engine_input.audio_path
-        config = engine_input.config
-        language = config.get("language")
-        vocabulary = config.get("vocabulary")
-        channel = config.get("channel")
+        params = engine_input.get_transcribe_params()
+        language = params.language
+        vocabulary = params.vocabulary
+        channel = params.channel
 
         if language == "auto" or language == "":
             language = None
@@ -243,7 +243,7 @@ class VLLMASREngine(BaseBatchTranscribeEngine):
             )
 
         # Get model to use
-        runtime_model_id = config.get("runtime_model_id", self._default_model_id)
+        runtime_model_id = params.runtime_model_id or self._default_model_id
 
         # Load model (with swapping if needed)
         self._ensure_model_loaded(runtime_model_id)
@@ -361,5 +361,5 @@ class VLLMASREngine(BaseBatchTranscribeEngine):
 
 
 if __name__ == "__main__":
-    engine = VLLMASREngine()
+    engine = VllmAsrBatchEngine()
     engine.run()

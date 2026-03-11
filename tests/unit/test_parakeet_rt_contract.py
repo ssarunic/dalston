@@ -2,7 +2,7 @@
 
 Verifies that the RT engine produces the correct Transcript
 shape and that word timestamp behavior is preserved after delegation
-to ParakeetCore.
+to NemoCore.
 """
 
 from __future__ import annotations
@@ -12,11 +12,12 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from dalston.engine_sdk.cores.parakeet_core import (
+from dalston.common.pipeline_types import TranscribeInput
+from dalston.engine_sdk.cores.nemo_core import (
+    NemoCore,
     NeMoSegmentResult,
     NeMoTranscriptionResult,
     NeMoWordResult,
-    ParakeetCore,
 )
 
 torch = pytest.importorskip("torch")
@@ -26,7 +27,7 @@ def _make_core_result(
     text: str = "hello world",
     words: list[NeMoWordResult] | None = None,
 ) -> NeMoTranscriptionResult:
-    """Create a mock ParakeetCore transcription result."""
+    """Create a mock NemoCore transcription result."""
     if words is None:
         words = [
             NeMoWordResult(word="hello", start=0.0, end=0.5),
@@ -49,7 +50,7 @@ def _make_core_result(
 
 
 def _build_rt_engine(core_result: NeMoTranscriptionResult):
-    """Create a ParakeetStreamingEngine with a mocked core."""
+    """Create a NemoRealtimeEngine with a mocked core."""
     import importlib.util
     import sys
     from pathlib import Path
@@ -61,12 +62,12 @@ def _build_rt_engine(core_result: NeMoTranscriptionResult):
     sys.modules["m63_parakeet_rt"] = module
     spec.loader.exec_module(module)
 
-    mock_core = MagicMock(spec=ParakeetCore)
+    mock_core = MagicMock(spec=NemoCore)
     mock_core.device = "cpu"
     mock_core.transcribe.return_value = core_result
     mock_core.manager = MagicMock()
 
-    engine = module.ParakeetStreamingEngine(core=mock_core)
+    engine = module.NemoRealtimeEngine(core=mock_core)
     return engine
 
 
@@ -78,7 +79,10 @@ class TestParakeetRTOutputShape:
         engine = _build_rt_engine(result)
 
         audio = np.zeros(16000, dtype=np.float32)
-        output = engine.transcribe(audio, "en", "parakeet-tdt-1.1b")
+        output = engine.transcribe(
+            audio,
+            TranscribeInput(language="en", runtime_model_id="parakeet-tdt-1.1b"),
+        )
 
         assert output.text == "hello world"
         assert output.language == "en"
@@ -95,7 +99,10 @@ class TestParakeetRTOutputShape:
         engine = _build_rt_engine(result)
 
         audio = np.zeros(16000, dtype=np.float32)
-        output = engine.transcribe(audio, "en", "parakeet-tdt-1.1b")
+        output = engine.transcribe(
+            audio,
+            TranscribeInput(language="en", runtime_model_id="parakeet-tdt-1.1b"),
+        )
 
         words = [w for seg in output.segments for w in (seg.words or [])]
         assert len(words) == 2
@@ -108,7 +115,10 @@ class TestParakeetRTOutputShape:
         engine = _build_rt_engine(result)
 
         audio = np.zeros(16000, dtype=np.float32)
-        output = engine.transcribe(audio, "en", "parakeet-tdt-1.1b")
+        output = engine.transcribe(
+            audio,
+            TranscribeInput(language="en", runtime_model_id="parakeet-tdt-1.1b"),
+        )
 
         assert output.text == ""
         assert output.segments == []
@@ -118,7 +128,10 @@ class TestParakeetRTOutputShape:
         engine = _build_rt_engine(result)
 
         audio = np.zeros(16000, dtype=np.float32)
-        engine.transcribe(audio, "en", "nvidia/parakeet-tdt-1.1b")
+        engine.transcribe(
+            audio,
+            TranscribeInput(language="en", runtime_model_id="nvidia/parakeet-tdt-1.1b"),
+        )
 
         # Should normalize to NeMoModelManager format
         call_args = engine._core.transcribe.call_args

@@ -46,10 +46,10 @@ from dalston.engine_sdk import (
     EngineInput,
 )
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
-from dalston.engine_sdk.cores.parakeet_core import ParakeetCore
+from dalston.engine_sdk.cores.nemo_core import NemoCore
 
 
-class ParakeetEngine(BaseBatchTranscribeEngine):
+class NemoBatchEngine(BaseBatchTranscribeEngine):
     """NVIDIA Parakeet transcription engine with runtime model swapping.
 
     Uses FastConformer encoder with CTC or TDT decoder for efficient
@@ -83,16 +83,16 @@ class ParakeetEngine(BaseBatchTranscribeEngine):
     # for Parakeet since it's English-only, so use the highest quality model)
     DEFAULT_MODEL_ID = "nvidia/parakeet-tdt-1.1b"
 
-    def __init__(self, core: ParakeetCore | None = None) -> None:
+    def __init__(self, core: NemoCore | None = None) -> None:
         """Initialize the engine.
 
         Args:
-            core: Optional shared ParakeetCore. If provided, the engine uses
+            core: Optional shared NemoCore. If provided, the engine uses
                   it instead of creating its own. This is how the unified
                   runner shares a single model between batch and RT adapters.
         """
         super().__init__()
-        self._core = core if core is not None else ParakeetCore.from_env()
+        self._core = core if core is not None else NemoCore.from_env()
 
         # Get default model from environment, with fallback to class default
         self._default_model_id = os.environ.get(
@@ -254,7 +254,7 @@ class ParakeetEngine(BaseBatchTranscribeEngine):
     def transcribe_audio(
         self, engine_input: EngineInput, ctx: BatchTaskContext
     ) -> Transcript:
-        """Transcribe audio using Parakeet CTC or TDT via shared ParakeetCore.
+        """Transcribe audio using Parakeet CTC or TDT via shared NemoCore.
 
         Args:
             engine_input: Task input with audio file path and config
@@ -264,11 +264,11 @@ class ParakeetEngine(BaseBatchTranscribeEngine):
             Transcript with text, segments, and words
         """
         audio_path = engine_input.audio_path
-        config = engine_input.config
-        channel = config.get("channel")
-        vocabulary = config.get("vocabulary")
+        params = engine_input.get_transcribe_params()
+        channel = params.channel
+        vocabulary = params.vocabulary
 
-        runtime_model_id = config.get("runtime_model_id", self._default_model_id)
+        runtime_model_id = params.runtime_model_id or self._default_model_id
         model_id = self._normalize_model_id(runtime_model_id)
 
         # Extract decoder type for alignment method
@@ -418,5 +418,5 @@ class ParakeetEngine(BaseBatchTranscribeEngine):
 
 
 if __name__ == "__main__":
-    engine = ParakeetEngine()
+    engine = NemoBatchEngine()
     engine.run()

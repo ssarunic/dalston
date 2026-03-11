@@ -20,6 +20,7 @@ import torch
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
+    TranscribeInput,
     Transcript,
     TranscriptWord,
 )
@@ -28,7 +29,7 @@ from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
 logger = structlog.get_logger()
 
 
-class VoxtralStreamingEngine(BaseRealtimeTranscribeEngine):
+class VoxtralRealtimeEngine(BaseRealtimeTranscribeEngine):
     """Real-time streaming transcription using Voxtral.
 
     Uses Voxtral-Mini-4B-Realtime for multilingual streaming transcription
@@ -222,20 +223,12 @@ class VoxtralStreamingEngine(BaseRealtimeTranscribeEngine):
 
         return clean_text, words
 
-    def transcribe_v1(
-        self,
-        audio: np.ndarray,
-        language: str,
-        model_variant: str,
-        vocabulary: list[str] | None = None,
-    ) -> Transcript:
+    def transcribe_v1(self, audio: np.ndarray, params: TranscribeInput) -> Transcript:
         """Transcribe an audio segment.
 
         Args:
             audio: Audio samples as float32 numpy array, mono, 16kHz
-            language: Language code or "auto" for detection
-            model_variant: Model variant (ignored - single model loaded)
-            vocabulary: List of terms to boost recognition (not supported)
+            params: Typed transcriber parameters for this utterance
 
         Returns:
             Transcript with text, words, language, confidence
@@ -244,11 +237,11 @@ class VoxtralStreamingEngine(BaseRealtimeTranscribeEngine):
             raise RuntimeError("Model not loaded. Call load_models() first.")
 
         # Voxtral doesn't support vocabulary boosting
-        if vocabulary:
+        if params.vocabulary:
             logger.debug(
                 "vocabulary_not_supported",
                 message="Vocabulary boosting is not supported for Voxtral. Terms ignored.",
-                terms_count=len(vocabulary),
+                terms_count=len(params.vocabulary),
             )
 
         if audio.dtype != np.float32:
@@ -280,7 +273,8 @@ class VoxtralStreamingEngine(BaseRealtimeTranscribeEngine):
 
         clean_text, words = self._parse_streaming_output(transcription)
 
-        detected_language = language if language != "auto" else "en"
+        requested_language = params.language or "auto"
+        detected_language = requested_language if requested_language != "auto" else "en"
         if detected_language not in self.SUPPORTED_LANGUAGES:
             detected_language = "en"
 
@@ -357,5 +351,5 @@ class VoxtralStreamingEngine(BaseRealtimeTranscribeEngine):
 if __name__ == "__main__":
     import asyncio
 
-    engine = VoxtralStreamingEngine()
+    engine = VoxtralRealtimeEngine()
     asyncio.run(engine.run())

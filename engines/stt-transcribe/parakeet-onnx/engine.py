@@ -4,7 +4,7 @@ Uses ONNX Runtime via the onnx-asr library for fast, lightweight inference
 of Parakeet CTC, TDT, and RNNT models without the full NeMo toolkit. Produces
 native word-level timestamps without requiring a separate alignment stage.
 
-Delegates inference to ParakeetOnnxCore (shared with the RT engine).
+Delegates inference to NemoOnnxCore (shared with the RT engine).
 
 Advantages over the NeMo runtime:
   - ~12x smaller container image (~1GB vs ~12GB)
@@ -41,7 +41,7 @@ from dalston.engine_sdk import (
     EngineInput,
 )
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
-from dalston.engine_sdk.cores.parakeet_onnx_core import ParakeetOnnxCore
+from dalston.engine_sdk.cores.nemo_onnx_core import NemoOnnxCore
 
 # Decoder type extracted from model ID for alignment method reporting
 _DECODER_TYPES = {"ctc", "tdt", "rnnt"}
@@ -56,10 +56,10 @@ _NGC_TO_MANAGER_ID = {
 }
 
 
-class ParakeetOnnxEngine(BaseBatchTranscribeEngine):
+class NemoOnnxBatchEngine(BaseBatchTranscribeEngine):
     """NVIDIA Parakeet transcription engine using ONNX Runtime.
 
-    Delegates inference to ParakeetOnnxCore, which is shared with the RT
+    Delegates inference to NemoOnnxCore, which is shared with the RT
     ONNX engine. The batch adapter handles file path input and output
     formatting to Transcript.
 
@@ -77,15 +77,15 @@ class ParakeetOnnxEngine(BaseBatchTranscribeEngine):
 
     DEFAULT_MODEL_ID = "nvidia/parakeet-ctc-0.6b"
 
-    def __init__(self, core: ParakeetOnnxCore | None = None) -> None:
+    def __init__(self, core: NemoOnnxCore | None = None) -> None:
         """Initialize the engine.
 
         Args:
-            core: Optional shared ParakeetOnnxCore. If provided, the engine
+            core: Optional shared NemoOnnxCore. If provided, the engine
                   uses it instead of creating its own.
         """
         super().__init__()
-        self._core = core if core is not None else ParakeetOnnxCore.from_env()
+        self._core = core if core is not None else NemoOnnxCore.from_env()
 
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
@@ -120,10 +120,10 @@ class ParakeetOnnxEngine(BaseBatchTranscribeEngine):
             Transcript with text, segments, and words
         """
         audio_path = engine_input.audio_path
-        config = engine_input.config
-        channel = config.get("channel")
+        params = engine_input.get_transcribe_params()
+        channel = params.channel
 
-        runtime_model_id = config.get("runtime_model_id", self._default_model_id)
+        runtime_model_id = params.runtime_model_id or self._default_model_id
         model_id = self._normalize_model_id(runtime_model_id)
         decoder_type = self._get_decoder_type(runtime_model_id)
         alignment_method = self._alignment_method_for(decoder_type)
@@ -229,5 +229,5 @@ class ParakeetOnnxEngine(BaseBatchTranscribeEngine):
 
 
 if __name__ == "__main__":
-    engine = ParakeetOnnxEngine()
+    engine = NemoOnnxBatchEngine()
     engine.run()

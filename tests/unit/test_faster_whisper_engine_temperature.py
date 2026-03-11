@@ -30,12 +30,12 @@ def _load_whisper_engine():
     module = importlib.util.module_from_spec(spec)
     sys.modules["m61_whisper_engine"] = module
     spec.loader.exec_module(module)
-    return module.WhisperEngine
+    return module.FasterWhisperBatchEngine
 
 
 def test_temperature_list_is_forwarded_to_faster_whisper_decoder() -> None:
-    WhisperEngine = _load_whisper_engine()
-    engine = WhisperEngine()
+    FasterWhisperBatchEngine = _load_whisper_engine()
+    engine = FasterWhisperBatchEngine()
 
     mock_segment = SimpleNamespace(
         start=0.0,
@@ -53,7 +53,7 @@ def test_temperature_list_is_forwarded_to_faster_whisper_decoder() -> None:
 
     mock_manager = MagicMock()
     mock_manager.acquire.return_value = mock_model
-    # M63: Engine now delegates to TranscribeCore which owns the manager
+    # M63: Engine now delegates to FasterWhisperCore which owns the manager
     engine._core._manager = mock_manager
 
     task_id = str(uuid4())

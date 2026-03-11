@@ -13,12 +13,13 @@ Example usage:
             sync_manager = FasterWhisperModelManager.from_env()
             self._model_manager = AsyncModelManager(sync_manager)
 
-        async def transcribe(self, audio, language, model_variant, vocabulary=None):
-            model = await self._model_manager.acquire(model_variant)
+        async def transcribe(self, audio, params):
+            model_id = params.runtime_model_id or "default"
+            model = await self._model_manager.acquire(model_id)
             try:
                 return model.transcribe(audio, ...)
             finally:
-                await self._model_manager.release(model_variant)
+                await self._model_manager.release(model_id)
 """
 
 from __future__ import annotations

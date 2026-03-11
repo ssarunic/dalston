@@ -93,7 +93,7 @@ class Settings(BaseSettings):
         ),
     )
     lite_transcribe_engine_ref: str = Field(
-        default="engines/stt-transcribe/faster-whisper/engine.py:WhisperEngine",
+        default="engines/stt-transcribe/faster-whisper/engine.py:FasterWhisperBatchEngine",
         alias="DALSTON_LITE_TRANSCRIBE_ENGINE_REF",
         description="Engine reference used by lite transcribe backend when backend='real'.",
     )

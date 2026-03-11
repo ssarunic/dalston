@@ -98,7 +98,7 @@ except ImportError:
 
 
 def load_whisper_engine():
-    """Load WhisperEngine from engines directory using importlib."""
+    """Load FasterWhisperBatchEngine from engines directory using importlib."""
     engine_path = Path("engines/stt-transcribe/faster-whisper/engine.py")
     if not engine_path.exists():
         pytest.skip("Faster-whisper engine not found")
@@ -110,7 +110,7 @@ def load_whisper_engine():
     module = importlib.util.module_from_spec(spec)
     sys.modules["whisper_engine"] = module
     spec.loader.exec_module(module)
-    return module.WhisperEngine
+    return module.FasterWhisperBatchEngine
 
 
 @pytest.mark.skipif(not HAS_FASTER_WHISPER, reason="faster_whisper not installed")
@@ -138,12 +138,12 @@ class TestWhisperEngineVocabulary:
 
     @pytest.fixture
     def engine_with_mock_model(self, mock_whisper_model, monkeypatch):
-        """Create WhisperEngine with mocked model."""
+        """Create FasterWhisperBatchEngine with mocked model."""
         # Force CPU mode to avoid CUDA requirement for large-v3
         monkeypatch.setenv("DALSTON_DEVICE", "cpu")
         with patch("faster_whisper.WhisperModel", return_value=mock_whisper_model):
-            WhisperEngine = load_whisper_engine()
-            engine = WhisperEngine()
+            FasterWhisperBatchEngine = load_whisper_engine()
+            engine = FasterWhisperBatchEngine()
             engine._model = mock_whisper_model
             yield engine, mock_whisper_model
 
@@ -212,7 +212,7 @@ class TestWhisperEngineVocabulary:
 
 
 def load_parakeet_engine():
-    """Load ParakeetEngine from engines directory using importlib."""
+    """Load NemoBatchEngine from engines directory using importlib."""
     engine_path = Path("engines/stt-transcribe/parakeet/engine.py")
     if not engine_path.exists():
         pytest.skip("Parakeet engine not found")
@@ -224,7 +224,7 @@ def load_parakeet_engine():
     module = importlib.util.module_from_spec(spec)
     sys.modules["parakeet_engine"] = module
     spec.loader.exec_module(module)
-    return module.ParakeetEngine
+    return module.NemoBatchEngine
 
 
 # Skip all parakeet tests if torch not installed
@@ -268,7 +268,7 @@ class TestParakeetEngineVocabulary:
 
     @pytest.fixture
     def engine_with_mock_model(self, mock_cuda_available, mock_nemo_model):
-        """Create ParakeetEngine with mocked NeMo model."""
+        """Create NemoBatchEngine with mocked NeMo model."""
         with patch.dict(
             "sys.modules",
             {
@@ -281,8 +281,8 @@ class TestParakeetEngineVocabulary:
                 "nemo.collections.asr.models.ASRModel.from_pretrained",
                 return_value=mock_nemo_model,
             ):
-                ParakeetEngine = load_parakeet_engine()
-                engine = ParakeetEngine()
+                NemoBatchEngine = load_parakeet_engine()
+                engine = NemoBatchEngine()
                 engine._model = mock_nemo_model
                 engine._model_name = "nvidia/parakeet-ctc-0.6b"
                 yield engine

@@ -28,7 +28,7 @@ from dalston.engine_sdk import (
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 
 
-class VoxtralEngine(BaseBatchTranscribeEngine):
+class VoxtralBatchEngine(BaseBatchTranscribeEngine):
     """Mistral Voxtral transcription engine.
 
     Uses Voxtral models for multilingual transcription.
@@ -158,10 +158,10 @@ class VoxtralEngine(BaseBatchTranscribeEngine):
             Transcript with text and segments
         """
         audio_path = engine_input.audio_path
-        config = engine_input.config
-        channel = config.get("channel")
-        language = config.get("language", "en")
-        vocabulary = config.get("vocabulary")  # Terms to boost
+        params = engine_input.get_transcribe_params()
+        channel = params.channel
+        language = params.language or "en"
+        vocabulary = params.vocabulary  # Terms to boost
 
         # Warn if vocabulary is provided - Voxtral doesn't support vocabulary boosting
         if vocabulary:
@@ -277,5 +277,5 @@ class VoxtralEngine(BaseBatchTranscribeEngine):
 
 
 if __name__ == "__main__":
-    engine = VoxtralEngine()
+    engine = VoxtralBatchEngine()
     engine.run()
