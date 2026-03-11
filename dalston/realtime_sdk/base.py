@@ -859,7 +859,9 @@ class RealtimeEngine(ABC):
 
         resample_quality = get_param(
             "resample_quality",
-            os.environ.get("DALSTON_REALTIME_RESAMPLE_QUALITY", DEFAULT_RESAMPLE_QUALITY),
+            os.environ.get(
+                "DALSTON_REALTIME_RESAMPLE_QUALITY", DEFAULT_RESAMPLE_QUALITY
+            ),
         )
         if resample_quality not in RESAMPLE_QUALITY_PROFILES:
             raise ValueError(

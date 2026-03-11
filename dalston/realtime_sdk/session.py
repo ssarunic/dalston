@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import soxr
 import structlog
 
 from dalston.common.audio_defaults import (
@@ -289,6 +288,8 @@ class AudioBuffer:
         """
         if self.client_sample_rate == self.sample_rate or len(samples) == 0:
             return samples
+
+        import soxr
 
         t0 = time.perf_counter()
         result = soxr.resample(
