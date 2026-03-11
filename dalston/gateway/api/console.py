@@ -1196,6 +1196,17 @@ async def get_metrics(
             )
         )
 
+    # Sort engines by pipeline stage order, then alphabetically by runtime
+    _STAGE_ORDER = {
+        "prepare": 0,
+        "transcribe": 1,
+        "align": 2,
+        "diarize": 3,
+        "pii_detect": 4,
+        "audio_redact": 5,
+    }
+    engine_metrics.sort(key=lambda e: (_STAGE_ORDER.get(e.stage, 99), e.runtime))
+
     # Grafana URL from environment (optional)
     grafana_url = os.environ.get("DALSTON_GRAFANA_URL")
 
