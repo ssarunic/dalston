@@ -13,6 +13,8 @@ import pytest
 
 from dalston.common.pipeline_types import TranscribeInput
 
+HAS_TORCH = importlib.util.find_spec("torch") is not None
+
 
 @pytest.fixture(autouse=True)
 def _cleanup_injected_modules():
@@ -49,6 +51,7 @@ def _mock_vllm(chat_text: str = "hello world"):
     return vllm_module, mock_llm, mock_llm_cls
 
 
+@pytest.mark.skipif(not HAS_TORCH, reason="torch not installed")
 class TestVoxtralRtVllmEngine:
     """Verify realtime contract and vLLM-backed behavior."""
 
