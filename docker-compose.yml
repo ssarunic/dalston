@@ -282,7 +282,7 @@ services:
       dockerfile: engines/stt-prepare/audio-prepare/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_RUNTIME: audio-prepare
+      DALSTON_ENGINE_ID: audio-prepare
       DALSTON_WORKER_ID: prepare-1
     depends_on: *batch-depends
     restart: unless-stopped
@@ -305,7 +305,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_UNIFIED_ENGINE_ENABLED: "true"
-      DALSTON_RUNTIME: nemo
+      DALSTON_ENGINE_ID: nemo
       DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-tdt-1.1b"
       DALSTON_INSTANCE: stt-unified-nemo
       DALSTON_WORKER_PORT: 9000
@@ -333,7 +333,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_UNIFIED_ENGINE_ENABLED: "true"
-      DALSTON_RUNTIME: nemo
+      DALSTON_ENGINE_ID: nemo
       DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-ctc-0.6b"
       DALSTON_INSTANCE: stt-unified-nemo-cpu
       DALSTON_WORKER_PORT: 9000
@@ -362,7 +362,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_UNIFIED_ENGINE_ENABLED: "true"
-      DALSTON_RUNTIME: faster-whisper
+      DALSTON_ENGINE_ID: faster-whisper
       DALSTON_DEFAULT_MODEL_ID: "large-v3-turbo"
       DALSTON_INSTANCE: stt-unified-faster-whisper-cpu
       DALSTON_WORKER_PORT: 9000
@@ -388,7 +388,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_UNIFIED_ENGINE_ENABLED: "true"
-      DALSTON_RUNTIME: faster-whisper
+      DALSTON_ENGINE_ID: faster-whisper
       DALSTON_DEFAULT_MODEL_ID: "large-v3-turbo"
       DALSTON_INSTANCE: stt-unified-faster-whisper
       DALSTON_WORKER_PORT: 9000
@@ -419,7 +419,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_UNIFIED_ENGINE_ENABLED: "true"
-      DALSTON_RUNTIME: nemo-onnx
+      DALSTON_ENGINE_ID: nemo-onnx
       DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-ctc-0.6b"
       DALSTON_INSTANCE: stt-unified-nemo-onnx-cpu
       DALSTON_WORKER_PORT: 9000
@@ -446,7 +446,7 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_UNIFIED_ENGINE_ENABLED: "true"
-      DALSTON_RUNTIME: nemo-onnx
+      DALSTON_ENGINE_ID: nemo-onnx
       DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-ctc-0.6b"
       DALSTON_INSTANCE: stt-unified-nemo-onnx
       DALSTON_WORKER_PORT: 9000
@@ -476,7 +476,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_RUNTIME: vllm-asr
+      DALSTON_ENGINE_ID: vllm-asr
       DALSTON_MODEL_VARIANT: mini-3b
     volumes:
       - model-cache:/models
@@ -495,7 +495,7 @@ services:
       dockerfile: engines/stt-transcribe/vllm-asr/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_RUNTIME: vllm-asr
+      DALSTON_ENGINE_ID: vllm-asr
       DALSTON_DEFAULT_MODEL_ID: "mistralai/Voxtral-Mini-3B-2507"
       DALSTON_MODEL_TTL_SECONDS: 7200
       DALSTON_MAX_LOADED_MODELS: 1
@@ -519,7 +519,7 @@ services:
       dockerfile: engines/stt-transcribe/hf-asr/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_RUNTIME: hf-asr
+      DALSTON_ENGINE_ID: hf-asr
       DALSTON_DEFAULT_MODEL_ID: "openai/whisper-large-v3"
       DALSTON_WORKER_ID: hf-asr-1
     volumes:
@@ -537,7 +537,7 @@ services:
       dockerfile: engines/stt-align/phoneme-align/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_RUNTIME: phoneme-align
+      DALSTON_ENGINE_ID: phoneme-align
       DALSTON_WORKER_ID: palign-cpu-1
     volumes:
       - model-cache:/models
@@ -549,7 +549,7 @@ services:
     image: dalston/stt-batch-align-phoneme:latest
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_RUNTIME: phoneme-align
+      DALSTON_ENGINE_ID: phoneme-align
       DALSTON_WORKER_ID: palign-gpu-1
     volumes:
       - model-cache:/models
@@ -568,7 +568,7 @@ services:
       dockerfile: engines/stt-diarize/pyannote-4.0/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_RUNTIME: pyannote-4.0
+      DALSTON_ENGINE_ID: pyannote-4.0
       DALSTON_WORKER_ID: pyannote-cpu-1
       HF_TOKEN: ${HF_TOKEN:-}
       DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
@@ -582,7 +582,7 @@ services:
     image: dalston/stt-batch-diarize-pyannote-4.0:latest
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_RUNTIME: pyannote-4.0
+      DALSTON_ENGINE_ID: pyannote-4.0
       DALSTON_WORKER_ID: pyannote-gpu-1
       HF_TOKEN: ${HF_TOKEN:-}
     volumes:
@@ -602,7 +602,7 @@ services:
         SKIP_MODEL_DOWNLOAD: ${SKIP_MODEL_DOWNLOAD:-false}
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_RUNTIME: nemo-msdd
+      DALSTON_ENGINE_ID: nemo-msdd
       DALSTON_WORKER_ID: nemo-msdd-gpu1
       DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
       DALSTON_NEMO_ALLOW_CPU: ${DALSTON_NEMO_ALLOW_CPU:-false}
@@ -622,7 +622,7 @@ services:
         SKIP_MODEL_DOWNLOAD: ${SKIP_MODEL_DOWNLOAD:-false}
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_RUNTIME: nemo-msdd
+      DALSTON_ENGINE_ID: nemo-msdd
       DALSTON_WORKER_ID: nemo-msdd-cpu1
       DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
       DALSTON_NEMO_ALLOW_CPU: "true"
@@ -642,7 +642,7 @@ services:
         DEVICE: cpu
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_RUNTIME: pii-presidio
+      DALSTON_ENGINE_ID: pii-presidio
       DALSTON_WORKER_ID: presidio-cpu1
       DALSTON_DEVICE: cpu
     volumes:
@@ -659,7 +659,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_RUNTIME: pii-presidio
+      DALSTON_ENGINE_ID: pii-presidio
       DALSTON_WORKER_ID: presidio-gpu1
       DALSTON_DEVICE: cuda
     volumes:
@@ -677,7 +677,7 @@ services:
       dockerfile: engines/stt-redact/audio-redactor/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_RUNTIME: audio-redactor
+      DALSTON_ENGINE_ID: audio-redactor
       DALSTON_WORKER_ID: redactor-1
     depends_on: *batch-depends
     restart: unless-stopped
@@ -723,7 +723,7 @@ services:
       dockerfile: engines/stt-transcribe/riva/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_RUNTIME: riva
+      DALSTON_ENGINE_ID: riva
       DALSTON_WORKER_ID: riva-batch-1
       DALSTON_RIVA_URI: riva-nim:50051
       DALSTON_RIVA_CHUNK_MS: 100
