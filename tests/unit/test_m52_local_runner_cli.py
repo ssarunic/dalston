@@ -92,7 +92,7 @@ def test_cli_run_happy_path_writes_output_json(tmp_path: Path) -> None:
 
 def test_cli_run_supports_advanced_json_inputs(tmp_path: Path) -> None:
     config = tmp_path / "config.json"
-    config.write_text('{"runtime_model_id": "aligner-v1"}', encoding="utf-8")
+    config.write_text('{"loaded_model_id": "aligner-v1"}', encoding="utf-8")
     payload = tmp_path / "payload.json"
     payload.write_text('{"flag": true}', encoding="utf-8")
     previous_outputs = tmp_path / "previous_outputs.json"
@@ -188,7 +188,7 @@ def test_cli_run_loads_engine_from_filesystem_module_reference(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     engine_file = (
-        tmp_path / "engines" / "stt-transcribe" / "my-hyphen-runtime" / "engine.py"
+        tmp_path / "engines" / "stt-transcribe" / "my-hyphen-engine_id" / "engine.py"
     )
     engine_file.parent.mkdir(parents=True, exist_ok=True)
     engine_file.write_text(
@@ -215,7 +215,7 @@ class FileRefEngine(Engine):
         [
             "run",
             "--engine",
-            "engines.stt-transcribe.my-hyphen-runtime.engine:FileRefEngine",
+            "engines.stt-transcribe.my-hyphen-engine_id.engine:FileRefEngine",
             "--stage",
             "transcribe",
             "--config",
@@ -230,11 +230,11 @@ class FileRefEngine(Engine):
     assert envelope["data"] == {"loaded": True}
 
 
-def test_cli_run_loads_engine_when_runtime_id_contains_dot(
+def test_cli_run_loads_engine_when_engine_id_id_contains_dot(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    engine_file = tmp_path / "engines" / "stt-diarize" / "my-runtime.1" / "engine.py"
+    engine_file = tmp_path / "engines" / "stt-diarize" / "my-engine_id.1" / "engine.py"
     engine_file.parent.mkdir(parents=True, exist_ok=True)
     engine_file.write_text(
         """
@@ -245,7 +245,7 @@ class DottedRuntimeEngine(Engine):
     def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         del input
         del ctx
-        return EngineOutput(data={"runtime": "dot-ok"})
+        return EngineOutput(data={"engine_id": "dot-ok"})
 """.strip()
         + "\n",
         encoding="utf-8",
@@ -260,7 +260,7 @@ class DottedRuntimeEngine(Engine):
         [
             "run",
             "--engine",
-            "engines.stt-diarize.my-runtime.1.engine:DottedRuntimeEngine",
+            "engines.stt-diarize.my-engine_id.1.engine:DottedRuntimeEngine",
             "--stage",
             "diarize",
             "--config",
@@ -272,7 +272,7 @@ class DottedRuntimeEngine(Engine):
 
     assert exit_code == 0
     envelope = json.loads(output.read_text(encoding="utf-8"))
-    assert envelope["data"] == {"runtime": "dot-ok"}
+    assert envelope["data"] == {"engine_id": "dot-ok"}
 
 
 def test_cli_run_supports_sibling_module_imports(

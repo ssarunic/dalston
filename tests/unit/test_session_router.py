@@ -31,7 +31,7 @@ class TestEngineRecord:
     def test_available_capacity(self):
         worker = EngineRecord(
             instance="worker-1",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             stage="transcribe",
             interfaces=["realtime"],
             status="ready",
@@ -50,7 +50,7 @@ class TestEngineRecord:
     def test_available_capacity_at_capacity(self):
         worker = EngineRecord(
             instance="worker-1",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             stage="transcribe",
             interfaces=["realtime"],
             status="busy",
@@ -69,7 +69,7 @@ class TestEngineRecord:
     def test_available_capacity_negative_clamped(self):
         worker = EngineRecord(
             instance="worker-1",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             stage="transcribe",
             interfaces=["realtime"],
             status="busy",
@@ -88,7 +88,7 @@ class TestEngineRecord:
     def test_is_available_ready_with_capacity(self):
         worker = EngineRecord(
             instance="worker-1",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             stage="transcribe",
             interfaces=["realtime"],
             status="ready",
@@ -107,7 +107,7 @@ class TestEngineRecord:
     def test_is_available_busy_with_capacity(self):
         worker = EngineRecord(
             instance="worker-1",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             stage="transcribe",
             interfaces=["realtime"],
             status="busy",
@@ -126,7 +126,7 @@ class TestEngineRecord:
     def test_is_not_available_offline(self):
         worker = EngineRecord(
             instance="worker-1",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             stage="transcribe",
             interfaces=["realtime"],
             status="offline",
@@ -145,7 +145,7 @@ class TestEngineRecord:
     def test_is_not_available_draining(self):
         worker = EngineRecord(
             instance="worker-1",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             stage="transcribe",
             interfaces=["realtime"],
             status="draining",
@@ -164,7 +164,7 @@ class TestEngineRecord:
     def test_is_not_available_at_capacity(self):
         worker = EngineRecord(
             instance="worker-1",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             stage="transcribe",
             interfaces=["realtime"],
             status="busy",
@@ -195,7 +195,7 @@ class TestUnifiedEngineRegistry:
     @pytest.mark.asyncio
     async def test_get_worker_found(self, registry: UnifiedEngineRegistry, mock_redis):
         mock_redis.hgetall.return_value = {
-            "runtime": "faster-whisper",
+            "engine_id": "faster-whisper",
             "stage": "transcribe",
             "interfaces": '["realtime"]',
             "endpoint": "ws://localhost:9000",
@@ -241,7 +241,7 @@ class TestUnifiedEngineRegistry:
         async def mock_hgetall(key):
             if "worker-1" in key:
                 return {
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                     "stage": "transcribe",
                     "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9000",
@@ -253,7 +253,7 @@ class TestUnifiedEngineRegistry:
                 }
             elif "worker-2" in key:
                 return {
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                     "stage": "transcribe",
                     "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9001",
@@ -283,7 +283,7 @@ class TestUnifiedEngineRegistry:
         async def mock_hgetall(key):
             if "worker-1" in key:
                 return {
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                     "stage": "transcribe",
                     "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9000",
@@ -296,7 +296,7 @@ class TestUnifiedEngineRegistry:
                 }
             elif "worker-2" in key:
                 return {
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                     "stage": "transcribe",
                     "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9001",
@@ -329,7 +329,7 @@ class TestUnifiedEngineRegistry:
         async def mock_hgetall(key):
             if "worker-1" in key:
                 return {
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                     "stage": "transcribe",
                     "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9000",
@@ -342,7 +342,7 @@ class TestUnifiedEngineRegistry:
                 }
             elif "worker-2" in key:
                 return {
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                     "stage": "transcribe",
                     "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9001",
@@ -376,7 +376,7 @@ class TestUnifiedEngineRegistry:
         async def mock_hgetall(key):
             if "worker-1" in key:
                 return {
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                     "stage": "transcribe",
                     "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9000",
@@ -389,7 +389,7 @@ class TestUnifiedEngineRegistry:
                 }
             elif "worker-2" in key:
                 return {
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                     "stage": "transcribe",
                     "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9001",
@@ -402,7 +402,7 @@ class TestUnifiedEngineRegistry:
                 }
             elif "worker-3" in key:
                 return {
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                     "stage": "transcribe",
                     "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9002",
@@ -449,7 +449,7 @@ class TestUnifiedEngineRegistry:
         async def mock_hgetall(key):
             if "worker-1" in key:
                 return {
-                    "runtime": "nemo",
+                    "engine_id": "nemo",
                     "stage": "transcribe",
                     "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9000",
@@ -462,7 +462,7 @@ class TestUnifiedEngineRegistry:
                 }
             elif "worker-2" in key:
                 return {
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                     "stage": "transcribe",
                     "interfaces": '["realtime"]',
                     "endpoint": "ws://localhost:9001",
@@ -492,7 +492,7 @@ class TestUnifiedEngineRegistry:
         mock_redis.smembers.return_value = {"worker-1"}
 
         mock_redis.hgetall.return_value = {
-            "runtime": "nemo",
+            "engine_id": "nemo",
             "stage": "transcribe",
             "interfaces": '["realtime"]',
             "endpoint": "ws://localhost:9000",
@@ -540,7 +540,7 @@ class TestSessionAllocator:
         # Setup available workers
         worker = EngineRecord(
             instance="worker-1",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             stage="transcribe",
             interfaces=["realtime"],
             status="ready",
@@ -577,7 +577,7 @@ class TestSessionAllocator:
         """INSTANCE_SET_KEY must be populated so orphan reconciliation can find instances."""
         worker = EngineRecord(
             instance="worker-1",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             stage="transcribe",
             interfaces=["realtime"],
             status="ready",
@@ -622,7 +622,7 @@ class TestSessionAllocator:
         # Setup worker that will exceed capacity after increment
         worker = EngineRecord(
             instance="worker-1",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             stage="transcribe",
             interfaces=["realtime"],
             status="ready",
@@ -731,11 +731,11 @@ class TestWorkerAllocation:
             instance="worker-1",
             endpoint="ws://localhost:9000",
             session_id="sess_abc123",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
         )
 
         assert allocation.instance == "worker-1"
-        assert allocation.runtime == "faster-whisper"
+        assert allocation.engine_id == "faster-whisper"
         assert allocation.endpoint == "ws://localhost:9000"
         assert allocation.session_id == "sess_abc123"
 

@@ -4,9 +4,9 @@ Uses ONNX Runtime via the onnx-asr library for fast, lightweight inference
 of Parakeet CTC, TDT, and RNNT models without the full NeMo toolkit. Produces
 native word-level timestamps without requiring a separate alignment stage.
 
-Delegates inference to NemoOnnxCore (shared with the RT engine).
+Delegates inference to NemoOnnxInference (shared with the RT engine).
 
-Advantages over the NeMo runtime:
+Advantages over the NeMo engine_id:
   - ~12x smaller container image (~1GB vs ~12GB)
   - ~3x faster cold start (no NeMo import overhead)
   - Better CPU performance (ONNX Runtime optimizations + INT8 quantization)
@@ -20,7 +20,7 @@ Supported models:
   - nvidia/parakeet-rnnt-0.6b: RNNT decoder, 600M params, English-only
 
 Environment variables:
-    DALSTON_RUNTIME: Runtime engine ID for registration (default: "nemo-onnx")
+    DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "nemo-onnx")
     DALSTON_DEFAULT_MODEL_ID: Default ONNX model ID (default: "nvidia/parakeet-ctc-0.6b")
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cpu.
     DALSTON_QUANTIZATION: ONNX quantization level (none, int8). Defaults to none.
@@ -41,7 +41,7 @@ from dalston.engine_sdk import (
     EngineInput,
 )
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
-from dalston.engine_sdk.cores.nemo_onnx_core import NemoOnnxCore
+from dalston.engine_sdk.inference.nemo_onnx_inference import NemoOnnxInference
 
 # Decoder type extracted from model ID for alignment method reporting
 _DECODER_TYPES = {"ctc", "tdt", "rnnt"}
@@ -59,7 +59,7 @@ _NGC_TO_MANAGER_ID = {
 class NemoOnnxBatchEngine(BaseBatchTranscribeEngine):
     """NVIDIA Parakeet transcription engine using ONNX Runtime.
 
-    Delegates inference to NemoOnnxCore, which is shared with the RT
+    Delegates inference to NemoOnnxInference, which is shared with the RT
     ONNX engine. The batch adapter handles file path input and output
     formatting to Transcript.
 
@@ -77,35 +77,35 @@ class NemoOnnxBatchEngine(BaseBatchTranscribeEngine):
 
     DEFAULT_MODEL_ID = "nvidia/parakeet-ctc-0.6b"
 
-    def __init__(self, core: NemoOnnxCore | None = None) -> None:
+    def __init__(self, core: NemoOnnxInference | None = None) -> None:
         """Initialize the engine.
 
         Args:
-            core: Optional shared NemoOnnxCore. If provided, the engine
+            core: Optional shared NemoOnnxInference. If provided, the engine
                   uses it instead of creating its own.
         """
         super().__init__()
-        self._core = core if core is not None else NemoOnnxCore.from_env()
+        self._core = core if core is not None else NemoOnnxInference.from_env()
 
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
         )
-        self._runtime = os.environ.get("DALSTON_RUNTIME", "nemo-onnx")
+        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "nemo-onnx")
 
         self.logger.info(
             "engine_init",
-            runtime=self._runtime,
+            engine_id=self._engine_id,
             default_model=self._default_model_id,
             device=self._core.device,
             quantization=self._core.quantization,
             shared_core=core is not None,
         )
 
-    def _normalize_model_id(self, runtime_model_id: str) -> str:
+    def _normalize_model_id(self, loaded_model_id: str) -> str:
         """Normalize NGC model IDs to NeMoOnnxModelManager format."""
-        if runtime_model_id in _NGC_TO_MANAGER_ID:
-            return _NGC_TO_MANAGER_ID[runtime_model_id]
-        return runtime_model_id
+        if loaded_model_id in _NGC_TO_MANAGER_ID:
+            return _NGC_TO_MANAGER_ID[loaded_model_id]
+        return loaded_model_id
 
     def transcribe_audio(
         self, engine_input: EngineInput, ctx: BatchTaskContext
@@ -123,9 +123,9 @@ class NemoOnnxBatchEngine(BaseBatchTranscribeEngine):
         params = engine_input.get_transcribe_params()
         channel = params.channel
 
-        runtime_model_id = params.runtime_model_id or self._default_model_id
-        model_id = self._normalize_model_id(runtime_model_id)
-        decoder_type = self._get_decoder_type(runtime_model_id)
+        loaded_model_id = params.loaded_model_id or self._default_model_id
+        model_id = self._normalize_model_id(loaded_model_id)
+        decoder_type = self._get_decoder_type(loaded_model_id)
         alignment_method = self._alignment_method_for(decoder_type)
 
         self.logger.info("transcribing", audio_path=str(audio_path))
@@ -172,16 +172,16 @@ class NemoOnnxBatchEngine(BaseBatchTranscribeEngine):
             text=core_result.text,
             segments=segments,
             language="en",
-            runtime=self._runtime,
+            engine_id=self._engine_id,
             language_confidence=1.0,
             alignment_method=alignment_method,
             channel=channel,
         )
 
     @staticmethod
-    def _get_decoder_type(runtime_model_id: str) -> str:
+    def _get_decoder_type(loaded_model_id: str) -> str:
         """Extract decoder type (ctc, tdt, rnnt) from a model ID."""
-        model_name = runtime_model_id.split("/")[-1]
+        model_name = loaded_model_id.split("/")[-1]
         parts = model_name.split("-")
         for part in parts:
             if part in _DECODER_TYPES:
@@ -202,7 +202,7 @@ class NemoOnnxBatchEngine(BaseBatchTranscribeEngine):
         model_stats = self._core.get_stats()
         return {
             "status": "healthy",
-            "runtime": self._runtime,
+            "engine_id": self._engine_id,
             "device": self._core.device,
             "models_loaded": model_stats.get("loaded_models", []),
             "model_count": model_stats.get("model_count", 0),
@@ -212,7 +212,7 @@ class NemoOnnxBatchEngine(BaseBatchTranscribeEngine):
     def get_capabilities(self) -> EngineCapabilities:
         """Return ONNX engine capabilities."""
         return EngineCapabilities(
-            runtime=self._runtime,
+            engine_id=self._engine_id,
             version="1.1.0",
             stages=["transcribe"],
             languages=["en"],

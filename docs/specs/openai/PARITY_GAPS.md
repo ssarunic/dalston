@@ -19,7 +19,7 @@ Both documents are intentionally locked to the public OpenAI STT surface as of
 
 For ambiguous cases, this analysis treats the official `openai-python` SDK as the
 primary consumer-contract for request/response behavior, with real OpenAI traces used
-to settle runtime details the SDK does not encode.
+to settle engine_id details the SDK does not encode.
 
 ---
 
@@ -83,7 +83,7 @@ The contract hierarchy is:
 
 - Public OpenAI docs for the intended product surface
 - Pinned `openai-python` behavior for client-facing request/response semantics
-- Real OpenAI traces for runtime semantics the SDK does not fully specify
+- Real OpenAI traces for engine_id semantics the SDK does not fully specify
 
 ---
 
@@ -161,7 +161,7 @@ Translation must be brought under the same capability table as transcription.
 
 Current realtime support in
 [openai_realtime.py](../../dalston/gateway/api/v1/openai_realtime.py)
-still exposes a narrower model/runtime surface than OpenAI's full realtime
+still exposes a narrower model/engine_id surface than OpenAI's full realtime
 matrix.
 
 Request-shape normalization work is now in place:

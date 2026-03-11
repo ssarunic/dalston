@@ -195,7 +195,7 @@ class WhisperEngine(Engine):
         )
 
     def process(self, input: TaskInput) -> TaskOutput:
-        model_id = input.config.get("runtime_model_id")
+        model_id = input.config.get("loaded_model_id")
         model = self._manager.acquire(model_id)
         try:
             result = model.transcribe(input.audio_path)
@@ -472,7 +472,7 @@ class WhisperEngine(Engine):
 
     def process(self, input: TaskInput) -> TaskOutput:
         model_id = input.config.get(
-            "runtime_model_id",
+            "loaded_model_id",
             os.environ.get("DALSTON_DEFAULT_MODEL_ID", "large-v3-turbo")
         )
 

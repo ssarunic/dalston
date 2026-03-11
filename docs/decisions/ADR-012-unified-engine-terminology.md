@@ -1,4 +1,4 @@
-# ADR-012: Unified Engine Terminology (runtime, model, instance)
+# ADR-012: Unified Engine Terminology (engine_id, model, instance)
 
 ## Status
 
@@ -10,14 +10,14 @@ Dalston has two processing modes—batch and real-time—that evolved independen
 
 | Concept | Batch Field | RT Field | Problem |
 |---------|-------------|----------|---------|
-| Inference framework | `engine_id` | `engine` + `runtime` | Three names for one thing |
+| Inference framework | `engine_id` | `engine` + `engine_id` | Three names for one thing |
 | Model weights | `loaded_model` | `models_loaded[]` | Two names |
 | Process identifier | `instance_id` | `worker_id` | Two names |
 
-The RT side has both `engine` and `runtime` on `WorkerState`:
+The RT side has both `engine` and `engine_id` on `WorkerState`:
 
 - `engine` is a legacy field (pre-M43) with loose categories like "parakeet" or "whisper"
-- `runtime` was added in M43 to match batch's `engine_id`
+- `engine_id` was added in M43 to match batch's `engine_id`
 
 This inconsistency causes problems:
 
@@ -30,32 +30,32 @@ This inconsistency causes problems:
 
 Standardize on three canonical terms:
 
-### 1. `runtime` — The inference framework
+### 1. `engine_id` — The inference framework
 
 **Definition:** The software that loads model weights and runs inference. Examples: `faster-whisper`, `nemo-onnx`, `whisperx`.
 
-**Why `runtime` over `engine`:**
+**Why `engine_id` over `engine`:**
 
 - `engine_id` in batch registries already means the inference framework
-- `engine.yaml` files have a `runtime` field that matches `engine_id`
-- Model YAMLs use `runtime` to define which engine can load them
-- The M43/M46 database schema standardized on `runtime`
+- `engine.yaml` files have a `engine_id` field that matches `engine_id`
+- Model YAMLs use `engine_id` to define which engine can load them
+- The M43/M46 database schema standardized on `engine_id`
 - The legacy RT `engine` field ("parakeet", "whisper") is a loose category that doesn't map to anything actionable
 
 **Mapping:**
 
-- Batch: `engine_id``runtime`
-- RT: deprecate `engine`, use `runtime` (already exists)
+- Batch: `engine_id``engine_id`
+- RT: deprecate `engine`, use `engine_id` (already exists)
 
 ### 2. `model` — The user-facing model identifier
 
 **Definition:** The namespaced model ID that users select or the system resolves. Examples: `nvidia/parakeet-tdt-1.1b`, `Systran/faster-whisper-large-v3`.
 
-**Why `model` over `model_id` or `runtime_model_id`:**
+**Why `model` over `model_id` or `loaded_model_id`:**
 
 - It's what users see and select in the UI
 - It's what the model selector resolves to
-- `runtime_model_id` (the string passed to the loader, e.g., HuggingFace repo path) is an internal implementation detail
+- `loaded_model_id` (the string passed to the loader, e.g., HuggingFace repo path) is an internal implementation detail
 
 **Internal detail (when needed):**
 
@@ -85,7 +85,7 @@ Batch span:
 
 ```
 engine.process
-  dalston.runtime   = "faster-whisper"
+  dalston.engine_id   = "faster-whisper"
   dalston.model     = "nvidia/parakeet-tdt-1.1b"
   dalston.instance  = "faster-whisper-a1b2c3d4"
   dalston.stage     = "transcribe"
@@ -97,7 +97,7 @@ RT span:
 
 ```
 realtime.session
-  dalston.runtime   = "faster-whisper"
+  dalston.engine_id   = "faster-whisper"
   dalston.model     = "nvidia/parakeet-tdt-1.1b"
   dalston.instance  = "stt-rt-fw-1"
   dalston.session_id = "..."
@@ -126,8 +126,8 @@ Same attributes, same semantics. The span name and presence of `job_id` vs `sess
 
 **Phase 3: Data model alignment (larger refactor)**
 
-- Rename `BatchEngineInfo.engine_id``runtime` (or alias)
-- Deprecate `WorkerInfo.engine` (already have `WorkerInfo.runtime`)
+- Rename `BatchEngineInfo.engine_id``engine_id` (or alias)
+- Deprecate `WorkerInfo.engine` (already have `WorkerInfo.engine_id`)
 - Align model field names
 
 ### Costs
@@ -142,7 +142,7 @@ Same attributes, same semantics. The span name and presence of `job_id` vs `sess
 
 Status quo. Rejected because the cognitive overhead and observability fragmentation outweigh any benefit from mode-specific terminology.
 
-### Use `engine` Instead of `runtime`
+### Use `engine` Instead of `engine_id`
 
 Would require deprecating `engine_id` in batch (widely used) rather than the legacy `engine` field in RT (narrowly used). More disruptive.
 
@@ -152,6 +152,6 @@ Would require deprecating `engine_id` in batch (widely used) rather than the leg
 
 ## References
 
-- M43: Real-time Registry Alignment — Added `runtime` to RT workers
-- M46: Model Registry as Source of Truth — Standardized on `runtime` in DB schema
+- M43: Real-time Registry Alignment — Added `engine_id` to RT workers
+- M46: Model Registry as Source of Truth — Standardized on `engine_id` in DB schema
 - [ADR-010: Engine Variant Structure](ADR-010-engine-variant-structure.md) — Related engine organization decisions

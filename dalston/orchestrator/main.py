@@ -1,4 +1,4 @@
-"""Orchestrator runtime mode dispatch entrypoint.
+"""Orchestrator engine_id mode dispatch entrypoint.
 
 Also provides compatibility exports for tests and callers that patch symbols
 from ``dalston.orchestrator.main``.
@@ -28,7 +28,7 @@ def _sync_distributed_patch_points() -> None:
     """Mirror compatibility symbols into distributed_main before invocation.
 
     This bridge only syncs the legacy names re-exported from this module.
-    Patch any other distributed runtime globals directly on
+    Patch any other distributed engine_id globals directly on
     ``dalston.orchestrator.distributed_main``.
     """
     _distributed_main.handle_job_created = handle_job_created

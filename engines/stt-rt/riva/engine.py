@@ -9,7 +9,7 @@ itself emits incremental partial results.
 
 Environment variables:
     DALSTON_RIVA_URI: gRPC endpoint for Riva NIM (default: localhost:50051)
-    DALSTON_RUNTIME: Runtime identifier for registration (default: riva)
+    DALSTON_ENGINE_ID: Runtime identifier for registration (default: riva)
     DALSTON_INSTANCE: Unique worker identifier (required)
     DALSTON_WORKER_PORT: WebSocket port (default: 9000)
     DALSTON_MAX_SESSIONS: Max concurrent sessions (default: 8)
@@ -53,7 +53,7 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
     def __init__(self) -> None:
         super().__init__()
         self._uri = os.environ.get("DALSTON_RIVA_URI", "localhost:50051")
-        self._runtime = os.environ.get("DALSTON_RUNTIME", "riva")
+        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "riva")
         self._channel: grpc.Channel | None = None
         self._asr: riva.client.ASRService | None = None
 
@@ -146,7 +146,7 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
             text=" ".join(text_parts),
             segments=segments,
             language=lang_code,
-            runtime=self._runtime,
+            engine_id=self._engine_id,
             language_confidence=max_confidence,
         )
 
@@ -162,9 +162,9 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
         """Languages supported by the NIM model."""
         return ["en", "es", "fr", "de", "it", "pt", "zh", "ja", "ko", "ru"]
 
-    def get_runtime(self) -> str:
-        """Return the runtime identifier."""
-        return self._runtime
+    def get_engine_id(self) -> str:
+        """Return the engine_id identifier."""
+        return self._engine_id
 
     def get_supports_vocabulary(self) -> bool:
         """Riva supports boosting but needs config mapping work."""

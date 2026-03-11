@@ -239,22 +239,22 @@ class TestBuildPostProcessingTasks:
 
         assert tasks[1].config["redaction_mode"] == "silence"
 
-    def test_runtime_model_id_propagated(self):
+    def test_loaded_model_id_propagated(self):
         job = _FakeJobModel(uuid4(), {"pii_detection": True})
 
         tasks = build_post_processing_tasks(
-            job, stage_runtime_model_ids={"pii_detect": "urchade/gliner_multi-v2.1"}
+            job, stage_loaded_model_ids={"pii_detect": "urchade/gliner_multi-v2.1"}
         )
 
-        assert tasks[0].config["runtime_model_id"] == "urchade/gliner_multi-v2.1"
+        assert tasks[0].config["loaded_model_id"] == "urchade/gliner_multi-v2.1"
 
     def test_uses_default_engines(self):
         job = _FakeJobModel(uuid4(), {"pii_detection": True, "redact_pii_audio": True})
 
         tasks = build_post_processing_tasks(job)
 
-        assert tasks[0].runtime == DEFAULT_ENGINES["pii_detect"]
-        assert tasks[1].runtime == DEFAULT_ENGINES["audio_redact"]
+        assert tasks[0].engine_id == DEFAULT_ENGINES["pii_detect"]
+        assert tasks[1].engine_id == DEFAULT_ENGINES["audio_redact"]
 
 
 class TestIsPostProcessingTask:

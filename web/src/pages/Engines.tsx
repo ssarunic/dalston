@@ -194,7 +194,7 @@ function getStageSpecificInfo(stage: string, models: ModelRegistryEntry[]): Reac
   // Only show models for transcribe stage (diarize doesn't use model registry)
   if (stage !== 'transcribe') return null
 
-  // No models in registry for this runtime
+  // No models in registry for this engine_id
   if (models.length === 0) {
     return (
       <div className="mt-3 flex items-center gap-2">
@@ -251,7 +251,7 @@ function EngineCard({ engine, models }: { engine: BatchEngine; models: ModelRegi
 
   return (
     <Link
-      to={`/engines/${encodeURIComponent(engine.runtime)}`}
+      to={`/engines/${encodeURIComponent(engine.engine_id)}`}
       className={cn(
         'block p-4 rounded-lg border transition-all',
         'hover:border-primary/50 hover:bg-accent/30',
@@ -263,7 +263,7 @@ function EngineCard({ engine, models }: { engine: BatchEngine; models: ModelRegi
         <div className="flex items-center gap-3 min-w-0">
           <StatusDot status={dot} />
           <div className="flex items-center gap-2 min-w-0">
-            <span className="font-medium truncate">{engine.runtime}</span>
+            <span className="font-medium truncate">{engine.engine_id}</span>
             <span className="text-sm text-muted-foreground">·</span>
             <span className="text-sm text-muted-foreground shrink-0">{engineStatusLabel(engine.status)}</span>
           </div>
@@ -308,9 +308,9 @@ function StageAccordion({
         <div className="p-4 space-y-2">
           {stageStatus.engines.map((engine) => (
             <EngineCard
-              key={engine.runtime}
+              key={engine.engine_id}
               engine={engine}
-              models={modelsByRuntime.get(engine.runtime) ?? []}
+              models={modelsByRuntime.get(engine.engine_id) ?? []}
             />
           ))}
         </div>
@@ -358,9 +358,9 @@ function RealtimeWorkerCard({ worker, models }: { worker: WorkerStatus; models: 
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="font-medium truncate">{worker.instance}</span>
-              {worker.runtime && (
+              {worker.engine_id && (
                 <Badge variant="outline" className="text-xs shrink-0">
-                  {worker.runtime}
+                  {worker.engine_id}
                 </Badge>
               )}
             </div>
@@ -436,13 +436,13 @@ export function Engines() {
   const batchEngines = useMemo(() => data?.batch_engines ?? [], [data?.batch_engines])
   const realtimeWorkers = data?.realtime_engines ?? []
 
-  // Group models by runtime (engine)
+  // Group models by engine_id (engine)
   const modelsByRuntime = useMemo(() => {
     const map = new Map<string, ModelRegistryEntry[]>()
     for (const model of registryData?.data ?? []) {
-      const existing = map.get(model.runtime) ?? []
+      const existing = map.get(model.engine_id) ?? []
       existing.push(model)
-      map.set(model.runtime, existing)
+      map.set(model.engine_id, existing)
     }
     return map
   }, [registryData?.data])
@@ -627,7 +627,7 @@ export function Engines() {
                 <RealtimeWorkerCard
                   key={worker.instance}
                   worker={worker}
-                  models={modelsByRuntime.get(worker.runtime ?? '') ?? []}
+                  models={modelsByRuntime.get(worker.engine_id ?? '') ?? []}
                 />
               ))}
             </div>

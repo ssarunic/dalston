@@ -123,7 +123,7 @@ class TestPIIPipelineTypes:
             entity_count_by_type={"phone_number": 1},
             entity_count_by_category={"pii": 1},
             processing_time_ms=150,
-            runtime="pii-presidio",
+            engine_id="pii-presidio",
         )
 
         assert len(output.entities) == 1
@@ -156,7 +156,7 @@ class TestPIIPipelineTypes:
                     "entity_types": ["credit_card_number"],
                 },
             ],
-            runtime="audio-redactor",
+            engine_id="audio-redactor",
         )
 
         assert output.redaction_mode == PIIRedactionMode.SILENCE

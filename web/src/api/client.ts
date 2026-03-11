@@ -219,9 +219,9 @@ export const apiClient = {
     currentClient.get('v1/engines/capabilities').json<CapabilitiesResponse>(),
 
   // Model catalog (M36 - list all available model variants)
-  getModels: (params: { runtime?: string; stage?: string } = {}) => {
+  getModels: (params: { engine_id?: string; stage?: string } = {}) => {
     const searchParams = new URLSearchParams()
-    if (params.runtime) searchParams.set('runtime', params.runtime)
+    if (params.engine_id) searchParams.set('engine_id', params.engine_id)
     if (params.stage) searchParams.set('stage', params.stage)
     return currentClient.get('v1/models', { searchParams }).json<ModelListResponse>()
   },
@@ -387,7 +387,7 @@ export const apiClient = {
   getModelRegistry: (filters?: ModelFilters) => {
     const searchParams = new URLSearchParams()
     if (filters?.stage) searchParams.set('stage', filters.stage)
-    if (filters?.runtime) searchParams.set('runtime', filters.runtime)
+    if (filters?.engine_id) searchParams.set('engine_id', filters.engine_id)
     if (filters?.status) searchParams.set('status', filters.status)
     return currentClient.get('v1/models', { searchParams }).json<ModelRegistryListResponse>()
   },

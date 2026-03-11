@@ -17,7 +17,7 @@ except Exception as exc:  # pragma: no cover - environment-dependent import
 
 
 def _require_sounddevice() -> Any:
-    """Return the sounddevice module or raise a runtime error with context."""
+    """Return the sounddevice module or raise a engine_id error with context."""
     if sd is None:
         detail = str(_IMPORT_ERROR) if _IMPORT_ERROR else "sounddevice unavailable"
         raise RuntimeError(

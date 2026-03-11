@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Goal** | Ensure RT session routing only considers workers whose runtime has downloaded models in the registry |
+| **Goal** | Ensure RT session routing only considers workers whose engine_id has downloaded models in the registry |
 | **Duration** | 0.5 days |
 | **Dependencies** | M46 (Model Registry as Source of Truth) |
-| **Deliverable** | Session router filters workers by valid runtimes from registry |
+| **Deliverable** | Session router filters workers by valid engine_ids from registry |
 | **Status** | Planned |
 
 ## Problem Statement
@@ -21,7 +21,7 @@ When no specific model is requested (via "Any available" in console OR ElevenLab
 
 **Example scenario:**
 
-1. User has downloaded `Systran/faster-whisper-base` (runtime: `faster-whisper`)
+1. User has downloaded `Systran/faster-whisper-base` (engine_id: `faster-whisper`)
 2. Worker `nemo-onnx-cpu` has `parakeet-onnx-ctc-0.6b` preloaded
 3. User selects "Any available" or calls ElevenLabs endpoint
 4. Session routes to `nemo-onnx-cpu` because it has models loaded
@@ -29,7 +29,7 @@ When no specific model is requested (via "Any available" in console OR ElevenLab
 
 ## Solution
 
-When `model=None` (no specific model requested), filter workers by runtimes that have at least one downloaded model in the registry.
+When `model=None` (no specific model requested), filter workers by engine_ids that have at least one downloaded model in the registry.
 
 ```
 Before:
@@ -38,41 +38,41 @@ Before:
 └────────────┘                └────────────────┘
 
 After:
-┌────────────┐   model=None   ┌──────────┐   valid_runtimes   ┌────────────────┐
+┌────────────┐   model=None   ┌──────────┐   valid_engine_ids   ┌────────────────┐
 │  Gateway   ├───────────────▶│ Registry ├───────────────────▶│ Session Router │
 └────────────┘                └──────────┘                    └────────────────┘
                                    │                                   │
                                    │ {faster-whisper, nemo}            │
                                    └───────────────────────────────────┘
-                                        Only workers with matching runtime
+                                        Only workers with matching engine_id
 ```
 
 ---
 
 ## Implementation
 
-### Phase 1: Add valid_runtimes parameter to WorkerRegistry
+### Phase 1: Add valid_engine_ids parameter to WorkerRegistry
 
 **File:** `dalston/session_router/registry.py`
 
-Add `valid_runtimes: set[str] | None = None` parameter to `get_available_workers()`:
+Add `valid_engine_ids: set[str] | None = None` parameter to `get_available_workers()`:
 
 ```python
 async def get_available_workers(
     self,
     model: str | None,
     language: str,
-    runtime: str | None = None,
-    valid_runtimes: set[str] | None = None,  # NEW
+    engine_id: str | None = None,
+    valid_engine_ids: set[str] | None = None,  # NEW
 ) -> list[WorkerState]:
 ```
 
 Add filtering logic:
 
 ```python
-# When model=None and valid_runtimes specified, filter by runtime
-if model is None and runtime is None and valid_runtimes is not None:
-    if worker.runtime not in valid_runtimes:
+# When model=None and valid_engine_ids specified, filter by engine_id
+if model is None and engine_id is None and valid_engine_ids is not None:
+    if worker.engine_id not in valid_engine_ids:
         continue
 ```
 
@@ -88,12 +88,12 @@ async def acquire_worker(
     language: str,
     model: str | None,
     client_ip: str,
-    runtime: str | None = None,
-    valid_runtimes: set[str] | None = None,  # NEW
+    engine_id: str | None = None,
+    valid_engine_ids: set[str] | None = None,  # NEW
 ) -> WorkerAllocation | None:
     # ...
     available = await self._registry.get_available_workers(
-        model, language, runtime, valid_runtimes  # Pass new param
+        model, language, engine_id, valid_engine_ids  # Pass new param
     )
 ```
 
@@ -109,16 +109,16 @@ async def acquire_worker(
     language: str,
     model: str | None,
     client_ip: str,
-    runtime: str | None = None,
-    valid_runtimes: set[str] | None = None,  # NEW
+    engine_id: str | None = None,
+    valid_engine_ids: set[str] | None = None,  # NEW
 ) -> WorkerAllocation | None:
     # ...
     return await self._allocator.acquire_worker(
         language=language,
         model=model,
         client_ip=client_ip,
-        runtime=runtime,
-        valid_runtimes=valid_runtimes,  # Pass new param
+        engine_id=engine_id,
+        valid_engine_ids=valid_engine_ids,  # Pass new param
     )
 ```
 
@@ -126,26 +126,26 @@ async def acquire_worker(
 
 **File:** `dalston/gateway/api/v1/realtime.py`
 
-When `routing_model is None`, query registry for downloaded models and extract runtimes:
+When `routing_model is None`, query registry for downloaded models and extract engine_ids:
 
 ```python
 # Model parameter: use engine ID directly or None for any available worker
 routing_model = model if model else None
-model_runtime = None
-valid_runtimes: set[str] | None = None  # NEW
+model_engine_id = None
+valid_engine_ids: set[str] | None = None  # NEW
 
 if routing_model:
-    # Look up model's runtime for routing
+    # Look up model's engine_id for routing
     # ... existing code ...
 else:
-    # When "Any available" selected, get valid runtimes from registry
+    # When "Any available" selected, get valid engine_ids from registry
     try:
         async for db in _get_db():
             model_service = ModelRegistryService()
             downloaded_models = await model_service.list_models(
                 db, stage="transcribe", status="ready"
             )
-            valid_runtimes = {m.runtime for m in downloaded_models if m.runtime}
+            valid_engine_ids = {m.engine_id for m in downloaded_models if m.engine_id}
             break
     except Exception as e:
         logger.warning("registry_lookup_failed", error=str(e))
@@ -155,8 +155,8 @@ allocation = await session_router.acquire_worker(
     language=language,
     model=routing_model,
     client_ip=client_ip,
-    runtime=model_runtime,
-    valid_runtimes=valid_runtimes,  # NEW
+    engine_id=model_engine_id,
+    valid_engine_ids=valid_engine_ids,  # NEW
 )
 ```
 
@@ -168,10 +168,10 @@ Apply same change to ElevenLabs endpoint handler.
 
 | File | Action |
 |------|--------|
-| `dalston/session_router/registry.py` | Add `valid_runtimes` param, add filter logic |
-| `dalston/session_router/allocator.py` | Add `valid_runtimes` param, pass through |
-| `dalston/session_router/router.py` | Add `valid_runtimes` param, pass through |
-| `dalston/gateway/api/v1/realtime.py` | Query registry, pass `valid_runtimes` to router |
+| `dalston/session_router/registry.py` | Add `valid_engine_ids` param, add filter logic |
+| `dalston/session_router/allocator.py` | Add `valid_engine_ids` param, pass through |
+| `dalston/session_router/router.py` | Add `valid_engine_ids` param, pass through |
+| `dalston/gateway/api/v1/realtime.py` | Query registry, pass `valid_engine_ids` to router |
 
 ---
 
@@ -190,8 +190,8 @@ Apply same change to ElevenLabs endpoint handler.
    docker compose logs --tail=20 gateway | grep session_allocated
    ```
 
-   - Session should route to `faster-whisper-cpu` (runtime has downloaded models)
-   - NOT to `nemo-onnx-cpu` (runtime has no downloaded models in registry)
+   - Session should route to `faster-whisper-cpu` (engine_id has downloaded models)
+   - NOT to `nemo-onnx-cpu` (engine_id has no downloaded models in registry)
 
 3. **Test ElevenLabs endpoint:**
 
@@ -211,7 +211,7 @@ Apply same change to ElevenLabs endpoint handler.
 
 ## Design Notes
 
-### Why filter by runtime, not by models_loaded?
+### Why filter by engine_id, not by models_loaded?
 
 The registry tracks which models are **downloaded and available for use**. A worker may have a model preloaded on startup that:
 
@@ -219,8 +219,8 @@ The registry tracks which models are **downloaded and available for use**. A wor
 - Isn't meant for production use
 - Users can't select in the UI
 
-Filtering by registry runtimes ensures routing consistency with the UI and API model selection.
+Filtering by registry engine_ids ensures routing consistency with the UI and API model selection.
 
 ### Performance consideration
 
-This adds one DB query per "Any available" session. The query is simple (filter by stage/status, extract runtimes) and should be fast. If needed, we could cache valid runtimes with a short TTL.
+This adds one DB query per "Any available" session. The query is simple (filter by stage/status, extract engine_ids) and should be fast. If needed, we could cache valid engine_ids with a short TTL.

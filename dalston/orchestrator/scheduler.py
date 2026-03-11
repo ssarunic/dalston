@@ -53,16 +53,16 @@ def _build_engine_info(
     running_ids: set[str],
     unhealthy_ids: set[str],
 ) -> EngineInfo:
-    """Build EngineInfo from catalog entry with runtime status."""
-    if entry.runtime in running_ids:
+    """Build EngineInfo from catalog entry with engine_id status."""
+    if entry.engine_id in running_ids:
         status = "running"
-    elif entry.runtime in unhealthy_ids:
+    elif entry.engine_id in unhealthy_ids:
         status = "unhealthy"
     else:
         status = "available"
 
     return EngineInfo(
-        id=entry.runtime,
+        id=entry.engine_id,
         languages=entry.capabilities.languages,
         supports_word_timestamps=entry.capabilities.supports_word_timestamps,
         status=status,
@@ -90,8 +90,8 @@ async def _build_error_details(
     """
     # Get running engine states
     running_engines = await registry.get_all()
-    running_ids = {e.runtime for e in running_engines if e.is_available}
-    unhealthy_ids = {e.runtime for e in running_engines if not e.is_available}
+    running_ids = {e.engine_id for e in running_engines if e.is_available}
+    unhealthy_ids = {e.engine_id for e in running_engines if not e.is_available}
 
     # Get all engines for this stage from catalog
     stage_engines = catalog.get_engines_for_stage(stage)
@@ -267,7 +267,7 @@ async def queue_task(
     """
     task_id_str = str(task.id)
     job_id_str = str(task.job_id)
-    queue_id = task.runtime
+    queue_id = task.engine_id
     if not task.input_bindings and isinstance(task.config, dict):
         bindings_from_config = task.config.get("input_bindings")
         if isinstance(bindings_from_config, list):
@@ -282,13 +282,13 @@ async def queue_task(
     # 1. Catalog check - does any engine in catalog support this?
     if catalog is None:
         catalog = get_catalog()
-    catalog_entry = catalog.get_engine(task.runtime)
+    catalog_entry = catalog.get_engine(task.engine_id)
     if catalog_entry is not None and catalog_entry.execution_profile != "container":
         raise CatalogValidationError(
-            f"Runtime '{task.runtime}' declares execution_profile "
+            f"Runtime '{task.engine_id}' declares execution_profile "
             f"'{catalog_entry.execution_profile}' and cannot be queued on the "
             "distributed container path. Use the lite pipeline for inproc/venv "
-            "runtimes.",
+            "engine_ids.",
             stage=task.stage,
         )
 
@@ -317,7 +317,7 @@ async def queue_task(
     engine_wait_timeout_seconds = int(
         getattr(settings, "engine_wait_timeout_seconds", 300)
     )
-    engine_available = await registry.is_engine_available(task.runtime)
+    engine_available = await registry.is_engine_available(task.engine_id)
     waiting_for_engine = False
 
     if not engine_available:
@@ -327,9 +327,9 @@ async def queue_task(
                 catalog, registry, task.stage, language, word_timestamps
             )
             raise EngineUnavailableError(
-                f"Engine '{task.runtime}' is not available. "
+                f"Engine '{task.engine_id}' is not available. "
                 f"No healthy engine registered for stage '{task.stage}'.",
-                runtime=task.runtime,
+                engine_id=task.engine_id,
                 stage=task.stage,
                 details=details,
             )
@@ -338,7 +338,7 @@ async def queue_task(
             waiting_for_engine = True
             logger.info(
                 "engine_not_available_waiting",
-                runtime=task.runtime,
+                engine_id=task.engine_id,
                 stage=task.stage,
                 job_id=str(task.job_id),
                 task_id=str(task.id),
@@ -347,7 +347,7 @@ async def queue_task(
             # Publish event for external scalers to start the engine
             await publish_engine_needed(
                 redis,
-                runtime=task.runtime,
+                engine_id=task.engine_id,
                 stage=task.stage,
                 job_id=task.job_id,
                 task_id=task.id,
@@ -356,23 +356,23 @@ async def queue_task(
 
     # 3. Capabilities check - does running engine support job requirements? (M29)
     if language and task.stage == "transcribe":
-        engine_state = await registry.get_engine(task.runtime)
+        engine_state = await registry.get_engine(task.engine_id)
         if engine_state and not engine_state.supports_language(language):
             # Build detailed error context (M30)
             details = await _build_error_details(
                 catalog, registry, task.stage, language, word_timestamps
             )
             raise EngineCapabilityError(
-                f"Engine '{task.runtime}' is running but does not support "
+                f"Engine '{task.engine_id}' is running but does not support "
                 f"language '{language}'. Supported languages: "
                 f"{engine_state.languages or 'unknown'}",
-                runtime=task.runtime,
+                engine_id=task.engine_id,
                 stage=task.stage,
                 language=language,
                 details=details,
             )
 
-    log = logger.bind(task_id=task_id_str, job_id=job_id_str, runtime=task.runtime)
+    log = logger.bind(task_id=task_id_str, job_id=job_id_str, engine_id=task.engine_id)
 
     # 1. Store task metadata in Redis hash (includes request_id for correlation)
     metadata_key = TASK_METADATA_KEY.format(task_id=task_id_str)
@@ -380,7 +380,7 @@ async def queue_task(
     metadata_mapping: dict[str, str] = {
         "job_id": job_id_str,
         "stage": task.stage,
-        "runtime": task.runtime,
+        "engine_id": task.engine_id,
         "queue_id": queue_id,
         "execution_profile": (
             catalog_entry.execution_profile

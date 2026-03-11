@@ -47,7 +47,7 @@ class ProducedArtifact(BaseModel):
 
 
 class ArtifactReference(BaseModel):
-    """Job-scoped artifact record persisted by runtime infrastructure."""
+    """Job-scoped artifact record persisted by engine_id infrastructure."""
 
     model_config = ConfigDict(extra="forbid")
 

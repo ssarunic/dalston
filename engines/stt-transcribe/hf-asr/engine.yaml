@@ -1,6 +1,6 @@
 schema_version: "1.1"
 id: hf-asr
-runtime: hf-asr
+engine_id: hf-asr
 stage: transcribe
 name: HuggingFace Transformers ASR
 version: 1.0.0
@@ -10,7 +10,7 @@ description: |
   with pipeline_tag=automatic-speech-recognition.
 
   Use for community fine-tunes and research models. Any of the 10,000+
-  ASR models on HuggingFace Hub can be loaded at runtime via runtime_model_id.
+  ASR models on HuggingFace Hub can be loaded at engine_id via loaded_model_id.
 
 container:
   gpu: optional

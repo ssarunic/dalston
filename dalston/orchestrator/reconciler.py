@@ -634,8 +634,8 @@ class ReconciliationSweeper:
             queue_id = (
                 metadata.get("queue_id")
                 or metadata.get("stage")
-                or metadata.get("runtime")
-                or task.runtime
+                or metadata.get("engine_id")
+                or task.engine_id
             )
             if not queue_id:
                 continue
@@ -744,11 +744,11 @@ class ReconciliationSweeper:
         Handles the case where engines crash without calling unregister():
         - Engine's Redis hash key expires (TTL)
         - But UNIFIED_INSTANCE_SET_KEY still contains the instance ID
-        - And UNIFIED_RUNTIME_SET_PREFIX + runtime still contains the instance
+        - And UNIFIED_RUNTIME_SET_PREFIX + engine_id still contains the instance
 
         Action:
         1. For each instance in UNIFIED_INSTANCE_SET_KEY, check if hash exists
-        2. Remove stale instances from the main set and runtime/stage index sets
+        2. Remove stale instances from the main set and engine_id/stage index sets
         """
         cleaned_count = 0
 

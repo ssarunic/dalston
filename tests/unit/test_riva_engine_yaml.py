@@ -26,7 +26,7 @@ class TestBatchEngineYaml:
         with open(BATCH_YAML) as f:
             data = yaml.safe_load(f)
 
-        assert data["runtime"] == "riva"
+        assert data["engine_id"] == "riva"
         assert data["stage"] == "transcribe"
         assert data["version"] == "1.0.0"
 
@@ -66,7 +66,7 @@ class TestRtEngineYaml:
         with open(RT_YAML) as f:
             data = yaml.safe_load(f)
 
-        assert data["runtime"] == "riva"
+        assert data["engine_id"] == "riva"
         assert data["stage"] == "transcribe"
         assert data["mode"] == "realtime"
         assert data["version"] == "1.0.0"

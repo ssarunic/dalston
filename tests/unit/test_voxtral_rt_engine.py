@@ -96,7 +96,7 @@ class TestVoxtralRtVllmEngine:
                 )
 
             assert result.text == "hello world"
-            assert result.runtime == "vllm-asr"
+            assert result.engine_id == "vllm-asr"
             assert result.timestamp_granularity.value == "segment"
             assert result.segments[0].start == 0.0
             assert result.segments[0].end == 0.02
@@ -132,7 +132,7 @@ class TestVoxtralRtVllmEngine:
             assert words[1].start == 0.08
             assert words[1].end == 0.16
 
-    def test_runtime_and_models_metadata(self):
+    def test_engine_id_and_models_metadata(self):
         with (
             patch("torch.cuda.is_available", return_value=True),
             patch("torch.cuda.device_count", return_value=1),
@@ -140,6 +140,6 @@ class TestVoxtralRtVllmEngine:
             VoxtralRealtimeEngine = _load_engine_class()
             engine = VoxtralRealtimeEngine()
 
-        assert engine.get_runtime() == "vllm-asr"
+        assert engine.get_engine_id() == "vllm-asr"
         assert engine.get_models() == ["voxtral-mini-4b"]
         assert "en" in engine.get_languages()

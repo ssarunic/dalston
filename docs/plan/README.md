@@ -264,7 +264,7 @@ M6 ──► M24 (realtime session persistence, prerequisite for M7)
 
 M3 + M4 + M25 ──► M26
 
-M28 ──► M29 ──► M30 ──► M31 ──► M36 (runtime model management)
+M28 ──► M29 ──► M30 ──► M31 ──► M36 (engine ID model management)
                   │                │
                   └──► M32         └──► M39 ──► M40 ──► M41
                                              │
@@ -276,7 +276,7 @@ M43 + M48 + M49 ──► M51 (engine runtime context refactor) ──► M52 (l
 
 M6 + M8 ──► M53 (realtime latency budget + explicit backpressure)
 M33 ──► M54 (event DLQ + poison-pill isolation)
-M36 + M40 + M46 ──► M55 (non-transcribe runtime model management)
+M36 + M40 + M46 ──► M55 (non-transcribe engine ID model management)
 M47 + M52 ──► M56 (lite mode infra backends)
 M56 + M13 + M36 + M40 ──► M57 (ghost server + zero-config CLI bootstrap)
 M56 + M57 + M47 ──► M57.1 (lite SQLite migration track + schema compatibility)
@@ -315,7 +315,7 @@ M10 + M11 + M15 ──► M35
 - **M35**: Settings Page (needs M10 console, M11 auth, M15 console auth)
 - **M36**: Runtime Model Management (needs M31 routing; enables dynamic model loading)
 - **M39-M46**: Model management (M36 → M39 cache TTL → M40 registry → M41 new engines, M42 console, M46 DB source of truth)
-- **M55**: Non-transcribe runtime model management (needs M36 runtime loading, M40 registry, M46 DB source of truth; extends model pluggability to diarize/align/PII stages)
+- **M55**: Non-transcribe engine ID model management (needs M36 runtime loading, M40 registry, M46 DB source of truth; extends model pluggability to diarize/align/PII stages)
 - **M42**: Console Model Management (needs M40 registry APIs, M10 console)
 
 ---
@@ -354,13 +354,13 @@ Each milestone has a verification section. Key checkpoints:
 | M35 | Settings page shows current values; admin can change rate limits and see effect immediately |
 | M36 | Engines load models on-demand; `GET /v1/engines` shows `loaded_model` per engine |
 | M39 | Model files evicted after TTL; cache stays within size limits |
-| M40 | `POST /v1/models/{id}/pull` downloads to S3; HF models auto-resolve to runtime |
+| M40 | `POST /v1/models/{id}/pull` downloads to S3; HF models auto-resolve to engine_id |
 | M42 | Models page shows registry with download/remove actions; Add from HF dialog works |
 | M46 | Models auto-seeded on startup; PATCH updates metadata; user edits preserved across restarts |
 | M51 | Batch engines are URI-free/stateless (`process(input, ctx)`), orchestrator passes artifact refs, runner materializes/persists artifacts, and local runner works without Redis/S3 |
 | M52 | Developer can run `python -m dalston.engine_sdk.local_runner run` with local `audio + config.json` and get canonical `output.json` without Redis/S3; legacy compatibility bridges removed |
 | M54 | Poison or malformed durable events are quarantined in `dalston:events:dlq` after policy thresholds; main stream entries are ACKed and healthy events continue processing |
-| M55 | Diarize, align, and PII stages accept `runtime_model_id`; models registered in registry with explicit stage; per-stage model selection works in standard and per-channel DAGs |
+| M55 | Diarize, align, and PII stages accept `loaded_model_id`; models registered in registry with explicit stage; per-stage model selection works in standard and per-channel DAGs |
 | M56 | `DALSTON_MODE`-driven mode binding with SQLite/in-memory/localfs backends and validated lite batch slice (`prepare -> transcribe -> merge`); `DALSTON_MODE=lite` runs scoped batch transcription without Postgres/Redis/MinIO while distributed mode remains stable |
 | M57 | `dalston transcribe <file>` auto-starts local server when needed, auto-ensures default model, and returns transcript in one command |
 | M58 | Lite mode supports explicit profiles/capability matrix and fails unsupported combinations deterministically with actionable guidance |

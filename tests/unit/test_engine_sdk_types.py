@@ -85,7 +85,7 @@ class TestTaskInputGetPrepareOutput:
                         },
                     ],
                     "split_channels": False,
-                    "runtime": "audio-prepare",
+                    "engine_id": "audio-prepare",
                 },
             },
         )
@@ -148,7 +148,7 @@ class TestTaskInputGetPrepareOutput:
                         },
                     ],
                     "split_channels": True,
-                    "runtime": "audio-prepare",
+                    "engine_id": "audio-prepare",
                 },
             },
         )
@@ -175,7 +175,7 @@ class TestTaskInputGetTranscript:
                     "text": "Hello world",
                     "language": "en",
                     "language_confidence": 0.98,
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                 },
             },
         )
@@ -208,7 +208,7 @@ class TestTaskInputGetTranscript:
                     "text": "Hello world",
                     "language": "en",
                     "timestamp_granularity": "word",
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                 },
             },
         )
@@ -229,13 +229,13 @@ class TestTaskInputGetTranscript:
                     "segments": [{"start": 0.0, "end": 5.0, "text": "Channel 0"}],
                     "text": "Channel 0",
                     "language": "en",
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                 },
                 "transcribe_ch1": {
                     "segments": [{"start": 0.0, "end": 5.0, "text": "Channel 1"}],
                     "text": "Channel 1",
                     "language": "en",
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                 },
             },
         )
@@ -291,7 +291,7 @@ class TestTaskInputGetAlignOutput:
                     "unaligned_words": [],
                     "unaligned_ratio": 0.0,
                     "granularity_achieved": "word",
-                    "runtime": "phoneme-align",
+                    "engine_id": "phoneme-align",
                 },
             },
         )
@@ -313,7 +313,7 @@ class TestTaskInputGetAlignOutput:
                     "text": "Hello",
                     "language": "xx",
                     "word_timestamps": False,
-                    "runtime": "phoneme-align",
+                    "engine_id": "phoneme-align",
                     "skipped": True,
                     "skip_reason": "No alignment model for language 'xx'",
                     "warnings": ["No alignment model for language 'xx'"],
@@ -337,7 +337,7 @@ class TestTaskInputGetAlignOutput:
                     "text": "Ch0",
                     "language": "en",
                     "word_timestamps": True,
-                    "runtime": "phoneme-align",
+                    "engine_id": "phoneme-align",
                 },
             },
         )
@@ -365,7 +365,7 @@ class TestTaskInputGetDiarizeOutput:
                     "num_speakers": 2,
                     "overlap_duration": 0.0,
                     "overlap_ratio": 0.0,
-                    "runtime": "pyannote-4.0",
+                    "engine_id": "pyannote-4.0",
                 },
             },
         )
@@ -397,7 +397,7 @@ class TestTaskInputGetDiarizeOutput:
                     "num_speakers": 2,
                     "overlap_duration": 0.5,
                     "overlap_ratio": 0.05,
-                    "runtime": "pyannote-4.0",
+                    "engine_id": "pyannote-4.0",
                 },
             },
         )
@@ -417,7 +417,7 @@ class TestTaskInputGetDiarizeOutput:
                     "turns": [{"speaker": "SPEAKER_00", "start": 0.0, "end": 999999.0}],
                     "speakers": ["SPEAKER_00"],
                     "num_speakers": 1,
-                    "runtime": "pyannote-4.0",
+                    "engine_id": "pyannote-4.0",
                     "skipped": True,
                     "skip_reason": "DIARIZATION_DISABLED=true",
                 },
@@ -481,7 +481,7 @@ class TestTaskOutput:
             segments=[TranscriptSegment(start=0.0, end=1.0, text="Hello")],
             text="Hello",
             language="en",
-            runtime="test",
+            engine_id="test",
         )
         output = EngineOutput(data=transcript)
         assert isinstance(output.data, Transcript)
@@ -504,7 +504,7 @@ class TestTaskOutput:
             text="Hello",
             language="en",
             timestamp_granularity=TimestampGranularity.WORD,
-            runtime="test",
+            engine_id="test",
         )
         output = EngineOutput(data=transcript)
         data = output.to_dict()
@@ -560,7 +560,7 @@ class TestTaskInputTypedOutputIntegration:
             text="Hello world",
             language="en",
             language_confidence=0.98,
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
         )
 
         # Create task input for align stage with serialized transcript
@@ -595,14 +595,14 @@ class TestTaskInputTypedOutputIntegration:
                 ),
             ],
             split_channels=False,
-            runtime="audio-prepare",
+            engine_id="audio-prepare",
         )
 
         transcript = Transcript(
             segments=[TranscriptSegment(start=0.0, end=5.0, text="Hello")],
             text="Hello",
             language="en",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
         )
 
         align_output = AlignOutput(
@@ -617,14 +617,14 @@ class TestTaskInputTypedOutputIntegration:
             text="Hello",
             language="en",
             word_timestamps=True,
-            runtime="phoneme-align",
+            engine_id="phoneme-align",
         )
 
         diarize_output = DiarizeOutput(
             turns=[SpeakerTurn(speaker="SPEAKER_00", start=0.0, end=5.0)],
             speakers=["SPEAKER_00"],
             num_speakers=1,
-            runtime="pyannote-4.0",
+            engine_id="pyannote-4.0",
         )
 
         # Create merge task input

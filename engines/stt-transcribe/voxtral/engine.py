@@ -230,7 +230,7 @@ class VoxtralBatchEngine(BaseBatchTranscribeEngine):
             text=full_text,
             segments=segments,
             language=language,
-            runtime=f"voxtral-{self._model_variant}",
+            engine_id=f"voxtral-{self._model_variant}",
             language_confidence=0.9,
             alignment_method=AlignmentMethod.UNKNOWN,
             channel=channel,
@@ -264,7 +264,7 @@ class VoxtralBatchEngine(BaseBatchTranscribeEngine):
         vram_mb = 9500 if self._model_variant == "mini-3b" else 55000
 
         return EngineCapabilities(
-            runtime="vllm-asr",
+            engine_id="vllm-asr",
             version="1.0.0",
             stages=["transcribe"],
             languages=self.SUPPORTED_LANGUAGES,

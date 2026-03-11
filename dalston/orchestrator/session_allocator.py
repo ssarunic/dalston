@@ -37,13 +37,13 @@ class WorkerAllocation:
         instance: Allocated instance identifier
         endpoint: Worker WebSocket endpoint URL
         session_id: Newly created session ID
-        runtime: Runtime framework (e.g., "faster-whisper", "parakeet")
+        engine_id: Runtime framework (e.g., "faster-whisper", "parakeet")
     """
 
     instance: str
     endpoint: str
     session_id: str
-    runtime: str
+    engine_id: str
 
 
 @dataclass
@@ -118,8 +118,8 @@ class SessionAllocator:
         language: str,
         model: str | None,
         client_ip: str,
-        runtime: str | None = None,
-        valid_runtimes: set[str] | None = None,
+        engine_id: str | None = None,
+        valid_engine_ids: set[str] | None = None,
     ) -> WorkerAllocation | None:
         """Find worker with capacity and reserve a slot.
 
@@ -129,10 +129,10 @@ class SessionAllocator:
             language: Requested language code or "auto"
             model: Model name (e.g., "faster-whisper-large-v3") or None for any
             client_ip: Client IP address for logging
-            runtime: Model runtime (e.g., "faster-whisper") for routing when model
-                     isn't pre-loaded. Workers matching runtime can load the model.
-            valid_runtimes: When model=None and runtime=None, only consider workers
-                     whose runtime is in this set. Used for "Any available" routing.
+            engine_id: Model engine_id (e.g., "faster-whisper") for routing when model
+                     isn't pre-loaded. Workers matching engine_id can load the model.
+            valid_engine_ids: When model=None and engine_id=None, only consider workers
+                     whose engine_id is in this set. Used for "Any available" routing.
 
         Returns:
             WorkerAllocation if successful, None if no capacity available
@@ -143,16 +143,16 @@ class SessionAllocator:
             attributes={
                 "dalston.language": language,
                 "dalston.model": model,
-                "dalston.runtime": runtime,
+                "dalston.engine_id": engine_id,
             },
         ):
             # Find available workers
             available = await self._registry.get_available(
                 interface="realtime",
                 language=language,
-                runtime=runtime,
+                engine_id=engine_id,
                 model=model,
-                valid_runtimes=valid_runtimes,
+                valid_engine_ids=valid_engine_ids,
             )
 
             if not available:
@@ -227,7 +227,7 @@ class SessionAllocator:
                 instance=worker.instance,
                 endpoint=worker.endpoint,
                 session_id=session_id,
-                runtime=worker.runtime,
+                engine_id=worker.engine_id,
             )
 
     async def _acquire_from_list(
@@ -269,7 +269,7 @@ class SessionAllocator:
                     instance=worker.instance,
                     endpoint=worker.endpoint,
                     session_id=session_id,
-                    runtime=worker.runtime,
+                    engine_id=worker.engine_id,
                 )
 
             # Rollback and try next

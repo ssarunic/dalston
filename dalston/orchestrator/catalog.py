@@ -1,6 +1,6 @@
 """Engine catalog loader.
 
-The catalog is a JSON file declaring all runtimes (engines) that could be used
+The catalog is a JSON file declaring all engine_ids (engines) that could be used
 in the system. It enables:
 - Validation: Check job requirements before engines are running
 - Auto-scaling (future): Know which images to boot for pending jobs
@@ -38,12 +38,12 @@ _VALID_EXECUTION_PROFILES = frozenset({"inproc", "venv", "container"})
 
 @dataclass
 class CatalogEntry:
-    """A runtime entry in the catalog.
+    """A engine_id entry in the catalog.
 
     Extends EngineCapabilities with deployment metadata (image name).
     """
 
-    runtime: str
+    engine_id: str
     image: str
     capabilities: EngineCapabilities
     execution_profile: ExecutionProfile = DEFAULT_EXECUTION_PROFILE
@@ -73,7 +73,7 @@ class EngineCatalog:
         """Initialize catalog with engine entries.
 
         Args:
-            entries: Map of runtime to CatalogEntry
+            entries: Map of engine_id to CatalogEntry
         """
         self._entries = entries
 
@@ -107,17 +107,17 @@ class EngineCatalog:
                 "Run 'python scripts/generate_catalog.py' to generate it from engine.yaml files."
             ) from None
 
-        # Load engine/runtime entries with strict validation
+        # Load engine/engine_id entries with strict validation
         entries: dict[str, CatalogEntry] = {}
         engines_data = data.get("engines", {})
         parse_errors: list[str] = []
 
-        for runtime, engine_data in engines_data.items():
+        for engine_id, engine_data in engines_data.items():
             try:
-                entry = cls._parse_engine_entry(runtime, engine_data)
-                entries[runtime] = entry
+                entry = cls._parse_engine_entry(engine_id, engine_data)
+                entries[engine_id] = entry
             except (KeyError, TypeError, ValueError) as e:
-                parse_errors.append(f"runtime '{runtime}': {e}")
+                parse_errors.append(f"engine_id '{engine_id}': {e}")
 
         if parse_errors:
             raise ValueError(
@@ -134,7 +134,7 @@ class EngineCatalog:
     # =========================================================================
 
     @classmethod
-    def _parse_engine_entry(cls, runtime: str, engine_data: dict) -> CatalogEntry:
+    def _parse_engine_entry(cls, engine_id: str, engine_data: dict) -> CatalogEntry:
         """Parse and validate a single engine entry.
 
         Raises:
@@ -165,7 +165,7 @@ class EngineCatalog:
             )
 
         capabilities = EngineCapabilities(
-            runtime=runtime,
+            engine_id=engine_id,
             version=engine_data.get("version", "unknown"),
             stages=stages,
             languages=languages,
@@ -201,8 +201,8 @@ class EngineCatalog:
             )
 
         return CatalogEntry(
-            runtime=runtime,
-            image=engine_data.get("image", f"dalston/{runtime}:latest"),
+            engine_id=engine_id,
+            image=engine_data.get("image", f"dalston/{engine_id}:latest"),
             execution_profile=execution_profile,
             capabilities=capabilities,
         )
@@ -211,16 +211,16 @@ class EngineCatalog:
     # Engine methods
     # =========================================================================
 
-    def get_engine(self, runtime: str) -> CatalogEntry | None:
+    def get_engine(self, engine_id: str) -> CatalogEntry | None:
         """Get a specific engine entry.
 
         Args:
-            runtime: Runtime identifier
+            engine_id: Runtime identifier
 
         Returns:
             CatalogEntry if found, None otherwise
         """
-        return self._entries.get(runtime)
+        return self._entries.get(engine_id)
 
     def get_all_engines(self) -> list[CatalogEntry]:
         """Get all engines in the catalog.
@@ -280,8 +280,8 @@ class EngineCatalog:
                 return f"No engine in catalog handles stage '{stage}'"
             return (
                 f"No engine in catalog supports language '{language}' "
-                f"for stage '{stage}'. Available runtimes: "
-                f"{[e.runtime for e in available_engines]}"
+                f"for stage '{stage}'. Available engine_ids: "
+                f"{[e.engine_id for e in available_engines]}"
             )
         return None
 
@@ -338,9 +338,9 @@ class EngineCatalog:
         """Return number of engines in catalog."""
         return len(self._entries)
 
-    def __contains__(self, runtime: str) -> bool:
-        """Check if runtime is in catalog."""
-        return runtime in self._entries
+    def __contains__(self, engine_id: str) -> bool:
+        """Check if engine_id is in catalog."""
+        return engine_id in self._entries
 
 
 # Module-level singleton for shared access

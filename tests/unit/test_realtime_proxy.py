@@ -42,7 +42,7 @@ class _FakeAllocation:
     instance: str = "worker-1"
     endpoint: str = "ws://worker-1:9000"
     session_id: str = "sess_abc123"
-    runtime: str = "faster-whisper"
+    engine_id: str = "faster-whisper"
 
 
 class _FakeWebSocket:
@@ -62,8 +62,8 @@ class _FakeWebSocket:
 
 class _FakeRoutingParams:
     routing_model: str | None = "faster-whisper-large-v3"
-    model_runtime: str | None = "faster-whisper"
-    valid_runtimes: set[str] | None = {"faster-whisper"}
+    model_engine_id: str | None = "faster-whisper"
+    valid_engine_ids: set[str] | None = {"faster-whisper"}
     effective_model: str = "faster-whisper-large-v3"
 
 

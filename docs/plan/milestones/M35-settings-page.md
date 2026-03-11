@@ -71,7 +71,7 @@ System Info Tab (read-only):
 
 ### 1. Database-Backed Overrides, Not Config File Replacement
 
-Settings are stored in a `settings` table as namespace/key/value rows. On startup, the application reads environment variables (via `config.py` `Settings` class) as defaults. Database rows override those defaults at runtime.
+Settings are stored in a `settings` table as namespace/key/value rows. On startup, the application reads environment variables (via `config.py` `Settings` class) as defaults. Database rows override those defaults at engine_id.
 
 **Rationale:** Environment variables remain the source of truth for infrastructure (DB URLs, S3 buckets, secrets). The Settings page only manages operational parameters that admins tune in production — rate limits, retention, engine behavior. This avoids the complexity of bidirectional config sync and keeps secrets out of the database.
 

@@ -26,7 +26,7 @@ In scope:
 Out of scope:
 
 - Session-router orchestration behavior migration (covered by M66).
-- Changes to upstream engine/runtime behavior.
+- Changes to upstream engine/engine_id behavior.
 
 ## Strategy
 
@@ -131,7 +131,7 @@ pytest -m e2e
 ## Rollback and Safety Controls
 
 The per-handler legacy lifecycle code was deleted as part of T3/T4. There is no
-runtime flag for rollback; revert via `git revert` if needed.
+engine_id flag for rollback; revert via `git revert` if needed.
 
 ## Success Criteria
 

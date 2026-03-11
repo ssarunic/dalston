@@ -27,7 +27,7 @@ def test_load_bootstrap_settings_defaults(monkeypatch, tmp_path: Path) -> None:
     assert settings.lock_file == tmp_path / ".dalston" / "run" / "bootstrap.lock"
 
 
-def test_run_preflight_creates_runtime_dirs(monkeypatch, tmp_path: Path) -> None:
+def test_run_preflight_creates_engine_id_dirs(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     settings = load_bootstrap_settings()
     settings = settings.__class__(**{**settings.__dict__, "min_free_bytes": 0})

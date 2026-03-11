@@ -220,7 +220,7 @@
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "Runtime engine for faster-whisper (CTranslate2-based Whisper) transcription.\nCan load any Whisper-compatible model at runtime via runtime_model_id.\n\nM36: This is a runtime-level configuration. The engine loads specific model\nvariants on demand, without requiring separate Docker images per variant.\nSee models/*.yaml for pre-defined model variants.",
+      "description": "Runtime engine for faster-whisper (CTranslate2-based Whisper) transcription.\nCan load any Whisper-compatible model at engine_id via loaded_model_id.\n\nM36: This is a engine_id-level configuration. The engine loads specific model\nvariants on demand, without requiring separate Docker images per variant.\nSee models/*.yaml for pre-defined model variants.",
       "image": "dalston/stt-batch-transcribe-faster-whisper:1.0.0",
       "execution_profile": "container",
       "capabilities": {
@@ -257,7 +257,7 @@
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "Generic ASR engine for HuggingFace Transformers models.\nSupports Whisper, Wav2Vec2, HuBERT, MMS, and other ASR architectures\nwith pipeline_tag=automatic-speech-recognition.\n\nUse for community fine-tunes and research models. Any of the 10,000+\nASR models on HuggingFace Hub can be loaded at runtime via runtime_model_id.",
+      "description": "Generic ASR engine for HuggingFace Transformers models.\nSupports Whisper, Wav2Vec2, HuBERT, MMS, and other ASR architectures\nwith pipeline_tag=automatic-speech-recognition.\n\nUse for community fine-tunes and research models. Any of the 10,000+\nASR models on HuggingFace Hub can be loaded at engine_id via loaded_model_id.",
       "image": "dalston/stt-batch-transcribe-hf-asr:1.0.0",
       "execution_profile": "container",
       "capabilities": {
@@ -294,7 +294,7 @@
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "Runtime engine for NVIDIA NeMo Parakeet transcription models.\nCan load any Parakeet model at runtime via runtime_model_id.\n\nM36: This is a runtime-level configuration. The engine loads specific model\nvariants on demand, without requiring separate Docker images per variant.\nSee models/*.yaml for pre-defined model variants.\n\nAll Parakeet models produce native word-level timestamps without needing\na separate alignment stage.",
+      "description": "Runtime engine for NVIDIA NeMo Parakeet transcription models.\nCan load any Parakeet model at engine_id via loaded_model_id.\n\nM36: This is a engine_id-level configuration. The engine loads specific model\nvariants on demand, without requiring separate Docker images per variant.\nSee models/*.yaml for pre-defined model variants.\n\nAll Parakeet models produce native word-level timestamps without needing\na separate alignment stage.",
       "image": "dalston/stt-batch-transcribe-nemo:1.0.0",
       "execution_profile": "container",
       "capabilities": {
@@ -333,7 +333,7 @@
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "Lightweight ONNX Runtime engine for NVIDIA Parakeet transcription models.\nUses the onnx-asr library for fast inference without the full NeMo toolkit.\nSupports CTC, TDT, and RNNT decoders.\n\nM41: This runtime provides the same Parakeet model accuracy with significantly\nsmaller container images (~1GB vs ~12GB) and faster startup. Uses ONNX Runtime\nfor inference and supports both CPU and GPU execution.\n\nSupported models:\n  - nvidia/parakeet-ctc-0.6b (CTC, fast, 600M params)\n  - nvidia/parakeet-ctc-1.1b (CTC, accurate, 1.1B params)\n  - nvidia/parakeet-tdt-0.6b-v2 (TDT, English-only, 600M params)\n  - nvidia/parakeet-tdt-0.6b-v3 (TDT, punctuation + capitalization, 600M params)\n  - nvidia/parakeet-rnnt-0.6b (RNNT, English-only, 600M params)\n\nAll models produce native word-level timestamps without needing a separate\nalignment stage.",
+      "description": "Lightweight ONNX Runtime engine for NVIDIA Parakeet transcription models.\nUses the onnx-asr library for fast inference without the full NeMo toolkit.\nSupports CTC, TDT, and RNNT decoders.\n\nM41: This engine_id provides the same Parakeet model accuracy with significantly\nsmaller container images (~1GB vs ~12GB) and faster startup. Uses ONNX Runtime\nfor inference and supports both CPU and GPU execution.\n\nSupported models:\n  - nvidia/parakeet-ctc-0.6b (CTC, fast, 600M params)\n  - nvidia/parakeet-ctc-1.1b (CTC, accurate, 1.1B params)\n  - nvidia/parakeet-tdt-0.6b-v2 (TDT, English-only, 600M params)\n  - nvidia/parakeet-tdt-0.6b-v3 (TDT, punctuation + capitalization, 600M params)\n  - nvidia/parakeet-rnnt-0.6b (RNNT, English-only, 600M params)\n\nAll models produce native word-level timestamps without needing a separate\nalignment stage.",
       "image": "dalston/stt-batch-transcribe-nemo-onnx:1.0.0",
       "execution_profile": "container",
       "capabilities": {

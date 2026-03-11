@@ -21,7 +21,7 @@ HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 def _ctx(input_obj) -> BatchTaskContext:
     return BatchTaskContext(
-        runtime="vllm-asr",
+        engine_id="vllm-asr",
         instance="test-instance",
         task_id=getattr(input_obj, "task_id", "test-task"),
         job_id=getattr(input_obj, "job_id", "test-job"),
@@ -89,7 +89,7 @@ class TestVoxtralAdapter:
 
         assert result.text == "Hello world, this is a test."
         assert result.language == "en"
-        assert result.runtime == "vllm-asr"
+        assert result.engine_id == "vllm-asr"
         assert len(result.segments) == 1
         assert result.segments[0].text == "Hello world, this is a test."
         assert result.segments[0].end > result.segments[0].start
@@ -168,7 +168,7 @@ class TestQwen2AudioAdapter:
 
         assert result.text == "Hello world"
         assert result.language == "en"
-        assert result.runtime == "vllm-asr"
+        assert result.engine_id == "vllm-asr"
         assert len(result.segments) == 1
         assert result.segments[0].end > result.segments[0].start
 
@@ -297,7 +297,7 @@ class TestVLLMASREngine:
         with patch.dict(
             os.environ,
             {
-                "DALSTON_RUNTIME": "vllm-asr",
+                "DALSTON_ENGINE_ID": "vllm-asr",
                 "DALSTON_DEFAULT_MODEL_ID": "mistralai/Voxtral-Mini-3B-2507",
             },
         ):
@@ -319,7 +319,7 @@ class TestVLLMASREngine:
 
     def test_engine_init(self, engine):
         """Engine should initialize with correct defaults."""
-        assert engine._runtime == "vllm-asr"
+        assert engine._engine_id == "vllm-asr"
         assert engine._default_model_id == "mistralai/Voxtral-Mini-3B-2507"
         assert engine._llm is None
         assert engine._loaded_model_id is None
@@ -328,7 +328,7 @@ class TestVLLMASREngine:
         """Engine should raise RuntimeError when CUDA is unavailable."""
         with patch.dict(
             os.environ,
-            {"DALSTON_RUNTIME": "vllm-asr"},
+            {"DALSTON_ENGINE_ID": "vllm-asr"},
         ):
             with patch("torch.cuda.is_available", return_value=False):
                 VllmAsrBatchEngine = load_vllm_asr_engine()
@@ -340,7 +340,7 @@ class TestVLLMASREngine:
         """Engine capabilities should be correct."""
         caps = engine.get_capabilities()
 
-        assert caps.runtime == "vllm-asr"
+        assert caps.engine_id == "vllm-asr"
         assert caps.version == "1.0.0"
         assert caps.stages == ["transcribe"]
         assert caps.languages is None  # Multilingual
@@ -348,7 +348,7 @@ class TestVLLMASREngine:
         assert caps.supports_streaming is False
         assert caps.gpu_required is True
         assert caps.supports_cpu is False
-        assert caps.runtime == "vllm-asr"
+        assert caps.engine_id == "vllm-asr"
 
     def test_health_check_no_model(self, engine):
         """Health check should work without model loaded."""
@@ -362,7 +362,7 @@ class TestVLLMASREngine:
                         health = engine.health_check()
 
         assert health["status"] == "healthy"
-        assert health["runtime"] == "vllm-asr"
+        assert health["engine_id"] == "vllm-asr"
         assert health["model_loaded"] is False
         assert health["loaded_model_id"] is None
         assert "mistralai/Voxtral-Mini-3B-2507" in health["supported_models"]
@@ -402,11 +402,11 @@ class TestVLLMASREngine:
         mock_input = MagicMock()
         mock_input.audio_path = audio_file
         mock_input.config = {
-            "runtime_model_id": "mistralai/Voxtral-Mini-3B-2507",
+            "loaded_model_id": "mistralai/Voxtral-Mini-3B-2507",
             "language": "en",
         }
         mock_input.get_transcribe_params.return_value = TranscribeInput(
-            runtime_model_id="mistralai/Voxtral-Mini-3B-2507",
+            loaded_model_id="mistralai/Voxtral-Mini-3B-2507",
             language="en",
         )
 
@@ -418,7 +418,7 @@ class TestVLLMASREngine:
             result = engine.process(mock_input, _ctx(mock_input))
 
         assert result.data.text == "Hello, this is a test transcription."
-        assert result.data.runtime == "vllm-asr"
+        assert result.data.engine_id == "vllm-asr"
         assert result.data.language == "en"
         assert len(result.data.segments) == 1
 
@@ -439,12 +439,12 @@ class TestVLLMASREngine:
         mock_input = MagicMock()
         mock_input.audio_path = audio_file
         mock_input.config = {
-            "runtime_model_id": "mistralai/Voxtral-Mini-3B-2507",
+            "loaded_model_id": "mistralai/Voxtral-Mini-3B-2507",
             "language": "en",
             "vocabulary": ["Dalston", "vLLM"],
         }
         mock_input.get_transcribe_params.return_value = TranscribeInput(
-            runtime_model_id="mistralai/Voxtral-Mini-3B-2507",
+            loaded_model_id="mistralai/Voxtral-Mini-3B-2507",
             language="en",
             vocabulary=["Dalston", "vLLM"],
         )
@@ -470,7 +470,7 @@ class TestVLLMASREngine:
 
         audio = np.zeros(320, dtype=np.float32)
         params = TranscribeInput(
-            runtime_model_id="mistralai/Voxtral-Mini-3B-2507",
+            loaded_model_id="mistralai/Voxtral-Mini-3B-2507",
             language="en",
         )
 
@@ -481,7 +481,7 @@ class TestVLLMASREngine:
             transcript = engine.transcribe_audio_array(audio, params, sample_rate=16000)
 
         assert transcript.text == "Realtime bridge test"
-        assert transcript.runtime == "vllm-asr"
+        assert transcript.engine_id == "vllm-asr"
         assert transcript.language == "en"
 
     def test_shutdown_cleans_up(self, engine):
@@ -501,12 +501,12 @@ class TestVLLMASREngine:
 class TestVLLMASREngineEnvironment:
     """Test engine environment variable handling."""
 
-    def test_custom_runtime(self):
+    def test_custom_engine_id(self):
         """Custom ENGINE_ID should be respected."""
         with patch.dict(
             os.environ,
             {
-                "DALSTON_RUNTIME": "custom-vllm",
+                "DALSTON_ENGINE_ID": "custom-vllm",
                 "DALSTON_DEFAULT_MODEL_ID": "mistralai/Voxtral-Mini-3B-2507",
             },
         ):
@@ -515,14 +515,14 @@ class TestVLLMASREngineEnvironment:
                     VllmAsrBatchEngine = load_vllm_asr_engine()
                     engine = VllmAsrBatchEngine()
 
-                    assert engine._runtime == "custom-vllm"
+                    assert engine._engine_id == "custom-vllm"
 
     def test_custom_gpu_memory_utilization(self):
         """Custom GPU memory utilization should be respected."""
         with patch.dict(
             os.environ,
             {
-                "DALSTON_RUNTIME": "vllm-asr",
+                "DALSTON_ENGINE_ID": "vllm-asr",
                 "DALSTON_VLLM_GPU_MEMORY_UTILIZATION": "0.7",
             },
         ):
@@ -538,7 +538,7 @@ class TestVLLMASREngineEnvironment:
         with patch.dict(
             os.environ,
             {
-                "DALSTON_RUNTIME": "vllm-asr",
+                "DALSTON_ENGINE_ID": "vllm-asr",
                 "DALSTON_VLLM_MAX_MODEL_LEN": "8192",
             },
         ):

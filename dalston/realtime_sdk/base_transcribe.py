@@ -118,7 +118,7 @@ class BaseRealtimeTranscribeEngine(RealtimeEngine):
         text: str,
         segments: list[TranscriptSegment],
         language: str,
-        runtime: str,
+        engine_id: str,
         language_confidence: float | None = None,
         duration: float | None = None,
         alignment_method: AlignmentMethod = AlignmentMethod.UNKNOWN,
@@ -139,7 +139,7 @@ class BaseRealtimeTranscribeEngine(RealtimeEngine):
             duration=duration,
             timestamp_granularity=granularity,
             alignment_method=alignment_method,
-            runtime=runtime,
+            engine_id=engine_id,
             warnings=warnings or [],
             metadata=extra if extra else {},
         )

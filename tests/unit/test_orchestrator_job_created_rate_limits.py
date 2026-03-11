@@ -17,7 +17,7 @@ from dalston.orchestrator.engine_selector import (
 @pytest.mark.parametrize(
     ("build_error", "expected_error_snippet"),
     [
-        (NoDownloadedModelError(runtime="nemo"), "No downloaded models"),
+        (NoDownloadedModelError(engine_id="nemo"), "No downloaded models"),
         (
             NoCapableEngineError(
                 stage="transcribe",

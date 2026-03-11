@@ -369,11 +369,11 @@ async def _claim_and_replay_stale_events(
         max_iterations = 100  # Up to 10,000 events at startup
         count = 100
     else:
-        max_iterations = 10  # Up to 1,000 events during runtime
+        max_iterations = 10  # Up to 1,000 events during engine_id
         count = 100
 
     # At startup, claim events idle for 30+ seconds (no other consumer can be
-    # processing if we just started). During runtime, use 5 minutes to avoid
+    # processing if we just started). During engine_id, use 5 minutes to avoid
     # stealing from slow but healthy consumers.
     min_idle_ms = 30000 if is_startup else 300000
 
@@ -572,11 +572,11 @@ async def _dispatch_event_dict(
 
                 elif event_type == "task.started":
                     task_id = _require_uuid_field(event, "task_id")
-                    runtime = event.get("runtime")
+                    engine_id = event.get("engine_id")
                     dalston.telemetry.set_span_attribute(
                         "dalston.task_id", str(task_id)
                     )
-                    await handle_task_started(task_id, db, runtime)
+                    await handle_task_started(task_id, db, engine_id)
 
                 elif event_type == "task.completed":
                     task_id = _require_uuid_field(event, "task_id")

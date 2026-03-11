@@ -831,7 +831,7 @@ class SessionHandler:
             duration=audio_duration,
             timestamp_granularity=TimestampGranularity.WORD,
             alignment_method=AlignmentMethod.UNKNOWN,
-            runtime="streaming-decode",
+            engine_id="streaming-decode",
         )
 
         # Add to assembler for timeline tracking
@@ -922,7 +922,7 @@ class SessionHandler:
     def _build_transcribe_params(self) -> TranscribeInput:
         """Build typed transcriber params from current session state."""
         return TranscribeInput(
-            runtime_model_id=self.config.model,
+            loaded_model_id=self.config.model,
             language=self.config.language,
             vocabulary=self.config.vocabulary,
             word_timestamps=self.config.word_timestamps,

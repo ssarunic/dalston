@@ -1,10 +1,10 @@
 # Model catalog entry for vllm-asr-qwen2-audio-7b
-# This file defines the model variant metadata for runtime model management (M36)
+# This file defines the model variant metadata for engine_id model management (M36)
 
 schema_version: "1.1"
 id: vllm-asr-qwen2-audio-7b
-runtime: vllm-asr
-runtime_model_id: "Qwen/Qwen2-Audio-7B-Instruct"
+engine_id: vllm-asr
+loaded_model_id: "Qwen/Qwen2-Audio-7B-Instruct"
 
 name: Qwen2-Audio 7B Instruct (vLLM)
 source: Qwen/Qwen2-Audio-7B-Instruct

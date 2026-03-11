@@ -247,17 +247,17 @@ class TestRivaRtStreamingSupport:
         engine, _ = engine_with_mock
         assert engine.supports_streaming() is True
 
-    def test_get_runtime_returns_env_value(self, engine_with_mock) -> None:
+    def test_get_engine_id_returns_env_value(self, engine_with_mock) -> None:
         engine, _ = engine_with_mock
-        # Default is "riva" when DALSTON_RUNTIME is not set
-        assert engine.get_runtime() == "riva"
+        # Default is "riva" when DALSTON_ENGINE_ID is not set
+        assert engine.get_engine_id() == "riva"
 
-    def test_get_runtime_respects_env_override(
+    def test_get_engine_id_respects_env_override(
         self, riva_rt_engine_class, monkeypatch
     ) -> None:
-        monkeypatch.setenv("DALSTON_RUNTIME", "riva-nim-2")
+        monkeypatch.setenv("DALSTON_ENGINE_ID", "riva-nim-2")
         engine = riva_rt_engine_class()
-        assert engine.get_runtime() == "riva-nim-2"
+        assert engine.get_engine_id() == "riva-nim-2"
 
     def test_get_languages(self, engine_with_mock) -> None:
         engine, _ = engine_with_mock

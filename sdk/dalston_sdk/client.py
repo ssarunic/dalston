@@ -680,7 +680,7 @@ class Dalston:
         """List available transcription models from the catalog.
 
         M36: Returns all model variants that can be used with the `model` parameter.
-        Each model maps to a runtime that can load it.
+        Each model maps to a engine_id that can load it.
 
         Returns:
             ModelList with all available models.
@@ -725,8 +725,8 @@ class Dalston:
                     ),
                     hardware=hardware,
                     name=m.get("name"),
-                    runtime=m.get("runtime"),
-                    runtime_model_id=m.get("runtime_model_id"),
+                    engine_id=m.get("engine_id"),
+                    loaded_model_id=m.get("loaded_model_id"),
                     source=m.get("source"),
                     size_gb=m.get("size_gb"),
                 )
@@ -780,8 +780,8 @@ class Dalston:
             ),
             hardware=hardware,
             name=m.get("name"),
-            runtime=m.get("runtime"),
-            runtime_model_id=m.get("runtime_model_id"),
+            engine_id=m.get("engine_id"),
+            loaded_model_id=m.get("loaded_model_id"),
             source=m.get("source"),
             size_gb=m.get("size_gb"),
         )
@@ -789,7 +789,7 @@ class Dalston:
     def list_engines(self) -> EngineList:
         """List all engines with their current status (M36).
 
-        Returns engines from the catalog with their runtime status:
+        Returns engines from the catalog with their engine_id status:
         - "running": Engine has valid heartbeat
         - "available": In catalog but not running
         - "unhealthy": Heartbeat expired
@@ -985,7 +985,7 @@ class Dalston:
                     status=RealtimeSessionStatus(s["status"]),
                     language=s.get("language"),
                     model=s.get("model"),
-                    runtime=s.get("runtime"),
+                    engine_id=s.get("engine_id"),
                     audio_duration_seconds=s.get("audio_duration_seconds", 0),
                     segment_count=s.get("segment_count", 0),
                     word_count=s.get("word_count", 0),
@@ -1032,7 +1032,7 @@ class Dalston:
             status=RealtimeSessionStatus(s["status"]),
             language=s.get("language"),
             model=s.get("model"),
-            runtime=s.get("runtime"),
+            engine_id=s.get("engine_id"),
             audio_duration_seconds=s.get("audio_duration_seconds", 0),
             segment_count=s.get("segment_count", 0),
             word_count=s.get("word_count", 0),
@@ -1615,7 +1615,7 @@ class AsyncDalston:
         """List available transcription models from the catalog.
 
         M36: Returns all model variants that can be used with the `model` parameter.
-        Each model maps to a runtime that can load it.
+        Each model maps to a engine_id that can load it.
 
         Returns:
             ModelList with all available models.
@@ -1660,8 +1660,8 @@ class AsyncDalston:
                     ),
                     hardware=hardware,
                     name=m.get("name"),
-                    runtime=m.get("runtime"),
-                    runtime_model_id=m.get("runtime_model_id"),
+                    engine_id=m.get("engine_id"),
+                    loaded_model_id=m.get("loaded_model_id"),
                     source=m.get("source"),
                     size_gb=m.get("size_gb"),
                 )
@@ -1715,8 +1715,8 @@ class AsyncDalston:
             ),
             hardware=hardware,
             name=m.get("name"),
-            runtime=m.get("runtime"),
-            runtime_model_id=m.get("runtime_model_id"),
+            engine_id=m.get("engine_id"),
+            loaded_model_id=m.get("loaded_model_id"),
             source=m.get("source"),
             size_gb=m.get("size_gb"),
         )
@@ -1724,7 +1724,7 @@ class AsyncDalston:
     async def list_engines(self) -> EngineList:
         """List all engines with their current status (M36).
 
-        Returns engines from the catalog with their runtime status:
+        Returns engines from the catalog with their engine_id status:
         - "running": Engine has valid heartbeat
         - "available": In catalog but not running
         - "unhealthy": Heartbeat expired
@@ -1920,7 +1920,7 @@ class AsyncDalston:
                     status=RealtimeSessionStatus(s["status"]),
                     language=s.get("language"),
                     model=s.get("model"),
-                    runtime=s.get("runtime"),
+                    engine_id=s.get("engine_id"),
                     audio_duration_seconds=s.get("audio_duration_seconds", 0),
                     segment_count=s.get("segment_count", 0),
                     word_count=s.get("word_count", 0),
@@ -1967,7 +1967,7 @@ class AsyncDalston:
             status=RealtimeSessionStatus(s["status"]),
             language=s.get("language"),
             model=s.get("model"),
-            runtime=s.get("runtime"),
+            engine_id=s.get("engine_id"),
             audio_duration_seconds=s.get("audio_duration_seconds", 0),
             segment_count=s.get("segment_count", 0),
             word_count=s.get("word_count", 0),

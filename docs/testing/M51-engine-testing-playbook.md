@@ -28,7 +28,7 @@ After M51, tests should verify:
 | Engine artifact tests | Verify stage engines declare produced artifacts correctly | `tests/unit/test_m51_engine_artifacts.py` |
 | Local runner tests | Verify no-Redis/no-S3 execution path | `tests/unit/test_m51_local_runner.py` |
 | Local runner CLI tests (M52) | Verify file-based command contract + output envelope | `tests/unit/test_m52_local_runner_cli.py`, `tests/unit/test_m52_local_runner_contract.py` |
-| SDK hardening tests (M52) | Enforce no alias exports + fail-closed typed parsing + runtime-only stream polling | `tests/unit/test_m52_sdk_surface.py`, `tests/unit/test_m52_engine_input_contract.py`, `tests/unit/test_m52_runner_stream_contract.py` |
+| SDK hardening tests (M52) | Enforce no alias exports + fail-closed typed parsing + engine-ID stream polling | `tests/unit/test_m52_sdk_surface.py`, `tests/unit/test_m52_engine_input_contract.py`, `tests/unit/test_m52_runner_stream_contract.py` |
 | Realtime side-effect boundary tests | Verify `SessionStorage` adapter behavior | `tests/unit/test_m51_realtime_storage.py` |
 | Static guardrails | Enforce signature + no URI/storage coupling in engines | `tests/unit/test_m51_enforcement.py` |
 
@@ -77,7 +77,7 @@ def test_engine_process_contract(tmp_path: Path) -> None:
         config={},
     )
     ctx = BatchTaskContext(
-        runtime="test-runtime",
+        engine_id="test-engine_id",
         instance="test-instance",
         task_id="task-1",
         job_id="job-1",
@@ -96,7 +96,7 @@ def test_engine_process_contract(tmp_path: Path) -> None:
 pytest tests/unit/test_m51_enforcement.py -q
 ```
 
-When changing engine-runtime contracts or artifact flow:
+When changing engine contracts or artifact flow:
 
 ```bash
 pytest \

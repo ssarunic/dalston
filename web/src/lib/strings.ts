@@ -425,7 +425,7 @@ const realtimeLive = {
   vocabularyLabel: 'Vocabulary (comma-separated terms to boost recognition)',
   vocabularyPlaceholder: 'e.g., Kubernetes, CrewAI, Bizzon',
   noModelsWarning:
-    'No downloaded models for available runtimes. Visit Models page to download.',
+    'No downloaded models for available engine_ids. Visit Models page to download.',
   unavailable:
     'Real-time transcription is currently unavailable. No workers are ready.',
   checkEngineHealth: 'Check engine health',
@@ -639,10 +639,10 @@ const modelTable = {
 const modelFilters = {
   searchPlaceholder: 'Search models...',
   allStages: 'All stages',
-  allRuntimes: 'All runtimes',
+  allRuntimes: 'All engine_ids',
   allStatuses: 'All statuses',
   stages: { transcribe: 'Transcribe', align: 'Align', diarize: 'Diarize' },
-  runtimes: {
+  engine_ids: {
     fasterWhisper: 'Faster Whisper',
     nemo: 'NeMo',
     whisperx: 'WhisperX',

@@ -461,7 +461,7 @@ class TestReadyTaskRecovery:
         mock_task = MagicMock()
         mock_task.id = task_id
         mock_task.job_id = job_id
-        mock_task.runtime = queue_id
+        mock_task.engine_id = queue_id
         mock_task.status = TaskStatus.READY.value
 
         mock_result = MagicMock()
@@ -520,7 +520,7 @@ class TestReadyTaskRecovery:
         mock_task = MagicMock()
         mock_task.id = task_id
         mock_task.job_id = job_id
-        mock_task.runtime = queue_id
+        mock_task.engine_id = queue_id
         mock_task.status = TaskStatus.READY.value
 
         mock_result = MagicMock()

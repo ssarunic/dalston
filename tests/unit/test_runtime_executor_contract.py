@@ -34,7 +34,7 @@ class _EchoEngine(Engine):
         return EngineOutput(
             data={
                 "stage": input.stage,
-                "runtime": ctx.runtime,
+                "engine_id": ctx.engine_id,
                 "metadata": ctx.metadata,
                 "config": input.config,
             }
@@ -61,10 +61,10 @@ class _RecordingExecutor(RuntimeExecutor):
 def _binding(stage: str, execution_profile: str) -> _LiteStageBinding:
     return _LiteStageBinding(
         entry=CatalogEntry(
-            runtime=f"{stage}-{execution_profile}",
+            engine_id=f"{stage}-{execution_profile}",
             image="dalston/test:latest",
             capabilities=EngineCapabilities(
-                runtime=f"{stage}-{execution_profile}",
+                engine_id=f"{stage}-{execution_profile}",
                 version="test",
                 stages=[stage],
             ),
@@ -97,7 +97,7 @@ def test_inproc_executor_matches_local_runner_contract(tmp_path: Path) -> None:
             task_id="task-local",
             job_id="job-local",
             stage="transcribe",
-            runtime="local",
+            engine_id="local",
             instance="local-runner",
             config={"model": "tiny"},
             previous_outputs={},
@@ -141,7 +141,7 @@ async def test_lite_pipeline_selects_executor_from_execution_profile(
 
     assert len(executor.requests) == 1
     request = executor.requests[0]
-    assert request.runtime == "transcribe-inproc"
+    assert request.engine_id == "transcribe-inproc"
     assert request.metadata["execution_profile"] == "inproc"
     output_path = (
         tmp_path
@@ -209,7 +209,7 @@ async def test_lite_pipeline_initializes_only_requested_profile_executor(
 
 
 @pytest.mark.asyncio
-async def test_lite_diarize_stage_injects_default_runtime_model_and_audio(
+async def test_lite_diarize_stage_injects_default_loaded_model_and_audio(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -240,7 +240,7 @@ async def test_lite_diarize_stage_injects_default_runtime_model_and_audio(
     )
 
     request = executor.requests[0]
-    assert request.config["runtime_model_id"] == "nvidia/diar-msdd-telephonic"
+    assert request.config["loaded_model_id"] == "nvidia/diar-msdd-telephonic"
     assert request.config["max_speakers"] == 3
     assert request.artifacts["audio"] == audio
 
@@ -257,7 +257,7 @@ def test_default_lite_pipeline_uses_real_transcribe_binding(
     binding = pipeline._stage_bindings["transcribe"]
 
     assert binding.entry.execution_profile == "venv"
-    assert binding.entry.runtime == "faster-whisper"
+    assert binding.entry.engine_id == "faster-whisper"
     assert binding.engine_ref is not None
     assert binding.engine_ref.endswith("engine.py:FasterWhisperBatchEngine")
 
@@ -274,6 +274,6 @@ def test_default_lite_pipeline_uses_real_diarize_binding(
     binding = pipeline._stage_bindings["diarize"]
 
     assert binding.entry.execution_profile == "venv"
-    assert binding.entry.runtime == "nemo-msdd"
+    assert binding.entry.engine_id == "nemo-msdd"
     assert binding.engine_ref is not None
     assert binding.engine_ref.endswith("engine.py:NemoMSDDEngine")

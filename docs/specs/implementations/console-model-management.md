@@ -178,7 +178,7 @@ User enters: "nvidia/canary-1b"
 │  └─────────────────────────────────────────────────────────────┘│
 │                                                                  │
 │  ┌─────────────────────────────────────────────────────────────┐│
-│  │ ✓ Resolved to runtime: nemo                                 ││
+│  │ ✓ Resolved to engine_id: nemo                                 ││
 │  │   Library: nemo                                             ││
 │  │   Languages: en, es, de, fr                                 ││
 │  │   45,231 downloads • 892 likes                              ││
@@ -194,7 +194,7 @@ User enters: "nvidia/canary-1b"
 │  └─────────────────────────────────────────────────────────────┘│
 │                                                                  │
 │  ┌─────────────────────────────────────────────────────────────┐│
-│  │ ⚠️ Could not determine runtime for this model.              ││
+│  │ ⚠️ Could not determine engine_id for this model.              ││
 │  │   It may not be a supported ASR model, or the library_name  ││
 │  │   is not recognized.                                        ││
 │  │                                                             ││
@@ -328,7 +328,7 @@ User enters: "nvidia/canary-1b"
                         │   ┌────────────────────────────────
                         │   │ {
                         │   │   model_id: "nvidia/canary",
-                        │   │   resolved_runtime: "nemo",
+                        │   │   resolved_engine_id: "nemo",
                         │   │   library_name: "nemo",
                         │   │   languages: ["en", "es"],
                         │   │   downloads: 45231,
@@ -365,7 +365,7 @@ Consistent React Query key patterns:
 ```typescript
 // Model registry
 ['modelRegistry']                           // List all
-['modelRegistry', { stage, runtime, status }] // List with filters
+['modelRegistry', { stage, engine_id, status }] // List with filters
 ['modelRegistry', modelId]                  // Single model
 
 // Catalog models (existing)
@@ -501,7 +501,7 @@ Consistent React Query key patterns:
 - [ ] Opens popover on click
 - [ ] Search filters options
 - [ ] Auto option selectable
-- [ ] Groups show by runtime
+- [ ] Groups show by engine_id
 - [ ] Custom HF input works
 - [ ] Selected model shows checkmark
 - [ ] Closes on selection

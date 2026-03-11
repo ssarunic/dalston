@@ -48,7 +48,7 @@ class TestUriFreeMediaContracts:
             buffer_ms=50,
             entities_redacted=2,
             redaction_map=[],
-            runtime="audio-redactor",
+            engine_id="audio-redactor",
         )
 
         assert pii_metadata.redacted_audio_artifact_id == "artf_audio_redacted"

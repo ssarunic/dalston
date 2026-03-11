@@ -30,7 +30,7 @@ YAML → generate_catalog.py → JSON → manual seed_from_catalog() → DB
 
 ## Solution
 
-Make the database registry the single runtime source of truth:
+Make the database registry the single engine_id source of truth:
 
 1. **Auto-seed on gateway startup** - Load YAMLs directly, upsert to DB
 2. **Preserve user edits** - Track `metadata_source` to avoid overwriting enrichments
@@ -102,8 +102,8 @@ import yaml
 class ModelYAMLEntry:
     """Parsed model YAML entry."""
     id: str
-    runtime: str
-    runtime_model_id: str
+    engine_id: str
+    loaded_model_id: str
     name: str
     source: str | None
     size_gb: float | None
@@ -355,13 +355,13 @@ File: `dalston/gateway/api/v1/models.py`
 )
 async def list_models(
     stage: str | None = Query(None),
-    runtime: str | None = Query(None),
+    engine_id: str | None = Query(None),
     status: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> ModelListResponse:
     """List all models from the registry."""
     service = ModelRegistryService()
-    models = await service.list_models(db, stage=stage, runtime=runtime, status=status)
+    models = await service.list_models(db, stage=stage, engine_id=engine_id, status=status)
     return ModelListResponse(data=[_to_response(m) for m in models])
 ```
 
@@ -381,9 +381,9 @@ Delete these methods entirely:
 
 - `get_model()`
 - `get_all_models()`
-- `get_runtime_for_model()`
-- `get_runtime_model_id()`
-- `get_models_for_runtime()`
+- `get_engine_id_for_model()`
+- `get_loaded_model_id()`
+- `get_models_for_engine_id()`
 - `get_models_for_stage()`
 - `find_models_supporting_language()`
 - `_parse_model_entry()`
@@ -405,7 +405,7 @@ Delete:
 Output becomes engines-only:
 
 ```json
-{"engines": {...}, "runtimes": {...}}
+{"engines": {...}, "engine_ids": {...}}
 ```
 
 #### 46.7.3: Remove models from generated JSON

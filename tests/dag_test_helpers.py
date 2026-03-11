@@ -47,18 +47,18 @@ def build_task_dag_for_test(
     if parameters.get("model_transcribe"):
         engines["transcribe"] = parameters["model_transcribe"]
 
-    # Determine runtime_model_id values by stage.
+    # Determine loaded_model_id values by stage.
     # In real usage, these come from EngineSelectionResult after registry lookup.
-    stage_runtime_model_ids: dict[str, str] = {}
+    stage_loaded_model_ids: dict[str, str] = {}
     transcribe_engine = engines.get("transcribe", DEFAULT_ENGINES["transcribe"])
 
-    # For testing: map known model IDs to their runtime + runtime_model_id
+    # For testing: map known model IDs to their engine_id + loaded_model_id
     # This simulates what the engine_selector does with the catalog
-    # Supports both catalog model IDs (parakeet-onnx-*) and runtime model IDs (nvidia/*)
+    # Supports both catalog model IDs (parakeet-onnx-*) and engine_id model IDs (nvidia/*)
     MODEL_TO_RUNTIME = {
-        # NeMo models (GPU required) - runtime model IDs
+        # NeMo models (GPU required) - engine_id model IDs
         "nvidia/parakeet-tdt-1.1b": ("nemo", "nvidia/parakeet-tdt-1.1b"),
-        # NeMo ONNX models (CPU/GPU) - runtime model IDs
+        # NeMo ONNX models (CPU/GPU) - engine_id model IDs
         "nvidia/parakeet-ctc-0.6b": ("nemo-onnx", "nvidia/parakeet-ctc-0.6b"),
         "nvidia/parakeet-ctc-1.1b": ("nemo-onnx", "nvidia/parakeet-ctc-1.1b"),
         "nvidia/parakeet-tdt-0.6b-v2": ("nemo-onnx", "nvidia/parakeet-tdt-0.6b-v2"),
@@ -76,16 +76,16 @@ def build_task_dag_for_test(
     }
 
     if transcribe_engine in MODEL_TO_RUNTIME:
-        runtime, runtime_model_id = MODEL_TO_RUNTIME[transcribe_engine]
-        engines["transcribe"] = runtime
-        stage_runtime_model_ids["transcribe"] = runtime_model_id
+        engine_id, loaded_model_id = MODEL_TO_RUNTIME[transcribe_engine]
+        engines["transcribe"] = engine_id
+        stage_loaded_model_ids["transcribe"] = loaded_model_id
 
     if parameters.get("model_diarize"):
-        stage_runtime_model_ids["diarize"] = parameters["model_diarize"]
+        stage_loaded_model_ids["diarize"] = parameters["model_diarize"]
     if parameters.get("model_align"):
-        stage_runtime_model_ids["align"] = parameters["model_align"]
+        stage_loaded_model_ids["align"] = parameters["model_align"]
     if parameters.get("model_pii_detect"):
-        stage_runtime_model_ids["pii_detect"] = parameters["model_pii_detect"]
+        stage_loaded_model_ids["pii_detect"] = parameters["model_pii_detect"]
 
     # Determine skip flags based on parameters and engine capabilities
     # NeMo and NeMo-ONNX models have native word timestamps, so skip alignment
@@ -105,6 +105,6 @@ def build_task_dag_for_test(
         engines=engines,
         skip_alignment=skip_alignment,
         skip_diarization=skip_diarization,
-        runtime_model_id=stage_runtime_model_ids.get("transcribe"),
-        stage_runtime_model_ids=stage_runtime_model_ids,
+        loaded_model_id=stage_loaded_model_ids.get("transcribe"),
+        stage_loaded_model_ids=stage_loaded_model_ids,
     )

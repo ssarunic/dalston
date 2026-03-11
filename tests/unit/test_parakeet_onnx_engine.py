@@ -74,7 +74,7 @@ class TestParakeetOnnxEngineHealthCheck:
         health = engine.health_check()
 
         assert "status" in health
-        assert "runtime" in health
+        assert "engine_id" in health
         assert "device" in health
         assert "models_loaded" in health
         assert "quantization" in health
@@ -88,25 +88,25 @@ class TestParakeetOnnxEngineHealthCheck:
         assert health["status"] == "healthy"
         assert health["model_count"] == 0
 
-    def test_health_check_reports_runtime(self):
-        """Test that health check reports correct runtime."""
+    def test_health_check_reports_engine_id(self):
+        """Test that health check reports correct engine_id."""
         NemoOnnxBatchEngine = load_parakeet_onnx_engine()
         engine = NemoOnnxBatchEngine()
         health = engine.health_check()
 
-        assert health["runtime"] == "nemo-onnx"
+        assert health["engine_id"] == "nemo-onnx"
 
 
 class TestParakeetOnnxEngineCapabilities:
     """Tests for Parakeet ONNX engine capabilities."""
 
-    def test_get_capabilities_returns_nemo_onnx_runtime(self):
-        """Test that capabilities report nemo-onnx runtime."""
+    def test_get_capabilities_returns_nemo_onnx_engine_id(self):
+        """Test that capabilities report nemo-onnx engine_id."""
         NemoOnnxBatchEngine = load_parakeet_onnx_engine()
         engine = NemoOnnxBatchEngine()
         caps = engine.get_capabilities()
 
-        assert caps.runtime == "nemo-onnx"
+        assert caps.engine_id == "nemo-onnx"
 
     def test_get_capabilities_supports_word_timestamps(self):
         """Test that capabilities report word timestamp support."""
@@ -230,18 +230,18 @@ class TestParakeetOnnxCatalogIntegration:
     in the database (M46). Use ModelRegistryService for model metadata.
     """
 
-    def test_onnx_runtime_exists_in_catalog(self):
-        """Test that nemo-onnx runtime exists in the engine catalog."""
+    def test_onnx_engine_id_exists_in_catalog(self):
+        """Test that nemo-onnx engine_id exists in the engine catalog."""
         from dalston.orchestrator.catalog import get_catalog
 
         catalog = get_catalog()
         engine = catalog.get_engine("nemo-onnx")
 
-        assert engine is not None, "nemo-onnx runtime not found in catalog"
+        assert engine is not None, "nemo-onnx engine_id not found in catalog"
         assert "transcribe" in engine.capabilities.stages
 
-    def test_onnx_runtime_supports_english(self):
-        """Test that nemo-onnx runtime reports English support."""
+    def test_onnx_engine_id_supports_english(self):
+        """Test that nemo-onnx engine_id reports English support."""
         from dalston.orchestrator.catalog import get_catalog
 
         catalog = get_catalog()
@@ -394,7 +394,7 @@ class TestParakeetOnnxWordsToSegments:
         NemoOnnxBatchEngine = load_parakeet_onnx_engine()
         engine = NemoOnnxBatchEngine()
 
-        from dalston.engine_sdk.cores.nemo_onnx_core import OnnxWordResult
+        from dalston.engine_sdk.inference.nemo_onnx_inference import OnnxWordResult
 
         words = [
             OnnxWordResult(word="Hello", start=0.0, end=0.3),
@@ -412,7 +412,7 @@ class TestParakeetOnnxWordsToSegments:
         NemoOnnxBatchEngine = load_parakeet_onnx_engine()
         engine = NemoOnnxBatchEngine()
 
-        from dalston.engine_sdk.cores.nemo_onnx_core import OnnxWordResult
+        from dalston.engine_sdk.inference.nemo_onnx_inference import OnnxWordResult
 
         words = [
             OnnxWordResult(word="Hello.", start=0.0, end=0.3),
@@ -432,7 +432,7 @@ class TestParakeetOnnxWordsToSegments:
         NemoOnnxBatchEngine = load_parakeet_onnx_engine()
         engine = NemoOnnxBatchEngine()
 
-        from dalston.engine_sdk.cores.nemo_onnx_core import OnnxWordResult
+        from dalston.engine_sdk.inference.nemo_onnx_inference import OnnxWordResult
 
         words = [
             OnnxWordResult(word="What?", start=0.0, end=0.3),
@@ -450,7 +450,7 @@ class TestParakeetOnnxWordsToSegments:
         NemoOnnxBatchEngine = load_parakeet_onnx_engine()
         engine = NemoOnnxBatchEngine()
 
-        from dalston.engine_sdk.cores.nemo_onnx_core import OnnxWordResult
+        from dalston.engine_sdk.inference.nemo_onnx_inference import OnnxWordResult
 
         words = [
             OnnxWordResult(word="hello", start=0.0, end=0.2),
@@ -478,7 +478,7 @@ class TestParakeetOnnxWordsToSegments:
         NemoOnnxBatchEngine = load_parakeet_onnx_engine()
         engine = NemoOnnxBatchEngine()
 
-        from dalston.engine_sdk.cores.nemo_onnx_core import OnnxWordResult
+        from dalston.engine_sdk.inference.nemo_onnx_inference import OnnxWordResult
 
         words = [
             OnnxWordResult(word="First.", start=1.0, end=1.5),

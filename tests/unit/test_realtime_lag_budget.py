@@ -46,7 +46,7 @@ def _transcribe_stub(*_args, **_kwargs) -> Transcript:
         text="stub",
         segments=[],
         language="en",
-        runtime="test",
+        engine_id="test",
     )
 
 

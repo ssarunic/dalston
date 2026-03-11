@@ -14,8 +14,8 @@
 # Build argument to select device (cuda or cpu)
 ARG DEVICE=cpu
 
-# GPU: CUDA runtime image
-FROM nvidia/cuda:12.6.0-runtime-ubuntu22.04 AS base-cuda
+# GPU: CUDA engine_id image
+FROM nvidia/cuda:12.6.0-engine_id-ubuntu22.04 AS base-cuda
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/* \

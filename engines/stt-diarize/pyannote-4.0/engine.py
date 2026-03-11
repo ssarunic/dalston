@@ -176,10 +176,10 @@ class PyannoteEngine(Engine):
 
         self.logger.info("processing_diarization", audio_path=str(audio_path))
 
-        runtime_model_id = config.get("runtime_model_id")
-        if not runtime_model_id:
+        loaded_model_id = config.get("loaded_model_id")
+        if not loaded_model_id:
             raise ValueError(
-                "Missing required config field 'runtime_model_id' for diarize stage."
+                "Missing required config field 'loaded_model_id' for diarize stage."
             )
 
         # Get speaker count hints
@@ -196,9 +196,9 @@ class PyannoteEngine(Engine):
 
         # Load pipeline (lazy)
         hf_token = self._get_hf_token(config)
-        pipeline = self._load_pipeline(runtime_model_id, hf_token)
-        self._active_model_id = runtime_model_id
-        self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
+        pipeline = self._load_pipeline(loaded_model_id, hf_token)
+        self._active_model_id = loaded_model_id
+        self._set_runtime_state(loaded_model=loaded_model_id, status="processing")
         try:
             # Build diarization parameters
             diarization_params = {}
@@ -234,7 +234,7 @@ class PyannoteEngine(Engine):
                 num_speakers=len(speakers),
                 overlap_duration=round(overlap_duration, 3),
                 overlap_ratio=round(overlap_ratio, 3),
-                runtime="pyannote-4.0",
+                engine_id="pyannote-4.0",
                 skipped=False,
                 skip_reason=None,
                 warnings=[],
@@ -242,7 +242,7 @@ class PyannoteEngine(Engine):
 
             return EngineOutput(data=output)
         finally:
-            self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
+            self._set_runtime_state(loaded_model=loaded_model_id, status="idle")
 
     def _convert_annotation(self, diarization) -> tuple[list[str], list[SpeakerTurn]]:
         """Convert pyannote diarization output to speakers list and turns.
@@ -332,7 +332,7 @@ class PyannoteEngine(Engine):
             num_speakers=1,
             overlap_duration=0.0,
             overlap_ratio=0.0,
-            runtime="pyannote-4.0",
+            engine_id="pyannote-4.0",
             skipped=True,
             skip_reason="DIARIZATION_DISABLED=true",
             warnings=["Diarization disabled via environment variable"],

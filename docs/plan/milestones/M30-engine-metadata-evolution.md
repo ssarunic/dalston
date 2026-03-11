@@ -10,7 +10,7 @@
 
 ## User Story
 
-> *"As a contributor adding a new engine, I want to write one engine.yaml file with all metadata, and have the system automatically validate it, include it in the catalog, and expose its capabilities at runtime."*
+> *"As a contributor adding a new engine, I want to write one engine.yaml file with all metadata, and have the system automatically validate it, include it in the catalog, and expose its capabilities at engine_id."*
 
 > *"As an API client, I want to discover what capabilities a Dalston deployment supports before submitting jobs."*
 
@@ -29,7 +29,7 @@ This milestone makes `engine.yaml` the single source of truth by:
 - Extending the schema with new sections
 - Creating JSON Schema validation
 - Generating the catalog from engine.yaml files at build time
-- Loading capabilities from engine.yaml at runtime
+- Loading capabilities from engine.yaml at engine_id
 - Exposing discovery APIs for clients
 
 ### Architecture After M30
@@ -511,7 +511,7 @@ Update `docs/specs/batch/ENGINES.md` to document the extended schema.
 ## What NOT to Do
 
 - Don't implement `--from-hf` scaffolding — defer until ecosystem need
-- Don't build runtime profile system (Phase 5 of original proposal) — defer until customers request custom models
+- Don't build engine_id profile system (Phase 5 of original proposal) — defer until customers request custom models
 - Don't add capabilities to realtime engines — batch only for now
 - Don't change DAG builder or pipeline stages — this is metadata evolution, not routing changes
 
@@ -655,7 +655,7 @@ M30 was implemented in 4 phases:
 
 ### Phase 4: Runtime & Tooling
 
-- Modified `Engine.get_capabilities()` to load from engine.yaml at runtime
+- Modified `Engine.get_capabilities()` to load from engine.yaml at engine_id
 - Created `dalston/tools/scaffold_engine.py` for new engine scaffolding
 - Deleted legacy `dalston/orchestrator/engine_catalog.yaml`
 - Extended `EngineCapabilities` model with hardware/performance fields

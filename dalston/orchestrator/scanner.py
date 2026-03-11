@@ -259,7 +259,7 @@ class StaleTaskScanner:
         """Scan a single stream for stale tasks.
 
         Args:
-            queue_id: Queue identifier (typically runtime)
+            queue_id: Queue identifier (typically engine_id)
 
         Returns:
             Tuple of (stale_tasks_found, tasks_failed)
@@ -473,7 +473,7 @@ class StaleTaskScanner:
                     await self._clear_waiting_task_marker(task_id, metadata_key)
                     continue
 
-                queue_id = metadata.get("queue_id") or metadata.get("runtime")
+                queue_id = metadata.get("queue_id") or metadata.get("engine_id")
                 message_id = metadata.get("stream_message_id")
 
                 # If already claimed into PEL, it has been picked up.
@@ -488,9 +488,9 @@ class StaleTaskScanner:
                 wait_timeout_s = metadata.get("wait_timeout_s") or str(
                     getattr(self._settings, "engine_wait_timeout_seconds", 300)
                 )
-                runtime = metadata.get("runtime") or task.runtime
+                engine_id = metadata.get("engine_id") or task.engine_id
                 error = (
-                    f"Runtime '{runtime}' did not become available "
+                    f"Runtime '{engine_id}' did not become available "
                     f"within {wait_timeout_s} seconds"
                 )
 
@@ -509,7 +509,7 @@ class StaleTaskScanner:
                     {
                         "task_id": task_id,
                         "error": error,
-                        "runtime": runtime,
+                        "engine_id": engine_id,
                         "queue_id": queue_id,
                     },
                 )
@@ -524,7 +524,7 @@ class StaleTaskScanner:
                 logger.warning(
                     "task_wait_for_engine_timeout",
                     task_id=task_id,
-                    runtime=runtime,
+                    engine_id=engine_id,
                     queue_id=queue_id,
                     wait_timeout_s=wait_timeout_s,
                 )

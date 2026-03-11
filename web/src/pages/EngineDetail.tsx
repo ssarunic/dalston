@@ -123,11 +123,11 @@ export function EngineDetail() {
 
   // Find the engine in console API (has queue stats)
   const batchEngineInfo: BatchEngine | undefined = consoleEnginesData?.batch_engines.find(
-    (e) => e.runtime === decodedEngineId
+    (e) => e.engine_id === decodedEngineId
   )
 
-  // Fetch models from registry and filter by this engine's runtime
-  const { data: registryData } = useModelRegistry({ runtime: decodedEngineId })
+  // Fetch models from registry and filter by this engine's engine_id
+  const { data: registryData } = useModelRegistry({ engine_id: decodedEngineId })
   const engineModels = useMemo(() => {
     return registryData?.data ?? []
   }, [registryData?.data])
@@ -390,7 +390,7 @@ export function EngineDetail() {
                         <div className="min-w-0 flex-1">
                           <div className="font-medium text-sm truncate">{model.name || model.id}</div>
                           <div className="text-xs text-muted-foreground mt-1 truncate">
-                            {model.runtime_model_id}
+                            {model.loaded_model_id}
                           </div>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">

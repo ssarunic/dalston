@@ -89,7 +89,7 @@ def _get_init_lock() -> asyncio.Lock:
 
 
 def get_engine() -> AsyncEngine:
-    """Get lazily-initialized async engine for current runtime mode."""
+    """Get lazily-initialized async engine for current engine_id mode."""
     global _engine, _mode
     if _engine is None:
         _engine, _mode = _build_engine()

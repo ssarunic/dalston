@@ -1,13 +1,13 @@
 # Engines Architecture Analysis: Registry, Runtimes, and Batch/Realtime Unification
 
 **Date**: 2026-03-03
-**Scope**: Batch engine registry + runtime model management (M30/M31/M36/M41) and its impact on real-time engines
+**Scope**: Batch engine registry + engine_id model management (M30/M31/M36/M41) and its impact on real-time engines
 
 ---
 
 ## Executive Summary
 
-The batch engine architecture has evolved significantly through milestones M30-M41, introducing a **registry-based discovery system**, a **static model catalog**, **capability-driven routing**, and **runtime model management** with 5 transcription runtimes. These changes are well-designed for batch processing but have **not been extended to real-time engines**, creating a growing divergence between the two subsystems. The real-time engines still work correctly but are now architecturally behind: they lack dynamic model management, capability declarations, and catalog integration.
+The batch engine architecture has evolved significantly through milestones M30-M41, introducing a **registry-based discovery system**, a **static model catalog**, **capability-driven routing**, and **engine_id model management** with 5 transcription engine_ids. These changes are well-designed for batch processing but have **not been extended to real-time engines**, creating a growing divergence between the two subsystems. The real-time engines still work correctly but are now architecturally behind: they lack dynamic model management, capability declarations, and catalog integration.
 
 This report analyzes: (1) whether changes have broken real-time engines, (2) whether the same approach applies to real-time, and (3) opportunities for unification.
 
@@ -23,7 +23,7 @@ This report analyzes: (1) whether changes have broken real-time engines, (2) whe
                       │  models/*.yaml → catalog.json │
                       │  Engine→Runtime→Model mapping  │
                       └──────────┬───────────────────┘
-                                 │ resolves model → runtime + runtime_model_id
+                                 │ resolves model → engine_id + loaded_model_id
                                  ▼
 ┌──────────┐    ┌──────────────────────┐    ┌──────────────────────┐
 │ API      │───▶│ Orchestrator         │───▶│ Redis Streams        │
@@ -45,10 +45,10 @@ This report analyzes: (1) whether changes have broken real-time engines, (2) whe
 
 | Component | Purpose | Location |
 |-----------|---------|----------|
-| `engine.yaml` | Declares runtime, capabilities, hardware requirements | `engines/stt-*/*/engine.yaml` |
+| `engine.yaml` | Declares engine_id, capabilities, hardware requirements | `engines/stt-*/*/engine.yaml` |
 | `EngineCapabilities` | Pydantic schema for what an engine can do | `engine_sdk/types.py` |
 | `BatchEngineRegistry` | Heartbeat-based registration in Redis | `engine_sdk/registry.py` |
-| `EngineCatalog` | Static model→runtime mapping from `generated_catalog.json` | `orchestrator/catalog.py` |
+| `EngineCatalog` | Static model→engine_id mapping from `generated_catalog.json` | `orchestrator/catalog.py` |
 | `ModelManager` | TTL-based model lifecycle with ref counting + LRU eviction | `engine_sdk/model_manager.py` |
 | `S3ModelStorage` | S3-backed model cache with atomic downloads | `engine_sdk/model_storage.py` |
 | `FasterWhisperModelManager` | Concrete manager for CTranslate2 Whisper models | `engine_sdk/managers/faster_whisper.py` |
@@ -77,12 +77,12 @@ This report analyzes: (1) whether changes have broken real-time engines, (2) whe
 
 | Batch has | Real-time equivalent | Gap |
 |-----------|---------------------|-----|
-| `engine.yaml` with `runtime:` field | No engine.yaml at all | No declarative capabilities |
+| `engine.yaml` with `engine_id:` field | No engine.yaml at all | No declarative capabilities |
 | `EngineCapabilities` schema | Flat strings (`models_loaded`, `languages_supported`) | No structured validation |
 | `EngineCatalog` integration | None — models hardcoded in Python | No dynamic model resolution |
-| `ModelManager` (TTL + LRU) | Models loaded once at startup, never swapped | No runtime model flexibility |
-| `S3ModelStorage` | None — models downloaded at Docker build time | No runtime model provisioning |
-| `runtime_model_id` in task config | Fixed `model_variant` from query params | No orchestrator-driven model selection |
+| `ModelManager` (TTL + LRU) | Models loaded once at startup, never swapped | No engine_id model flexibility |
+| `S3ModelStorage` | None — models downloaded at Docker build time | No engine_id model provisioning |
+| `loaded_model_id` in task config | Fixed `model_variant` from query params | No orchestrator-driven model selection |
 | Capability-driven stage skipping | Not applicable (single-stage) | N/A |
 
 ---
@@ -109,11 +109,11 @@ The batch and real-time subsystems are **cleanly separated** at every level:
 
 1. **No capability validation for RT:** The Gateway's `realtime.py` passes `model` as a raw query parameter. If the requested model isn't loaded on any worker, the Session Router silently assigns any available worker. There's no equivalent of the batch `engine_selector.py` that validates capabilities first.
 
-2. **No model catalog for RT:** A user requesting `model=parakeet-tdt-1.1b` in a batch job gets catalog resolution to the correct runtime. The same model name in a real-time request is treated as an opaque string matched against `models_loaded` — a list of arbitrary names each RT engine publishes.
+2. **No model catalog for RT:** A user requesting `model=parakeet-tdt-1.1b` in a batch job gets catalog resolution to the correct engine_id. The same model name in a real-time request is treated as an opaque string matched against `models_loaded` — a list of arbitrary names each RT engine publishes.
 
 3. **No standardized model names:** Batch engines use catalog-defined names (`Systran/faster-whisper-large-v3-turbo`). RT engines use ad-hoc names (`faster-whisper-large-v3`, `faster-whisper-distil-large-v3`). The same underlying model has different identifiers depending on whether it's accessed via batch or real-time.
 
-4. **No runtime model swapping for RT:** Batch engines can load any model variant at runtime via `ModelManager.acquire()`. RT engines load a fixed set at startup. To change models, you must redeploy the container.
+4. **No engine_id model swapping for RT:** Batch engines can load any model variant at engine_id via `ModelManager.acquire()`. RT engines load a fixed set at startup. To change models, you must redeploy the container.
 
 **Verdict:** Nothing is broken today. But the two subsystems are **drifting apart** in capabilities, and users will encounter inconsistencies when using both batch and real-time for the same audio (e.g., real-time for live transcription followed by batch enhancement).
 
@@ -131,8 +131,8 @@ The core batch innovations can be mapped to real-time:
 |--------------|---------------|------------|
 | `engine.yaml` with structured capabilities | Add `engine.yaml` to `engines/stt-rt/*/` | Low — just YAML files |
 | `EngineCapabilities` schema | Reuse same schema (already has `max_concurrency`, `supports_streaming`) | Low — schema already supports it |
-| `EngineCatalog` model resolution | Session Router uses catalog to resolve `model=X` → worker with correct runtime | Medium — needs `session_router/` changes |
-| `S3ModelStorage` for model provisioning | RT engines download models from S3 at startup or on-demand | Low — library is runtime-agnostic |
+| `EngineCatalog` model resolution | Session Router uses catalog to resolve `model=X` → worker with correct engine_id | Medium — needs `session_router/` changes |
+| `S3ModelStorage` for model provisioning | RT engines download models from S3 at startup or on-demand | Low — library is engine_id-agnostic |
 | Standardized model naming | Both batch and RT use catalog model IDs | Low — naming convention |
 
 ### 3.2 What needs adaptation
@@ -171,7 +171,7 @@ Batch heartbeats include `loaded_model` and `local_cache`. RT heartbeats would a
 | Redis Streams task queuing | RT uses direct WebSocket proxying — no queue |
 | Task DAG / multi-stage pipeline | RT is single-stage (transcribe only) |
 | Capability-driven stage skipping (M31) | No stages to skip |
-| `runtime_model_id` in task config | RT model selected at connection time, not per-task |
+| `loaded_model_id` in task config | RT model selected at connection time, not per-task |
 
 ### Pros and cons of applying the batch approach to RT
 
@@ -336,7 +336,7 @@ Then:
 4. Integrate `ModelManager` into `RealtimeEngine` base class
 5. Integrate `S3ModelStorage` for RT model provisioning
 6. Session Router uses `loaded_model` from heartbeat for warm-model routing
-7. Consolidate per-model RT Docker images into per-runtime images
+7. Consolidate per-model RT Docker images into per-engine_id images
 
 **Phase 3 (Deep integration — if warranted by usage patterns):**
 8. Session Router uses `EngineCatalog` for model resolution
@@ -347,7 +347,7 @@ Then:
 
 ## 5. The Five Transcription Runtimes
 
-For reference, here are the current runtimes and their batch/RT coverage:
+For reference, here are the current engine_ids and their batch/RT coverage:
 
 | Runtime | Batch engine | RT engine | Key trait |
 |---------|-------------|-----------|-----------|

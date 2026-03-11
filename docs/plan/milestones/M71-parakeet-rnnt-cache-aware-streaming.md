@@ -17,7 +17,7 @@
    which is the only correct approach for CTC.
 3. `engine.yaml` and variant YAMLs that already declare `streaming: true` and
    "cache-aware FastConformer encoder" are backed by actual implementation.
-4. Architecture reaches parity with Riva after M70: both runtimes deliver genuine
+4. Architecture reaches parity with Riva after M70: both engine_ids deliver genuine
    streaming partials from the model, not from post-hoc segmentation.
 
 ## Background
@@ -48,7 +48,7 @@ In scope:
 - Update the RT parakeet engine (`engines/stt-rt/parakeet/engine.py`) to call
   `transcribe_streaming()` for RNNT/TDT variants, bypassing VAD accumulation.
 - Retain the VAD-accumulate path as the code path for CTC variants.
-- Update `ParakeetOnnxCore` only if the ONNX runtime exposes an equivalent API
+- Update `ParakeetOnnxCore` only if the ONNX engine_id exposes an equivalent API
   (parakeet-onnx uses CTC; likely out of scope).
 - Add `DALSTON_RNNT_CHUNK_MS` env var (default 160 ms — one FastConformer chunk).
 

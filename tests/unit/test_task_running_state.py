@@ -112,18 +112,18 @@ class TestHandleTaskStarted:
         mock_db.get = AsyncMock(return_value=mock_task)
 
         # Should not raise, but claim is rejected
-        await handle_task_started(task_id, mock_db, runtime="test-engine")
+        await handle_task_started(task_id, mock_db, engine_id="test-engine")
 
         # Commit should NOT be called (claim rejected)
         mock_db.commit.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_passes_runtime_to_logs(self, task_id, mock_task, mock_db):
-        """Test that runtime parameter is accepted."""
+    async def test_passes_engine_id_to_logs(self, task_id, mock_task, mock_db):
+        """Test that engine_id parameter is accepted."""
         from dalston.orchestrator.handlers import handle_task_started
 
-        # Should not raise with runtime
-        await handle_task_started(task_id, mock_db, runtime="faster-whisper")
+        # Should not raise with engine_id
+        await handle_task_started(task_id, mock_db, engine_id="faster-whisper")
 
         # Verify the function completed (basic smoke test)
         mock_db.execute.assert_called_once()
@@ -142,7 +142,7 @@ class TestEngineRunnerPublishTaskStarted:
 
         mock_engine = MagicMock()
         runner = EngineRunner(mock_engine)
-        runner.runtime = "faster-whisper"
+        runner.engine_id = "faster-whisper"
 
         mock_redis = MagicMock()
         runner._redis = mock_redis
@@ -161,5 +161,5 @@ class TestEngineRunnerPublishTaskStarted:
         assert event["type"] == "task.started"
         assert event["task_id"] == task_id
         assert event["job_id"] == job_id
-        assert event["runtime"] == "faster-whisper"
+        assert event["engine_id"] == "faster-whisper"
         assert "timestamp" in event

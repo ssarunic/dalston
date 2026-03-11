@@ -51,7 +51,7 @@ schema bootstrap.  There is no longer a need to:
 
 ### Clean-start outcomes
 
-1. No silent runtime 500s caused by missing columns/tables on older lite DBs.
+1. No silent engine_id 500s caused by missing columns/tables on older lite DBs.
 2. No hidden schema mutations outside the Alembic migration path.
 3. No requirement to manually delete local DB state as a standard upgrade step.
 
@@ -115,7 +115,7 @@ with an actionable error message — no partial startup.
 3. Do not expand lite feature scope beyond migration reliability, except
    targeted M57 carry-forward closures (#2, #3, #6, #7, #10, #12).
 4. Do not change API request/response contracts.
-5. Do not bundle runtime-isolation or packaging scope (M59/M60).
+5. Do not bundle engine_id-isolation or packaging scope (M59/M60).
 
 ---
 

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Goal** | NeMo RT engines use dynamic model loading, consolidating per-model containers into per-runtime containers |
+| **Goal** | NeMo RT engines use dynamic model loading, consolidating per-model containers into per-engine containers |
 | **Duration** | 3-4 days |
 | **Dependencies** | M43 (Real-Time Engine Unification) |
 | **Deliverable** | Two consolidated RT containers: `stt-rt-nemo` and `stt-rt-nemo-onnx` |
@@ -37,7 +37,7 @@ This means:
 
 ## Solution
 
-Consolidate into two runtime-based containers with dynamic model loading:
+Consolidate into two engine-ID-based containers with dynamic model loading:
 
 ```text
 Before: 6+ NeMo RT images (per-model)
@@ -150,8 +150,8 @@ engines/stt-rt/parakeet-onnx-tdt-0.6b-v3/
 ```json
 {
   "id": "parakeet-rnnt-1.1b",
-  "runtime": "nemo",
-  "runtime_model_id": "nvidia/parakeet-rnnt-1.1b",
+  "engine_id": "nemo",
+  "loaded_model_id": "nvidia/parakeet-rnnt-1.1b",
   "architecture": "rnnt",
   "size_gb": 1.2,
   "languages": ["en"],
@@ -169,7 +169,7 @@ Same as M43 - `loaded_models` in heartbeat:
 ```json
 {
   "worker_id": "stt-rt-nemo-1",
-  "runtime": "nemo",
+  "engine_id": "nemo",
   "loaded_models": ["parakeet-rnnt-1.1b"],
   "active_sessions": 2
 }

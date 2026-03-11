@@ -5,7 +5,7 @@ batch engine (queue-based) and the realtime engine (WebSocket-based) can
 share a single loaded model and inference path.
 
 This module owns the FasterWhisperModelManager and provides a
-runtime-neutral interface for transcription. Each engine adapter
+engine_id-neutral interface for transcription. Each engine adapter
 (batch / realtime) is responsible for formatting the raw results into
 its own output contract.
 """
@@ -29,7 +29,7 @@ logger = structlog.get_logger()
 
 
 # ---------------------------------------------------------------------------
-# Result types — runtime-neutral, no dependency on batch or RT SDK types
+# Result types — engine_id-neutral, no dependency on batch or RT SDK types
 # ---------------------------------------------------------------------------
 
 
@@ -91,11 +91,11 @@ class FasterWhisperConfig:
 
 
 # ---------------------------------------------------------------------------
-# FasterWhisperCore — shared inference logic
+# FasterWhisperInference — shared inference logic
 # ---------------------------------------------------------------------------
 
 
-class FasterWhisperCore:
+class FasterWhisperInference:
     """Shared inference logic for faster-whisper batch and realtime.
 
     Owns the model manager and provides a unified transcription interface.
@@ -365,8 +365,8 @@ class FasterWhisperCore:
         cls,
         device: str | None = None,
         compute_type: str | None = None,
-    ) -> FasterWhisperCore:
-        """Create a FasterWhisperCore configured from environment variables.
+    ) -> FasterWhisperInference:
+        """Create a FasterWhisperInference configured from environment variables.
 
         Args:
             device: Override device (None = auto-detect or from env)

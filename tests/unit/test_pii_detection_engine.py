@@ -88,9 +88,9 @@ class TestPIINameFalsePositiveFiltering:
 
 
 class TestPIIRuntimeModelSelection:
-    """Tests for runtime_model_id-driven GLiNER loading."""
+    """Tests for loaded_model_id-driven GLiNER loading."""
 
-    def test_gliner_cache_is_keyed_by_runtime_model_id(self):
+    def test_gliner_cache_is_keyed_by_loaded_model_id(self):
         PIIDetectionEngine = load_pii_engine()
 
         class _DummyModel:

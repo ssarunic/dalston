@@ -9,7 +9,7 @@
 # Or directly:
 #   docker build -t dalston/stt-batch-transcribe-hf-asr:1.0.0 -f engines/stt-transcribe/hf-asr/Dockerfile .
 #
-# Models are downloaded at runtime to /models/huggingface volume.
+# Models are downloaded at engine_id to /models/huggingface volume.
 
 FROM python:3.11-slim
 

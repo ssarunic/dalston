@@ -33,7 +33,7 @@ Replace the heavy NeMo toolkit (~5GB container) with lightweight ONNX Runtime (~
 ### Current State
 
 - `engines/stt-transcribe/parakeet/` uses NeMo toolkit
-- NeMo pulls PyTorch, Megatron, CUDA runtime
+- NeMo pulls PyTorch, Megatron, CUDA engine_id
 - Container is ~5GB, slow cold start
 
 ### Target State
@@ -106,7 +106,7 @@ id: parakeet-onnx
 name: Parakeet ONNX Runtime
 version: 1.0.0
 stage: transcribe
-runtime: parakeet-onnx
+engine_id: parakeet-onnx
 
 description: |
   NVIDIA Parakeet transcription using ONNX Runtime.
@@ -243,7 +243,7 @@ class ParakeetOnnxEngine(Engine):
 
     def process(self, input: TaskInput) -> TaskOutput:
         model_id = input.config.get(
-            "runtime_model_id",
+            "loaded_model_id",
             os.environ.get("DALSTON_DEFAULT_MODEL_ID", "parakeet-tdt-1.1b-onnx")
         )
 
@@ -399,7 +399,7 @@ engines/stt-transcribe/hf-asr/
 
 ```dockerfile
 # HuggingFace Transformers ASR Engine
-FROM nvidia/cuda:12.4.0-runtime-ubuntu24.04
+FROM nvidia/cuda:12.4.0-engine_id-ubuntu24.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-dev \
@@ -447,7 +447,7 @@ id: hf-asr
 name: HuggingFace Transformers ASR
 version: 1.0.0
 stage: transcribe
-runtime: hf-asr
+engine_id: hf-asr
 
 description: |
   Generic ASR engine for HuggingFace transformers models.
@@ -541,7 +541,7 @@ class HFASREngine(Engine):
 
     def process(self, input: TaskInput) -> TaskOutput:
         model_id = input.config.get(
-            "runtime_model_id",
+            "loaded_model_id",
             os.environ.get("DALSTON_DEFAULT_MODEL_ID", "openai/whisper-large-v3")
         )
         language = input.config.get("language")
@@ -741,7 +741,7 @@ id: vllm-asr
 name: vLLM Audio ASR
 version: 1.0.0
 stage: transcribe
-runtime: vllm-asr
+engine_id: vllm-asr
 
 description: |
   Audio-capable LLMs via vLLM for state-of-the-art transcription accuracy.
@@ -982,7 +982,7 @@ class VLLMASREngine(Engine):
 
     def process(self, input: TaskInput) -> TaskOutput:
         model_id = input.config.get(
-            "runtime_model_id",
+            "loaded_model_id",
             os.environ.get("DALSTON_DEFAULT_MODEL_ID", "mistralai/Voxtral-Mini-3B-2507")
         )
         language = input.config.get("language")
@@ -1083,19 +1083,19 @@ Add new engines to `generated_catalog.json` or database seeding:
       "id": "parakeet-onnx",
       "image": "dalston/engine-parakeet-onnx:latest",
       "stage": "transcribe",
-      "runtime": "parakeet-onnx"
+      "engine_id": "parakeet-onnx"
     },
     "hf-asr": {
       "id": "hf-asr",
       "image": "dalston/engine-hf-asr:latest",
       "stage": "transcribe",
-      "runtime": "hf-asr"
+      "engine_id": "hf-asr"
     },
     "vllm-asr": {
       "id": "vllm-asr",
       "image": "dalston/engine-vllm-asr:latest",
       "stage": "transcribe",
-      "runtime": "vllm-asr"
+      "engine_id": "vllm-asr"
     }
   }
 }

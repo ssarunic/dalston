@@ -304,7 +304,7 @@ class TestExceptionSerialization:
 
         error = EngineUnavailableError(
             "Engine 'whisper' is not running",
-            runtime="whisper",
+            engine_id="whisper",
             stage="transcribe",
             details=details,
         )
@@ -312,7 +312,7 @@ class TestExceptionSerialization:
         result = error.to_dict()
 
         assert result["error"] == "engine_unavailable"
-        assert result["runtime"] == "whisper"
+        assert result["engine_id"] == "whisper"
         assert result["stage"] == "transcribe"
         assert "details" in result
 
@@ -333,7 +333,7 @@ class TestExceptionSerialization:
 
         error = EngineCapabilityError(
             "Engine does not support language 'hr'",
-            runtime="parakeet",
+            engine_id="parakeet",
             stage="transcribe",
             language="hr",
             details=details,
@@ -342,6 +342,6 @@ class TestExceptionSerialization:
         result = error.to_dict()
 
         assert result["error"] == "engine_capability_mismatch"
-        assert result["runtime"] == "parakeet"
+        assert result["engine_id"] == "parakeet"
         assert result["language"] == "hr"
         assert "details" in result

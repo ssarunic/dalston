@@ -63,7 +63,7 @@ class InProcExecutor(RuntimeExecutor):
                 materialized_artifacts=materialized,
             )
             ctx = BatchTaskContext(
-                runtime=request.runtime,
+                engine_id=request.engine_id,
                 instance=request.instance,
                 task_id=request.task_id,
                 job_id=request.job_id,

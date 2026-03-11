@@ -1,6 +1,6 @@
 schema_version: "1.1"
 id: vllm-asr
-runtime: vllm-asr
+engine_id: vllm-asr
 stage: transcribe
 name: vLLM Audio ASR
 version: 1.0.0
@@ -9,7 +9,7 @@ description: |
   Supports Voxtral (Mistral) and Qwen2-Audio model families.
 
   Uses model-specific adapters for prompt building and output parsing.
-  Loads models at runtime via runtime_model_id without requiring
+  Loads models at engine_id via loaded_model_id without requiring
   separate Docker images per variant.
 
   Note: Audio LLMs produce text only - no word timestamps.

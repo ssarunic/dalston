@@ -72,13 +72,13 @@ def _resolve_engine_module_path(module_name: str) -> Path | None:
     if candidate.exists() and candidate.is_file():
         return candidate
 
-    # Handle runtime IDs that include dots, for example:
+    # Handle engine_id IDs that include dots, for example:
     # engines.stt-diarize.pyannote-4.0.engine -> engines/stt-diarize/pyannote-4.0/engine.py
     parts = module_name.split(".")
     if len(parts) >= 4 and parts[0] == "engines" and parts[-1] == "engine":
         stage = parts[1]
-        runtime = ".".join(parts[2:-1])
-        runtime_candidate = Path("engines") / stage / runtime / "engine.py"
+        engine_id = ".".join(parts[2:-1])
+        runtime_candidate = Path("engines") / stage / engine_id / "engine.py"
         if runtime_candidate.exists() and runtime_candidate.is_file():
             return runtime_candidate
 

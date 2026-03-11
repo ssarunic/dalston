@@ -51,7 +51,7 @@ class RealtimeSessionService:
         client_ip: str,
         language: str | None = None,
         model: str | None = None,
-        runtime: str | None = None,
+        engine_id: str | None = None,
         encoding: str | None = None,
         sample_rate: int | None = None,
         retention: int = RETENTION_DEFAULT_DAYS,
@@ -68,7 +68,7 @@ class RealtimeSessionService:
             client_ip: Client IP address
             language: Language code or "auto"
             model: Model variant requested by user
-            runtime: Runtime framework that handled the session (e.g., "parakeet", "faster-whisper")
+            engine_id: Runtime framework that handled the session (e.g., "parakeet", "faster-whisper")
             encoding: Audio encoding
             sample_rate: Audio sample rate
             retention: Retention in days (0=transient, -1=permanent, N=days)
@@ -87,7 +87,7 @@ class RealtimeSessionService:
             status="active",
             language=language,
             model=model,
-            runtime=runtime,
+            engine_id=engine_id,
             encoding=encoding,
             sample_rate=sample_rate,
             retention=retention,

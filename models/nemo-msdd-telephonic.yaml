@@ -1,7 +1,7 @@
 schema_version: "1.1"
 id: nvidia/diar-msdd-telephonic
-runtime: nemo-msdd
-runtime_model_id: nvidia/diar-msdd-telephonic
+engine_id: nemo-msdd
+loaded_model_id: nvidia/diar-msdd-telephonic
 
 name: NVIDIA NeMo MSDD Telephonic
 source: nvidia/diar-msdd-telephonic
@@ -10,7 +10,7 @@ stage: diarize
 
 description: |
   NeMo MSDD diarization model set tuned for telephonic-style speech.
-  Resolved to component models inside the nemo-msdd runtime.
+  Resolved to component models inside the nemo-msdd engine_id.
 
 languages: null
 

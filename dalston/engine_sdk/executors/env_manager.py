@@ -1,4 +1,4 @@
-"""Helpers for resolving and validating runtime-specific virtualenvs."""
+"""Helpers for resolving and validating engine_id-specific virtualenvs."""
 
 from __future__ import annotations
 
@@ -9,14 +9,14 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class VenvEnvironment:
-    runtime: str
+    engine_id: str
     python_executable: Path
     env_dir: Path
     lockfile: Path | None = None
 
 
 class VenvEnvironmentManager:
-    """Resolve runtime-specific Python executables with caching and health checks."""
+    """Resolve engine_id-specific Python executables with caching and health checks."""
 
     def __init__(
         self,
@@ -27,68 +27,69 @@ class VenvEnvironmentManager:
     ) -> None:
         if health_check_timeout_s <= 0:
             raise ValueError("health_check_timeout_s must be > 0")
-        self._runtime_pythons = {
-            runtime: Path(path) for runtime, path in (runtime_pythons or {}).items()
+        self._engine_id_pythons = {
+            engine_id: Path(path) for engine_id, path in (runtime_pythons or {}).items()
         }
-        self._runtime_lockfiles = {
-            runtime: Path(path) for runtime, path in (runtime_lockfiles or {}).items()
+        self._engine_id_lockfiles = {
+            engine_id: Path(path)
+            for engine_id, path in (runtime_lockfiles or {}).items()
         }
         self._cache: dict[str, VenvEnvironment] = {}
         self._health_check_timeout_s = health_check_timeout_s
 
-    def register_runtime(
+    def register_engine_id(
         self,
-        runtime: str,
+        engine_id: str,
         *,
         python_executable: Path | str,
         lockfile: Path | str | None = None,
     ) -> None:
-        self._runtime_pythons[runtime] = Path(python_executable)
+        self._engine_id_pythons[engine_id] = Path(python_executable)
         if lockfile is not None:
-            self._runtime_lockfiles[runtime] = Path(lockfile)
-        self._cache.pop(runtime, None)
+            self._engine_id_lockfiles[engine_id] = Path(lockfile)
+        self._cache.pop(engine_id, None)
 
-    def ensure_environment(self, runtime: str) -> VenvEnvironment:
-        cached = self._cache.get(runtime)
+    def ensure_environment(self, engine_id: str) -> VenvEnvironment:
+        cached = self._cache.get(engine_id)
         if cached is not None:
             return cached
 
-        python_executable = self._runtime_pythons.get(runtime)
+        python_executable = self._engine_id_pythons.get(engine_id)
         if python_executable is None:
             raise FileNotFoundError(
-                f"No venv python configured for runtime '{runtime}'"
+                f"No venv python configured for engine_id '{engine_id}'"
             )
 
         resolved_python = python_executable.expanduser().absolute()
         if not resolved_python.exists() or not resolved_python.is_file():
             raise FileNotFoundError(
-                f"Configured venv python does not exist for runtime '{runtime}': "
+                f"Configured venv python does not exist for engine_id '{engine_id}': "
                 f"{resolved_python}"
             )
 
-        lockfile = self._runtime_lockfiles.get(runtime)
+        lockfile = self._engine_id_lockfiles.get(engine_id)
         resolved_lockfile = None
         if lockfile is not None:
             resolved_lockfile = lockfile.expanduser().resolve()
             if not resolved_lockfile.exists() or not resolved_lockfile.is_file():
                 raise FileNotFoundError(
-                    f"Configured venv lockfile does not exist for runtime "
-                    f"'{runtime}': {resolved_lockfile}"
+                    f"Configured venv lockfile does not exist for engine_id "
+                    f"'{engine_id}': {resolved_lockfile}"
                 )
 
         self._health_check(
-            runtime,
+            engine_id,
             resolved_python,
             timeout_s=self._health_check_timeout_s,
         )
 
         environment = VenvEnvironment(
-            runtime=runtime,
+            engine_id=engine_id,
             python_executable=resolved_python,
             env_dir=resolved_python.parent.parent,
             lockfile=resolved_lockfile,
         )
-        self._cache[runtime] = environment
+        self._cache[engine_id] = environment
         return environment
 
     def clear_cache(self) -> None:
@@ -96,7 +97,7 @@ class VenvEnvironmentManager:
 
     @staticmethod
     def _health_check(
-        runtime: str,
+        engine_id: str,
         python_executable: Path,
         *,
         timeout_s: float,
@@ -115,12 +116,12 @@ class VenvEnvironmentManager:
             )
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(
-                f"Health check timed out for runtime '{runtime}' venv "
+                f"Health check timed out for engine_id '{engine_id}' venv "
                 f"({python_executable}) after {timeout_s:.0f}s"
             ) from exc
         if completed.returncode != 0:
             stderr = completed.stderr.strip() or completed.stdout.strip()
             raise RuntimeError(
-                f"Health check failed for runtime '{runtime}' venv "
+                f"Health check failed for engine_id '{engine_id}' venv "
                 f"({python_executable}): {stderr}"
             )

@@ -553,8 +553,8 @@ When `vocabulary_boost` is provided to a model that only supports `initial_promp
 | `model_align` | align | Alignment model registry ID |
 | `model_pii_detect` | pii_detect | PII detection model registry ID |
 
-All stage model parameters resolve to `(runtime, runtime_model_id)` via the model registry.
-The DAG passes `runtime_model_id` directly into task config for each model-backed stage.
+All stage model parameters resolve to `(engine_id, loaded_model_id)` via the model registry.
+The DAG passes `loaded_model_id` directly into task config for each model-backed stage.
 
 ### Timestamp Granularity Parameter
 

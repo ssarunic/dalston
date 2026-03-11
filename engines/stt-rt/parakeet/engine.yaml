@@ -1,6 +1,6 @@
 schema_version: "1.1"
 id: stt-rt-parakeet
-runtime: nemo
+engine_id: nemo
 stage: transcribe
 mode: realtime
 name: Parakeet Realtime

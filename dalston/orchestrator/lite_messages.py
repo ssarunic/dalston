@@ -1,7 +1,7 @@
 """Centralized user-facing strings for lite mode orchestrator.
 
 Internal to dalston.orchestrator — do not import from other packages (gateway,
-CLI, engines).  Package install boundaries enforce this at runtime.
+CLI, engines).  Package install boundaries enforce this at engine_id.
 
 Usage:
 

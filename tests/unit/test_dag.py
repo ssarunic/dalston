@@ -26,17 +26,17 @@ class TestBuildTaskDagModelSelection:
     def test_default_model_config(self, job_id: UUID, audio_uri: str):
         """Test that default config is used when no model specified.
 
-        M36: With runtime model management, the default engine (faster-whisper-large-v3-turbo)
-        is resolved to its runtime (faster-whisper).
+        M36: With engine_id model management, the default engine (faster-whisper-large-v3-turbo)
+        is resolved to its engine_id (faster-whisper).
         """
         tasks = build_task_dag_for_test(job_id, audio_uri, {})
 
         # Find transcribe task
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
 
-        # M36: runtime is the logical engine identifier
-        # Default engine faster-whisper-large-v3-turbo maps to faster-whisper runtime
-        assert transcribe_task.runtime == "faster-whisper"
+        # M36: engine_id is the logical engine identifier
+        # Default engine faster-whisper-large-v3-turbo maps to faster-whisper engine_id
+        assert transcribe_task.engine_id == "faster-whisper"
         # Default config values are applied
         assert (
             transcribe_task.config["beam_size"]
@@ -69,7 +69,7 @@ class TestBuildTaskDagModelSelection:
         tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
-        assert transcribe_task.runtime == "custom-engine"
+        assert transcribe_task.engine_id == "custom-engine"
 
     def test_model_registry_integration(self, job_id: UUID, audio_uri: str):
         """Test parameters as they would be passed from gateway with model registry."""
@@ -86,7 +86,7 @@ class TestBuildTaskDagModelSelection:
         tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
-        assert transcribe_task.runtime == "faster-whisper"
+        assert transcribe_task.engine_id == "faster-whisper"
         assert transcribe_task.config["model"] == "base"
         assert transcribe_task.config["language"] == "en"
 
@@ -205,8 +205,8 @@ class TestBuildTaskDagPipeline:
         stages = [t.stage for t in tasks]
         assert "diarize" in stages
 
-    def test_diarize_runtime_model_id_propagated(self, job_id: UUID, audio_uri: str):
-        """Diarize config should include selected runtime_model_id."""
+    def test_diarize_loaded_model_id_propagated(self, job_id: UUID, audio_uri: str):
+        """Diarize config should include selected loaded_model_id."""
         tasks = build_task_dag_for_test(
             job_id,
             audio_uri,
@@ -218,12 +218,12 @@ class TestBuildTaskDagPipeline:
 
         diarize_task = next(t for t in tasks if t.stage == "diarize")
         assert (
-            diarize_task.config["runtime_model_id"]
+            diarize_task.config["loaded_model_id"]
             == "pyannote/speaker-diarization-community-1"
         )
 
-    def test_align_runtime_model_id_propagated(self, job_id: UUID, audio_uri: str):
-        """Align config should include selected runtime_model_id."""
+    def test_align_loaded_model_id_propagated(self, job_id: UUID, audio_uri: str):
+        """Align config should include selected loaded_model_id."""
         tasks = build_task_dag_for_test(
             job_id,
             audio_uri,
@@ -235,7 +235,7 @@ class TestBuildTaskDagPipeline:
 
         align_task = next(t for t in tasks if t.stage == "align")
         assert (
-            align_task.config["runtime_model_id"]
+            align_task.config["loaded_model_id"]
             == "jonatasgrosman/wav2vec2-large-xlsr-53-japanese"
         )
 
@@ -261,9 +261,9 @@ class TestBuildTaskDagPipeline:
 
 
 class TestBuildTaskDagNemo:
-    """Tests for NeMo runtime DAG behavior (M21/M36).
+    """Tests for NeMo engine_id DAG behavior (M21/M36).
 
-    M36: Parakeet models now route through the 'nemo' runtime.
+    M36: Parakeet models now route through the 'nemo' engine_id.
     Using catalog entries like 'nvidia/parakeet-tdt-1.1b' (full HuggingFace namespace).
     """
 
@@ -357,11 +357,13 @@ class TestBuildTaskDagNemo:
         # Transcribe depends on prepare
         assert task_by_stage["prepare"].id in task_by_stage["transcribe"].dependencies
 
-    def test_nemo_transcribe_task_uses_nemo_runtime(self, job_id: UUID, audio_uri: str):
-        """Test that transcribe task uses NeMo runtime when a parakeet model is specified.
+    def test_nemo_transcribe_task_uses_nemo_engine_id(
+        self, job_id: UUID, audio_uri: str
+    ):
+        """Test that transcribe task uses NeMo engine_id when a parakeet model is specified.
 
-        M36: MODEL_REGISTRY resolves 'parakeet-tdt-1.1b' to runtime='nemo' and
-        sets runtime_model_id in the task config.
+        M36: MODEL_REGISTRY resolves 'parakeet-tdt-1.1b' to engine_id='nemo' and
+        sets loaded_model_id in the task config.
         """
         parameters = {
             "model_transcribe": "nvidia/parakeet-tdt-1.1b",
@@ -370,7 +372,7 @@ class TestBuildTaskDagNemo:
         tasks = build_task_dag_for_test(job_id, audio_uri, parameters)
 
         transcribe_task = next(t for t in tasks if t.stage == "transcribe")
-        # M36: runtime is the logical engine identifier, not the model ID
-        assert transcribe_task.runtime == "nemo"
-        # runtime_model_id tells the engine which specific model to load
-        assert transcribe_task.config["runtime_model_id"] == "nvidia/parakeet-tdt-1.1b"
+        # M36: engine_id is the logical engine identifier, not the model ID
+        assert transcribe_task.engine_id == "nemo"
+        # loaded_model_id tells the engine which specific model to load
+        assert transcribe_task.config["loaded_model_id"] == "nvidia/parakeet-tdt-1.1b"

@@ -7,7 +7,7 @@
 ### Core Value Proposition
 
 - **Dual Mode**: Both batch (file upload) and real-time (streaming) transcription
-- **Runtime Isolation Profiles**: Batch runtimes declare `execution_profile` (`container`, `venv`, `inproc`) so incompatible stacks can coexist without scattered runtime-specific dispatch logic
+- **Runtime Isolation Profiles**: Batch engines declare `execution_profile` (`container`, `venv`, `inproc`) so incompatible stacks can coexist without scattered engine-specific dispatch logic
 - **Pluggable Pipeline**: Swap transcription, diarization, or alignment engines without changing the system
 - **Two-Level Queue**: Jobs contain task DAGs enabling parallel processing and granular failure handling
 - **Simple API, Complex Internals**: ElevenLabs and OpenAI-compatible API abstracts internal complexity
@@ -185,18 +185,18 @@
 
 ### Batch Engine Runtimes
 
-**Purpose**: Execute processing tasks in the isolation boundary declared by each runtime
+**Purpose**: Execute processing tasks in the isolation boundary declared by each engine_id
 
 **Execution Profiles**:
 
 - `container` (default): existing Redis-stream + long-running engine worker path
-- `venv`: lite-mode subprocess execution in a runtime-specific virtualenv
+- `venv`: lite-mode subprocess execution in an engine-specific virtualenv
 - `inproc`: lite-mode direct execution in the orchestrator process
 
 **Execution Model**:
 
 - Distributed mode keeps polling Redis streams with long-running engine workers
-- Lite mode dispatches `inproc` and `venv` runtimes through the same task contract used by containerized engines
+- Lite mode dispatches `inproc` and `venv` engine IDs through the same task contract used by containerized engines
 - There is no silent fallback from `venv` or `inproc` back to another profile on execution failure
 
 **Engine Categories**:

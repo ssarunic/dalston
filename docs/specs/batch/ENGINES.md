@@ -8,9 +8,9 @@ Engines are containerized processors that implement one or more pipeline stages.
 
 ## Engine Architecture
 
-### Runtime-Based Design (M36)
+### Engine-ID-Based Design (M36)
 
-Dalston uses a **runtime-based architecture** where a small number of engine runtimes can load any compatible model on demand:
+Dalston uses an **engine-ID-based architecture** where a small number of engines can load any compatible model on demand:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -33,7 +33,7 @@ Dalston uses a **runtime-based architecture** where a small number of engine run
 ### Model Loading Flow
 
 ```
-Job arrives with runtime_model_id
+Job arrives with loaded_model_id
       ↓
 Check if model loaded in memory
       ↓
@@ -67,7 +67,7 @@ Audio preprocessing and analysis.
 
 ### TRANSCRIBE
 
-Speech-to-text conversion. These are **runtime-based engines** that load models dynamically.
+Speech-to-text conversion. These are **engine-ID-based engines** that load models dynamically.
 
 | Runtime | Library | Models | Languages | GPU |
 |---------|---------|--------|-----------|-----|
@@ -140,13 +140,13 @@ Each engine has an `engine.yaml` file (schema version 1.1) describing its capabi
 
 ### Runtime Engine Schema
 
-For transcription runtimes that load models dynamically:
+For transcription engines that load models dynamically:
 
 ```yaml
 # Runtime-level engine.yaml (e.g., engines/stt-transcribe/faster-whisper/engine.yaml)
 schema_version: "1.1"
-id: faster-whisper                      # Runtime ID
-runtime: faster-whisper                 # Runtime family
+id: faster-whisper                      # Canonical engine ID
+engine_id: faster-whisper               # Engine family (usually same as id)
 stage: transcribe
 name: Faster Whisper Runtime
 version: 1.0.0
@@ -198,7 +198,7 @@ For single-purpose utility engines:
 # Utility engine.yaml (e.g., engines/stt-merge/final-merger/engine.yaml)
 schema_version: "1.1"
 id: final-merger
-runtime: final-merger                   # Same as ID for utilities
+engine_id: final-merger                   # Same as ID for utilities
 stage: merge
 name: Final Merger
 version: 1.0.0
@@ -226,7 +226,7 @@ hardware:
 |-------|------|-------------|
 | `schema_version` | string | Always `"1.1"` |
 | `id` | string | Unique engine identifier |
-| `runtime` | string | Runtime family (for model routing) |
+| `engine_id` | string | Engine family / routing key for model selection |
 | `stage` | string | Pipeline stage |
 | `name` | string | Human-readable name |
 | `version` | string | Semantic version |
@@ -234,13 +234,13 @@ hardware:
 
 #### execution_profile (Optional, defaults to `container`)
 
-Controls where the runtime executes:
+Controls where the engine executes:
 
 - `container`: existing distributed worker model via Redis streams and long-running engine containers
-- `venv`: lite-mode subprocess execution in a runtime-specific virtualenv
+- `venv`: lite-mode subprocess execution in an engine-specific virtualenv
 - `inproc`: lite-mode direct execution inside the orchestrator process
 
-`execution_profile` is execution policy only. It does not change task payloads, model identity (`runtime_model_id`), or output schemas. If the field is omitted, Dalston treats the runtime as `container` for backward compatibility.
+`execution_profile` is execution policy only. It does not change task payloads, model identity (`loaded_model_id`), or output schemas. If the field is omitted, Dalston treats the engine as `container` for backward compatibility.
 
 #### container (Conditionally Required)
 
@@ -372,7 +372,7 @@ class MyTranscribeEngine(Engine):
         del ctx
         # Parse canonical typed transcribe params
         params: TranscribeInput = input.get_transcribe_params()
-        model_id = params.runtime_model_id or os.environ.get("DALSTON_DEFAULT_MODEL_ID")
+        model_id = params.loaded_model_id or os.environ.get("DALSTON_DEFAULT_MODEL_ID")
 
         # Acquire model (loads if needed)
         with self.model_manager.acquire(model_id) as model:
@@ -383,7 +383,7 @@ class MyTranscribeEngine(Engine):
                 segments=[Segment(**s) for s in result.segments],
                 text=result.text,
                 language=result.language,
-                runtime="my-runtime",
+                engine_id="my-engine",
             )
         )
 
@@ -482,7 +482,7 @@ The `config` dict includes:
 
 | Key | Description |
 |-----|-------------|
-| `runtime_model_id` | Runtime model identifier for the selected stage model |
+| `loaded_model_id` | Runtime model identifier for the selected stage model |
 | `language` | Language code or "auto" |
 | `beam_size` | Beam search width |
 | Other | Model-specific parameters |
@@ -513,8 +513,8 @@ The `loaded_model` field enables the console to show which model each engine ins
 ### Quick Start with Scaffold Command
 
 ```bash
-# Scaffold a new transcription runtime
-python -m dalston.tools.scaffold_engine my-runtime --stage transcribe --gpu optional --no-dry-run
+# Scaffold a new transcription engine_id
+python -m dalston.tools.scaffold_engine my-engine --stage transcribe --gpu optional --no-dry-run
 
 # Scaffold a utility engine
 python -m dalston.tools.scaffold_engine my-merger --stage merge --gpu none --no-dry-run
@@ -591,7 +591,7 @@ stt-batch-transcribe-faster-whisper:
 | Variable | Description |
 |----------|-------------|
 | `REDIS_URL` | Redis connection URL |
-| `DALSTON_ENGINE_ID` | Engine/runtime identifier |
+| `DALSTON_ENGINE_ID` | Engine identifier |
 | `DALSTON_S3_BUCKET` | S3 bucket for models and artifacts |
 
 ### Optional
@@ -631,7 +631,7 @@ CTranslate2-optimized Whisper for fast multilingual transcription.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `runtime_model_id` | string | env default | HuggingFace model ID |
+| `loaded_model_id` | string | env default | HuggingFace model ID |
 | `language` | string | `auto` | Language code or "auto" |
 | `beam_size` | int | `5` | Beam search width |
 | `vad_filter` | bool | `true` | Filter silence with VAD |
@@ -658,7 +658,7 @@ NVIDIA NeMo Parakeet models for high-accuracy English transcription.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `runtime_model_id` | string | env default | HuggingFace model ID |
+| `loaded_model_id` | string | env default | HuggingFace model ID |
 
 ---
 
@@ -681,7 +681,7 @@ Audio LLMs via vLLM for multilingual transcription with reasoning capabilities.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `runtime_model_id` | string | env default | HuggingFace model ID |
+| `loaded_model_id` | string | env default | HuggingFace model ID |
 | `max_tokens` | int | `4096` | Max output tokens |
 
 ---
@@ -696,7 +696,7 @@ State-of-the-art speaker diarization.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `runtime_model_id` | string | required | Model registry runtime ID for diarization |
+| `loaded_model_id` | string | required | Model registry engine ID for diarization |
 | `min_speakers` | int | `null` | Minimum speakers |
 | `max_speakers` | int | `null` | Maximum speakers |
 | `hf_token` | string | env | HuggingFace token |

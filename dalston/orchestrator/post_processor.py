@@ -84,7 +84,7 @@ def needs_post_processing(job: JobModel) -> bool:
 def build_post_processing_tasks(
     job: JobModel,
     *,
-    stage_runtime_model_ids: dict[str, str] | None = None,
+    stage_loaded_model_ids: dict[str, str] | None = None,
 ) -> list[Task]:
     """Build post-processing PII tasks for a completed job.
 
@@ -93,13 +93,13 @@ def build_post_processing_tasks(
 
     Args:
         job: Job model (must already be COMPLETED).
-        stage_runtime_model_ids: Optional runtime model overrides by stage.
+        stage_loaded_model_ids: Optional engine_id model overrides by stage.
 
     Returns:
         List of Task objects with dependencies wired to existing tasks.
     """
     params = job.parameters or {}
-    stage_runtime_model_ids = stage_runtime_model_ids or {}
+    stage_loaded_model_ids = stage_loaded_model_ids or {}
 
     tasks: list[Task] = []
 
@@ -111,14 +111,14 @@ def build_post_processing_tasks(
         ),
         "post_processing": True,
     }
-    if "pii_detect" in stage_runtime_model_ids:
-        pii_detect_config["runtime_model_id"] = stage_runtime_model_ids["pii_detect"]
+    if "pii_detect" in stage_loaded_model_ids:
+        pii_detect_config["loaded_model_id"] = stage_loaded_model_ids["pii_detect"]
 
     pii_detect_task = Task(
         id=uuid4(),
         job_id=job.id,
         stage="pii_detect",
-        runtime=DEFAULT_ENGINES["pii_detect"],
+        engine_id=DEFAULT_ENGINES["pii_detect"],
         status=TaskStatus.PENDING,
         dependencies=[],  # No DAG dependencies; job is already complete
         input_bindings=[],
@@ -146,7 +146,7 @@ def build_post_processing_tasks(
             id=uuid4(),
             job_id=job.id,
             stage="audio_redact",
-            runtime=DEFAULT_ENGINES["audio_redact"],
+            engine_id=DEFAULT_ENGINES["audio_redact"],
             status=TaskStatus.PENDING,
             dependencies=[pii_detect_task.id],
             input_bindings=[
@@ -198,15 +198,15 @@ async def schedule_post_processing(
 
     log = logger.bind(job_id=str(job.id))
 
-    # Resolve runtime_model_id for PII detection from job parameters
+    # Resolve loaded_model_id for PII detection from job parameters
     params = job.parameters or {}
-    stage_runtime_model_ids: dict[str, str] = {}
+    stage_loaded_model_ids: dict[str, str] = {}
     model_pii = params.get("model_pii_detect")
     if model_pii:
-        stage_runtime_model_ids["pii_detect"] = model_pii
+        stage_loaded_model_ids["pii_detect"] = model_pii
 
     tasks = build_post_processing_tasks(
-        job, stage_runtime_model_ids=stage_runtime_model_ids
+        job, stage_loaded_model_ids=stage_loaded_model_ids
     )
     if not tasks:
         return []
@@ -226,7 +226,7 @@ async def schedule_post_processing(
             id=task.id,
             job_id=task.job_id,
             stage=task.stage,
-            runtime=task.runtime,
+            engine_id=task.engine_id,
             status=task.status.value,
             config=task_config,
             input_uri=task.input_uri,
@@ -464,7 +464,7 @@ async def update_transcript_with_pii(
 
             # Build pii_metadata
             pii_metadata: dict[str, Any] = {
-                "detection_engine": pii_detect_task.runtime,
+                "detection_engine": pii_detect_task.engine_id,
                 "entities_detected": len(pii_data.get("pii_entities", [])),
             }
             if redact_data:

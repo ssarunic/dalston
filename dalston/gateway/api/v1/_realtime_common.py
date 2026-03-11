@@ -124,27 +124,32 @@ async def keep_session_alive(
 class RTRoutingParams:
     """Resolved routing parameters for a real-time session."""
 
-    __slots__ = ("routing_model", "model_runtime", "valid_runtimes", "effective_model")
+    __slots__ = (
+        "routing_model",
+        "model_engine_id",
+        "valid_engine_ids",
+        "effective_model",
+    )
 
     def __init__(
         self,
         routing_model: str | None,
-        model_runtime: str | None,
-        valid_runtimes: set[str] | None,
+        model_engine_id: str | None,
+        valid_engine_ids: set[str] | None,
         effective_model: str,
     ) -> None:
         self.routing_model = routing_model
-        self.model_runtime = model_runtime
-        self.valid_runtimes = valid_runtimes
+        self.model_engine_id = model_engine_id
+        self.valid_engine_ids = valid_engine_ids
         self.effective_model = effective_model
 
 
 async def resolve_rt_routing(requested_model: str | None) -> RTRoutingParams:
     """Resolve routing parameters for a real-time session.
 
-    When a specific model is requested, looks up its runtime for worker matching.
+    When a specific model is requested, looks up its engine_id for worker matching.
     When no model is requested (None / empty), auto-selects the largest ready
-    streaming model from the registry (M48) and collects valid runtimes for
+    streaming model from the registry (M48) and collects valid engine_ids for
     fallback routing.
 
     Args:
@@ -154,8 +159,8 @@ async def resolve_rt_routing(requested_model: str | None) -> RTRoutingParams:
         Routing parameters to pass to the session allocator.
     """
     routing_model = requested_model or None
-    model_runtime: str | None = None
-    valid_runtimes: set[str] | None = None
+    model_engine_id: str | None = None
+    valid_engine_ids: set[str] | None = None
     effective_model: str = requested_model or ""
 
     if routing_model:
@@ -163,7 +168,7 @@ async def resolve_rt_routing(requested_model: str | None) -> RTRoutingParams:
             async for db in _get_db():
                 model_entry = await ModelRegistryService().get_model(db, routing_model)
                 if model_entry:
-                    model_runtime = model_entry.runtime
+                    model_engine_id = model_entry.engine_id
                 break
         except Exception as e:
             logger.warning("model_lookup_failed", model=routing_model, error=str(e))
@@ -181,20 +186,22 @@ async def resolve_rt_routing(requested_model: str | None) -> RTRoutingParams:
                 if candidates:
                     largest = max(candidates, key=lambda m: m.size_bytes or 0)
                     routing_model = largest.id
-                    model_runtime = largest.runtime
+                    model_engine_id = largest.engine_id
                     effective_model = largest.id
                     logger.info(
                         "auto_selected_rt_model",
                         model_id=largest.id,
-                        runtime=largest.runtime,
+                        engine_id=largest.engine_id,
                         size_mb=round((largest.size_bytes or 0) / 1024 / 1024, 1),
                     )
 
-                valid_runtimes = {m.runtime for m in downloaded_models if m.runtime}
+                valid_engine_ids = {
+                    m.engine_id for m in downloaded_models if m.engine_id
+                }
                 break
         except Exception as e:
             logger.warning("registry_lookup_failed", error=str(e))
 
     return RTRoutingParams(
-        routing_model, model_runtime, valid_runtimes, effective_model
+        routing_model, model_engine_id, valid_engine_ids, effective_model
     )

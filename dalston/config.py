@@ -88,7 +88,7 @@ class Settings(BaseSettings):
         alias="DALSTON_LITE_TRANSCRIBE_BACKEND",
         description=(
             "Lite transcribe backend. "
-            "'real': execute a local engine runtime (default). "
+            "'real': execute a local engine engine_id (default). "
             "'stub': use deterministic placeholder transcript."
         ),
     )
@@ -102,7 +102,7 @@ class Settings(BaseSettings):
         alias="DALSTON_LITE_DIARIZE_BACKEND",
         description=(
             "Lite diarize backend. "
-            "'real': execute a local engine runtime (default). "
+            "'real': execute a local engine engine_id (default). "
             "'stub': use deterministic placeholder diarization."
         ),
     )
@@ -111,16 +111,16 @@ class Settings(BaseSettings):
         alias="DALSTON_LITE_DIARIZE_ENGINE_REF",
         description="Engine reference used by lite diarize backend when backend='real'.",
     )
-    lite_diarize_runtime_model_id: str = Field(
+    lite_diarize_loaded_model_id: str = Field(
         default="nvidia/diar-msdd-telephonic",
         alias="DALSTON_LITE_DIARIZE_RUNTIME_MODEL_ID",
-        description="Default runtime_model_id injected into lite diarize config when omitted.",
+        description="Default loaded_model_id injected into lite diarize config when omitted.",
     )
     lite_venv_python: str | None = Field(
         default=None,
         alias="DALSTON_LITE_VENV_PYTHON",
         description=(
-            "Python executable used for lite venv runtimes. "
+            "Python executable used for lite venv engine_ids. "
             "Defaults to the current interpreter when unset."
         ),
     )

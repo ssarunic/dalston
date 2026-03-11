@@ -17,7 +17,7 @@ Responsibilities of the caller (adapter handlers)
 - Authenticate the WebSocket connection.
 - Accept the connection.
 - Check and increment the rate-limit session counter.
-- Resolve routing parameters (model, runtime).
+- Resolve routing parameters (model, engine_id).
 - Provide a ``connect`` coroutine that performs the protocol-specific proxy.
 - Send any protocol-specific opening message before calling ``run()``.
 """
@@ -137,7 +137,7 @@ class RealtimeProxy:
         Args:
             websocket: The client WebSocket connection (already accepted).
             session_router: SessionRouter used for worker allocation.
-            routing_params: Model/runtime routing resolution from ``resolve_rt_routing()``.
+            routing_params: Model/engine_id routing resolution from ``resolve_rt_routing()``.
             language: Language code to forward to the worker (e.g. ``"auto"``).
             connect: Protocol-specific proxy coroutine. Called with
                 ``(websocket, allocation)``; returns ``session_end_data | None``.
@@ -153,8 +153,8 @@ class RealtimeProxy:
             language=language,
             model=routing_params.routing_model,
             client_ip=client_ip,
-            runtime=routing_params.model_runtime,
-            valid_runtimes=routing_params.valid_runtimes,
+            engine_id=routing_params.model_engine_id,
+            valid_engine_ids=routing_params.valid_engine_ids,
         )
 
         if allocation is None:
@@ -286,7 +286,7 @@ class RealtimeProxy:
                 "client_ip": session_params.client_ip,
                 "language": language,
                 "model": session_params.model,
-                "runtime": allocation.runtime,
+                "engine_id": allocation.engine_id,
                 "created_by_key_id": session_params.created_by_key_id,
             }
             if session_params.encoding is not None:

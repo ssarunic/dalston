@@ -47,7 +47,7 @@ DEFAULT_ENGINES_DIR = Path(__file__).parent.parent.parent / "engines"
 class ScaffoldConfig(NamedTuple):
     """Configuration for scaffolding a new engine."""
 
-    runtime: str
+    engine_id: str
     stage: str
     name: str
     description: str
@@ -65,7 +65,7 @@ class VariantConfig(NamedTuple):
 
     variant_id: str  # e.g., "base", "large-v3"
     engine_family: str  # e.g., "whisper"
-    full_runtime: str  # e.g., "whisper-base"
+    full_engine_id: str  # e.g., "whisper-base"
     stage: str
     name: str
     description: str
@@ -133,44 +133,44 @@ VARIANT_DEFAULTS = {
 }
 
 
-def validate_runtime(runtime: str) -> str | None:
-    """Validate runtime ID matches schema pattern.
+def validate_engine_id(engine_id: str) -> str | None:
+    """Validate engine_id ID matches schema pattern.
 
     Returns error message if invalid, None if valid.
     """
     pattern = r"^[a-z][a-z0-9.-]*[a-z0-9]$"
-    if not re.match(pattern, runtime):
+    if not re.match(pattern, engine_id):
         return (
-            f"Runtime ID '{runtime}' is invalid. "
+            f"Runtime ID '{engine_id}' is invalid. "
             "Must be lowercase, start with letter, end with letter/number, "
             "and contain only letters, numbers, hyphens, and dots."
         )
-    if len(runtime) < 2 or len(runtime) > 64:
-        return f"Runtime ID must be 2-64 characters, got {len(runtime)}"
+    if len(engine_id) < 2 or len(engine_id) > 64:
+        return f"Runtime ID must be 2-64 characters, got {len(engine_id)}"
     return None
 
 
-def to_class_name(runtime: str) -> str:
-    """Convert runtime ID to Python class name.
+def to_class_name(engine_id: str) -> str:
+    """Convert engine_id ID to Python class name.
 
     Examples:
         faster-whisper -> FasterWhisperEngine
         pyannote-4.0 -> Pyannote40Engine
         my-new-engine -> MyNewEngineEngine
     """
-    parts = re.split(r"[-.]", runtime)
+    parts = re.split(r"[-.]", engine_id)
     class_name = "".join(part.capitalize() for part in parts)
     return f"{class_name}Engine"
 
 
-def to_human_name(runtime: str) -> str:
-    """Convert runtime ID to human-readable name.
+def to_human_name(engine_id: str) -> str:
+    """Convert engine_id ID to human-readable name.
 
     Examples:
         faster-whisper -> Faster Whisper
         pyannote-4.0 -> Pyannote 4.0
     """
-    parts = runtime.split("-")
+    parts = engine_id.split("-")
     return " ".join(part.title() for part in parts)
 
 
@@ -212,7 +212,7 @@ def generate_engine_yaml(config: ScaffoldConfig) -> str:
         rtf_cpu = "0.5" if config.supports_cpu else "null"
 
     return f"""schema_version: "1.1"
-id: {config.runtime}
+id: {config.engine_id}
 stage: {config.stage}
 name: {config.name}
 version: 1.0.0
@@ -273,7 +273,7 @@ performance:
 
 def generate_engine_py(config: ScaffoldConfig) -> str:
     """Generate engine.py content."""
-    class_name = to_class_name(config.runtime)
+    class_name = to_class_name(config.engine_id)
 
     return f'''"""{config.name} engine.
 
@@ -353,7 +353,7 @@ class {class_name}(Engine):
     def get_capabilities(self) -> EngineCapabilities:
         """Return engine capabilities for catalog validation."""
         return EngineCapabilities(
-            runtime="{config.runtime}",
+            engine_id="{config.engine_id}",
             version="1.0.0",
             stages=["{config.stage}"],
             languages={repr(config.languages)},
@@ -383,7 +383,7 @@ def generate_dockerfile(config: ScaffoldConfig) -> str:
 # {config.description}
 #
 # Build from repo root:
-#   docker compose build stt-batch-{config.stage}-{config.runtime}
+#   docker compose build stt-batch-{config.stage}-{config.engine_id}
 #
 {gpu_comment}
 FROM python:3.11-slim
@@ -407,14 +407,14 @@ RUN pip install --no-cache-dir -e ".[engine-sdk]"
 WORKDIR /engine
 
 # Copy engine requirements first for better caching
-COPY engines/stt-{config.stage}/{config.runtime}/requirements.txt .
+COPY engines/stt-{config.stage}/{config.engine_id}/requirements.txt .
 
 # Install engine dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy engine files
-COPY engines/stt-{config.stage}/{config.runtime}/engine.yaml .
-COPY engines/stt-{config.stage}/{config.runtime}/engine.py .
+COPY engines/stt-{config.stage}/{config.engine_id}/engine.yaml .
+COPY engines/stt-{config.stage}/{config.engine_id}/engine.py .
 
 # Create model cache directory
 ENV HF_HOME=/models
@@ -450,10 +450,10 @@ def generate_readme(config: ScaffoldConfig) -> str:
 
 ```bash
 # Build the engine
-docker compose build stt-batch-{config.stage}-{config.runtime}
+docker compose build stt-batch-{config.stage}-{config.engine_id}
 
 # Run with docker compose
-docker compose up -d stt-batch-{config.stage}-{config.runtime}
+docker compose up -d stt-batch-{config.stage}-{config.engine_id}
 ```
 
 ## Configuration
@@ -477,7 +477,7 @@ docker compose up -d stt-batch-{config.stage}-{config.runtime}
 pip install -r requirements.txt
 
 # Run locally
-REDIS_URL=redis://localhost:6379 ENGINE_ID={config.runtime} python engine.py
+REDIS_URL=redis://localhost:6379 ENGINE_ID={config.engine_id} python engine.py
 ```
 
 ## Output Format
@@ -523,7 +523,7 @@ def generate_variant_yaml(config: VariantConfig) -> str:
         rtf_cpu = "0.5" if config.supports_cpu else "null"
 
     return f"""schema_version: "1.1"
-id: {config.full_runtime}
+id: {config.full_engine_id}
 stage: {config.stage}
 name: {config.name}
 version: 1.0.0
@@ -759,7 +759,7 @@ This engine supports multiple variants with different hardware requirements:
         config = VariantConfig(
             variant_id=variant,
             engine_family=engine_family,
-            full_runtime=f"{engine_family}-{variant}",
+            full_engine_id=f"{engine_family}-{variant}",
             stage=stage,
             name=f"{engine_family.title()} {variant.title().replace('-', ' ')}",
             description=f"{engine_family.title()} {variant} variant.",
@@ -817,7 +817,7 @@ def scaffold_engine(config: ScaffoldConfig, engines_dir: Path, dry_run: bool) ->
 
     Returns True on success, False on failure.
     """
-    engine_dir = engines_dir / f"stt-{config.stage}" / config.runtime
+    engine_dir = engines_dir / f"stt-{config.stage}" / config.engine_id
 
     if engine_dir.exists():
         print(f"Error: Directory already exists: {engine_dir}", file=sys.stderr)
@@ -875,7 +875,7 @@ Examples:
         """,
     )
     parser.add_argument(
-        "runtime",
+        "engine_id",
         type=str,
         nargs="?",
         help="Engine identifier (lowercase, hyphens allowed)",
@@ -894,7 +894,7 @@ Examples:
     parser.add_argument(
         "--name",
         type=str,
-        help="Human-readable name (default: derived from runtime)",
+        help="Human-readable name (default: derived from engine_id)",
     )
     parser.add_argument(
         "--description",
@@ -960,14 +960,14 @@ Examples:
             print(f"  {stage:12} -> {tag}")
         return 0
 
-    if not args.runtime:
-        parser.error("runtime is required (or use --list-stages)")
+    if not args.engine_id:
+        parser.error("engine_id is required (or use --list-stages)")
 
     if not args.stage:
         parser.error("--stage is required")
 
     # Validate engine ID
-    error = validate_runtime(args.runtime)
+    error = validate_engine_id(args.engine_id)
     if error:
         print(f"Error: {error}", file=sys.stderr)
         return 1
@@ -983,7 +983,7 @@ Examples:
     if args.variants:
         variants = [v.strip() for v in args.variants.split(",")]
         success = scaffold_variant_engine(
-            engine_family=args.runtime,
+            engine_family=args.engine_id,
             stage=args.stage,
             variants=variants,
             description=args.description,
@@ -1007,9 +1007,9 @@ Examples:
         min_vram_gb = 4
 
     config = ScaffoldConfig(
-        runtime=args.runtime,
+        engine_id=args.engine_id,
         stage=args.stage,
-        name=args.name or to_human_name(args.runtime),
+        name=args.name or to_human_name(args.engine_id),
         description=args.description,
         gpu=args.gpu,
         memory=args.memory,

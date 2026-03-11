@@ -482,8 +482,8 @@ export function RealtimeSessions() {
                       <TableCell className="text-muted-foreground text-sm">
                         <div className="flex flex-col">
                           <span>{session.model ?? '-'}</span>
-                          {session.runtime && (
-                            <span className="text-xs text-muted-foreground">{session.runtime}</span>
+                          {session.engine_id && (
+                            <span className="text-xs text-muted-foreground">{session.engine_id}</span>
                           )}
                         </div>
                       </TableCell>

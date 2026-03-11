@@ -43,7 +43,7 @@ export function Models() {
       (m) =>
         m.id.toLowerCase().includes(search) ||
         m.name?.toLowerCase().includes(search) ||
-        m.runtime.toLowerCase().includes(search)
+        m.engine_id.toLowerCase().includes(search)
     )
   }, [models, filters.search])
 

@@ -10,7 +10,7 @@ into configurable segments (DALSTON_RIVA_CHUNK_MS, default 100ms).
 Environment variables:
     DALSTON_RIVA_URI: gRPC endpoint for Riva NIM (default: localhost:50051)
     DALSTON_RIVA_CHUNK_MS: Chunk size in milliseconds (default: 100)
-    DALSTON_RUNTIME: Runtime identifier for registration (default: riva)
+    DALSTON_ENGINE_ID: Runtime identifier for registration (default: riva)
 """
 
 import os
@@ -52,14 +52,14 @@ class RivaBatchEngine(BaseBatchTranscribeEngine):
         super().__init__()
         self._uri = os.environ.get("DALSTON_RIVA_URI", "localhost:50051")
         self._chunk_ms = int(os.environ.get("DALSTON_RIVA_CHUNK_MS", "100"))
-        self._runtime = os.environ.get("DALSTON_RUNTIME", "riva")
+        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "riva")
 
         self._channel = grpc.insecure_channel(self._uri)
         self._asr = riva.client.ASRService(self._channel)
 
         self.logger.info(
             "engine_init",
-            runtime=self._runtime,
+            engine_id=self._engine_id,
             riva_uri=self._uri,
             chunk_ms=self._chunk_ms,
         )
@@ -138,7 +138,7 @@ class RivaBatchEngine(BaseBatchTranscribeEngine):
                 text=full_text,
                 segments=segments,
                 language=language,
-                runtime=self._runtime,
+                engine_id=self._engine_id,
                 duration=duration,
             )
 
@@ -203,9 +203,9 @@ class RivaBatchEngine(BaseBatchTranscribeEngine):
 
         return segments
 
-    def get_runtime(self) -> str:
-        """Return the runtime identifier."""
-        return self._runtime
+    def get_engine_id(self) -> str:
+        """Return the engine_id identifier."""
+        return self._engine_id
 
     def health_check(self) -> dict[str, Any]:
         """Check NIM connectivity via gRPC."""

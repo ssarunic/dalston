@@ -89,7 +89,7 @@ The contract hierarchy is:
 
 - Public ElevenLabs docs for the intended product surface
 - Pinned `elevenlabs-python` behavior for client-facing request/response semantics
-- Raw HTTP/WebSocket traces for runtime semantics the SDK does not fully specify
+- Raw HTTP/WebSocket traces for engine_id semantics the SDK does not fully specify
 
 ---
 
@@ -101,7 +101,7 @@ The contract hierarchy is:
 **Feasibility**: `CURRENT`
 
 The repo currently has route-level integration tests in
-[test_elevenlabs_api.py](../../tests/integration/test_elevenlabs_api.py), but no pinned
+[test_elevenlabs_api.py](../../../tests/integration/test_elevenlabs_api.py), but no pinned
 official SDK contract suite. That matters because the current test layer does not
 exercise the parts of compatibility that usually break first:
 
@@ -130,8 +130,8 @@ live-stack SDK smoke path under `tests/e2e/`.
 **Feasibility**: `CONTRACT-LOCK-FIRST`
 
 Current batch and realtime handling in
-[speech_to_text.py](../../dalston/gateway/api/v1/speech_to_text.py) and
-[realtime.py](../../dalston/gateway/api/v1/realtime.py) still assumes an older model and
+[speech_to_text.py](../../../dalston/gateway/api/v1/speech_to_text.py) and
+[realtime.py](../../../dalston/gateway/api/v1/realtime.py) still assumes an older model and
 parameter surface:
 
 - batch `model_id` is accepted but silently replaced with `settings.default_model`
@@ -180,17 +180,17 @@ The earlier milestone/report direction overstated how much infrastructure is mis
 Dalston already has:
 
 - native transcript deletion in
-  [transcription.py](../../dalston/gateway/api/v1/transcription.py)
+  [transcription.py](../../../dalston/gateway/api/v1/transcription.py)
 - ephemeral token issuance in
-  [auth.py](../../dalston/gateway/api/auth.py)
+  [auth.py](../../../dalston/gateway/api/auth.py)
 - WebSocket auth middleware in
-  [auth.py](../../dalston/gateway/middleware/auth.py)
+  [auth.py](../../../dalston/gateway/middleware/auth.py)
 - webhook endpoint CRUD in
-  [webhooks.py](../../dalston/gateway/api/v1/webhooks.py) and
-  [webhook_endpoints.py](../../dalston/gateway/services/webhook_endpoints.py)
+  [webhooks.py](../../../dalston/gateway/api/v1/webhooks.py) and
+  [webhook_endpoints.py](../../../dalston/gateway/services/webhook_endpoints.py)
 - durable webhook delivery in
-  [delivery.py](../../dalston/orchestrator/delivery.py) and
-  [distributed_main.py](../../dalston/orchestrator/distributed_main.py)
+  [delivery.py](../../../dalston/orchestrator/delivery.py) and
+  [distributed_main.py](../../../dalston/orchestrator/distributed_main.py)
 
 **Important correction**
 
@@ -208,7 +208,7 @@ solving a real platform gap.
 **Feasibility**: `CURRENT`
 
 The current ElevenLabs-compatible route in
-[speech_to_text.py](../../dalston/gateway/api/v1/speech_to_text.py)
+[speech_to_text.py](../../../dalston/gateway/api/v1/speech_to_text.py)
 returns a custom processing response while a job is still running. That is not part of
 the public ElevenLabs contract. The DELETE alias is also missing.
 
@@ -235,7 +235,7 @@ claim anything more specific.
 **Feasibility**: `CROSS-SERVICE`
 
 Current batch handling in
-[speech_to_text.py](../../dalston/gateway/api/v1/speech_to_text.py)
+[speech_to_text.py](../../../dalston/gateway/api/v1/speech_to_text.py)
 accepts `model_id` and then routes all work through `settings.default_model`.
 
 That is a silent behavior change visible to any client that chooses models for
@@ -368,7 +368,7 @@ engine cannot honor them.
 **Feasibility**: `CURRENT`
 
 Current realtime handling in
-[realtime.py](../../dalston/gateway/api/v1/realtime.py)
+[realtime.py](../../../dalston/gateway/api/v1/realtime.py)
 defaults `commit_strategy` to `vad`. The current ElevenLabs public contract defaults it
 to `manual`.
 
@@ -412,7 +412,7 @@ route.
 **Feasibility**: `CURRENT`
 
 Current realtime chunk handling in
-[realtime.py](../../dalston/gateway/api/v1/realtime.py)
+[realtime.py](../../../dalston/gateway/api/v1/realtime.py)
 base64-decodes input and forwards it as if every format were PCM16. That corrupts
 `ulaw_8000` sessions.
 
@@ -424,7 +424,7 @@ treats `ulaw_8000` as supported.
 **Best remedy**
 
 Decode mu-law to PCM in the gateway before forwarding audio to the worker. Keep this in a
-small codec helper so the runtime dependency can be swapped cleanly if needed.
+small codec helper so the codec dependency can be swapped cleanly if needed.
 
 ---
 

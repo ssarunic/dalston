@@ -29,8 +29,8 @@ def test_runner_has_no_legacy_stage_fallback_method() -> None:
     assert not hasattr(EngineRunner, "_candidate_stream_ids")
 
 
-def test_runner_polls_runtime_stream_only(monkeypatch) -> None:
-    with patch.dict(os.environ, {"DALSTON_RUNTIME": "runtime-only"}):
+def test_runner_polls_engine_id_stream_only(monkeypatch) -> None:
+    with patch.dict(os.environ, {"DALSTON_ENGINE_ID": "engine_id-only"}):
         runner = EngineRunner(_NoopEngine())
     runner._redis = MagicMock()
     runner._stage = "transcribe"
@@ -71,14 +71,14 @@ def test_runner_polls_runtime_stream_only(monkeypatch) -> None:
 
     runner._poll_and_process()
 
-    assert seen_stages == ["runtime-only", "runtime-only"]
+    assert seen_stages == ["engine_id-only", "engine_id-only"]
 
 
 def test_runner_uses_final_transcript_artifact_for_canonical_uri(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setenv("DALSTON_S3_BUCKET", "test-bucket")
-    with patch.dict(os.environ, {"DALSTON_RUNTIME": "runtime-only"}):
+    with patch.dict(os.environ, {"DALSTON_ENGINE_ID": "engine_id-only"}):
         runner = EngineRunner(_NoopEngine())
 
     transcript_path = tmp_path / "transcript.json"

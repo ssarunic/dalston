@@ -11,11 +11,11 @@ this engine: vllm-asr (transcribe) -> phoneme-align (add timestamps).
 Features:
     - TTL-based model management with LRU eviction
     - Model-specific adapters for prompt building and output parsing
-    - Runtime model swapping via config["runtime_model_id"]
+    - Runtime model swapping via config["loaded_model_id"]
     - GPU-only inference (vLLM requires CUDA)
 
 Environment variables:
-    DALSTON_RUNTIME: Engine ID for registration (default: "vllm-asr")
+    DALSTON_ENGINE_ID: Engine ID for registration (default: "vllm-asr")
     DALSTON_DEFAULT_MODEL_ID: Default HF model ID (default: "mistralai/Voxtral-Mini-3B-2507")
     DALSTON_MODEL_TTL_SECONDS: Evict models idle longer than this (default: 7200)
     DALSTON_MAX_LOADED_MODELS: Maximum models to keep loaded (default: 1)
@@ -83,7 +83,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
         self._tokenizer = None
         self._model_storage: S3ModelStorage | None = None
 
-        self._runtime = os.environ.get("DALSTON_RUNTIME", "vllm-asr")
+        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "vllm-asr")
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
         )
@@ -110,7 +110,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
         self.logger.info(
             "engine_init",
-            runtime=self._runtime,
+            engine_id=self._engine_id,
             default_model=self._default_model_id,
             gpu_memory_utilization=self._gpu_memory_utilization,
             max_model_len=self._max_model_len,
@@ -118,27 +118,27 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
             s3_storage_enabled=self._model_storage is not None,
         )
 
-    def _ensure_model_loaded(self, runtime_model_id: str) -> None:
+    def _ensure_model_loaded(self, loaded_model_id: str) -> None:
         """Ensure the requested model is loaded, swapping if necessary.
 
         If S3ModelStorage is configured, models are downloaded from S3 to
         local cache first. Otherwise, vLLM downloads directly from HuggingFace.
 
         Args:
-            runtime_model_id: HuggingFace model identifier
+            loaded_model_id: HuggingFace model identifier
 
         Raises:
             ValueError: If no adapter exists for the model
             RuntimeError: If vLLM is not installed or model loading fails
             ModelNotInS3Error: If S3 storage is enabled but model is not in S3
         """
-        if runtime_model_id == self._loaded_model_id:
+        if loaded_model_id == self._loaded_model_id:
             return
 
         # Validate adapter exists before loading
-        if runtime_model_id not in ADAPTER_REGISTRY:
+        if loaded_model_id not in ADAPTER_REGISTRY:
             raise ValueError(
-                f"No adapter for model: {runtime_model_id}. "
+                f"No adapter for model: {loaded_model_id}. "
                 f"Supported models: {sorted(ADAPTER_REGISTRY.keys())}"
             )
 
@@ -147,7 +147,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
             self.logger.info(
                 "unloading_model",
                 current=self._loaded_model_id,
-                requested=runtime_model_id,
+                requested=loaded_model_id,
             )
             self._set_runtime_state(status="unloading")
 
@@ -164,17 +164,17 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
             self.logger.info("model_unloaded")
 
         # Determine model path - either from S3 cache or HuggingFace ID
-        model_path: str = runtime_model_id
+        model_path: str = loaded_model_id
         if self._model_storage is not None:
             self.logger.info(
                 "ensuring_model_from_s3",
-                runtime_model_id=runtime_model_id,
+                loaded_model_id=loaded_model_id,
             )
-            local_path = self._model_storage.ensure_local(runtime_model_id)
+            local_path = self._model_storage.ensure_local(loaded_model_id)
             model_path = str(local_path)
             self.logger.info(
                 "model_ready_from_s3",
-                runtime_model_id=runtime_model_id,
+                loaded_model_id=loaded_model_id,
                 local_path=model_path,
             )
 
@@ -182,7 +182,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
         self._set_runtime_state(status="loading")
         self.logger.info(
             "loading_vllm_model",
-            runtime_model_id=runtime_model_id,
+            loaded_model_id=loaded_model_id,
             model_path=model_path,
         )
 
@@ -202,13 +202,13 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
             limit_mm_per_prompt={"audio": 1},
         )
 
-        self._loaded_model_id = runtime_model_id
+        self._loaded_model_id = loaded_model_id
         self._loaded_model_path = model_path
-        self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
+        self._set_runtime_state(loaded_model=loaded_model_id, status="idle")
 
         self.logger.info(
             "model_loaded_successfully",
-            runtime_model_id=runtime_model_id,
+            loaded_model_id=loaded_model_id,
             model_path=model_path,
         )
 
@@ -228,7 +228,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
         params = engine_input.get_transcribe_params()
         language = params.language
         return self._transcribe_with_vllm(
-            runtime_model_id=params.runtime_model_id or self._default_model_id,
+            loaded_model_id=params.loaded_model_id or self._default_model_id,
             language=language,
             vocabulary=params.vocabulary,
             channel=params.channel,
@@ -248,7 +248,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
         """
         language = params.language
         return self._transcribe_with_vllm(
-            runtime_model_id=params.runtime_model_id or self._default_model_id,
+            loaded_model_id=params.loaded_model_id or self._default_model_id,
             language=language,
             vocabulary=params.vocabulary,
             channel=params.channel,
@@ -258,7 +258,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
     def _transcribe_with_vllm(
         self,
-        runtime_model_id: str,
+        loaded_model_id: str,
         language: str | None,
         vocabulary: list[str] | None,
         channel: int | None,
@@ -282,34 +282,34 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
                 f"Vocabulary boosting ({len(vocabulary)} terms) not supported by vLLM-ASR engine"
             )
 
-        self._ensure_model_loaded(runtime_model_id)
-        self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
+        self._ensure_model_loaded(loaded_model_id)
+        self._set_runtime_state(loaded_model=loaded_model_id, status="processing")
 
         try:
             if audio_path is not None:
                 self.logger.info(
                     "transcribing",
                     audio_path=str(audio_path),
-                    runtime_model_id=runtime_model_id,
+                    loaded_model_id=loaded_model_id,
                     language=language,
                 )
                 raw_text, transcript = transcribe_audio_path(
                     llm=self._llm,
-                    runtime_model_id=runtime_model_id,
+                    loaded_model_id=loaded_model_id,
                     audio_path=Path(audio_path),
                     language=language,
                 )
             elif audio is not None:
                 self.logger.info(
                     "transcribing_audio_array",
-                    runtime_model_id=runtime_model_id,
+                    loaded_model_id=loaded_model_id,
                     language=language,
                     sample_rate=sample_rate,
                     sample_count=int(audio.size),
                 )
                 raw_text, transcript = transcribe_audio_array(
                     llm=self._llm,
-                    runtime_model_id=runtime_model_id,
+                    loaded_model_id=loaded_model_id,
                     audio=audio,
                     language=language,
                     sample_rate=sample_rate,
@@ -319,7 +319,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
             self.logger.info("transcription_complete", char_count=len(raw_text))
 
-            transcript.runtime = self._runtime
+            transcript.engine_id = self._engine_id
             if channel is not None:
                 transcript.channel = channel
             if warnings:
@@ -327,7 +327,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
             return transcript
         finally:
-            self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
+            self._set_runtime_state(loaded_model=loaded_model_id, status="idle")
 
     def health_check(self) -> dict[str, Any]:
         """Return health status including GPU and model info."""
@@ -342,7 +342,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
         return {
             "status": "healthy",
-            "runtime": self._runtime,
+            "engine_id": self._engine_id,
             "model_loaded": self._llm is not None,
             "loaded_model_id": self._loaded_model_id,
             "loaded_model_path": self._loaded_model_path,
@@ -358,7 +358,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
     def get_capabilities(self) -> EngineCapabilities:
         """Return vLLM-ASR engine capabilities."""
         return EngineCapabilities(
-            runtime=self._runtime,
+            engine_id=self._engine_id,
             version="1.0.0",
             stages=["transcribe"],
             languages=None,  # Multilingual (model-dependent)

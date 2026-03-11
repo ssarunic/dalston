@@ -229,7 +229,7 @@ class Task(BaseModel):
     id: UUID
     job_id: UUID
     stage: str
-    runtime: str
+    engine_id: str
     status: TaskStatus = TaskStatus.PENDING
     dependencies: list[UUID] = Field(default_factory=list)
     input_bindings: list[dict[str, Any]] = Field(default_factory=list)

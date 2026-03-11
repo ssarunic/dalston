@@ -2,7 +2,7 @@
 
 Verifies that the batch engine produces the correct output shape
 (Transcript with segments, text, language) and that word
-timestamp behavior is preserved after delegation to FasterWhisperCore.
+timestamp behavior is preserved after delegation to FasterWhisperInference.
 
 These tests mock the faster-whisper model to avoid GPU/model dependencies.
 """
@@ -22,7 +22,7 @@ from dalston.engine_sdk.context import BatchTaskContext
 
 def _ctx(task_id: str, job_id: str) -> BatchTaskContext:
     return BatchTaskContext(
-        runtime="test-runtime",
+        engine_id="test-engine_id",
         instance="test-instance",
         task_id=task_id,
         job_id=job_id,
@@ -86,7 +86,7 @@ def _make_mock_info(
 
 
 def _build_engine_with_mock(segments, info):
-    """Create a FasterWhisperBatchEngine with a mocked FasterWhisperCore."""
+    """Create a FasterWhisperBatchEngine with a mocked FasterWhisperInference."""
     engine = _WhisperEngine()
 
     # Mock the core's manager to return a mock model
@@ -125,7 +125,7 @@ class TestBatchOutputShape:
         assert data.language_confidence == 0.99
         assert data.duration == 5.0
         assert len(data.segments) == 1
-        assert data.runtime == "faster-whisper"
+        assert data.engine_id == "faster-whisper"
 
     def test_output_segment_has_word_timestamps(self) -> None:
         mock_words = [
@@ -233,7 +233,7 @@ class TestBatchOutputShape:
 
 
 class TestBatchConfigPassthrough:
-    """Verify that config values are passed through to FasterWhisperCore."""
+    """Verify that config values are passed through to FasterWhisperInference."""
 
     def test_language_auto_maps_to_none(self) -> None:
         segments = [_make_mock_segment()]

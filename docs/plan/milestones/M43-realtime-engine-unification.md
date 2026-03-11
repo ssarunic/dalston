@@ -5,7 +5,7 @@
 | **Goal** | RT engines use the same registry + dynamic model loading architecture as batch engines |
 | **Duration** | 3-5 days |
 | **Dependencies** | M36 (Runtime Model Management), M40 (Model Registry) |
-| **Deliverable** | Dynamic model loading for RT engines, consolidated Docker images (one per runtime) |
+| **Deliverable** | Dynamic model loading for RT engines, consolidated Docker images (one per engine ID) |
 | **Status** | In Progress (Phase 2/2b Complete) |
 
 > Note (2026-03-11): Base `docker-compose.yml` no longer declares
@@ -14,7 +14,7 @@
 
 ## User Story
 
-> *"As a platform operator, I can deploy a single RT container per runtime that serves any model variant, with models downloaded on-demand from S3."*
+> *"As a platform operator, I can deploy a single RT container per engine ID that serves any model variant, with models downloaded on-demand from S3."*
 
 ---
 
@@ -34,17 +34,17 @@ This means:
 
 - Adding a new model requires building and deploying a new image
 - GPU nodes run multiple containers for different models (wasted VRAM overhead)
-- No runtime model swapping - restart required to change models
+- No engine ID model swapping - restart required to change models
 - Model names are ad-hoc strings, not catalog-validated
 
 ---
 
 ## Solution
 
-RT engines download and load models dynamically using the same `ModelManager` and `S3ModelStorage` that batch engines use. One RT container per runtime serves any model variant.
+RT engines download and load models dynamically using the same `ModelManager` and `S3ModelStorage` that batch engines use. One RT container per engine ID serves any model variant.
 
 ```text
-Before: 8 RT images (2 runtimes x 4 models each)
+Before: 8 RT images (2 engine IDs x 4 models each)
 After:  2 RT images (faster-whisper-rt, parakeet-rt)
 ```
 
@@ -56,7 +56,7 @@ After:  2 RT images (faster-whisper-rt, parakeet-rt)
 
 **Deliverables:**
 
-- [x] Add `engine.yaml` to all RT engines with runtime and capabilities
+- [x] Add `engine.yaml` to all RT engines with engine_id and capabilities
 - [x] Add `get_capabilities()` to `RealtimeEngine` base class
 - [x] Include structured capabilities in worker registration/heartbeats
 - [x] Update Dockerfiles to use main engine.yaml
@@ -65,7 +65,7 @@ After:  2 RT images (faster-whisper-rt, parakeet-rt)
 
 - `engines/stt-rt/*/engine.yaml` - New capability declarations
 - `dalston/realtime_sdk/base.py` - `get_capabilities()`, `_load_engine_yaml()`
-- `dalston/realtime_sdk/registry.py` - `WorkerInfo.capabilities`, `WorkerInfo.runtime`
+- `dalston/realtime_sdk/registry.py` - `WorkerInfo.capabilities`, `WorkerInfo.engine_id`
 
 ### Phase 2: Dynamic Model Loading (Complete)
 
@@ -74,7 +74,7 @@ After:  2 RT images (faster-whisper-rt, parakeet-rt)
 - [x] `AsyncModelManager` wrapper for RT engines
 - [x] RT engines use `ModelManager.acquire()/release()` per session (faster-whisper)
 - [x] Session Router routes by `loaded_models` in heartbeat (warm routing)
-- [x] Consolidate per-model Docker images into per-runtime images (faster-whisper)
+- [x] Consolidate per-model Docker images into per-engine images (faster-whisper)
 
 **Key changes:**
 
@@ -118,30 +118,30 @@ class WhisperStreamingEngine(RealtimeEngine):
 **Notes:**
 
 - Parakeet and Voxtral engines retain single-model-per-instance approach (model selected via `DALSTON_MODEL_VARIANT` env var at startup)
-- Full dynamic model loading for NeMo/Transformers runtimes deferred to future enhancement
+- Full dynamic model loading for NeMo/Transformers engines deferred to future enhancement
 
 ### Phase 2b: Web Console & Registry Impact (Complete)
 
 **Deliverables:**
 
-- [x] Add `runtime` field to Session Router's `WorkerState` and `WorkerStatus`
-- [x] Add `runtime` field to Console API's `RealtimeWorker` response model
-- [x] Update frontend `WorkerStatus` type with `runtime` field
-- [x] Update `RealtimeWorkerCard` UI to display runtime badge and "Loaded models" label
+- [x] Add `engine_id` field to Session Router's `WorkerState` and `WorkerStatus`
+- [x] Add `engine_id` field to Console API's `RealtimeWorker` response model
+- [x] Update frontend `WorkerStatus` type with `engine_id` field
+- [x] Update `RealtimeWorkerCard` UI to display an engine ID badge and "Loaded models" label
 
 **Files changed:**
 
-- `dalston/session_router/registry.py` - Added `runtime` field to `WorkerState`
-- `dalston/session_router/router.py` - Added `runtime` field to `WorkerStatus`
-- `dalston/gateway/api/console.py` - Added `runtime` field to `RealtimeWorker`
-- `web/src/api/types.ts` - Added `runtime` field to `WorkerStatus` interface
-- `web/src/pages/Engines.tsx` - Updated `RealtimeWorkerCard` to show runtime and clarify loaded models
+- `dalston/session_router/registry.py` - Added `engine_id` field to `WorkerState`
+- `dalston/session_router/router.py` - Added `engine_id` field to `WorkerStatus`
+- `dalston/gateway/api/console.py` - Added `engine_id` field to `RealtimeWorker`
+- `web/src/api/types.ts` - Added `engine_id` field to `WorkerStatus` interface
+- `web/src/pages/Engines.tsx` - Updated `RealtimeWorkerCard` to show engine_id and clarify loaded models
 
 **UI Changes:**
 
 The Real-time Workers card in the Engines page now shows:
 
-- Runtime badge (e.g., "faster-whisper") next to worker ID
+- Engine ID badge (e.g., "faster-whisper") next to worker ID
 - "Loaded models" label above the model badges to clarify these are dynamically loaded
 
 ### Phase 3: Session Router Integration (Pending)
@@ -163,8 +163,7 @@ New fields in worker registration:
 ```json
 {
   "worker_id": "rt-fw-1",
-  "engine_id": "stt-rt-faster-whisper",
-  "runtime": "faster-whisper",
+  "engine_id": "faster-whisper",
   "capabilities": { "languages": null, "streaming": true, ... },
   "loaded_models": ["Systran/faster-whisper-large-v3-turbo"],
   "active_sessions": 2
@@ -190,7 +189,7 @@ Response includes warm/cold status:
 - [x] RT engines serve any model variant without image rebuild (faster-whisper)
 - [ ] Session Router routes to warm workers when available (Phase 3)
 - [ ] Cold-start latency < 60s for largest model (Phase 3)
-- [x] Number of RT Docker images reduced from N*M to N (runtimes only)
+- [x] Number of RT Docker images reduced from N*M to N (engine IDs only)
 
 ---
 
@@ -198,4 +197,4 @@ Response includes warm/cold status:
 
 - [M36: Runtime Model Management](M36-runtime-model-management.md) - Batch `ModelManager` implementation
 - [M40: Model Registry](M40-model-registry.md) - Database model tracking
-- [Engine Architecture Analysis](../reports/engines-architecture-analysis.md) - Research leading to this milestone
+- [Engine Architecture Analysis](../../reports/engines-architecture-analysis.md) - Research leading to this milestone

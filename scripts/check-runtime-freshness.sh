@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/check-runtime-freshness.sh [--require-running]
+Usage: scripts/check-engine_id-freshness.sh [--require-running]
 
 Checks that running Dalston containers were created with the current git revision
 via DALSTON_RUNTIME_REVISION.
@@ -25,7 +25,7 @@ if [[ $# -ne 0 ]]; then
 fi
 
 if ! command -v docker >/dev/null 2>&1; then
-  echo "docker is required for runtime freshness checks." >&2
+  echo "docker is required for engine_id freshness checks." >&2
   exit 1
 fi
 
@@ -38,7 +38,7 @@ if [[ -z "$services" ]]; then
     echo "Start a stack first (for example: make dev-minimal)." >&2
     exit 1
   fi
-  echo "No running services found; runtime freshness check skipped."
+  echo "No running services found; engine_id freshness check skipped."
   exit 0
 fi
 
@@ -81,7 +81,7 @@ if [[ "$checked" -eq 0 ]]; then
     echo "No running Dalston-managed containers found (image prefix dalston/*)." >&2
     exit 1
   fi
-  echo "No running Dalston-managed containers found; runtime freshness check skipped."
+  echo "No running Dalston-managed containers found; engine_id freshness check skipped."
   exit 0
 fi
 

@@ -31,8 +31,8 @@ def sample_model() -> ModelRegistryModel:
     return ModelRegistryModel(
         id="faster-whisper-large-v3",
         name="Faster Whisper Large V3",
-        runtime="faster-whisper",
-        runtime_model_id="Systran/faster-whisper-large-v3",
+        engine_id="faster-whisper",
+        loaded_model_id="Systran/faster-whisper-large-v3",
         stage="transcribe",
         status="ready",
         download_path="/models/huggingface/hub/models--Systran--faster-whisper-large-v3",
@@ -159,17 +159,17 @@ class TestListModels:
         mock_db.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_list_models_with_runtime_filter(
+    async def test_list_models_with_engine_id_filter(
         self,
         service: ModelRegistryService,
         mock_db: AsyncMock,
     ):
-        """Test listing models filtered by runtime."""
+        """Test listing models filtered by engine_id."""
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = []
         mock_db.execute.return_value = mock_result
 
-        await service.list_models(mock_db, runtime="nemo")
+        await service.list_models(mock_db, engine_id="nemo")
 
         mock_db.execute.assert_called_once()
 
@@ -289,8 +289,8 @@ class TestRegisterModel:
         await service.register_model(
             mock_db,
             model_id="test-model",
-            runtime="test-runtime",
-            runtime_model_id="test/model",
+            engine_id="test-engine_id",
+            loaded_model_id="test/model",
             stage="transcribe",
         )
 
@@ -309,8 +309,8 @@ class TestRegisterModel:
             mock_db,
             model_id="nvidia/parakeet-tdt-1.1b",
             name="Parakeet TDT 1.1B",
-            runtime="nemo",
-            runtime_model_id="nvidia/parakeet-tdt-1.1b",
+            engine_id="nemo",
+            loaded_model_id="nvidia/parakeet-tdt-1.1b",
             stage="transcribe",
             source="huggingface",
             library_name="nemo",
@@ -331,7 +331,7 @@ class TestRegisterModel:
         added_model = mock_db.add.call_args_list[0][0][0]
         assert added_model.id == "nvidia/parakeet-tdt-1.1b"
         assert added_model.name == "Parakeet TDT 1.1B"
-        assert added_model.runtime == "nemo"
+        assert added_model.engine_id == "nemo"
         assert added_model.status == "not_downloaded"
         assert added_model.languages == ["en"]
         assert added_model.supports_cpu is False

@@ -1,6 +1,6 @@
 schema_version: "1.1"
 id: stt-rt-voxtral
-runtime: vllm-asr
+engine_id: vllm-asr
 stage: transcribe
 mode: realtime
 name: Voxtral Realtime

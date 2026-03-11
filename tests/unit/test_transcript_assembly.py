@@ -43,7 +43,7 @@ class TestAssembleTranscriptBasic:
                         "channels": 1,
                     }
                 ],
-                "runtime": "audio-prepare",
+                "engine_id": "audio-prepare",
             },
             "transcribe": {
                 "text": "Hello world",
@@ -51,7 +51,7 @@ class TestAssembleTranscriptBasic:
                 "segments": [
                     {"start": 0.0, "end": 2.0, "text": "Hello world"},
                 ],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
         }
 
@@ -82,7 +82,7 @@ class TestAssembleTranscriptBasic:
                         "channels": 1,
                     }
                 ],
-                "runtime": "audio-prepare",
+                "engine_id": "audio-prepare",
             },
             "transcribe": {
                 "text": "Hello world",
@@ -90,7 +90,7 @@ class TestAssembleTranscriptBasic:
                 "segments": [
                     {"start": 0.0, "end": 2.0, "text": "Hello world"},
                 ],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
             "align": {
                 "segments": [
@@ -109,7 +109,7 @@ class TestAssembleTranscriptBasic:
                 "word_timestamps": True,
                 "unaligned_ratio": 0.0,
                 "granularity_achieved": "word",
-                "runtime": "phoneme-align",
+                "engine_id": "phoneme-align",
             },
         }
 
@@ -138,7 +138,7 @@ class TestAssembleTranscriptBasic:
                         "channels": 1,
                     }
                 ],
-                "runtime": "audio-prepare",
+                "engine_id": "audio-prepare",
             },
             "transcribe": {
                 "text": "Hello, comment allez-vous?",
@@ -157,7 +157,7 @@ class TestAssembleTranscriptBasic:
                         "language": "fr",
                     },
                 ],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
                 "timestamp_granularity": "segment",
                 "alignment_method": "attention",
             },
@@ -203,7 +203,7 @@ class TestAssembleTranscriptBasic:
                 "word_timestamps": True,
                 "unaligned_ratio": 0.0,
                 "granularity_achieved": "word",
-                "runtime": "phoneme-align",
+                "engine_id": "phoneme-align",
             },
         }
 
@@ -241,7 +241,7 @@ class TestAssembleTranscriptBasic:
                         "channels": 1,
                     }
                 ],
-                "runtime": "audio-prepare",
+                "engine_id": "audio-prepare",
             },
             "transcribe": {
                 "text": "Hello. How are you?",
@@ -250,7 +250,7 @@ class TestAssembleTranscriptBasic:
                     {"start": 0.0, "end": 2.0, "text": "Hello."},
                     {"start": 3.0, "end": 5.0, "text": "How are you?"},
                 ],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
             "diarize": {
                 "turns": [
@@ -259,7 +259,7 @@ class TestAssembleTranscriptBasic:
                 ],
                 "speakers": ["SPEAKER_00", "SPEAKER_01"],
                 "num_speakers": 2,
-                "runtime": "pyannote-4.0",
+                "engine_id": "pyannote-4.0",
             },
         }
 
@@ -290,19 +290,19 @@ class TestAssembleTranscriptBasic:
                         "channels": 1,
                     }
                 ],
-                "runtime": "audio-prepare",
+                "engine_id": "audio-prepare",
             },
             "transcribe": {
                 "text": "Hello",
                 "language": "en",
                 "segments": [{"start": 0.0, "end": 1.0, "text": "Hello"}],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
             "diarize": {
                 "turns": [{"speaker": "SPEAKER_00", "start": 0.0, "end": 1.5}],
                 "speakers": ["SPEAKER_00"],
                 "num_speakers": 1,
-                "runtime": "pyannote-4.0",
+                "engine_id": "pyannote-4.0",
             },
         }
 
@@ -322,7 +322,7 @@ class TestAssembleTranscriptBasic:
                 "text": "Test",
                 "language": "en",
                 "segments": [{"start": 0.0, "end": 1.0, "text": "Test"}],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
         }
 
@@ -347,13 +347,13 @@ class TestAssembleTranscriptBasic:
                         "channels": 1,
                     }
                 ],
-                "runtime": "audio-prepare",
+                "engine_id": "audio-prepare",
             },
             "transcribe": {
                 "text": "Test",
                 "language": "en",
                 "segments": [],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
             "align": {
                 "segments": [],
@@ -362,7 +362,7 @@ class TestAssembleTranscriptBasic:
                 "word_timestamps": False,
                 "unaligned_ratio": 0.0,
                 "granularity_achieved": "word",
-                "runtime": "phoneme-align",
+                "engine_id": "phoneme-align",
             },
         }
 
@@ -382,7 +382,7 @@ class TestAssembleTranscriptBasic:
                 "text": "Test",
                 "language": "en",
                 "segments": [],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
         }
 
@@ -401,7 +401,7 @@ class TestAssembleTranscriptBasic:
                 "text": "Test",
                 "language": "en",
                 "segments": [],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
         }
 
@@ -501,7 +501,7 @@ class TestSelectSegments:
             segments=[TranscriptSegment(start=0.0, end=1.0, text="orig")],
             text="orig",
             language="en",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
         )
         align = AlignOutput(
             segments=[Segment(start=0.1, end=0.9, text="aligned")],
@@ -510,7 +510,7 @@ class TestSelectSegments:
             word_timestamps=True,
             unaligned_ratio=0.0,
             granularity_achieved="word",
-            runtime="phoneme-align",
+            engine_id="phoneme-align",
         )
 
         segments, has_words, warnings = _select_segments(
@@ -527,7 +527,7 @@ class TestSelectSegments:
             segments=[TranscriptSegment(start=0.0, end=1.0, text="orig")],
             text="orig",
             language="en",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
         )
         align = AlignOutput(
             segments=[],
@@ -536,7 +536,7 @@ class TestSelectSegments:
             word_timestamps=False,
             unaligned_ratio=0.0,
             granularity_achieved="word",
-            runtime="phoneme-align",
+            engine_id="phoneme-align",
             skipped=True,
             skip_reason="unsupported language",
         )
@@ -555,7 +555,7 @@ class TestSelectSegments:
             segments=[TranscriptSegment(start=0.0, end=1.0, text="hello")],
             text="hello",
             language="en",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
         )
 
         segments, has_words, warnings = _select_segments(
@@ -719,7 +719,7 @@ class TestAssemblePerChannelTranscript:
                 "segments": [
                     {"start": 0.0, "end": 2.0, "text": "Hello from channel zero."},
                 ],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
             "transcribe_ch1": {
                 "text": "Hi from channel one.",
@@ -727,7 +727,7 @@ class TestAssemblePerChannelTranscript:
                 "segments": [
                     {"start": 1.0, "end": 3.0, "text": "Hi from channel one."},
                 ],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
         }
 
@@ -766,7 +766,7 @@ class TestAssemblePerChannelTranscript:
                     {"start": 0.0, "end": 1.0, "text": "A."},
                     {"start": 4.0, "end": 5.0, "text": "C."},
                 ],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
             "transcribe_ch1": {
                 "text": "B.",
@@ -774,7 +774,7 @@ class TestAssemblePerChannelTranscript:
                 "segments": [
                     {"start": 2.0, "end": 3.0, "text": "B."},
                 ],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
         }
 
@@ -801,7 +801,7 @@ class TestAssemblePerChannelTranscript:
                 "text": "Hello",
                 "language": "en",
                 "segments": [{"start": 0.0, "end": 2.0, "text": "Hello"}],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
             "align_ch0": {
                 "segments": [
@@ -817,13 +817,13 @@ class TestAssemblePerChannelTranscript:
                 "word_timestamps": True,
                 "unaligned_ratio": 0.0,
                 "granularity_achieved": "word",
-                "runtime": "phoneme-align",
+                "engine_id": "phoneme-align",
             },
             "transcribe_ch1": {
                 "text": "World",
                 "language": "en",
                 "segments": [{"start": 1.0, "end": 3.0, "text": "World"}],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
         }
 
@@ -848,13 +848,13 @@ class TestAssemblePerChannelTranscript:
                 "text": "Hi",
                 "language": "en",
                 "segments": [{"start": 0.0, "end": 1.0, "text": "Hi"}],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
             "transcribe_ch1": {
                 "text": "Hello",
                 "language": "en",
                 "segments": [{"start": 1.0, "end": 2.0, "text": "Hello"}],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
         }
 
@@ -876,13 +876,13 @@ class TestAssemblePerChannelTranscript:
                 "text": "Hello.",
                 "language": "en",
                 "segments": [{"start": 0.0, "end": 1.0, "text": "Hello."}],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
             "transcribe_ch1": {
                 "text": "Hi there.",
                 "language": "en",
                 "segments": [{"start": 2.0, "end": 3.0, "text": "Hi there."}],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
         }
 
@@ -901,13 +901,13 @@ class TestAssemblePerChannelTranscript:
                 "text": "Test",
                 "language": "en",
                 "segments": [{"start": 0.0, "end": 1.0, "text": "Test"}],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
             "transcribe_ch1": {
                 "text": "Data",
                 "language": "en",
                 "segments": [{"start": 1.0, "end": 2.0, "text": "Data"}],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
         }
 
@@ -949,7 +949,7 @@ class TestAssemblePerChannelTranscript:
                         "language": "en",
                     },
                 ],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
             "transcribe_ch1": {
                 "text": "Bonjour.",
@@ -967,7 +967,7 @@ class TestAssemblePerChannelTranscript:
                         "language": "fr",
                     },
                 ],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
         }
 
@@ -1001,7 +1001,7 @@ class TestAssemblePerChannelTranscript:
                 "text": "Hello",
                 "language": "en",
                 "segments": [{"start": 0.0, "end": 1.0, "text": "Hello"}],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
             # transcribe_ch1 is missing
         }
@@ -1020,13 +1020,13 @@ class TestAssemblePerChannelTranscript:
                 "text": "Hi",
                 "language": "en",
                 "segments": [],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
             "transcribe_ch1": {
                 "text": "Hey",
                 "language": "en",
                 "segments": [],
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
         }
 

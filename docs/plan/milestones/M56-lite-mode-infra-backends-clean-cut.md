@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Goal** | Introduce a first-class `lite` runtime mode by abstracting core infra backends (DB, queue, storage) so Dalston can run without Postgres/Redis/MinIO in local-first workflows |
+| **Goal** | Introduce a first-class `lite` engine_id mode by abstracting core infra backends (DB, queue, storage) so Dalston can run without Postgres/Redis/MinIO in local-first workflows |
 | **Duration** | 7-10 days |
-| **Dependencies** | M47 (service-layer SQL separation and injection points), M51/M52 (engine runtime contract + local runner), existing batch gateway/orchestrator flow |
+| **Dependencies** | M47 (service-layer SQL separation and injection points), M51/M52 (engine engine_id contract + local runner), existing batch gateway/orchestrator flow |
 | **Deliverable** | Mode-aware backend interfaces with `distributed` and `lite` implementations, SQLite support, in-memory queue, local filesystem storage, and one validated lite batch transcription path |
 | **Status** | Completed |
 
@@ -20,7 +20,7 @@ Dependency clarification:
 1. Dalston can boot in `lite` mode without external Postgres, Redis, or MinIO services.
 2. `lite` mode provides one working batch path end-to-end for first output (`prepare -> transcribe -> merge`).
 3. Existing distributed mode behavior remains unchanged by default.
-4. Backend selection is explicit and deterministic via mode/config, not implicit runtime heuristics.
+4. Backend selection is explicit and deterministic via mode/config, not implicit engine_id heuristics.
 
 ### Architecture outcomes
 
@@ -66,7 +66,7 @@ This avoids a large abstraction layer with no proven behavior.
 
 ### Strategy 2: Mode-first boot contract
 
-Introduce one canonical runtime mode switch:
+Introduce one canonical engine_id mode switch:
 
 1. `DALSTON_MODE=distributed` (default)
 2. `DALSTON_MODE=lite`
@@ -79,7 +79,7 @@ M56 focuses on first-run batch path only. Realtime/session router and high-throu
 
 ### Strategy 4: Preserve current distributed behavior
 
-Treat distributed mode as compatibility baseline. Any abstraction change must be verified against existing distributed tests and expected runtime behavior.
+Treat distributed mode as compatibility baseline. Any abstraction change must be verified against existing distributed tests and expected engine_id behavior.
 
 ### Strategy 5: Defer hard problems to explicit follow-on milestones
 
@@ -88,7 +88,7 @@ Do not overload M56 with:
 1. full SQLite parity for all historical migrations,
 2. full realtime parity,
 3. packaging/single-binary distribution,
-4. multi-runtime local isolation policy.
+4. multi-engine_id local isolation policy.
 
 These are planned as follow-on milestones with separate acceptance gates.
 
@@ -100,7 +100,7 @@ These are planned as follow-on milestones with separate acceptance gates.
 2. Do not port every existing Alembic migration to SQLite.
 3. Do not implement full distributed reliability semantics (e.g., Redis Streams claim/replay parity) inside lite queue.
 4. Do not add auto-start daemon/ghost server behavior yet.
-5. Do not solve all runtime dependency isolation concerns (PyTorch/NeMo/ONNX/vLLM) in this milestone.
+5. Do not solve all engine_id dependency isolation concerns (PyTorch/NeMo/ONNX/vLLM) in this milestone.
 
 ---
 
@@ -269,7 +269,7 @@ Goal: Expand lite-mode beyond minimal batch path (additional stages/flags), defi
 
 ### M59: Runtime Isolation Profiles (In-Proc / Venv / Container)
 
-Goal: Introduce per-runtime execution profiles to handle conflicting dependency stacks locally while preserving a unified control plane and CLI UX.
+Goal: Introduce per-engine_id execution profiles to handle conflicting dependency stacks locally while preserving a unified control plane and CLI UX.
 
 ### M60: One-Line Distribution and Packaging
 

@@ -3,16 +3,16 @@
 This service enables automatic engine selection based on a HuggingFace model's
 `library_name` field. When a user specifies a HuggingFace model ID (e.g.,
 "nvidia/parakeet-tdt-1.1b"), we can fetch its model card and determine which
-Dalston runtime is appropriate.
+Dalston engine_id is appropriate.
 
 Routing priority:
 1. library_name (most reliable) - e.g., "ctranslate2" -> "faster-whisper"
-2. Model tags (fallback) - e.g., "nemo" tag -> "nemo" runtime
+2. Model tags (fallback) - e.g., "nemo" tag -> "nemo" engine_id
 3. pipeline_tag (last resort) - "automatic-speech-recognition" -> "hf-asr"
 
 Usage:
     resolver = HFResolver()
-    runtime = await resolver.resolve_runtime("Systran/faster-whisper-large-v3")
+    engine_id = await resolver.resolve_engine_id("Systran/faster-whisper-large-v3")
     # Returns: "faster-whisper"
 """
 
@@ -26,7 +26,7 @@ import structlog
 
 logger = structlog.get_logger()
 
-# Mapping from HuggingFace library_name to Dalston runtime
+# Mapping from HuggingFace library_name to Dalston engine_id
 # library_name is set in the model's config.json or model card
 LIBRARY_TO_RUNTIME: dict[str, str] = {
     # CTranslate2-based models (faster-whisper)
@@ -44,10 +44,10 @@ LIBRARY_TO_RUNTIME: dict[str, str] = {
     "whisper": "whisper",
 }
 
-# Fallback mapping from model tags to runtime
+# Fallback mapping from model tags to engine_id
 # Used when library_name is not set
 TAG_TO_RUNTIME: dict[str, str] = {
-    # Explicit runtime tags
+    # Explicit engine_id tags
     "faster-whisper": "faster-whisper",
     "ctranslate2": "faster-whisper",
     "nemo": "nemo",
@@ -76,15 +76,15 @@ class HFModelMetadata:
     languages: list[str]
     downloads: int
     likes: int
-    # Computed runtime from card routing
-    resolved_runtime: str | None
+    # Computed engine_id from card routing
+    resolved_engine_id: str | None
 
 
 class HFResolver:
     """Resolve HuggingFace model metadata for engine routing.
 
     This service fetches model info from HuggingFace Hub and determines
-    which Dalston runtime can load the model based on its library_name,
+    which Dalston engine_id can load the model based on its library_name,
     tags, and pipeline_tag.
     """
 
@@ -126,8 +126,8 @@ class HFResolver:
             )
             return None
 
-    async def resolve_runtime(self, model_id: str) -> str | None:
-        """Determine which runtime can load a HuggingFace model.
+    async def resolve_engine_id(self, model_id: str) -> str | None:
+        """Determine which engine_id can load a HuggingFace model.
 
         Routing priority:
         1. library_name (most reliable)
@@ -138,8 +138,8 @@ class HFResolver:
             model_id: HuggingFace model ID (e.g., "Systran/faster-whisper-large-v3")
 
         Returns:
-            Dalston runtime name (e.g., "faster-whisper", "nemo") or None
-            if the runtime cannot be determined.
+            Dalston engine_id name (e.g., "faster-whisper", "nemo") or None
+            if the engine_id cannot be determined.
         """
         info = await self.get_model_info(model_id)
         if info is None:
@@ -153,8 +153,8 @@ class HFResolver:
         library_name = getattr(info, "library_name", None)
         if library_name:
             library_name_lower = library_name.lower()
-            runtime = LIBRARY_TO_RUNTIME.get(library_name_lower)
-            if runtime:
+            engine_id = LIBRARY_TO_RUNTIME.get(library_name_lower)
+            if engine_id:
                 # Special case: "transformers" is used for many tasks (LLM, ASR, etc.)
                 # Only route to hf-asr if pipeline_tag confirms it's ASR
                 if library_name_lower == "transformers":
@@ -171,31 +171,31 @@ class HFResolver:
                             model_id=model_id,
                             library_name=library_name,
                             pipeline_tag=pipeline_tag,
-                            runtime=runtime,
+                            engine_id=engine_id,
                         )
-                        return runtime
+                        return engine_id
                 else:
                     logger.info(
                         "runtime_resolved_by_library",
                         model_id=model_id,
                         library_name=library_name,
-                        runtime=runtime,
+                        engine_id=engine_id,
                     )
-                    return runtime
+                    return engine_id
 
         # 2. Check tags as fallback
         tags = set(info.tags) if info.tags else set()
         for tag in tags:
             tag_lower = tag.lower()
             if tag_lower in TAG_TO_RUNTIME:
-                runtime = TAG_TO_RUNTIME[tag_lower]
+                engine_id = TAG_TO_RUNTIME[tag_lower]
                 logger.info(
                     "runtime_resolved_by_tag",
                     model_id=model_id,
                     tag=tag,
-                    runtime=runtime,
+                    engine_id=engine_id,
                 )
-                return runtime
+                return engine_id
 
         # 3. Check pipeline_tag for generic ASR
         pipeline_tag = getattr(info, "pipeline_tag", None)
@@ -205,7 +205,7 @@ class HFResolver:
                 "runtime_resolved_by_pipeline_tag",
                 model_id=model_id,
                 pipeline_tag=pipeline_tag,
-                runtime="hf-asr",
+                engine_id="hf-asr",
             )
             return "hf-asr"
 
@@ -219,7 +219,7 @@ class HFResolver:
         return None
 
     async def get_model_metadata(self, model_id: str) -> HFModelMetadata | None:
-        """Get full metadata for a model, including resolved runtime.
+        """Get full metadata for a model, including resolved engine_id.
 
         This method is useful for caching model metadata in the registry
         after successful resolution.
@@ -244,8 +244,8 @@ class HFResolver:
         else:
             languages = []
 
-        # Resolve runtime
-        runtime = await self.resolve_runtime(model_id)
+        # Resolve engine_id
+        engine_id = await self.resolve_engine_id(model_id)
 
         return HFModelMetadata(
             model_id=model_id,
@@ -255,23 +255,23 @@ class HFResolver:
             languages=languages,
             downloads=getattr(info, "downloads", 0),
             likes=getattr(info, "likes", 0),
-            resolved_runtime=runtime,
+            resolved_engine_id=engine_id,
         )
 
-    def get_library_to_runtime_mapping(self) -> dict[str, str]:
-        """Return the library_name to runtime mapping for reference.
+    def get_library_to_engine_id_mapping(self) -> dict[str, str]:
+        """Return the library_name to engine_id mapping for reference.
 
         Useful for debugging and API responses.
         """
         return dict(LIBRARY_TO_RUNTIME)
 
-    def get_tag_to_runtime_mapping(self) -> dict[str, str]:
-        """Return the tag to runtime fallback mapping for reference."""
+    def get_tag_to_engine_id_mapping(self) -> dict[str, str]:
+        """Return the tag to engine_id fallback mapping for reference."""
         return dict(TAG_TO_RUNTIME)
 
-    def get_supported_runtimes(self) -> list[str]:
-        """Return list of all runtimes that can be resolved."""
-        runtimes = set(LIBRARY_TO_RUNTIME.values())
-        runtimes.update(TAG_TO_RUNTIME.values())
-        runtimes.add("hf-asr")  # Fallback runtime
-        return sorted(runtimes)
+    def get_supported_engine_ids(self) -> list[str]:
+        """Return list of all engine_ids that can be resolved."""
+        engine_ids = set(LIBRARY_TO_RUNTIME.values())
+        engine_ids.update(TAG_TO_RUNTIME.values())
+        engine_ids.add("hf-asr")  # Fallback engine_id
+        return sorted(engine_ids)

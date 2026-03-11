@@ -32,7 +32,7 @@ def _cleanup_injected_modules():
 
 def _ctx(task_id: str = "task-123", job_id: str = "job-456") -> BatchTaskContext:
     return BatchTaskContext(
-        runtime="test-runtime",
+        engine_id="test-engine_id",
         instance="test-instance",
         task_id=task_id,
         job_id=job_id,
@@ -125,7 +125,7 @@ def test_audio_redactor_declares_redacted_artifact_id(tmp_path: Path) -> None:
                 "entity_count_by_type": {},
                 "entity_count_by_category": {},
                 "processing_time_ms": 1,
-                "runtime": "pii-presidio",
+                "engine_id": "pii-presidio",
             }
         },
         config={"redaction_mode": "silence", "buffer_ms": 25},
@@ -173,13 +173,13 @@ def test_merge_engine_declares_transcript_artifact(tmp_path: Path) -> None:
                     }
                 ],
                 "split_channels": False,
-                "runtime": "audio-prepare",
+                "engine_id": "audio-prepare",
             },
             "transcribe": {
                 "segments": [{"start": 0.0, "end": 0.8, "text": "hello"}],
                 "text": "hello",
                 "language": "en",
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
         },
         config={"speaker_detection": "none"},
@@ -227,13 +227,13 @@ def test_merge_engine_applies_known_speaker_names(tmp_path: Path) -> None:
                     }
                 ],
                 "split_channels": False,
-                "runtime": "audio-prepare",
+                "engine_id": "audio-prepare",
             },
             "transcribe": {
                 "segments": [{"start": 0.0, "end": 0.8, "text": "hello"}],
                 "text": "hello",
                 "language": "en",
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
             "diarize": {
                 "turns": [
@@ -241,7 +241,7 @@ def test_merge_engine_applies_known_speaker_names(tmp_path: Path) -> None:
                 ],
                 "speakers": ["SPEAKER_00"],
                 "num_speakers": 1,
-                "runtime": "pyannote-4.0",
+                "engine_id": "pyannote-4.0",
                 "skipped": False,
                 "warnings": [],
             },
@@ -294,7 +294,7 @@ def test_merge_engine_preserves_segment_quality_metadata(tmp_path: Path) -> None
                     }
                 ],
                 "split_channels": False,
-                "runtime": "audio-prepare",
+                "engine_id": "audio-prepare",
             },
             "transcribe": {
                 "segments": [
@@ -313,7 +313,7 @@ def test_merge_engine_preserves_segment_quality_metadata(tmp_path: Path) -> None
                 ],
                 "text": "hello",
                 "language": "en",
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
             },
         },
         config={"speaker_detection": "none"},

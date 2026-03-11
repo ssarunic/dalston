@@ -38,7 +38,7 @@ python -m dalston.engine_sdk.local_runner run \
 ## Readiness Findings
 
 1. Local runner CLI contract is functional for representative alignment and diarization flows.
-2. Engine reference resolution now supports filesystem-backed refs used by hyphenated runtime paths.
+2. Engine reference resolution now supports filesystem-backed refs used by hyphenated engine_id paths.
 3. `pii_detect` local readiness is environment-dependent; missing Presidio dependency is the current blocker.
 
 ## Follow-Up

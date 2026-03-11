@@ -11,7 +11,7 @@ Metric Naming Convention:
     dalston_{service}_{metric_name}_{unit}
 
 Common Labels:
-    runtime: Runtime identifier (e.g., "faster-whisper", "nemo")
+    engine_id: Runtime identifier (e.g., "faster-whisper", "nemo")
     model: Model identifier (e.g., "nvidia/parakeet-tdt-1.1b")
     execution_profile: Runtime isolation profile ("inproc", "venv", "container")
     instance: Instance identifier
@@ -135,20 +135,20 @@ def _init_orchestrator_metrics() -> None:
     _orchestrator_metrics["job_duration_seconds"] = Histogram(
         "dalston_orchestrator_job_duration_seconds",
         "Total job duration from creation to completion",
-        ["runtime", "model"],
+        ["engine_id", "model"],
         buckets=(1, 5, 10, 30, 60, 120, 300, 600, 1800),
     )
 
     _orchestrator_metrics["tasks_scheduled_total"] = Counter(
         "dalston_orchestrator_tasks_scheduled_total",
         "Tasks pushed to queues",
-        ["runtime", "stage", "execution_profile"],
+        ["engine_id", "stage", "execution_profile"],
     )
 
     _orchestrator_metrics["tasks_completed_total"] = Counter(
         "dalston_orchestrator_tasks_completed_total",
         "Task completions",
-        ["runtime", "status", "execution_profile"],
+        ["engine_id", "status", "execution_profile"],
     )
 
     _orchestrator_metrics["events_processed_total"] = Counter(
@@ -189,34 +189,34 @@ def _init_engine_metrics() -> None:
     _engine_metrics["tasks_processed_total"] = Counter(
         "dalston_engine_tasks_processed_total",
         "Tasks processed",
-        ["runtime", "model", "status", "execution_profile"],
+        ["engine_id", "model", "status", "execution_profile"],
     )
 
     _engine_metrics["task_duration_seconds"] = Histogram(
         "dalston_engine_task_duration_seconds",
         "Task processing time (excludes queue wait)",
-        ["runtime", "model", "execution_profile"],
+        ["engine_id", "model", "execution_profile"],
         buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300),
     )
 
     _engine_metrics["queue_wait_seconds"] = Histogram(
         "dalston_engine_queue_wait_seconds",
         "Time between task enqueue and dequeue",
-        ["runtime", "execution_profile"],
+        ["engine_id", "execution_profile"],
         buckets=(0.01, 0.1, 0.5, 1, 5, 10, 30, 60, 300),
     )
 
     _engine_metrics["s3_download_seconds"] = Histogram(
         "dalston_engine_s3_download_seconds",
         "Input download time",
-        ["runtime", "execution_profile"],
+        ["engine_id", "execution_profile"],
         buckets=(0.01, 0.05, 0.1, 0.5, 1, 2.5, 5, 10),
     )
 
     _engine_metrics["s3_upload_seconds"] = Histogram(
         "dalston_engine_s3_upload_seconds",
         "Output upload time",
-        ["runtime", "execution_profile"],
+        ["engine_id", "execution_profile"],
         buckets=(0.01, 0.05, 0.1, 0.5, 1, 2.5, 5, 10),
     )
 
@@ -235,14 +235,14 @@ def _init_engine_metrics() -> None:
     _engine_metrics["model_load_seconds"] = Histogram(
         "dalston_engine_model_load_seconds",
         "Model loading time (cold load or cache miss)",
-        ["runtime", "model", "execution_profile"],
+        ["engine_id", "model", "execution_profile"],
         buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300),
     )
 
     _engine_metrics["model_cache_hits_total"] = Counter(
         "dalston_engine_model_cache_hits_total",
         "Model cache hits (model already loaded)",
-        ["runtime", "model"],
+        ["engine_id", "model"],
     )
 
 
@@ -286,20 +286,20 @@ def _init_realtime_metrics() -> None:
     _realtime_metrics["session_duration_seconds"] = Histogram(
         "dalston_realtime_session_duration_seconds",
         "Total session duration",
-        ["runtime", "model"],
+        ["engine_id", "model"],
         buckets=(1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600),
     )
 
     _realtime_metrics["audio_processed_seconds"] = Counter(
         "dalston_realtime_audio_processed_seconds",
         "Cumulative audio processed",
-        ["runtime", "model"],
+        ["engine_id", "model"],
     )
 
     _realtime_metrics["transcripts_total"] = Counter(
         "dalston_realtime_transcripts_total",
         "Transcripts emitted",
-        ["runtime", "model", "type"],
+        ["engine_id", "model", "type"],
     )
 
     _realtime_metrics["resample_duration_seconds"] = Histogram(
@@ -317,13 +317,13 @@ def _init_queue_metrics() -> None:
     _queue_metrics["queue_depth"] = Gauge(
         "dalston_queue_depth",
         "Tasks waiting in each engine queue",
-        ["runtime"],
+        ["engine_id"],
     )
 
     _queue_metrics["queue_oldest_task_age_seconds"] = Gauge(
         "dalston_queue_oldest_task_age_seconds",
         "Age of oldest task in queue",
-        ["runtime"],
+        ["engine_id"],
     )
 
     _queue_metrics["redis_connected"] = Gauge(
@@ -450,57 +450,57 @@ def inc_orchestrator_jobs(status: str) -> None:
 
 
 def observe_orchestrator_job_duration(
-    runtime: str, model: str, duration: float
+    engine_id: str, model: str, duration: float
 ) -> None:
     """Record job duration.
 
     Args:
-        runtime: Runtime identifier (e.g., "faster-whisper")
+        engine_id: Runtime identifier (e.g., "faster-whisper")
         model: Model identifier (e.g., "nvidia/parakeet-tdt-1.1b")
         duration: Duration in seconds
     """
     if not _metrics_enabled or "job_duration_seconds" not in _orchestrator_metrics:
         return
     _orchestrator_metrics["job_duration_seconds"].labels(
-        runtime=runtime, model=model
+        engine_id=engine_id, model=model
     ).observe(duration)
 
 
 def inc_orchestrator_tasks_scheduled(
-    runtime: str,
+    engine_id: str,
     stage: str,
     execution_profile: str = "unknown",
 ) -> None:
     """Increment tasks scheduled counter.
 
     Args:
-        runtime: Runtime identifier
+        engine_id: Runtime identifier
         stage: Pipeline stage name
     """
     if not _metrics_enabled or "tasks_scheduled_total" not in _orchestrator_metrics:
         return
     _orchestrator_metrics["tasks_scheduled_total"].labels(
-        runtime=runtime,
+        engine_id=engine_id,
         stage=stage,
         execution_profile=execution_profile,
     ).inc()
 
 
 def inc_orchestrator_tasks_completed(
-    runtime: str,
+    engine_id: str,
     status: str,
     execution_profile: str = "unknown",
 ) -> None:
     """Increment tasks completed counter.
 
     Args:
-        runtime: Runtime identifier
+        engine_id: Runtime identifier
         status: Task status (success, failure)
     """
     if not _metrics_enabled or "tasks_completed_total" not in _orchestrator_metrics:
         return
     _orchestrator_metrics["tasks_completed_total"].labels(
-        runtime=runtime,
+        engine_id=engine_id,
         status=status,
         execution_profile=execution_profile,
     ).inc()
@@ -584,7 +584,7 @@ def inc_orchestrator_scanner_scans(status: str) -> None:
 
 
 def inc_engine_tasks(
-    runtime: str,
+    engine_id: str,
     model: str,
     status: str,
     execution_profile: str = "unknown",
@@ -592,14 +592,14 @@ def inc_engine_tasks(
     """Increment engine tasks processed counter.
 
     Args:
-        runtime: Runtime identifier (e.g., "faster-whisper")
+        engine_id: Runtime identifier (e.g., "faster-whisper")
         model: Model identifier (e.g., "nvidia/parakeet-tdt-1.1b")
         status: Task status (success, failure)
     """
     if not _metrics_enabled or "tasks_processed_total" not in _engine_metrics:
         return
     _engine_metrics["tasks_processed_total"].labels(
-        runtime=runtime,
+        engine_id=engine_id,
         model=model,
         status=status,
         execution_profile=execution_profile,
@@ -607,7 +607,7 @@ def inc_engine_tasks(
 
 
 def observe_engine_task_duration(
-    runtime: str,
+    engine_id: str,
     model: str,
     duration: float,
     execution_profile: str = "unknown",
@@ -615,78 +615,78 @@ def observe_engine_task_duration(
     """Record engine task processing duration.
 
     Args:
-        runtime: Runtime identifier
+        engine_id: Runtime identifier
         model: Model identifier
         duration: Duration in seconds
     """
     if not _metrics_enabled or "task_duration_seconds" not in _engine_metrics:
         return
     _engine_metrics["task_duration_seconds"].labels(
-        runtime=runtime,
+        engine_id=engine_id,
         model=model,
         execution_profile=execution_profile,
     ).observe(duration)
 
 
 def observe_engine_queue_wait(
-    runtime: str,
+    engine_id: str,
     duration: float,
     execution_profile: str = "unknown",
 ) -> None:
     """Record queue wait time.
 
     Args:
-        runtime: Runtime identifier
+        engine_id: Runtime identifier
         duration: Duration in seconds
     """
     if not _metrics_enabled or "queue_wait_seconds" not in _engine_metrics:
         return
     _engine_metrics["queue_wait_seconds"].labels(
-        runtime=runtime,
+        engine_id=engine_id,
         execution_profile=execution_profile,
     ).observe(duration)
 
 
 def observe_engine_s3_download(
-    runtime: str,
+    engine_id: str,
     duration: float,
     execution_profile: str = "unknown",
 ) -> None:
     """Record S3 download time.
 
     Args:
-        runtime: Runtime identifier
+        engine_id: Runtime identifier
         duration: Duration in seconds
     """
     if not _metrics_enabled or "s3_download_seconds" not in _engine_metrics:
         return
     _engine_metrics["s3_download_seconds"].labels(
-        runtime=runtime,
+        engine_id=engine_id,
         execution_profile=execution_profile,
     ).observe(duration)
 
 
 def observe_engine_s3_upload(
-    runtime: str,
+    engine_id: str,
     duration: float,
     execution_profile: str = "unknown",
 ) -> None:
     """Record S3 upload time.
 
     Args:
-        runtime: Runtime identifier
+        engine_id: Runtime identifier
         duration: Duration in seconds
     """
     if not _metrics_enabled or "s3_upload_seconds" not in _engine_metrics:
         return
     _engine_metrics["s3_upload_seconds"].labels(
-        runtime=runtime,
+        engine_id=engine_id,
         execution_profile=execution_profile,
     ).observe(duration)
 
 
 def observe_engine_model_load(
-    runtime: str,
+    engine_id: str,
     model: str,
     duration: float,
     execution_profile: str = "unknown",
@@ -694,29 +694,31 @@ def observe_engine_model_load(
     """Record model loading time.
 
     Args:
-        runtime: Runtime identifier
+        engine_id: Runtime identifier
         model: Model identifier
         duration: Duration in seconds
     """
     if not _metrics_enabled or "model_load_seconds" not in _engine_metrics:
         return
     _engine_metrics["model_load_seconds"].labels(
-        runtime=runtime,
+        engine_id=engine_id,
         model=model,
         execution_profile=execution_profile,
     ).observe(duration)
 
 
-def inc_engine_model_cache_hit(runtime: str, model: str) -> None:
+def inc_engine_model_cache_hit(engine_id: str, model: str) -> None:
     """Increment model cache hit counter.
 
     Args:
-        runtime: Runtime identifier
+        engine_id: Runtime identifier
         model: Model identifier
     """
     if not _metrics_enabled or "model_cache_hits_total" not in _engine_metrics:
         return
-    _engine_metrics["model_cache_hits_total"].labels(runtime=runtime, model=model).inc()
+    _engine_metrics["model_cache_hits_total"].labels(
+        engine_id=engine_id, model=model
+    ).inc()
 
 
 def inc_task_redelivery(stage: str, reason: str) -> None:
@@ -817,49 +819,49 @@ def observe_session_router_allocation(duration: float) -> None:
 
 
 def observe_realtime_session_duration(
-    runtime: str, model: str, duration: float
+    engine_id: str, model: str, duration: float
 ) -> None:
     """Record realtime session duration.
 
     Args:
-        runtime: Runtime identifier
+        engine_id: Runtime identifier
         model: Model identifier
         duration: Duration in seconds
     """
     if not _metrics_enabled or "session_duration_seconds" not in _realtime_metrics:
         return
     _realtime_metrics["session_duration_seconds"].labels(
-        runtime=runtime, model=model
+        engine_id=engine_id, model=model
     ).observe(duration)
 
 
-def inc_realtime_audio_processed(runtime: str, model: str, seconds: float) -> None:
+def inc_realtime_audio_processed(engine_id: str, model: str, seconds: float) -> None:
     """Increment audio processed counter.
 
     Args:
-        runtime: Runtime identifier
+        engine_id: Runtime identifier
         model: Model identifier
         seconds: Audio duration in seconds
     """
     if not _metrics_enabled or "audio_processed_seconds" not in _realtime_metrics:
         return
     _realtime_metrics["audio_processed_seconds"].labels(
-        runtime=runtime, model=model
+        engine_id=engine_id, model=model
     ).inc(seconds)
 
 
-def inc_realtime_transcripts(runtime: str, model: str, transcript_type: str) -> None:
+def inc_realtime_transcripts(engine_id: str, model: str, transcript_type: str) -> None:
     """Increment transcripts counter.
 
     Args:
-        runtime: Runtime identifier
+        engine_id: Runtime identifier
         model: Model identifier
         transcript_type: Transcript type (partial, final)
     """
     if not _metrics_enabled or "transcripts_total" not in _realtime_metrics:
         return
     _realtime_metrics["transcripts_total"].labels(
-        runtime=runtime, model=model, type=transcript_type
+        engine_id=engine_id, model=model, type=transcript_type
     ).inc()
 
 
@@ -906,28 +908,28 @@ def init_queue_metrics() -> None:
     _init_queue_metrics()
 
 
-def set_queue_depth(runtime: str, depth: int) -> None:
-    """Set queue depth for a runtime.
+def set_queue_depth(engine_id: str, depth: int) -> None:
+    """Set queue depth for a engine_id.
 
     Args:
-        runtime: Runtime identifier
+        engine_id: Runtime identifier
         depth: Number of tasks in queue
     """
     if not _metrics_enabled or "queue_depth" not in _queue_metrics:
         return
-    _queue_metrics["queue_depth"].labels(runtime=runtime).set(depth)
+    _queue_metrics["queue_depth"].labels(engine_id=engine_id).set(depth)
 
 
-def set_queue_oldest_task_age(runtime: str, age_seconds: float) -> None:
-    """Set oldest task age for a runtime.
+def set_queue_oldest_task_age(engine_id: str, age_seconds: float) -> None:
+    """Set oldest task age for a engine_id.
 
     Args:
-        runtime: Runtime identifier
+        engine_id: Runtime identifier
         age_seconds: Age in seconds
     """
     if not _metrics_enabled or "queue_oldest_task_age_seconds" not in _queue_metrics:
         return
-    _queue_metrics["queue_oldest_task_age_seconds"].labels(runtime=runtime).set(
+    _queue_metrics["queue_oldest_task_age_seconds"].labels(engine_id=engine_id).set(
         age_seconds
     )
 

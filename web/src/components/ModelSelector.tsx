@@ -65,7 +65,7 @@ export function ModelSelector({ value, onChange, language }: ModelSelectorProps)
         const matches =
           m.id.toLowerCase().includes(searchLower) ||
           m.name?.toLowerCase().includes(searchLower) ||
-          m.runtime.toLowerCase().includes(searchLower)
+          m.engine_id.toLowerCase().includes(searchLower)
         if (!matches) return false
       }
 
@@ -188,7 +188,7 @@ export function ModelSelector({ value, onChange, language }: ModelSelectorProps)
           ) : selectedModel ? (
             <>
               <Badge variant="secondary" className="text-xs shrink-0">
-                {selectedModel.runtime}
+                {selectedModel.engine_id}
               </Badge>
               <span className="truncate">{selectedModel.name || selectedModel.id}</span>
             </>
@@ -351,7 +351,7 @@ function ModelOption({ model, isSelected, isHighlighted, onSelect }: ModelOption
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
           <Badge variant="outline" className="text-[10px] px-1 py-0">
-            {model.runtime}
+            {model.engine_id}
           </Badge>
           {model.languages && model.languages.length > 0 && (
             <span>

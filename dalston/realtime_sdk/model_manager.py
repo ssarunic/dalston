@@ -14,7 +14,7 @@ Example usage:
             self._model_manager = AsyncModelManager(sync_manager)
 
         async def transcribe(self, audio, params):
-            model_id = params.runtime_model_id or "default"
+            model_id = params.loaded_model_id or "default"
             model = await self._model_manager.acquire(model_id)
             try:
                 return model.transcribe(audio, ...)

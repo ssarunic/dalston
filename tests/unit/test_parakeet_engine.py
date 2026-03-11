@@ -69,7 +69,7 @@ def mock_nemo_asr():
 
 
 class TestParakeetEngineModelVariants:
-    """Tests for Parakeet model variants (M36 runtime model management)."""
+    """Tests for Parakeet model variants (M36 engine_id model management)."""
 
     def test_default_model_id_is_tdt_1_1b(self, mock_cuda_available):
         """Test that default model is nvidia/parakeet-tdt-1.1b (M36)."""

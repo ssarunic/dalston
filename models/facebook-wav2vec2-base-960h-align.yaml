@@ -1,7 +1,7 @@
 schema_version: "1.1"
 id: facebook/wav2vec2-base-960h
-runtime: phoneme-align
-runtime_model_id: facebook/wav2vec2-base-960h
+engine_id: phoneme-align
+loaded_model_id: facebook/wav2vec2-base-960h
 
 name: Wav2Vec2 Base 960h (Alignment)
 source: facebook/wav2vec2-base-960h

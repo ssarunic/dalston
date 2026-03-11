@@ -102,7 +102,7 @@ stream**. The difference is purely in the I/O transport layer.
   - reserve realtime capacity (`rt_reservation`)
   - cap batch inflight work (`batch_max_inflight`)
   - use weighted scheduling across batch/RT interfaces
-  - optionally deploy isolated runtime pools when strict isolation is needed
+  - optionally deploy isolated engine_id pools when strict isolation is needed
 
 ### Concrete simplification: unified engine interface
 
@@ -279,9 +279,9 @@ services. Each engine variant (e.g., `stt-batch-transcribe-nemo`,
 `stt-batch-transcribe-nemo-onnx-gpu`) is a separate service with its own
 container image.
 
-With unified engines + runtime model loading, you need **one container per
+With unified engines + engine_id model loading, you need **one container per
 inference framework** (faster-whisper, nemo, vllm), not one per model variant.
-The model variant is a runtime parameter.
+The model variant is a engine_id parameter.
 
 **Current:** ~20 service definitions
 **After unification:** ~6-8 service definitions (one per framework, plus
@@ -353,7 +353,7 @@ The DAG builder, selector, and docker-compose don't change.
 refactor target. For this cycle:
 
 - Keep current `per_channel` behavior and API semantics unchanged.
-- Prioritize engine unification and runtime/registry simplification first.
+- Prioritize engine unification and engine_id/registry simplification first.
 - Re-evaluate per_channel redesign after core unification stabilizes.
 
 Candidate future approach (deferred): gateway pre-split + parent/child jobs +
@@ -362,7 +362,7 @@ stitcher. This remains valid, but intentionally out of the initial sequence.
 ### 5b. Keep align as a capability-gated fallback stage
 
 Do not remove `align` unconditionally. Keep it as an optional fallback stage
-for runtimes/models whose native timestamps are not precise enough.
+for engine_ids/models whose native timestamps are not precise enough.
 
 Selection policy should be capability-driven:
 
@@ -492,7 +492,7 @@ registry stores capabilities including whether the engine accepts streaming.
 
 ## 6. Target End-State of Pipeline Simplification (Executed Last)
 
-After engine/runtime unification work is stable, the batch DAG can be
+After engine/engine_id unification work is stable, the batch DAG can be
 restructured toward a mostly linear core pipeline.
 
 Current DAG:
@@ -648,8 +648,8 @@ is batch-only. With Riva as a real-time engine:
 
 ## 7. Recommended Execution Order
 
-1. **Unify engine runtimes first (smallest increments)** -- shared
-   batch/RT engine architecture runtime-by-runtime, with strict
+1. **Unify engine engine_ids first (smallest increments)** -- shared
+   batch/RT engine architecture engine_id-by-engine_id, with strict
    characterization tests and no API changes.
 
 2. **Unify registry protocol** -- introduce unified engine registration
@@ -937,7 +937,7 @@ real-time system. This de-risks the pipeline refactor significantly.
 
 | Change | Risk | Mitigation |
 |---|---|---|
-| Engine unification (batch+RT shared runtime) | High -- touches every engine (~9,000 LOC surface) | Incremental runtime-by-runtime migration, strict characterization tests, QoS guards (`rt_reservation`, `batch_max_inflight`) |
+| Engine unification (batch+RT shared engine_id) | High -- touches every engine (~9,000 LOC surface) | Incremental engine_id-by-engine_id migration, strict characterization tests, QoS guards (`rt_reservation`, `batch_max_inflight`) |
 | Linear pipeline + merge elimination (executed last) | Medium -- orchestrator/schema migration complexity | Shared Transcript schema versioned; compatibility bridge; DB migration sequenced after dual-path validation |
 | Registry unification | Low -- internal protocol | Run old + new in parallel, cut over |
 | Declarative engine.yaml | Medium -- new stage registration contract | Keep hardcoded fallback during transition |

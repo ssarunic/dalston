@@ -17,7 +17,7 @@ This directory contains Architecture Decision Records (ADRs) documenting signifi
 | [ADR-009](ADR-009-pii-detection-architecture.md) | PII Detection & Audio Redaction Architecture | Accepted |
 | [ADR-010](ADR-010-engine-variant-structure.md) | Engine Variant Structure | Accepted |
 | [ADR-011](ADR-011-security-architecture.md) | Security Architecture | Proposed |
-| [ADR-012](ADR-012-unified-engine-terminology.md) | Unified Engine Terminology (runtime, model, instance) | Proposed |
+| [ADR-012](ADR-012-unified-engine-terminology.md) | Unified Engine Terminology (engine_id, model, instance) | Proposed |
 
 ## ADR Template
 

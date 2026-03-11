@@ -28,7 +28,7 @@ OutputT = TypeVar("OutputT")
 class EngineCapabilities(BaseModel):
     """What an engine can do. Published in heartbeats, declared in catalog."""
 
-    runtime: str
+    engine_id: str
     version: str
     stages: list[str]
     languages: list[str] | None = None

@@ -55,8 +55,8 @@ from dalston.gateway.api.v1.openai_audio import (
     attach_openai_rate_limit_headers,
     format_openai_response,
     is_openai_model,
+    map_openai_loaded_model,
     map_openai_model,
-    map_openai_runtime_model,
     raise_openai_error,
     validate_openai_request,
 )
@@ -451,7 +451,7 @@ async def create_transcription(
 
     # Build parameters
     if openai_mode:
-        # OpenAI mode: map OpenAI model alias to configured runtime engine.
+        # OpenAI mode: map OpenAI model alias to configured engine_id engine.
         parameters: dict = {
             "language": language or "auto",
             MODEL_PARAM_TRANSCRIBE: map_openai_model(model),
@@ -459,9 +459,9 @@ async def create_transcription(
             if timestamp_granularities and "word" in timestamp_granularities
             else "segment",
         }
-        runtime_model_id = map_openai_runtime_model(model)
-        if runtime_model_id:
-            parameters[MODEL_PARAM_TRANSCRIBE] = runtime_model_id
+        loaded_model_id = map_openai_loaded_model(model)
+        if loaded_model_id:
+            parameters[MODEL_PARAM_TRANSCRIBE] = loaded_model_id
         # Preserve OpenAI free-text prompt semantics end-to-end.
         if prompt:
             parameters["prompt"] = prompt
@@ -912,7 +912,7 @@ async def get_transcription(
             StageResponse(
                 stage=task.stage,
                 task_id=task.id,
-                runtime=task.runtime,
+                engine_id=task.engine_id,
                 status=task.status,
                 required=task.required,
                 started_at=task.started_at,

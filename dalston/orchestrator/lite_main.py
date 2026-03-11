@@ -115,16 +115,16 @@ class _LiteStageBinding:
 def _make_stage_binding(
     *,
     stage: str,
-    runtime: str,
+    engine_id: str,
     compute: Callable[[dict[str, Any]], dict[str, Any]],
     execution_profile: str = "inproc",
 ) -> _LiteStageBinding:
     return _LiteStageBinding(
         entry=CatalogEntry(
-            runtime=runtime,
+            engine_id=engine_id,
             image=f"dalston/lite-{stage}:{execution_profile}",
             capabilities=EngineCapabilities(
-                runtime=runtime,
+                engine_id=engine_id,
                 version="lite",
                 stages=[stage],
             ),
@@ -137,16 +137,16 @@ def _make_stage_binding(
 def _make_engine_ref_binding(
     *,
     stage: str,
-    runtime: str,
+    engine_id: str,
     engine_ref: str,
     execution_profile: str = "venv",
 ) -> _LiteStageBinding:
     return _LiteStageBinding(
         entry=CatalogEntry(
-            runtime=runtime,
+            engine_id=engine_id,
             image=f"dalston/lite-{stage}:{execution_profile}",
             capabilities=EngineCapabilities(
-                runtime=runtime,
+                engine_id=engine_id,
                 version="lite",
                 stages=[stage],
             ),
@@ -160,28 +160,28 @@ def _build_default_stage_bindings(settings: Settings) -> dict[str, _LiteStageBin
     if settings.lite_transcribe_backend == "real":
         transcribe = _make_engine_ref_binding(
             stage="transcribe",
-            runtime=_DEFAULT_LITE_TRANSCRIBE_RUNTIME,
+            engine_id=_DEFAULT_LITE_TRANSCRIBE_RUNTIME,
             engine_ref=settings.lite_transcribe_engine_ref,
             execution_profile="venv",
         )
     else:
         transcribe = _make_stage_binding(
             stage="transcribe",
-            runtime="lite-transcribe",
+            engine_id="lite-transcribe",
             compute=_compute_transcribe,
         )
 
     if settings.lite_diarize_backend == "real":
         diarize = _make_engine_ref_binding(
             stage="diarize",
-            runtime=_DEFAULT_LITE_DIARIZE_RUNTIME,
+            engine_id=_DEFAULT_LITE_DIARIZE_RUNTIME,
             engine_ref=settings.lite_diarize_engine_ref,
             execution_profile="venv",
         )
     else:
         diarize = _make_stage_binding(
             stage="diarize",
-            runtime="lite-diarize",
+            engine_id="lite-diarize",
             compute=_compute_diarize,
         )
 
@@ -190,7 +190,7 @@ def _build_default_stage_bindings(settings: Settings) -> dict[str, _LiteStageBin
         "diarize": diarize,
         "pii_detect": _make_stage_binding(
             stage="pii_detect",
-            runtime="lite-pii-detect",
+            engine_id="lite-pii-detect",
             compute=_compute_pii_detect,
         ),
     }
@@ -247,7 +247,7 @@ class LitePipeline:
         self._ephemeral_mode = ephemeral_mode
         self._profile = cap.profile
         self._profile_cap = cap
-        self._lite_diarize_runtime_model_id = settings.lite_diarize_runtime_model_id
+        self._lite_diarize_loaded_model_id = settings.lite_diarize_loaded_model_id
         self._stage_outputs: dict[str, dict[str, dict[str, Any]]] = {}
         self._stage_bindings = dict(
             _build_default_stage_bindings(settings)
@@ -259,8 +259,8 @@ class LitePipeline:
             lite_venv_python = Path(
                 settings.lite_venv_python or sys.executable
             ).expanduser()
-            venv_runtimes = {
-                binding.entry.runtime: lite_venv_python
+            venv_engine_ids = {
+                binding.entry.engine_id: lite_venv_python
                 for binding in self._stage_bindings.values()
                 if binding.entry.execution_profile == "venv"
             }
@@ -269,7 +269,7 @@ class LitePipeline:
                 "inproc": lambda: InProcExecutor(output_dir=lite_output_dir),
                 "venv": lambda: VenvExecutor(
                     env_manager=VenvEnvironmentManager(
-                        runtime_pythons=venv_runtimes,
+                        runtime_pythons=venv_engine_ids,
                     ),
                     output_dir=lite_output_dir,
                 ),
@@ -515,13 +515,13 @@ class LitePipeline:
         binding = self._stage_bindings.get(stage)
         if binding is None:
             raise RuntimeError(
-                f"No lite runtime binding configured for stage '{stage}'"
+                f"No lite engine_id binding configured for stage '{stage}'"
             )
 
         stage_config = dict(parameters)
         if stage == "diarize":
             stage_config.setdefault(
-                "runtime_model_id", self._lite_diarize_runtime_model_id
+                "loaded_model_id", self._lite_diarize_loaded_model_id
             )
             num_speakers = stage_config.get("num_speakers")
             if (
@@ -553,7 +553,7 @@ class LitePipeline:
                 materialized_artifacts={},
             )
             ctx = BatchTaskContext(
-                runtime=binding.entry.runtime,
+                engine_id=binding.entry.engine_id,
                 instance=f"lite-{self._profile.value}",
                 task_id=envelope.task_id,
                 job_id=envelope.job_id,
@@ -572,7 +572,7 @@ class LitePipeline:
             raise RuntimeError(
                 "No executor configured for "
                 f"profile '{binding.entry.execution_profile}' "
-                f"(runtime '{binding.entry.runtime}', stage '{stage}')"
+                f"(engine_id '{binding.entry.engine_id}', stage '{stage}')"
             )
 
         artifacts: dict[str, Path] = {}
@@ -583,7 +583,7 @@ class LitePipeline:
             task_id=envelope.task_id,
             job_id=envelope.job_id,
             stage=stage,
-            runtime=binding.entry.runtime,
+            engine_id=binding.entry.engine_id,
             instance=f"lite-{self._profile.value}",
             config=stage_config,
             previous_outputs=previous_outputs,

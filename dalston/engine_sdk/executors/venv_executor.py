@@ -1,4 +1,4 @@
-"""Subprocess executor for runtime-specific virtualenvs."""
+"""Subprocess executor for engine_id-specific virtualenvs."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ class VenvExecutor(RuntimeExecutor):
         if not request.engine_ref:
             raise ValueError("VenvExecutor requires ExecutionRequest.engine_ref")
 
-        environment = self._env_manager.ensure_environment(request.runtime)
+        environment = self._env_manager.ensure_environment(request.engine_id)
 
         with tempfile.TemporaryDirectory(prefix="dalston-venv-executor-") as tmp:
             temp_dir = Path(tmp)
@@ -72,13 +72,13 @@ class VenvExecutor(RuntimeExecutor):
                 )
             except subprocess.TimeoutExpired as exc:
                 raise RuntimeError(
-                    "Venv executor timed out for runtime "
-                    f"'{request.runtime}' after {self._subprocess_timeout_s:.0f}s"
+                    "Venv executor timed out for engine_id "
+                    f"'{request.engine_id}' after {self._subprocess_timeout_s:.0f}s"
                 ) from exc
             if completed.returncode != 0:
                 stderr = completed.stderr.strip() or completed.stdout.strip()
                 raise RuntimeError(
-                    f"Venv executor failed for runtime '{request.runtime}': {stderr}"
+                    f"Venv executor failed for engine_id '{request.engine_id}': {stderr}"
                 )
 
             return _load_json_object(output_path)
@@ -89,7 +89,7 @@ class VenvExecutor(RuntimeExecutor):
             "task_id": request.task_id,
             "job_id": request.job_id,
             "stage": request.stage,
-            "runtime": request.runtime,
+            "engine_id": request.engine_id,
             "instance": request.instance,
             "config": request.config,
             "previous_outputs": request.previous_outputs,
@@ -117,7 +117,7 @@ def _worker_execute(request_path: Path, output_path: Path) -> int:
             task_id=request_data["task_id"],
             job_id=request_data["job_id"],
             stage=request_data["stage"],
-            runtime=request_data["runtime"],
+            engine_id=request_data["engine_id"],
             instance=request_data["instance"],
             config=request_data["config"],
             previous_outputs=request_data["previous_outputs"],

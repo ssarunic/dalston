@@ -94,7 +94,7 @@ diarizer:
 """
 
 # Runtime model definitions for NeMo MSDD diarization.
-# Each runtime_model_id maps to the component model paths used by NeuralDiarizer.
+# Each loaded_model_id maps to the component model paths used by NeuralDiarizer.
 MODEL_COMPONENTS = {
     "nvidia/diar-msdd-telephonic": {
         "vad_model_path": "vad_multilingual_marblenet",
@@ -119,7 +119,7 @@ class NemoMSDDEngine(Engine):
     def __init__(self) -> None:
         super().__init__()
         self._diarizer = None
-        self._active_runtime_model_id: str | None = None
+        self._active_loaded_model_id: str | None = None
         self._device = self._detect_device()
         self._disabled = (
             os.environ.get("DALSTON_DIARIZATION_DISABLED", "").lower() == "true"
@@ -191,7 +191,7 @@ class NemoMSDDEngine(Engine):
         manifest_path: str,
         out_dir: str,
         max_speakers: int | None,
-        runtime_model_id: str,
+        loaded_model_id: str,
     ) -> Any:
         """Create NeuralDiarizer with configured paths.
 
@@ -200,10 +200,10 @@ class NemoMSDDEngine(Engine):
         """
         from nemo.collections.asr.models.msdd_models import NeuralDiarizer
 
-        if runtime_model_id not in MODEL_COMPONENTS:
+        if loaded_model_id not in MODEL_COMPONENTS:
             raise ValueError(
-                "Unsupported runtime_model_id for nemo-msdd: "
-                f"{runtime_model_id}. Known values: {sorted(MODEL_COMPONENTS.keys())}"
+                "Unsupported loaded_model_id for nemo-msdd: "
+                f"{loaded_model_id}. Known values: {sorted(MODEL_COMPONENTS.keys())}"
             )
 
         # Load base config
@@ -214,7 +214,7 @@ class NemoMSDDEngine(Engine):
         cfg.diarizer.out_dir = out_dir
         cfg.device = self._device
 
-        components = MODEL_COMPONENTS[runtime_model_id]
+        components = MODEL_COMPONENTS[loaded_model_id]
         cfg.diarizer.vad.model_path = components["vad_model_path"]
         cfg.diarizer.speaker_embeddings.model_path = components[
             "speaker_embeddings_model_path"
@@ -230,7 +230,7 @@ class NemoMSDDEngine(Engine):
             manifest=manifest_path,
             out_dir=out_dir,
             device=self._device,
-            runtime_model_id=runtime_model_id,
+            loaded_model_id=loaded_model_id,
         )
 
         diarizer = NeuralDiarizer(cfg=cfg)
@@ -355,10 +355,10 @@ class NemoMSDDEngine(Engine):
             duration = self._get_audio_duration(audio_path)
 
         max_speakers = config.get("max_speakers")
-        runtime_model_id = config.get("runtime_model_id")
-        if not runtime_model_id:
+        loaded_model_id = config.get("loaded_model_id")
+        if not loaded_model_id:
             raise ValueError(
-                "Missing required config field 'runtime_model_id' for diarize stage."
+                "Missing required config field 'loaded_model_id' for diarize stage."
             )
 
         self.logger.info(
@@ -366,7 +366,7 @@ class NemoMSDDEngine(Engine):
             audio_path=str(audio_path),
             duration=round(duration, 2),
             max_speakers=max_speakers,
-            runtime_model_id=runtime_model_id,
+            loaded_model_id=loaded_model_id,
         )
 
         # Create output directory and manifest
@@ -374,8 +374,8 @@ class NemoMSDDEngine(Engine):
         out_dir.mkdir(exist_ok=True)
         manifest_path = self._create_manifest(audio_path, duration, out_dir)
 
-        self._active_runtime_model_id = runtime_model_id
-        self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
+        self._active_loaded_model_id = loaded_model_id
+        self._set_runtime_state(loaded_model=loaded_model_id, status="processing")
         try:
             try:
                 # Create diarizer with this specific config
@@ -383,7 +383,7 @@ class NemoMSDDEngine(Engine):
                     manifest_path=str(manifest_path),
                     out_dir=str(out_dir),
                     max_speakers=max_speakers,
-                    runtime_model_id=runtime_model_id,
+                    loaded_model_id=loaded_model_id,
                 )
 
                 self.logger.info("running_nemo_diarization")
@@ -419,7 +419,7 @@ class NemoMSDDEngine(Engine):
                 num_speakers=len(speakers),
                 overlap_duration=overlap_duration,
                 overlap_ratio=overlap_ratio,
-                runtime="nemo-msdd",
+                engine_id="nemo-msdd",
                 skipped=False,
                 skip_reason=None,
                 warnings=[],
@@ -427,7 +427,7 @@ class NemoMSDDEngine(Engine):
 
             return EngineOutput(data=output)
         finally:
-            self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
+            self._set_runtime_state(loaded_model=loaded_model_id, status="idle")
 
     def _mock_output(self) -> EngineOutput:
         """Return mock output when diarization is disabled."""
@@ -437,7 +437,7 @@ class NemoMSDDEngine(Engine):
             num_speakers=1,
             overlap_duration=0.0,
             overlap_ratio=0.0,
-            runtime="nemo-msdd",
+            engine_id="nemo-msdd",
             skipped=True,
             skip_reason="DIARIZATION_DISABLED=true",
             warnings=["Diarization disabled via environment variable"],
@@ -459,8 +459,8 @@ class NemoMSDDEngine(Engine):
             "device": getattr(self, "_device", "unknown"),
             "cuda_available": cuda_available,
             "diarization_disabled": self._disabled,
-            "active_model_id": self._active_runtime_model_id,
-            "available_runtime_models": sorted(MODEL_COMPONENTS.keys()),
+            "active_model_id": self._active_loaded_model_id,
+            "available_loaded_models": sorted(MODEL_COMPONENTS.keys()),
         }
 
 

@@ -839,7 +839,7 @@ def list_running_compose_services(ctx: RunContext) -> list[str]:
     return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
 
 
-def get_service_runtime(ctx: RunContext, service: str) -> str | None:
+def get_service_engine_id(ctx: RunContext, service: str) -> str | None:
     """Read ENGINE_ID from a running compose service container."""
     proc = run_compose(ctx, "exec", "-T", service, "env", check=False)
     if proc.returncode != 0:
@@ -862,9 +862,9 @@ def get_preferred_transcribe_model(ctx: RunContext) -> str:
         if service.startswith("stt-batch-transcribe-")
     )
     for service in transcribe_services:
-        runtime = get_service_runtime(ctx, service)
-        if runtime:
-            return runtime
+        engine_id = get_service_engine_id(ctx, service)
+        if engine_id:
+            return engine_id
 
     # Fallback: use API registry if compose service inspection is unavailable.
     running_transcribe_engines = [
@@ -1167,10 +1167,10 @@ def scenario_transcribe_cold_start(ctx: RunContext) -> tuple[str, list[str]]:
     target_service: str | None = None
     target_engine: str | None = None
     for service in transcribe_services:
-        runtime = get_service_runtime(ctx, service)
-        if runtime:
+        engine_id = get_service_engine_id(ctx, service)
+        if engine_id:
             target_service = service
-            target_engine = runtime
+            target_engine = engine_id
             break
 
     if not target_service or not target_engine:

@@ -196,7 +196,7 @@ class TaskResponse(BaseModel):
 
     id: UUID
     stage: str
-    runtime: str
+    engine_id: str
     status: str
     dependencies: list[UUID]
     started_at: datetime | None = None
@@ -250,7 +250,7 @@ async def get_job_tasks(
     }
     sorted_tasks = sorted(
         job_dto.tasks,
-        key=lambda t: (stage_order.get(t.stage, 99), t.runtime),
+        key=lambda t: (stage_order.get(t.stage, 99), t.engine_id),
     )
 
     def compute_duration(task):
@@ -265,7 +265,7 @@ async def get_job_tasks(
             TaskResponse(
                 id=task.id,
                 stage=task.stage,
-                runtime=task.runtime,
+                engine_id=task.engine_id,
                 status=task.status,
                 dependencies=task.dependencies,
                 started_at=task.started_at,
@@ -284,7 +284,7 @@ class TaskArtifactResponse(BaseModel):
     task_id: UUID
     job_id: UUID
     stage: str
-    runtime: str
+    engine_id: str
     status: str
     required: bool
     started_at: datetime | None = None
@@ -343,7 +343,7 @@ async def get_task_artifacts(
         task_id=task.id,
         job_id=job_id,
         stage=task.stage,
-        runtime=task.runtime,
+        engine_id=task.engine_id,
         status=task.status,
         required=task.required,
         started_at=task.started_at,
@@ -362,7 +362,7 @@ async def get_task_artifacts(
 class BatchEngine(BaseModel):
     """Batch engine status."""
 
-    runtime: str
+    engine_id: str
     stage: str
     status: Literal[
         "idle", "processing", "loading", "downloading", "error", "offline", "stale"
@@ -381,7 +381,7 @@ class RealtimeWorker(BaseModel):
     active_sessions: int
     models: list[str]  # M43: Currently loaded models (dynamic)
     languages: list[str]
-    runtime: str | None = None  # M43: Model runtime (e.g., "faster-whisper")
+    engine_id: str | None = None  # M43: Model engine_id (e.g., "faster-whisper")
     supports_vocabulary: bool = False
 
 
@@ -424,12 +424,12 @@ async def get_engines(
 
     for instance_id in all_instance_ids:
         data = await redis.hgetall(f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance_id}")
-        if data and "runtime" in data:
+        if data and "engine_id" in data:
             # Skip realtime-only instances — their "ready" status isn't a valid BatchEngine status
             if data.get("interfaces") == '["realtime"]':
                 continue
-            runtime = data["runtime"]
-            discovered_heartbeats.setdefault(runtime, []).append(data)
+            engine_id = data["engine_id"]
+            discovered_heartbeats.setdefault(engine_id, []).append(data)
 
     now = datetime.now(UTC)
     batch_engines = []
@@ -440,13 +440,13 @@ async def get_engines(
         if not entry.capabilities.stages:
             continue
 
-        runtime = entry.runtime
+        engine_id = entry.engine_id
         stage = entry.capabilities.stages[0]
 
-        stream_key = f"dalston:stream:{runtime}"
+        stream_key = f"dalston:stream:{engine_id}"
         queue_depth = await _get_stream_backlog(redis, stream_key)
 
-        instance_heartbeats = discovered_heartbeats.get(runtime, [])
+        instance_heartbeats = discovered_heartbeats.get(engine_id, [])
         if not instance_heartbeats:
             # No heartbeats = offline
             status = "offline"
@@ -481,7 +481,7 @@ async def get_engines(
 
         batch_engines.append(
             BatchEngine(
-                runtime=runtime,
+                engine_id=engine_id,
                 stage=stage,
                 status=status,
                 queue_depth=queue_depth,
@@ -496,7 +496,7 @@ async def get_engines(
     try:
         workers = await session_router.list_workers()
         for worker in workers:
-            running_engine_types.add(worker.runtime or "unknown")
+            running_engine_types.add(worker.engine_id or "unknown")
             realtime_engines.append(
                 RealtimeWorker(
                     instance=worker.instance,
@@ -506,7 +506,7 @@ async def get_engines(
                     active_sessions=worker.active_sessions,
                     models=worker.models,  # M43: Dynamically loaded models
                     languages=worker.languages,
-                    runtime=worker.runtime,  # M43: Model runtime
+                    engine_id=worker.engine_id,  # M43: Model engine_id
                     supports_vocabulary=worker.supports_vocabulary,
                 )
             )
@@ -520,22 +520,22 @@ async def get_engines(
         if entry.capabilities.stages:
             continue
 
-        runtime = entry.runtime
+        engine_id = entry.engine_id
         # Check if any workers are running for this engine type
         # Worker engine field uses short name (e.g., "whisper" not "whisper-streaming")
-        engine_short_name = runtime.replace("-streaming", "")
+        engine_short_name = engine_id.replace("-streaming", "")
         if engine_short_name not in running_engine_types:
             # No workers running - add offline placeholder
             realtime_engines.append(
                 RealtimeWorker(
-                    instance=f"{runtime} (offline)",
+                    instance=f"{engine_id} (offline)",
                     endpoint="",
                     status="offline",
                     capacity=entry.capabilities.max_concurrency or 4,
                     active_sessions=0,
                     models=[],
                     languages=entry.capabilities.languages or [],
-                    runtime=entry.capabilities.runtime,  # M43: Model runtime
+                    engine_id=entry.capabilities.engine_id,  # M43: Model engine_id
                 )
             )
 
@@ -1102,7 +1102,7 @@ class SuccessRate(BaseModel):
 class EngineMetric(BaseModel):
     """Per-engine performance summary."""
 
-    runtime: str
+    engine_id: str
     stage: str
     completed: int
     failed: int
@@ -1174,19 +1174,19 @@ async def get_metrics(
         if not entry.capabilities.stages:
             continue  # skip realtime engines
 
-        runtime = entry.runtime
+        engine_id = entry.engine_id
         stage = entry.capabilities.stages[0]
 
         # Task stats from DB (last 24h)
-        stats = await console_service.get_engine_task_stats(db, runtime)
+        stats = await console_service.get_engine_task_stats(db, engine_id)
 
         # Queue depth from Redis
-        stream_key = f"dalston:stream:{runtime}"
+        stream_key = f"dalston:stream:{engine_id}"
         queue_depth = await _get_stream_backlog(redis, stream_key)
 
         engine_metrics.append(
             EngineMetric(
-                runtime=runtime,
+                engine_id=engine_id,
                 stage=stage,
                 completed=stats.completed,
                 failed=stats.failed,
@@ -1196,7 +1196,7 @@ async def get_metrics(
             )
         )
 
-    # Sort engines by pipeline stage order, then alphabetically by runtime
+    # Sort engines by pipeline stage order, then alphabetically by engine_id
     _STAGE_ORDER = {
         "prepare": 0,
         "transcribe": 1,
@@ -1205,7 +1205,7 @@ async def get_metrics(
         "pii_detect": 4,
         "audio_redact": 5,
     }
-    engine_metrics.sort(key=lambda e: (_STAGE_ORDER.get(e.stage, 99), e.runtime))
+    engine_metrics.sort(key=lambda e: (_STAGE_ORDER.get(e.stage, 99), e.engine_id))
 
     # Grafana URL from environment (optional)
     grafana_url = os.environ.get("DALSTON_GRAFANA_URL")

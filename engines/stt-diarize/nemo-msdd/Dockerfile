@@ -33,7 +33,7 @@ WORKDIR /engine
 COPY engines/stt-diarize/nemo-msdd/requirements.txt .
 
 # Install PyTorch CPU first (for CPU testing), then NeMo
-# For GPU, the CUDA version will be used at runtime
+# For GPU, the CUDA version will be used at engine_id
 RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 
 # Install NeMo and dependencies
@@ -51,7 +51,7 @@ EncDecClassificationModel.from_pretrained('vad_multilingual_marblenet'); \
 print('Downloading TitaNet speaker embedding model...'); \
 EncDecSpeakerLabelModel.from_pretrained('titanet_large'); \
 print('Models downloaded successfully')"; \
-    else echo "Skipping model download (will download at runtime)"; fi
+    else echo "Skipping model download (will download at engine_id)"; fi
 
 # Copy engine files
 COPY engines/stt-diarize/nemo-msdd/engine.yaml /etc/dalston/engine.yaml

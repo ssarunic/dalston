@@ -47,7 +47,7 @@
 Define one canonical classification model:
 
 1. **Non-retryable**: invalid payload JSON, schema violations, unknown event type.
-2. **Retryable**: handler/runtime exceptions while dispatching valid events.
+2. **Retryable**: handler/engine_id exceptions while dispatching valid events.
 
 This prevents ad hoc retry behavior by individual handlers.
 

@@ -36,6 +36,6 @@ COPY engines/stt-transcribe/riva/engine.yaml /etc/dalston/engine.yaml
 # Default environment variables
 ENV DALSTON_RIVA_URI=riva-nim:50051
 ENV DALSTON_RIVA_CHUNK_MS=100
-ENV DALSTON_RUNTIME=riva
+ENV DALSTON_ENGINE_ID=riva
 
 CMD ["python", "engine.py"]

@@ -3,16 +3,16 @@
 Uses the faster-whisper library (CTranslate2-based) for efficient
 speech-to-text transcription with GPU acceleration.
 
-Delegates inference to FasterWhisperCore (shared with the realtime engine).
+Delegates inference to FasterWhisperInference (shared with the realtime engine).
 
 Features:
-    - Runtime model swapping via config["runtime_model_id"]
+    - Runtime model swapping via config["loaded_model_id"]
     - TTL-based model eviction for idle models
     - LRU eviction when at max_loaded capacity
     - Multi-model support on single GPU
 
 Environment variables:
-    DALSTON_RUNTIME: Runtime engine ID for registration (default: "faster-whisper")
+    DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "faster-whisper")
     DALSTON_DEFAULT_MODEL_ID: Default model ID (default: "large-v3-turbo")
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
     DALSTON_MODEL_TTL_SECONDS: Evict models idle longer than this (default: 3600)
@@ -32,22 +32,22 @@ from dalston.common.pipeline_types import (
 )
 from dalston.engine_sdk import BatchTaskContext, EngineInput
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
-from dalston.engine_sdk.cores.faster_whisper_core import (
+from dalston.engine_sdk.inference.faster_whisper_inference import (
     FasterWhisperConfig,
-    FasterWhisperCore,
+    FasterWhisperInference,
 )
 
 
 class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
     """Faster-Whisper transcription engine with TTL-based model management.
 
-    This engine delegates inference to FasterWhisperCore, which is shared
+    This engine delegates inference to FasterWhisperInference, which is shared
     with the realtime faster-whisper engine. The batch adapter handles:
     - Task config parsing
     - Output formatting to Transcript
     - Heartbeat state reporting
 
-    When run standalone, creates its own FasterWhisperCore. When used within
+    When run standalone, creates its own FasterWhisperInference. When used within
     a unified runner, accepts an injected core to share a single loaded
     model with the realtime adapter.
 
@@ -60,21 +60,21 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
     DEFAULT_VAD_FILTER = True
     DEFAULT_MODEL_ID = "large-v3-turbo"
 
-    def __init__(self, core: FasterWhisperCore | None = None) -> None:
+    def __init__(self, core: FasterWhisperInference | None = None) -> None:
         super().__init__()
 
         # Get configuration from environment
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
         )
-        self._runtime = os.environ.get("DALSTON_RUNTIME", "faster-whisper")
+        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "faster-whisper")
 
         # Use injected core (unified runner) or create own (standalone)
-        self._core = core if core is not None else FasterWhisperCore.from_env()
+        self._core = core if core is not None else FasterWhisperInference.from_env()
 
         self.logger.info(
             "engine_init",
-            runtime=self._runtime,
+            engine_id=self._engine_id,
             default_model=self._default_model_id,
             device=self._core.device,
             compute_type=self._core.compute_type,
@@ -86,7 +86,7 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
     def transcribe_audio(
         self, engine_input: EngineInput, ctx: BatchTaskContext
     ) -> Transcript:
-        """Transcribe audio using Faster-Whisper via shared FasterWhisperCore.
+        """Transcribe audio using Faster-Whisper via shared FasterWhisperInference.
 
         Args:
             engine_input: Task input with audio file path and config
@@ -117,7 +117,7 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
             decode_temperature = segment_temperature
 
         # Get model to use from task config
-        runtime_model_id = params.runtime_model_id or self._default_model_id
+        loaded_model_id = params.loaded_model_id or self._default_model_id
 
         # Build transcribe config
         hotwords = " ".join(vocabulary) if vocabulary else None
@@ -138,13 +138,13 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
             hotwords=hotwords,
         )
 
-        # Update runtime state for heartbeat reporting
-        self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
+        # Update engine_id state for heartbeat reporting
+        self._set_runtime_state(loaded_model=loaded_model_id, status="processing")
 
         self.logger.info("transcribing", audio_path=str(audio_path))
         self.logger.info(
             "transcribe_config",
-            runtime_model_id=runtime_model_id,
+            loaded_model_id=loaded_model_id,
             language=transcribe_config.language,
             beam_size=transcribe_config.beam_size,
             vad_filter=transcribe_config.vad_filter,
@@ -158,7 +158,7 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
             # Delegate to shared core
             result = self._core.transcribe(
                 audio=audio_path,
-                model_id=runtime_model_id,
+                model_id=loaded_model_id,
                 config=transcribe_config,
             )
 
@@ -213,7 +213,7 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
                 text=full_text,
                 segments=segments,
                 language=result.language,
-                runtime=self._runtime,
+                engine_id=self._engine_id,
                 language_confidence=round(result.language_probability, 3),
                 duration=result.duration,
                 alignment_method=AlignmentMethod.ATTENTION,
@@ -240,7 +240,7 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
 
         return {
             "status": "healthy",
-            "runtime": self._runtime,
+            "engine_id": self._engine_id,
             "device": self._core.device,
             "compute_type": self._core.compute_type,
             "cuda_available": cuda_available,

@@ -86,7 +86,7 @@ class EngineRunner:
 
     The runner:
     1. Connects to Redis for queue polling and event publishing
-    2. Polls the engine's stream (dalston:stream:{runtime})
+    2. Polls the engine's stream (dalston:stream:{engine_id})
     3. Downloads task input from S3
     4. Calls engine.process()
     5. Uploads task output to S3
@@ -95,7 +95,7 @@ class EngineRunner:
     """
 
     # Redis key patterns (display only - actual stream key built by streams module)
-    STREAM_KEY = "dalston:stream:{runtime}"
+    STREAM_KEY = "dalston:stream:{engine_id}"
     EVENTS_CHANNEL = "dalston:events"
 
     # Configuration
@@ -128,33 +128,33 @@ class EngineRunner:
         self._materializer = ArtifactMaterializer(store=S3ArtifactStore())
 
         # Load configuration from environment
-        self.runtime = os.environ.get("DALSTON_RUNTIME", "unknown")
+        self.engine_id = os.environ.get("DALSTON_ENGINE_ID", "unknown")
         # Instance ID: prefer a stable ID so container restarts reuse the same Redis key
-        # and don't leave ghost entries in stage/runtime sets.
+        # and don't leave ghost entries in stage/engine_id sets.
         # Priority: DALSTON_WORKER_ID > DALSTON_INSTANCE > random UUID (local/dev fallback)
         stable_id = os.environ.get("DALSTON_WORKER_ID") or os.environ.get(
             "DALSTON_INSTANCE"
         )
         if stable_id:
-            self.instance = f"{self.runtime}-{stable_id[:12]}"
+            self.instance = f"{self.engine_id}-{stable_id[:12]}"
         else:
-            self.instance = f"{self.runtime}-{uuid4().hex[:12]}"
+            self.instance = f"{self.engine_id}-{uuid4().hex[:12]}"
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
         self.s3_bucket = os.environ.get("DALSTON_S3_BUCKET", "dalston-artifacts")
         self.metrics_port = int(os.environ.get("DALSTON_METRICS_PORT", "9100"))
 
-        # Configure structured logging (use logical runtime for aggregation)
-        dalston.logging.configure(f"engine-{self.runtime}")
+        # Configure structured logging (use logical engine_id for aggregation)
+        dalston.logging.configure(f"engine-{self.engine_id}")
 
         # Configure distributed tracing (M19)
-        dalston.telemetry.configure_tracing(f"dalston-engine-{self.runtime}")
+        dalston.telemetry.configure_tracing(f"dalston-engine-{self.engine_id}")
 
         # Configure Prometheus metrics (M20)
-        dalston.metrics.configure_metrics(f"engine-{self.runtime}")
+        dalston.metrics.configure_metrics(f"engine-{self.engine_id}")
 
         logger.info(
             "engine_runner_initialized",
-            runtime=self.runtime,
+            engine_id=self.engine_id,
             instance=self.instance,
         )
 
@@ -171,7 +171,7 @@ class EngineRunner:
     @property
     def stream_key(self) -> str:
         """Get the Redis stream key for this engine."""
-        return self.STREAM_KEY.format(runtime=self.runtime)
+        return self.STREAM_KEY.format(engine_id=self.engine_id)
 
     def run(self) -> None:
         """Start the processing loop.
@@ -186,12 +186,12 @@ class EngineRunner:
 
         # Initialize registry and register engine with capabilities
         capabilities = self.engine.get_capabilities()
-        catalog_entry = get_catalog().get_engine(self.runtime)
+        catalog_entry = get_catalog().get_engine(self.engine_id)
         if catalog_entry is not None:
             self._execution_profile = catalog_entry.execution_profile
             if self._execution_profile != "container":
                 raise RuntimeError(
-                    f"Runtime '{self.runtime}' declares execution_profile "
+                    f"Runtime '{self.engine_id}' declares execution_profile "
                     f"'{self._execution_profile}' and cannot start as a "
                     "distributed container worker."
                 )
@@ -204,7 +204,7 @@ class EngineRunner:
         self._unified_writer.register(
             EngineRecord(
                 instance=self.instance,
-                runtime=self.runtime,
+                engine_id=self.engine_id,
                 stage=self._stage,
                 status="idle",
                 interfaces=["batch"],
@@ -228,7 +228,7 @@ class EngineRunner:
 
         logger.info(
             "engine_loop_starting",
-            runtime=self.runtime,
+            engine_id=self.engine_id,
             queue=self.stream_key,
             execution_profile=self._execution_profile,
         )
@@ -311,7 +311,7 @@ class EngineRunner:
     def _heartbeat_loop(self) -> None:
         """Send heartbeats to Redis periodically via registry.
 
-        M36: Also reports the currently loaded model from engine's runtime state.
+        M36: Also reports the currently loaded model from engine's engine_id state.
         This allows the orchestrator to know which model is loaded without
         requiring a model swap.
         """
@@ -321,7 +321,7 @@ class EngineRunner:
                 with self._task_lock:
                     current_task = self._current_task_id
 
-                # M36: Get runtime state including loaded model and engine status
+                # M36: Get engine_id state including loaded model and engine status
                 runtime_state = self.engine.get_runtime_state()
                 loaded_model = runtime_state.get("loaded_model")
                 engine_status = runtime_state.get("status", "idle")
@@ -337,7 +337,7 @@ class EngineRunner:
                             status=status,
                             active_batch=1 if current_task else 0,
                             loaded_model=loaded_model,
-                            runtime=self.runtime,
+                            engine_id=self.engine_id,
                             stage=self._stage,
                         )
                     except Exception as e:
@@ -373,7 +373,7 @@ class EngineRunner:
         3. Always ACK after processing (success or failure)
         """
         message: StreamMessage | None = None
-        stream_id = self.runtime
+        stream_id = self.engine_id
 
         # 1. Try to claim stale tasks from DEAD engines only
         # Use instance_id as consumer to ensure spot replacements don't mask old tasks
@@ -452,7 +452,7 @@ class EngineRunner:
             # ACK the task so it's removed from PEL
             ack_task(
                 self.redis_client,
-                self._current_stream_id or self.runtime,
+                self._current_stream_id or self.engine_id,
                 self._current_message_id,
             )
             self._current_message_id = None
@@ -470,7 +470,7 @@ class EngineRunner:
             self._publish_task_failed(message.task_id, message.job_id, str(e))
             ack_task(
                 self.redis_client,
-                self._current_stream_id or self.runtime,
+                self._current_stream_id or self.engine_id,
                 self._current_message_id,
             )
             self._current_message_id = None
@@ -486,7 +486,7 @@ class EngineRunner:
             )
             ack_task(
                 self.redis_client,
-                self._current_stream_id or self.runtime,
+                self._current_stream_id or self.engine_id,
                 self._current_message_id,
             )
             self._current_message_id = None
@@ -504,7 +504,7 @@ class EngineRunner:
             logger.info(
                 "task_deferred_skipping_ack",
                 task_id=message.task_id,
-                stream_id=self._current_stream_id or self.runtime,
+                stream_id=self._current_stream_id or self.engine_id,
             )
             self._current_message_id = None
             self._current_stream_id = None
@@ -513,7 +513,7 @@ class EngineRunner:
             if self._current_message_id:
                 ack_task(
                     self.redis_client,
-                    self._current_stream_id or self.runtime,
+                    self._current_stream_id or self.engine_id,
                     self._current_message_id,
                 )
                 self._current_message_id = None
@@ -551,7 +551,7 @@ class EngineRunner:
         task_metadata = self._get_task_metadata(task_id)
 
         # Extract model from task config (set by orchestrator's engine selector)
-        task_model = task_metadata.get("runtime_model_id", "")
+        task_model = task_metadata.get("loaded_model_id", "")
 
         # Record queue wait time (M20) - time between enqueue and dequeue
         enqueued_at_str = task_metadata.get("enqueued_at")
@@ -561,7 +561,7 @@ class EngineRunner:
                 dequeued_at = datetime.now(UTC)
                 queue_wait_seconds = (dequeued_at - enqueued_at).total_seconds()
                 dalston.metrics.observe_engine_queue_wait(
-                    self.runtime,
+                    self.engine_id,
                     queue_wait_seconds,
                     self._execution_profile,
                 )
@@ -576,11 +576,11 @@ class EngineRunner:
 
         # Create span linked to parent trace from orchestrator
         with dalston.telemetry.span_from_context(
-            f"engine.{self.runtime}.process",
+            f"engine.{self.engine_id}.process",
             trace_context,
             attributes={
                 "dalston.task_id": task_id,
-                "dalston.runtime": self.runtime,
+                "dalston.engine_id": self.engine_id,
                 "dalston.model": task_model,
                 "dalston.stage": task_metadata.get("stage", "unknown"),
                 "dalston.instance": self.instance,
@@ -595,7 +595,7 @@ class EngineRunner:
                 with dalston.telemetry.create_span("engine.download_input"):
                     task_input = self._load_task_input(task_id, temp_dir)
                 dalston.metrics.observe_engine_s3_download(
-                    self.runtime,
+                    self.engine_id,
                     time.time() - download_start,
                     self._execution_profile,
                 )
@@ -603,7 +603,7 @@ class EngineRunner:
 
                 # Resolve model from task input config if not in metadata
                 if not task_model:
-                    task_model = task_input.config.get("runtime_model_id", "")
+                    task_model = task_input.config.get("loaded_model_id", "")
                     if task_model:
                         dalston.telemetry.set_span_attribute(
                             "dalston.model", task_model
@@ -617,7 +617,7 @@ class EngineRunner:
                 structlog.contextvars.bind_contextvars(
                     task_id=task_id,
                     job_id=job_id,
-                    runtime=self.runtime,
+                    engine_id=self.engine_id,
                     model=task_model,
                     **({"request_id": request_id} if request_id else {}),
                 )
@@ -629,7 +629,7 @@ class EngineRunner:
                 logger.info("task_processing")
                 process_start = time.time()
                 task_ctx = BatchTaskContext(
-                    runtime=self.runtime,
+                    engine_id=self.engine_id,
                     instance=self.instance,
                     task_id=task_id,
                     job_id=job_id,
@@ -655,20 +655,20 @@ class EngineRunner:
                 with dalston.telemetry.create_span("engine.upload_output"):
                     self._save_task_output(task_id, job_id, output, total_task_time)
                 dalston.metrics.observe_engine_s3_upload(
-                    self.runtime,
+                    self.engine_id,
                     time.time() - upload_start,
                     self._execution_profile,
                 )
 
                 # Record task success metrics (M20)
                 dalston.metrics.observe_engine_task_duration(
-                    self.runtime,
+                    self.engine_id,
                     task_model,
                     process_time,
                     self._execution_profile,
                 )
                 dalston.metrics.inc_engine_tasks(
-                    self.runtime,
+                    self.engine_id,
                     task_model,
                     "success",
                     self._execution_profile,
@@ -693,7 +693,7 @@ class EngineRunner:
 
                 # Record task failure metric (M20)
                 dalston.metrics.inc_engine_tasks(
-                    self.runtime,
+                    self.engine_id,
                     task_model,
                     "failure",
                     self._execution_profile,
@@ -925,7 +925,7 @@ class EngineRunner:
             "type": "task.started",
             "task_id": task_id,
             "job_id": job_id,
-            "runtime": self.runtime,
+            "engine_id": self.engine_id,
             "timestamp": datetime.now(UTC).isoformat(),
         }
         # Inject trace context for distributed tracing (M19)
@@ -935,7 +935,7 @@ class EngineRunner:
 
         durable_success = self._publish_durable_event(
             event_type="task.started",
-            payload={"task_id": task_id, "job_id": job_id, "runtime": self.runtime},
+            payload={"task_id": task_id, "job_id": job_id, "engine_id": self.engine_id},
             task_id=task_id,
         )
 
@@ -969,7 +969,7 @@ class EngineRunner:
             "type": "task.completed",
             "task_id": task_id,
             "job_id": job_id,
-            "runtime": self.runtime,
+            "engine_id": self.engine_id,
             "timestamp": datetime.now(UTC).isoformat(),
         }
         # Inject trace context for distributed tracing (M19)
@@ -979,7 +979,7 @@ class EngineRunner:
 
         durable_success = self._publish_durable_event(
             event_type="task.completed",
-            payload={"task_id": task_id, "job_id": job_id, "runtime": self.runtime},
+            payload={"task_id": task_id, "job_id": job_id, "engine_id": self.engine_id},
             task_id=task_id,
         )
 
@@ -1019,7 +1019,7 @@ class EngineRunner:
             "type": "task.failed",
             "task_id": task_id,
             "job_id": job_id,
-            "runtime": self.runtime,
+            "engine_id": self.engine_id,
             "error": error,
             "timestamp": datetime.now(UTC).isoformat(),
         }
@@ -1033,7 +1033,7 @@ class EngineRunner:
             payload={
                 "task_id": task_id,
                 "job_id": job_id,
-                "runtime": self.runtime,
+                "engine_id": self.engine_id,
                 "error": error,
             },
             task_id=task_id,

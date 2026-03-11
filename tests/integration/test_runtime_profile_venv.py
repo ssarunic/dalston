@@ -16,7 +16,7 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _runtime_python() -> Path:
+def _engine_id_python() -> Path:
     return _repo_root() / ".venv" / "bin" / "python"
 
 
@@ -35,7 +35,7 @@ class VenvPipelineEngine(Engine):
             data={
                 "text": "venv transcript",
                 "segments": [{"text": "venv transcript"}],
-                "runtime": ctx.runtime,
+                "engine_id": ctx.engine_id,
             }
         )
 """.strip()
@@ -50,7 +50,7 @@ async def test_lite_pipeline_routes_venv_stage_execution(tmp_path: Path) -> None
     artifacts = LocalFilesystemArtifactStoreAdapter(str(tmp_path / "artifacts"))
     engine_path = _write_engine_module(tmp_path)
     manager = VenvEnvironmentManager(
-        runtime_pythons={"venv-transcribe": _runtime_python()},
+        runtime_pythons={"venv-transcribe": _engine_id_python()},
     )
     executor = VenvExecutor(
         env_manager=manager,
@@ -59,10 +59,10 @@ async def test_lite_pipeline_routes_venv_stage_execution(tmp_path: Path) -> None
     )
     binding = _LiteStageBinding(
         entry=CatalogEntry(
-            runtime="venv-transcribe",
+            engine_id="venv-transcribe",
             image="dalston/test:latest",
             capabilities=EngineCapabilities(
-                runtime="venv-transcribe",
+                engine_id="venv-transcribe",
                 version="test",
                 stages=["transcribe"],
             ),
@@ -96,4 +96,4 @@ async def test_lite_pipeline_routes_venv_stage_execution(tmp_path: Path) -> None
     )
     transcribe_data = json.loads(transcribe_output.read_text())
     assert transcribe_data["text"] == "venv transcript"
-    assert transcribe_data["runtime"] == "venv-transcribe"
+    assert transcribe_data["engine_id"] == "venv-transcribe"

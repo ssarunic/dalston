@@ -77,7 +77,7 @@ class EngineResponse(BaseModel):
     version: str
     execution_profile: ExecutionProfile
     status: Literal["running", "available", "unhealthy"]
-    loaded_model: str | None = None  # M36: Currently loaded model (runtime_model_id)
+    loaded_model: str | None = None  # M36: Currently loaded model (loaded_model_id)
     available_models: list[str] | None = None  # M36: Models on disk, ready to load
     capabilities: EngineCapabilitiesResponse
     hardware: EngineHardwareResponse | None = None
@@ -136,30 +136,30 @@ async def list_engines(
     registry = UnifiedEngineRegistry(redis)
     model_service = ModelRegistryService()
 
-    # Load all models from DB, group by runtime for efficient lookup
+    # Load all models from DB, group by engine_id for efficient lookup
     all_models = await model_service.list_models(db)
-    models_by_runtime: dict[str, list[str]] = {}
+    models_by_engine_id: dict[str, list[str]] = {}
     for m in all_models:
-        if m.runtime not in models_by_runtime:
-            models_by_runtime[m.runtime] = []
-        models_by_runtime[m.runtime].append(m.id)
+        if m.engine_id not in models_by_engine_id:
+            models_by_engine_id[m.engine_id] = []
+        models_by_engine_id[m.engine_id].append(m.id)
 
     # Get running engines from registry
     running_engines = await registry.get_all()
-    running_map = {e.runtime: e for e in running_engines}
+    running_map = {e.engine_id: e for e in running_engines}
 
     engines: list[EngineResponse] = []
 
     # Process all engines from catalog
     for entry in catalog.get_all_engines():
-        runtime = entry.runtime
+        engine_id = entry.engine_id
         caps = entry.capabilities
 
-        # Determine status and runtime state from registry
+        # Determine status and engine_id state from registry
         loaded_model: str | None = None
 
-        if runtime in running_map:
-            reg_engine = running_map[runtime]
+        if engine_id in running_map:
+            reg_engine = running_map[engine_id]
             if reg_engine.is_available:
                 status: Literal["running", "available", "unhealthy"] = "running"
             else:
@@ -169,12 +169,12 @@ async def list_engines(
         else:
             status = "available"
 
-        # M36/M46: Get available models for this runtime from DB
-        available_models = models_by_runtime.get(runtime) or None
+        # M36/M46: Get available models for this engine_id from DB
+        available_models = models_by_engine_id.get(engine_id) or None
 
         engines.append(
             EngineResponse(
-                id=runtime,
+                id=engine_id,
                 name=None,  # Could be added to catalog if needed
                 stage=caps.stages[0] if caps.stages else "unknown",
                 version=caps.version,
@@ -232,7 +232,7 @@ async def get_capabilities(
 
     # Get running engines from registry
     running_engines = await registry.get_all()
-    running_ids = {e.runtime for e in running_engines if e.is_available}
+    running_ids = {e.engine_id for e in running_engines if e.is_available}
 
     # Aggregate capabilities from running engines
     all_languages: set[str] = set()
@@ -240,7 +240,7 @@ async def get_capabilities(
     max_duration: int | None = None
 
     for entry in catalog.get_all_engines():
-        if entry.runtime not in running_ids:
+        if entry.engine_id not in running_ids:
             continue
 
         caps = entry.capabilities
@@ -264,7 +264,7 @@ async def get_capabilities(
                 )
 
             stage_caps = stages[stage]
-            stage_caps.engines.append(entry.runtime)
+            stage_caps.engines.append(entry.engine_id)
 
             # Merge capabilities (union for booleans, intersection for languages)
             if caps.supports_word_timestamps:
@@ -336,7 +336,7 @@ class LiteCapabilitiesResponse(BaseModel):
     description=(
         "Return the versioned lite capability matrix derived from the single "
         "source of truth in ``dalston.orchestrator.lite_capabilities``. "
-        "Available in all runtime modes; the ``active_profile`` field reflects "
+        "Available in all engine_id modes; the ``active_profile`` field reflects "
         "the profile currently configured via env or default."
     ),
 )
@@ -344,7 +344,7 @@ async def get_lite_capabilities() -> LiteCapabilitiesResponse:
     """Return the full lite capability matrix.
 
     This endpoint is always available (no Redis/DB dependency) and works in
-    both distributed and lite runtime modes.  It is the primary discovery
+    both distributed and lite engine_id modes.  It is the primary discovery
     surface for tooling, dashboards, and documentation generators.
     """
     matrix = get_matrix_as_dict()

@@ -1,6 +1,6 @@
 schema_version: "1.1"
 id: phoneme-align
-runtime: phoneme-align
+engine_id: phoneme-align
 stage: align
 name: Phoneme Forced Alignment
 version: 1.0.0
@@ -34,7 +34,7 @@ input:
 config_schema:
   type: object
   properties:
-    runtime_model_id:
+    loaded_model_id:
       type: string
       description: Runtime model identifier for explicit wav2vec2 model selection
     return_char_alignments:

@@ -238,7 +238,7 @@ function ModelTableRow({
           </div>
         </TableCell>
         <TableCell>
-          <Badge variant="secondary">{model.runtime}</Badge>
+          <Badge variant="secondary">{model.engine_id}</Badge>
         </TableCell>
         <TableCell>
           <div className="flex items-center gap-2">

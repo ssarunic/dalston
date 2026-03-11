@@ -7,14 +7,14 @@ Uses the HuggingFace ``transformers.pipeline("automatic-speech-recognition")``
 abstraction to normalize loading and inference across model architectures.
 
 Features:
-    - Runtime model swapping via config["runtime_model_id"]
+    - Runtime model swapping via config["loaded_model_id"]
     - TTL-based model eviction for idle models
     - LRU eviction when at max_loaded capacity
     - Multi-model support on single GPU
     - Output normalization across architectures to Dalston format
 
 Environment variables:
-    DALSTON_RUNTIME: Runtime engine ID for registration (default: "hf-asr")
+    DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "hf-asr")
     DALSTON_DEFAULT_MODEL_ID: Default HF model ID (default: "openai/whisper-large-v3")
     DALSTON_DEVICE: Device for inference (cuda, cpu). Defaults to cuda if available.
     DALSTON_MODEL_TTL_SECONDS: Evict models idle longer than this (default: 3600)
@@ -64,7 +64,7 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
         )
-        self._runtime = os.environ.get("DALSTON_RUNTIME", "hf-asr")
+        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "hf-asr")
 
         # Auto-detect device and dtype
         self._device, self._torch_dtype = self._detect_device()
@@ -90,7 +90,7 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
 
         self.logger.info(
             "engine_init",
-            runtime=self._runtime,
+            engine_id=self._engine_id,
             default_model=self._default_model_id,
             device=self._device,
             torch_dtype=str(self._torch_dtype),
@@ -145,7 +145,7 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
         params = engine_input.get_transcribe_params()
 
         # Get model to use from task config
-        runtime_model_id = params.runtime_model_id or self._default_model_id
+        loaded_model_id = params.loaded_model_id or self._default_model_id
 
         # Handle language: None or "auto" means auto-detect
         language = params.language
@@ -155,15 +155,15 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
         channel = params.channel
 
         # Acquire pipeline from manager (loads if needed, updates LRU)
-        pipe = self._manager.acquire(runtime_model_id)
+        pipe = self._manager.acquire(loaded_model_id)
         try:
-            # Update runtime state for heartbeat reporting
-            self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
+            # Update engine_id state for heartbeat reporting
+            self._set_runtime_state(loaded_model=loaded_model_id, status="processing")
 
             self.logger.info(
                 "transcribing",
                 audio_path=str(engine_input.audio_path),
-                runtime_model_id=runtime_model_id,
+                loaded_model_id=loaded_model_id,
                 language=language,
             )
 
@@ -185,7 +185,7 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
 
             # Normalize output to Transcript format
             transcript = self._normalize_output(
-                result, runtime_model_id, language, channel
+                result, loaded_model_id, language, channel
             )
 
             self.logger.info(
@@ -198,7 +198,7 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
 
         finally:
             # Always release the model reference
-            self._manager.release(runtime_model_id)
+            self._manager.release(loaded_model_id)
             self._set_runtime_state(status="idle")
 
     def _normalize_output(
@@ -288,7 +288,7 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
             text=text,
             segments=segments,
             language=language or "auto",
-            runtime=self._runtime,
+            engine_id=self._engine_id,
             alignment_method=(
                 AlignmentMethod.ATTENTION
                 if has_word_timestamps
@@ -305,7 +305,7 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
 
         return {
             "status": "healthy",
-            "runtime": self._runtime,
+            "engine_id": self._engine_id,
             "device": self._device,
             "torch_dtype": str(self._torch_dtype),
             "cuda_available": cuda_available,
