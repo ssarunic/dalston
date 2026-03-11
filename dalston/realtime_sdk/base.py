@@ -274,9 +274,7 @@ class RealtimeEngine(ABC):
             return self._model_manager.loaded_models()
         return None
 
-    def get_streaming_decode_fn(
-        self, model_variant: str | None = None
-    ) -> Any:
+    def get_streaming_decode_fn(self, model_variant: str | None = None) -> Any:
         """Return a streaming decode callback for the given model, or None.
 
         Override in engines that support cache-aware streaming decode

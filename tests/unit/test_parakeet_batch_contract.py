@@ -16,6 +16,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
+import pytest
+
 from dalston.engine_sdk import EngineInput
 from dalston.engine_sdk.context import BatchTaskContext
 
@@ -41,7 +43,9 @@ def _load_parakeet_engine_class():
     return module.ParakeetEngine
 
 
-# Load once at module level to avoid re-importing native C extensions
+# Load once at module level to avoid re-importing native C extensions.
+# Guard: torch is required by the engine but not available in CI.
+torch = pytest.importorskip("torch")
 _ParakeetEngine = _load_parakeet_engine_class()
 
 

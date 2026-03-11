@@ -243,9 +243,12 @@ class TestRTEngineStreamingDispatch:
         if mock_core is None:
             mock_core = _make_mock_core()
 
-        with patch.dict("os.environ", {
-            "DALSTON_RNNT_CHUNK_MS": "160",
-        }):
+        with patch.dict(
+            "os.environ",
+            {
+                "DALSTON_RNNT_CHUNK_MS": "160",
+            },
+        ):
             engine = module.ParakeetStreamingEngine(core=mock_core)
         return engine
 
@@ -292,6 +295,7 @@ class TestRTEngineStreamingDispatch:
         fn = engine.get_streaming_decode_fn("parakeet-ctc-0.6b")
         assert fn is None
 
+
 # ---------------------------------------------------------------------------
 # T2: RT engine transcribe_streaming() output shape
 # ---------------------------------------------------------------------------
@@ -314,9 +318,12 @@ class TestRTEngineTranscribeStreaming:
             ]
         )
 
-        with patch.dict("os.environ", {
-            "DALSTON_RNNT_CHUNK_MS": "160",
-        }):
+        with patch.dict(
+            "os.environ",
+            {
+                "DALSTON_RNNT_CHUNK_MS": "160",
+            },
+        ):
             engine = module.ParakeetStreamingEngine(core=mock_core)
         return engine
 

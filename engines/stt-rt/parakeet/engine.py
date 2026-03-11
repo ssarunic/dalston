@@ -79,9 +79,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
         self._core: ParakeetCore | None = core
 
         # M71: Cache-aware streaming configuration
-        self._rnnt_chunk_ms = int(
-            os.environ.get("DALSTON_RNNT_CHUNK_MS", "160")
-        )
+        self._rnnt_chunk_ms = int(os.environ.get("DALSTON_RNNT_CHUNK_MS", "160"))
 
     def load_models(self) -> None:
         """Initialize ParakeetCore with optional preloading.
@@ -284,9 +282,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
         """Parakeet supports native streaming with partial results."""
         return True
 
-    def get_streaming_decode_fn(
-        self, model_variant: str | None = None
-    ) -> Any:
+    def get_streaming_decode_fn(self, model_variant: str | None = None) -> Any:
         """Return streaming decode callback for RNNT/TDT models.
 
         M71: When the model supports streaming decode, returns
