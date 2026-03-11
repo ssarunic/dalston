@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from dalston.common.pipeline_types import TranscribeInput
 from dalston.engine_sdk.context import BatchTaskContext
 
 HAS_TORCH = importlib.util.find_spec("torch") is not None
@@ -421,6 +422,10 @@ class TestVLLMASREngine:
             "runtime_model_id": "mistralai/Voxtral-Mini-3B-2507",
             "language": "en",
         }
+        mock_input.get_transcribe_params.return_value = TranscribeInput(
+            runtime_model_id="mistralai/Voxtral-Mini-3B-2507",
+            language="en",
+        )
 
         # Mock SamplingParams import
         mock_sampling_params = MagicMock()
@@ -455,6 +460,11 @@ class TestVLLMASREngine:
             "language": "en",
             "vocabulary": ["Dalston", "vLLM"],
         }
+        mock_input.get_transcribe_params.return_value = TranscribeInput(
+            runtime_model_id="mistralai/Voxtral-Mini-3B-2507",
+            language="en",
+            vocabulary=["Dalston", "vLLM"],
+        )
 
         mock_sampling_params = MagicMock()
         with patch.dict(
