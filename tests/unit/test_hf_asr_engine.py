@@ -173,7 +173,7 @@ class TestHFASREngineNormalizeOutput:
         assert output.segments[0].words is None
         assert output.segments[0].start == 0.0
         assert output.segments[0].end == 0.0
-        assert output.timestamp_granularity.value == "none"
+        assert output.timestamp_granularity.value == "segment"
         assert output.alignment_method.value == "unknown"
 
     def test_normalize_output_with_none_timestamps(self, engine):
