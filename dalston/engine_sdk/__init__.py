@@ -5,7 +5,7 @@ that integrate with the Dalston transcription pipeline.
 
 Example usage:
     from dalston.engine_sdk import Engine, EngineInput, EngineOutput
-    from dalston.engine_sdk import PrepareOutput, TranscribeOutput, Segment, Word
+    from dalston.engine_sdk import PrepareOutput, Transcript, TranscriptSegment
 
     class MyTranscriptionEngine(Engine):
         def process(
@@ -19,9 +19,9 @@ Example usage:
             result = transcribe(engine_input.audio_path)
 
             # Return typed output
-            return EngineOutput(data=TranscribeOutput(
+            return EngineOutput(data=Transcript(
                 text=result.text,
-                segments=[Segment(start=0.0, end=1.0, text="hello")],
+                segments=[TranscriptSegment(start=0.0, end=1.0, text="hello")],
                 language="en",
                 runtime="my-engine",
             ))
@@ -46,7 +46,6 @@ from dalston.common.pipeline_types import (
     AlignOutput,
     AudioMedia,
     AudioRedactOutput,
-    Transcript,
     DiarizeOutput,
     MergedSegment,
     MergeOutput,
@@ -58,18 +57,18 @@ from dalston.common.pipeline_types import (
     PIIRedactionMode,
     PrepareOutput,
     Segment,
+    SegmentMetaKeys,
     Speaker,
     SpeakerDetectionMode,
     SpeakerTurn,
     SpeechRegion,
     TaskInputData,
     TimestampGranularity,
-    TranscribeOutput,
+    Transcript,
     TranscriptMetadata,
+    TranscriptMetaKeys,
     TranscriptSegment,
     TranscriptWord,
-    SegmentMetaKeys,
-    TranscriptMetaKeys,
     Word,
     WordMetaKeys,
 )
@@ -128,5 +127,4 @@ __all__ = [
     "MergeOutput",
     "PIIDetectOutput",
     "PrepareOutput",
-    "TranscribeOutput",
 ]

@@ -8,7 +8,8 @@ from dalston.common.pipeline_types import (
     AlignOutput,
     Segment,
     SpeakerTurn,
-    TranscribeOutput,
+    Transcript,
+    TranscriptSegment,
     Word,
 )
 from dalston.common.transcript import (
@@ -393,8 +394,8 @@ class TestSelectSegments:
     """Tests for segment source selection."""
 
     def test_prefers_align_over_transcribe(self):
-        transcribe = TranscribeOutput(
-            segments=[Segment(start=0.0, end=1.0, text="orig")],
+        transcript = Transcript(
+            segments=[TranscriptSegment(start=0.0, end=1.0, text="orig")],
             text="orig",
             language="en",
             runtime="faster-whisper",
@@ -410,7 +411,7 @@ class TestSelectSegments:
         )
 
         segments, has_words, warnings = _select_segments(
-            transcribe_output=transcribe,
+            transcript_v1=transcript,
             align_output=align,
             raw_segments=[],
         )
@@ -420,8 +421,8 @@ class TestSelectSegments:
         assert has_words is True
 
     def test_falls_back_to_transcribe_when_align_skipped(self):
-        transcribe = TranscribeOutput(
-            segments=[Segment(start=0.0, end=1.0, text="orig")],
+        transcript = Transcript(
+            segments=[TranscriptSegment(start=0.0, end=1.0, text="orig")],
             text="orig",
             language="en",
             runtime="faster-whisper",
@@ -439,7 +440,7 @@ class TestSelectSegments:
         )
 
         segments, has_words, warnings = _select_segments(
-            transcribe_output=transcribe,
+            transcript_v1=transcript,
             align_output=align,
             raw_segments=[],
         )
@@ -452,7 +453,7 @@ class TestSelectSegments:
         raw = [{"start": 0.0, "end": 1.0, "text": "raw"}]
 
         segments, has_words, warnings = _select_segments(
-            transcribe_output=None,
+            transcript_v1=None,
             align_output=None,
             raw_segments=raw,
         )

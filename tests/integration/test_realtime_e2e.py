@@ -279,44 +279,66 @@ class TestTranscriptAssemblyE2E:
     """End-to-end tests for transcript assembly flow."""
 
     def test_multi_utterance_assembly(self):
+        from dalston.common.pipeline_types import (
+            Transcript,
+            TranscriptSegment,
+            TranscriptWord,
+        )
         from dalston.realtime_sdk.assembler import (
-            TranscribeResult,
             TranscriptAssembler,
-            Word,
         )
 
         assembler = TranscriptAssembler()
 
+        def _make_transcript(
+            text: str,
+            words: list[TranscriptWord],
+            confidence: float,
+        ) -> Transcript:
+            return Transcript(
+                text=text,
+                segments=[
+                    TranscriptSegment(
+                        start=words[0].start if words else 0.0,
+                        end=words[-1].end if words else 0.0,
+                        text=text,
+                        words=words,
+                        confidence=confidence,
+                    )
+                ],
+                language="en",
+                runtime="test",
+            )
+
         # Simulate receiving multiple utterances from VAD
         results = [
-            TranscribeResult(
+            _make_transcript(
                 text="Hello everyone",
                 words=[
-                    Word(word="Hello", start=0.0, end=0.5, confidence=0.95),
-                    Word(word="everyone", start=0.6, end=1.2, confidence=0.92),
+                    TranscriptWord(text="Hello", start=0.0, end=0.5, confidence=0.95),
+                    TranscriptWord(
+                        text="everyone", start=0.6, end=1.2, confidence=0.92
+                    ),
                 ],
-                language="en",
                 confidence=0.93,
             ),
-            TranscribeResult(
+            _make_transcript(
                 text="Welcome to the show",
                 words=[
-                    Word(word="Welcome", start=0.0, end=0.5, confidence=0.90),
-                    Word(word="to", start=0.6, end=0.7, confidence=0.95),
-                    Word(word="the", start=0.8, end=0.9, confidence=0.94),
-                    Word(word="show", start=1.0, end=1.3, confidence=0.91),
+                    TranscriptWord(text="Welcome", start=0.0, end=0.5, confidence=0.90),
+                    TranscriptWord(text="to", start=0.6, end=0.7, confidence=0.95),
+                    TranscriptWord(text="the", start=0.8, end=0.9, confidence=0.94),
+                    TranscriptWord(text="show", start=1.0, end=1.3, confidence=0.91),
                 ],
-                language="en",
                 confidence=0.92,
             ),
-            TranscribeResult(
+            _make_transcript(
                 text="Today we discuss",
                 words=[
-                    Word(word="Today", start=0.0, end=0.4, confidence=0.88),
-                    Word(word="we", start=0.5, end=0.6, confidence=0.90),
-                    Word(word="discuss", start=0.7, end=1.1, confidence=0.87),
+                    TranscriptWord(text="Today", start=0.0, end=0.4, confidence=0.88),
+                    TranscriptWord(text="we", start=0.5, end=0.6, confidence=0.90),
+                    TranscriptWord(text="discuss", start=0.7, end=1.1, confidence=0.87),
                 ],
-                language="en",
                 confidence=0.88,
             ),
         ]
@@ -324,7 +346,7 @@ class TestTranscriptAssemblyE2E:
         durations = [2.0, 2.0, 1.5]
 
         for result, duration in zip(results, durations, strict=False):
-            assembler.add_utterance(result, audio_duration=duration)
+            assembler.add_transcript(result, audio_duration=duration)
 
         # Verify full transcript
         assert assembler.get_full_transcript() == (

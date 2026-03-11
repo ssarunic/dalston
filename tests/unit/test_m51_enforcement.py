@@ -40,15 +40,14 @@ def test_runtime_engines_have_new_process_signature() -> None:
             and "ctx: BatchTaskContext" in text
             and "-> EngineOutput" in text
         )
-        has_v1_signature = (
-            "def transcribe_audio(" in text
-            and "-> Transcript" in text
-        )
+        has_v1_signature = "def transcribe_audio(" in text and "-> Transcript" in text
         if not has_m51_signature and not has_v1_signature:
             missing.append(str(file_path))
         if "BatchTaskContext | None" in text:
             optional_ctx.append(str(file_path))
-    assert not missing, f"Engines missing M51 process or V1 transcribe_audio signature: {missing}"
+    assert not missing, (
+        f"Engines missing M51 process or V1 transcribe_audio signature: {missing}"
+    )
     assert not optional_ctx, (
         f"Engines still using optional ctx signature: {optional_ctx}"
     )

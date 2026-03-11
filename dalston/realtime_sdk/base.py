@@ -33,6 +33,7 @@ from dalston.common.audio_defaults import (
     MAX_SAMPLE_RATE,
     MIN_SAMPLE_RATE,
 )
+from dalston.common.pipeline_types import Transcript
 from dalston.common.registry import EngineRecord, UnifiedEngineRegistry
 from dalston.common.timeouts import WS_PING_INTERVAL, WS_PING_TIMEOUT
 from dalston.common.ws_close_codes import (
@@ -41,7 +42,6 @@ from dalston.common.ws_close_codes import (
     WS_CLOSE_TRY_AGAIN_LATER,
 )
 from dalston.engine_sdk.types import EngineCapabilities
-from dalston.realtime_sdk.assembler import TranscribeResult
 from dalston.realtime_sdk.model_manager import AsyncModelManager
 from dalston.realtime_sdk.session import SessionConfig, SessionHandler
 
@@ -71,17 +71,18 @@ class RealtimeEngine(ABC):
     - Signal handling for graceful shutdown
 
     Example:
-        class MyRealtimeEngine(RealtimeEngine):
+        class MyRealtimeEngine(BaseRealtimeTranscribeEngine):
             def load_models(self) -> None:
                 from faster_whisper import WhisperModel
                 self.model = WhisperModel("large-v3", device="cuda")
 
-            def transcribe(
+            def transcribe_v1(
                 self,
                 audio: np.ndarray,
                 language: str,
                 model_variant: str,
-            ) -> TranscribeResult:
+                vocabulary: list[str] | None = None,
+            ) -> Transcript:
                 segments, info = self.model.transcribe(
                     audio,
                     language=None if language == "auto" else language,
@@ -93,18 +94,18 @@ class RealtimeEngine(ABC):
                 for segment in segments:
                     text_parts.append(segment.text.strip())
                     for word in segment.words or []:
-                        words.append(Word(
-                            word=word.word,
+                        words.append(self.build_word(
+                            text=word.word,
                             start=word.start,
                             end=word.end,
                             confidence=word.probability,
                         ))
 
-                return TranscribeResult(
+                return self.build_transcript(
                     text=" ".join(text_parts),
-                    words=words,
+                    segments=[self.build_segment(...)],
                     language=info.language,
-                    confidence=info.language_probability,
+                    runtime="faster-whisper",
                 )
 
         if __name__ == "__main__":
@@ -167,7 +168,7 @@ class RealtimeEngine(ABC):
         language: str,
         model_variant: str,
         vocabulary: list[str] | None = None,
-    ) -> TranscribeResult:
+    ) -> Transcript:
         """Transcribe an audio segment.
 
         Called by SessionHandler when VAD detects an utterance endpoint.
@@ -179,23 +180,7 @@ class RealtimeEngine(ABC):
             vocabulary: List of terms to boost recognition (hotwords/bias)
 
         Returns:
-            TranscribeResult with text, words, language, confidence
-
-        Example:
-            def transcribe(self, audio, language, model_variant, vocabulary=None):
-                # Apply vocabulary boosting if supported
-                kwargs = {}
-                if vocabulary:
-                    kwargs["hotwords"] = " ".join(vocabulary)
-
-                segments, info = self.model.transcribe(
-                    audio,
-                    language=None if language == "auto" else language,
-                    word_timestamps=True,
-                    **kwargs,
-                )
-                # Process segments...
-                return TranscribeResult(text=text, words=words, ...)
+            Transcript with text, segments, language, and metadata
         """
         raise NotImplementedError
 
@@ -284,7 +269,7 @@ class RealtimeEngine(ABC):
 
         The callback signature is:
             (audio_iter: Iterator[np.ndarray], language: str, model: str)
-            -> Iterator[TranscribeResult]
+            -> Iterator[Transcript]
 
         Args:
             model_variant: Model name from the session config.

@@ -14,7 +14,6 @@ import structlog
 
 from dalston.common.pipeline_types import (
     AlignOutput,
-    Transcript,
     DiarizeOutput,
     MergedSegment,
     MergeOutput,
@@ -22,7 +21,7 @@ from dalston.common.pipeline_types import (
     Speaker,
     SpeakerDetectionMode,
     SpeakerTurn,
-    TranscribeOutput,
+    Transcript,
     TranscriptMetadata,
     TranscriptSegment,
     Word,
@@ -72,15 +71,15 @@ def assemble_transcript(
         transcribe_data,
     )
 
-    # Parse typed outputs if possible — try Transcript first
-    transcript_v1 = _try_parse_transcript_v1(transcribe_data) if transcribe_data else None
-    transcribe_output = _try_parse_transcribe(transcribe_data) if transcript_v1 is None else None
+    # Parse typed outputs if possible
+    transcript_v1 = (
+        _try_parse_transcript_v1(transcribe_data) if transcribe_data else None
+    )
     align_output = _try_parse_align(align_data) if align_data else None
     diarize_output = _try_parse_diarize(diarize_data) if diarize_data else None
 
     # Select segment source and determine word timestamp availability
     segments_source, word_timestamps_available, pipeline_warnings = _select_segments(
-        transcribe_output=transcribe_output,
         align_output=align_output,
         raw_segments=raw_segments,
         transcript_v1=transcript_v1,
@@ -220,14 +219,10 @@ def assemble_per_channel_transcript(
         transcript_v1 = (
             _try_parse_transcript_v1(transcribe_data) if transcribe_data else None
         )
-        transcribe_output = (
-            _try_parse_transcribe(transcribe_data) if transcribe_data and transcript_v1 is None else None
-        )
         align_output = _try_parse_align(align_data) if align_data else None
         raw_segments = transcribe_data.get("segments", []) if transcribe_data else []
 
         segments_source, ch_word_ts, ch_warnings = _select_segments(
-            transcribe_output=transcribe_output,
             align_output=align_output,
             raw_segments=raw_segments,
             transcript_v1=transcript_v1,
@@ -467,14 +462,6 @@ def _try_parse_transcript_v1(data: dict[str, Any]) -> Transcript | None:
         return None
 
 
-def _try_parse_transcribe(data: dict[str, Any]) -> TranscribeOutput | None:
-    """Try to parse transcribe data into a typed TranscribeOutput."""
-    try:
-        return TranscribeOutput.model_validate(data)
-    except Exception:
-        return None
-
-
 def _try_parse_align(data: dict[str, Any]) -> AlignOutput | None:
     """Try to parse align data into a typed AlignOutput."""
     try:
@@ -493,7 +480,6 @@ def _try_parse_diarize(data: dict[str, Any]) -> DiarizeOutput | None:
 
 def _select_segments(
     *,
-    transcribe_output: TranscribeOutput | None,
     align_output: AlignOutput | None,
     raw_segments: list,
     transcript_v1: Transcript | None = None,
@@ -511,8 +497,6 @@ def _select_segments(
             pipeline_warnings.extend(align_output.warnings)
             if transcript_v1 is not None:
                 segments_source: list = list(transcript_v1.segments)
-            elif transcribe_output is not None:
-                segments_source = list(transcribe_output.segments)
             else:
                 segments_source = raw_segments
             word_timestamps_available = False
@@ -522,9 +506,6 @@ def _select_segments(
     elif transcript_v1 is not None:
         segments_source = list(transcript_v1.segments)
         word_timestamps_available = any(s.words for s in transcript_v1.segments)
-    elif transcribe_output is not None:
-        segments_source = list(transcribe_output.segments)
-        word_timestamps_available = any(s.words for s in transcribe_output.segments)
     else:
         segments_source = raw_segments
         word_timestamps_available = False
@@ -647,6 +628,7 @@ def _build_merged_segments(
     segments: list[MergedSegment] = []
 
     for idx, seg in enumerate(segments_source):
+        seg_words: Any = None
         if isinstance(seg, TranscriptSegment):
             # Transcript segment
             seg_start = seg.start

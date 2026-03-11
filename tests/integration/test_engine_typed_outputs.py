@@ -16,7 +16,9 @@ from dalston.common.pipeline_types import (
     SpeakerDetectionMode,
     SpeakerTurn,
     TimestampGranularity,
-    TranscribeOutput,
+    Transcript,
+    TranscriptSegment,
+    TranscriptWord,
     Word,
 )
 from dalston.engine_sdk.context import BatchTaskContext
@@ -361,23 +363,24 @@ class TestOutputValidation:
     without requiring any external dependencies.
     """
 
-    def test_transcribe_output_validates_correctly(self):
-        """Test TranscribeOutput validates against the spec."""
-        output = TranscribeOutput(
+    def test_transcript_validates_correctly(self):
+        """Test Transcript validates against the spec."""
+        output = Transcript(
             segments=[
-                Segment(
+                TranscriptSegment(
                     start=0.0,
                     end=5.0,
                     text="Test segment",
                     words=[
-                        Word(
+                        TranscriptWord(
                             text="Test",
                             start=0.0,
                             end=2.5,
                             confidence=0.95,
-                            alignment_method=AlignmentMethod.ATTENTION,
                         ),
-                        Word(text="segment", start=2.5, end=5.0, confidence=0.97),
+                        TranscriptWord(
+                            text="segment", start=2.5, end=5.0, confidence=0.97
+                        ),
                     ],
                 )
             ],
@@ -385,19 +388,16 @@ class TestOutputValidation:
             language="en",
             language_confidence=0.98,
             duration=5.0,
-            timestamp_granularity_requested=TimestampGranularity.WORD,
-            timestamp_granularity_actual=TimestampGranularity.WORD,
+            timestamp_granularity=TimestampGranularity.WORD,
             alignment_method=AlignmentMethod.ATTENTION,
             runtime="faster-whisper",
-            skipped=False,
-            skip_reason=None,
             warnings=[],
         )
 
         # Should serialize without errors
         data = output.model_dump(mode="json")
         assert data["language"] == "en"
-        assert data["timestamp_granularity_actual"] == "word"
+        assert data["timestamp_granularity"] == "word"
         assert data["alignment_method"] == "attention"
 
     def test_align_output_validates_correctly(self):
@@ -486,24 +486,28 @@ class TestOutputValidation:
         assert data["channel_files"][0]["sample_rate"] == 16000
         assert data["channel_files"][0]["format"] == "wav"
 
-    def test_transcribe_output_roundtrip(self):
-        """Test TranscribeOutput can be serialized and deserialized."""
-        original = TranscribeOutput(
+    def test_transcript_roundtrip(self):
+        """Test Transcript can be serialized and deserialized."""
+        original = Transcript(
             segments=[
-                Segment(
+                TranscriptSegment(
                     start=0.0,
                     end=5.0,
                     text="Hello world",
                     words=[
-                        Word(text="Hello", start=0.0, end=2.5, confidence=0.95),
-                        Word(text="world", start=2.5, end=5.0, confidence=0.97),
+                        TranscriptWord(
+                            text="Hello", start=0.0, end=2.5, confidence=0.95
+                        ),
+                        TranscriptWord(
+                            text="world", start=2.5, end=5.0, confidence=0.97
+                        ),
                     ],
                 )
             ],
             text="Hello world",
             language="en",
             language_confidence=0.98,
-            timestamp_granularity_actual=TimestampGranularity.WORD,
+            timestamp_granularity=TimestampGranularity.WORD,
             runtime="faster-whisper",
         )
 
@@ -511,7 +515,7 @@ class TestOutputValidation:
         data = original.model_dump(mode="json")
 
         # Deserialize back
-        restored = TranscribeOutput.model_validate(data)
+        restored = Transcript.model_validate(data)
 
         assert restored.text == original.text
         assert restored.language == original.language

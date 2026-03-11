@@ -184,7 +184,9 @@ class HFASREngine(BaseBatchTranscribeEngine):
             result = pipe(str(engine_input.audio_path), **pipe_kwargs)
 
             # Normalize output to Transcript format
-            transcript = self._normalize_output(result, runtime_model_id, language, channel)
+            transcript = self._normalize_output(
+                result, runtime_model_id, language, channel
+            )
 
             self.logger.info(
                 "transcription_complete",
@@ -288,7 +290,9 @@ class HFASREngine(BaseBatchTranscribeEngine):
             language=language or "auto",
             runtime=self._runtime,
             alignment_method=(
-                AlignmentMethod.ATTENTION if has_word_timestamps else AlignmentMethod.UNKNOWN
+                AlignmentMethod.ATTENTION
+                if has_word_timestamps
+                else AlignmentMethod.UNKNOWN
             ),
             channel=channel,
         )

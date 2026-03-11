@@ -4,26 +4,31 @@ This SDK provides the foundation for building real-time transcription
 workers that integrate with the Dalston real-time infrastructure.
 
 Example usage:
-    from dalston.realtime_sdk import RealtimeEngine, TranscribeResult, Word
+    from dalston.realtime_sdk import BaseRealtimeTranscribeEngine
 
-    class MyEngine(RealtimeEngine):
+    class MyEngine(BaseRealtimeTranscribeEngine):
         def load_models(self):
             from faster_whisper import WhisperModel
             self.model = WhisperModel("large-v3", device="cuda")
 
-        def transcribe(self, audio, language, model_variant):
+        def transcribe_v1(self, audio, language, model_variant, vocabulary=None):
             segments, info = self.model.transcribe(audio, word_timestamps=True)
-            words = []
-            text_parts = []
+            seg_list = []
             for segment in segments:
-                text_parts.append(segment.text)
-                for w in segment.words or []:
-                    words.append(Word(w.word, w.start, w.end, w.probability))
-            return TranscribeResult(
-                text=" ".join(text_parts),
-                words=words,
+                words = [
+                    self.build_word(text=w.word, start=w.start, end=w.end,
+                                    confidence=w.probability)
+                    for w in segment.words or []
+                ]
+                seg_list.append(self.build_segment(
+                    start=segment.start, end=segment.end,
+                    text=segment.text.strip(), words=words,
+                ))
+            return self.build_transcript(
+                text=" ".join(s.text for s in seg_list),
+                segments=seg_list,
                 language=info.language,
-                confidence=info.language_probability,
+                runtime="faster-whisper",
             )
 
     if __name__ == "__main__":
@@ -41,7 +46,6 @@ Environment variables:
 # Light imports (no heavy dependencies like numpy, torch, websockets)
 from dalston.realtime_sdk.assembler import (
     Segment,
-    TranscribeResult,
     TranscriptAssembler,
     Word,
 )
@@ -127,7 +131,6 @@ __all__ = [
     "BaseRealtimeTranscribeEngine",
     "RealtimeEngine",
     "AsyncModelManager",
-    "TranscribeResult",
     # Session handling (lazy)
     "SessionHandler",
     "SessionConfig",

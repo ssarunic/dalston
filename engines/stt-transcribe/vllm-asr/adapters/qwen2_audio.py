@@ -14,9 +14,10 @@ from typing import Any
 import structlog
 
 from dalston.common.pipeline_types import (
-    Segment,
+    AlignmentMethod,
     TimestampGranularity,
-    TranscribeOutput,
+    Transcript,
+    TranscriptSegment,
 )
 
 from .base import AudioLLMAdapter
@@ -77,24 +78,24 @@ class Qwen2AudioAdapter(AudioLLMAdapter):
         self,
         raw_text: str,
         language: str | None = None,
-    ) -> TranscribeOutput:
-        """Parse Qwen2-Audio output to TranscribeOutput.
+    ) -> Transcript:
+        """Parse Qwen2-Audio output to Transcript.
 
         Args:
             raw_text: Raw text from the model
             language: Language used for transcription
 
         Returns:
-            TranscribeOutput with text in a single segment
+            Transcript with text in a single segment
         """
         text = raw_text.strip()
 
         effective_language = language if language and language != "auto" else "en"
 
-        return TranscribeOutput(
+        return Transcript(
             text=text,
             segments=[
-                Segment(
+                TranscriptSegment(
                     start=0.0,
                     end=0.0,
                     text=text,
@@ -102,11 +103,9 @@ class Qwen2AudioAdapter(AudioLLMAdapter):
             ],
             language=effective_language,
             language_confidence=0.9,
-            timestamp_granularity_requested=TimestampGranularity.SEGMENT,
-            timestamp_granularity_actual=TimestampGranularity.SEGMENT,
+            timestamp_granularity=TimestampGranularity.SEGMENT,
+            alignment_method=AlignmentMethod.UNKNOWN,
             runtime="vllm-asr",
-            skipped=False,
-            skip_reason=None,
             warnings=[],
         )
 

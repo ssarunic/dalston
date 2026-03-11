@@ -36,7 +36,7 @@ from dalston.common.pipeline_types import (
     TranscriptWord,
 )
 from dalston.engine_sdk.cores.parakeet_core import ParakeetCore
-from dalston.realtime_sdk import AsyncModelManager, TranscribeResult, Word
+from dalston.realtime_sdk import AsyncModelManager
 from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
 
 logger = structlog.get_logger()
@@ -175,8 +175,12 @@ class ParakeetStreamingEngine(BaseRealtimeTranscribeEngine):
                 )
             segments.append(
                 self.build_segment(
-                    start=seg.start if hasattr(seg, "start") else (words[0].start if words else 0.0),
-                    end=seg.end if hasattr(seg, "end") else (words[-1].end if words else 0.0),
+                    start=seg.start
+                    if hasattr(seg, "start")
+                    else (words[0].start if words else 0.0),
+                    end=seg.end
+                    if hasattr(seg, "end")
+                    else (words[-1].end if words else 0.0),
                     text=seg_text,
                     words=words if words else None,
                 )
@@ -213,8 +217,8 @@ class ParakeetStreamingEngine(BaseRealtimeTranscribeEngine):
         audio_iter: Iterator[np.ndarray],
         language: str,
         model_variant: str,
-    ) -> Iterator[TranscribeResult]:
-        """Yield incremental TranscribeResults from cache-aware streaming.
+    ) -> Iterator[Transcript]:
+        """Yield incremental Transcripts from cache-aware streaming.
 
         Each yielded result contains a single word with its timing.
         The SessionHandler should send each as a partial transcript event.
@@ -225,7 +229,7 @@ class ParakeetStreamingEngine(BaseRealtimeTranscribeEngine):
             model_variant: Model name
 
         Yields:
-            TranscribeResult for each newly decoded word
+            Transcript for each newly decoded word
         """
         if self._core is None:
             raise RuntimeError(
@@ -244,18 +248,28 @@ class ParakeetStreamingEngine(BaseRealtimeTranscribeEngine):
         for word_result in self._core.transcribe_streaming(
             audio_iter, model_id, chunk_ms=self._rnnt_chunk_ms
         ):
-            yield TranscribeResult(
+            confidence = word_result.confidence or 0.95
+            yield self.build_transcript(
                 text=word_result.word,
-                words=[
-                    Word(
-                        word=word_result.word,
+                segments=[
+                    self.build_segment(
                         start=word_result.start,
                         end=word_result.end,
-                        confidence=word_result.confidence or 0.95,
+                        text=word_result.word,
+                        words=[
+                            self.build_word(
+                                text=word_result.word,
+                                start=word_result.start,
+                                end=word_result.end,
+                                confidence=confidence,
+                            )
+                        ],
+                        confidence=confidence,
                     )
                 ],
                 language="en",
-                confidence=word_result.confidence or 0.95,
+                runtime="parakeet",
+                language_confidence=confidence,
             )
 
     def _normalize_model_id(self, model_id: str) -> str:

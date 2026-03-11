@@ -1,9 +1,7 @@
 """Base class for real-time transcription engines returning Transcript.
 
-Provides a bridge between the new unified transcript contract and the
-existing ``SessionHandler`` which expects ``TranscribeResult``. Concrete
-engines implement ``transcribe_v1()`` and return ``Transcript``;
-the base class auto-converts to ``TranscribeResult`` for the session layer.
+Concrete engines implement ``transcribe_v1()`` and return ``Transcript``.
+The ``transcribe()`` method delegates directly to ``transcribe_v1()``.
 """
 
 from __future__ import annotations
@@ -15,13 +13,12 @@ import numpy as np
 from dalston.common.pipeline_types import (
     AlignmentMethod,
     Character,
-    Transcript,
     Phoneme,
     TimestampGranularity,
+    Transcript,
     TranscriptSegment,
     TranscriptWord,
 )
-from dalston.realtime_sdk.assembler import TranscribeResult, Word
 from dalston.realtime_sdk.base import RealtimeEngine
 
 
@@ -29,11 +26,7 @@ class BaseRealtimeTranscribeEngine(RealtimeEngine):
     """Base class for real-time engines that produce Transcript.
 
     Subclasses implement ``transcribe_v1()`` which returns the canonical
-    transcript type. The ``transcribe()`` method auto-converts to the
-    ``TranscribeResult`` that ``SessionHandler`` expects.
-
-    This allows engines to be migrated one at a time without changing the
-    session handling layer.
+    transcript type. The ``transcribe()`` method delegates to it.
     """
 
     def transcribe(
@@ -42,13 +35,12 @@ class BaseRealtimeTranscribeEngine(RealtimeEngine):
         language: str,
         model_variant: str,
         vocabulary: list[str] | None = None,
-    ) -> TranscribeResult:
-        """Convert Transcript to TranscribeResult for SessionHandler.
+    ) -> Transcript:
+        """Transcribe audio and return a Transcript.
 
         Subclasses should override ``transcribe_v1()`` instead.
         """
-        transcript = self.transcribe_v1(audio, language, model_variant, vocabulary)
-        return self._to_transcribe_result(transcript)
+        return self.transcribe_v1(audio, language, model_variant, vocabulary)
 
     def transcribe_v1(
         self,
@@ -71,35 +63,6 @@ class BaseRealtimeTranscribeEngine(RealtimeEngine):
             Canonical transcript output
         """
         raise NotImplementedError
-
-    # ------------------------------------------------------------------
-    # Conversion helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _to_transcribe_result(transcript: Transcript) -> TranscribeResult:
-        """Convert a Transcript to a TranscribeResult."""
-        words: list[Word] = []
-        for seg in transcript.segments:
-            if seg.words:
-                for w in seg.words:
-                    words.append(
-                        Word(
-                            word=w.text,
-                            start=w.start,
-                            end=w.end,
-                            confidence=w.confidence if w.confidence is not None else 0.0,
-                        )
-                    )
-
-        confidence = transcript.language_confidence if transcript.language_confidence is not None else 0.0
-
-        return TranscribeResult(
-            text=transcript.text,
-            words=words,
-            language=transcript.language,
-            confidence=confidence,
-        )
 
     # ------------------------------------------------------------------
     # Builder helpers (same API as BaseBatchTranscribeEngine)

@@ -17,7 +17,9 @@ from dalston.common.pipeline_types import (
     Segment,
     SpeakerTurn,
     TimestampGranularity,
-    TranscribeOutput,
+    Transcript,
+    TranscriptSegment,
+    TranscriptWord,
     Word,
 )
 from dalston.engine_sdk.types import EngineInput, EngineOutput
@@ -156,11 +158,11 @@ class TestTaskInputGetPrepareOutput:
         assert len(output.channel_files) == 2
 
 
-class TestTaskInputGetTranscribeOutput:
-    """Tests for EngineInput.get_transcribe_output()."""
+class TestTaskInputGetTranscript:
+    """Tests for EngineInput.get_transcript()."""
 
-    def test_get_transcribe_output_valid(self):
-        """Test getting valid transcribe output."""
+    def test_get_transcript_valid(self):
+        """Test getting valid transcript."""
         task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
@@ -177,15 +179,15 @@ class TestTaskInputGetTranscribeOutput:
                 },
             },
         )
-        output = task_input.get_transcribe_output()
+        output = task_input.get_transcript()
         assert output is not None
-        assert isinstance(output, TranscribeOutput)
+        assert isinstance(output, Transcript)
         assert output.text == "Hello world"
         assert output.language == "en"
         assert len(output.segments) == 1
 
-    def test_get_transcribe_output_with_words(self):
-        """Test getting transcribe output with word timestamps."""
+    def test_get_transcript_with_words(self):
+        """Test getting transcript with word timestamps."""
         task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
@@ -205,19 +207,19 @@ class TestTaskInputGetTranscribeOutput:
                     ],
                     "text": "Hello world",
                     "language": "en",
-                    "timestamp_granularity_actual": "word",
+                    "timestamp_granularity": "word",
                     "runtime": "faster-whisper",
                 },
             },
         )
-        output = task_input.get_transcribe_output()
+        output = task_input.get_transcript()
         assert output is not None
         assert output.segments[0].words is not None
         assert len(output.segments[0].words) == 2
         assert output.segments[0].words[0].text == "Hello"
 
-    def test_get_transcribe_output_per_channel(self):
-        """Test getting transcribe output for specific channel."""
+    def test_get_transcript_per_channel(self):
+        """Test getting transcript for specific channel."""
         task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
@@ -237,22 +239,22 @@ class TestTaskInputGetTranscribeOutput:
                 },
             },
         )
-        ch0 = task_input.get_transcribe_output("transcribe_ch0")
-        ch1 = task_input.get_transcribe_output("transcribe_ch1")
+        ch0 = task_input.get_transcript("transcribe_ch0")
+        ch1 = task_input.get_transcript("transcribe_ch1")
         assert ch0 is not None
         assert ch1 is not None
         assert ch0.text == "Channel 0"
         assert ch1.text == "Channel 1"
 
-    def test_get_transcribe_output_missing(self):
-        """Test getting transcribe output when not present."""
+    def test_get_transcript_missing(self):
+        """Test getting transcript when not present."""
         task_input = EngineInput(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
             previous_outputs={},
         )
-        output = task_input.get_transcribe_output()
+        output = task_input.get_transcript()
         assert output is None
 
 
@@ -475,38 +477,42 @@ class TestTaskOutput:
 
     def test_create_task_output_with_pydantic_model(self):
         """Test creating EngineOutput with Pydantic model."""
-        transcribe_output = TranscribeOutput(
-            segments=[Segment(start=0.0, end=1.0, text="Hello")],
+        transcript = Transcript(
+            segments=[TranscriptSegment(start=0.0, end=1.0, text="Hello")],
             text="Hello",
             language="en",
             runtime="test",
         )
-        output = EngineOutput(data=transcribe_output)
-        assert isinstance(output.data, TranscribeOutput)
+        output = EngineOutput(data=transcript)
+        assert isinstance(output.data, Transcript)
 
     def test_task_output_to_dict_from_pydantic(self):
         """Test EngineOutput.to_dict() with Pydantic model."""
-        transcribe_output = TranscribeOutput(
+        transcript = Transcript(
             segments=[
-                Segment(
+                TranscriptSegment(
                     start=0.0,
                     end=1.0,
                     text="Hello",
-                    words=[Word(text="Hello", start=0.0, end=1.0, confidence=0.95)],
+                    words=[
+                        TranscriptWord(
+                            text="Hello", start=0.0, end=1.0, confidence=0.95
+                        )
+                    ],
                 )
             ],
             text="Hello",
             language="en",
-            timestamp_granularity_actual=TimestampGranularity.WORD,
+            timestamp_granularity=TimestampGranularity.WORD,
             runtime="test",
         )
-        output = EngineOutput(data=transcribe_output)
+        output = EngineOutput(data=transcript)
         data = output.to_dict()
 
         assert isinstance(data, dict)
         assert data["text"] == "Hello"
         assert data["language"] == "en"
-        assert data["timestamp_granularity_actual"] == "word"
+        assert data["timestamp_granularity"] == "word"
         assert len(data["segments"]) == 1
         assert data["segments"][0]["words"][0]["text"] == "Hello"
 
@@ -548,27 +554,27 @@ class TestTaskInputTypedOutputIntegration:
 
     def test_transcribe_to_align_flow(self):
         """Test transcribe output can be consumed by align stage."""
-        # Simulate transcribe output
-        transcribe_output = TranscribeOutput(
-            segments=[Segment(start=0.0, end=5.0, text="Hello world")],
+        # Simulate transcript
+        transcript = Transcript(
+            segments=[TranscriptSegment(start=0.0, end=5.0, text="Hello world")],
             text="Hello world",
             language="en",
             language_confidence=0.98,
             runtime="faster-whisper",
         )
 
-        # Create task input for align stage with serialized transcribe output
+        # Create task input for align stage with serialized transcript
         task_input = EngineInput(
             task_id="align-task",
             job_id="job-123",
             audio_path=Path("/tmp/audio.wav"),
             previous_outputs={
-                "transcribe": transcribe_output.model_dump(mode="json"),
+                "transcribe": transcript.model_dump(mode="json"),
             },
         )
 
         # Align stage gets typed output
-        output = task_input.get_transcribe_output()
+        output = task_input.get_transcript()
         assert output is not None
         assert output.text == "Hello world"
         assert output.language == "en"
@@ -592,8 +598,8 @@ class TestTaskInputTypedOutputIntegration:
             runtime="audio-prepare",
         )
 
-        transcribe_output = TranscribeOutput(
-            segments=[Segment(start=0.0, end=5.0, text="Hello")],
+        transcript = Transcript(
+            segments=[TranscriptSegment(start=0.0, end=5.0, text="Hello")],
             text="Hello",
             language="en",
             runtime="faster-whisper",
@@ -628,7 +634,7 @@ class TestTaskInputTypedOutputIntegration:
             audio_path=Path("/tmp/audio.wav"),
             previous_outputs={
                 "prepare": prepare_output.model_dump(mode="json"),
-                "transcribe": transcribe_output.model_dump(mode="json"),
+                "transcribe": transcript.model_dump(mode="json"),
                 "align": align_output.model_dump(mode="json"),
                 "diarize": diarize_output.model_dump(mode="json"),
             },
@@ -636,7 +642,7 @@ class TestTaskInputTypedOutputIntegration:
 
         # Merge stage gets all typed outputs
         prepare = task_input.get_prepare_output()
-        transcribe = task_input.get_transcribe_output()
+        transcribe = task_input.get_transcript()
         align = task_input.get_align_output()
         diarize = task_input.get_diarize_output()
 

@@ -1,7 +1,7 @@
 """Contract tests for faster-whisper batch engine.
 
 Verifies that the batch engine produces the correct output shape
-(TranscribeOutput with segments, text, language) and that word
+(Transcript with segments, text, language) and that word
 timestamp behavior is preserved after delegation to TranscribeCore.
 
 These tests mock the faster-whisper model to avoid GPU/model dependencies.
@@ -100,7 +100,7 @@ def _build_engine_with_mock(segments, info):
 
 
 class TestBatchOutputShape:
-    """Verify TranscribeOutput structure from batch engine."""
+    """Verify Transcript structure from batch engine."""
 
     def test_output_has_text_segments_and_language(self) -> None:
         segments = [_make_mock_segment(text="hello world")]

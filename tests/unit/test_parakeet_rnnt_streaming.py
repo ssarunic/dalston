@@ -302,7 +302,7 @@ class TestRTEngineStreamingDispatch:
 
 
 class TestRTEngineTranscribeStreaming:
-    """Verify transcribe_streaming yields TranscribeResult per word."""
+    """Verify transcribe_streaming yields Transcript per word."""
 
     def _build_engine(self):
         module = _load_rt_engine_module()
@@ -328,7 +328,7 @@ class TestRTEngineTranscribeStreaming:
         return engine
 
     def test_yields_transcribe_results(self) -> None:
-        """Each yielded result should be a TranscribeResult with one word."""
+        """Each yielded result should be a Transcript with one word."""
         engine = self._build_engine()
         audio_iter = iter([np.zeros(1600, dtype=np.float32)])
 
@@ -339,13 +339,13 @@ class TestRTEngineTranscribeStreaming:
         assert len(results) == 2
         assert results[0].text == "hello"
         assert results[0].language == "en"
-        assert len(results[0].words) == 1
-        assert results[0].words[0].word == "hello"
-        assert results[0].words[0].start == 0.0
-        assert results[0].words[0].end == 0.5
+        assert len(results[0].segments[0].words) == 1
+        assert results[0].segments[0].words[0].text == "hello"
+        assert results[0].segments[0].words[0].start == 0.0
+        assert results[0].segments[0].words[0].end == 0.5
 
         assert results[1].text == "world"
-        assert results[1].words[0].start == 0.5
+        assert results[1].segments[0].words[0].start == 0.5
 
     def test_word_ordering_preserved(self) -> None:
         """Words should arrive in correct order across chunks."""
@@ -369,8 +369,8 @@ class TestRTEngineTranscribeStreaming:
         )
 
         for i in range(len(results) - 1):
-            current_end = results[i].words[0].end
-            next_start = results[i + 1].words[0].start
+            current_end = results[i].segments[0].words[0].end
+            next_start = results[i + 1].segments[0].words[0].start
             assert current_end <= next_start, (
                 f"Word {i} end ({current_end}) > word {i + 1} start ({next_start})"
             )

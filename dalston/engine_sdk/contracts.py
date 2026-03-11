@@ -14,13 +14,12 @@ from dalston.common.pipeline_types import (
     AlignOutput,
     AudioMedia,
     AudioRedactOutput,
-    Transcript,
     DiarizeOutput,
     MergeOutput,
     PIIDetectOutput,
     PrepareOutput,
     SpeakerDetectionMode,
-    TranscribeOutput,
+    Transcript,
 )
 
 
@@ -75,13 +74,7 @@ class PrepareOutputPayload(PrepareOutput):
 
 
 # Transcript is the canonical output type for transcription.
-# TranscribeOutputPayload inherits from TranscribeOutput for backward
-# compatibility during the migration period.
-TranscribeOutputPayloadV1 = Transcript
-
-
-class TranscribeOutputPayload(TranscribeOutput):
-    pass
+TranscribeOutputPayload = Transcript
 
 
 class AlignOutputPayload(AlignOutput):

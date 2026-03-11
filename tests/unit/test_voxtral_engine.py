@@ -150,7 +150,7 @@ class TestVoxtralEngine:
     )
     @pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
     def test_process_mocked(self, engine, tmp_path):
-        """Process should return valid TranscribeOutput.
+        """Process should return valid Transcript.
 
         Note: This test has mock isolation issues due to transformers' lazy module
         loading. The process() method is tested via integration tests instead.

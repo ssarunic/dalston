@@ -158,8 +158,12 @@ class ParakeetOnnxStreamingEngine(BaseRealtimeTranscribeEngine):
                 )
             segments.append(
                 self.build_segment(
-                    start=seg.start if hasattr(seg, "start") else (words[0].start if words else 0.0),
-                    end=seg.end if hasattr(seg, "end") else (words[-1].end if words else 0.0),
+                    start=seg.start
+                    if hasattr(seg, "start")
+                    else (words[0].start if words else 0.0),
+                    end=seg.end
+                    if hasattr(seg, "end")
+                    else (words[-1].end if words else 0.0),
                     text=seg_text,
                     words=words if words else None,
                 )

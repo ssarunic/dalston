@@ -795,9 +795,11 @@ class EngineRunner:
         """
         from dalston.common.pipeline_types import Transcript
 
-        strict = os.environ.get(
-            "DALSTON_STRICT_TRANSCRIPT_VALIDATION", ""
-        ).lower() in ("true", "1", "yes")
+        strict = os.environ.get("DALSTON_STRICT_TRANSCRIPT_VALIDATION", "").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
 
         output_dict = output.to_dict()
         try:

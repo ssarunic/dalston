@@ -1,6 +1,6 @@
 """Contract tests for Riva NIM batch transcription engine.
 
-Verifies that the batch engine produces the correct TranscribeOutput
+Verifies that the batch engine produces the correct Transcript
 shape with segments, text, language, and word timestamps when
 communicating with a mocked Riva NIM gRPC sidecar.
 
@@ -145,7 +145,7 @@ def _setup_streaming_responses(engine, responses):
 
 
 class TestRivaBatchOutputShape:
-    """Verify TranscribeOutput structure from Riva batch engine."""
+    """Verify Transcript structure from Riva batch engine."""
 
     def test_output_has_text_segments_and_language(
         self, engine_with_mock, tmp_path

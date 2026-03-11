@@ -103,7 +103,7 @@ class PhonemeAlignEngine(Engine):
         audio_path = engine_input.audio_path
 
         # Get transcription output from previous stage
-        transcribe_output = engine_input.get_transcribe_output()
+        transcribe_output = engine_input.get_transcript()
         if transcribe_output:
             text = transcribe_output.text
             raw_segments: list[InputSegment] = [

@@ -1,7 +1,7 @@
 """Contract tests for parakeet (NeMo) batch engine.
 
 Verifies that the batch engine produces the correct output shape
-(TranscribeOutput with segments, text, language) and that word
+(Transcript with segments, text, language) and that word
 timestamp behavior is preserved after delegation to ParakeetCore.
 
 These tests mock the NeMo model to avoid GPU/model dependencies.
@@ -112,7 +112,7 @@ def _build_engine_with_mock_core(hypothesis):
 
 
 class TestParakeetBatchOutputShape:
-    """Verify TranscribeOutput structure from parakeet batch engine."""
+    """Verify Transcript structure from parakeet batch engine."""
 
     def test_output_has_text_and_language(self) -> None:
         hypothesis = _make_tdt_hypothesis(text="hello world")

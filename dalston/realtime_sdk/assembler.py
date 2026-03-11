@@ -42,24 +42,6 @@ class Segment:
     confidence: float
 
 
-@dataclass
-class TranscribeResult:
-    """Result from ASR transcription.
-
-    Used as input to TranscriptAssembler.add_utterance().
-    Word timestamps are relative to the audio segment (0-based).
-
-    .. deprecated::
-        Prefer returning ``Transcript`` from engines and using
-        ``TranscriptAssembler.add_transcript()`` instead.
-    """
-
-    text: str
-    words: list[Word]
-    language: str
-    confidence: float
-
-
 class TranscriptAssembler:
     """Assembles session transcript from individual utterances.
 
@@ -67,20 +49,17 @@ class TranscriptAssembler:
     adjusting timestamps to session timeline.
 
     Example:
+        from dalston.common.pipeline_types import Transcript, TranscriptSegment
+
         assembler = TranscriptAssembler()
 
         # First utterance (0-2 seconds of speech)
-        result = TranscribeResult(text="Hello", words=[...], ...)
-        segment = assembler.add_utterance(result, audio_duration=2.0)
+        transcript = Transcript(text="Hello", segments=[...], ...)
+        segment = assembler.add_transcript(transcript, audio_duration=2.0)
         # segment.start = 0.0, segment.end = 2.0
 
-        # Second utterance (after silence, 1.5 seconds of speech)
-        result = TranscribeResult(text="World", words=[...], ...)
-        segment = assembler.add_utterance(result, audio_duration=1.5)
-        # segment.start = 2.0, segment.end = 3.5
-
         # Full transcript
-        print(assembler.get_full_transcript())  # "Hello World"
+        print(assembler.get_full_transcript())  # "Hello"
     """
 
     def __init__(self) -> None:
@@ -88,47 +67,6 @@ class TranscriptAssembler:
         self._segments: list[Segment] = []
         self._current_time: float = 0.0
         self._segment_counter: int = 0
-
-    def add_utterance(
-        self,
-        result: TranscribeResult,
-        audio_duration: float,
-    ) -> Segment:
-        """Add transcribed utterance to session transcript.
-
-        Args:
-            result: Transcription result from ASR engine
-            audio_duration: Duration of the audio segment in seconds
-
-        Returns:
-            Segment with timestamps adjusted to session timeline
-        """
-        # Adjust word timestamps from segment-relative to session-relative
-        adjusted_words = [
-            Word(
-                word=w.word,
-                start=self._current_time + w.start,
-                end=self._current_time + w.end,
-                confidence=w.confidence,
-            )
-            for w in result.words
-        ]
-
-        # Create segment
-        segment = Segment(
-            id=f"seg_{self._segment_counter:04d}",
-            start=self._current_time,
-            end=self._current_time + audio_duration,
-            text=result.text,
-            words=adjusted_words,
-            confidence=result.confidence,
-        )
-
-        self._segments.append(segment)
-        self._segment_counter += 1
-        self._current_time = segment.end
-
-        return segment
 
     def add_transcript(
         self,
@@ -138,8 +76,7 @@ class TranscriptAssembler:
         """Add a Transcript result to the session transcript.
 
         Extracts words from all transcript segments and adjusts timestamps
-        to the session timeline. This is the preferred method for engines
-        that return the unified transcript contract.
+        to the session timeline.
 
         Args:
             transcript: Unified transcript from ASR engine
@@ -158,7 +95,9 @@ class TranscriptAssembler:
                             word=w.text,
                             start=self._current_time + w.start,
                             end=self._current_time + w.end,
-                            confidence=w.confidence if w.confidence is not None else 0.0,
+                            confidence=w.confidence
+                            if w.confidence is not None
+                            else 0.0,
                         )
                     )
 

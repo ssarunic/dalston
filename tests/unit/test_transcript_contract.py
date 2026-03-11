@@ -14,10 +14,10 @@ from pydantic import ValidationError
 from dalston.common.pipeline_types import (
     AlignmentMethod,
     Character,
-    Transcript,
     Phoneme,
     SegmentMetaKeys,
     TimestampGranularity,
+    Transcript,
     TranscriptMetaKeys,
     TranscriptSegment,
     TranscriptWord,
@@ -46,7 +46,10 @@ def _make_segment(**overrides):
         "start": 0.0,
         "end": 2.0,
         "text": "hello world",
-        "words": [_make_word(text="hello", start=0.0, end=0.5), _make_word(text="world", start=0.5, end=1.0)],
+        "words": [
+            _make_word(text="hello", start=0.0, end=0.5),
+            _make_word(text="world", start=0.5, end=1.0),
+        ],
     }
     defaults.update(overrides)
     return TranscriptSegment(**defaults)
@@ -414,8 +417,20 @@ _RUNTIME_FIXTURES = {
                 "end": 2.0,
                 "text": "hello world",
                 "words": [
-                    {"text": "hello", "start": 0.0, "end": 0.5, "confidence": 0.95, "alignment_method": "attention"},
-                    {"text": "world", "start": 0.5, "end": 1.0, "confidence": 0.90, "alignment_method": "attention"},
+                    {
+                        "text": "hello",
+                        "start": 0.0,
+                        "end": 0.5,
+                        "confidence": 0.95,
+                        "alignment_method": "attention",
+                    },
+                    {
+                        "text": "world",
+                        "start": 0.5,
+                        "end": 1.0,
+                        "confidence": 0.90,
+                        "alignment_method": "attention",
+                    },
                 ],
                 "metadata": {
                     "compression_ratio": 1.5,
@@ -441,8 +456,20 @@ _RUNTIME_FIXTURES = {
                 "end": 2.0,
                 "text": "hello world",
                 "words": [
-                    {"text": "hello", "start": 0.0, "end": 0.5, "confidence": 0.92, "alignment_method": "ctc"},
-                    {"text": "world", "start": 0.5, "end": 1.0, "confidence": 0.88, "alignment_method": "ctc"},
+                    {
+                        "text": "hello",
+                        "start": 0.0,
+                        "end": 0.5,
+                        "confidence": 0.92,
+                        "alignment_method": "ctc",
+                    },
+                    {
+                        "text": "world",
+                        "start": 0.5,
+                        "end": 1.0,
+                        "confidence": 0.88,
+                        "alignment_method": "ctc",
+                    },
                 ],
                 "metadata": {"decoder_type": "ctc"},
             }
@@ -530,7 +557,13 @@ class TestTranscriptAssembly:
         stage_outputs = {
             "prepare": {
                 "channel_files": [
-                    {"duration": 2.0, "channels": 1, "sample_rate": 16000, "artifact_id": "a1", "format": "wav"}
+                    {
+                        "duration": 2.0,
+                        "channels": 1,
+                        "sample_rate": 16000,
+                        "artifact_id": "a1",
+                        "format": "wav",
+                    }
                 ],
                 "runtime": "ffmpeg",
             },

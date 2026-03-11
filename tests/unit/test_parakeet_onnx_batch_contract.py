@@ -1,7 +1,7 @@
 """Contract tests for parakeet-onnx batch engine.
 
 Verifies that the batch engine produces the correct output shape
-(TranscribeOutput with segments, text, language) and that word
+(Transcript with segments, text, language) and that word
 timestamp behavior is preserved after delegation to ParakeetOnnxCore.
 """
 
@@ -90,7 +90,7 @@ def _build_engine_with_mock_core(core_result: OnnxTranscriptionResult):
 
 
 class TestOnnxBatchOutputShape:
-    """Verify TranscribeOutput structure from ONNX batch engine."""
+    """Verify Transcript structure from ONNX batch engine."""
 
     def test_output_has_text_and_language(self) -> None:
         result = _make_core_result(text="hello world")

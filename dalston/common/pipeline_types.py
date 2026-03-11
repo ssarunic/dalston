@@ -471,43 +471,6 @@ class PrepareOutput(BaseModel):
     warnings: list[str] = Field(default_factory=list, description="Any warnings")
 
 
-class TranscribeOutput(BaseModel):
-    """Output from transcription stage."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    segments: list[Segment] = Field(..., description="Transcript segments")
-    text: str = Field(..., description="Full transcript text")
-    language: str = Field(..., description="Detected/used language code")
-    language_confidence: float | None = Field(
-        default=None, ge=0, le=1, description="Language detection confidence"
-    )
-    duration: float | None = Field(default=None, ge=0, description="Audio duration")
-
-    # Timestamp metadata
-    timestamp_granularity_requested: TimestampGranularity | None = Field(
-        default=None, description="What was requested"
-    )
-    timestamp_granularity_actual: TimestampGranularity | None = Field(
-        default=None, description="What was produced"
-    )
-    alignment_method: AlignmentMethod | None = Field(
-        default=None, description="How timestamps were produced"
-    )
-
-    # Per-channel mode
-    channel: int | None = Field(
-        default=None,
-        description="Source audio channel (0=left, 1=right) for per_channel mode",
-    )
-
-    # Standard output fields
-    runtime: str = Field(..., description="Runtime identifier")
-    skipped: bool = Field(default=False, description="Whether processing was skipped")
-    skip_reason: str | None = Field(default=None, description="Reason if skipped")
-    warnings: list[str] = Field(default_factory=list, description="Any warnings")
-
-
 # =============================================================================
 # Unified Transcript Contract (Transcript)
 # =============================================================================
@@ -581,7 +544,7 @@ class TranscriptSegment(BaseModel):
 class Transcript(BaseModel):
     """Canonical transcript output — returned by every transcription runtime.
 
-    Subsumes both ``TranscribeOutput`` (batch) and ``TranscribeResult`` (realtime).
+    Canonical transcript output for both batch and real-time engines.
     Model-specific data lives in ``metadata`` dicts at the transcript, segment,
     and word levels rather than as top-level fields.
 
@@ -877,7 +840,6 @@ class AudioRedactOutput(BaseModel):
 PreviousOutputs = dict[
     str,
     PrepareOutput
-    | TranscribeOutput
     | Transcript
     | AlignOutput
     | DiarizeOutput

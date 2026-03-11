@@ -1,6 +1,6 @@
 """Contract tests for Riva NIM real-time transcription engine.
 
-Verifies that the RT engine produces correct TranscribeResult output,
+Verifies that the RT engine produces correct Transcript output,
 supports streaming (partial results), and handles health checks properly
 when communicating with a mocked Riva NIM gRPC sidecar.
 
@@ -125,8 +125,8 @@ def engine_with_mock(riva_rt_engine_class, _mock_riva_modules):
     return engine, mock_riva_client
 
 
-class TestRivaRtTranscribeResult:
-    """Verify TranscribeResult contract from RT engine."""
+class TestRivaRtTranscript:
+    """Verify Transcript contract from RT engine."""
 
     def test_transcribe_returns_text_and_words(self, engine_with_mock) -> None:
         engine, _ = engine_with_mock
@@ -139,12 +139,13 @@ class TestRivaRtTranscribeResult:
         result = engine.transcribe(audio, "en", "")
 
         assert result.text == "hello world"
-        assert len(result.words) == 2
-        assert result.words[0].word == "hello"
-        assert result.words[0].start == 0.0
-        assert result.words[0].end == 0.5
+        assert len(result.segments) == 1
+        assert len(result.segments[0].words) == 2
+        assert result.segments[0].words[0].text == "hello"
+        assert result.segments[0].words[0].start == 0.0
+        assert result.segments[0].words[0].end == 0.5
         assert result.language == "en"
-        assert result.confidence == 0.95
+        assert result.language_confidence == 0.95
 
     def test_transcribe_handles_auto_language(self, engine_with_mock) -> None:
         engine, mock_riva_client = engine_with_mock
@@ -179,8 +180,8 @@ class TestRivaRtTranscribeResult:
         result = engine.transcribe(audio, "en", "")
 
         assert result.text == ""
-        assert result.words == []
-        assert result.confidence == 0.0
+        assert result.segments == []
+        assert result.language_confidence == 0.0
 
     def test_transcribe_converts_float32_to_int16(self, engine_with_mock) -> None:
         engine, _ = engine_with_mock
@@ -228,7 +229,8 @@ class TestRivaRtTranscribeResult:
         result = engine.transcribe(audio, "en", "")
 
         assert result.text == "hello world"
-        assert len(result.words) == 2
+        words = [w for seg in result.segments for w in (seg.words or [])]
+        assert len(words) == 2
 
 
 class TestRivaRtStreamingSupport:
@@ -348,5 +350,6 @@ class TestRivaRtWordConfidence:
         result = engine.transcribe(audio, "en", "")
 
         # Word confidence should come from the word, not the alternative
-        assert result.words[0].confidence == 0.99
-        assert result.words[1].confidence == 0.85
+        words = result.segments[0].words
+        assert words[0].confidence == 0.99
+        assert words[1].confidence == 0.85

@@ -1,7 +1,7 @@
 """Contract tests for faster-whisper realtime engine.
 
 Verifies that the RT engine produces the correct output shape
-(TranscribeResult with text, words, language, confidence) and
+(Transcript with text, segments, language) and
 that session lifecycle behavior is preserved after delegation
 to TranscribeCore.
 
@@ -137,7 +137,7 @@ def _make_audio(duration_seconds: float = 1.0, sample_rate: int = 16000) -> np.n
 
 
 class TestRTOutputShape:
-    """Verify TranscribeResult structure from RT engine."""
+    """Verify Transcript structure from RT engine."""
 
     def test_output_has_text_words_language_confidence(self) -> None:
         segments = [_make_mock_segment(text="hello world")]
@@ -152,8 +152,9 @@ class TestRTOutputShape:
 
         assert result.text == "hello world"
         assert result.language == "en"
-        assert result.confidence == 0.99
-        assert len(result.words) == 2
+        assert result.language_confidence == 0.99
+        words = [w for seg in result.segments for w in (seg.words or [])]
+        assert len(words) == 2
 
     def test_word_timestamps_in_result(self) -> None:
         mock_words = [
@@ -170,12 +171,13 @@ class TestRTOutputShape:
             model_variant="large-v3-turbo",
         )
 
-        assert len(result.words) == 2
-        assert result.words[0].word == "hello"
-        assert result.words[0].start == 0.0
-        assert result.words[0].end == 0.5
-        assert result.words[0].confidence == 0.95
-        assert result.words[1].word == "world"
+        words = [w for seg in result.segments for w in (seg.words or [])]
+        assert len(words) == 2
+        assert words[0].text == "hello"
+        assert words[0].start == 0.0
+        assert words[0].end == 0.5
+        assert words[0].confidence == 0.95
+        assert words[1].text == "world"
 
     def test_empty_audio_returns_empty_result(self) -> None:
         segments: list = []
@@ -189,7 +191,7 @@ class TestRTOutputShape:
         )
 
         assert result.text == ""
-        assert result.words == []
+        assert result.segments == []
 
     def test_multiple_segments_concatenated(self) -> None:
         segments = [

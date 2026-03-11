@@ -12,9 +12,9 @@ from typing import Any
 from dalston.common.pipeline_types import (
     AlignmentMethod,
     Character,
-    Transcript,
     Phoneme,
     TimestampGranularity,
+    Transcript,
     TranscriptSegment,
     TranscriptWord,
 )
@@ -138,9 +138,7 @@ class BaseBatchTranscribeEngine(Engine):
         **extra: Any,
     ) -> Transcript:
         """Build a ``Transcript`` from assembled parts."""
-        has_words = any(
-            seg.words for seg in segments if seg.words is not None
-        )
+        has_words = any(seg.words for seg in segments if seg.words is not None)
         granularity = (
             TimestampGranularity.WORD if has_words else TimestampGranularity.SEGMENT
         )

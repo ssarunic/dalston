@@ -14,9 +14,10 @@ from typing import Any
 import structlog
 
 from dalston.common.pipeline_types import (
-    Segment,
+    AlignmentMethod,
     TimestampGranularity,
-    TranscribeOutput,
+    Transcript,
+    TranscriptSegment,
 )
 
 from .base import AudioLLMAdapter
@@ -86,8 +87,8 @@ class VoxtralAdapter(AudioLLMAdapter):
         self,
         raw_text: str,
         language: str | None = None,
-    ) -> TranscribeOutput:
-        """Parse Voxtral output to TranscribeOutput.
+    ) -> Transcript:
+        """Parse Voxtral output to Transcript.
 
         Voxtral returns plain text without timestamps. A single segment
         is created covering the entire transcription.
@@ -97,7 +98,7 @@ class VoxtralAdapter(AudioLLMAdapter):
             language: Language used for transcription
 
         Returns:
-            TranscribeOutput with text in a single segment
+            Transcript with text in a single segment
         """
         text = raw_text.strip()
 
@@ -106,10 +107,10 @@ class VoxtralAdapter(AudioLLMAdapter):
         if effective_language not in SUPPORTED_LANGUAGES:
             effective_language = "en"
 
-        return TranscribeOutput(
+        return Transcript(
             text=text,
             segments=[
-                Segment(
+                TranscriptSegment(
                     start=0.0,
                     end=0.0,
                     text=text,
@@ -117,11 +118,9 @@ class VoxtralAdapter(AudioLLMAdapter):
             ],
             language=effective_language,
             language_confidence=0.9,
-            timestamp_granularity_requested=TimestampGranularity.SEGMENT,
-            timestamp_granularity_actual=TimestampGranularity.SEGMENT,
+            timestamp_granularity=TimestampGranularity.SEGMENT,
+            alignment_method=AlignmentMethod.UNKNOWN,
             runtime="vllm-asr",
-            skipped=False,
-            skip_reason=None,
             warnings=[],
         )
 

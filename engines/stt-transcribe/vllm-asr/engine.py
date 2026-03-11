@@ -39,10 +39,7 @@ if TYPE_CHECKING:
     from dalston.engine_sdk.model_storage import S3ModelStorage
 
 from dalston.common.pipeline_types import (
-    AlignmentMethod,
     Transcript,
-    TranscriptSegment,
-    TranscriptWord,
 )
 from dalston.engine_sdk import (
     BatchTaskContext,
@@ -289,59 +286,17 @@ class VLLMASREngine(BaseBatchTranscribeEngine):
                 char_count=len(raw_text),
             )
 
-            # Parse output using adapter (returns old-style TranscribeOutput)
-            adapter_result = adapter.parse_output(raw_text, language)
+            # Parse output using adapter (returns Transcript directly)
+            transcript = adapter.parse_output(raw_text, language)
 
-            # Convert adapter result segments to TranscriptSegment
-            segments: list[TranscriptSegment] = []
-            for seg in adapter_result.segments:
-                seg_words: list[TranscriptWord] | None = None
-                if seg.words:
-                    seg_words = [
-                        self.build_word(
-                            text=w.text,
-                            start=w.start,
-                            end=w.end,
-                            confidence=w.confidence,
-                            alignment_method=(
-                                w.alignment_method
-                                if w.alignment_method is not None
-                                else AlignmentMethod.UNKNOWN
-                            ),
-                        )
-                        for w in seg.words
-                    ]
+            # Override runtime and merge engine-level warnings/channel
+            transcript.runtime = self._runtime
+            if channel is not None:
+                transcript.channel = channel
+            if warnings:
+                transcript.warnings = warnings + list(transcript.warnings)
 
-                segments.append(
-                    self.build_segment(
-                        start=seg.start,
-                        end=seg.end,
-                        text=seg.text,
-                        words=seg_words,
-                        language=seg.language,
-                        confidence=seg.confidence,
-                    )
-                )
-
-            # Merge warnings from adapter with engine warnings
-            adapter_warnings = adapter_result.warnings or []
-            all_warnings = warnings + adapter_warnings
-
-            return self.build_transcript(
-                text=adapter_result.text,
-                segments=segments,
-                language=adapter_result.language,
-                runtime=self._runtime,
-                language_confidence=adapter_result.language_confidence,
-                duration=adapter_result.duration,
-                alignment_method=(
-                    adapter_result.alignment_method
-                    if adapter_result.alignment_method is not None
-                    else AlignmentMethod.UNKNOWN
-                ),
-                channel=channel,
-                warnings=all_warnings,
-            )
+            return transcript
 
         finally:
             self._set_runtime_state(loaded_model=runtime_model_id, status="idle")

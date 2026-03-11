@@ -1,6 +1,6 @@
 """Contract tests for parakeet (NeMo) RT engine.
 
-Verifies that the RT engine produces the correct TranscribeResult
+Verifies that the RT engine produces the correct Transcript
 shape and that word timestamp behavior is preserved after delegation
 to ParakeetCore.
 """
@@ -71,7 +71,7 @@ def _build_rt_engine(core_result: NeMoTranscriptionResult):
 
 
 class TestParakeetRTOutputShape:
-    """Verify TranscribeResult structure from parakeet RT engine."""
+    """Verify Transcript structure from parakeet RT engine."""
 
     def test_output_has_text_and_language(self) -> None:
         result = _make_core_result(text="hello world")
@@ -82,7 +82,7 @@ class TestParakeetRTOutputShape:
 
         assert output.text == "hello world"
         assert output.language == "en"
-        assert output.confidence == 1.0
+        assert output.language_confidence == 1.0
 
     def test_output_has_words(self) -> None:
         result = _make_core_result(
@@ -97,10 +97,11 @@ class TestParakeetRTOutputShape:
         audio = np.zeros(16000, dtype=np.float32)
         output = engine.transcribe(audio, "en", "parakeet-tdt-1.1b")
 
-        assert len(output.words) == 2
-        assert output.words[0].word == "hello"
-        assert output.words[0].start == 0.0
-        assert output.words[1].word == "world"
+        words = [w for seg in output.segments for w in (seg.words or [])]
+        assert len(words) == 2
+        assert words[0].text == "hello"
+        assert words[0].start == 0.0
+        assert words[1].text == "world"
 
     def test_empty_transcription(self) -> None:
         result = NeMoTranscriptionResult(text="", segments=[])
@@ -110,7 +111,7 @@ class TestParakeetRTOutputShape:
         output = engine.transcribe(audio, "en", "parakeet-tdt-1.1b")
 
         assert output.text == ""
-        assert output.words == []
+        assert output.segments == []
 
     def test_model_normalization(self) -> None:
         result = _make_core_result()
