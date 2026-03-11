@@ -78,7 +78,7 @@ dev-minimal: clean-local
 	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
 		docker compose --profile local-infra --profile local-object-storage up -d --build \
 		gateway orchestrator \
-		stt-batch-prepare stt-batch-transcribe-faster-whisper stt-batch-align-phoneme-cpu
+		stt-batch-prepare stt-unified-faster-whisper-cpu stt-batch-align-phoneme-cpu
 
 # Start with GPU engines (requires NVIDIA GPU)
 dev-gpu: clean-local

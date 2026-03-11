@@ -392,6 +392,7 @@ services:
       DALSTON_INSTANCE: stt-unified-faster-whisper
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
+      DALSTON_DEVICE: cuda
       DALSTON_RT_RESERVATION: ${DALSTON_RT_RESERVATION:-2}
       DALSTON_BATCH_MAX_INFLIGHT: ${DALSTON_BATCH_MAX_INFLIGHT:-4}
       DALSTON_TOTAL_CAPACITY: ${DALSTON_TOTAL_CAPACITY:-6}
@@ -403,23 +404,6 @@ services:
     profiles: [gpu]
     restart: unless-stopped
 
-  # Faster Whisper Runtime (CPU/GPU - multilingual transcription)
-  # Supports: tiny, base, small, medium, large-v2, large-v3, large-v3-turbo
-  # Default model (large-v3-turbo) is CPU-capable for out-of-the-box experience.
-  stt-batch-transcribe-faster-whisper:
-    image: dalston/stt-batch-transcribe-faster-whisper:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-transcribe/faster-whisper/Dockerfile
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_RUNTIME: faster-whisper
-      DALSTON_DEFAULT_MODEL_ID: "large-v3-turbo"
-      DALSTON_WORKER_ID: fwhisper-1
-    volumes:
-      - model-cache:/models
-    depends_on: *batch-depends
-    restart: unless-stopped
 
   # M63: Unified Parakeet ONNX (CPU) — lightweight English, batch + realtime.
   # Uses ONNX Runtime instead of NeMo for ~12x smaller container image.
@@ -723,25 +707,6 @@ services:
     profiles: [gpu]
     restart: unless-stopped
 
-  # M43: Faster Whisper CPU (for local development without GPU)
-  stt-rt-faster-whisper-cpu:
-    image: dalston/stt-rt-faster-whisper:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-rt/faster-whisper/Dockerfile
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_INSTANCE: stt-rt-faster-whisper-cpu
-      DALSTON_WORKER_PORT: 9000
-      DALSTON_MAX_SESSIONS: 2
-      DALSTON_MODEL_TTL_SECONDS: 3600
-      DALSTON_MAX_LOADED_MODELS: 1
-      DALSTON_MODEL_PRELOAD: base  # Lighter model for CPU
-    volumes:
-      - model-cache:/models
-    depends_on: *realtime-depends
-    healthcheck: *ws-healthcheck
-    restart: unless-stopped
 
   # Voxtral Mini 4B (GPU - multilingual realtime)
   stt-rt-transcribe-voxtral-mini-4b:
