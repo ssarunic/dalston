@@ -25,6 +25,10 @@ logger = structlog.get_logger()
 # Max message size: 512MB to handle large audio files
 _MAX_MESSAGE_LENGTH = 512 * 1024 * 1024
 
+# Default timeout for gRPC calls (seconds)
+_TRANSCRIBE_TIMEOUT_S = 600  # 10 minutes — long audio files can take a while
+_STATUS_TIMEOUT_S = 10
+
 
 # ---------------------------------------------------------------------------
 # Unified result types that work for both faster-whisper and parakeet
@@ -94,8 +98,15 @@ class RemoteTranscribeCore:
     of in-process.
     """
 
-    def __init__(self, uri: str = "localhost:50052") -> None:
+    def __init__(
+        self,
+        uri: str = "localhost:50052",
+        transcribe_timeout_s: float = _TRANSCRIBE_TIMEOUT_S,
+        status_timeout_s: float = _STATUS_TIMEOUT_S,
+    ) -> None:
         self._uri = uri
+        self._transcribe_timeout_s = transcribe_timeout_s
+        self._status_timeout_s = status_timeout_s
         self._channel = grpc.insecure_channel(
             uri,
             options=[
@@ -160,7 +171,9 @@ class RemoteTranscribeCore:
         )
 
         try:
-            response = self._stub.Transcribe(request)
+            response = self._stub.Transcribe(
+                request, timeout=self._transcribe_timeout_s
+            )
         except grpc.RpcError as e:
             logger.error(
                 "remote_transcribe_failed",
@@ -175,7 +188,9 @@ class RemoteTranscribeCore:
     def get_status(self) -> dict[str, Any]:
         """Query the inference server status."""
         try:
-            response = self._stub.GetStatus(inference_pb2.StatusRequest())
+            response = self._stub.GetStatus(
+                inference_pb2.StatusRequest(), timeout=self._status_timeout_s
+            )
             return {
                 "runtime": response.runtime,
                 "device": response.device,
@@ -307,8 +322,13 @@ class RemoteCoreManager:
     management — that's handled by the inference server.
     """
 
-    def __init__(self, stub: inference_pb2_grpc.InferenceServiceStub) -> None:
+    def __init__(
+        self,
+        stub: inference_pb2_grpc.InferenceServiceStub,
+        timeout_s: float = _STATUS_TIMEOUT_S,
+    ) -> None:
         self._stub = stub
+        self._timeout_s = timeout_s
 
     @property
     def ttl_seconds(self) -> int:
@@ -317,7 +337,9 @@ class RemoteCoreManager:
     @property
     def max_loaded(self) -> int:
         try:
-            response = self._stub.GetStatus(inference_pb2.StatusRequest())
+            response = self._stub.GetStatus(
+                inference_pb2.StatusRequest(), timeout=self._timeout_s
+            )
             return response.total_capacity
         except grpc.RpcError:
             return 0
@@ -328,7 +350,9 @@ class RemoteCoreManager:
 
     def get_stats(self) -> dict[str, Any]:
         try:
-            response = self._stub.GetStatus(inference_pb2.StatusRequest())
+            response = self._stub.GetStatus(
+                inference_pb2.StatusRequest(), timeout=self._timeout_s
+            )
             return {
                 "loaded_models": list(response.loaded_models),
                 "model_count": len(response.loaded_models),

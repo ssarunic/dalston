@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import grpc
+import grpc.aio
 import numpy as np
 import pytest
 
@@ -217,11 +219,57 @@ class TestRemoteTranscribeCore:
         assert result.language == "en"
         assert result.duration == pytest.approx(2.5)
 
-        # Verify the request was sent with correct format
+        # Verify the request was sent with correct format and timeout
         call_args = mock_stub.Transcribe.call_args
         request = call_args[0][0]
         assert request.format == inference_pb2.PCM_F32LE_16K
         assert request.model_id == "large-v3-turbo"
+        # Verify timeout was passed
+        assert call_args[1]["timeout"] == 600  # _TRANSCRIBE_TIMEOUT_S default
+
+    @patch("dalston.engine_sdk.cores.remote_core.grpc.insecure_channel")
+    def test_transcribe_custom_timeout(self, mock_channel_fn: MagicMock) -> None:
+        """Custom timeout is forwarded to gRPC stub."""
+        from dalston.engine_sdk.cores.remote_core import RemoteTranscribeCore
+
+        mock_channel = MagicMock()
+        mock_channel_fn.return_value = mock_channel
+        mock_stub = MagicMock()
+        mock_stub.Transcribe.return_value = self._make_mock_response()
+
+        with patch(
+            "dalston.engine_sdk.cores.remote_core.inference_pb2_grpc.InferenceServiceStub",
+            return_value=mock_stub,
+        ):
+            core = RemoteTranscribeCore("localhost:50052", transcribe_timeout_s=30)
+            audio = np.zeros(16000, dtype=np.float32)
+            core.transcribe(audio, "large-v3-turbo")
+
+        call_args = mock_stub.Transcribe.call_args
+        assert call_args[1]["timeout"] == 30
+
+    @patch("dalston.engine_sdk.cores.remote_core.grpc.insecure_channel")
+    def test_get_status_timeout(self, mock_channel_fn: MagicMock) -> None:
+        """GetStatus uses status timeout."""
+        from dalston.engine_sdk.cores.remote_core import RemoteTranscribeCore
+
+        mock_channel = MagicMock()
+        mock_channel_fn.return_value = mock_channel
+        mock_stub = MagicMock()
+        mock_stub.GetStatus.return_value = inference_pb2.StatusResponse(
+            runtime="test", device="cpu", healthy=True,
+            total_capacity=4, available_capacity=4,
+        )
+
+        with patch(
+            "dalston.engine_sdk.cores.remote_core.inference_pb2_grpc.InferenceServiceStub",
+            return_value=mock_stub,
+        ):
+            core = RemoteTranscribeCore("localhost:50052", status_timeout_s=5)
+            core.get_status()
+
+        call_args = mock_stub.GetStatus.call_args
+        assert call_args[1]["timeout"] == 5
 
     @patch("dalston.engine_sdk.cores.remote_core.grpc.insecure_channel")
     def test_transcribe_file_path(self, mock_channel_fn: MagicMock, tmp_path) -> None:
@@ -492,11 +540,82 @@ class TestInferenceServerBase:
         # Clean up
         os.unlink(result)
 
-    def test_semaphore_initial_value(self) -> None:
-        """Semaphore starts with max_concurrent value."""
+    def test_initial_capacity(self) -> None:
+        """Server starts with zero active requests and correct max."""
         server, _ = self._make_server(max_concurrent=3)
-        assert server._semaphore._value == 3
+        assert server._active_requests == 0
         assert server._max_concurrent == 3
+
+    def test_capacity_rejection(self) -> None:
+        """Transcribe rejects when at capacity."""
+        server, _ = self._make_server(max_concurrent=2)
+
+        async def run():
+            # Simulate being at capacity
+            server._active_requests = 2
+
+            ctx = MagicMock()
+            ctx.abort = MagicMock(side_effect=grpc.aio.AbortError(
+                grpc.StatusCode.RESOURCE_EXHAUSTED, "at capacity"
+            ))
+
+            audio = np.zeros(16000, dtype=np.float32).tobytes()
+            request = inference_pb2.TranscribeRequest(
+                audio=audio,
+                format=inference_pb2.PCM_F32LE_16K,
+                model_id="test",
+            )
+
+            with pytest.raises(grpc.aio.AbortError):
+                await server.Transcribe(request, ctx)
+
+            ctx.abort.assert_called_once()
+
+        asyncio.run(run())
+
+    def test_temp_file_cleanup_on_error(self, tmp_path) -> None:
+        """Temp file is cleaned up even when transcription fails."""
+        from dalston.engine_sdk.inference_server import InferenceServer
+
+        class FailingServer(InferenceServer):
+            def __init__(self, core):
+                super().__init__(core=core, port=50099, max_concurrent=4)
+
+            def get_runtime(self) -> str:
+                return "failing"
+
+            def _do_transcribe(self, audio, model_id, config):
+                raise RuntimeError("deliberate failure")
+
+            def _get_loaded_models(self) -> list[str]:
+                return []
+
+        mock_core = MagicMock()
+        mock_core.device = "cpu"
+        server = FailingServer(mock_core)
+
+        async def run():
+            import os
+
+            audio_data = b"RIFF" + b"\x00" * 100
+            request = inference_pb2.TranscribeRequest(
+                audio=audio_data,
+                format=inference_pb2.FILE,
+                model_id="test",
+            )
+
+            ctx = MagicMock()
+            ctx.abort = MagicMock(side_effect=grpc.aio.AbortError(
+                grpc.StatusCode.INTERNAL, "failed"
+            ))
+
+            with pytest.raises(grpc.aio.AbortError):
+                await server.Transcribe(request, ctx)
+
+            # Verify temp file was cleaned up (check no .wav files leaked)
+            assert server._active_requests == 0
+
+        asyncio.run(run())
 
 
 # ---------------------------------------------------------------------------

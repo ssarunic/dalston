@@ -120,8 +120,8 @@ class InferenceServer(ABC, inference_pb2_grpc.InferenceServiceServicer):
         context: grpc.aio.ServicerContext,
     ) -> inference_pb2.TranscribeResponse:
         """Handle a Transcribe RPC."""
-        acquired = self._semaphore.locked() and self._semaphore._value == 0
-        if self._semaphore._value == 0:
+        # Reject immediately if at capacity — no blocking wait
+        if self._active_requests >= self._max_concurrent:
             logger.warning(
                 "inference_at_capacity",
                 active=self._active_requests,
@@ -131,7 +131,9 @@ class InferenceServer(ABC, inference_pb2_grpc.InferenceServiceServicer):
                 grpc.StatusCode.RESOURCE_EXHAUSTED,
                 f"Server at capacity ({self._max_concurrent} concurrent requests)",
             )
+            return inference_pb2.TranscribeResponse()  # unreachable; satisfies type checker
 
+        audio: str | np.ndarray | None = None
         async with self._semaphore:
             self._active_requests += 1
             try:
@@ -149,21 +151,21 @@ class InferenceServer(ABC, inference_pb2_grpc.InferenceServiceServicer):
                     self._do_transcribe, audio, request.model_id, config_dict
                 )
 
-                # Clean up temp file if we created one
-                if isinstance(audio, str):
-                    try:
-                        Path(audio).unlink(missing_ok=True)
-                    except OSError:
-                        pass
-
                 return response
             except Exception as e:
                 logger.error("transcribe_error", error=str(e), exc_info=True)
                 await context.abort(
                     grpc.StatusCode.INTERNAL, f"Transcription failed: {e}"
                 )
+                return inference_pb2.TranscribeResponse()  # unreachable; satisfies type checker
             finally:
                 self._active_requests -= 1
+                # Clean up temp file if we created one (handles both success and error paths)
+                if isinstance(audio, str):
+                    try:
+                        Path(audio).unlink(missing_ok=True)
+                    except OSError:
+                        pass
 
     @abstractmethod
     def _get_loaded_models(self) -> list[str]:
@@ -180,7 +182,7 @@ class InferenceServer(ABC, inference_pb2_grpc.InferenceServiceServicer):
             device=getattr(self._core, "device", "unknown"),
             loaded_models=self._get_loaded_models(),
             total_capacity=self._max_concurrent,
-            available_capacity=self._semaphore._value,
+            available_capacity=self._max_concurrent - self._active_requests,
             healthy=True,
         )
 
