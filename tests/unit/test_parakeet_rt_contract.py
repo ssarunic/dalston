@@ -10,6 +10,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
 
 from dalston.engine_sdk.cores.parakeet_core import (
     NeMoSegmentResult,
@@ -17,6 +18,8 @@ from dalston.engine_sdk.cores.parakeet_core import (
     NeMoWordResult,
     ParakeetCore,
 )
+
+torch = pytest.importorskip("torch")
 
 
 def _make_core_result(

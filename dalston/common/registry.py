@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import redis.asyncio as aioredis
 import structlog
@@ -309,8 +309,8 @@ class UnifiedEngineRegistry:
         )
     """
 
-    def __init__(self, redis_client: aioredis.Redis) -> None:
-        self._redis = redis_client
+    def __init__(self, redis_client: aioredis.Redis) -> None:  # type: ignore[type-arg]
+        self._redis: Any = redis_client
 
     async def register(self, record: EngineRecord) -> None:
         """Write engine record to unified registry."""
@@ -537,9 +537,9 @@ class UnifiedRegistryWriter:
 
     def __init__(self, redis_url: str) -> None:
         self._redis_url = redis_url
-        self._redis: object | None = None
+        self._redis: Any = None
 
-    def _get_redis(self):  # type: ignore[no-untyped-def]
+    def _get_redis(self) -> Any:
         """Get or create sync Redis connection."""
         if self._redis is None:
             import redis
@@ -618,5 +618,5 @@ class UnifiedRegistryWriter:
     def close(self) -> None:
         """Close Redis connection."""
         if self._redis is not None:
-            self._redis.close()  # type: ignore[union-attr]
+            self._redis.close()
             self._redis = None

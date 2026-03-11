@@ -593,12 +593,10 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/data/dalston
 ExecStart=/usr/bin/docker-compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml --env-file .env.gpu --profile gpu up -d \
-  stt-batch-transcribe-nemo \
+  stt-unified-nemo \
   stt-batch-transcribe-faster-whisper \
   stt-batch-align-phoneme \
-  stt-batch-diarize-nemo-msdd \
-  stt-rt-nemo \
-  stt-rt-faster-whisper
+  stt-batch-diarize-nemo-msdd
 ExecStop=/usr/bin/docker-compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml --env-file .env.gpu --profile gpu down
 TimeoutStartSec=600
 

@@ -213,7 +213,9 @@ def assemble_per_channel_transcript(
             language_confidence = lc_raw if lc_raw is not None else 1.0
 
         # Select best segment source for this channel
-        transcribe_output = _try_parse_transcribe(transcribe_data) if transcribe_data else None
+        transcribe_output = (
+            _try_parse_transcribe(transcribe_data) if transcribe_data else None
+        )
         align_output = _try_parse_align(align_data) if align_data else None
         raw_segments = transcribe_data.get("segments", []) if transcribe_data else []
 
@@ -251,7 +253,9 @@ def assemble_per_channel_transcript(
             text=seg_dict["text"],
             speaker=seg_dict["speaker"],
             words=words,
-            tokens=seg_dict.get("tokens") if isinstance(seg_dict.get("tokens"), list) else None,
+            tokens=seg_dict.get("tokens")
+            if isinstance(seg_dict.get("tokens"), list)
+            else None,
             temperature=seg_dict.get("temperature"),
             avg_logprob=seg_dict.get("avg_logprob"),
             compression_ratio=seg_dict.get("compression_ratio"),
@@ -591,18 +595,7 @@ def _build_merged_segments(
             seg_avg_logprob = seg.avg_logprob
             seg_compression_ratio = seg.compression_ratio
             seg_no_speech_prob = seg.no_speech_prob
-        elif hasattr(seg, "start"):
-            # Pydantic model but not Segment (e.g. from align output)
-            seg_start = seg.start
-            seg_end = seg.end
-            seg_text = seg.text
-            seg_words = getattr(seg, "words", None)
-            seg_tokens = getattr(seg, "tokens", None)
-            seg_temperature = getattr(seg, "temperature", None)
-            seg_avg_logprob = getattr(seg, "avg_logprob", None)
-            seg_compression_ratio = getattr(seg, "compression_ratio", None)
-            seg_no_speech_prob = getattr(seg, "no_speech_prob", None)
-        else:
+        elif isinstance(seg, dict):
             seg_start = seg.get("start", 0.0)
             seg_end = seg.get("end", 0.0)
             seg_text = seg.get("text", "")
@@ -612,6 +605,17 @@ def _build_merged_segments(
             seg_avg_logprob = seg.get("avg_logprob")
             seg_compression_ratio = seg.get("compression_ratio")
             seg_no_speech_prob = seg.get("no_speech_prob")
+        else:
+            # Pydantic model but not Segment (e.g. from align output)
+            seg_start = getattr(seg, "start", 0.0)
+            seg_end = getattr(seg, "end", 0.0)
+            seg_text = getattr(seg, "text", "")
+            seg_words = getattr(seg, "words", None)
+            seg_tokens = getattr(seg, "tokens", None)
+            seg_temperature = getattr(seg, "temperature", None)
+            seg_avg_logprob = getattr(seg, "avg_logprob", None)
+            seg_compression_ratio = getattr(seg, "compression_ratio", None)
+            seg_no_speech_prob = getattr(seg, "no_speech_prob", None)
 
         # Assign speaker based on diarization overlap
         speaker = None

@@ -51,10 +51,10 @@ class TestNeMoModelManagerInit:
 
             manager = NeMoModelManager(device="cpu")
 
-            assert manager._get_architecture("parakeet-rnnt-0.6b") == "rnnt"
-            assert manager._get_architecture("parakeet-ctc-1.1b") == "ctc"
-            assert manager._get_architecture("parakeet-tdt-0.6b-v3") == "tdt"
-            assert manager._get_architecture("parakeet-tdt-1.1b") == "tdt"
+            assert manager.get_architecture("parakeet-rnnt-0.6b") == "rnnt"
+            assert manager.get_architecture("parakeet-ctc-1.1b") == "ctc"
+            assert manager.get_architecture("parakeet-tdt-0.6b-v3") == "tdt"
+            assert manager.get_architecture("parakeet-tdt-1.1b") == "tdt"
 
             manager.shutdown()
 
