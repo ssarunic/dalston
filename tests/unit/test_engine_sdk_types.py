@@ -14,13 +14,11 @@ from dalston.common.pipeline_types import (
     AudioMedia,
     DiarizeOutput,
     PrepareOutput,
-    Segment,
     SpeakerTurn,
     TimestampGranularity,
     Transcript,
     TranscriptSegment,
     TranscriptWord,
-    Word,
 )
 from dalston.engine_sdk.types import EngineInput, EngineOutput
 
@@ -607,11 +605,11 @@ class TestTaskInputTypedOutputIntegration:
 
         align_output = AlignOutput(
             segments=[
-                Segment(
+                TranscriptSegment(
                     start=0.0,
                     end=5.0,
                     text="Hello",
-                    words=[Word(text="Hello", start=0.0, end=5.0)],
+                    words=[TranscriptWord(text="Hello", start=0.0, end=5.0)],
                 )
             ],
             text="Hello",
