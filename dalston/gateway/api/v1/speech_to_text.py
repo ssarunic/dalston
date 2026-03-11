@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_created
+from dalston.common.model_selection_keys import MODEL_PARAM_TRANSCRIBE
 from dalston.common.models import JobStatus
 from dalston.config import Settings
 from dalston.gateway.api.v1.elevenlabs_stt import (
@@ -380,7 +381,7 @@ async def create_transcription(
         "elevenlabs_webhook_enabled": webhook,
         "request_id": request_id,
         "use_multi_channel": enable_multi_channel,
-        "engine_transcribe": settings.default_model,
+        MODEL_PARAM_TRANSCRIBE: settings.default_model,
     }
     if enable_multi_channel:
         parameters["num_channels"] = ingested.metadata.channels

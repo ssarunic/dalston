@@ -35,7 +35,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_cancel_requested, publish_job_created
 from dalston.common.model_selection_keys import (
-    ENGINE_PARAM_TRANSCRIBE,
     MODEL_PARAM_ALIGN,
     MODEL_PARAM_DIARIZE,
     MODEL_PARAM_PII_DETECT,
@@ -455,7 +454,7 @@ async def create_transcription(
         # OpenAI mode: map OpenAI model alias to configured runtime engine.
         parameters: dict = {
             "language": language or "auto",
-            ENGINE_PARAM_TRANSCRIBE: map_openai_model(model),
+            MODEL_PARAM_TRANSCRIBE: map_openai_model(model),
             "timestamps_granularity": "word"
             if timestamp_granularities and "word" in timestamp_granularities
             else "segment",
@@ -487,7 +486,7 @@ async def create_transcription(
             "timestamps_granularity": timestamps_granularity,
         }
         if model.lower() != "auto":
-            parameters[ENGINE_PARAM_TRANSCRIBE] = model
+            parameters[MODEL_PARAM_TRANSCRIBE] = model
 
         # Stage-specific model overrides (M55)
         if model_diarize and model_diarize.strip():
@@ -651,9 +650,7 @@ async def create_transcription(
 
         pii_enabled = bool(parameters.get("pii_detection"))
         pii_meta = transcript.get("pii_metadata") or {}
-        model_for_response = parameters.get(ENGINE_PARAM_TRANSCRIBE) or parameters.get(
-            MODEL_PARAM_TRANSCRIBE
-        )
+        model_for_response = parameters.get(MODEL_PARAM_TRANSCRIBE)
 
         response.status_code = 200
         return JobResponse(
@@ -936,9 +933,7 @@ async def get_transcription(
     # Extract model from parameters (set when user specifies a model)
     model = None
     if job.parameters:
-        model = job.parameters.get(ENGINE_PARAM_TRANSCRIBE) or job.parameters.get(
-            MODEL_PARAM_TRANSCRIBE
-        )
+        model = job.parameters.get(MODEL_PARAM_TRANSCRIBE)
 
     # Build response
     response = JobResponse(
@@ -1100,9 +1095,7 @@ async def update_transcription(
     # Extract model from parameters
     model = None
     if job.parameters:
-        model = job.parameters.get(ENGINE_PARAM_TRANSCRIBE) or job.parameters.get(
-            MODEL_PARAM_TRANSCRIBE
-        )
+        model = job.parameters.get(MODEL_PARAM_TRANSCRIBE)
 
     return JobResponse(
         id=job.id,
