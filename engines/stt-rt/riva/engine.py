@@ -31,6 +31,10 @@ logger = structlog.get_logger()
 # Audio parameters matching Dalston's real-time pipeline
 _SAMPLE_RATE = 16000
 
+# gRPC timeout for offline_recognize — RT utterances are short (≤30s),
+# but allow headroom for NIM cold starts and queuing.
+_GRPC_TIMEOUT_S = 120
+
 
 class RivaRealtimeEngine(RealtimeEngine):
     """Real-time transcription engine using Riva NIM gRPC.
@@ -96,7 +100,9 @@ class RivaRealtimeEngine(RealtimeEngine):
             audio_channel_count=1,
         )
 
-        response = self._asr.offline_recognize(audio_bytes, config)
+        response = self._asr.offline_recognize(
+            audio_bytes, config, timeout=_GRPC_TIMEOUT_S
+        )
 
         words: list[Word] = []
         text_parts: list[str] = []
@@ -142,7 +148,7 @@ class RivaRealtimeEngine(RealtimeEngine):
 
     def get_runtime(self) -> str:
         """Return the runtime identifier."""
-        return "riva"
+        return self._runtime
 
     def get_supports_vocabulary(self) -> bool:
         """Riva supports boosting but needs config mapping work."""

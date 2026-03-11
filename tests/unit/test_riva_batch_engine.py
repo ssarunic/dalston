@@ -83,6 +83,16 @@ def _make_mock_response(
     return SimpleNamespace(results=results)
 
 
+@pytest.fixture(autouse=True)
+def _cleanup_injected_modules():
+    """Remove dynamically loaded modules after each test to prevent ordering pollution."""
+    keys_before = set(sys.modules)
+    yield
+    for key in list(sys.modules):
+        if key not in keys_before:
+            sys.modules.pop(key, None)
+
+
 @pytest.fixture()
 def _mock_riva_modules():
     """Mock riva.client and related modules so engine.py can be imported."""
@@ -181,7 +191,9 @@ class TestRivaBatchOutputShape:
             _make_mock_word("world", 0.5, 1.0, 0.92),
         ]
         response = _make_mock_response(
-            results=[_make_mock_result(alternatives=[_make_mock_alternative(words=words)])]
+            results=[
+                _make_mock_result(alternatives=[_make_mock_alternative(words=words)])
+            ]
         )
         _setup_streaming_responses(engine, [response])
 
@@ -459,9 +471,7 @@ class TestRivaBatchWordConfidence:
             _make_mock_word("world", 0.5, 1.0, 0.85),
         ]
         alt = _make_mock_alternative(confidence=0.90, words=words)
-        response = _make_mock_response(
-            results=[_make_mock_result(alternatives=[alt])]
-        )
+        response = _make_mock_response(results=[_make_mock_result(alternatives=[alt])])
         _setup_streaming_responses(engine, [response])
 
         task_id = str(uuid4())
@@ -490,9 +500,7 @@ class TestRivaBatchWordConfidence:
         audio_file.write_bytes(b"\x00\x00" * 16000)
 
         alt = _make_mock_alternative(transcript="hello world", words=[])
-        response = _make_mock_response(
-            results=[_make_mock_result(alternatives=[alt])]
-        )
+        response = _make_mock_response(results=[_make_mock_result(alternatives=[alt])])
         _setup_streaming_responses(engine, [response])
 
         task_id = str(uuid4())

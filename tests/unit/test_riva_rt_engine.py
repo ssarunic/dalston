@@ -68,6 +68,16 @@ def _make_mock_response(
     return SimpleNamespace(results=results)
 
 
+@pytest.fixture(autouse=True)
+def _cleanup_injected_modules():
+    """Remove dynamically loaded modules after each test to prevent ordering pollution."""
+    keys_before = set(sys.modules)
+    yield
+    for key in list(sys.modules):
+        if key not in keys_before:
+            sys.modules.pop(key, None)
+
+
 @pytest.fixture()
 def _mock_riva_modules():
     """Mock riva.client and related modules so engine.py can be imported."""
@@ -228,9 +238,17 @@ class TestRivaRtStreamingSupport:
         engine, _ = engine_with_mock
         assert engine.supports_streaming() is True
 
-    def test_get_runtime_returns_riva(self, engine_with_mock) -> None:
+    def test_get_runtime_returns_env_value(self, engine_with_mock) -> None:
         engine, _ = engine_with_mock
+        # Default is "riva" when DALSTON_RUNTIME is not set
         assert engine.get_runtime() == "riva"
+
+    def test_get_runtime_respects_env_override(
+        self, riva_rt_engine_class, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("DALSTON_RUNTIME", "riva-nim-2")
+        engine = riva_rt_engine_class()
+        assert engine.get_runtime() == "riva-nim-2"
 
     def test_get_languages(self, engine_with_mock) -> None:
         engine, _ = engine_with_mock
@@ -288,9 +306,7 @@ class TestRivaRtInitialization:
         engine.load_models()
         assert engine._asr is not None
 
-    def test_transcribe_raises_without_load_models(
-        self, riva_rt_engine_class
-    ) -> None:
+    def test_transcribe_raises_without_load_models(self, riva_rt_engine_class) -> None:
         engine = riva_rt_engine_class()
 
         audio = np.zeros(16000, dtype=np.float32)
