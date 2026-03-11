@@ -1,16 +1,23 @@
 # Plan: Unified TranscriberParams + Engine Naming Consistency
 
+## Guiding Principle
+
+**Runtimes are infrastructure, models are configuration.** Adding a new model to an existing runtime should be a config change + adapter, not a new engine.
+
+The system currently names engines after models (Parakeet, Voxtral) when they should be named after runtimes (NeMo, vLLM). This conflates what runs (model) with what runs it (runtime).
+
 ## Overview
 
-Two related changes:
-1. **TranscriberParams** — a canonical input type for all transcription engines (the input analog to `Transcript` output)
-2. **Engine naming** — rename classes from model-based names to runtime-based names, make Batch/Realtime suffix consistent
+Two steps, each independently shippable:
 
-These are split into 4 phases to keep each commit reviewable and testable independently.
+1. **Step 1: TranscriberParams + class renames** — add unified input type, rename all engine classes to runtime-based naming
+2. **Step 2: Voxtral absorption + RivaCore extraction** — eliminate model-specific engines that duplicate runtime-generic ones
 
 ---
 
-## Phase 1: Add `TranscriberParams` to `dalston/common/pipeline_types.py`
+## Step 1: TranscriberParams + Class Renames
+
+### Phase 1a: Add `TranscriberParams`
 
 **Files changed:**
 - `dalston/common/pipeline_types.py` — add `TranscriberParams` class
@@ -37,120 +44,111 @@ class TranscriberParams(BaseModel):
 
 No consumers yet — just the type definition and tests.
 
-**Tests:** Unit tests for TranscriberParams construction, serialization, defaults.
-
----
-
-## Phase 2: Wire `TranscriberParams` into SDK base classes
-
-### 2a: Batch SDK — replace `config: dict` with `TranscriberParams`
+### Phase 1b: Wire into Batch SDK
 
 **Files changed:**
 - `dalston/engine_sdk/types.py` — add `transcriber_params: TranscriberParams` field to `EngineInput`
-- `dalston/engine_sdk/base_transcribe.py` — update `transcribe_audio()` signature docs
-- `dalston/engine_sdk/runner.py` — construct `TranscriberParams` from the task config dict when building `EngineInput` (backward compat: keep `config` dict populated too for now)
+- `dalston/engine_sdk/runner.py` — construct `TranscriberParams` from the task config dict when building `EngineInput` (keep `config` dict for backward compat during migration)
 
-Each batch engine currently does `config.get("language")`, `config.get("beam_size", 5)`, etc. from a raw dict. After this change, engines can use `engine_input.transcriber_params.language` instead. The raw `config` dict stays for backward compat during migration.
+**Engine migrations (each engine switches from `config.get(...)` to `transcriber_params.*`):**
+- `engines/stt-transcribe/faster-whisper/engine.py`
+- `engines/stt-transcribe/parakeet/engine.py`
+- `engines/stt-transcribe/parakeet-onnx/engine.py`
+- `engines/stt-transcribe/voxtral/engine.py`
+- `engines/stt-transcribe/vllm-asr/engine.py`
+- `engines/stt-transcribe/hf-asr/engine.py`
+- `engines/stt-transcribe/riva/engine.py`
 
-**Engine migrations (one per engine, can be separate commits):**
-- `engines/stt-transcribe/faster-whisper/engine.py` — use `transcriber_params` instead of `config` dict
-- `engines/stt-transcribe/parakeet/engine.py` — same
-- `engines/stt-transcribe/parakeet-onnx/engine.py` — same
-- `engines/stt-transcribe/voxtral/engine.py` — same
-- `engines/stt-transcribe/vllm-asr/engine.py` — same
-- `engines/stt-transcribe/hf-asr/engine.py` — same
-- `engines/stt-transcribe/riva/engine.py` — same
-
-### 2b: Realtime SDK — replace positional args with `TranscriberParams`
+### Phase 1c: Wire into Realtime SDK
 
 **Files changed:**
-- `dalston/realtime_sdk/session.py` — change `TranscribeCallback` signature from `(audio, language, model, vocabulary)` to `(audio, params: TranscriberParams)`. Update the two call sites in `_transcribe_and_send` and the streaming partial path.
-- `dalston/realtime_sdk/base_transcribe.py` — update `transcribe()` and `transcribe_v1()` signatures:
-  ```python
-  # Before:
-  def transcribe_v1(self, audio, language, model_variant, vocabulary) -> Transcript
-  # After:
-  def transcribe_v1(self, audio: np.ndarray, params: TranscriberParams) -> Transcript
-  ```
-- `dalston/realtime_sdk/base.py` — update `_handle_connection()` to construct `TranscriberParams` from `SessionConfig`
+- `dalston/realtime_sdk/session.py` — change `TranscribeCallback` from `(audio, language, model, vocabulary)` to `(audio, params: TranscriberParams)`
+- `dalston/realtime_sdk/base_transcribe.py` — update `transcribe_v1()` signature to `(audio: np.ndarray, params: TranscriberParams)`
+- `dalston/realtime_sdk/base.py` — construct `TranscriberParams` from `SessionConfig` in `_handle_connection()`
 
-**Engine migrations (one per engine):**
-- `engines/stt-rt/faster-whisper/engine.py` — update `transcribe_v1()` to accept `TranscriberParams`
-- `engines/stt-rt/parakeet/engine.py` — same
-- `engines/stt-rt/parakeet-onnx/engine.py` — same
-- `engines/stt-rt/voxtral/engine.py` — same
-- `engines/stt-rt/riva/engine.py` — same
+**Engine migrations:**
+- `engines/stt-rt/faster-whisper/engine.py`
+- `engines/stt-rt/parakeet/engine.py`
+- `engines/stt-rt/parakeet-onnx/engine.py`
+- `engines/stt-rt/voxtral/engine.py`
+- `engines/stt-rt/riva/engine.py`
 
-**Tests:** Update all test files that mock/call transcribe_v1 or TranscribeCallback.
+### Phase 1d: Rename classes to runtime-based naming
 
----
+All renames are mechanical find-and-replace within each engine + its tests + unified runner imports.
 
-## Phase 3: Rename classes to runtime-based naming
+**Runtime strings (no changes — already correct in engine.yaml):**
+- `faster-whisper`, `nemo`, `nemo-onnx`, `vllm-asr`, `hf-asr`, `riva`
 
-All renames are mechanical find-and-replace within each engine + its tests + the unified runner that imports it.
+**Core renames:**
 
-### Runtime string decisions (no changes needed — already correct):
-- `faster-whisper` — keep (it IS the library name)
-- `nemo` — keep (already in engine.yaml)
-- `nemo-onnx` — keep (already in engine.yaml)
-- `vllm-asr` — keep (distinguishes from generic vllm)
-- `hf-asr` — keep (distinguishes from generic transformers/hf)
-- `riva` — keep
-
-### Class renames:
-
-**Cores:**
 | Before | After | File |
 |---|---|---|
 | `TranscribeCore` | `FasterWhisperCore` | `dalston/engine_sdk/cores/faster_whisper_core.py` |
 | `TranscribeConfig` | `FasterWhisperConfig` | same file |
-| `ParakeetCore` | `NemoCore` | `dalston/engine_sdk/cores/parakeet_core.py` → rename file to `nemo_core.py` |
-| `ParakeetOnnxCore` | `NemoOnnxCore` | `dalston/engine_sdk/cores/parakeet_onnx_core.py` → rename file to `nemo_onnx_core.py` |
+| `ParakeetCore` | `NemoCore` | rename file to `nemo_core.py` |
+| `ParakeetOnnxCore` | `NemoOnnxCore` | rename file to `nemo_onnx_core.py` |
 
-**Managers (no changes needed — already correct):**
-| Class | Status |
+**Batch engine renames:**
+
+| Before | After |
 |---|---|
-| `FasterWhisperModelManager` | already correct |
-| `NeMoModelManager` | already correct |
-| `NeMoOnnxModelManager` | already correct |
-| `HFTransformersModelManager` | already correct |
+| `WhisperEngine` | `FasterWhisperBatchEngine` |
+| `ParakeetEngine` | `NemoBatchEngine` |
+| `ParakeetOnnxEngine` | `NemoOnnxBatchEngine` |
+| `HFASREngine` | `HfAsrBatchEngine` |
+| `VLLMASREngine` | `VllmBatchEngine` |
+| `RivaBatchEngine` | no change |
 
-**Batch engines:**
-| Before | After | File |
-|---|---|---|
-| `WhisperEngine` | `FasterWhisperBatchEngine` | `engines/stt-transcribe/faster-whisper/engine.py` |
-| `ParakeetEngine` | `NemoBatchEngine` | `engines/stt-transcribe/parakeet/engine.py` |
-| `ParakeetOnnxEngine` | `NemoOnnxBatchEngine` | `engines/stt-transcribe/parakeet-onnx/engine.py` |
-| `VoxtralEngine` | `VoxtralBatchEngine` | `engines/stt-transcribe/voxtral/engine.py` |
-| `HFASREngine` | `HfAsrBatchEngine` | `engines/stt-transcribe/hf-asr/engine.py` |
-| `VLLMASREngine` | `VllmAsrBatchEngine` | `engines/stt-transcribe/vllm-asr/engine.py` |
-| `RivaBatchEngine` | no change | already correct |
+**Realtime engine renames:**
 
-**Realtime engines:**
-| Before | After | File |
-|---|---|---|
-| `WhisperStreamingEngine` | `FasterWhisperRealtimeEngine` | `engines/stt-rt/faster-whisper/engine.py` |
-| `ParakeetStreamingEngine` | `NemoRealtimeEngine` | `engines/stt-rt/parakeet/engine.py` |
-| `ParakeetOnnxStreamingEngine` | `NemoOnnxRealtimeEngine` | `engines/stt-rt/parakeet-onnx/engine.py` |
-| `VoxtralStreamingEngine` | `VoxtralRealtimeEngine` | `engines/stt-rt/voxtral/engine.py` |
-| `RivaRealtimeEngine` | no change | already correct |
+| Before | After |
+|---|---|
+| `WhisperStreamingEngine` | `FasterWhisperRealtimeEngine` |
+| `ParakeetStreamingEngine` | `NemoRealtimeEngine` |
+| `ParakeetOnnxStreamingEngine` | `NemoOnnxRealtimeEngine` |
+| `RivaRealtimeEngine` | no change |
 
-**Unified runners** (import updates only):
-- `engines/stt-unified/faster-whisper/runner.py` — update class imports
-- `engines/stt-unified/parakeet/runner.py` — update class imports
-- `engines/stt-unified/parakeet-onnx/runner.py` — update class imports
+Voxtral engines are NOT renamed — they're absorbed in Step 2.
 
-**Test files** — update class imports and instantiation in all affected test files.
+**Managers** — no changes needed (`FasterWhisperModelManager`, `NeMoModelManager`, `NeMoOnnxModelManager`, `HFTransformersModelManager` are already correct).
 
-**Gateway/Orchestrator** — no changes needed. These reference runtime strings (`"faster-whisper"`, `"nemo"`, etc.), not class names. Runtime strings stay the same.
+**Unified runners** — import updates only in `engines/stt-unified/{faster-whisper,parakeet,parakeet-onnx}/runner.py`.
+
+**Gateway/Orchestrator** — no changes. These use runtime strings, not class names.
 
 ---
 
-## Phase 4: Extract `RivaCore` (shared inference logic)
+## Step 2: Voxtral Absorption + RivaCore Extraction
+
+### Phase 2a: Absorb Voxtral batch into VllmBatchEngine
+
+The standalone `engines/stt-transcribe/voxtral/` uses Transformers directly but reports `runtime: vllm-asr`. It duplicates functionality that `VllmBatchEngine` already provides via its `VoxtralAdapter`. This is a model pretending to be a runtime.
+
+**Action:**
+- Delete `engines/stt-transcribe/voxtral/` entirely
+- Voxtral batch transcription is already handled by `VllmBatchEngine` + `VoxtralAdapter` in `engines/stt-transcribe/vllm-asr/adapters/`
+- Update docker-compose: remove `stt-batch-transcribe-voxtral-mini-3b` service, point voxtral batch workloads to `stt-batch-transcribe-vllm-asr` with `DALSTON_DEFAULT_MODEL_ID=mistralai/Voxtral-Mini-3B-2507`
+- Delete `tests/unit/test_voxtral_engine.py` (batch)
+- Update `dalston/gateway/services/hf_resolver.py` if it references voxtral directly
+
+### Phase 2b: Absorb Voxtral RT into HF-ASR / Transformers RT engine
+
+The Voxtral RT engine (`engines/stt-rt/voxtral/`) uses `transformers.VoxtralRealtimeForConditionalGeneration`. It's the same runtime as hf-asr (Transformers) but with a model-specific wrapper.
+
+**Action:**
+- Create `HfAsrRealtimeEngine` (new RT engine for the `hf-asr` runtime) in `engines/stt-rt/hf-asr/`
+- Move Voxtral RT logic into the new engine as model-specific handling (the Voxtral realtime model needs special prompt construction and output parsing, similar to how vllm-asr has adapters)
+- Delete `engines/stt-rt/voxtral/`
+- Update docker-compose: rename `stt-rt-voxtral` service to `stt-rt-hf-asr`, configure with `DALSTON_DEFAULT_MODEL_ID=mistralai/Voxtral-Mini-4B-Realtime-2602`
+
+This means "voxtral" no longer appears as an engine anywhere — it's just a model that runs on the `hf-asr` (Transformers) runtime.
+
+### Phase 2c: Extract `RivaCore`
 
 **New file:** `dalston/engine_sdk/cores/riva_core.py`
 
-Extract from both Riva engines:
+Extract shared logic from both Riva engines:
 - gRPC channel management (connect, health check, shutdown)
 - Audio format conversion (float32 → int16 bytes)
 - `RecognitionConfig` construction from `TranscriberParams`
@@ -167,24 +165,39 @@ class RivaCore:
 ```
 
 **Files changed:**
-- `engines/stt-transcribe/riva/engine.py` — simplify to delegate to `RivaCore`
-- `engines/stt-rt/riva/engine.py` — simplify to delegate to `RivaCore`
+- `engines/stt-transcribe/riva/engine.py` — simplify to thin adapter delegating to `RivaCore`
+- `engines/stt-rt/riva/engine.py` — same
 - New tests for `RivaCore` in isolation
 
-This makes Riva structurally identical to faster-whisper and nemo (both already have cores).
+After this, Riva is structurally identical to faster-whisper and nemo (Core + Batch adapter + RT adapter).
 
 ---
 
+## End State
+
+After both steps, the engine taxonomy is clean:
+
+| Runtime | Core | Batch Engine | RT Engine | Models |
+|---|---|---|---|---|
+| faster-whisper | `FasterWhisperCore` | `FasterWhisperBatchEngine` | `FasterWhisperRealtimeEngine` | Whisper variants (large-v3, turbo, etc.) |
+| nemo | `NemoCore` | `NemoBatchEngine` | `NemoRealtimeEngine` | Parakeet, Canary (future) |
+| nemo-onnx | `NemoOnnxCore` | `NemoOnnxBatchEngine` | `NemoOnnxRealtimeEngine` | ONNX-exported NeMo models |
+| vllm-asr | — | `VllmBatchEngine` | — | Voxtral, Qwen2-Audio, extensible via adapters |
+| hf-asr | — | `HfAsrBatchEngine` | `HfAsrRealtimeEngine` | Any HF ASR model, Voxtral-Realtime |
+| riva | `RivaCore` | `RivaBatchEngine` | `RivaRealtimeEngine` | Whatever NIM serves |
+
+**Model selection is config, not code:**
+- `NemoCore` loads Parakeet OR Canary based on `model_id` in `TranscriberParams`
+- `VllmBatchEngine` loads Voxtral OR Qwen2-Audio based on adapter selection
+- `FasterWhisperCore` loads large-v3 OR base OR turbo based on `model_id`
+
+Adding a new model to an existing runtime = config change + adapter (if needed). No new engine required.
+
 ## What is NOT in scope
 
-- **Directory renames** (e.g., `engines/stt-rt/parakeet/` → `engines/stt-rt/nemo/`). These would break Dockerfiles, compose service names, CI, and image tags. Not worth the churn — the directory name represents the default model, which is fine.
-- **Voxtral absorption into vllm-asr**. The Voxtral engines use Transformers, not vLLM. They're model-specific implementations that happen to share a runtime string. Absorbing them requires either making them actually use vLLM (different inference path) or creating a Transformers core. Separate milestone.
-- **Runtime string changes**. The current strings (`faster-whisper`, `nemo`, `nemo-onnx`, `vllm-asr`, `hf-asr`, `riva`) are already reasonable and are stored in Redis, used in routing, referenced in configs. Changing them has high blast radius for low value.
+- **Directory renames** (e.g., `engines/stt-rt/parakeet/` → `engines/stt-rt/nemo/`). These would break Dockerfiles, compose service names, CI, and image tags. The directory name can represent the default model family.
+- **Runtime string changes**. Current strings are stored in Redis, used in routing, referenced in configs. They're already reasonable.
 
 ## Commit strategy
 
-One commit per phase. Each phase is independently testable:
-- Phase 1: `make test` passes (new type, no consumers)
-- Phase 2: `make test` passes (all engines migrated to TranscriberParams)
-- Phase 3: `make test` passes (all renames, pure refactor)
-- Phase 4: `make test` passes (RivaCore extraction, pure refactor)
+One commit per phase. Each is independently testable (`make test` passes after each).
