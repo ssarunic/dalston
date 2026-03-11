@@ -642,8 +642,9 @@ class EngineRunner:
                 process_time = time.time() - process_start
 
                 # Boundary validation: validate transcribe outputs against
-                # Transcript (warn-only during migration).
-                if task_input.stage == "transcribe":
+                # Transcript. Covers both mono ("transcribe") and per-channel
+                # ("transcribe_ch0", "transcribe_ch1", ...) stages.
+                if task_input.stage.startswith("transcribe"):
                     self._validate_transcript_output(output, task_id)
 
                 # Calculate total task time (for metrics)
