@@ -302,6 +302,13 @@ def _init_realtime_metrics() -> None:
         ["runtime", "model", "type"],
     )
 
+    _realtime_metrics["resample_duration_seconds"] = Histogram(
+        "dalston_realtime_resample_duration_seconds",
+        "Time spent resampling audio chunks",
+        ["from_rate", "to_rate"],
+        buckets=(0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05),
+    )
+
 
 def _init_queue_metrics() -> None:
     """Initialize Queue Exporter metrics."""
@@ -854,6 +861,23 @@ def inc_realtime_transcripts(runtime: str, model: str, transcript_type: str) -> 
     _realtime_metrics["transcripts_total"].labels(
         runtime=runtime, model=model, type=transcript_type
     ).inc()
+
+
+def observe_realtime_resample_duration(
+    from_rate: int, to_rate: int, duration: float
+) -> None:
+    """Record time spent resampling an audio chunk.
+
+    Args:
+        from_rate: Source sample rate in Hz
+        to_rate: Target sample rate in Hz
+        duration: Wall-clock seconds spent resampling
+    """
+    if not _metrics_enabled or "resample_duration_seconds" not in _realtime_metrics:
+        return
+    _realtime_metrics["resample_duration_seconds"].labels(
+        from_rate=str(from_rate), to_rate=str(to_rate)
+    ).observe(duration)
 
 
 # =============================================================================

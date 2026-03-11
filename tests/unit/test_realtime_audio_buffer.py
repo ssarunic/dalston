@@ -1,7 +1,5 @@
 """Unit tests for AudioBuffer, focusing on resampling quality."""
 
-import struct
-
 import numpy as np
 import pytest
 
@@ -24,7 +22,7 @@ class TestAudioBufferResampling:
         assert buf._total_samples == expected_samples
 
     def test_downsample_preserves_low_frequency(self):
-        """A 400 Hz tone survives 48 kHz → 16 kHz downsampling."""
+        """A 400 Hz tone survives 48 kHz -> 16 kHz downsampling."""
         buf = AudioBuffer(
             sample_rate=16000,
             encoding="pcm_s16le",
@@ -35,12 +33,10 @@ class TestAudioBufferResampling:
         tone = _sine_pcm16(freq_hz=400, sample_rate=48000, duration_s=0.1)
         buf.add(tone)
 
-        # Extract all buffered audio
         chunks = _drain_chunks(buf)
         assert len(chunks) > 0, "Should have at least one chunk after 100 ms"
 
         audio = np.concatenate(chunks)
-        # Verify dominant frequency via FFT
         dominant = _dominant_frequency(audio, sample_rate=16000)
         assert abs(dominant - 400) < 50, f"Expected ~400 Hz, got {dominant} Hz"
 
@@ -57,15 +53,12 @@ class TestAudioBufferResampling:
             chunk_duration_ms=200,
         )
 
-        # 9 kHz tone at 48 kHz — above 8 kHz Nyquist of 16 kHz target
         tone = _sine_pcm16(freq_hz=9000, sample_rate=48000, duration_s=0.2)
         buf.add(tone)
 
         chunks = _drain_chunks(buf)
         audio = np.concatenate(chunks)
 
-        # With anti-aliasing, the 9 kHz tone should be heavily attenuated.
-        # RMS of the resampled signal should be much smaller than the original.
         rms = np.sqrt(np.mean(audio**2))
         assert rms < 0.05, (
             f"Above-Nyquist tone should be attenuated (RMS={rms:.4f}). "
@@ -73,7 +66,7 @@ class TestAudioBufferResampling:
         )
 
     def test_upsample_output_length(self):
-        """Upsampling 8 kHz → 16 kHz should roughly double sample count."""
+        """Upsampling 8 kHz -> 16 kHz should roughly double sample count."""
         buf = AudioBuffer(
             sample_rate=16000,
             encoding="pcm_s16le",
@@ -81,7 +74,6 @@ class TestAudioBufferResampling:
             chunk_duration_ms=100,
         )
 
-        # 100 ms at 8 kHz = 800 samples → should become ~1600 at 16 kHz
         tone = _sine_pcm16(freq_hz=400, sample_rate=8000, duration_s=0.1)
         buf.add(tone)
 
@@ -98,6 +90,71 @@ class TestAudioBufferResampling:
 
         buf.add(b"")
         assert buf._total_samples == 0
+
+
+class TestResampleQualityProfiles:
+    """Tests for configurable resampling quality profiles."""
+
+    @pytest.mark.parametrize("profile", ["fast", "balanced", "high"])
+    def test_all_profiles_attenuate_alias(self, profile: str):
+        """Every quality profile must attenuate above-Nyquist content."""
+        buf = AudioBuffer(
+            sample_rate=16000,
+            encoding="pcm_s16le",
+            client_sample_rate=48000,
+            chunk_duration_ms=200,
+            resample_quality=profile,
+        )
+
+        tone = _sine_pcm16(freq_hz=9000, sample_rate=48000, duration_s=0.2)
+        buf.add(tone)
+
+        chunks = _drain_chunks(buf)
+        audio = np.concatenate(chunks)
+        rms = np.sqrt(np.mean(audio**2))
+        assert rms < 0.05, (
+            f"Profile '{profile}' failed alias attenuation (RMS={rms:.4f})"
+        )
+
+    @pytest.mark.parametrize("profile", ["fast", "balanced", "high"])
+    def test_all_profiles_preserve_low_freq(self, profile: str):
+        """Every quality profile must preserve in-band content."""
+        buf = AudioBuffer(
+            sample_rate=16000,
+            encoding="pcm_s16le",
+            client_sample_rate=48000,
+            chunk_duration_ms=100,
+            resample_quality=profile,
+        )
+
+        tone = _sine_pcm16(freq_hz=400, sample_rate=48000, duration_s=0.1)
+        buf.add(tone)
+
+        chunks = _drain_chunks(buf)
+        audio = np.concatenate(chunks)
+        dominant = _dominant_frequency(audio, sample_rate=16000)
+        assert abs(dominant - 400) < 50, (
+            f"Profile '{profile}': expected ~400 Hz, got {dominant} Hz"
+        )
+
+    def test_unknown_profile_falls_back_to_balanced(self):
+        """An unrecognized profile name should fall back to balanced (HQ)."""
+        buf = AudioBuffer(
+            sample_rate=16000,
+            encoding="pcm_s16le",
+            client_sample_rate=48000,
+            resample_quality="nonexistent",
+        )
+        assert buf._soxr_quality == "HQ"
+
+    def test_default_profile_is_balanced(self):
+        """Default resample_quality should resolve to HQ."""
+        buf = AudioBuffer(
+            sample_rate=16000,
+            encoding="pcm_s16le",
+            client_sample_rate=48000,
+        )
+        assert buf._soxr_quality == "HQ"
 
 
 # --- helpers ---
