@@ -10,7 +10,7 @@ Parakeet produces native word-level timestamps, eliminating the need for
 a separate alignment stage.
 
 Long audio support: Uses local attention (rel_pos_local_attn) instead of full
-attention to reduce memory from O(n²) to O(n). This enables transcription of
+attention to reduce memory from O(n^2) to O(n). This enables transcription of
 audio up to 3 hours on T4/A10g GPUs.
 
 Vocabulary boosting: Supports GPU-PB (GPU-accelerated Phrase Boosting) for
@@ -34,22 +34,22 @@ from typing import Any
 
 import torch
 
-from dalston.engine_sdk import (
+from dalston.common.pipeline_types import (
     AlignmentMethod,
+    Transcript,
+    TranscriptSegment,
+    TranscriptWord,
+)
+from dalston.engine_sdk import (
     BatchTaskContext,
-    Engine,
     EngineCapabilities,
     EngineInput,
-    EngineOutput,
-    Segment,
-    TimestampGranularity,
-    TranscribeOutput,
-    Word,
 )
+from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 from dalston.engine_sdk.cores.parakeet_core import ParakeetCore
 
 
-class ParakeetEngine(Engine):
+class ParakeetEngine(BaseBatchTranscribeEngine):
     """NVIDIA Parakeet transcription engine with runtime model swapping.
 
     Uses FastConformer encoder with CTC or TDT decoder for efficient
@@ -121,7 +121,7 @@ class ParakeetEngine(Engine):
             Normalized model ID for NeMoModelManager
                 (e.g. "parakeet-tdt-1.1b")
         """
-        # Strip "nvidia/" prefix if present — NeMoModelManager uses short IDs
+        # Strip "nvidia/" prefix if present -- NeMoModelManager uses short IDs
         if "/" in runtime_model_id:
             return runtime_model_id.split("/", 1)[1]
         return runtime_model_id
@@ -231,7 +231,7 @@ class ParakeetEngine(Engine):
     def _enable_local_attention(self, model: Any) -> None:
         """Enable local attention for long audio support (up to 3 hours).
 
-        Reduces memory from O(n²) to O(n), essential for T4/A10g GPUs.
+        Reduces memory from O(n^2) to O(n), essential for T4/A10g GPUs.
         """
         try:
             model.change_attention_model(
@@ -251,14 +251,17 @@ class ParakeetEngine(Engine):
                 message="Falling back to full attention (limited to ~24min on A100)",
             )
 
-    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def transcribe_audio(
+        self, engine_input: EngineInput, ctx: BatchTaskContext
+    ) -> Transcript:
         """Transcribe audio using Parakeet CTC or TDT via shared ParakeetCore.
 
         Args:
             engine_input: Task input with audio file path and config
+            ctx: Batch task context for tracing/logging
 
         Returns:
-            EngineOutput with TranscribeOutput containing text, segments, and words
+            Transcript with text, segments, and words
         """
         audio_path = engine_input.audio_path
         config = engine_input.config
@@ -312,14 +315,14 @@ class ParakeetEngine(Engine):
             )
             core_result = self._core.transcribe(str(audio_path), model_id)
 
-        # Convert core result to batch output format
-        segments: list[Segment] = []
-        all_words: list[Word] = []
+        # Convert core result to Transcript format
+        segments: list[TranscriptSegment] = []
+        all_words: list[TranscriptWord] = []
 
         for core_seg in core_result.segments:
-            seg_words: list[Word] = []
+            seg_words: list[TranscriptWord] = []
             for w in core_seg.words:
-                word = Word(
+                word = self.build_word(
                     text=w.word,
                     start=w.start,
                     end=w.end,
@@ -330,7 +333,7 @@ class ParakeetEngine(Engine):
                 all_words.append(word)
 
             segments.append(
-                Segment(
+                self.build_segment(
                     start=core_seg.start,
                     end=core_seg.end,
                     text=core_seg.text,
@@ -345,35 +348,22 @@ class ParakeetEngine(Engine):
             char_count=len(core_result.text),
         )
 
-        has_word_timestamps = any(seg.words for seg in segments)
-        timestamp_granularity_actual = (
-            TimestampGranularity.WORD
-            if has_word_timestamps
-            else TimestampGranularity.SEGMENT
-        )
-
         warnings: list[str] = []
         if vocabulary and not vocabulary_enabled:
             warnings.append(
                 f"Vocabulary boosting ({len(vocabulary)} terms) failed to configure - transcribed without boosting"
             )
 
-        output = TranscribeOutput(
+        return self.build_transcript(
             text=core_result.text,
             segments=segments,
             language="en",
+            runtime=self._runtime,
             language_confidence=1.0,
-            timestamp_granularity_requested=TimestampGranularity.WORD,
-            timestamp_granularity_actual=timestamp_granularity_actual,
             alignment_method=alignment_method,
             channel=channel,
-            runtime=self._runtime,
-            skipped=False,
-            skip_reason=None,
             warnings=warnings,
         )
-
-        return EngineOutput(data=output)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status including GPU availability."""

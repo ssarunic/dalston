@@ -24,30 +24,27 @@ Environment variables:
 import os
 from typing import Any
 
-from dalston.engine_sdk import (
+from dalston.common.pipeline_types import (
     AlignmentMethod,
-    BatchTaskContext,
-    Engine,
-    EngineInput,
-    EngineOutput,
-    Segment,
-    TimestampGranularity,
-    TranscribeOutput,
-    Word,
+    Transcript,
+    TranscriptSegment,
+    TranscriptWord,
 )
+from dalston.engine_sdk import BatchTaskContext, EngineInput
+from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 from dalston.engine_sdk.cores.faster_whisper_core import (
     TranscribeConfig,
     TranscribeCore,
 )
 
 
-class WhisperEngine(Engine):
+class WhisperEngine(BaseBatchTranscribeEngine):
     """Faster-Whisper transcription engine with TTL-based model management.
 
     This engine delegates inference to TranscribeCore, which is shared
     with the realtime faster-whisper engine. The batch adapter handles:
     - Task config parsing
-    - Output formatting to TranscribeOutput
+    - Output formatting to Transcript
     - Heartbeat state reporting
 
     When run standalone, creates its own TranscribeCore. When used within
@@ -86,7 +83,9 @@ class WhisperEngine(Engine):
             shared_core=core is not None,
         )
 
-    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def transcribe_audio(
+        self, engine_input: EngineInput, ctx: BatchTaskContext
+    ) -> Transcript:
         """Transcribe audio using Faster-Whisper via shared TranscribeCore.
 
         Args:
@@ -94,7 +93,7 @@ class WhisperEngine(Engine):
             ctx: Batch task context for tracing/logging
 
         Returns:
-            EngineOutput with TranscribeOutput containing text, segments, and language
+            Transcript with text, segments, and language
         """
         audio_path = engine_input.audio_path
         config = engine_input.config
@@ -157,15 +156,15 @@ class WhisperEngine(Engine):
                 config=transcribe_config,
             )
 
-            # Format core result into batch output contract
-            segments: list[Segment] = []
+            # Format core result into Transcript
+            segments: list[TranscriptSegment] = []
             full_text_parts: list[str] = []
 
             for seg in result.segments:
-                words: list[Word] | None = None
+                words: list[TranscriptWord] | None = None
                 if seg.words:
                     words = [
-                        Word(
+                        self.build_word(
                             text=w.word,
                             start=w.start,
                             end=w.end,
@@ -176,11 +175,12 @@ class WhisperEngine(Engine):
                     ]
 
                 segments.append(
-                    Segment(
+                    self.build_segment(
                         start=seg.start,
                         end=seg.end,
                         text=seg.text,
                         words=words,
+                        # Whisper-specific fields go into metadata
                         tokens=seg.tokens,
                         temperature=segment_temperature,
                         avg_logprob=seg.avg_logprob,
@@ -203,32 +203,16 @@ class WhisperEngine(Engine):
                 confidence=round(result.language_probability, 2),
             )
 
-            has_word_timestamps = any(seg.words for seg in segments)
-            timestamp_granularity_actual = (
-                TimestampGranularity.WORD
-                if has_word_timestamps
-                else TimestampGranularity.SEGMENT
-            )
-
-            output = TranscribeOutput(
+            return self.build_transcript(
                 text=full_text,
                 segments=segments,
                 language=result.language,
+                runtime=self._runtime,
                 language_confidence=round(result.language_probability, 3),
                 duration=result.duration,
-                timestamp_granularity_requested=TimestampGranularity.WORD,
-                timestamp_granularity_actual=timestamp_granularity_actual,
-                alignment_method=(
-                    AlignmentMethod.ATTENTION if has_word_timestamps else None
-                ),
+                alignment_method=AlignmentMethod.ATTENTION,
                 channel=channel,
-                runtime=self._runtime,
-                skipped=False,
-                skip_reason=None,
-                warnings=[],
             )
-
-            return EngineOutput(data=output)
 
         finally:
             self._set_runtime_state(status="idle")

@@ -11,28 +11,29 @@ from typing import Any
 import numpy as np
 import structlog
 
+from dalston.common.pipeline_types import (
+    AlignmentMethod,
+    Transcript,
+    TranscriptWord,
+)
 from dalston.engine_sdk.cores.faster_whisper_core import (
     TranscribeConfig,
     TranscribeCore,
 )
-from dalston.realtime_sdk import (
-    AsyncModelManager,
-    RealtimeEngine,
-    TranscribeResult,
-    Word,
-)
+from dalston.realtime_sdk import AsyncModelManager
+from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
 
 logger = structlog.get_logger()
 
 
-class WhisperStreamingEngine(RealtimeEngine):
+class WhisperStreamingEngine(BaseRealtimeTranscribeEngine):
     """Real-time streaming transcription using Whisper with dynamic model loading.
 
     Delegates inference to TranscribeCore, which is shared with the batch
     faster-whisper engine. The RT adapter handles:
     - Model ID normalization
     - VAD-chunked audio input (numpy arrays)
-    - Output formatting to TranscribeResult
+    - Output formatting to Transcript
 
     When run standalone, creates its own TranscribeCore in load_models().
     When used within a unified runner, accepts an injected core to share a
@@ -87,13 +88,13 @@ class WhisperStreamingEngine(RealtimeEngine):
             shared_core=self._core is not None,
         )
 
-    def transcribe(
+    def transcribe_v1(
         self,
         audio: np.ndarray,
         language: str,
         model_variant: str,
         vocabulary: list[str] | None = None,
-    ) -> TranscribeResult:
+    ) -> Transcript:
         """Transcribe an audio segment via shared TranscribeCore.
 
         Args:
@@ -103,7 +104,7 @@ class WhisperStreamingEngine(RealtimeEngine):
             vocabulary: List of terms to boost recognition (hotwords)
 
         Returns:
-            TranscribeResult with text, words, language, confidence
+            Transcript with text, words, language, confidence
         """
         if self._core is None:
             raise RuntimeError(
@@ -137,27 +138,39 @@ class WhisperStreamingEngine(RealtimeEngine):
             config=config,
         )
 
-        # Format core result into RT output contract
-        words: list[Word] = []
+        # Format core result into Transcript
+        segments = []
         text_parts: list[str] = []
 
         for seg in result.segments:
+            words: list[TranscriptWord] = []
             text_parts.append(seg.text)
             for w in seg.words:
                 words.append(
-                    Word(
-                        word=w.word,
+                    self.build_word(
+                        text=w.word,
                         start=w.start,
                         end=w.end,
                         confidence=w.probability,
+                        alignment_method=AlignmentMethod.ATTENTION,
                     )
                 )
+            segments.append(
+                self.build_segment(
+                    start=seg.start,
+                    end=seg.end,
+                    text=seg.text,
+                    words=words if words else None,
+                )
+            )
 
-        return TranscribeResult(
+        return self.build_transcript(
             text=" ".join(text_parts),
-            words=words,
+            segments=segments,
             language=result.language,
-            confidence=result.language_probability,
+            runtime="faster-whisper",
+            language_confidence=result.language_probability,
+            alignment_method=AlignmentMethod.ATTENTION,
         )
 
     def get_models(self) -> list[str]:

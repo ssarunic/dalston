@@ -23,8 +23,10 @@ from dalston.common.pipeline_types import (
     SpeakerTurn,
     SpeechRegion,
     TimestampGranularity,
-    TranscribeOutput,
+    Transcript,
     TranscriptMetadata,
+    TranscriptSegment,
+    TranscriptWord,
     Word,
 )
 
@@ -412,13 +414,13 @@ class TestPrepareOutput:
         assert out.speech_ratio == 0.32
 
 
-class TestTranscribeOutput:
-    """Tests for TranscribeOutput stage model."""
+class TestTranscript:
+    """Tests for Transcript model."""
 
-    def test_create_basic_transcribe_output(self):
-        """Test creating basic transcribe output."""
-        out = TranscribeOutput(
-            segments=[Segment(start=0.0, end=5.0, text="Hello world")],
+    def test_create_basic_transcript(self):
+        """Test creating basic transcript."""
+        out = Transcript(
+            segments=[TranscriptSegment(start=0.0, end=5.0, text="Hello world")],
             text="Hello world",
             language="en",
             runtime="faster-whisper",
@@ -426,30 +428,30 @@ class TestTranscribeOutput:
         assert len(out.segments) == 1
         assert out.text == "Hello world"
         assert out.language == "en"
-        assert out.skipped is False
 
-    def test_transcribe_output_with_word_timestamps(self):
-        """Test transcribe output with word-level timestamps."""
+    def test_transcript_with_word_timestamps(self):
+        """Test transcript with word-level timestamps."""
         words = [
-            Word(text="Hello", start=0.0, end=0.5, confidence=0.98),
-            Word(text="world", start=0.5, end=1.0, confidence=0.99),
+            TranscriptWord(text="Hello", start=0.0, end=0.5, confidence=0.98),
+            TranscriptWord(text="world", start=0.5, end=1.0, confidence=0.99),
         ]
-        out = TranscribeOutput(
-            segments=[Segment(start=0.0, end=1.0, text="Hello world", words=words)],
+        out = Transcript(
+            segments=[
+                TranscriptSegment(start=0.0, end=1.0, text="Hello world", words=words)
+            ],
             text="Hello world",
             language="en",
-            timestamp_granularity_requested=TimestampGranularity.WORD,
-            timestamp_granularity_actual=TimestampGranularity.WORD,
+            timestamp_granularity=TimestampGranularity.WORD,
             alignment_method=AlignmentMethod.ATTENTION,
             runtime="faster-whisper",
         )
-        assert out.timestamp_granularity_actual == TimestampGranularity.WORD
+        assert out.timestamp_granularity == TimestampGranularity.WORD
         assert out.alignment_method == AlignmentMethod.ATTENTION
 
-    def test_transcribe_output_with_language_confidence(self):
-        """Test transcribe output with language detection confidence."""
-        out = TranscribeOutput(
-            segments=[Segment(start=0.0, end=1.0, text="Bonjour")],
+    def test_transcript_with_language_confidence(self):
+        """Test transcript with language detection confidence."""
+        out = Transcript(
+            segments=[TranscriptSegment(start=0.0, end=1.0, text="Bonjour")],
             text="Bonjour",
             language="fr",
             language_confidence=0.97,
@@ -679,19 +681,18 @@ class TestModelSerialization:
         assert data["text"] == "Hello"
         assert len(data["words"]) == 1
 
-    def test_transcribe_output_to_json(self):
-        """Test TranscribeOutput serializes correctly."""
-        out = TranscribeOutput(
-            segments=[Segment(start=0.0, end=1.0, text="Hello")],
+    def test_transcript_to_json(self):
+        """Test Transcript serializes correctly."""
+        out = Transcript(
+            segments=[TranscriptSegment(start=0.0, end=1.0, text="Hello")],
             text="Hello",
             language="en",
-            timestamp_granularity_actual=TimestampGranularity.WORD,
+            timestamp_granularity=TimestampGranularity.WORD,
             runtime="test",
         )
         data = out.model_dump(mode="json")
         assert data["language"] == "en"
-        assert data["timestamp_granularity_actual"] == "word"
-        assert data["skipped"] is False
+        assert data["timestamp_granularity"] == "word"
 
     def test_diarize_output_to_json(self):
         """Test DiarizeOutput serializes correctly."""

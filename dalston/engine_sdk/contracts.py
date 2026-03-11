@@ -19,7 +19,7 @@ from dalston.common.pipeline_types import (
     PIIDetectOutput,
     PrepareOutput,
     SpeakerDetectionMode,
-    TranscribeOutput,
+    Transcript,
 )
 
 
@@ -73,8 +73,8 @@ class PrepareOutputPayload(PrepareOutput):
     pass
 
 
-class TranscribeOutputPayload(TranscribeOutput):
-    pass
+# Transcript is the canonical output type for transcription.
+TranscribeOutputPayload = Transcript
 
 
 class AlignOutputPayload(AlignOutput):

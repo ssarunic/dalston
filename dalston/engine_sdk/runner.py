@@ -641,6 +641,12 @@ class EngineRunner:
                     output = self.engine.process(task_input, task_ctx)
                 process_time = time.time() - process_start
 
+                # Boundary validation: validate transcribe outputs against
+                # Transcript. Covers both mono ("transcribe") and per-channel
+                # ("transcribe_ch0", "transcribe_ch1", ...) stages.
+                if task_input.stage.startswith("transcribe"):
+                    self._validate_transcript_output(output, task_id)
+
                 # Calculate total task time (for metrics)
                 total_task_time = time.time() - start_time
 
@@ -776,6 +782,26 @@ class EngineRunner:
             raise ValueError(f"Task metadata not found in Redis: {task_id}")
 
         return data
+
+    def _validate_transcript_output(
+        self,
+        output: EngineOutput,
+        task_id: str,
+    ) -> None:
+        """Validate transcribe-stage output against Transcript.
+
+        Raises ValueError if the output does not conform to the Transcript
+        schema. All transcribe engines must return valid Transcript output.
+        """
+        from dalston.common.pipeline_types import Transcript
+
+        output_dict = output.to_dict()
+        try:
+            Transcript.model_validate(output_dict)
+        except Exception as e:
+            raise ValueError(
+                f"Transcribe output failed Transcript validation: {e}"
+            ) from e
 
     def _save_task_output(
         self,

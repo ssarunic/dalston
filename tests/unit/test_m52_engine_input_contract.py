@@ -38,9 +38,9 @@ def test_typed_output_raises_on_invalid_structure() -> None:
         previous_outputs={"transcribe": {"segments": "invalid-shape"}},
     )
     with pytest.raises(ValidationError):
-        input_data.get_transcribe_output()
+        input_data.get_transcript()
 
 
 def test_typed_output_returns_none_when_key_missing() -> None:
     input_data = EngineInput(task_id="task-1", job_id="job-1", previous_outputs={})
-    assert input_data.get_transcribe_output() is None
+    assert input_data.get_transcript() is None

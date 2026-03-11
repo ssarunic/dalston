@@ -15,7 +15,7 @@ from dalston.common.pipeline_types import (
     DiarizeOutput,
     PIIDetectOutput,
     PrepareOutput,
-    TranscribeOutput,
+    Transcript,
 )
 
 # Type variable for generic output model parsing
@@ -88,8 +88,9 @@ class EngineInput(Generic[PayloadT]):
     def get_prepare_output(self) -> PrepareOutput | None:
         return self._get_typed_output("prepare", PrepareOutput)
 
-    def get_transcribe_output(self, key: str = "transcribe") -> TranscribeOutput | None:
-        return self._get_typed_output(key, TranscribeOutput)
+    def get_transcript(self, key: str = "transcribe") -> Transcript | None:
+        """Get transcribe output as Transcript."""
+        return self._get_typed_output(key, Transcript)
 
     def get_align_output(self, key: str = "align") -> AlignOutput | None:
         return self._get_typed_output(key, AlignOutput)

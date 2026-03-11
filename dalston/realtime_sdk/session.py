@@ -30,9 +30,15 @@ from dalston.common.audio_defaults import (
     DEFAULT_VAD_THRESHOLD,
     RESAMPLE_QUALITY_PROFILES,
 )
+from dalston.common.pipeline_types import (
+    AlignmentMethod,
+    TimestampGranularity,
+    Transcript,
+    TranscriptSegment,
+    TranscriptWord,
+)
 from dalston.common.ws_close_codes import WS_CLOSE_LAG_EXCEEDED
 from dalston.realtime_sdk.assembler import (
-    TranscribeResult,
     TranscriptAssembler,
     Word,
 )
@@ -312,16 +318,33 @@ class AudioBuffer:
 # Type alias for transcribe callback
 TranscribeCallback = Callable[
     [np.ndarray, str, str, list[str] | None],  # audio, language, model, vocabulary
-    TranscribeResult,
+    Transcript,
 ]
 
 # M71: Type alias for streaming decode callback.
 # Takes an Iterator[np.ndarray] of audio chunks, language, and model,
-# and yields TranscribeResult for each decoded word.
+# and yields Transcript for each decoded word.
 StreamingDecodeCallback = Callable[
     [Iterator[np.ndarray], str, str],
-    Iterator[TranscribeResult],
+    Iterator[Transcript],
 ]
+
+
+def _extract_words(transcript: Transcript) -> list[Word]:
+    """Extract assembler Word objects from a Transcript's segments."""
+    words: list[Word] = []
+    for seg in transcript.segments:
+        if seg.words:
+            for w in seg.words:
+                words.append(
+                    Word(
+                        word=w.text,
+                        start=w.start,
+                        end=w.end,
+                        confidence=w.confidence if w.confidence is not None else 0.0,
+                    )
+                )
+    return words
 
 
 class SessionHandler:
@@ -332,7 +355,7 @@ class SessionHandler:
     Example:
         async def transcribe(audio, language, model):
             # Call ASR engine
-            return TranscribeResult(...)
+            return Transcript(...)
 
         handler = SessionHandler(
             websocket=ws,
@@ -670,7 +693,7 @@ class SessionHandler:
         """Background task: consume audio chunks and emit partial results.
 
         Runs the engine's streaming decode callback in a thread pool,
-        yielding TranscribeResult for each decoded word, and sends
+        yielding Transcript for each decoded word, and sends
         partial transcript events to the client.
         """
         if self._streaming_decode_fn is None or self._streaming_chunk_queue is None:
@@ -697,15 +720,17 @@ class SessionHandler:
                 if self._ended:
                     break
 
-                if result.text and result.words:
+                # Extract words from transcript segments
+                result_words = _extract_words(result)
+                if result.text and result_words:
                     self._streaming_session_text_parts.append(result.text)
-                    self._streaming_word_results.extend(result.words)
-                    self._streaming_word_count += len(result.words)
+                    self._streaming_word_results.extend(result_words)
+                    self._streaming_word_count += len(result_words)
 
                     # Send partial transcript event
                     if self.config.interim_results:
                         cumulative_text = " ".join(self._streaming_session_text_parts)
-                        word = result.words[0]
+                        word = result_words[0]
 
                         await self._send(
                             TranscriptPartialMessage(
@@ -723,14 +748,14 @@ class SessionHandler:
         self,
         chunk_iterator_factory: Callable[[], Iterator[np.ndarray]],
         loop: asyncio.AbstractEventLoop,
-    ) -> AsyncIterator[TranscribeResult]:
+    ) -> AsyncIterator[Transcript]:
         """Run streaming decode in thread and yield results asynchronously.
 
         Args:
             chunk_iterator_factory: Callable returning a blocking chunk iterator
             loop: The event loop for thread-safe coroutine scheduling
         """
-        result_queue: asyncio.Queue[TranscribeResult | None] = asyncio.Queue()
+        result_queue: asyncio.Queue[Transcript | None] = asyncio.Queue()
 
         def _thread_target() -> None:
             """Thread function that runs the blocking streaming decode."""
@@ -776,18 +801,40 @@ class SessionHandler:
         confidences = [w.confidence for w in words if w.confidence]
         avg_confidence = sum(confidences) / len(confidences) if confidences else 0.95
 
-        result = TranscribeResult(
-            text=full_text,
-            words=words,
-            language=self.config.language,
-            confidence=avg_confidence,
-        )
-
         # Calculate audio duration from word timestamps
         audio_duration = words[-1].end if words else 0.0
 
+        # Build a Transcript from accumulated streaming words
+        transcript_words = [
+            TranscriptWord(
+                text=w.word,
+                start=w.start,
+                end=w.end,
+                confidence=w.confidence,
+            )
+            for w in words
+        ]
+        result = Transcript(
+            text=full_text,
+            segments=[
+                TranscriptSegment(
+                    start=0.0,
+                    end=audio_duration,
+                    text=full_text,
+                    words=transcript_words,
+                    confidence=avg_confidence,
+                ),
+            ],
+            language=self.config.language,
+            language_confidence=avg_confidence,
+            duration=audio_duration,
+            timestamp_granularity=TimestampGranularity.WORD,
+            alignment_method=AlignmentMethod.UNKNOWN,
+            runtime="streaming-decode",
+        )
+
         # Add to assembler for timeline tracking
-        segment = self._assembler.add_utterance(result, audio_duration)
+        segment = self._assembler.add_transcript(result, audio_duration)
 
         # Send final transcript
         word_infos = None
@@ -977,7 +1024,7 @@ class SessionHandler:
 
             # Add to assembler
             audio_duration = self._samples_to_seconds(len(audio))
-            segment = self._assembler.add_utterance(result, audio_duration)
+            segment = self._assembler.add_transcript(result, audio_duration)
 
             # Send transcript.final
             words = None

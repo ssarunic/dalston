@@ -28,6 +28,7 @@ from dalston.engine_sdk import (
     SpeakerDetectionMode,
     SpeakerTurn,
     TranscriptMetadata,
+    TranscriptSegment,
     Word,
 )
 
@@ -76,7 +77,7 @@ class FinalMergerEngine(Engine):
 
         # Get typed outputs from upstream stages
         prepare_output = engine_input.get_prepare_output()
-        transcribe_output = engine_input.get_transcribe_output()
+        transcribe_output = engine_input.get_transcript()
         align_output = engine_input.get_align_output()
         diarize_output = engine_input.get_diarize_output()
 
@@ -170,17 +171,27 @@ class FinalMergerEngine(Engine):
         # Build segments with IDs and speaker assignments
         segments: list[MergedSegment] = []
         for idx, seg in enumerate(segments_source):
-            # Handle both typed Segment and raw dict
-            if hasattr(seg, "start"):
+            # Handle TranscriptSegment, Segment, and raw dict
+            if isinstance(seg, TranscriptSegment):
                 seg_start = seg.start
                 seg_end = seg.end
                 seg_text = seg.text
                 seg_words = seg.words
-                seg_tokens = seg.tokens
-                seg_temperature = seg.temperature
-                seg_avg_logprob = seg.avg_logprob
-                seg_compression_ratio = seg.compression_ratio
-                seg_no_speech_prob = seg.no_speech_prob
+                seg_tokens = seg.metadata.get("tokens")
+                seg_temperature = seg.metadata.get("temperature")
+                seg_avg_logprob = seg.metadata.get("avg_logprob")
+                seg_compression_ratio = seg.metadata.get("compression_ratio")
+                seg_no_speech_prob = seg.metadata.get("no_speech_prob")
+            elif hasattr(seg, "start"):
+                seg_start = seg.start
+                seg_end = seg.end
+                seg_text = seg.text
+                seg_words = seg.words
+                seg_tokens = getattr(seg, "tokens", None)
+                seg_temperature = getattr(seg, "temperature", None)
+                seg_avg_logprob = getattr(seg, "avg_logprob", None)
+                seg_compression_ratio = getattr(seg, "compression_ratio", None)
+                seg_no_speech_prob = getattr(seg, "no_speech_prob", None)
             else:
                 seg_start = seg.get("start", 0.0)
                 seg_end = seg.get("end", 0.0)
@@ -434,7 +445,7 @@ class FinalMergerEngine(Engine):
             pii_detect_key = f"pii_detect_ch{channel}"
             audio_redact_key = f"audio_redact_ch{channel}"
 
-            transcribe_output = input.get_transcribe_output(transcribe_key)
+            transcribe_output = input.get_transcript(transcribe_key)
             align_output = input.get_align_output(align_key)
 
             if not transcribe_output and not align_output:
@@ -473,7 +484,7 @@ class FinalMergerEngine(Engine):
             # Add channel/speaker info to each segment
             speaker_id = f"SPEAKER_{source_channel:02d}"
             for seg in raw_segments:
-                if hasattr(seg, "start"):
+                if isinstance(seg, TranscriptSegment):
                     all_segments.append(
                         {
                             "start": seg.start,
@@ -481,11 +492,29 @@ class FinalMergerEngine(Engine):
                             "text": seg.text,
                             "speaker": speaker_id,
                             "words": seg.words if has_words else None,
-                            "tokens": seg.tokens,
-                            "temperature": seg.temperature,
-                            "avg_logprob": seg.avg_logprob,
-                            "compression_ratio": seg.compression_ratio,
-                            "no_speech_prob": seg.no_speech_prob,
+                            "tokens": seg.metadata.get("tokens"),
+                            "temperature": seg.metadata.get("temperature"),
+                            "avg_logprob": seg.metadata.get("avg_logprob"),
+                            "compression_ratio": seg.metadata.get("compression_ratio"),
+                            "no_speech_prob": seg.metadata.get("no_speech_prob"),
+                            "channel": source_channel,
+                        }
+                    )
+                elif hasattr(seg, "start"):
+                    all_segments.append(
+                        {
+                            "start": seg.start,
+                            "end": seg.end,
+                            "text": seg.text,
+                            "speaker": speaker_id,
+                            "words": seg.words if has_words else None,
+                            "tokens": getattr(seg, "tokens", None),
+                            "temperature": getattr(seg, "temperature", None),
+                            "avg_logprob": getattr(seg, "avg_logprob", None),
+                            "compression_ratio": getattr(
+                                seg, "compression_ratio", None
+                            ),
+                            "no_speech_prob": getattr(seg, "no_speech_prob", None),
                             "channel": source_channel,
                         }
                     )

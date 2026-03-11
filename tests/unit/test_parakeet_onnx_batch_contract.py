@@ -1,7 +1,7 @@
 """Contract tests for parakeet-onnx batch engine.
 
 Verifies that the batch engine produces the correct output shape
-(TranscribeOutput with segments, text, language) and that word
+(Transcript with segments, text, language) and that word
 timestamp behavior is preserved after delegation to ParakeetOnnxCore.
 """
 
@@ -90,7 +90,7 @@ def _build_engine_with_mock_core(core_result: OnnxTranscriptionResult):
 
 
 class TestOnnxBatchOutputShape:
-    """Verify TranscribeOutput structure from ONNX batch engine."""
+    """Verify Transcript structure from ONNX batch engine."""
 
     def test_output_has_text_and_language(self) -> None:
         result = _make_core_result(text="hello world")
@@ -114,7 +114,6 @@ class TestOnnxBatchOutputShape:
         assert data.language_confidence == 1.0
         assert len(data.segments) >= 1
         assert data.runtime == "nemo-onnx"
-        assert data.skipped is False
 
     def test_output_has_word_timestamps(self) -> None:
         result = _make_core_result(
@@ -241,7 +240,7 @@ class TestOnnxBatchTimestampGranularity:
             _ctx(task_id, job_id),
         )
 
-        assert output.data.timestamp_granularity_actual.value == "word"
+        assert output.data.timestamp_granularity.value == "word"
 
     def test_segment_granularity_when_no_words(self) -> None:
         result = OnnxTranscriptionResult(
@@ -262,4 +261,4 @@ class TestOnnxBatchTimestampGranularity:
             _ctx(task_id, job_id),
         )
 
-        assert output.data.timestamp_granularity_actual.value == "segment"
+        assert output.data.timestamp_granularity.value == "segment"

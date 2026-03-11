@@ -311,7 +311,7 @@ class PIIDetectionEngine(Engine):
         try:
             # Get transcript data from previous stages
             align_output = engine_input.get_align_output()
-            transcribe_output = engine_input.get_transcribe_output()
+            transcribe_output = engine_input.get_transcript()
 
             # Extract language from transcription
             language = "en"  # Default fallback

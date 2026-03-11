@@ -5,7 +5,7 @@ that integrate with the Dalston transcription pipeline.
 
 Example usage:
     from dalston.engine_sdk import Engine, EngineInput, EngineOutput
-    from dalston.engine_sdk import PrepareOutput, TranscribeOutput, Segment, Word
+    from dalston.engine_sdk import PrepareOutput, Transcript, TranscriptSegment
 
     class MyTranscriptionEngine(Engine):
         def process(
@@ -19,9 +19,9 @@ Example usage:
             result = transcribe(engine_input.audio_path)
 
             # Return typed output
-            return EngineOutput(data=TranscribeOutput(
+            return EngineOutput(data=Transcript(
                 text=result.text,
-                segments=[Segment(start=0.0, end=1.0, text="hello")],
+                segments=[TranscriptSegment(start=0.0, end=1.0, text="hello")],
                 language="en",
                 runtime="my-engine",
             ))
@@ -57,17 +57,23 @@ from dalston.common.pipeline_types import (
     PIIRedactionMode,
     PrepareOutput,
     Segment,
+    SegmentMetaKeys,
     Speaker,
     SpeakerDetectionMode,
     SpeakerTurn,
     SpeechRegion,
     TaskInputData,
     TimestampGranularity,
-    TranscribeOutput,
+    Transcript,
     TranscriptMetadata,
+    TranscriptMetaKeys,
+    TranscriptSegment,
+    TranscriptWord,
     Word,
+    WordMetaKeys,
 )
 from dalston.engine_sdk.base import Engine
+from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.local_runner import LocalRunner
 from dalston.engine_sdk.model_manager import LoadedModel, ModelManager
@@ -79,6 +85,7 @@ from dalston.engine_sdk.types import (
 
 __all__ = [
     # Core SDK
+    "BaseBatchTranscribeEngine",
     "Engine",
     "EngineCapabilities",
     "LocalRunner",
@@ -106,13 +113,18 @@ __all__ = [
     "SpeechRegion",
     "TaskInputData",
     "TranscriptMetadata",
+    "TranscriptSegment",
+    "TranscriptWord",
+    "SegmentMetaKeys",
+    "TranscriptMetaKeys",
     "Word",
+    "WordMetaKeys",
     # Stage outputs
     "AlignOutput",
     "AudioRedactOutput",
+    "Transcript",
     "DiarizeOutput",
     "MergeOutput",
     "PIIDetectOutput",
     "PrepareOutput",
-    "TranscribeOutput",
 ]

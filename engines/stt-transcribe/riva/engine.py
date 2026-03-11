@@ -1,7 +1,7 @@
 """Riva NIM batch transcription engine.
 
 Streams audio chunks to a Riva NIM sidecar via gRPC streaming_recognize().
-The engine itself is a thin CPU adapter — all GPU inference runs in the
+The engine itself is a thin CPU adapter -- all GPU inference runs in the
 NIM container.
 
 Supports long recordings without gRPC deadline risk by chunking audio
@@ -21,16 +21,16 @@ import grpc
 import riva.client
 import riva.client.proto.riva_asr_pb2 as riva_asr_pb2
 
+from dalston.common.pipeline_types import (
+    Transcript,
+    TranscriptSegment,
+    TranscriptWord,
+)
 from dalston.engine_sdk import (
     BatchTaskContext,
-    Engine,
     EngineInput,
-    EngineOutput,
-    Segment,
-    TimestampGranularity,
-    TranscribeOutput,
-    Word,
 )
+from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 
 # Default sample rate for prepared audio
 _SAMPLE_RATE = 16000
@@ -40,12 +40,12 @@ _BYTES_PER_SAMPLE = 2
 _GRPC_TIMEOUT_S = 7200
 
 
-class RivaBatchEngine(Engine):
+class RivaBatchEngine(BaseBatchTranscribeEngine):
     """Batch transcription engine using Riva NIM streaming gRPC.
 
     Reads audio files from disk, streams them in chunks to NIM via
     streaming_recognize(interim_results=False), and collects final
-    segments into a TranscribeOutput.
+    segments into a Transcript.
     """
 
     def __init__(self) -> None:
@@ -81,7 +81,9 @@ class RivaBatchEngine(Engine):
                 audio_content=audio_bytes[offset : offset + chunk_bytes]
             )
 
-    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def transcribe_audio(
+        self, engine_input: EngineInput, ctx: BatchTaskContext
+    ) -> Transcript:
         """Transcribe audio via Riva NIM streaming gRPC.
 
         Args:
@@ -89,7 +91,7 @@ class RivaBatchEngine(Engine):
             ctx: Batch task context for tracing/logging
 
         Returns:
-            EngineOutput with TranscribeOutput
+            Transcript with text, segments, and words
         """
         audio_path = engine_input.audio_path
         config = engine_input.config
@@ -132,22 +134,13 @@ class RivaBatchEngine(Engine):
             # Estimate duration from audio bytes (int16 mono 16kHz)
             duration = len(audio_bytes) / (_SAMPLE_RATE * _BYTES_PER_SAMPLE)
 
-            has_words = any(s.words for s in segments)
-            output = TranscribeOutput(
+            return self.build_transcript(
                 text=full_text,
                 segments=segments,
                 language=language,
-                duration=duration,
-                timestamp_granularity_requested=TimestampGranularity.WORD,
-                timestamp_granularity_actual=(
-                    TimestampGranularity.WORD
-                    if has_words
-                    else TimestampGranularity.SEGMENT
-                ),
                 runtime=self._runtime,
+                duration=duration,
             )
-
-            return EngineOutput(data=output)
 
         finally:
             self._set_runtime_state(status="idle")
@@ -156,13 +149,13 @@ class RivaBatchEngine(Engine):
         self,
         responses: Any,
         language: str,
-    ) -> list[Segment]:
+    ) -> list[TranscriptSegment]:
         """Collect final segments from streaming responses.
 
         Only processes results where is_final=True, ignoring any
         interim results (which shouldn't appear with interim_results=False).
         """
-        segments: list[Segment] = []
+        segments: list[TranscriptSegment] = []
 
         for response in responses:
             for result in response.results:
@@ -177,7 +170,7 @@ class RivaBatchEngine(Engine):
                 if not transcript:
                     continue
 
-                words: list[Word] = []
+                words: list[TranscriptWord] = []
                 seg_start = 0.0
                 seg_end = 0.0
 
@@ -185,7 +178,7 @@ class RivaBatchEngine(Engine):
                     word_start = w.start_time
                     word_end = w.end_time
                     words.append(
-                        Word(
+                        self.build_word(
                             text=w.word,
                             start=word_start,
                             end=word_end,
@@ -198,7 +191,7 @@ class RivaBatchEngine(Engine):
                     seg_end = words[-1].end
 
                 segments.append(
-                    Segment(
+                    self.build_segment(
                         start=seg_start,
                         end=seg_end,
                         text=transcript,

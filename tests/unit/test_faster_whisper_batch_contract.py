@@ -1,7 +1,7 @@
 """Contract tests for faster-whisper batch engine.
 
 Verifies that the batch engine produces the correct output shape
-(TranscribeOutput with segments, text, language) and that word
+(Transcript with segments, text, language) and that word
 timestamp behavior is preserved after delegation to TranscribeCore.
 
 These tests mock the faster-whisper model to avoid GPU/model dependencies.
@@ -100,7 +100,7 @@ def _build_engine_with_mock(segments, info):
 
 
 class TestBatchOutputShape:
-    """Verify TranscribeOutput structure from batch engine."""
+    """Verify Transcript structure from batch engine."""
 
     def test_output_has_text_segments_and_language(self) -> None:
         segments = [_make_mock_segment(text="hello world")]
@@ -126,7 +126,6 @@ class TestBatchOutputShape:
         assert data.duration == 5.0
         assert len(data.segments) == 1
         assert data.runtime == "faster-whisper"
-        assert data.skipped is False
 
     def test_output_segment_has_word_timestamps(self) -> None:
         mock_words = [
@@ -202,10 +201,10 @@ class TestBatchOutputShape:
         )
 
         seg = result.data.segments[0]
-        assert seg.tokens == [10, 20, 30]
-        assert seg.avg_logprob == -0.3
-        assert seg.compression_ratio == 1.2
-        assert seg.no_speech_prob == 0.05
+        assert seg.metadata["tokens"] == [10, 20, 30]
+        assert seg.metadata["avg_logprob"] == -0.3
+        assert seg.metadata["compression_ratio"] == 1.2
+        assert seg.metadata["no_speech_prob"] == 0.05
 
     def test_multiple_segments(self) -> None:
         segments = [
@@ -303,7 +302,7 @@ class TestBatchConfigPassthrough:
         )
         assert call_kwargs["temperature"] == [0.0, 0.2, 0.4]
         # Segment temperature uses first value
-        assert result.data.segments[0].temperature == 0.0
+        assert result.data.segments[0].metadata["temperature"] == 0.0
 
     def test_channel_preserved_in_output(self) -> None:
         segments = [_make_mock_segment()]
@@ -389,8 +388,7 @@ class TestBatchTimestampGranularity:
             _ctx(task_id, job_id),
         )
 
-        assert result.data.timestamp_granularity_actual.value == "word"
-        assert result.data.alignment_method is not None
+        assert result.data.timestamp_granularity.value == "word"
         assert result.data.alignment_method.value == "attention"
 
     def test_segment_granularity_when_no_words(self) -> None:
@@ -410,5 +408,5 @@ class TestBatchTimestampGranularity:
             _ctx(task_id, job_id),
         )
 
-        assert result.data.timestamp_granularity_actual.value == "segment"
-        assert result.data.alignment_method is None
+        assert result.data.timestamp_granularity.value == "segment"
+        assert result.data.alignment_method.value == "attention"

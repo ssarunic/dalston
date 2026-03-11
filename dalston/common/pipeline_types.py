@@ -13,7 +13,7 @@ Design principles:
 
 import logging
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -471,41 +471,144 @@ class PrepareOutput(BaseModel):
     warnings: list[str] = Field(default_factory=list, description="Any warnings")
 
 
-class TranscribeOutput(BaseModel):
-    """Output from transcription stage."""
+# =============================================================================
+# Unified Transcript Contract (Transcript)
+# =============================================================================
+
+
+class TranscriptWord(BaseModel):
+    """Word-level timing and confidence for the unified transcript contract.
+
+    Model-specific word-level data (e.g., logprobs) goes in ``metadata``.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    segments: list[Segment] = Field(..., description="Transcript segments")
+    text: str = Field(..., description="The word text")
+    start: float = Field(..., ge=0, description="Start time in seconds")
+    end: float = Field(..., ge=0, description="End time in seconds")
+    confidence: float | None = Field(
+        default=None, description="0.0-1.0 confidence, None if unavailable"
+    )
+    alignment_method: AlignmentMethod = Field(
+        default=AlignmentMethod.UNKNOWN,
+        description="How this word's timestamps were produced",
+    )
+    characters: list[Character] | None = Field(
+        default=None, description="Character-level timing (from alignment)"
+    )
+    phonemes: list[Phoneme] | None = Field(
+        default=None, description="Phoneme-level timing (from alignment)"
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Model-specific word data"
+    )
+
+
+class TranscriptSegment(BaseModel):
+    """A contiguous speech segment for the unified transcript contract.
+
+    Model-specific segment-level data (e.g., compression_ratio, no_speech_prob,
+    avg_logprob, tokens, temperature) goes in ``metadata``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str | None = Field(
+        default=None, description="Stable segment ID for incremental updates"
+    )
+    start: float = Field(..., ge=0, description="Start time in seconds")
+    end: float = Field(..., ge=0, description="End time in seconds")
+    text: str = Field(..., description="Segment transcript text")
+    words: list[TranscriptWord] | None = Field(
+        default=None, description="Word-level detail"
+    )
+    language: str | None = Field(
+        default=None, description="Per-segment language (for code-switching)"
+    )
+    confidence: float | None = Field(
+        default=None, description="Segment-level confidence"
+    )
+    is_final: bool | None = Field(
+        default=None, description="False for interim realtime results"
+    )
+    is_speech: bool | None = Field(
+        default=None, description="False for music/noise segments"
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Model-specific segment data (compression_ratio, no_speech_prob, etc.)",
+    )
+
+
+class Transcript(BaseModel):
+    """Canonical transcript output — returned by every transcription runtime.
+
+    Canonical transcript output for both batch and real-time engines.
+    Model-specific data lives in ``metadata`` dicts at the transcript, segment,
+    and word levels rather than as top-level fields.
+
+    ``schema_version`` enables non-breaking evolution; consumers can branch on it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["1"] = Field(
+        default="1", description="Schema version for forward compatibility"
+    )
     text: str = Field(..., description="Full transcript text")
-    language: str = Field(..., description="Detected/used language code")
+    segments: list[TranscriptSegment] = Field(..., description="Transcript segments")
+    language: str = Field(..., description="Detected/used language code (ISO 639-1)")
     language_confidence: float | None = Field(
         default=None, ge=0, le=1, description="Language detection confidence"
     )
-    duration: float | None = Field(default=None, ge=0, description="Audio duration")
-
-    # Timestamp metadata
-    timestamp_granularity_requested: TimestampGranularity | None = Field(
-        default=None, description="What was requested"
+    duration: float | None = Field(
+        default=None, ge=0, description="Audio duration in seconds"
     )
-    timestamp_granularity_actual: TimestampGranularity | None = Field(
-        default=None, description="What was produced"
+    timestamp_granularity: TimestampGranularity = Field(
+        default=TimestampGranularity.SEGMENT,
+        description="Finest granularity of timestamps in this transcript",
     )
-    alignment_method: AlignmentMethod | None = Field(
-        default=None, description="How timestamps were produced"
+    alignment_method: AlignmentMethod = Field(
+        default=AlignmentMethod.UNKNOWN,
+        description="Primary alignment method used",
     )
-
-    # Per-channel mode
+    runtime: str = Field(..., description="Runtime identifier (e.g., 'faster-whisper')")
     channel: int | None = Field(
         default=None,
         description="Source audio channel (0=left, 1=right) for per_channel mode",
     )
+    warnings: list[str] = Field(default_factory=list, description="Runtime warnings")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Runtime-level extras"
+    )
 
-    # Standard output fields
-    runtime: str = Field(..., description="Runtime identifier")
-    skipped: bool = Field(default=False, description="Whether processing was skipped")
-    skip_reason: str | None = Field(default=None, description="Reason if skipped")
-    warnings: list[str] = Field(default_factory=list, description="Any warnings")
+
+class SegmentMetaKeys:
+    """Well-known metadata keys for TranscriptSegment.metadata.
+
+    Using these constants instead of raw strings prevents typos
+    and enables IDE autocomplete / grep-ability.
+    """
+
+    TOKENS = "tokens"
+    AVG_LOGPROB = "avg_logprob"
+    COMPRESSION_RATIO = "compression_ratio"
+    NO_SPEECH_PROB = "no_speech_prob"
+    TEMPERATURE = "temperature"
+    DECODER_TYPE = "decoder_type"
+
+
+class WordMetaKeys:
+    """Well-known metadata keys for TranscriptWord.metadata."""
+
+    LOGPROB = "logprob"
+
+
+class TranscriptMetaKeys:
+    """Well-known metadata keys for Transcript.metadata."""
+
+    MODEL_ID = "model_id"
 
 
 class AlignOutput(BaseModel):
@@ -737,7 +840,7 @@ class AudioRedactOutput(BaseModel):
 PreviousOutputs = dict[
     str,
     PrepareOutput
-    | TranscribeOutput
+    | Transcript
     | AlignOutput
     | DiarizeOutput
     | PIIDetectOutput

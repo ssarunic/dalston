@@ -129,13 +129,12 @@ class TestVoxtralAdapter:
         assert "Spanish" in text_content
 
     def test_parse_output_basic(self, adapter):
-        """Output parsing should produce valid TranscribeOutput."""
+        """Output parsing should produce valid Transcript."""
         result = adapter.parse_output("Hello world, this is a test.", language="en")
 
         assert result.text == "Hello world, this is a test."
         assert result.language == "en"
         assert result.runtime == "vllm-asr"
-        assert result.skipped is False
         assert len(result.segments) == 1
         assert result.segments[0].text == "Hello world, this is a test."
 
@@ -216,7 +215,7 @@ class TestQwen2AudioAdapter:
         assert "zh" in text_content
 
     def test_parse_output_basic(self, adapter):
-        """Output parsing should produce valid TranscribeOutput."""
+        """Output parsing should produce valid Transcript."""
         result = adapter.parse_output("Hello world", language="en")
 
         assert result.text == "Hello world"
@@ -399,7 +398,7 @@ class TestVLLMASREngine:
                     engine._ensure_model_loaded("mistralai/Voxtral-Mini-3B-2507")
 
     def test_process_with_mocked_vllm(self, engine, tmp_path):
-        """Process should return valid TranscribeOutput with mocked vLLM."""
+        """Process should return valid Transcript with mocked vLLM."""
         # Create a test audio file
         audio_file = tmp_path / "test.wav"
         audio_file.touch()
@@ -434,7 +433,6 @@ class TestVLLMASREngine:
         assert result.data.runtime == "vllm-asr"
         assert result.data.language == "en"
         assert len(result.data.segments) == 1
-        assert result.data.skipped is False
 
     def test_process_vocabulary_warning(self, engine, tmp_path):
         """Process should add warning when vocabulary is provided."""

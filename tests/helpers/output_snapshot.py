@@ -23,13 +23,13 @@ from typing import Any
 
 
 def normalize_batch_output(output: Any) -> dict:
-    """Normalize a TranscribeOutput (batch) to a comparable dict.
+    """Normalize a Transcript (batch) to a comparable dict.
 
     Extracts the fields that are comparable across batch and RT outputs,
     rounding floats to avoid precision noise.
 
     Args:
-        output: TranscribeOutput from a batch engine
+        output: Transcript from a batch engine
 
     Returns:
         Dict with text, language, words (list of {text, start, end})
@@ -54,10 +54,10 @@ def normalize_batch_output(output: Any) -> dict:
 
 
 def normalize_rt_output(result: Any) -> dict:
-    """Normalize a TranscribeResult (RT) to a comparable dict.
+    """Normalize a Transcript (RT) to a comparable dict.
 
     Args:
-        result: TranscribeResult from a realtime engine
+        result: Transcript from a realtime engine
 
     Returns:
         Dict with text, language, words (list of {text, start, end})

@@ -30,25 +30,26 @@ import numpy as np
 import structlog
 import torch
 
-from dalston.engine_sdk.cores.parakeet_core import ParakeetCore
-from dalston.realtime_sdk import (
-    AsyncModelManager,
-    RealtimeEngine,
-    TranscribeResult,
-    Word,
+from dalston.common.pipeline_types import (
+    AlignmentMethod,
+    Transcript,
+    TranscriptWord,
 )
+from dalston.engine_sdk.cores.parakeet_core import ParakeetCore
+from dalston.realtime_sdk import AsyncModelManager
+from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
 
 logger = structlog.get_logger()
 
 
-class ParakeetStreamingEngine(RealtimeEngine):
+class ParakeetStreamingEngine(BaseRealtimeTranscribeEngine):
     """Real-time streaming transcription using Parakeet with dynamic model loading.
 
     Delegates inference to ParakeetCore, which is shared with the batch
     Parakeet engine. The RT adapter handles:
     - Model ID normalization
     - VAD-chunked audio input (numpy arrays)
-    - Output formatting to TranscribeResult
+    - Output formatting to Transcript
 
     When run standalone, creates its own ParakeetCore in load_models().
     When used within a unified runner, accepts an injected core to share a
@@ -106,13 +107,13 @@ class ParakeetStreamingEngine(RealtimeEngine):
             rnnt_chunk_ms=self._rnnt_chunk_ms,
         )
 
-    def transcribe(
+    def transcribe_v1(
         self,
         audio: np.ndarray,
         language: str,
         model_variant: str,
         vocabulary: list[str] | None = None,
-    ) -> TranscribeResult:
+    ) -> Transcript:
         """Transcribe an audio segment via shared ParakeetCore.
 
         Args:
@@ -122,7 +123,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
             vocabulary: List of terms to boost recognition (not yet supported)
 
         Returns:
-            TranscribeResult with text, words, language, confidence
+            Transcript with text, words, language, confidence
         """
         if self._core is None:
             raise RuntimeError(
@@ -154,24 +155,43 @@ class ParakeetStreamingEngine(RealtimeEngine):
         # Delegate to shared core
         result = self._core.transcribe(audio, model_id)
 
-        # Format core result into RT output contract
-        words: list[Word] = []
+        # Format core result into Transcript
+        segments = []
+        text_parts: list[str] = []
+
         for seg in result.segments:
+            words: list[TranscriptWord] = []
+            seg_text = seg.text if hasattr(seg, "text") else ""
+            text_parts.append(seg_text)
             for w in seg.words:
                 words.append(
-                    Word(
-                        word=w.word,
+                    self.build_word(
+                        text=w.word,
                         start=w.start,
                         end=w.end,
                         confidence=w.confidence or 0.95,
+                        alignment_method=AlignmentMethod.CTC,
                     )
                 )
+            segments.append(
+                self.build_segment(
+                    start=seg.start
+                    if hasattr(seg, "start")
+                    else (words[0].start if words else 0.0),
+                    end=seg.end
+                    if hasattr(seg, "end")
+                    else (words[-1].end if words else 0.0),
+                    text=seg_text,
+                    words=words if words else None,
+                )
+            )
 
-        return TranscribeResult(
+        return self.build_transcript(
             text=result.text,
-            words=words,
+            segments=segments,
             language="en",
-            confidence=1.0,
+            runtime="nemo",
+            language_confidence=1.0,
         )
 
     def use_streaming_decode(self, model_variant: str | None = None) -> bool:
@@ -197,8 +217,8 @@ class ParakeetStreamingEngine(RealtimeEngine):
         audio_iter: Iterator[np.ndarray],
         language: str,
         model_variant: str,
-    ) -> Iterator[TranscribeResult]:
-        """Yield incremental TranscribeResults from cache-aware streaming.
+    ) -> Iterator[Transcript]:
+        """Yield incremental Transcripts from cache-aware streaming.
 
         Each yielded result contains a single word with its timing.
         The SessionHandler should send each as a partial transcript event.
@@ -209,7 +229,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
             model_variant: Model name
 
         Yields:
-            TranscribeResult for each newly decoded word
+            Transcript for each newly decoded word
         """
         if self._core is None:
             raise RuntimeError(
@@ -228,18 +248,28 @@ class ParakeetStreamingEngine(RealtimeEngine):
         for word_result in self._core.transcribe_streaming(
             audio_iter, model_id, chunk_ms=self._rnnt_chunk_ms
         ):
-            yield TranscribeResult(
+            confidence = word_result.confidence or 0.95
+            yield self.build_transcript(
                 text=word_result.word,
-                words=[
-                    Word(
-                        word=word_result.word,
+                segments=[
+                    self.build_segment(
                         start=word_result.start,
                         end=word_result.end,
-                        confidence=word_result.confidence or 0.95,
+                        text=word_result.word,
+                        words=[
+                            self.build_word(
+                                text=word_result.word,
+                                start=word_result.start,
+                                end=word_result.end,
+                                confidence=confidence,
+                            )
+                        ],
+                        confidence=confidence,
                     )
                 ],
                 language="en",
-                confidence=word_result.confidence or 0.95,
+                runtime="parakeet",
+                language_confidence=confidence,
             )
 
     def _normalize_model_id(self, model_id: str) -> str:

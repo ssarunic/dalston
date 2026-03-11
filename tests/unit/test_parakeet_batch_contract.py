@@ -1,7 +1,7 @@
 """Contract tests for parakeet (NeMo) batch engine.
 
 Verifies that the batch engine produces the correct output shape
-(TranscribeOutput with segments, text, language) and that word
+(Transcript with segments, text, language) and that word
 timestamp behavior is preserved after delegation to ParakeetCore.
 
 These tests mock the NeMo model to avoid GPU/model dependencies.
@@ -112,7 +112,7 @@ def _build_engine_with_mock_core(hypothesis):
 
 
 class TestParakeetBatchOutputShape:
-    """Verify TranscribeOutput structure from parakeet batch engine."""
+    """Verify Transcript structure from parakeet batch engine."""
 
     def test_output_has_text_and_language(self) -> None:
         hypothesis = _make_tdt_hypothesis(text="hello world")
@@ -136,7 +136,6 @@ class TestParakeetBatchOutputShape:
         assert data.language_confidence == 1.0
         assert len(data.segments) >= 1
         assert data.runtime == "nemo"
-        assert data.skipped is False
 
     def test_tdt_word_timestamps(self) -> None:
         hypothesis = _make_tdt_hypothesis(
@@ -276,7 +275,7 @@ class TestParakeetBatchTimestampGranularity:
             _ctx(task_id, job_id),
         )
 
-        assert result.data.timestamp_granularity_actual.value == "word"
+        assert result.data.timestamp_granularity.value == "word"
 
     def test_segment_granularity_when_no_words(self) -> None:
         hypothesis = SimpleNamespace(text="hello world", timestep=None)
@@ -294,4 +293,4 @@ class TestParakeetBatchTimestampGranularity:
             _ctx(task_id, job_id),
         )
 
-        assert result.data.timestamp_granularity_actual.value == "segment"
+        assert result.data.timestamp_granularity.value == "segment"

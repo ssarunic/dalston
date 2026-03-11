@@ -302,11 +302,13 @@ def test_merge_engine_preserves_segment_quality_metadata(tmp_path: Path) -> None
                         "start": 0.0,
                         "end": 0.8,
                         "text": "hello",
-                        "tokens": [11, 22, 33],
-                        "temperature": 0.0,
-                        "avg_logprob": -0.42,
-                        "compression_ratio": 1.15,
-                        "no_speech_prob": 0.07,
+                        "metadata": {
+                            "tokens": [11, 22, 33],
+                            "temperature": 0.0,
+                            "avg_logprob": -0.42,
+                            "compression_ratio": 1.15,
+                            "no_speech_prob": 0.07,
+                        },
                     }
                 ],
                 "text": "hello",

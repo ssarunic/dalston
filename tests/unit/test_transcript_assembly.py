@@ -8,7 +8,8 @@ from dalston.common.pipeline_types import (
     AlignOutput,
     Segment,
     SpeakerTurn,
-    TranscribeOutput,
+    Transcript,
+    TranscriptSegment,
     Word,
 )
 from dalston.common.transcript import (
@@ -393,8 +394,8 @@ class TestSelectSegments:
     """Tests for segment source selection."""
 
     def test_prefers_align_over_transcribe(self):
-        transcribe = TranscribeOutput(
-            segments=[Segment(start=0.0, end=1.0, text="orig")],
+        transcript = Transcript(
+            segments=[TranscriptSegment(start=0.0, end=1.0, text="orig")],
             text="orig",
             language="en",
             runtime="faster-whisper",
@@ -410,9 +411,8 @@ class TestSelectSegments:
         )
 
         segments, has_words, warnings = _select_segments(
-            transcribe_output=transcribe,
+            transcript=transcript,
             align_output=align,
-            raw_segments=[],
         )
 
         assert len(segments) == 1
@@ -420,8 +420,8 @@ class TestSelectSegments:
         assert has_words is True
 
     def test_falls_back_to_transcribe_when_align_skipped(self):
-        transcribe = TranscribeOutput(
-            segments=[Segment(start=0.0, end=1.0, text="orig")],
+        transcript = Transcript(
+            segments=[TranscriptSegment(start=0.0, end=1.0, text="orig")],
             text="orig",
             language="en",
             runtime="faster-whisper",
@@ -439,25 +439,29 @@ class TestSelectSegments:
         )
 
         segments, has_words, warnings = _select_segments(
-            transcribe_output=transcribe,
+            transcript=transcript,
             align_output=align,
-            raw_segments=[],
         )
 
         assert len(segments) == 1
         assert segments[0].text == "orig"
         assert has_words is False
 
-    def test_uses_raw_segments_as_last_resort(self):
-        raw = [{"start": 0.0, "end": 1.0, "text": "raw"}]
+    def test_uses_transcript_when_no_align(self):
+        transcript = Transcript(
+            segments=[TranscriptSegment(start=0.0, end=1.0, text="hello")],
+            text="hello",
+            language="en",
+            runtime="faster-whisper",
+        )
 
         segments, has_words, warnings = _select_segments(
-            transcribe_output=None,
+            transcript=transcript,
             align_output=None,
-            raw_segments=raw,
         )
 
         assert len(segments) == 1
+        assert segments[0].text == "hello"
         assert has_words is False
 
 
@@ -503,9 +507,14 @@ class TestBuildMergedSegments:
         assert result[0].speaker == "SPEAKER_00"
         assert result[1].speaker == "SPEAKER_01"
 
-    def test_handles_raw_dict_segments(self):
+    def test_handles_transcript_segment_metadata(self):
         source = [
-            {"start": 0.0, "end": 1.0, "text": "Hello", "tokens": [1, 2, 3]},
+            TranscriptSegment(
+                start=0.0,
+                end=1.0,
+                text="Hello",
+                metadata={"tokens": [1, 2, 3]},
+            ),
         ]
 
         result = _build_merged_segments(
@@ -808,8 +817,10 @@ class TestAssemblePerChannelTranscript:
         assert result.redacted_text is None
         assert result.pii_entities is None
 
-    def test_empty_channel(self):
-        """Assembly handles a channel with no output gracefully."""
+    def test_empty_channel_raises(self):
+        """Assembly raises ValueError when a channel has no output."""
+        import pytest
+
         stage_outputs = {
             "prepare": {"duration": 5.0, "channels": 2, "sample_rate": 16000},
             "transcribe_ch0": {
@@ -821,16 +832,12 @@ class TestAssemblePerChannelTranscript:
             # transcribe_ch1 is missing
         }
 
-        result = assemble_per_channel_transcript(
-            job_id="job-pc-7",
-            stage_outputs=stage_outputs,
-            channel_count=2,
-        )
-
-        assert len(result.segments) == 1
-        assert result.segments[0].speaker == "SPEAKER_00"
-        # Speakers array still has both channels
-        assert len(result.speakers) == 2
+        with pytest.raises(ValueError, match="Missing 'transcribe_ch1'"):
+            assemble_per_channel_transcript(
+                job_id="job-pc-7",
+                stage_outputs=stage_outputs,
+                channel_count=2,
+            )
 
     def test_explicit_pipeline_stages(self):
         """Pipeline stages can be explicitly provided."""

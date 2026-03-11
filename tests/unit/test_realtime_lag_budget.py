@@ -6,8 +6,8 @@ import json
 
 import pytest
 
+from dalston.common.pipeline_types import Transcript
 from dalston.common.ws_close_codes import WS_CLOSE_LAG_EXCEEDED
-from dalston.realtime_sdk.assembler import TranscribeResult
 from dalston.realtime_sdk.session import SessionConfig, SessionHandler
 
 
@@ -41,12 +41,12 @@ class _ScriptedWebSocket(_FakeWebSocket):
         return self._messages.pop(0)
 
 
-def _transcribe_stub(*_args, **_kwargs) -> TranscribeResult:
-    return TranscribeResult(
+def _transcribe_stub(*_args, **_kwargs) -> Transcript:
+    return Transcript(
         text="stub",
-        words=[],
+        segments=[],
         language="en",
-        confidence=1.0,
+        runtime="test",
     )
 
 
