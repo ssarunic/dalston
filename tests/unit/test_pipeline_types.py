@@ -530,12 +530,8 @@ class TestCodeSwitching:
 
     def test_word_level_language(self):
         """TranscriptWord accepts per-word language for code-switching."""
-        word_en = TranscriptWord(
-            text="hello", start=0.0, end=0.5, language="en"
-        )
-        word_fr = TranscriptWord(
-            text="monde", start=0.5, end=1.0, language="fr"
-        )
+        word_en = TranscriptWord(text="hello", start=0.0, end=0.5, language="en")
+        word_fr = TranscriptWord(text="monde", start=0.5, end=1.0, language="fr")
         assert word_en.language == "en"
         assert word_fr.language == "fr"
 

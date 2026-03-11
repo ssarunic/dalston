@@ -611,7 +611,9 @@ class Transcript(BaseModel):
     )
     text: str = Field(..., description="Full transcript text")
     segments: list[TranscriptSegment] = Field(..., description="Transcript segments")
-    language: str = Field(..., description="Primary detected/used language code (ISO 639-1)")
+    language: str = Field(
+        ..., description="Primary detected/used language code (ISO 639-1)"
+    )
     language_confidence: float | None = Field(
         default=None, ge=0, le=1, description="Language detection confidence"
     )
