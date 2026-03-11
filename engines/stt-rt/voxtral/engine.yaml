@@ -6,8 +6,8 @@ mode: realtime
 name: Voxtral Realtime
 version: 1.0.0
 description: |
-  Real-time streaming transcription using Mistral Voxtral-Mini-4B-Realtime.
-  Multilingual support with configurable latency/accuracy tradeoff (80-2400ms delay).
+  Real-time transcription using Mistral Voxtral-Mini-4B-Realtime on vLLM.
+  Supports multilingual streaming-style partial updates via periodic decode.
 
 container:
   gpu: required
@@ -49,5 +49,5 @@ hardware:
   min_ram_gb: 16
 
 performance:
-  rtf_gpu: 0.1
-  warm_start_latency_ms: 500
+  rtf_gpu: 0.15
+  warm_start_latency_ms: 5000

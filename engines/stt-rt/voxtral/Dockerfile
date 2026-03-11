@@ -1,8 +1,8 @@
-# Mistral Voxtral Streaming Real-time Engine
+# Voxtral Realtime Engine (vLLM)
 #
-# Real-time transcription using Voxtral-Mini-4B-Realtime.
+# Real-time transcription using Voxtral-Mini-4B-Realtime on vLLM.
 # Runs a WebSocket server for streaming audio transcription.
-# GPU required for realtime latency requirements.
+# GPU required for vLLM.
 #
 # Legacy split RT image kept for targeted testing.
 # Note: `stt-rt-transcribe-voxtral-mini-4b` was removed from default
@@ -56,19 +56,6 @@ COPY engines/stt-rt/voxtral/requirements.txt .
 # Install dependencies
 RUN python -m pip install --no-cache-dir -r requirements.txt
 
-# Pre-download the model at build time for faster container startup
-ARG MODEL_VARIANT=mini-4b
-RUN python -c "\
-import os; \
-os.environ['HF_HOME'] = '/models'; \
-from transformers import AutoProcessor, VoxtralRealtimeForConditionalGeneration; \
-model_map = {'mini-4b': 'mistralai/Voxtral-Mini-4B-Realtime-2602'}; \
-model_id = model_map['${MODEL_VARIANT}']; \
-print(f'Downloading model {model_id}...'); \
-AutoProcessor.from_pretrained(model_id); \
-VoxtralRealtimeForConditionalGeneration.from_pretrained(model_id); \
-print(f'Model {model_id} downloaded successfully')"
-
 # Download Silero VAD model
 RUN python -c "import torch; torch.hub.load('snakers4/silero-vad', 'silero_vad', trust_repo=True)" \
     && echo "Silero VAD model downloaded successfully"
@@ -90,7 +77,6 @@ ENV DALSTON_WORKER_PORT=9000
 ENV DALSTON_MAX_SESSIONS=4
 ENV REDIS_URL=redis://redis:6379
 ENV DALSTON_MODEL_VARIANT=${MODEL_VARIANT}
-ENV DALSTON_TRANSCRIPTION_DELAY_MS=480
 
 # Set CUDA visible devices
 ENV NVIDIA_VISIBLE_DEVICES=all
