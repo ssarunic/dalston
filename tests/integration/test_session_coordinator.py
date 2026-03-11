@@ -33,7 +33,6 @@ from dalston.orchestrator.realtime_registry import (
 from dalston.orchestrator.session_allocator import SessionState, WorkerAllocation
 from dalston.orchestrator.session_coordinator import (
     CapacityInfo,
-    ParityMonitor,
     SessionCoordinator,
     WorkerStatus,
 )
@@ -519,91 +518,3 @@ def test_capacity_info_fields() -> None:
     assert info.available_capacity == 7
     assert info.worker_count == 3
     assert info.ready_workers == 2
-
-
-# ---------------------------------------------------------------------------
-# ParityMonitor – non-mutating read-only observer
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_parity_monitor_start_stop() -> None:
-    """ParityMonitor starts and stops cleanly."""
-    coordinator = SessionCoordinator.__new__(SessionCoordinator)
-    coordinator._redis = AsyncMock()
-    coordinator._registry = AsyncMock()
-    coordinator._allocator = AsyncMock()
-    coordinator._health = AsyncMock()
-    coordinator._redis_url = "redis://localhost:6379"
-
-    monitor = ParityMonitor(coordinator)
-    assert not monitor.is_running
-
-    await monitor.start()
-    assert monitor.is_running
-
-    await monitor.stop()
-    assert not monitor.is_running
-
-
-@pytest.mark.asyncio
-async def test_parity_monitor_does_not_mutate_redis() -> None:
-    """ParityMonitor only reads Redis — never writes, marks offline, or reconciles."""
-    coordinator = SessionCoordinator.__new__(SessionCoordinator)
-    redis_mock = AsyncMock()
-    coordinator._redis = redis_mock
-    coordinator._redis_url = "redis://localhost:6379"
-
-    mock_registry = AsyncMock()
-    mock_registry.get_all.return_value = [
-        _make_worker("w1", capacity=4, active_sessions=2),
-    ]
-    coordinator._registry = mock_registry
-    coordinator._allocator = AsyncMock()
-    coordinator._health = AsyncMock()
-
-    redis_mock.smembers.return_value = {"sess_1", "sess_2"}
-
-    monitor = ParityMonitor(coordinator)
-    # Trigger a single snapshot directly (not via the background loop)
-    await monitor._snapshot()
-
-    # Only read operations: smembers and registry.get_all
-    mock_registry.get_all.assert_called_once()
-    redis_mock.smembers.assert_called_once()
-
-    # No write operations
-    redis_mock.hset.assert_not_called()
-    redis_mock.hincrby.assert_not_called()
-    redis_mock.srem.assert_not_called()
-    redis_mock.sadd.assert_not_called()
-    redis_mock.publish.assert_not_called()
-    redis_mock.expire.assert_not_called()
-    mock_registry.mark_instance_offline.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_parity_monitor_tolerates_registry_error() -> None:
-    """ParityMonitor continues running even when a snapshot raises."""
-    import asyncio
-
-    coordinator = SessionCoordinator.__new__(SessionCoordinator)
-    redis_mock = AsyncMock()
-    coordinator._redis = redis_mock
-    coordinator._redis_url = "redis://localhost:6379"
-
-    mock_registry = AsyncMock()
-    mock_registry.get_all.side_effect = Exception("Redis timeout")
-    coordinator._registry = mock_registry
-    coordinator._allocator = AsyncMock()
-    coordinator._health = AsyncMock()
-
-    monitor = ParityMonitor(coordinator)
-    monitor.CHECK_INTERVAL = 0.05  # type: ignore[assignment]
-
-    await monitor.start()
-    await asyncio.sleep(0.12)  # allow ≥2 loop iterations
-    await monitor.stop()
-
-    # Should have attempted multiple snapshots despite errors
-    assert mock_registry.get_all.call_count >= 2
