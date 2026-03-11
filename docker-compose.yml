@@ -475,7 +475,8 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_RUNTIME: voxtral-mini-3b
+      DALSTON_RUNTIME: vllm-asr
+      DALSTON_MODEL_VARIANT: mini-3b
     volumes:
       - model-cache:/models
     depends_on: *batch-depends
@@ -677,6 +678,19 @@ services:
       <<: [*common-env, *observability-env]
       DALSTON_RUNTIME: audio-redactor
       DALSTON_WORKER_ID: redactor-1
+    depends_on: *batch-depends
+    restart: unless-stopped
+
+  # --- MERGE STAGE ---
+  stt-batch-merge-final-merger:
+    image: dalston/stt-batch-merge-final-merger:1.1.0
+    build:
+      context: .
+      dockerfile: engines/stt-merge/final-merger/Dockerfile
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_RUNTIME: final-merger
+      DALSTON_WORKER_ID: merger-1
     depends_on: *batch-depends
     restart: unless-stopped
 
