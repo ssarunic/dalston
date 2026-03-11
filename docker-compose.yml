@@ -348,6 +348,61 @@ services:
     healthcheck: *ws-healthcheck
     restart: unless-stopped
 
+  # M63: Unified Faster Whisper (CPU) — multilingual batch + realtime.
+  # Uses CTranslate2 for efficient CPU inference. Supports 99 languages.
+  # Supports: tiny, base, small, medium, large-v2, large-v3, large-v3-turbo
+  stt-unified-faster-whisper-cpu:
+    image: dalston/stt-unified-faster-whisper-cpu:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-unified/faster-whisper/Dockerfile
+      args:
+        DEVICE: cpu
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_UNIFIED_ENGINE_ENABLED: "true"
+      DALSTON_RUNTIME: faster-whisper
+      DALSTON_DEFAULT_MODEL_ID: "large-v3-turbo"
+      DALSTON_INSTANCE: stt-unified-faster-whisper-cpu
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 2
+      DALSTON_DEVICE: cpu
+      DALSTON_RT_RESERVATION: ${DALSTON_RT_RESERVATION:-1}
+      DALSTON_BATCH_MAX_INFLIGHT: ${DALSTON_BATCH_MAX_INFLIGHT:-2}
+      DALSTON_TOTAL_CAPACITY: ${DALSTON_TOTAL_CAPACITY:-3}
+    volumes:
+      - model-cache:/models
+    depends_on: *batch-depends
+    healthcheck: *ws-healthcheck
+    restart: unless-stopped
+
+  # M63: Unified Faster Whisper (GPU) — multilingual batch + realtime.
+  stt-unified-faster-whisper:
+    image: dalston/stt-unified-faster-whisper:1.0.0
+    build:
+      context: .
+      dockerfile: engines/stt-unified/faster-whisper/Dockerfile
+      args:
+        DEVICE: cuda
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_UNIFIED_ENGINE_ENABLED: "true"
+      DALSTON_RUNTIME: faster-whisper
+      DALSTON_DEFAULT_MODEL_ID: "large-v3-turbo"
+      DALSTON_INSTANCE: stt-unified-faster-whisper
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 4
+      DALSTON_RT_RESERVATION: ${DALSTON_RT_RESERVATION:-2}
+      DALSTON_BATCH_MAX_INFLIGHT: ${DALSTON_BATCH_MAX_INFLIGHT:-4}
+      DALSTON_TOTAL_CAPACITY: ${DALSTON_TOTAL_CAPACITY:-6}
+    volumes:
+      - model-cache:/models
+    depends_on: *batch-depends
+    healthcheck: *ws-healthcheck
+    deploy: *gpu-deploy
+    profiles: [gpu]
+    restart: unless-stopped
+
   # Faster Whisper Runtime (CPU/GPU - multilingual transcription)
   # Supports: tiny, base, small, medium, large-v2, large-v3, large-v3-turbo
   # Default model (large-v3-turbo) is CPU-capable for out-of-the-box experience.
