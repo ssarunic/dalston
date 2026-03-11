@@ -1,7 +1,7 @@
 {
   "generated_at": "2026-03-11T08:55:27.153871+00:00",
   "schema_version": "3.0",
-  "engine_count": 13,
+  "engine_count": 12,
   "engines": {
     "phoneme-align": {
       "id": "phoneme-align",
@@ -144,40 +144,6 @@
         "rtf_gpu": 0.08,
         "rtf_cpu": 1.2,
         "warm_start_latency_ms": 500
-      }
-    },
-    "final-merger": {
-      "id": "final-merger",
-      "name": "Final Merger",
-      "version": "1.1.0",
-      "stage": "merge",
-      "type": null,
-      "description": "Combines outputs from upstream pipeline stages into the\nstandard Dalston transcript format.\n\nAdds segment IDs, metadata, and writes the canonical\ntranscript.json file for the Gateway to read.\n\nFor per_channel mode with PII detection and audio redaction:\n- Collects and merges PII entities from each channel\n- Assembles redacted mono WAVs into stereo output (FFmpeg)",
-      "image": "dalston/stt-batch-merge-final-merger:1.1.0",
-      "execution_profile": "container",
-      "capabilities": {
-        "stages": [
-          "merge"
-        ],
-        "languages": null,
-        "supports_word_timestamps": false,
-        "supports_streaming": false,
-        "max_audio_duration": 86400,
-        "max_concurrency": null
-      },
-      "hardware": {
-        "gpu_required": false,
-        "gpu_optional": false,
-        "min_vram_gb": 0,
-        "recommended_gpu": null,
-        "supports_cpu": true,
-        "min_ram_gb": 1,
-        "memory": "256M"
-      },
-      "performance": {
-        "rtf_gpu": null,
-        "rtf_cpu": 0.001,
-        "warm_start_latency_ms": 5
       }
     },
     "audio-prepare": {

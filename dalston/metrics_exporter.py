@@ -41,7 +41,6 @@ KNOWN_ENGINES = [
     "phoneme-align",
     "pyannote-4.0",
     "nemo-msdd",
-    "final-merger",
     "parakeet",
 ]
 
