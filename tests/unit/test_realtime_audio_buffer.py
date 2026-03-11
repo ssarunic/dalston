@@ -1,16 +1,9 @@
 """Unit tests for AudioBuffer, focusing on resampling quality."""
 
-import importlib
-
 import numpy as np
 import pytest
 
 from dalston.realtime_sdk.session import AudioBuffer
-
-pytestmark = pytest.mark.skipif(
-    importlib.util.find_spec("soxr") is None,
-    reason="soxr not installed",
-)
 
 
 class TestAudioBufferResampling:
