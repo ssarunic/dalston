@@ -193,6 +193,16 @@ class TestGenerateCatalog:
             assert "hardware" in engine
             assert "performance" in engine
 
+    def test_catalog_excludes_legacy_merge_runtime(self) -> None:
+        """Merge runtime is deprecated and should not appear in generated catalog."""
+        engines_dir = Path(__file__).parent.parent.parent / "engines"
+        if not engines_dir.exists():
+            pytest.skip("Engines directory not found")
+
+        catalog = generate_catalog(engines_dir)
+        assert "final-merger" not in catalog["engines"]
+        assert all(engine["stage"] != "merge" for engine in catalog["engines"].values())
+
     def test_generate_catalog_empty_dir_raises(self) -> None:
         """Should raise error for empty directory."""
         with tempfile.TemporaryDirectory() as tmpdir:

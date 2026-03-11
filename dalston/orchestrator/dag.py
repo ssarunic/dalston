@@ -75,7 +75,6 @@ DEFAULT_ENGINES = {
     "diarize": "pyannote-4.0",
     "pii_detect": "pii-presidio",
     "audio_redact": "audio-redactor",
-    "merge": "final-merger",
 }
 
 VALID_PII_REDACTION_MODES = {"silence", "beep"}

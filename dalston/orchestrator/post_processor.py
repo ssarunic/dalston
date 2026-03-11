@@ -103,7 +103,7 @@ def build_post_processing_tasks(
 
     tasks: list[Task] = []
 
-    # PII detect depends on the merge task output (transcript is available)
+    # PII detect runs after core pipeline completion (transcript is available).
     pii_detect_config: dict = {
         "entity_types": params.get("pii_entity_types"),
         "confidence_threshold": params.get(
