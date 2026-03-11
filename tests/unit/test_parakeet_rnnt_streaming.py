@@ -6,7 +6,6 @@ Covers:
 - CTC variant raises RuntimeError if transcribe_streaming() called
 - RT engine decoder-aware dispatch (use_streaming_decode, get_streaming_decode_fn)
 - SessionHandler streaming decode integration
-- DALSTON_RNNT_STREAMING=false fallback
 - Word ordering and timestamp continuity across chunk boundaries
 """
 
@@ -233,7 +232,6 @@ class TestRTEngineStreamingDispatch:
     def _build_engine(
         self,
         mock_core: MagicMock | None = None,
-        rnnt_streaming: str = "true",
     ):
         """Build a ParakeetStreamingEngine with controlled env."""
         module = _load_rt_engine_module()
@@ -242,7 +240,6 @@ class TestRTEngineStreamingDispatch:
             mock_core = _make_mock_core()
 
         with patch.dict("os.environ", {
-            "DALSTON_RNNT_STREAMING": rnnt_streaming,
             "DALSTON_RNNT_CHUNK_MS": "160",
         }):
             engine = module.ParakeetStreamingEngine(core=mock_core)
@@ -272,14 +269,6 @@ class TestRTEngineStreamingDispatch:
 
         assert engine.use_streaming_decode("parakeet-tdt-1.1b") is True
 
-    def test_streaming_disabled_by_env(self) -> None:
-        """DALSTON_RNNT_STREAMING=false should disable streaming for all."""
-        mock_core = _make_mock_core()
-        mock_core.supports_streaming_decode.return_value = True
-        engine = self._build_engine(mock_core, rnnt_streaming="false")
-
-        assert engine.use_streaming_decode("parakeet-rnnt-1.1b") is False
-
     def test_get_streaming_decode_fn_rnnt(self) -> None:
         """get_streaming_decode_fn returns callback for RNNT."""
         mock_core = _make_mock_core()
@@ -298,16 +287,6 @@ class TestRTEngineStreamingDispatch:
 
         fn = engine.get_streaming_decode_fn("parakeet-ctc-0.6b")
         assert fn is None
-
-    def test_get_streaming_decode_fn_disabled_returns_none(self) -> None:
-        """get_streaming_decode_fn returns None when streaming disabled."""
-        mock_core = _make_mock_core()
-        mock_core.supports_streaming_decode.return_value = True
-        engine = self._build_engine(mock_core, rnnt_streaming="false")
-
-        fn = engine.get_streaming_decode_fn("parakeet-rnnt-1.1b")
-        assert fn is None
-
 
 # ---------------------------------------------------------------------------
 # T2: RT engine transcribe_streaming() output shape
@@ -330,7 +309,6 @@ class TestRTEngineTranscribeStreaming:
         ])
 
         with patch.dict("os.environ", {
-            "DALSTON_RNNT_STREAMING": "true",
             "DALSTON_RNNT_CHUNK_MS": "160",
         }):
             engine = module.ParakeetStreamingEngine(core=mock_core)
@@ -397,10 +375,7 @@ class TestRTEngineExistingPathUnchanged:
         module = _load_rt_engine_module()
         mock_core = _make_mock_core()
 
-        with patch.dict("os.environ", {
-            "DALSTON_RNNT_STREAMING": "true",
-        }):
-            engine = module.ParakeetStreamingEngine(core=mock_core)
+        engine = module.ParakeetStreamingEngine(core=mock_core)
         return engine, mock_core
 
     def test_transcribe_still_works(self) -> None:
@@ -422,39 +397,6 @@ class TestRTEngineExistingPathUnchanged:
 
         assert result.text == "hello world"
         mock_core.transcribe.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# T4: DALSTON_RNNT_STREAMING=false fallback
-# ---------------------------------------------------------------------------
-
-
-class TestStreamingFallback:
-    """Verify DALSTON_RNNT_STREAMING=false disables streaming for all."""
-
-    def test_fallback_disables_streaming_decode(self) -> None:
-        module = _load_rt_engine_module()
-        mock_core = _make_mock_core()
-        mock_core.supports_streaming_decode.return_value = True
-
-        with patch.dict("os.environ", {
-            "DALSTON_RNNT_STREAMING": "false",
-        }):
-            engine = module.ParakeetStreamingEngine(core=mock_core)
-
-        assert engine.use_streaming_decode("parakeet-rnnt-1.1b") is False
-        assert engine.get_streaming_decode_fn("parakeet-rnnt-1.1b") is None
-
-    def test_fallback_get_streaming_decode_fn_none(self) -> None:
-        module = _load_rt_engine_module()
-        mock_core = _make_mock_core()
-
-        with patch.dict("os.environ", {
-            "DALSTON_RNNT_STREAMING": "0",
-        }):
-            engine = module.ParakeetStreamingEngine(core=mock_core)
-
-        assert engine.get_streaming_decode_fn("parakeet-rnnt-1.1b") is None
 
 
 # ---------------------------------------------------------------------------

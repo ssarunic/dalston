@@ -9,7 +9,6 @@ Supports dynamic model loading via NeMoModelManager (M44).
 
 M71: RNNT/TDT models use cache-aware streaming inference to emit
 tokens frame-by-frame. CTC models retain the VAD-accumulate path.
-Controlled by DALSTON_RNNT_STREAMING (default: true).
 
 Environment variables:
     DALSTON_INSTANCE: Unique identifier for this worker (required)
@@ -20,7 +19,6 @@ Environment variables:
     DALSTON_MAX_LOADED_MODELS: Max models in memory (default: 2)
     DALSTON_MODEL_PRELOAD: Model to preload on startup (optional)
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
-    DALSTON_RNNT_STREAMING: Enable cache-aware streaming for RNNT/TDT (default: true)
     DALSTON_RNNT_CHUNK_MS: Chunk duration in ms for streaming (default: 160)
 """
 
@@ -81,10 +79,6 @@ class ParakeetStreamingEngine(RealtimeEngine):
         self._core: ParakeetCore | None = core
 
         # M71: Cache-aware streaming configuration
-        self._rnnt_streaming_enabled = (
-            os.environ.get("DALSTON_RNNT_STREAMING", "true").lower()
-            in ("true", "1", "yes")
-        )
         self._rnnt_chunk_ms = int(
             os.environ.get("DALSTON_RNNT_CHUNK_MS", "160")
         )
@@ -111,7 +105,6 @@ class ParakeetStreamingEngine(RealtimeEngine):
             device=self._core.device,
             preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
             shared_core=is_shared,
-            rnnt_streaming_enabled=self._rnnt_streaming_enabled,
             rnnt_chunk_ms=self._rnnt_chunk_ms,
         )
 
@@ -186,9 +179,8 @@ class ParakeetStreamingEngine(RealtimeEngine):
     def use_streaming_decode(self, model_variant: str | None = None) -> bool:
         """Check whether the given model should use streaming decode.
 
-        Returns True when RNNT streaming is enabled *and* the model's
-        decoder architecture supports cache-aware streaming (RNNT or TDT).
-        CTC models always return False.
+        Returns True when the model's decoder architecture supports
+        cache-aware streaming (RNNT or TDT). CTC models always return False.
 
         Args:
             model_variant: Model name; uses DEFAULT_MODEL if None.
@@ -196,7 +188,7 @@ class ParakeetStreamingEngine(RealtimeEngine):
         Returns:
             True if streaming decode should be used for this model.
         """
-        if self._core is None or not self._rnnt_streaming_enabled:
+        if self._core is None:
             return False
 
         model_id = self._normalize_model_id(model_variant or self.DEFAULT_MODEL)
@@ -297,12 +289,12 @@ class ParakeetStreamingEngine(RealtimeEngine):
     ) -> Any:
         """Return streaming decode callback for RNNT/TDT models.
 
-        M71: When RNNT streaming is enabled and the model supports it,
-        returns ``self.transcribe_streaming`` so the SessionHandler
-        can feed audio chunks directly to the streaming decoder.
+        M71: When the model supports streaming decode, returns
+        ``self.transcribe_streaming`` so the SessionHandler can feed
+        audio chunks directly to the streaming decoder.
 
-        Returns None for CTC models or when streaming is disabled,
-        causing the SessionHandler to use the VAD-accumulate path.
+        Returns None for CTC models, causing the SessionHandler to
+        use the VAD-accumulate path.
         """
         if self.use_streaming_decode(model_variant):
             return self.transcribe_streaming

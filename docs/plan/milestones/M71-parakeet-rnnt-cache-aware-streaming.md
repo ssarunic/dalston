@@ -47,12 +47,10 @@ In scope:
   `CacheAwareStreamingConfig` that yields `NeMoWordResult` events incrementally.
 - Update the RT parakeet engine (`engines/stt-rt/parakeet/engine.py`) to call
   `transcribe_streaming()` for RNNT/TDT variants, bypassing VAD accumulation.
-- Retain the VAD-accumulate path as the code path for CTC variants and as
-  fallback when `DALSTON_RNNT_STREAMING=false`.
+- Retain the VAD-accumulate path as the code path for CTC variants.
 - Update `ParakeetOnnxCore` only if the ONNX runtime exposes an equivalent API
   (parakeet-onnx uses CTC; likely out of scope).
-- Add `DALSTON_RNNT_CHUNK_MS` env var (default 160 ms — one FastConformer chunk)
-  and `DALSTON_RNNT_STREAMING` flag (default `true` for RNNT/TDT, ignored for CTC).
+- Add `DALSTON_RNNT_CHUNK_MS` env var (default 160 ms — one FastConformer chunk).
 
 Out of scope:
 
@@ -111,12 +109,12 @@ Gate: unit tests pass; existing `transcribe()` path unchanged.
 ### T2. RT engine — decoder-aware dispatch
 
 Update `engines/stt-rt/parakeet/engine.py` to select the inference path based on
-decoder architecture and the `DALSTON_RNNT_STREAMING` flag:
+decoder architecture:
 
 ```python
 def transcribe(self, audio_chunk_iter, language, model_variant):
     decoder_type = self._core.decoder_type(model_variant)
-    if decoder_type in ("rnnt", "tdt") and self._streaming_enabled:
+    if decoder_type in ("rnnt", "tdt"):
         yield from self._core.transcribe_streaming(audio_chunk_iter, language)
     else:
         # Existing path: VAD accumulation → model.transcribe(full_array)
@@ -141,10 +139,8 @@ Gate: integration test — first partial event from an RNNT session arrives with
 300 ms of the first word spoken (measured against a reference recording with
 known onset time).
 
-### T4. Fallback and observability
+### T4. Observability
 
-- `DALSTON_RNNT_STREAMING=false` disables the streaming path; engine falls back to
-  VAD-accumulate for all variants. Allows rollback without rebuild.
 - Log `decoder_type` and `streaming_path` on session start for observability.
 - Metric: `rt_first_partial_latency_ms` — time from session start to first partial
   event. Separate labels for `rnnt_streaming` vs `vad_segment` paths.
@@ -163,7 +159,6 @@ known onset time).
 
 - RNNT and TDT RT sessions emit `is_final=False` partial events before silence.
 - CTC RT sessions are behaviorally identical to today.
-- `DALSTON_RNNT_STREAMING=false` restores pre-M71 behaviour for all variants.
 - `make lint` and `make test` pass.
 - First-word latency for RNNT sessions measurably lower than VAD-segment baseline.
 
