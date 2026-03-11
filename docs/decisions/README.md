@@ -18,6 +18,7 @@ This directory contains Architecture Decision Records (ADRs) documenting signifi
 | [ADR-010](ADR-010-engine-variant-structure.md) | Engine Variant Structure | Accepted |
 | [ADR-011](ADR-011-security-architecture.md) | Security Architecture | Proposed |
 | [ADR-012](ADR-012-unified-engine-terminology.md) | Unified Engine Terminology (runtime, model, instance) | Proposed |
+| [ADR-013](ADR-013-inference-architecture-approach.md) | Inference Architecture — Unified Runner Default, Sidecar Deferred | Accepted |
 
 ## ADR Template
 

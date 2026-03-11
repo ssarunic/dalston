@@ -6,7 +6,16 @@
 | **Duration** | 5–7 days |
 | **Dependencies** | M63 (engine unification — provides TranscribeCore / ParakeetCore), M70 (Riva sidecar — architectural reference) |
 | **Primary Deliverable** | `faster-whisper-server` and `parakeet-server` gRPC inference services; batch and RT engines refactored to thin gRPC clients; unified runners deprecated |
-| **Status** | Proposed |
+| **Status** | Deferred — see [ADR-013](../../decisions/ADR-013-inference-architecture-approach.md) |
+
+## Deferral Note
+
+> **This milestone is deferred.** The unified runner (M63) is the recommended
+> default deployment for single-machine setups. The sidecar code is retained as
+> an optional scaling path for multi-node deployments where independent
+> batch/RT scaling or fault isolation is required. See
+> [ADR-013](../../decisions/ADR-013-inference-architecture-approach.md) for the
+> full analysis and decision criteria for when to revisit.
 
 ## Context
 
