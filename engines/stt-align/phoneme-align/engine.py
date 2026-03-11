@@ -267,6 +267,11 @@ class PhonemeAlignEngine(Engine):
         unaligned_words = 0
 
         for idx, aseg in enumerate(aligned_segments):
+            # Resolve per-segment language before building words so they inherit it
+            seg_language: str | None = None
+            if segment_languages and idx < len(segment_languages):
+                seg_language = segment_languages[idx]
+
             words: list[Word] | None = None
             if aseg.words:
                 valid_words: list[Word] = []
@@ -283,14 +288,10 @@ class PhonemeAlignEngine(Engine):
                             end=aw.end,
                             confidence=aw.score,
                             alignment_method=AlignmentMethod.PHONEME_WAV2VEC,
+                            language=seg_language,
                         )
                     )
                 words = valid_words if valid_words else None
-
-            # Propagate per-segment language from transcription (code-switching)
-            seg_language: str | None = None
-            if segment_languages and idx < len(segment_languages):
-                seg_language = segment_languages[idx]
 
             segments.append(
                 Segment(

@@ -169,7 +169,12 @@ class TestAssembleTranscriptBasic:
                         "text": "Hello,",
                         "language": "en",
                         "words": [
-                            {"text": "Hello,", "start": 0.05, "end": 0.95},
+                            {
+                                "text": "Hello,",
+                                "start": 0.05,
+                                "end": 0.95,
+                                "language": "en",
+                            },
                         ],
                     },
                     {
@@ -178,8 +183,18 @@ class TestAssembleTranscriptBasic:
                         "text": "comment allez-vous?",
                         "language": "fr",
                         "words": [
-                            {"text": "comment", "start": 1.05, "end": 1.5},
-                            {"text": "allez-vous?", "start": 1.6, "end": 2.9},
+                            {
+                                "text": "comment",
+                                "start": 1.05,
+                                "end": 1.5,
+                                "language": "fr",
+                            },
+                            {
+                                "text": "allez-vous?",
+                                "start": 1.6,
+                                "end": 2.9,
+                                "language": "fr",
+                            },
                         ],
                     },
                 ],
@@ -202,6 +217,12 @@ class TestAssembleTranscriptBasic:
         # Aligned segments must preserve per-segment language
         assert result.segments[0].language == "en"
         assert result.segments[1].language == "fr"
+        # Word-level language must also be propagated from segment
+        assert result.segments[0].words is not None
+        assert result.segments[0].words[0].language == "en"
+        assert result.segments[1].words is not None
+        for w in result.segments[1].words:
+            assert w.language == "fr"
         # Transcript-level languages metadata must be present
         assert result.metadata.languages is not None
         assert len(result.metadata.languages) == 2
