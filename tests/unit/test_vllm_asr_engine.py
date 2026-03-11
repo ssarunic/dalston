@@ -92,6 +92,7 @@ class TestVoxtralAdapter:
         assert result.runtime == "vllm-asr"
         assert len(result.segments) == 1
         assert result.segments[0].text == "Hello world, this is a test."
+        assert result.segments[0].end > result.segments[0].start
 
     def test_parse_output_strips_whitespace(self, adapter):
         """Output parsing should strip leading/trailing whitespace."""
@@ -169,6 +170,7 @@ class TestQwen2AudioAdapter:
         assert result.language == "en"
         assert result.runtime == "vllm-asr"
         assert len(result.segments) == 1
+        assert result.segments[0].end > result.segments[0].start
 
     def test_sampling_kwargs(self, adapter):
         """Sampling kwargs should use deterministic temperature."""

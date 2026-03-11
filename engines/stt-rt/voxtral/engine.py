@@ -55,6 +55,7 @@ class VoxtralRealtimeEngine(BaseRealtimeTranscribeEngine):
     ]
 
     _TIMESTAMP_PATTERN = re.compile(r"<\|(\d+\.\d+)\|>")
+    _WORD_DURATION_FALLBACK_S = 0.08
 
     def __init__(self) -> None:
         super().__init__()
@@ -194,7 +195,7 @@ class VoxtralRealtimeEngine(BaseRealtimeTranscribeEngine):
             if not word_text:
                 continue
 
-            next_time = current_time + 0.08
+            next_time = current_time + self._WORD_DURATION_FALLBACK_S
             for j in range(i + 1, len(parts)):
                 try:
                     next_time = float(parts[j])

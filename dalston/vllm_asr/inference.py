@@ -28,7 +28,18 @@ def transcribe_audio_path(
     sampling_params = SamplingParams(**adapter.get_sampling_kwargs())
     outputs = llm.chat(messages=messages, sampling_params=sampling_params)
     raw_text = outputs[0].outputs[0].text
-    transcript = adapter.parse_output(raw_text, language)
+
+    audio_duration: float | None = None
+    try:
+        import soundfile as sf
+
+        info = sf.info(str(audio_path))
+        if info.samplerate and info.frames:
+            audio_duration = float(info.frames) / float(info.samplerate)
+    except Exception:
+        audio_duration = None
+
+    transcript = adapter.parse_output(raw_text, language, duration=audio_duration)
     return raw_text, transcript
 
 
@@ -39,7 +50,11 @@ def transcribe_audio_array(
     language: str | None,
     sample_rate: int = 16000,
 ) -> tuple[str, Transcript]:
-    """Run vLLM audio inference from an in-memory numpy waveform."""
+    """Run vLLM audio inference from an in-memory numpy waveform.
+
+    Callers should execute this in a worker thread (``asyncio.to_thread``)
+    when invoked from async code because vLLM chat inference is blocking.
+    """
     with temporary_wav_file(audio=audio, sample_rate=sample_rate) as audio_path:
         return transcribe_audio_path(
             llm=llm,

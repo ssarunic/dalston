@@ -24,7 +24,11 @@ def _cleanup_injected_modules():
 def _load_engine_class():
     """Load VoxtralRealtimeEngine directly from engine file."""
     sys.modules.pop("voxtral_rt_engine_test", None)
-    engine_path = Path("engines/stt-rt/voxtral/engine.py")
+    engine_path = (
+        Path(__file__).resolve().parents[2] / "engines/stt-rt/voxtral/engine.py"
+    )
+    if not engine_path.exists():
+        pytest.skip(f"Voxtral realtime engine not found at {engine_path}")
     spec = importlib.util.spec_from_file_location("voxtral_rt_engine_test", engine_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

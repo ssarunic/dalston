@@ -87,6 +87,7 @@ class VoxtralAdapter(AudioLLMAdapter):
         self,
         raw_text: str,
         language: str | None = None,
+        duration: float | None = None,
     ) -> Transcript:
         """Parse Voxtral output to Transcript.
 
@@ -106,13 +107,14 @@ class VoxtralAdapter(AudioLLMAdapter):
         effective_language = language if language and language != "auto" else "en"
         if effective_language not in SUPPORTED_LANGUAGES:
             effective_language = "en"
+        segment_end = max(duration or 0.0, 0.001 if text else 0.0)
 
         return Transcript(
             text=text,
             segments=[
                 TranscriptSegment(
                     start=0.0,
-                    end=0.0,
+                    end=segment_end,
                     text=text,
                 ),
             ],

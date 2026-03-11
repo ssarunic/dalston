@@ -340,6 +340,23 @@ async def test_openai_client_to_worker_commit_chains_previous_item_id():
     assert committed_events[1]["previous_item_id"] == "item_seed"
 
 
+def test_openai_session_state_bounds_committed_item_queue(monkeypatch):
+    """Committed queue should stay bounded even without finalized transcripts."""
+    monkeypatch.setattr(OpenAISessionState, "MAX_COMMITTED_QUEUE_DEPTH", 2)
+    session_state = OpenAISessionState()
+
+    session_state.pending_item_id = "item_a"
+    session_state.commit_active_item()
+    session_state.pending_item_id = "item_b"
+    session_state.commit_active_item()
+    session_state.pending_item_id = "item_c"
+    session_state.commit_active_item()
+
+    assert len(session_state.committed_item_queue) == 2
+    assert session_state.committed_item_queue == ["item_b", "item_c"]
+    assert session_state.active_transcript_item_id == "item_b"
+
+
 @pytest.mark.asyncio
 async def test_openai_client_to_worker_accepts_flat_session_update_shape():
     """Flat session.update payload should normalize and update worker config."""
@@ -407,6 +424,60 @@ async def test_openai_client_to_worker_accepts_flat_session_update_shape():
         updated_event["session"]["input_audio_transcription"]["prompt"]
         == "bonjour le monde"
     )
+
+
+@pytest.mark.asyncio
+async def test_openai_client_to_worker_rejects_double_wrapped_session_update_shape():
+    """Nested {'session': {'session': ...}} payload should be rejected."""
+    client_ws = _FakeClientReceiver(
+        [
+            {
+                "type": "websocket.receive",
+                "text": json.dumps(
+                    {
+                        "type": "session.update",
+                        "session": {
+                            "session": {
+                                "input_audio_transcription": {
+                                    "model": "gpt-4o-transcribe"
+                                }
+                            }
+                        },
+                    }
+                ),
+            },
+            {"type": "websocket.disconnect"},
+        ]
+    )
+    worker_ws = _FakeWorkerSender()
+    session_state = OpenAISessionState()
+    session_config = {
+        "language": "auto",
+        "encoding": "pcm_s16le",
+        "client_sample_rate": 24000,
+        "sample_rate": 16000,
+        "enable_vad": True,
+        "interim_results": True,
+        "word_timestamps": False,
+        "vocabulary": None,
+    }
+
+    await _openai_client_to_worker(
+        client_ws=client_ws,
+        worker_ws=worker_ws,
+        session_id="sess_nested",
+        session_config=session_config,
+        session_state=session_state,
+    )
+
+    error_event = next(
+        payload for payload in client_ws.sent_json if payload["type"] == "error"
+    )
+    assert error_event["error"]["code"] == "invalid_request"
+    assert "Nested payload" in error_event["error"]["message"]
+
+    text_payloads = [json.loads(p) for p in worker_ws.sent if isinstance(p, str)]
+    assert all(payload.get("type") != "config" for payload in text_payloads)
 
 
 def _build_rest_realtime_create_app(api_key: APIKey) -> tuple[FastAPI, AsyncMock]:
@@ -521,6 +592,38 @@ def test_openai_realtime_session_create_endpoint_accepts_wrapped_session_shape()
     assert payload["client_secret"]["value"] == "tk_wrapped"
     assert payload["input_audio_transcription"]["model"] == "gpt-4o-transcribe"
     create_token_mock.assert_awaited_once()
+
+
+def test_openai_realtime_session_create_endpoint_rejects_double_wrapped_session_shape():
+    """REST create endpoint should reject nested {'session': {'session': ...}}."""
+    api_key = _build_api_key()
+    app, _ = _build_rest_realtime_create_app(api_key)
+
+    with patch(
+        "dalston.gateway.api.v1.openai_realtime.AuthService.create_session_token",
+        new_callable=AsyncMock,
+    ) as create_token_mock:
+        client = TestClient(app)
+        response = client.post(
+            "/v1/realtime/transcription_sessions",
+            headers={"Authorization": "Bearer dk_test"},
+            json={
+                "session": {
+                    "session": {
+                        "input_audio_transcription": {"model": "gpt-4o-transcribe"}
+                    }
+                }
+            },
+        )
+
+    assert response.status_code == 400
+    payload = response.json()
+    error = payload.get("error") or payload.get("detail", {}).get("error")
+    assert error is not None
+    assert error["code"] == "invalid_request"
+    assert error["param"] == "session"
+    assert "Nested payload" in error["message"]
+    create_token_mock.assert_not_awaited()
 
 
 def test_openai_realtime_session_create_endpoint_rejects_invalid_model():

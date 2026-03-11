@@ -14,10 +14,11 @@ import asyncio
 import base64
 import binascii
 import json
+import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 import structlog
 from fastapi import (
@@ -148,6 +149,10 @@ class OpenAISessionState:
     Used to correlate item_ids between committed events and transcript events.
     """
 
+    MAX_COMMITTED_QUEUE_DEPTH: ClassVar[int] = int(
+        os.environ.get("DALSTON_OPENAI_RT_MAX_COMMITTED_ITEMS", "64")
+    )
+
     pending_item_id: str = field(default_factory=generate_item_id)
     active_transcript_item_id: str | None = None
     last_committed_item_id: str | None = None
@@ -190,6 +195,18 @@ class OpenAISessionState:
         previous_item_id = self.last_committed_item_id
         self.last_committed_item_id = item_id
         self.committed_item_queue.append(item_id)
+        if len(self.committed_item_queue) > self.MAX_COMMITTED_QUEUE_DEPTH:
+            dropped_item_id = self.committed_item_queue.pop(0)
+            logger.warning(
+                "openai_realtime_item_queue_overflow",
+                max_depth=self.MAX_COMMITTED_QUEUE_DEPTH,
+                dropped_item_id=dropped_item_id,
+                queue_depth=len(self.committed_item_queue),
+            )
+            if self.active_transcript_item_id == dropped_item_id:
+                self.active_transcript_item_id = (
+                    self.committed_item_queue[0] if self.committed_item_queue else None
+                )
         if self.active_transcript_item_id is None:
             self.active_transcript_item_id = item_id
         self.pending_item_id = generate_item_id()
@@ -473,7 +490,17 @@ async def create_openai_realtime_transcription_session(
     else:
         session_input = raw_body
 
-    normalized_session = _normalize_session_update_payload({"session": session_input})
+    try:
+        normalized_session = _normalize_session_update_payload(
+            {"session": session_input}
+        )
+    except ValueError as exc:
+        raise_openai_error(
+            400,
+            str(exc),
+            param="session",
+            code="invalid_request",
+        )
     transcription_cfg = normalized_session.get("input_audio_transcription", {})
     if not isinstance(transcription_cfg, dict):
         raise_openai_error(
@@ -879,6 +906,8 @@ def _normalize_session_update_payload(data: dict) -> dict:
         session: dict = {k: v for k, v in data.items() if k not in {"type", "event_id"}}
     elif isinstance(raw_session, dict):
         session = dict(raw_session)
+        if isinstance(session.get("session"), dict):
+            raise ValueError("Nested payload {'session': {'session': ...}} is invalid")
     else:
         return {}
 
@@ -1036,7 +1065,7 @@ async def _openai_client_to_worker(
                     await worker_ws.send(message["bytes"])
 
     except Exception as e:
-        logger.debug(
+        logger.exception(
             "openai_client_to_worker_ended",
             session_id=session_id,
             error=str(e),
@@ -1059,7 +1088,21 @@ async def _handle_session_update(
 
     Updates session configuration, forwards to worker, and sends acknowledgment.
     """
-    session = _normalize_session_update_payload(data)
+    try:
+        session = _normalize_session_update_payload(data)
+    except ValueError as exc:
+        await client_ws.send_json(
+            {
+                "type": "error",
+                "event_id": generate_event_id(),
+                "error": {
+                    "type": "invalid_request_error",
+                    "code": "invalid_request",
+                    "message": str(exc),
+                },
+            }
+        )
+        return
 
     # Update audio format
     audio_format = session.get("input_audio_format", "pcm16")
@@ -1288,7 +1331,7 @@ async def _openai_worker_to_client(
                 pass
 
     except Exception as e:
-        logger.debug(
+        logger.exception(
             "openai_worker_to_client_ended",
             session_id=session_id,
             error=str(e),

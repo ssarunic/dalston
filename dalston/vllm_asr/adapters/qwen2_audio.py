@@ -78,6 +78,7 @@ class Qwen2AudioAdapter(AudioLLMAdapter):
         self,
         raw_text: str,
         language: str | None = None,
+        duration: float | None = None,
     ) -> Transcript:
         """Parse Qwen2-Audio output to Transcript.
 
@@ -91,13 +92,14 @@ class Qwen2AudioAdapter(AudioLLMAdapter):
         text = raw_text.strip()
 
         effective_language = language if language and language != "auto" else "en"
+        segment_end = max(duration or 0.0, 0.001 if text else 0.0)
 
         return Transcript(
             text=text,
             segments=[
                 TranscriptSegment(
                     start=0.0,
-                    end=0.0,
+                    end=segment_end,
                     text=text,
                 ),
             ],
