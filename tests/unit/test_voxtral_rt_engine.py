@@ -91,6 +91,8 @@ class TestVoxtralRtVllmEngine:
             assert result.text == "hello world"
             assert result.runtime == "vllm-asr"
             assert result.timestamp_granularity.value == "segment"
+            assert result.segments[0].start == 0.0
+            assert result.segments[0].end == 0.02
             assert any("Word timestamps requested" in w for w in result.warnings)
 
     def test_transcribe_parses_timestamp_tokens_into_words(self):

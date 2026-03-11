@@ -241,6 +241,7 @@ class VoxtralRealtimeEngine(BaseRealtimeTranscribeEngine):
             audio = audio.astype(np.float32)
         if audio.ndim > 1:
             audio = audio.squeeze()
+        audio_duration = float(audio.shape[0]) / 16000.0
 
         raw_text, adapter_transcript = transcribe_audio_array(
             llm=self._llm,
@@ -266,7 +267,7 @@ class VoxtralRealtimeEngine(BaseRealtimeTranscribeEngine):
 
         words = parsed_words if include_words else None
         seg_start = words[0].start if words else 0.0
-        seg_end = words[-1].end if words else 0.0
+        seg_end = words[-1].end if words else round(audio_duration, 3)
 
         segments = [
             self.build_segment(
