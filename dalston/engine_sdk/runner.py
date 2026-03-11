@@ -642,7 +642,7 @@ class EngineRunner:
                 process_time = time.time() - process_start
 
                 # Boundary validation: validate transcribe outputs against
-                # DalstonTranscriptV1 (warn-only during migration).
+                # Transcript (warn-only during migration).
                 if task_input.stage == "transcribe":
                     self._validate_transcript_output(output, task_id)
 
@@ -787,13 +787,13 @@ class EngineRunner:
         output: EngineOutput,
         task_id: str,
     ) -> None:
-        """Validate transcribe-stage output against DalstonTranscriptV1.
+        """Validate transcribe-stage output against Transcript.
 
         During the migration period this logs a warning on failure rather
         than rejecting the output. Set DALSTON_STRICT_TRANSCRIPT_VALIDATION=true
         to promote warnings to errors.
         """
-        from dalston.common.pipeline_types import DalstonTranscriptV1
+        from dalston.common.pipeline_types import Transcript
 
         strict = os.environ.get(
             "DALSTON_STRICT_TRANSCRIPT_VALIDATION", ""
@@ -801,18 +801,18 @@ class EngineRunner:
 
         output_dict = output.to_dict()
         try:
-            DalstonTranscriptV1.model_validate(output_dict)
+            Transcript.model_validate(output_dict)
         except Exception as e:
             if strict:
                 raise ValueError(
-                    f"Transcribe output failed DalstonTranscriptV1 validation: {e}"
+                    f"Transcribe output failed Transcript validation: {e}"
                 ) from e
             logger.warning(
                 "transcript_v1_validation_failed",
                 task_id=task_id,
                 error=str(e),
-                hint="Engine output does not conform to DalstonTranscriptV1. "
-                "Migrate engine to return DalstonTranscriptV1 for strict mode.",
+                hint="Engine output does not conform to Transcript. "
+                "Migrate engine to return Transcript for strict mode.",
             )
 
     def _save_task_output(

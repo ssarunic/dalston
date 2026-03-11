@@ -42,7 +42,7 @@ def test_runtime_engines_have_new_process_signature() -> None:
         )
         has_v1_signature = (
             "def transcribe_audio(" in text
-            and "-> DalstonTranscriptV1" in text
+            and "-> Transcript" in text
         )
         if not has_m51_signature and not has_v1_signature:
             missing.append(str(file_path))

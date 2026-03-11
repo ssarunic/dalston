@@ -29,7 +29,7 @@ import structlog
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
-    DalstonTranscriptV1,
+    Transcript,
     TranscriptWord,
 )
 from dalston.engine_sdk.cores.parakeet_onnx_core import ParakeetOnnxCore
@@ -46,7 +46,7 @@ class ParakeetOnnxStreamingEngine(BaseRealtimeTranscribeEngine):
     ONNX engine. The RT adapter handles:
     - Model ID normalization
     - VAD-chunked audio input (numpy arrays)
-    - Output formatting to DalstonTranscriptV1
+    - Output formatting to Transcript
 
     When run standalone, creates its own ParakeetOnnxCore in load_models().
     When used within a unified runner, accepts an injected core to share a
@@ -98,7 +98,7 @@ class ParakeetOnnxStreamingEngine(BaseRealtimeTranscribeEngine):
         language: str,
         model_variant: str,
         vocabulary: list[str] | None = None,
-    ) -> DalstonTranscriptV1:
+    ) -> Transcript:
         """Transcribe an audio segment via shared ParakeetOnnxCore.
 
         Args:
@@ -108,7 +108,7 @@ class ParakeetOnnxStreamingEngine(BaseRealtimeTranscribeEngine):
             vocabulary: List of terms to boost recognition (not supported for ONNX)
 
         Returns:
-            DalstonTranscriptV1 with text, words, language, confidence
+            Transcript with text, words, language, confidence
         """
         if self._core is None:
             raise RuntimeError(
@@ -138,7 +138,7 @@ class ParakeetOnnxStreamingEngine(BaseRealtimeTranscribeEngine):
         # Delegate to shared core
         result = self._core.transcribe(audio, model_id)
 
-        # Format core result into DalstonTranscriptV1
+        # Format core result into Transcript
         segments = []
         text_parts: list[str] = []
 

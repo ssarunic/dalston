@@ -22,7 +22,7 @@ import riva.client
 import riva.client.proto.riva_asr_pb2 as riva_asr_pb2
 
 from dalston.common.pipeline_types import (
-    DalstonTranscriptV1,
+    Transcript,
     TranscriptSegment,
     TranscriptWord,
 )
@@ -45,7 +45,7 @@ class RivaBatchEngine(BaseBatchTranscribeEngine):
 
     Reads audio files from disk, streams them in chunks to NIM via
     streaming_recognize(interim_results=False), and collects final
-    segments into a DalstonTranscriptV1.
+    segments into a Transcript.
     """
 
     def __init__(self) -> None:
@@ -83,7 +83,7 @@ class RivaBatchEngine(BaseBatchTranscribeEngine):
 
     def transcribe_audio(
         self, engine_input: EngineInput, ctx: BatchTaskContext
-    ) -> DalstonTranscriptV1:
+    ) -> Transcript:
         """Transcribe audio via Riva NIM streaming gRPC.
 
         Args:
@@ -91,7 +91,7 @@ class RivaBatchEngine(BaseBatchTranscribeEngine):
             ctx: Batch task context for tracing/logging
 
         Returns:
-            DalstonTranscriptV1 with text, segments, and words
+            Transcript with text, segments, and words
         """
         audio_path = engine_input.audio_path
         config = engine_input.config

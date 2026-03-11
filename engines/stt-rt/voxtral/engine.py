@@ -20,7 +20,7 @@ import torch
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
-    DalstonTranscriptV1,
+    Transcript,
     TranscriptWord,
 )
 from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
@@ -228,7 +228,7 @@ class VoxtralStreamingEngine(BaseRealtimeTranscribeEngine):
         language: str,
         model_variant: str,
         vocabulary: list[str] | None = None,
-    ) -> DalstonTranscriptV1:
+    ) -> Transcript:
         """Transcribe an audio segment.
 
         Args:
@@ -238,7 +238,7 @@ class VoxtralStreamingEngine(BaseRealtimeTranscribeEngine):
             vocabulary: List of terms to boost recognition (not supported)
 
         Returns:
-            DalstonTranscriptV1 with text, words, language, confidence
+            Transcript with text, words, language, confidence
         """
         if self._model is None:
             raise RuntimeError("Model not loaded. Call load_models() first.")

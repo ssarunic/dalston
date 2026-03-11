@@ -509,7 +509,7 @@ class TranscribeOutput(BaseModel):
 
 
 # =============================================================================
-# Unified Transcript Contract (DalstonTranscriptV1)
+# Unified Transcript Contract (Transcript)
 # =============================================================================
 
 
@@ -578,7 +578,7 @@ class TranscriptSegment(BaseModel):
     )
 
 
-class DalstonTranscriptV1(BaseModel):
+class Transcript(BaseModel):
     """Canonical transcript output — returned by every transcription runtime.
 
     Subsumes both ``TranscribeOutput`` (batch) and ``TranscribeResult`` (realtime).
@@ -643,7 +643,7 @@ class WordMetaKeys:
 
 
 class TranscriptMetaKeys:
-    """Well-known metadata keys for DalstonTranscriptV1.metadata."""
+    """Well-known metadata keys for Transcript.metadata."""
 
     MODEL_ID = "model_id"
 
@@ -878,7 +878,7 @@ PreviousOutputs = dict[
     str,
     PrepareOutput
     | TranscribeOutput
-    | DalstonTranscriptV1
+    | Transcript
     | AlignOutput
     | DiarizeOutput
     | PIIDetectOutput

@@ -1,4 +1,4 @@
-"""Base class for batch transcription engines returning DalstonTranscriptV1.
+"""Base class for batch transcription engines returning Transcript.
 
 Provides ``_to_dalston_transcript()`` to eliminate per-engine mapping
 boilerplate. Concrete engines implement ``transcribe_audio()`` and return
@@ -12,7 +12,7 @@ from typing import Any
 from dalston.common.pipeline_types import (
     AlignmentMethod,
     Character,
-    DalstonTranscriptV1,
+    Transcript,
     Phoneme,
     TimestampGranularity,
     TranscriptSegment,
@@ -27,7 +27,7 @@ class BaseBatchTranscribeEngine(Engine):
     """Base class for batch transcription engines.
 
     Subclasses implement ``transcribe_audio()`` which returns a
-    ``DalstonTranscriptV1``. The ``process()`` method wraps it in an
+    ``Transcript``. The ``process()`` method wraps it in an
     ``EngineOutput`` envelope.
 
     Helper methods are provided for building the canonical types from
@@ -51,8 +51,8 @@ class BaseBatchTranscribeEngine(Engine):
         self,
         engine_input: EngineInput,
         ctx: BatchTaskContext,
-    ) -> DalstonTranscriptV1:
-        """Transcribe audio and return a DalstonTranscriptV1.
+    ) -> Transcript:
+        """Transcribe audio and return a Transcript.
 
         Must be implemented by subclasses.
 
@@ -136,8 +136,8 @@ class BaseBatchTranscribeEngine(Engine):
         channel: int | None = None,
         warnings: list[str] | None = None,
         **extra: Any,
-    ) -> DalstonTranscriptV1:
-        """Build a ``DalstonTranscriptV1`` from assembled parts."""
+    ) -> Transcript:
+        """Build a ``Transcript`` from assembled parts."""
         has_words = any(
             seg.words for seg in segments if seg.words is not None
         )
@@ -145,7 +145,7 @@ class BaseBatchTranscribeEngine(Engine):
             TimestampGranularity.WORD if has_words else TimestampGranularity.SEGMENT
         )
 
-        return DalstonTranscriptV1(
+        return Transcript(
             text=text,
             segments=segments,
             language=language,

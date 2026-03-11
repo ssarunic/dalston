@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from dalston.common.pipeline_types import DalstonTranscriptV1
+    from dalston.common.pipeline_types import Transcript
 
 
 @dataclass
@@ -50,7 +50,7 @@ class TranscribeResult:
     Word timestamps are relative to the audio segment (0-based).
 
     .. deprecated::
-        Prefer returning ``DalstonTranscriptV1`` from engines and using
+        Prefer returning ``Transcript`` from engines and using
         ``TranscriptAssembler.add_transcript()`` instead.
     """
 
@@ -132,10 +132,10 @@ class TranscriptAssembler:
 
     def add_transcript(
         self,
-        transcript: DalstonTranscriptV1,
+        transcript: Transcript,
         audio_duration: float,
     ) -> Segment:
-        """Add a DalstonTranscriptV1 result to the session transcript.
+        """Add a Transcript result to the session transcript.
 
         Extracts words from all transcript segments and adjusts timestamps
         to the session timeline. This is the preferred method for engines

@@ -31,7 +31,7 @@ from typing import Any
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
-    DalstonTranscriptV1,
+    Transcript,
     TranscriptSegment,
     TranscriptWord,
 )
@@ -61,7 +61,7 @@ class ParakeetOnnxEngine(BaseBatchTranscribeEngine):
 
     Delegates inference to ParakeetOnnxCore, which is shared with the RT
     ONNX engine. The batch adapter handles file path input and output
-    formatting to DalstonTranscriptV1.
+    formatting to Transcript.
 
     Supports both GPU (CUDA/TensorRT) and CPU inference. CPU inference with
     INT8 quantization achieves competitive performance for batch processing.
@@ -109,7 +109,7 @@ class ParakeetOnnxEngine(BaseBatchTranscribeEngine):
 
     def transcribe_audio(
         self, engine_input: EngineInput, ctx: BatchTaskContext
-    ) -> DalstonTranscriptV1:
+    ) -> Transcript:
         """Transcribe audio using Parakeet via ONNX Runtime and shared core.
 
         Args:
@@ -117,7 +117,7 @@ class ParakeetOnnxEngine(BaseBatchTranscribeEngine):
             ctx: Batch task context
 
         Returns:
-            DalstonTranscriptV1 with text, segments, and words
+            Transcript with text, segments, and words
         """
         audio_path = engine_input.audio_path
         config = engine_input.config
@@ -133,7 +133,7 @@ class ParakeetOnnxEngine(BaseBatchTranscribeEngine):
         # Delegate to shared core
         core_result = self._core.transcribe(str(audio_path), model_id)
 
-        # Convert core result to DalstonTranscriptV1
+        # Convert core result to Transcript
         segments: list[TranscriptSegment] = []
         word_count = 0
 

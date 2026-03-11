@@ -36,7 +36,7 @@ import torch
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
-    DalstonTranscriptV1,
+    Transcript,
     TranscriptSegment,
     TranscriptWord,
 )
@@ -253,7 +253,7 @@ class ParakeetEngine(BaseBatchTranscribeEngine):
 
     def transcribe_audio(
         self, engine_input: EngineInput, ctx: BatchTaskContext
-    ) -> DalstonTranscriptV1:
+    ) -> Transcript:
         """Transcribe audio using Parakeet CTC or TDT via shared ParakeetCore.
 
         Args:
@@ -261,7 +261,7 @@ class ParakeetEngine(BaseBatchTranscribeEngine):
             ctx: Batch task context for tracing/logging
 
         Returns:
-            DalstonTranscriptV1 with text, segments, and words
+            Transcript with text, segments, and words
         """
         audio_path = engine_input.audio_path
         config = engine_input.config
@@ -315,7 +315,7 @@ class ParakeetEngine(BaseBatchTranscribeEngine):
             )
             core_result = self._core.transcribe(str(audio_path), model_id)
 
-        # Convert core result to DalstonTranscriptV1 format
+        # Convert core result to Transcript format
         segments: list[TranscriptSegment] = []
         all_words: list[TranscriptWord] = []
 

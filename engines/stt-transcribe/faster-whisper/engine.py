@@ -26,7 +26,7 @@ from typing import Any
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
-    DalstonTranscriptV1,
+    Transcript,
     TranscriptSegment,
     TranscriptWord,
 )
@@ -44,7 +44,7 @@ class WhisperEngine(BaseBatchTranscribeEngine):
     This engine delegates inference to TranscribeCore, which is shared
     with the realtime faster-whisper engine. The batch adapter handles:
     - Task config parsing
-    - Output formatting to DalstonTranscriptV1
+    - Output formatting to Transcript
     - Heartbeat state reporting
 
     When run standalone, creates its own TranscribeCore. When used within
@@ -85,7 +85,7 @@ class WhisperEngine(BaseBatchTranscribeEngine):
 
     def transcribe_audio(
         self, engine_input: EngineInput, ctx: BatchTaskContext
-    ) -> DalstonTranscriptV1:
+    ) -> Transcript:
         """Transcribe audio using Faster-Whisper via shared TranscribeCore.
 
         Args:
@@ -93,7 +93,7 @@ class WhisperEngine(BaseBatchTranscribeEngine):
             ctx: Batch task context for tracing/logging
 
         Returns:
-            DalstonTranscriptV1 with text, segments, and language
+            Transcript with text, segments, and language
         """
         audio_path = engine_input.audio_path
         config = engine_input.config
@@ -156,7 +156,7 @@ class WhisperEngine(BaseBatchTranscribeEngine):
                 config=transcribe_config,
             )
 
-            # Format core result into DalstonTranscriptV1
+            # Format core result into Transcript
             segments: list[TranscriptSegment] = []
             full_text_parts: list[str] = []
 

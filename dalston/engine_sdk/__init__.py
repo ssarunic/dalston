@@ -46,7 +46,7 @@ from dalston.common.pipeline_types import (
     AlignOutput,
     AudioMedia,
     AudioRedactOutput,
-    DalstonTranscriptV1,
+    Transcript,
     DiarizeOutput,
     MergedSegment,
     MergeOutput,
@@ -123,7 +123,7 @@ __all__ = [
     # Stage outputs
     "AlignOutput",
     "AudioRedactOutput",
-    "DalstonTranscriptV1",
+    "Transcript",
     "DiarizeOutput",
     "MergeOutput",
     "PIIDetectOutput",

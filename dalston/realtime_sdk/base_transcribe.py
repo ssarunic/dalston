@@ -1,8 +1,8 @@
-"""Base class for real-time transcription engines returning DalstonTranscriptV1.
+"""Base class for real-time transcription engines returning Transcript.
 
 Provides a bridge between the new unified transcript contract and the
 existing ``SessionHandler`` which expects ``TranscribeResult``. Concrete
-engines implement ``transcribe_v1()`` and return ``DalstonTranscriptV1``;
+engines implement ``transcribe_v1()`` and return ``Transcript``;
 the base class auto-converts to ``TranscribeResult`` for the session layer.
 """
 
@@ -15,7 +15,7 @@ import numpy as np
 from dalston.common.pipeline_types import (
     AlignmentMethod,
     Character,
-    DalstonTranscriptV1,
+    Transcript,
     Phoneme,
     TimestampGranularity,
     TranscriptSegment,
@@ -26,7 +26,7 @@ from dalston.realtime_sdk.base import RealtimeEngine
 
 
 class BaseRealtimeTranscribeEngine(RealtimeEngine):
-    """Base class for real-time engines that produce DalstonTranscriptV1.
+    """Base class for real-time engines that produce Transcript.
 
     Subclasses implement ``transcribe_v1()`` which returns the canonical
     transcript type. The ``transcribe()`` method auto-converts to the
@@ -43,7 +43,7 @@ class BaseRealtimeTranscribeEngine(RealtimeEngine):
         model_variant: str,
         vocabulary: list[str] | None = None,
     ) -> TranscribeResult:
-        """Convert DalstonTranscriptV1 to TranscribeResult for SessionHandler.
+        """Convert Transcript to TranscribeResult for SessionHandler.
 
         Subclasses should override ``transcribe_v1()`` instead.
         """
@@ -56,8 +56,8 @@ class BaseRealtimeTranscribeEngine(RealtimeEngine):
         language: str,
         model_variant: str,
         vocabulary: list[str] | None = None,
-    ) -> DalstonTranscriptV1:
-        """Transcribe audio and return a DalstonTranscriptV1.
+    ) -> Transcript:
+        """Transcribe audio and return a Transcript.
 
         Must be implemented by subclasses.
 
@@ -77,8 +77,8 @@ class BaseRealtimeTranscribeEngine(RealtimeEngine):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _to_transcribe_result(transcript: DalstonTranscriptV1) -> TranscribeResult:
-        """Convert a DalstonTranscriptV1 to a TranscribeResult."""
+    def _to_transcribe_result(transcript: Transcript) -> TranscribeResult:
+        """Convert a Transcript to a TranscribeResult."""
         words: list[Word] = []
         for seg in transcript.segments:
             if seg.words:
@@ -166,14 +166,14 @@ class BaseRealtimeTranscribeEngine(RealtimeEngine):
         alignment_method: AlignmentMethod = AlignmentMethod.UNKNOWN,
         warnings: list[str] | None = None,
         **extra: Any,
-    ) -> DalstonTranscriptV1:
-        """Build a ``DalstonTranscriptV1`` from assembled parts."""
+    ) -> Transcript:
+        """Build a ``Transcript`` from assembled parts."""
         has_words = any(seg.words for seg in segments if seg.words is not None)
         granularity = (
             TimestampGranularity.WORD if has_words else TimestampGranularity.SEGMENT
         )
 
-        return DalstonTranscriptV1(
+        return Transcript(
             text=text,
             segments=segments,
             language=language,

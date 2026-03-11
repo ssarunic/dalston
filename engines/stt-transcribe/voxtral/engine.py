@@ -18,7 +18,7 @@ import torch
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
-    DalstonTranscriptV1,
+    Transcript,
 )
 from dalston.engine_sdk import (
     BatchTaskContext,
@@ -147,7 +147,7 @@ class VoxtralEngine(BaseBatchTranscribeEngine):
 
     def transcribe_audio(
         self, engine_input: EngineInput, ctx: BatchTaskContext
-    ) -> DalstonTranscriptV1:
+    ) -> Transcript:
         """Transcribe audio using Voxtral.
 
         Args:
@@ -155,7 +155,7 @@ class VoxtralEngine(BaseBatchTranscribeEngine):
             ctx: Batch task context for tracing/logging
 
         Returns:
-            DalstonTranscriptV1 with text and segments
+            Transcript with text and segments
         """
         audio_path = engine_input.audio_path
         config = engine_input.config

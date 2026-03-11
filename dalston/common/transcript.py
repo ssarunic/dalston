@@ -14,7 +14,7 @@ import structlog
 
 from dalston.common.pipeline_types import (
     AlignOutput,
-    DalstonTranscriptV1,
+    Transcript,
     DiarizeOutput,
     MergedSegment,
     MergeOutput,
@@ -72,7 +72,7 @@ def assemble_transcript(
         transcribe_data,
     )
 
-    # Parse typed outputs if possible — try DalstonTranscriptV1 first
+    # Parse typed outputs if possible — try Transcript first
     transcript_v1 = _try_parse_transcript_v1(transcribe_data) if transcribe_data else None
     transcribe_output = _try_parse_transcribe(transcribe_data) if transcript_v1 is None else None
     align_output = _try_parse_align(align_data) if align_data else None
@@ -335,7 +335,7 @@ def assemble_per_channel_transcript(
 def _extract_segment_fields(seg: Any) -> dict[str, Any]:
     """Extract segment fields into a plain dict from any segment type."""
     if isinstance(seg, TranscriptSegment):
-        # DalstonTranscriptV1 segment — model-specific fields are in metadata
+        # Transcript segment — model-specific fields are in metadata
         return {
             "start": seg.start,
             "end": seg.end,
@@ -459,10 +459,10 @@ def _extract_transcribe_data(
     return text, language, language_confidence, raw_segments
 
 
-def _try_parse_transcript_v1(data: dict[str, Any]) -> DalstonTranscriptV1 | None:
-    """Try to parse transcribe data into a DalstonTranscriptV1."""
+def _try_parse_transcript_v1(data: dict[str, Any]) -> Transcript | None:
+    """Try to parse transcribe data into a Transcript."""
     try:
-        return DalstonTranscriptV1.model_validate(data)
+        return Transcript.model_validate(data)
     except Exception:
         return None
 
@@ -496,7 +496,7 @@ def _select_segments(
     transcribe_output: TranscribeOutput | None,
     align_output: AlignOutput | None,
     raw_segments: list,
-    transcript_v1: DalstonTranscriptV1 | None = None,
+    transcript_v1: Transcript | None = None,
 ) -> tuple[list[Segment] | list[TranscriptSegment] | list[dict], bool, list]:
     """Select the best available segments and determine word timestamp availability.
 
@@ -648,7 +648,7 @@ def _build_merged_segments(
 
     for idx, seg in enumerate(segments_source):
         if isinstance(seg, TranscriptSegment):
-            # DalstonTranscriptV1 segment
+            # Transcript segment
             seg_start = seg.start
             seg_end = seg.end
             seg_text = seg.text

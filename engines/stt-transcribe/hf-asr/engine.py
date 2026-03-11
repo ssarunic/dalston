@@ -30,7 +30,7 @@ import torch
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
-    DalstonTranscriptV1,
+    Transcript,
     TranscriptSegment,
     TranscriptWord,
 )
@@ -132,7 +132,7 @@ class HFASREngine(BaseBatchTranscribeEngine):
 
     def transcribe_audio(
         self, engine_input: EngineInput, ctx: BatchTaskContext
-    ) -> DalstonTranscriptV1:
+    ) -> Transcript:
         """Transcribe audio using a HuggingFace ASR pipeline.
 
         Args:
@@ -140,7 +140,7 @@ class HFASREngine(BaseBatchTranscribeEngine):
             ctx: Batch task context for tracing/logging
 
         Returns:
-            DalstonTranscriptV1 with text, segments, and language
+            Transcript with text, segments, and language
         """
         config = engine_input.config
 
@@ -183,7 +183,7 @@ class HFASREngine(BaseBatchTranscribeEngine):
             # Run ASR pipeline
             result = pipe(str(engine_input.audio_path), **pipe_kwargs)
 
-            # Normalize output to DalstonTranscriptV1 format
+            # Normalize output to Transcript format
             transcript = self._normalize_output(result, runtime_model_id, language, channel)
 
             self.logger.info(
@@ -205,8 +205,8 @@ class HFASREngine(BaseBatchTranscribeEngine):
         model_id: str,
         language: str | None,
         channel: int | None,
-    ) -> DalstonTranscriptV1:
-        """Normalize HuggingFace pipeline output to DalstonTranscriptV1.
+    ) -> Transcript:
+        """Normalize HuggingFace pipeline output to Transcript.
 
         HF pipeline returns different formats based on model architecture:
         - Whisper: {"text": "...", "chunks": [{"text": "...", "timestamp": (start, end)}]}
@@ -220,7 +220,7 @@ class HFASREngine(BaseBatchTranscribeEngine):
             channel: Audio channel index or None
 
         Returns:
-            Normalized DalstonTranscriptV1
+            Normalized Transcript
         """
         text = result.get("text", "").strip()
         chunks = result.get("chunks", [])

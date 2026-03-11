@@ -1,11 +1,11 @@
-"""Contract parity tests for DalstonTranscriptV1.
+"""Contract parity tests for Transcript.
 
 Validates that:
 1. The schema can be instantiated with required fields
 2. Model-specific fields land in metadata, not as top-level keys
 3. Round-trip serialization preserves all data
 4. Cross-runtime field coverage is consistent
-5. DalstonTranscriptV1 can be consumed by transcript assembly
+5. Transcript can be consumed by transcript assembly
 """
 
 import pytest
@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from dalston.common.pipeline_types import (
     AlignmentMethod,
     Character,
-    DalstonTranscriptV1,
+    Transcript,
     Phoneme,
     SegmentMetaKeys,
     TimestampGranularity,
@@ -64,7 +64,7 @@ def _make_transcript(**overrides):
         "alignment_method": AlignmentMethod.ATTENTION,
     }
     defaults.update(overrides)
-    return DalstonTranscriptV1(**defaults)
+    return Transcript(**defaults)
 
 
 # ---------------------------------------------------------------------------
@@ -73,11 +73,11 @@ def _make_transcript(**overrides):
 
 
 class TestSchemaConformance:
-    """Test that DalstonTranscriptV1 validates required fields and rejects unknown ones."""
+    """Test that Transcript validates required fields and rejects unknown ones."""
 
     def test_valid_minimal(self):
         """Minimal valid transcript with just required fields."""
-        t = DalstonTranscriptV1(
+        t = Transcript(
             text="hello",
             segments=[TranscriptSegment(start=0.0, end=1.0, text="hello")],
             language="en",
@@ -101,7 +101,7 @@ class TestSchemaConformance:
     def test_rejects_extra_fields(self):
         """StrictModel rejects unknown top-level fields."""
         with pytest.raises(ValidationError):
-            DalstonTranscriptV1(
+            Transcript(
                 text="hello",
                 segments=[TranscriptSegment(start=0.0, end=1.0, text="hello")],
                 language="en",
@@ -298,7 +298,7 @@ class TestRoundTrip:
             warnings=["low confidence"],
         )
         json_str = original.model_dump_json()
-        restored = DalstonTranscriptV1.model_validate_json(json_str)
+        restored = Transcript.model_validate_json(json_str)
 
         assert restored.text == original.text
         assert restored.language == original.language
@@ -316,13 +316,13 @@ class TestRoundTrip:
         """Serialize to dict and deserialize — no data loss."""
         original = _make_transcript()
         data = original.model_dump(mode="json")
-        restored = DalstonTranscriptV1.model_validate(data)
+        restored = Transcript.model_validate(data)
 
         assert restored == original
 
     def test_round_trip_with_metadata(self):
         """Metadata at all levels survives round-trip."""
-        original = DalstonTranscriptV1(
+        original = Transcript(
             text="test",
             segments=[
                 TranscriptSegment(
@@ -346,7 +346,7 @@ class TestRoundTrip:
         )
 
         data = original.model_dump(mode="json")
-        restored = DalstonTranscriptV1.model_validate(data)
+        restored = Transcript.model_validate(data)
 
         assert restored.metadata["model"] == "test-model"
         assert restored.segments[0].metadata["compression_ratio"] == 1.2
@@ -354,7 +354,7 @@ class TestRoundTrip:
 
     def test_round_trip_with_restored_fields(self):
         """Characters, phonemes, segment id/is_final/is_speech survive round-trip."""
-        original = DalstonTranscriptV1(
+        original = Transcript(
             text="test",
             segments=[
                 TranscriptSegment(
@@ -386,7 +386,7 @@ class TestRoundTrip:
         )
 
         data = original.model_dump(mode="json")
-        restored = DalstonTranscriptV1.model_validate(data)
+        restored = Transcript.model_validate(data)
 
         seg = restored.segments[0]
         assert seg.id == "seg-1"
@@ -475,9 +475,9 @@ class TestCrossRuntimeCoverage:
 
     @pytest.mark.parametrize("runtime", list(_RUNTIME_FIXTURES.keys()))
     def test_runtime_fixture_validates(self, runtime):
-        """Each runtime fixture validates as DalstonTranscriptV1."""
+        """Each runtime fixture validates as Transcript."""
         data = _RUNTIME_FIXTURES[runtime]
-        transcript = DalstonTranscriptV1.model_validate(data)
+        transcript = Transcript.model_validate(data)
 
         # Required fields always present
         assert transcript.text
@@ -489,21 +489,21 @@ class TestCrossRuntimeCoverage:
     def test_runtime_granularity_populated(self, runtime):
         """Each runtime populates timestamp_granularity."""
         data = _RUNTIME_FIXTURES[runtime]
-        transcript = DalstonTranscriptV1.model_validate(data)
+        transcript = Transcript.model_validate(data)
         assert transcript.timestamp_granularity in TimestampGranularity
 
     @pytest.mark.parametrize("runtime", list(_RUNTIME_FIXTURES.keys()))
     def test_runtime_alignment_method_populated(self, runtime):
         """Each runtime populates alignment_method."""
         data = _RUNTIME_FIXTURES[runtime]
-        transcript = DalstonTranscriptV1.model_validate(data)
+        transcript = Transcript.model_validate(data)
         assert transcript.alignment_method in AlignmentMethod
 
     @pytest.mark.parametrize("runtime", list(_RUNTIME_FIXTURES.keys()))
     def test_model_specific_fields_in_metadata(self, runtime):
         """Model-specific fields are in segment/word metadata, not top-level."""
         data = _RUNTIME_FIXTURES[runtime]
-        transcript = DalstonTranscriptV1.model_validate(data)
+        transcript = Transcript.model_validate(data)
 
         for seg in transcript.segments:
             # These should NOT be top-level segment fields
@@ -520,10 +520,10 @@ class TestCrossRuntimeCoverage:
 
 
 class TestTranscriptAssembly:
-    """Test that DalstonTranscriptV1 integrates with transcript assembly."""
+    """Test that Transcript integrates with transcript assembly."""
 
     def test_assemble_with_v1_output(self):
-        """Transcript assembly works with DalstonTranscriptV1 stage output."""
+        """Transcript assembly works with Transcript stage output."""
         from dalston.common.transcript import assemble_transcript
 
         transcript_data = _RUNTIME_FIXTURES["faster-whisper"]
@@ -547,7 +547,7 @@ class TestTranscriptAssembly:
         assert result.metadata.language == "en"
 
     def test_assembler_add_transcript(self):
-        """TranscriptAssembler.add_transcript works with DalstonTranscriptV1."""
+        """TranscriptAssembler.add_transcript works with Transcript."""
         from dalston.realtime_sdk.assembler import TranscriptAssembler
 
         assembler = TranscriptAssembler()

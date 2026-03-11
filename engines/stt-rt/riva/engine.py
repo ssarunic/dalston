@@ -26,7 +26,7 @@ import structlog
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
-    DalstonTranscriptV1,
+    Transcript,
     TranscriptWord,
 )
 from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
@@ -72,7 +72,7 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
         language: str,
         model_variant: str,
         vocabulary: list[str] | None = None,
-    ) -> DalstonTranscriptV1:
+    ) -> Transcript:
         """Transcribe an audio segment via Riva NIM.
 
         Called by SessionHandler when VAD detects an utterance endpoint
@@ -85,7 +85,7 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
             vocabulary: Not supported yet
 
         Returns:
-            DalstonTranscriptV1 with text, words, language, confidence
+            Transcript with text, words, language, confidence
         """
         if self._asr is None:
             raise RuntimeError("ASR service not initialized — call load_models() first")

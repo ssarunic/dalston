@@ -12,7 +12,7 @@ from dalston.common.artifacts import MaterializedArtifact, ProducedArtifact
 from dalston.common.pipeline_types import (
     AlignOutput,
     AudioRedactOutput,
-    DalstonTranscriptV1,
+    Transcript,
     DiarizeOutput,
     PIIDetectOutput,
     PrepareOutput,
@@ -92,9 +92,9 @@ class EngineInput(Generic[PayloadT]):
     def get_transcribe_output(self, key: str = "transcribe") -> TranscribeOutput | None:
         return self._get_typed_output(key, TranscribeOutput)
 
-    def get_transcript_v1(self, key: str = "transcribe") -> DalstonTranscriptV1 | None:
-        """Get transcribe output as DalstonTranscriptV1 (returns None if not V1)."""
-        return self._get_typed_output(key, DalstonTranscriptV1)
+    def get_transcript_v1(self, key: str = "transcribe") -> Transcript | None:
+        """Get transcribe output as Transcript (returns None if not V1)."""
+        return self._get_typed_output(key, Transcript)
 
     def get_align_output(self, key: str = "align") -> AlignOutput | None:
         return self._get_typed_output(key, AlignOutput)
