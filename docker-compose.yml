@@ -290,6 +290,7 @@ services:
   # --- TRANSCRIBE STAGE ---
   # M36: Runtime-based transcription engines. Each runtime can load any compatible
   # model variant on demand via config["runtime_model_id"].
+  # Non-Riva realtime transcription is served by these unified services.
 
   # M63: Unified NeMo Parakeet (GPU) — one process, one model, batch + realtime.
   # Supports: nvidia/parakeet-ctc-0.6b, nvidia/parakeet-ctc-1.1b,
@@ -679,57 +680,6 @@ services:
       DALSTON_RUNTIME: audio-redactor
       DALSTON_WORKER_ID: redactor-1
     depends_on: *batch-depends
-    restart: unless-stopped
-
-  # ============================================================
-  # REALTIME STT WORKERS
-  # ============================================================
-
-  # M43: Faster Whisper (consolidated runtime - serves any model variant dynamically)
-  stt-rt-faster-whisper:
-    image: dalston/stt-rt-faster-whisper:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-rt/faster-whisper/Dockerfile
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_INSTANCE: stt-rt-faster-whisper
-      DALSTON_WORKER_PORT: 9000
-      DALSTON_MAX_SESSIONS: 4
-      # M43: Dynamic model loading configuration
-      DALSTON_MODEL_TTL_SECONDS: 3600  # Unload models idle for 1 hour
-      DALSTON_MAX_LOADED_MODELS: 2     # Keep at most 2 models loaded
-      DALSTON_MODEL_PRELOAD: large-v3-turbo  # Preload default model on startup
-    volumes:
-      - model-cache:/models
-    depends_on: *realtime-depends
-    healthcheck: *ws-healthcheck
-    deploy: *gpu-deploy
-    profiles: [gpu]
-    restart: unless-stopped
-
-
-  # Voxtral Mini 4B (GPU - multilingual realtime)
-  stt-rt-transcribe-voxtral-mini-4b:
-    image: dalston/stt-rt-transcribe-voxtral-mini-4b:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-rt/voxtral/Dockerfile
-      args:
-        MODEL_VARIANT: mini-4b
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_INSTANCE: stt-rt-transcribe-voxtral-mini-4b
-      DALSTON_MODEL_VARIANT: mini-4b
-      DALSTON_WORKER_PORT: 9000
-      DALSTON_MAX_SESSIONS: 4
-      DALSTON_TRANSCRIPTION_DELAY_MS: 480
-    volumes:
-      - model-cache:/models
-    depends_on: *realtime-depends
-    healthcheck: *ws-healthcheck
-    deploy: *gpu-deploy
-    profiles: [gpu]
     restart: unless-stopped
 
   # ============================================================

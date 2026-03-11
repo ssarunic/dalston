@@ -8,6 +8,10 @@
 | **Deliverable** | Dynamic model loading for RT engines, consolidated Docker images (one per runtime) |
 | **Status** | In Progress (Phase 2/2b Complete) |
 
+> Note (2026-03-11): Base `docker-compose.yml` no longer declares
+> `stt-rt-faster-whisper`. Default deployments use `stt-unified-faster-whisper*`.
+> Any split-service names in this milestone are historical context.
+
 ## User Story
 
 > *"As a platform operator, I can deploy a single RT container per runtime that serves any model variant, with models downloaded on-demand from S3."*

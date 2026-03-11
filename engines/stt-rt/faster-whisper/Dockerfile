@@ -4,8 +4,11 @@
 # Runs a WebSocket server for streaming audio transcription.
 # Models are loaded on-demand via ModelManager, not baked into the image.
 #
-# Build from repo root:
-#   docker compose build stt-rt-faster-whisper
+# Legacy split RT image kept for targeted testing.
+# Note: `stt-rt-faster-whisper` was removed from default `docker-compose.yml`
+# on 2026-03-11 in favor of `stt-unified-faster-whisper`.
+# Build directly from repo root:
+#   docker build -t dalston/stt-rt-faster-whisper:1.0.0 -f engines/stt-rt/faster-whisper/Dockerfile .
 #
 # For GPU support, use docker compose --profile gpu
 

@@ -8,6 +8,10 @@
 | **Primary Deliverable** | `faster-whisper-server` and `parakeet-server` gRPC inference services; batch and RT engines refactored to thin gRPC clients; unified runners deprecated |
 | **Status** | Proposed |
 
+> Note (2026-03-11): Base `docker-compose.yml` removed split RT services
+> `stt-rt-faster-whisper` and `stt-rt-transcribe-voxtral-mini-4b`.
+> Non-Riva realtime/transcribe flows are currently served by unified runtime services.
+
 ## Context
 
 M63 solved model duplication by running batch + RT adapters in a single process

@@ -4,10 +4,10 @@
 # Runs a WebSocket server for streaming audio transcription.
 # GPU required for realtime latency requirements.
 #
-# Build from repo root:
-#   docker compose build stt-rt-transcribe-voxtral-mini-4b
-#
-# Or directly:
+# Legacy split RT image kept for targeted testing.
+# Note: `stt-rt-transcribe-voxtral-mini-4b` was removed from default
+# `docker-compose.yml` on 2026-03-11.
+# Build directly from repo root:
 #   docker build -t dalston/stt-rt-transcribe-voxtral-mini-4b:1.0.0 .
 
 # Build argument to select model variant
