@@ -37,11 +37,15 @@ def build_task_dag_for_test(
     # Start with default engines
     engines = dict(DEFAULT_ENGINES)
 
-    # Handle engine overrides from parameters
-    for stage in ["transcribe", "align", "diarize", "prepare", "merge"]:
+    # Handle explicit engine overrides from parameters (non-model-backed stages).
+    for stage in ["align", "diarize", "prepare", "merge"]:
         override_key = f"engine_{stage}"
         if override_key in parameters:
             engines[stage] = parameters[override_key]
+
+    # Canonical transcription model selector key.
+    if parameters.get("model_transcribe"):
+        engines["transcribe"] = parameters["model_transcribe"]
 
     # Determine runtime_model_id values by stage.
     # In real usage, these come from EngineSelectionResult after registry lookup.

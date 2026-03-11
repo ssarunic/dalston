@@ -880,7 +880,7 @@ class TestStageModelSelection:
 
         mock_db = AsyncMock()
         mock_db.execute.side_effect = [
-            _ScalarOneResult(None),  # engine_transcribe preference -> not a model
+            _ScalarOneResult(None),  # model_transcribe preference -> not a model
             _ScalarOneResult(
                 SimpleNamespace(
                     id="facebook/wav2vec2-base-960h",
@@ -920,7 +920,7 @@ class TestStageModelSelection:
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={
-                "engine_transcribe": "faster-whisper",
+                "model_transcribe": "faster-whisper",
                 "timestamps_granularity": "word",
                 "speaker_detection": "diarize",
                 "pii_detection": True,
@@ -978,7 +978,7 @@ class TestStageModelSelection:
 
         mock_db = AsyncMock()
         mock_db.execute.side_effect = [
-            _ScalarOneResult(None),  # engine_transcribe preference -> not a model
+            _ScalarOneResult(None),  # model_transcribe preference -> not a model
             _ScalarOneResult(
                 SimpleNamespace(
                     id="urchade/gliner_multi-v2.1",
@@ -997,7 +997,7 @@ class TestStageModelSelection:
                 job_id=job_id,
                 audio_uri=audio_uri,
                 parameters={
-                    "engine_transcribe": "faster-whisper",
+                    "model_transcribe": "faster-whisper",
                     "timestamps_granularity": "word",
                     "model_align": "urchade/gliner_multi-v2.1",
                 },

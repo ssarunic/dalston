@@ -571,13 +571,13 @@ class ConsoleService:
         """Resolve the model display string for a job.
 
         Precedence:
-        1. Explicit engine_transcribe parameter → use as-is
+        1. Explicit model_transcribe parameter → use as-is
         2. Auto-selected via orchestrator → "Auto (<selected engine>)"
         3. Pending/running with no selection yet → "Auto (pending selection)"
         4. Fallback → "Auto"
         """
-        # Explicit model selection
-        explicit = job.parameters.get("engine_transcribe") if job.parameters else None
+        # Explicit model selection.
+        explicit = job.parameters.get("model_transcribe") if job.parameters else None
         if explicit:
             return explicit
 

@@ -132,7 +132,7 @@ class TestParakeetEngineDagIntegration:
         job_id = uuid4()
         audio_uri = "s3://test/audio.wav"
         parameters = {
-            "engine_transcribe": "nvidia/parakeet-tdt-1.1b",  # MODEL_REGISTRY key
+            "model_transcribe": "nvidia/parakeet-tdt-1.1b",  # MODEL_REGISTRY key
             "timestamps_granularity": "word",
         }
 
