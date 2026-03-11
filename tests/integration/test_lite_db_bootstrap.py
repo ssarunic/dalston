@@ -95,3 +95,23 @@ async def test_lite_db_bootstrap_drops_hybrid_enhance_column(
         columns = {row[1] for row in result.fetchall()}
 
     assert "enhance_on_end" not in columns
+
+
+@pytest.mark.asyncio
+async def test_lite_db_bootstrap_applies_latest_revision(monkeypatch, tmp_path) -> None:
+    """Lite bootstrap should migrate to the current Alembic head revision."""
+    from sqlalchemy import text
+
+    monkeypatch.setenv("DALSTON_MODE", "lite")
+    monkeypatch.setenv(
+        "DALSTON_LITE_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path}/lite.db"
+    )
+    get_settings.cache_clear()
+    reset_session_state()
+    await init_db()
+
+    async with async_session() as session:
+        result = await session.execute(text("SELECT version_num FROM alembic_version"))
+        revisions = {row[0] for row in result.fetchall()}
+
+    assert revisions == {"0003_backfill_model_transcribe"}

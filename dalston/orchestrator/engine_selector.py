@@ -21,7 +21,6 @@ import structlog
 
 import dalston.telemetry
 from dalston.common.model_selection_keys import (
-    ENGINE_PARAM_TRANSCRIBE,
     MODEL_PARAM_ALIGN,
     MODEL_PARAM_DIARIZE,
     MODEL_PARAM_PII_DETECT,
@@ -832,8 +831,7 @@ async def select_pipeline_engines(
             requirements,
             registry,
             catalog,
-            user_preference=effective_parameters.get(MODEL_PARAM_TRANSCRIBE)
-            or effective_parameters.get(ENGINE_PARAM_TRANSCRIBE),
+            user_preference=effective_parameters.get(MODEL_PARAM_TRANSCRIBE),
             db=db,
         )
 
