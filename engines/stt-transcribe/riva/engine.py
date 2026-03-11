@@ -81,9 +81,7 @@ class RivaBatchEngine(Engine):
                 audio_content=audio_bytes[offset : offset + chunk_bytes]
             )
 
-    def process(
-        self, engine_input: EngineInput, ctx: BatchTaskContext
-    ) -> EngineOutput:
+    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Transcribe audio via Riva NIM streaming gRPC.
 
         Args:
@@ -142,7 +140,9 @@ class RivaBatchEngine(Engine):
                 duration=duration,
                 timestamp_granularity_requested=TimestampGranularity.WORD,
                 timestamp_granularity_actual=(
-                    TimestampGranularity.WORD if has_words else TimestampGranularity.SEGMENT
+                    TimestampGranularity.WORD
+                    if has_words
+                    else TimestampGranularity.SEGMENT
                 ),
                 runtime=self._runtime,
             )
