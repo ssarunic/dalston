@@ -29,9 +29,10 @@ from __future__ import annotations
 
 import gc
 import os
-import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import structlog
 import torch
 
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
     from dalston.engine_sdk.model_storage import S3ModelStorage
 
 from dalston.common.pipeline_types import (
+    TranscribeInput,
     Transcript,
 )
 from dalston.engine_sdk import (
@@ -47,10 +49,11 @@ from dalston.engine_sdk import (
     EngineInput,
 )
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
-
-# Add engine directory to path for adapter imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from adapters import ADAPTER_REGISTRY, get_adapter
+from dalston.vllm_asr.adapters import ADAPTER_REGISTRY
+from dalston.vllm_asr.inference import (
+    transcribe_audio_array,
+    transcribe_audio_path,
+)
 
 logger = structlog.get_logger()
 
@@ -224,13 +227,50 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
         audio_path = engine_input.audio_path
         params = engine_input.get_transcribe_params()
         language = params.language
-        vocabulary = params.vocabulary
-        channel = params.channel
+        return self._transcribe_with_vllm(
+            runtime_model_id=params.runtime_model_id or self._default_model_id,
+            language=language,
+            vocabulary=params.vocabulary,
+            channel=params.channel,
+            audio_path=audio_path,
+        )
 
+    def transcribe_audio_array(
+        self,
+        audio: np.ndarray,
+        params: TranscribeInput,
+        sample_rate: int = 16000,
+    ) -> Transcript:
+        """Transcribe in-memory audio buffers via vLLM.
+
+        This is a shared migration bridge for realtime workers that operate on
+        numpy chunks instead of file inputs.
+        """
+        language = params.language
+        return self._transcribe_with_vllm(
+            runtime_model_id=params.runtime_model_id or self._default_model_id,
+            language=language,
+            vocabulary=params.vocabulary,
+            channel=params.channel,
+            audio=audio,
+            sample_rate=sample_rate,
+        )
+
+    def _transcribe_with_vllm(
+        self,
+        runtime_model_id: str,
+        language: str | None,
+        vocabulary: list[str] | None,
+        channel: int | None,
+        *,
+        audio_path: os.PathLike[str] | str | None = None,
+        audio: np.ndarray | None = None,
+        sample_rate: int = 16000,
+    ) -> Transcript:
+        """Common vLLM transcription path for file and in-memory audio."""
         if language == "auto" or language == "":
             language = None
 
-        # Warn about vocabulary - audio LLMs don't support vocabulary boosting
         warnings: list[str] = []
         if vocabulary:
             self.logger.warning(
@@ -242,54 +282,43 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
                 f"Vocabulary boosting ({len(vocabulary)} terms) not supported by vLLM-ASR engine"
             )
 
-        # Get model to use
-        runtime_model_id = params.runtime_model_id or self._default_model_id
-
-        # Load model (with swapping if needed)
         self._ensure_model_loaded(runtime_model_id)
-
-        # Get adapter for this model
-        adapter = get_adapter(runtime_model_id)
-
         self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
 
         try:
-            self.logger.info(
-                "transcribing",
-                audio_path=str(audio_path),
-                runtime_model_id=runtime_model_id,
-                language=language,
-            )
+            if audio_path is not None:
+                self.logger.info(
+                    "transcribing",
+                    audio_path=str(audio_path),
+                    runtime_model_id=runtime_model_id,
+                    language=language,
+                )
+                raw_text, transcript = transcribe_audio_path(
+                    llm=self._llm,
+                    runtime_model_id=runtime_model_id,
+                    audio_path=Path(audio_path),
+                    language=language,
+                )
+            elif audio is not None:
+                self.logger.info(
+                    "transcribing_audio_array",
+                    runtime_model_id=runtime_model_id,
+                    language=language,
+                    sample_rate=sample_rate,
+                    sample_count=int(audio.size),
+                )
+                raw_text, transcript = transcribe_audio_array(
+                    llm=self._llm,
+                    runtime_model_id=runtime_model_id,
+                    audio=audio,
+                    language=language,
+                    sample_rate=sample_rate,
+                )
+            else:
+                raise ValueError("Either audio_path or audio must be provided")
 
-            # Build model-specific messages
-            messages = adapter.build_messages(
-                audio_path=audio_path,
-                language=language,
-            )
+            self.logger.info("transcription_complete", char_count=len(raw_text))
 
-            # Build sampling parameters
-            from vllm import SamplingParams
-
-            sampling_kwargs = adapter.get_sampling_kwargs()
-            sampling_params = SamplingParams(**sampling_kwargs)
-
-            # Generate transcription
-            outputs = self._llm.chat(
-                messages=messages,
-                sampling_params=sampling_params,
-            )
-
-            raw_text = outputs[0].outputs[0].text
-
-            self.logger.info(
-                "transcription_complete",
-                char_count=len(raw_text),
-            )
-
-            # Parse output using adapter (returns Transcript directly)
-            transcript = adapter.parse_output(raw_text, language)
-
-            # Override runtime and merge engine-level warnings/channel
             transcript.runtime = self._runtime
             if channel is not None:
                 transcript.channel = channel
@@ -297,7 +326,6 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
                 transcript.warnings = warnings + list(transcript.warnings)
 
             return transcript
-
         finally:
             self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
 

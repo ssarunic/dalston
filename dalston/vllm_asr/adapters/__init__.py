@@ -12,6 +12,7 @@ from .voxtral import VoxtralAdapter
 ADAPTER_REGISTRY: dict[str, type[AudioLLMAdapter]] = {
     "mistralai/Voxtral-Mini-3B-2507": VoxtralAdapter,
     "mistralai/Voxtral-Small-24B-2507": VoxtralAdapter,
+    "mistralai/Voxtral-Mini-4B-Realtime-2602": VoxtralAdapter,
     "Qwen/Qwen2-Audio-7B-Instruct": Qwen2AudioAdapter,
 }
 

@@ -49,7 +49,6 @@ RUN mkdir -p /models/huggingface /models/torch
 # Copy engine files
 COPY engines/stt-transcribe/vllm-asr/engine.yaml /etc/dalston/engine.yaml
 COPY engines/stt-transcribe/vllm-asr/engine.py .
-COPY engines/stt-transcribe/vllm-asr/adapters/ adapters/
 
 # Default environment variables
 ENV DALSTON_ENGINE_ID=vllm-asr

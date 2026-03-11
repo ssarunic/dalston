@@ -6,30 +6,17 @@ Tests engine logic and adapters without loading actual model weights or vLLM.
 import importlib.util
 import os
 import sys
+import wave
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
 from dalston.common.pipeline_types import TranscribeInput
 from dalston.engine_sdk.context import BatchTaskContext
 
 HAS_TORCH = importlib.util.find_spec("torch") is not None
-
-
-@pytest.fixture(autouse=True)
-def _cleanup_injected_modules():
-    """Remove adapter modules injected into sys.modules by load_adapter_module.
-
-    ``load_adapter_module`` writes ``vllm_asr_adapter_*`` keys directly into
-    ``sys.modules``.  Without cleanup those entries persist for the rest of the
-    process and can cause cross-test import aliasing.
-    """
-    keys_before = set(sys.modules)
-    yield
-    for key in list(sys.modules):
-        if key not in keys_before:
-            sys.modules.pop(key, None)
 
 
 def _ctx(input_obj) -> BatchTaskContext:
@@ -47,48 +34,15 @@ def _ctx(input_obj) -> BatchTaskContext:
 # ---------------------------------------------------------------------------
 
 
-def load_adapter_module(name: str):
-    """Load an adapter module from the engines directory using importlib."""
-    adapter_path = Path(f"engines/stt-transcribe/vllm-asr/adapters/{name}.py")
-    if not adapter_path.exists():
-        pytest.skip(f"Adapter {name} not found at {adapter_path}")
-
-    spec = importlib.util.spec_from_file_location(
-        f"vllm_asr_adapter_{name}", adapter_path
-    )
-    if spec is None or spec.loader is None:
-        pytest.skip(f"Could not load adapter spec for {name}")
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[f"vllm_asr_adapter_{name}"] = module
-
-    # Ensure base adapter is loadable
-    base_path = Path("engines/stt-transcribe/vllm-asr/adapters/base.py")
-    base_spec = importlib.util.spec_from_file_location(
-        "vllm_asr_adapter_base", base_path
-    )
-    if base_spec and base_spec.loader:
-        base_module = importlib.util.module_from_spec(base_spec)
-        sys.modules["vllm_asr_adapter_base"] = base_module
-
-    spec.loader.exec_module(module)
-    return module
-
-
 class TestVoxtralAdapter:
     """Test Voxtral adapter prompt building and output parsing."""
 
     @pytest.fixture
     def adapter(self):
         """Import and create VoxtralAdapter."""
-        # Import directly from the engine directory
-        sys.path.insert(0, str(Path("engines/stt-transcribe/vllm-asr").absolute()))
-        try:
-            from adapters.voxtral import VoxtralAdapter
+        from dalston.vllm_asr.adapters.voxtral import VoxtralAdapter
 
-            return VoxtralAdapter()
-        finally:
-            sys.path.pop(0)
+        return VoxtralAdapter()
 
     def test_build_messages_default_language(self, adapter, tmp_path):
         """Messages should use generic prompt when no language specified."""
@@ -167,16 +121,12 @@ class TestVoxtralAdapter:
 
     def test_supported_languages(self, adapter):
         """Voxtral should support 8 languages."""
-        sys.path.insert(0, str(Path("engines/stt-transcribe/vllm-asr").absolute()))
-        try:
-            from adapters.voxtral import SUPPORTED_LANGUAGES
+        from dalston.vllm_asr.adapters.voxtral import SUPPORTED_LANGUAGES
 
-            assert len(SUPPORTED_LANGUAGES) == 8
-            assert "en" in SUPPORTED_LANGUAGES
-            assert "es" in SUPPORTED_LANGUAGES
-            assert "fr" in SUPPORTED_LANGUAGES
-        finally:
-            sys.path.pop(0)
+        assert len(SUPPORTED_LANGUAGES) == 8
+        assert "en" in SUPPORTED_LANGUAGES
+        assert "es" in SUPPORTED_LANGUAGES
+        assert "fr" in SUPPORTED_LANGUAGES
 
 
 class TestQwen2AudioAdapter:
@@ -185,13 +135,9 @@ class TestQwen2AudioAdapter:
     @pytest.fixture
     def adapter(self):
         """Import and create Qwen2AudioAdapter."""
-        sys.path.insert(0, str(Path("engines/stt-transcribe/vllm-asr").absolute()))
-        try:
-            from adapters.qwen2_audio import Qwen2AudioAdapter
+        from dalston.vllm_asr.adapters.qwen2_audio import Qwen2AudioAdapter
 
-            return Qwen2AudioAdapter()
-        finally:
-            sys.path.pop(0)
+        return Qwen2AudioAdapter()
 
     def test_build_messages_default_language(self, adapter, tmp_path):
         """Messages should use generic prompt when no language specified."""
@@ -234,53 +180,88 @@ class TestQwen2AudioAdapter:
 class TestAdapterRegistry:
     """Test adapter registry and get_adapter function."""
 
-    @pytest.fixture(autouse=True)
-    def setup_path(self):
-        """Add engine directory to path."""
-        engine_dir = str(Path("engines/stt-transcribe/vllm-asr").absolute())
-        sys.path.insert(0, engine_dir)
-        yield
-        sys.path.remove(engine_dir)
-
     def test_get_adapter_voxtral_mini(self):
         """Registry should return VoxtralAdapter for Voxtral Mini."""
-        from adapters import get_adapter
-        from adapters.voxtral import VoxtralAdapter
+        from dalston.vllm_asr.adapters import get_adapter
+        from dalston.vllm_asr.adapters.voxtral import VoxtralAdapter
 
         adapter = get_adapter("mistralai/Voxtral-Mini-3B-2507")
         assert isinstance(adapter, VoxtralAdapter)
 
     def test_get_adapter_voxtral_small(self):
         """Registry should return VoxtralAdapter for Voxtral Small."""
-        from adapters import get_adapter
-        from adapters.voxtral import VoxtralAdapter
+        from dalston.vllm_asr.adapters import get_adapter
+        from dalston.vllm_asr.adapters.voxtral import VoxtralAdapter
 
         adapter = get_adapter("mistralai/Voxtral-Small-24B-2507")
         assert isinstance(adapter, VoxtralAdapter)
 
+    def test_get_adapter_voxtral_realtime(self):
+        """Registry should return VoxtralAdapter for Voxtral Realtime model."""
+        from dalston.vllm_asr.adapters import get_adapter
+        from dalston.vllm_asr.adapters.voxtral import VoxtralAdapter
+
+        adapter = get_adapter("mistralai/Voxtral-Mini-4B-Realtime-2602")
+        assert isinstance(adapter, VoxtralAdapter)
+
     def test_get_adapter_qwen2_audio(self):
         """Registry should return Qwen2AudioAdapter for Qwen2-Audio."""
-        from adapters import get_adapter
-        from adapters.qwen2_audio import Qwen2AudioAdapter
+        from dalston.vllm_asr.adapters import get_adapter
+        from dalston.vllm_asr.adapters.qwen2_audio import Qwen2AudioAdapter
 
         adapter = get_adapter("Qwen/Qwen2-Audio-7B-Instruct")
         assert isinstance(adapter, Qwen2AudioAdapter)
 
     def test_get_adapter_unknown_model_raises(self):
         """Unknown model should raise ValueError."""
-        from adapters import get_adapter
+        from dalston.vllm_asr.adapters import get_adapter
 
         with pytest.raises(ValueError, match="No adapter for model"):
             get_adapter("unknown/model-id")
 
     def test_registry_contains_expected_models(self):
         """Registry should contain all supported models."""
-        from adapters import ADAPTER_REGISTRY
+        from dalston.vllm_asr.adapters import ADAPTER_REGISTRY
 
         assert "mistralai/Voxtral-Mini-3B-2507" in ADAPTER_REGISTRY
         assert "mistralai/Voxtral-Small-24B-2507" in ADAPTER_REGISTRY
+        assert "mistralai/Voxtral-Mini-4B-Realtime-2602" in ADAPTER_REGISTRY
         assert "Qwen/Qwen2-Audio-7B-Instruct" in ADAPTER_REGISTRY
-        assert len(ADAPTER_REGISTRY) == 3
+        assert len(ADAPTER_REGISTRY) == 4
+
+
+# ---------------------------------------------------------------------------
+# Audio bridge tests (RT migration prerequisites)
+# ---------------------------------------------------------------------------
+
+
+class TestVllmAudioBridge:
+    """Test shared audio bridge helpers for future RT-on-vLLM path."""
+
+    def test_write_wav_file_pcm16_mono(self, tmp_path):
+        """Helper should write mono PCM16 WAV files."""
+        from dalston.vllm_asr.audio import write_wav_file
+
+        wav_path = tmp_path / "bridge.wav"
+        audio = np.array([0.0, 0.25, -0.25, 0.9], dtype=np.float32)
+
+        write_wav_file(wav_path, audio=audio, sample_rate=16000)
+
+        with wave.open(str(wav_path), "rb") as reader:
+            assert reader.getnchannels() == 1
+            assert reader.getsampwidth() == 2
+            assert reader.getframerate() == 16000
+            assert reader.getnframes() == len(audio)
+
+    def test_temporary_wav_file_cleanup(self):
+        """Temporary WAV context should remove files on exit."""
+        from dalston.vllm_asr.audio import temporary_wav_file
+
+        audio = np.zeros(320, dtype=np.float32)
+        with temporary_wav_file(audio=audio, sample_rate=16000) as wav_path:
+            assert wav_path.exists()
+
+        assert not wav_path.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -474,6 +455,32 @@ class TestVLLMASREngine:
 
         assert len(result.data.warnings) > 0
         assert "not supported" in result.data.warnings[0].lower()
+
+    def test_transcribe_audio_array_with_mocked_vllm(self, engine):
+        """Engine should support in-memory audio transcription bridge."""
+        mock_output = MagicMock()
+        mock_output.outputs = [MagicMock(text="Realtime bridge test")]
+        mock_llm = MagicMock()
+        mock_llm.chat.return_value = [mock_output]
+
+        engine._llm = mock_llm
+        engine._loaded_model_id = "mistralai/Voxtral-Mini-3B-2507"
+
+        audio = np.zeros(320, dtype=np.float32)
+        params = TranscribeInput(
+            runtime_model_id="mistralai/Voxtral-Mini-3B-2507",
+            language="en",
+        )
+
+        mock_sampling_params = MagicMock()
+        with patch.dict(
+            sys.modules, {"vllm": MagicMock(SamplingParams=mock_sampling_params)}
+        ):
+            transcript = engine.transcribe_audio_array(audio, params, sample_rate=16000)
+
+        assert transcript.text == "Realtime bridge test"
+        assert transcript.runtime == "vllm-asr"
+        assert transcript.language == "en"
 
     def test_shutdown_cleans_up(self, engine):
         """Shutdown should clean up model and GPU resources."""
