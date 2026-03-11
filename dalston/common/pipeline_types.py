@@ -531,6 +531,12 @@ class TranscriptWord(BaseModel):
         default=AlignmentMethod.UNKNOWN,
         description="How this word's timestamps were produced",
     )
+    characters: list[Character] | None = Field(
+        default=None, description="Character-level timing (from alignment)"
+    )
+    phonemes: list[Phoneme] | None = Field(
+        default=None, description="Phoneme-level timing (from alignment)"
+    )
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Model-specific word data"
     )
@@ -545,6 +551,9 @@ class TranscriptSegment(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    id: str | None = Field(
+        default=None, description="Stable segment ID for incremental updates"
+    )
     start: float = Field(..., ge=0, description="Start time in seconds")
     end: float = Field(..., ge=0, description="End time in seconds")
     text: str = Field(..., description="Segment transcript text")
@@ -556,6 +565,12 @@ class TranscriptSegment(BaseModel):
     )
     confidence: float | None = Field(
         default=None, description="Segment-level confidence"
+    )
+    is_final: bool | None = Field(
+        default=None, description="False for interim realtime results"
+    )
+    is_speech: bool | None = Field(
+        default=None, description="False for music/noise segments"
     )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
@@ -604,6 +619,33 @@ class DalstonTranscriptV1(BaseModel):
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Runtime-level extras"
     )
+
+
+class SegmentMetaKeys:
+    """Well-known metadata keys for TranscriptSegment.metadata.
+
+    Using these constants instead of raw strings prevents typos
+    and enables IDE autocomplete / grep-ability.
+    """
+
+    TOKENS = "tokens"
+    AVG_LOGPROB = "avg_logprob"
+    COMPRESSION_RATIO = "compression_ratio"
+    NO_SPEECH_PROB = "no_speech_prob"
+    TEMPERATURE = "temperature"
+    DECODER_TYPE = "decoder_type"
+
+
+class WordMetaKeys:
+    """Well-known metadata keys for TranscriptWord.metadata."""
+
+    LOGPROB = "logprob"
+
+
+class TranscriptMetaKeys:
+    """Well-known metadata keys for DalstonTranscriptV1.metadata."""
+
+    MODEL_ID = "model_id"
 
 
 class AlignOutput(BaseModel):

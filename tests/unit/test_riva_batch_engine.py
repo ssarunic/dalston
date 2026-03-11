@@ -176,7 +176,6 @@ class TestRivaBatchOutputShape:
         assert data.language == "en"
         assert len(data.segments) == 1
         assert data.runtime == "riva"
-        assert data.skipped is False
 
     def test_output_segment_has_word_timestamps(
         self, engine_with_mock, tmp_path
@@ -410,8 +409,7 @@ class TestRivaBatchConfig:
             _ctx(task_id, job_id),
         )
 
-        assert result.data.timestamp_granularity_requested.value == "word"
-        assert result.data.timestamp_granularity_actual.value == "word"
+        assert result.data.timestamp_granularity.value == "word"
 
 
 class TestRivaBatchHealthCheck:
@@ -515,4 +513,4 @@ class TestRivaBatchWordConfidence:
             _ctx(task_id, job_id),
         )
 
-        assert result.data.timestamp_granularity_actual.value == "segment"
+        assert result.data.timestamp_granularity.value == "segment"

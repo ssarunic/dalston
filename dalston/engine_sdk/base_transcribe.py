@@ -11,7 +11,9 @@ from typing import Any
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
+    Character,
     DalstonTranscriptV1,
+    Phoneme,
     TimestampGranularity,
     TranscriptSegment,
     TranscriptWord,
@@ -74,6 +76,8 @@ class BaseBatchTranscribeEngine(Engine):
         end: float,
         confidence: float | None = None,
         alignment_method: AlignmentMethod = AlignmentMethod.UNKNOWN,
+        characters: list[Character] | None = None,
+        phonemes: list[Phoneme] | None = None,
         **extra: Any,
     ) -> TranscriptWord:
         """Build a ``TranscriptWord`` with optional metadata."""
@@ -83,6 +87,8 @@ class BaseBatchTranscribeEngine(Engine):
             end=end,
             confidence=confidence,
             alignment_method=alignment_method,
+            characters=characters,
+            phonemes=phonemes,
             metadata=extra if extra else {},
         )
 
@@ -94,6 +100,9 @@ class BaseBatchTranscribeEngine(Engine):
         words: list[TranscriptWord] | None = None,
         language: str | None = None,
         confidence: float | None = None,
+        segment_id: str | None = None,
+        is_final: bool | None = None,
+        is_speech: bool | None = None,
         **extra: Any,
     ) -> TranscriptSegment:
         """Build a ``TranscriptSegment`` with optional metadata.
@@ -103,12 +112,15 @@ class BaseBatchTranscribeEngine(Engine):
         ``metadata``.
         """
         return TranscriptSegment(
+            id=segment_id,
             start=start,
             end=end,
             text=text,
             words=words,
             language=language,
             confidence=confidence,
+            is_final=is_final,
+            is_speech=is_speech,
             metadata=extra if extra else {},
         )
 

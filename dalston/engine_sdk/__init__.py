@@ -68,7 +68,10 @@ from dalston.common.pipeline_types import (
     TranscriptMetadata,
     TranscriptSegment,
     TranscriptWord,
+    SegmentMetaKeys,
+    TranscriptMetaKeys,
     Word,
+    WordMetaKeys,
 )
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
@@ -113,7 +116,10 @@ __all__ = [
     "TranscriptMetadata",
     "TranscriptSegment",
     "TranscriptWord",
+    "SegmentMetaKeys",
+    "TranscriptMetaKeys",
     "Word",
+    "WordMetaKeys",
     # Stage outputs
     "AlignOutput",
     "AudioRedactOutput",

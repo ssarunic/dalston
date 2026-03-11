@@ -155,7 +155,7 @@ class TestHFASREngineNormalizeOutput:
         assert output.segments[0].words[1].text == "world"
         assert output.segments[0].words[1].start == 0.5
         assert output.segments[0].words[1].end == 1.0
-        assert output.timestamp_granularity_actual.value == "word"
+        assert output.timestamp_granularity.value == "word"
         assert output.alignment_method.value == "attention"
 
     def test_normalize_wav2vec2_output_no_timestamps(self, engine):
@@ -173,8 +173,8 @@ class TestHFASREngineNormalizeOutput:
         assert output.segments[0].words is None
         assert output.segments[0].start == 0.0
         assert output.segments[0].end == 0.0
-        assert output.timestamp_granularity_actual.value == "none"
-        assert output.alignment_method is None
+        assert output.timestamp_granularity.value == "none"
+        assert output.alignment_method.value == "unknown"
 
     def test_normalize_output_with_none_timestamps(self, engine):
         """Chunks with None timestamps should default to 0.0."""

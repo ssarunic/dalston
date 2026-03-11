@@ -32,17 +32,23 @@ def test_runtime_engines_have_new_process_signature() -> None:
     optional_ctx = []
     for file_path in ENGINE_RUNTIME_FILES:
         text = file_path.read_text(encoding="utf-8")
-        has_signature = (
+        # Accept either direct process() override (M51) or
+        # transcribe_audio() via BaseBatchTranscribeEngine (V1 contract)
+        has_m51_signature = (
             "def process(" in text
             and "input: EngineInput" in text
             and "ctx: BatchTaskContext" in text
             and "-> EngineOutput" in text
         )
-        if not has_signature:
+        has_v1_signature = (
+            "def transcribe_audio(" in text
+            and "-> DalstonTranscriptV1" in text
+        )
+        if not has_m51_signature and not has_v1_signature:
             missing.append(str(file_path))
         if "BatchTaskContext | None" in text:
             optional_ctx.append(str(file_path))
-    assert not missing, f"Engines missing M51 process signature: {missing}"
+    assert not missing, f"Engines missing M51 process or V1 transcribe_audio signature: {missing}"
     assert not optional_ctx, (
         f"Engines still using optional ctx signature: {optional_ctx}"
     )

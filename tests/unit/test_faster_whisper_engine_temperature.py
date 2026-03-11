@@ -70,4 +70,4 @@ def test_temperature_list_is_forwarded_to_faster_whisper_decoder() -> None:
 
     call_kwargs = mock_model.transcribe.call_args.kwargs
     assert call_kwargs["temperature"] == [0.0, 0.2, 0.4]
-    assert output.data.segments[0].temperature == 0.0
+    assert output.data.segments[0].metadata["temperature"] == 0.0

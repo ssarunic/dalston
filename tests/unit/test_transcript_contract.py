@@ -13,10 +13,15 @@ from pydantic import ValidationError
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
+    Character,
     DalstonTranscriptV1,
+    Phoneme,
+    SegmentMetaKeys,
     TimestampGranularity,
+    TranscriptMetaKeys,
     TranscriptSegment,
     TranscriptWord,
+    WordMetaKeys,
 )
 
 # ---------------------------------------------------------------------------
@@ -180,6 +185,105 @@ class TestMetadataPlacement:
 
 
 # ---------------------------------------------------------------------------
+# Restored typed fields tests
+# ---------------------------------------------------------------------------
+
+
+class TestRestoredTypedFields:
+    """Test fields restored from old Segment/Word schemas."""
+
+    def test_word_with_characters(self):
+        """TranscriptWord accepts typed Character list."""
+        word = TranscriptWord(
+            text="hello",
+            start=0.0,
+            end=0.5,
+            characters=[
+                Character(char="h", start=0.0, end=0.1),
+                Character(char="e", start=0.1, end=0.2, confidence=0.9),
+            ],
+        )
+        assert len(word.characters) == 2
+        assert word.characters[0].char == "h"
+        assert word.characters[1].confidence == 0.9
+
+    def test_word_with_phonemes(self):
+        """TranscriptWord accepts typed Phoneme list."""
+        word = TranscriptWord(
+            text="hello",
+            start=0.0,
+            end=0.5,
+            phonemes=[
+                Phoneme(phoneme="h", start=0.0, end=0.1),
+                Phoneme(phoneme="ɛ", start=0.1, end=0.2, stress=1),
+            ],
+        )
+        assert len(word.phonemes) == 2
+        assert word.phonemes[1].stress == 1
+
+    def test_segment_id(self):
+        """TranscriptSegment accepts stable ID for incremental updates."""
+        seg = TranscriptSegment(
+            id="seg-001",
+            start=0.0,
+            end=2.0,
+            text="hello",
+        )
+        assert seg.id == "seg-001"
+
+    def test_segment_is_final(self):
+        """TranscriptSegment tracks interim vs final results."""
+        interim = TranscriptSegment(start=0.0, end=1.0, text="hel", is_final=False)
+        final = TranscriptSegment(start=0.0, end=1.0, text="hello", is_final=True)
+        assert interim.is_final is False
+        assert final.is_final is True
+
+    def test_segment_is_speech(self):
+        """TranscriptSegment tracks speech vs non-speech."""
+        speech = TranscriptSegment(start=0.0, end=1.0, text="hello", is_speech=True)
+        music = TranscriptSegment(start=0.0, end=1.0, text="[music]", is_speech=False)
+        assert speech.is_speech is True
+        assert music.is_speech is False
+
+    def test_defaults_are_none(self):
+        """New optional fields default to None."""
+        word = _make_word()
+        seg = _make_segment()
+        assert word.characters is None
+        assert word.phonemes is None
+        assert seg.id is None
+        assert seg.is_final is None
+        assert seg.is_speech is None
+
+
+class TestMetaKeyConstants:
+    """Test that metadata key constants match expected values."""
+
+    def test_segment_meta_keys(self):
+        assert SegmentMetaKeys.TOKENS == "tokens"
+        assert SegmentMetaKeys.AVG_LOGPROB == "avg_logprob"
+        assert SegmentMetaKeys.COMPRESSION_RATIO == "compression_ratio"
+        assert SegmentMetaKeys.NO_SPEECH_PROB == "no_speech_prob"
+        assert SegmentMetaKeys.TEMPERATURE == "temperature"
+        assert SegmentMetaKeys.DECODER_TYPE == "decoder_type"
+
+    def test_word_meta_keys(self):
+        assert WordMetaKeys.LOGPROB == "logprob"
+
+    def test_transcript_meta_keys(self):
+        assert TranscriptMetaKeys.MODEL_ID == "model_id"
+
+    def test_keys_match_fixture_data(self):
+        """Constants match the keys used in runtime fixtures."""
+        whisper_meta = _RUNTIME_FIXTURES["faster-whisper"]["segments"][0]["metadata"]
+        assert SegmentMetaKeys.COMPRESSION_RATIO in whisper_meta
+        assert SegmentMetaKeys.NO_SPEECH_PROB in whisper_meta
+        assert SegmentMetaKeys.AVG_LOGPROB in whisper_meta
+        assert SegmentMetaKeys.TOKENS in whisper_meta
+        assert SegmentMetaKeys.TEMPERATURE in whisper_meta
+
+
+# ---------------------------------------------------------------------------
 # Round-trip serialization tests
 # ---------------------------------------------------------------------------
 
@@ -247,6 +351,53 @@ class TestRoundTrip:
         assert restored.metadata["model"] == "test-model"
         assert restored.segments[0].metadata["compression_ratio"] == 1.2
         assert restored.segments[0].words[0].metadata["logprob"] == -0.5
+
+    def test_round_trip_with_restored_fields(self):
+        """Characters, phonemes, segment id/is_final/is_speech survive round-trip."""
+        original = DalstonTranscriptV1(
+            text="test",
+            segments=[
+                TranscriptSegment(
+                    id="seg-1",
+                    start=0.0,
+                    end=1.0,
+                    text="test",
+                    is_final=True,
+                    is_speech=True,
+                    words=[
+                        TranscriptWord(
+                            text="test",
+                            start=0.0,
+                            end=1.0,
+                            characters=[
+                                Character(char="t", start=0.0, end=0.25),
+                                Character(char="e", start=0.25, end=0.5),
+                            ],
+                            phonemes=[
+                                Phoneme(phoneme="t", start=0.0, end=0.25),
+                                Phoneme(phoneme="ɛ", start=0.25, end=0.5, stress=1),
+                            ],
+                        )
+                    ],
+                )
+            ],
+            language="en",
+            runtime="test",
+        )
+
+        data = original.model_dump(mode="json")
+        restored = DalstonTranscriptV1.model_validate(data)
+
+        seg = restored.segments[0]
+        assert seg.id == "seg-1"
+        assert seg.is_final is True
+        assert seg.is_speech is True
+
+        word = seg.words[0]
+        assert len(word.characters) == 2
+        assert word.characters[0].char == "t"
+        assert len(word.phonemes) == 2
+        assert word.phonemes[1].stress == 1
 
 
 # ---------------------------------------------------------------------------

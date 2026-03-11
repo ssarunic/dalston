@@ -114,7 +114,6 @@ class TestOnnxBatchOutputShape:
         assert data.language_confidence == 1.0
         assert len(data.segments) >= 1
         assert data.runtime == "nemo-onnx"
-        assert data.skipped is False
 
     def test_output_has_word_timestamps(self) -> None:
         result = _make_core_result(
@@ -241,7 +240,7 @@ class TestOnnxBatchTimestampGranularity:
             _ctx(task_id, job_id),
         )
 
-        assert output.data.timestamp_granularity_actual.value == "word"
+        assert output.data.timestamp_granularity.value == "word"
 
     def test_segment_granularity_when_no_words(self) -> None:
         result = OnnxTranscriptionResult(
@@ -262,4 +261,4 @@ class TestOnnxBatchTimestampGranularity:
             _ctx(task_id, job_id),
         )
 
-        assert output.data.timestamp_granularity_actual.value == "segment"
+        assert output.data.timestamp_granularity.value == "segment"
