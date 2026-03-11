@@ -3,7 +3,7 @@
 # Simplifies common development and deployment commands.
 # Run `make help` to see all available targets.
 
-.PHONY: help dev dev-minimal dev-gpu dev-observability stop logs logs-all ps \
+.PHONY: help dev dev-minimal dev-gpu dev-riva dev-observability stop logs logs-all ps \
         build-cpu build-gpu build-engine deploy-web \
         aws-start aws-stop aws-logs \
         health clean clean-local validate test lint test-openai-sdk-live \
@@ -22,6 +22,7 @@ help:
 	@echo "  make dev             - Start full local stack (postgres, redis, minio, gateway, orchestrator, CPU engines)"
 	@echo "  make dev-minimal     - Start minimal stack (infra + gateway + transcribe + align + merge)"
 	@echo "  make dev-gpu         - Start with GPU engines (requires NVIDIA GPU)"
+	@echo "  make dev-riva        - Start with Riva NIM engines (requires NVIDIA GPU)"
 	@echo "  make dev-observability - Start with monitoring stack (jaeger, prometheus, grafana)"
 	@echo "  make stop            - Stop all services"
 	@echo "  make logs            - Follow gateway logs"
@@ -85,6 +86,11 @@ dev-gpu: clean-local
 	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
 		docker compose --profile local-infra --profile local-object-storage --profile gpu up -d --build
 
+# Start with Riva NIM engines (requires NVIDIA GPU for NIM sidecar)
+dev-riva: clean-local
+	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
+		docker compose --profile local-infra --profile local-object-storage --profile riva up -d --build
+
 # Start with observability stack (jaeger, prometheus, grafana)
 dev-observability:
 	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
@@ -92,7 +98,7 @@ dev-observability:
 
 # Stop all services (all profiles)
 stop:
-	docker compose --profile local-infra --profile local-object-storage --profile gpu --profile observability down
+	docker compose --profile local-infra --profile local-object-storage --profile gpu --profile riva --profile observability down
 
 # Follow gateway logs
 logs:
@@ -236,6 +242,8 @@ validate:
 	@docker compose --profile local-object-storage config > /dev/null
 	@echo "Validating gpu profile..."
 	@docker compose --profile gpu config > /dev/null
+	@echo "Validating riva profile..."
+	@docker compose --profile riva config > /dev/null
 	@echo "Validating AWS override..."
 	@S3_BUCKET=test AWS_REGION=eu-west-2 docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml config > /dev/null
 	@echo "All compose configurations valid"
@@ -287,12 +295,12 @@ docker-gc-auto:
 
 # Remove stopped containers and unused images
 clean:
-	docker compose --profile local-infra --profile local-object-storage --profile gpu --profile observability down --remove-orphans
+	docker compose --profile local-infra --profile local-object-storage --profile gpu --profile riva --profile observability down --remove-orphans
 	docker system prune -f
 
 # Deep clean: remove all containers, images, and volumes
 clean-all:
-	docker compose --profile local-infra --profile local-object-storage --profile gpu --profile observability down --remove-orphans --volumes
+	docker compose --profile local-infra --profile local-object-storage --profile gpu --profile riva --profile observability down --remove-orphans --volumes
 	docker system prune -af --volumes
 
 # Show queue depths
