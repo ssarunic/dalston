@@ -125,6 +125,88 @@ class TestAssembleTranscriptBasic:
         assert result.segments[0].end == 1.9
         assert result.metadata.word_timestamps is True
 
+    def test_alignment_preserves_code_switching_language(self):
+        """Aligned segments carry per-segment language from transcribe output."""
+        stage_outputs = {
+            "prepare": {
+                "channel_files": [
+                    {
+                        "artifact_id": "a1",
+                        "format": "wav",
+                        "duration": 5.0,
+                        "sample_rate": 16000,
+                        "channels": 1,
+                    }
+                ],
+                "runtime": "audio-prepare",
+            },
+            "transcribe": {
+                "text": "Hello, comment allez-vous?",
+                "language": "en",
+                "language_confidence": 0.7,
+                "languages": [
+                    {"code": "en", "confidence": 0.7, "is_primary": True},
+                    {"code": "fr", "confidence": 0.3},
+                ],
+                "segments": [
+                    {"start": 0.0, "end": 1.0, "text": "Hello,", "language": "en"},
+                    {
+                        "start": 1.0,
+                        "end": 3.0,
+                        "text": "comment allez-vous?",
+                        "language": "fr",
+                    },
+                ],
+                "runtime": "faster-whisper",
+                "timestamp_granularity": "segment",
+                "alignment_method": "attention",
+            },
+            "align": {
+                "segments": [
+                    {
+                        "start": 0.05,
+                        "end": 0.95,
+                        "text": "Hello,",
+                        "language": "en",
+                        "words": [
+                            {"text": "Hello,", "start": 0.05, "end": 0.95},
+                        ],
+                    },
+                    {
+                        "start": 1.05,
+                        "end": 2.9,
+                        "text": "comment allez-vous?",
+                        "language": "fr",
+                        "words": [
+                            {"text": "comment", "start": 1.05, "end": 1.5},
+                            {"text": "allez-vous?", "start": 1.6, "end": 2.9},
+                        ],
+                    },
+                ],
+                "text": "Hello, comment allez-vous?",
+                "language": "en",
+                "word_timestamps": True,
+                "unaligned_ratio": 0.0,
+                "granularity_achieved": "word",
+                "runtime": "phoneme-align",
+            },
+        }
+
+        result = assemble_transcript(
+            job_id="job-align-cs",
+            stage_outputs=stage_outputs,
+            word_timestamps_requested=True,
+        )
+
+        assert len(result.segments) == 2
+        # Aligned segments must preserve per-segment language
+        assert result.segments[0].language == "en"
+        assert result.segments[1].language == "fr"
+        # Transcript-level languages metadata must be present
+        assert result.metadata.languages is not None
+        assert len(result.metadata.languages) == 2
+        assert result.metadata.languages[0].code == "en"
+
     def test_with_diarization(self):
         """Assemble transcript with speaker assignments from diarize output."""
         stage_outputs = {
@@ -816,6 +898,77 @@ class TestAssemblePerChannelTranscript:
 
         assert result.redacted_text is None
         assert result.pii_entities is None
+
+    def test_per_channel_code_switching_languages(self):
+        """Per-channel assembly populates metadata.languages from channel transcriptions."""
+        stage_outputs = {
+            "prepare": {
+                "channel_files": [
+                    {
+                        "artifact_id": "a1",
+                        "format": "wav",
+                        "duration": 5.0,
+                        "sample_rate": 16000,
+                        "channels": 2,
+                    }
+                ],
+            },
+            "transcribe_ch0": {
+                "text": "Hello there.",
+                "language": "en",
+                "language_confidence": 0.9,
+                "languages": [
+                    {"code": "en", "confidence": 0.9, "is_primary": True},
+                ],
+                "segments": [
+                    {
+                        "start": 0.0,
+                        "end": 2.0,
+                        "text": "Hello there.",
+                        "language": "en",
+                    },
+                ],
+                "runtime": "faster-whisper",
+            },
+            "transcribe_ch1": {
+                "text": "Bonjour.",
+                "language": "fr",
+                "language_confidence": 0.85,
+                "languages": [
+                    {"code": "fr", "confidence": 0.85, "is_primary": True},
+                    {"code": "en", "confidence": 0.15},
+                ],
+                "segments": [
+                    {
+                        "start": 1.0,
+                        "end": 3.0,
+                        "text": "Bonjour.",
+                        "language": "fr",
+                    },
+                ],
+                "runtime": "faster-whisper",
+            },
+        }
+
+        result = assemble_per_channel_transcript(
+            job_id="job-pc-cs",
+            stage_outputs=stage_outputs,
+            channel_count=2,
+        )
+
+        # metadata.languages should be populated from both channels
+        assert result.metadata.languages is not None
+        lang_codes = [li.code for li in result.metadata.languages]
+        assert "en" in lang_codes
+        assert "fr" in lang_codes
+        # Sorted by confidence descending — en (0.9) > fr (0.85)
+        assert result.metadata.languages[0].code == "en"
+        assert result.metadata.languages[0].confidence == 0.9
+        assert result.metadata.languages[1].code == "fr"
+        assert result.metadata.languages[1].confidence == 0.85
+        # Per-segment language should also be set
+        assert result.segments[0].language == "en"
+        assert result.segments[1].language == "fr"
 
     def test_empty_channel_raises(self):
         """Assembly raises ValueError when a channel has no output."""

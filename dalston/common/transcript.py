@@ -202,6 +202,7 @@ def assemble_per_channel_transcript(
     pipeline_warnings: list[str] = []
     language = "en"
     language_confidence = 1.0
+    all_languages: dict[str, LanguageInfo] = {}  # keyed by code, merge across channels
 
     for channel in range(channel_count):
         transcribe_key = f"transcribe_ch{channel}"
@@ -211,11 +212,20 @@ def assemble_per_channel_transcript(
         transcribe_data = stage_outputs.get(transcribe_key, {})
         align_data = stage_outputs.get(align_key)
 
-        # Use first channel's language info
+        # Use first channel's language info as primary
         if channel == 0 and transcribe_data:
             language = transcribe_data.get("language", "en")
             lc_raw = transcribe_data.get("language_confidence")
             language_confidence = lc_raw if lc_raw is not None else 1.0
+
+        # Collect per-channel language lists for code-switching metadata
+        if transcribe_data:
+            _, _, _, ch_languages = _extract_transcribe_data(transcribe_data)
+            if ch_languages:
+                for lang_info in ch_languages:
+                    existing = all_languages.get(lang_info.code)
+                    if existing is None or lang_info.confidence > existing.confidence:
+                        all_languages[lang_info.code] = lang_info
 
         # Parse typed outputs — transcribe must be a valid Transcript
         if not transcribe_data:
@@ -283,6 +293,13 @@ def assemble_per_channel_transcript(
     if isinstance(known_speaker_names, list) and known_speaker_names:
         _apply_known_speaker_names(segments, speakers, known_speaker_names)
 
+    # Build merged languages list (sorted by confidence descending)
+    languages: list[LanguageInfo] | None = None
+    if all_languages:
+        languages = sorted(
+            all_languages.values(), key=lambda li: li.confidence, reverse=True
+        )
+
     # Build metadata
     now = datetime.now(UTC).isoformat()
     metadata = TranscriptMetadata(
@@ -291,6 +308,7 @@ def assemble_per_channel_transcript(
         sample_rate=sample_rate,
         language=language,
         language_confidence=round(language_confidence, 3),
+        languages=languages,
         word_timestamps=word_timestamps_available,
         word_timestamps_requested=word_timestamps_requested,
         speaker_detection=SpeakerDetectionMode.PER_CHANNEL,

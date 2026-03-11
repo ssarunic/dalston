@@ -104,11 +104,15 @@ class PhonemeAlignEngine(Engine):
 
         # Get transcription output from previous stage
         transcribe_output = engine_input.get_transcript()
+        segment_languages: list[str | None] = []
         if transcribe_output:
             text = transcribe_output.text
             raw_segments: list[InputSegment] = [
                 InputSegment(start=s.start, end=s.end, text=s.text)
                 for s in transcribe_output.segments
+            ]
+            segment_languages = [
+                getattr(s, "language", None) for s in transcribe_output.segments
             ]
             language = transcribe_output.language
         else:
@@ -123,6 +127,9 @@ class PhonemeAlignEngine(Engine):
                     text=s.get("text", ""),
                 )
                 for s in raw_output.get("segments", [])
+            ]
+            segment_languages = [
+                s.get("language") for s in raw_output.get("segments", [])
             ]
             language = raw_output.get("language", "en")
 
@@ -168,7 +175,9 @@ class PhonemeAlignEngine(Engine):
                 ),
             )
 
-            output_segments, stats = self._to_sdk_segments(result.segments)
+            output_segments, stats = self._to_sdk_segments(
+                result.segments, segment_languages
+            )
 
             # Compute alignment confidence
             all_words: list[Word] = []
@@ -242,13 +251,22 @@ class PhonemeAlignEngine(Engine):
         return waveform.squeeze(0).numpy()
 
     def _to_sdk_segments(
-        self, aligned_segments: list[AlignedSegment]
+        self,
+        aligned_segments: list[AlignedSegment],
+        segment_languages: list[str | None] | None = None,
     ) -> tuple[list[Segment], dict[str, int]]:
-        """Convert aligned segments to SDK types."""
+        """Convert aligned segments to SDK types.
+
+        Args:
+            aligned_segments: Aligned segments from the alignment model.
+            segment_languages: Per-segment language codes from the original
+                transcript (code-switching). Positionally matched to
+                ``aligned_segments``.
+        """
         segments: list[Segment] = []
         unaligned_words = 0
 
-        for aseg in aligned_segments:
+        for idx, aseg in enumerate(aligned_segments):
             words: list[Word] | None = None
             if aseg.words:
                 valid_words: list[Word] = []
@@ -269,12 +287,18 @@ class PhonemeAlignEngine(Engine):
                     )
                 words = valid_words if valid_words else None
 
+            # Propagate per-segment language from transcription (code-switching)
+            seg_language: str | None = None
+            if segment_languages and idx < len(segment_languages):
+                seg_language = segment_languages[idx]
+
             segments.append(
                 Segment(
                     start=aseg.start,
                     end=aseg.end,
                     text=aseg.text,
                     words=words,
+                    language=seg_language,
                 )
             )
 
