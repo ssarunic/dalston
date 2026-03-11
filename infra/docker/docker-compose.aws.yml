@@ -34,7 +34,7 @@ services:
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
       AWS_REGION: ${AWS_REGION}
 
-  stt-batch-transcribe-faster-whisper:
+  stt-unified-faster-whisper:
     environment:
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
