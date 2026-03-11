@@ -30,6 +30,21 @@ DEFAULT_PRE_SPEECH_PAD_MS = 250  # audio to include before detected speech
 DEFAULT_POST_SPEECH_PAD_MS = 50  # audio to include after detected speech
 
 # =============================================================================
+# Resampling
+# =============================================================================
+
+# Maps user-facing profile names to soxr quality presets.
+# "fast"     — MQ: low CPU, acceptable for telephony-grade input (8 kHz μ-law).
+# "balanced" — HQ: good default for most real-time paths.
+# "high"     — VHQ: broadcast quality, higher CPU cost.
+RESAMPLE_QUALITY_PROFILES: dict[str, str] = {
+    "fast": "MQ",
+    "balanced": "HQ",
+    "high": "VHQ",
+}
+DEFAULT_RESAMPLE_QUALITY = "balanced"
+
+# =============================================================================
 # Buffer Limits
 # =============================================================================
 

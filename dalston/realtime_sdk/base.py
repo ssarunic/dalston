@@ -28,10 +28,12 @@ from dalston.common.audio_defaults import (
     DEFAULT_MAX_UTTERANCE_SECONDS,
     DEFAULT_MIN_SILENCE_MS,
     DEFAULT_MIN_SPEECH_MS,
+    DEFAULT_RESAMPLE_QUALITY,
     DEFAULT_SAMPLE_RATE,
     DEFAULT_VAD_THRESHOLD,
     MAX_SAMPLE_RATE,
     MIN_SAMPLE_RATE,
+    RESAMPLE_QUALITY_PROFILES,
 )
 from dalston.common.registry import EngineRecord, UnifiedEngineRegistry
 from dalston.common.timeouts import WS_PING_INTERVAL, WS_PING_TIMEOUT
@@ -855,6 +857,18 @@ class RealtimeEngine(ABC):
             max_val=MAX_SAMPLE_RATE,
         )
 
+        resample_quality = get_param(
+            "resample_quality",
+            os.environ.get(
+                "DALSTON_REALTIME_RESAMPLE_QUALITY", DEFAULT_RESAMPLE_QUALITY
+            ),
+        )
+        if resample_quality not in RESAMPLE_QUALITY_PROFILES:
+            raise ValueError(
+                f"resample_quality must be one of {list(RESAMPLE_QUALITY_PROFILES)}, "
+                f"got '{resample_quality}'"
+            )
+
         return SessionConfig(
             session_id=session_id,
             language=get_param("language", "auto"),
@@ -862,6 +876,7 @@ class RealtimeEngine(ABC):
             encoding=get_param("encoding", "pcm_s16le"),
             client_sample_rate=client_sample_rate,
             sample_rate=sample_rate,
+            resample_quality=resample_quality,
             channels=get_int_param("channels", 1, min_val=1, max_val=2),
             enable_vad=get_bool_param("enable_vad", True),
             interim_results=get_bool_param("interim_results", True),

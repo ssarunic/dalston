@@ -25,8 +25,10 @@ from dalston.common.audio_defaults import (
     DEFAULT_MIN_SILENCE_MS,
     DEFAULT_MIN_SPEECH_MS,
     DEFAULT_PRE_SPEECH_PAD_MS,
+    DEFAULT_RESAMPLE_QUALITY,
     DEFAULT_SAMPLE_RATE,
     DEFAULT_VAD_THRESHOLD,
+    RESAMPLE_QUALITY_PROFILES,
 )
 from dalston.common.ws_close_codes import WS_CLOSE_LAG_EXCEEDED
 from dalston.realtime_sdk.assembler import (
@@ -101,6 +103,7 @@ class SessionConfig:
     encoding: str = "pcm_s16le"
     client_sample_rate: int | None = None
     sample_rate: int = DEFAULT_SAMPLE_RATE
+    resample_quality: str = DEFAULT_RESAMPLE_QUALITY  # "fast", "balanced", "high"
     channels: int = 1
     enable_vad: bool = True
     interim_results: bool = True
@@ -148,6 +151,7 @@ class AudioBuffer:
         client_sample_rate: int | None = None,
         channels: int = 1,
         chunk_duration_ms: int = 100,
+        resample_quality: str = DEFAULT_RESAMPLE_QUALITY,
     ) -> None:
         """Initialize audio buffer.
 
@@ -156,6 +160,7 @@ class AudioBuffer:
             encoding: Audio encoding (see SUPPORTED_ENCODINGS)
             channels: Number of channels
             chunk_duration_ms: Chunk size for VAD processing in milliseconds
+            resample_quality: Resampling quality profile ("fast", "balanced", "high")
         """
         if encoding not in self.SUPPORTED_ENCODINGS:
             raise ValueError(
@@ -168,6 +173,12 @@ class AudioBuffer:
         self.encoding = encoding
         self.channels = max(1, channels)
         self.chunk_duration_ms = chunk_duration_ms
+
+        # Resolve soxr quality preset from profile name
+        self._soxr_quality = RESAMPLE_QUALITY_PROFILES.get(
+            resample_quality,
+            RESAMPLE_QUALITY_PROFILES[DEFAULT_RESAMPLE_QUALITY],
+        )
 
         # Calculate chunk size in samples across all channels
         self.chunk_samples = int(sample_rate * chunk_duration_ms / 1000) * self.channels
@@ -269,19 +280,33 @@ class AudioBuffer:
             raise ValueError(f"Unsupported encoding: {self.encoding}")
 
     def _resample_if_needed(self, samples: np.ndarray) -> np.ndarray:
-        """Resample client audio to worker processing sample rate if needed."""
+        """Resample client audio to worker processing sample rate if needed.
+
+        Uses libsoxr for high-quality polyphase resampling with anti-aliasing
+        filter, avoiding the spectral aliasing that linear interpolation causes
+        when downsampling (e.g. 48 kHz → 16 kHz).
+        """
         if self.client_sample_rate == self.sample_rate or len(samples) == 0:
             return samples
 
-        # TODO(m61): Linear interpolation is fast but can alias when downsampling.
-        # Replace with low-pass + polyphase resampling for production-quality fidelity.
-        target_len = max(
-            1,
-            int(len(samples) * self.sample_rate / self.client_sample_rate),
+        import soxr
+
+        t0 = time.perf_counter()
+        result = soxr.resample(
+            samples,
+            self.client_sample_rate,
+            self.sample_rate,
+            quality=self._soxr_quality,
+        ).astype(np.float32)
+        elapsed = time.perf_counter() - t0
+
+        import dalston.metrics
+
+        dalston.metrics.observe_realtime_resample_duration(
+            self.client_sample_rate, self.sample_rate, elapsed
         )
-        src = np.linspace(0.0, 1.0, num=len(samples), endpoint=False)
-        dst = np.linspace(0.0, 1.0, num=target_len, endpoint=False)
-        return np.interp(dst, src, samples).astype(np.float32)
+
+        return result
 
 
 # Type alias for transcribe callback
@@ -357,6 +382,7 @@ class SessionHandler:
             encoding=config.encoding,
             client_sample_rate=config.client_sample_rate,
             channels=config.channels,
+            resample_quality=config.resample_quality,
         )
         # Only initialize VAD if enabled - when disabled, use time-based chunking
         if config.enable_vad:
