@@ -3,7 +3,7 @@ from typing import Any
 try:  # pragma: no cover - exercised in dependency-constrained test envs
     from redis.asyncio import Redis
 except ModuleNotFoundError:  # pragma: no cover
-    Redis = Any  # type: ignore[misc,assignment]
+    Redis = Any  # type: ignore
 
 from dalston.common.models import Job, JobStatus, Task, TaskStatus
 from dalston.common.redis import close_redis, get_redis

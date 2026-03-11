@@ -329,13 +329,13 @@ def _stamp_sync(cfg, revision: str) -> None:
     directory.  This is necessary because legacy revisions (0001–0038) no
     longer exist as script files after the squash consolidation.
     """
-    from alembic import command
+    import alembic.command
 
-    command.stamp(cfg, revision, purge=True)
+    alembic.command.stamp(cfg, revision, purge=True)
 
 
 def _run_upgrade_sync(cfg) -> None:
     """Synchronous Alembic upgrade (runs in thread)."""
-    from alembic import command
+    import alembic.command
 
-    command.upgrade(cfg, "head")
+    alembic.command.upgrade(cfg, "head")

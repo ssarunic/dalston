@@ -67,6 +67,7 @@ realtime-sdk = [
     "redis>=7.0.0",
     "numpy>=1.24.0",
     "torch>=2.0.0",
+    "soxr>=0.3.0",  # High-quality sample rate conversion (libsoxr)
     "aioboto3>=13.0.0",  # S3 storage for audio/transcript persistence
     "types-aiobotocore-s3>=2.13.0",
     "audioop-lts>=0.2.1;python_version>='3.13'",  # audioop removed in Python 3.13
@@ -84,6 +85,7 @@ dev = [
     "ruff>=0.9.0",
     "pre-commit>=4.0.0",
     "numpy>=1.24.0",  # For VAD tests
+    "soxr>=0.3.0",  # For resampling tests
     "jsonschema>=4.0.0",  # For engine YAML validation (M30)
     # OpenTelemetry test utilities (M19)
     "opentelemetry-test-utils>=0.60b0,<1.0.0",

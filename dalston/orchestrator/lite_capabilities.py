@@ -27,7 +27,7 @@ compliance
 from __future__ import annotations
 
 import os
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel
@@ -46,7 +46,7 @@ _COMPLIANCE_PREREQS = ("presidio_analyzer", "presidio_anonymizer")
 _PER_CHANNEL = "per_channel"
 
 
-class LiteProfile(str, Enum):
+class LiteProfile(StrEnum):
     CORE = "core"
     SPEAKER = "speaker"
     COMPLIANCE = "compliance"

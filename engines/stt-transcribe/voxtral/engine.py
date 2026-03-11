@@ -264,7 +264,7 @@ class VoxtralEngine(BaseBatchTranscribeEngine):
         vram_mb = 9500 if self._model_variant == "mini-3b" else 55000
 
         return EngineCapabilities(
-            runtime=f"voxtral-{self._model_variant}",
+            runtime="vllm-asr",
             version="1.0.0",
             stages=["transcribe"],
             languages=self.SUPPORTED_LANGUAGES,

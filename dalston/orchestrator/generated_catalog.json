@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-03-10T21:26:58.772271+00:00",
+  "generated_at": "2026-03-11T08:55:27.153871+00:00",
   "schema_version": "3.0",
-  "engine_count": 11,
+  "engine_count": 13,
   "engines": {
     "phoneme-align": {
       "id": "phoneme-align",
@@ -144,6 +144,40 @@
         "rtf_gpu": 0.08,
         "rtf_cpu": 1.2,
         "warm_start_latency_ms": 500
+      }
+    },
+    "final-merger": {
+      "id": "final-merger",
+      "name": "Final Merger",
+      "version": "1.1.0",
+      "stage": "merge",
+      "type": null,
+      "description": "Combines outputs from upstream pipeline stages into the\nstandard Dalston transcript format.\n\nAdds segment IDs, metadata, and writes the canonical\ntranscript.json file for the Gateway to read.\n\nFor per_channel mode with PII detection and audio redaction:\n- Collects and merges PII entities from each channel\n- Assembles redacted mono WAVs into stereo output (FFmpeg)",
+      "image": "dalston/stt-batch-merge-final-merger:1.1.0",
+      "execution_profile": "container",
+      "capabilities": {
+        "stages": [
+          "merge"
+        ],
+        "languages": null,
+        "supports_word_timestamps": false,
+        "supports_streaming": false,
+        "max_audio_duration": 86400,
+        "max_concurrency": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": false,
+        "min_vram_gb": 0,
+        "recommended_gpu": null,
+        "supports_cpu": true,
+        "min_ram_gb": 1,
+        "memory": "256M"
+      },
+      "performance": {
+        "rtf_gpu": null,
+        "rtf_cpu": 0.001,
+        "warm_start_latency_ms": 5
       }
     },
     "audio-prepare": {
@@ -366,42 +400,96 @@
         "warm_start_latency_ms": 50
       }
     },
-    "vllm-asr": {
-      "id": "vllm-asr",
-      "name": "vLLM Audio ASR",
+    "riva": {
+      "id": "riva",
+      "name": "Riva NIM Batch Transcription",
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "Audio-capable LLMs via vLLM for high-accuracy transcription.\nSupports Voxtral (Mistral) and Qwen2-Audio model families.\n\nUses model-specific adapters for prompt building and output parsing.\nLoads models at runtime via runtime_model_id without requiring\nseparate Docker images per variant.\n\nNote: Audio LLMs produce text only - no word timestamps.\nUse the alignment stage (phoneme-align) if word-level timing is needed.",
+      "description": "Batch transcription engine using NVIDIA Riva NIM as a gRPC sidecar.\nStreams audio chunks to NIM via streaming_recognize() for robust\nprocessing of long recordings without gRPC deadline risk.\n\nThe engine itself is a thin CPU adapter; all GPU inference runs\nin the Riva NIM sidecar container.",
+      "image": "dalston/stt-batch-transcribe-riva:1.0.0",
+      "execution_profile": "container",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "languages": [
+          "en",
+          "es",
+          "fr",
+          "de",
+          "it",
+          "pt",
+          "zh",
+          "ja",
+          "ko",
+          "ru"
+        ],
+        "supports_word_timestamps": true,
+        "supports_streaming": false,
+        "max_audio_duration": 7200,
+        "max_concurrency": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": false,
+        "min_vram_gb": null,
+        "recommended_gpu": null,
+        "supports_cpu": true,
+        "min_ram_gb": 1,
+        "memory": "1G"
+      },
+      "performance": {
+        "rtf_gpu": 0.05,
+        "rtf_cpu": 0.05,
+        "warm_start_latency_ms": 50
+      }
+    },
+    "vllm-asr": {
+      "id": "vllm-asr",
+      "name": "Voxtral Batch",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "type": null,
+      "description": "Batch transcription using Mistral Voxtral models via HuggingFace Transformers.\nSupports Mini 3B and Small 24B variants for multilingual transcription\nacross 8 languages. GPU required for inference.\n\nNote: Produces segment-level output without word timestamps.\nChain with phoneme-align stage if word-level timestamps are needed.",
       "image": "dalston/stt-batch-transcribe-vllm-asr:1.0.0",
       "execution_profile": "container",
       "capabilities": {
         "stages": [
           "transcribe"
         ],
-        "languages": null,
+        "languages": [
+          "en",
+          "es",
+          "fr",
+          "pt",
+          "hi",
+          "de",
+          "nl",
+          "it"
+        ],
         "supports_word_timestamps": false,
         "supports_streaming": false,
-        "max_audio_duration": 600,
+        "max_audio_duration": 1800,
         "max_concurrency": null
       },
       "hardware": {
         "gpu_required": true,
         "gpu_optional": false,
-        "min_vram_gb": 8,
+        "min_vram_gb": 10,
         "recommended_gpu": [
           "a10g",
           "l4",
-          "a100"
+          "rtx4090"
         ],
         "supports_cpu": false,
         "min_ram_gb": 16,
-        "memory": "16G"
+        "memory": "12G"
       },
       "performance": {
-        "rtf_gpu": 0.15,
+        "rtf_gpu": 0.05,
         "rtf_cpu": null,
-        "warm_start_latency_ms": 5000
+        "warm_start_latency_ms": 500
       }
     }
   }
