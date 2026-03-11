@@ -60,11 +60,11 @@ class NeMoTranscriptionResult:
 
 
 # ---------------------------------------------------------------------------
-# ParakeetCore — shared inference logic
+# NemoCore — shared inference logic
 # ---------------------------------------------------------------------------
 
 
-class ParakeetCore:
+class NemoCore:
     """Shared inference logic for NeMo Parakeet batch and realtime.
 
     Owns the NeMoModelManager and provides a unified transcription interface.
@@ -473,8 +473,8 @@ class ParakeetCore:
     # -- Factory -------------------------------------------------------------
 
     @classmethod
-    def from_env(cls) -> ParakeetCore:
-        """Create a ParakeetCore configured from environment variables.
+    def from_env(cls) -> NemoCore:
+        """Create a NemoCore configured from environment variables.
 
         Environment variables:
             DALSTON_DEVICE: Device ("cuda" or "cpu", default: auto-detect)

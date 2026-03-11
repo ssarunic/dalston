@@ -288,7 +288,7 @@ class TestAdapterRegistry:
 
 
 def load_vllm_asr_engine():
-    """Load VLLMASREngine from engines directory using importlib."""
+    """Load VllmAsrBatchEngine from engines directory using importlib."""
     engine_path = Path("engines/stt-transcribe/vllm-asr/engine.py")
     if not engine_path.exists():
         pytest.skip("vLLM-ASR engine not found")
@@ -300,12 +300,12 @@ def load_vllm_asr_engine():
     module = importlib.util.module_from_spec(spec)
     sys.modules["vllm_asr_engine"] = module
     spec.loader.exec_module(module)
-    return module.VLLMASREngine
+    return module.VllmAsrBatchEngine
 
 
 @pytest.mark.skipif(not HAS_TORCH, reason="torch not installed")
 class TestVLLMASREngine:
-    """Test VLLMASREngine without loading actual model."""
+    """Test VllmAsrBatchEngine without loading actual model."""
 
     @pytest.fixture
     def mock_cuda(self):
@@ -329,8 +329,8 @@ class TestVLLMASREngine:
             if "vllm_asr" in key:
                 del sys.modules[key]
 
-        VLLMASREngine = load_vllm_asr_engine()
-        engine = VLLMASREngine()
+        VllmAsrBatchEngine = load_vllm_asr_engine()
+        engine = VllmAsrBatchEngine()
         return engine
 
     def test_engine_init(self, engine):
@@ -347,10 +347,10 @@ class TestVLLMASREngine:
             {"DALSTON_RUNTIME": "vllm-asr"},
         ):
             with patch("torch.cuda.is_available", return_value=False):
-                VLLMASREngine = load_vllm_asr_engine()
+                VllmAsrBatchEngine = load_vllm_asr_engine()
 
                 with pytest.raises(RuntimeError, match="requires CUDA"):
-                    VLLMASREngine()
+                    VllmAsrBatchEngine()
 
     def test_get_capabilities(self, engine):
         """Engine capabilities should be correct."""
@@ -493,8 +493,8 @@ class TestVLLMASREngineEnvironment:
         ):
             with patch("torch.cuda.is_available", return_value=True):
                 with patch("torch.cuda.device_count", return_value=1):
-                    VLLMASREngine = load_vllm_asr_engine()
-                    engine = VLLMASREngine()
+                    VllmAsrBatchEngine = load_vllm_asr_engine()
+                    engine = VllmAsrBatchEngine()
 
                     assert engine._runtime == "custom-vllm"
 
@@ -509,8 +509,8 @@ class TestVLLMASREngineEnvironment:
         ):
             with patch("torch.cuda.is_available", return_value=True):
                 with patch("torch.cuda.device_count", return_value=1):
-                    VLLMASREngine = load_vllm_asr_engine()
-                    engine = VLLMASREngine()
+                    VllmAsrBatchEngine = load_vllm_asr_engine()
+                    engine = VllmAsrBatchEngine()
 
                     assert engine._gpu_memory_utilization == 0.7
 
@@ -525,7 +525,7 @@ class TestVLLMASREngineEnvironment:
         ):
             with patch("torch.cuda.is_available", return_value=True):
                 with patch("torch.cuda.device_count", return_value=1):
-                    VLLMASREngine = load_vllm_asr_engine()
-                    engine = VLLMASREngine()
+                    VllmAsrBatchEngine = load_vllm_asr_engine()
+                    engine = VllmAsrBatchEngine()
 
                     assert engine._max_model_len == 8192

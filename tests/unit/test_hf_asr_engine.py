@@ -29,7 +29,7 @@ def _ctx(task_input: EngineInput) -> BatchTaskContext:
 
 
 def load_hf_asr_engine():
-    """Load HFASREngine from engines directory using importlib."""
+    """Load HfAsrBatchEngine from engines directory using importlib."""
     engine_path = Path("engines/stt-transcribe/hf-asr/engine.py")
     if not engine_path.exists():
         pytest.skip("HF-ASR engine not found")
@@ -41,12 +41,12 @@ def load_hf_asr_engine():
     module = importlib.util.module_from_spec(spec)
     sys.modules["hf_asr_engine"] = module
     spec.loader.exec_module(module)
-    return module.HFASREngine
+    return module.HfAsrBatchEngine
 
 
 @pytest.mark.skipif(not HAS_TORCH, reason="torch not installed")
 class TestHFASREngine:
-    """Test HFASREngine without loading actual model."""
+    """Test HfAsrBatchEngine without loading actual model."""
 
     @pytest.fixture(autouse=True)
     def _clear_module_cache(self):
@@ -66,8 +66,8 @@ class TestHFASREngine:
     @pytest.fixture
     def engine(self, mock_torch):
         """Create engine instance with mocked dependencies."""
-        HFASREngine = load_hf_asr_engine()
-        return HFASREngine()
+        HfAsrBatchEngine = load_hf_asr_engine()
+        return HfAsrBatchEngine()
 
     def test_engine_init_cpu_fallback(self, engine):
         """Engine should fall back to CPU when CUDA unavailable."""
@@ -83,8 +83,8 @@ class TestHFASREngine:
             os.environ,
             {"DALSTON_DEFAULT_MODEL_ID": "facebook/wav2vec2-large-960h"},
         ):
-            HFASREngine = load_hf_asr_engine()
-            engine = HFASREngine()
+            HfAsrBatchEngine = load_hf_asr_engine()
+            engine = HfAsrBatchEngine()
             assert engine._default_model_id == "facebook/wav2vec2-large-960h"
 
     def test_runtime_from_env(self):
@@ -93,8 +93,8 @@ class TestHFASREngine:
             os.environ, {"DALSTON_RUNTIME": "custom-hf-asr", "DALSTON_DEVICE": "cpu"}
         ):
             with patch("torch.cuda.is_available", return_value=False):
-                HFASREngine = load_hf_asr_engine()
-                engine = HFASREngine()
+                HfAsrBatchEngine = load_hf_asr_engine()
+                engine = HfAsrBatchEngine()
                 assert engine._runtime == "custom-hf-asr"
 
     def test_health_check(self, engine):
@@ -130,8 +130,8 @@ class TestHFASREngineNormalizeOutput:
         """Create engine instance for normalization tests."""
         with patch.dict(os.environ, {"DALSTON_DEVICE": "cpu"}):
             with patch("torch.cuda.is_available", return_value=False):
-                HFASREngine = load_hf_asr_engine()
-                return HFASREngine()
+                HfAsrBatchEngine = load_hf_asr_engine()
+                return HfAsrBatchEngine()
 
     def test_normalize_whisper_output_with_word_timestamps(self, engine):
         """Whisper output with word-level chunks should produce word timestamps."""
@@ -257,8 +257,8 @@ class TestHFASREngineProcess:
         """Create engine instance."""
         with patch.dict(os.environ, {"DALSTON_DEVICE": "cpu"}):
             with patch("torch.cuda.is_available", return_value=False):
-                HFASREngine = load_hf_asr_engine()
-                return HFASREngine()
+                HfAsrBatchEngine = load_hf_asr_engine()
+                return HfAsrBatchEngine()
 
     def test_process_uses_runtime_model_id(self, engine, tmp_path):
         """Process should use runtime_model_id from config."""
@@ -410,8 +410,8 @@ class TestHFASREngineEnvironment:
         """Explicit DEVICE=cpu should use CPU even when CUDA available."""
         with patch.dict(os.environ, {"DALSTON_DEVICE": "cpu"}):
             with patch("torch.cuda.is_available", return_value=True):
-                HFASREngine = load_hf_asr_engine()
-                engine = HFASREngine()
+                HfAsrBatchEngine = load_hf_asr_engine()
+                engine = HfAsrBatchEngine()
                 assert engine._device == "cpu"
 
     def test_cuda_device_when_available(self):
@@ -419,25 +419,25 @@ class TestHFASREngineEnvironment:
         with patch.dict(os.environ, {"DALSTON_DEVICE": ""}):
             with patch("torch.cuda.is_available", return_value=True):
                 with patch("torch.cuda.device_count", return_value=1):
-                    HFASREngine = load_hf_asr_engine()
-                    engine = HFASREngine()
+                    HfAsrBatchEngine = load_hf_asr_engine()
+                    engine = HfAsrBatchEngine()
                     assert engine._device == "cuda"
 
     def test_cuda_requested_but_unavailable_raises(self):
         """Requesting CUDA when unavailable should raise RuntimeError."""
         with patch.dict(os.environ, {"DALSTON_DEVICE": "cuda"}):
             with patch("torch.cuda.is_available", return_value=False):
-                HFASREngine = load_hf_asr_engine()
+                HfAsrBatchEngine = load_hf_asr_engine()
                 with pytest.raises(RuntimeError, match="CUDA is not available"):
-                    HFASREngine()
+                    HfAsrBatchEngine()
 
     def test_unknown_device_raises(self):
         """Unknown device name should raise ValueError."""
         with patch.dict(os.environ, {"DALSTON_DEVICE": "tpu"}):
             with patch("torch.cuda.is_available", return_value=False):
-                HFASREngine = load_hf_asr_engine()
+                HfAsrBatchEngine = load_hf_asr_engine()
                 with pytest.raises(ValueError, match="Unknown DALSTON_DEVICE"):
-                    HFASREngine()
+                    HfAsrBatchEngine()
 
 
 class TestHFTransformersModelManager:
@@ -572,14 +572,14 @@ class TestHFTransformersModelManager:
 
 @pytest.mark.skipif(not HAS_TORCH, reason="torch not installed")
 class TestHFASREngineS3Storage:
-    """Test HFASREngine S3 storage integration."""
+    """Test HfAsrBatchEngine S3 storage integration."""
 
     def test_engine_get_local_cache_stats_without_storage(self):
         """Engine get_local_cache_stats returns None without S3."""
         with patch.dict(os.environ, {"DALSTON_DEVICE": "cpu"}):
             with patch("torch.cuda.is_available", return_value=False):
-                HFASREngine = load_hf_asr_engine()
-                engine = HFASREngine()
+                HfAsrBatchEngine = load_hf_asr_engine()
+                engine = HfAsrBatchEngine()
 
                 assert engine.get_local_cache_stats() is None
                 engine.shutdown()
@@ -600,8 +600,8 @@ class TestHFASREngineS3Storage:
                     "dalston.engine_sdk.model_storage.S3ModelStorage",
                     mock_storage_class,
                 ):
-                    HFASREngine = load_hf_asr_engine()
-                    engine = HFASREngine()
+                    HfAsrBatchEngine = load_hf_asr_engine()
+                    engine = HfAsrBatchEngine()
 
                     # S3ModelStorage should have been initialized
                     mock_storage_class.from_env.assert_called_once()

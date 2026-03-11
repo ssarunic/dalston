@@ -35,7 +35,7 @@ from dalston.common.audio_defaults import (
     MIN_SAMPLE_RATE,
     RESAMPLE_QUALITY_PROFILES,
 )
-from dalston.common.pipeline_types import Transcript
+from dalston.common.pipeline_types import TranscribeInput, Transcript
 from dalston.common.registry import EngineRecord, UnifiedEngineRegistry
 from dalston.common.timeouts import WS_PING_INTERVAL, WS_PING_TIMEOUT
 from dalston.common.ws_close_codes import (
@@ -81,13 +81,11 @@ class RealtimeEngine(ABC):
             def transcribe_v1(
                 self,
                 audio: np.ndarray,
-                language: str,
-                model_variant: str,
-                vocabulary: list[str] | None = None,
+                params: TranscribeInput,
             ) -> Transcript:
                 segments, info = self.model.transcribe(
                     audio,
-                    language=None if language == "auto" else language,
+                    language=None if params.language == "auto" else params.language,
                     word_timestamps=True,
                 )
 
@@ -167,9 +165,7 @@ class RealtimeEngine(ABC):
     def transcribe(
         self,
         audio: np.ndarray,
-        language: str,
-        model_variant: str,
-        vocabulary: list[str] | None = None,
+        params: TranscribeInput,
     ) -> Transcript:
         """Transcribe an audio segment.
 
@@ -177,9 +173,7 @@ class RealtimeEngine(ABC):
 
         Args:
             audio: Audio samples as float32 numpy array, mono, 16kHz
-            language: Language code (e.g., "en") or "auto" for detection
-            model_variant: Model name (e.g., "faster-whisper-large-v3")
-            vocabulary: List of terms to boost recognition (hotwords/bias)
+            params: Typed transcriber parameters for this utterance
 
         Returns:
             Transcript with text, segments, language, and metadata

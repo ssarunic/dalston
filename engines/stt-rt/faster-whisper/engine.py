@@ -1,7 +1,7 @@
 """Real-time Whisper streaming transcription engine.
 
 Uses faster-whisper for transcription with Silero VAD for speech detection.
-Delegates inference to TranscribeCore (shared with the batch engine).
+Delegates inference to FasterWhisperCore (shared with the batch engine).
 Supports dynamic model loading via ModelManager (M43).
 """
 
@@ -13,12 +13,13 @@ import structlog
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
+    TranscribeInput,
     Transcript,
     TranscriptWord,
 )
 from dalston.engine_sdk.cores.faster_whisper_core import (
-    TranscribeConfig,
-    TranscribeCore,
+    FasterWhisperConfig,
+    FasterWhisperCore,
 )
 from dalston.realtime_sdk import AsyncModelManager
 from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
@@ -26,16 +27,16 @@ from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
 logger = structlog.get_logger()
 
 
-class WhisperStreamingEngine(BaseRealtimeTranscribeEngine):
+class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
     """Real-time streaming transcription using Whisper with dynamic model loading.
 
-    Delegates inference to TranscribeCore, which is shared with the batch
+    Delegates inference to FasterWhisperCore, which is shared with the batch
     faster-whisper engine. The RT adapter handles:
     - Model ID normalization
     - VAD-chunked audio input (numpy arrays)
     - Output formatting to Transcript
 
-    When run standalone, creates its own TranscribeCore in load_models().
+    When run standalone, creates its own FasterWhisperCore in load_models().
     When used within a unified runner, accepts an injected core to share a
     single loaded model with the batch adapter.
 
@@ -53,26 +54,26 @@ class WhisperStreamingEngine(BaseRealtimeTranscribeEngine):
     # Default model when client doesn't specify
     DEFAULT_MODEL = "large-v3-turbo"
 
-    def __init__(self, core: TranscribeCore | None = None) -> None:
+    def __init__(self, core: FasterWhisperCore | None = None) -> None:
         """Initialize the engine.
 
         Args:
-            core: Optional shared TranscribeCore. If provided, load_models()
+            core: Optional shared FasterWhisperCore. If provided, load_models()
                   skips creating its own core and uses the injected one.
         """
         super().__init__()
-        self._core: TranscribeCore | None = core
+        self._core: FasterWhisperCore | None = core
 
     def load_models(self) -> None:
-        """Initialize shared TranscribeCore with optional preloading.
+        """Initialize shared FasterWhisperCore with optional preloading.
 
-        If a TranscribeCore was injected via __init__, this method uses it
+        If a FasterWhisperCore was injected via __init__, this method uses it
         instead of creating a new one. This is how the unified runner shares
         a single model instance between batch and RT adapters.
         """
         if self._core is None:
             # Standalone mode — create own core
-            self._core = TranscribeCore.from_env()
+            self._core = FasterWhisperCore.from_env()
 
         # Wrap the core's manager in AsyncModelManager for heartbeat reporting
         self._model_manager = AsyncModelManager(self._core.manager)
@@ -88,39 +89,37 @@ class WhisperStreamingEngine(BaseRealtimeTranscribeEngine):
             shared_core=self._core is not None,
         )
 
-    def transcribe_v1(
-        self,
-        audio: np.ndarray,
-        language: str,
-        model_variant: str,
-        vocabulary: list[str] | None = None,
-    ) -> Transcript:
-        """Transcribe an audio segment via shared TranscribeCore.
+    def transcribe_v1(self, audio: np.ndarray, params: TranscribeInput) -> Transcript:
+        """Transcribe an audio segment via shared FasterWhisperCore.
 
         Args:
             audio: Audio samples as float32 numpy array, mono, 16kHz
-            language: Language code (e.g., "en") or "auto" for detection
-            model_variant: Model name (e.g., "large-v3-turbo")
-            vocabulary: List of terms to boost recognition (hotwords)
+            params: Typed transcriber parameters for this utterance
 
         Returns:
             Transcript with text, words, language, confidence
         """
         if self._core is None:
             raise RuntimeError(
-                "TranscribeCore not initialized — call load_models() first"
+                "FasterWhisperCore not initialized — call load_models() first"
             )
 
         # Use default if no model specified
-        model_id = model_variant or self.DEFAULT_MODEL
+        model_id = params.runtime_model_id or self.DEFAULT_MODEL
+        language = params.language or "auto"
+        vocabulary = params.vocabulary
 
         # Build config for realtime use (VAD handled by SessionHandler)
         initial_prompt = ", ".join(vocabulary) if vocabulary else None
-        config = TranscribeConfig(
+        config = FasterWhisperConfig(
             language=language,
-            beam_size=5,
+            beam_size=params.beam_size if params.beam_size is not None else 5,
             vad_filter=False,  # VAD handled separately by SessionHandler
-            word_timestamps=True,
+            word_timestamps=(
+                True if params.word_timestamps is None else params.word_timestamps
+            ),
+            temperature=params.temperature,
+            task=params.task,
             initial_prompt=initial_prompt,
         )
 
@@ -175,7 +174,7 @@ class WhisperStreamingEngine(BaseRealtimeTranscribeEngine):
 
     def get_models(self) -> list[str]:
         """Return list of supported model variants."""
-        return TranscribeCore.SUPPORTED_MODELS
+        return FasterWhisperCore.SUPPORTED_MODELS
 
     def get_languages(self) -> list[str]:
         """Return list of supported languages."""
@@ -239,5 +238,5 @@ class WhisperStreamingEngine(BaseRealtimeTranscribeEngine):
 if __name__ == "__main__":
     import asyncio
 
-    engine = WhisperStreamingEngine()
+    engine = FasterWhisperRealtimeEngine()
     asyncio.run(engine.run())

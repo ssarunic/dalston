@@ -1,7 +1,7 @@
 """Real-time Parakeet ONNX streaming transcription engine.
 
 Uses ONNX Runtime via the onnx-asr library for low-latency transcription
-of VAD-segmented utterances. Delegates inference to ParakeetOnnxCore
+of VAD-segmented utterances. Delegates inference to NemoOnnxCore
 (shared with the batch engine).
 
 Unlike the NeMo-based real-time engine, this uses ONNX Runtime which
@@ -29,26 +29,27 @@ import structlog
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
+    TranscribeInput,
     Transcript,
     TranscriptWord,
 )
-from dalston.engine_sdk.cores.parakeet_onnx_core import ParakeetOnnxCore
+from dalston.engine_sdk.cores.parakeet_onnx_core import NemoOnnxCore
 from dalston.realtime_sdk import AsyncModelManager
 from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
 
 logger = structlog.get_logger()
 
 
-class ParakeetOnnxStreamingEngine(BaseRealtimeTranscribeEngine):
+class NemoOnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
     """Real-time transcription using Parakeet via ONNX Runtime.
 
-    Delegates inference to ParakeetOnnxCore, which is shared with the batch
+    Delegates inference to NemoOnnxCore, which is shared with the batch
     ONNX engine. The RT adapter handles:
     - Model ID normalization
     - VAD-chunked audio input (numpy arrays)
     - Output formatting to Transcript
 
-    When run standalone, creates its own ParakeetOnnxCore in load_models().
+    When run standalone, creates its own NemoOnnxCore in load_models().
     When used within a unified runner, accepts an injected core to share a
     single loaded model with the batch adapter.
 
@@ -58,26 +59,26 @@ class ParakeetOnnxStreamingEngine(BaseRealtimeTranscribeEngine):
     # Default model when client doesn't specify
     DEFAULT_MODEL = "parakeet-onnx-ctc-0.6b"
 
-    def __init__(self, core: ParakeetOnnxCore | None = None) -> None:
+    def __init__(self, core: NemoOnnxCore | None = None) -> None:
         """Initialize the engine.
 
         Args:
-            core: Optional shared ParakeetOnnxCore. If provided, load_models()
+            core: Optional shared NemoOnnxCore. If provided, load_models()
                   skips creating its own core and uses the injected one.
         """
         super().__init__()
-        self._core: ParakeetOnnxCore | None = core
+        self._core: NemoOnnxCore | None = core
 
     def load_models(self) -> None:
-        """Initialize ParakeetOnnxCore with optional preloading.
+        """Initialize NemoOnnxCore with optional preloading.
 
-        If a ParakeetOnnxCore was injected via __init__, this method uses it
+        If a NemoOnnxCore was injected via __init__, this method uses it
         instead of creating a new one. This is how the unified runner shares
         a single model instance between batch and RT adapters.
         """
         if self._core is None:
             # Standalone mode — create own core
-            self._core = ParakeetOnnxCore.from_env()
+            self._core = NemoOnnxCore.from_env()
 
         # Wrap the core's manager in AsyncModelManager for heartbeat reporting
         self._model_manager = AsyncModelManager(self._core.manager)
@@ -92,31 +93,25 @@ class ParakeetOnnxStreamingEngine(BaseRealtimeTranscribeEngine):
             shared_core=self._core is not None,
         )
 
-    def transcribe_v1(
-        self,
-        audio: np.ndarray,
-        language: str,
-        model_variant: str,
-        vocabulary: list[str] | None = None,
-    ) -> Transcript:
-        """Transcribe an audio segment via shared ParakeetOnnxCore.
+    def transcribe_v1(self, audio: np.ndarray, params: TranscribeInput) -> Transcript:
+        """Transcribe an audio segment via shared NemoOnnxCore.
 
         Args:
             audio: Audio samples as float32 numpy array, mono, 16kHz
-            language: Language code (ignored - Parakeet is English-only)
-            model_variant: Model name (e.g., "parakeet-onnx-tdt-0.6b-v3")
-            vocabulary: List of terms to boost recognition (not supported for ONNX)
+            params: Typed transcriber parameters for this utterance
 
         Returns:
             Transcript with text, words, language, confidence
         """
         if self._core is None:
             raise RuntimeError(
-                "ParakeetOnnxCore not initialized — call load_models() first"
+                "NemoOnnxCore not initialized — call load_models() first"
             )
 
         # Use default if no model specified
-        model_id = model_variant or self.DEFAULT_MODEL
+        model_id = params.runtime_model_id or self.DEFAULT_MODEL
+        language = params.language or "auto"
+        vocabulary = params.vocabulary
 
         # Normalize model ID
         model_id = self._normalize_model_id(model_id)
@@ -201,7 +196,7 @@ class ParakeetOnnxStreamingEngine(BaseRealtimeTranscribeEngine):
 
     def get_models(self) -> list[str]:
         """Return list of supported model identifiers."""
-        return ParakeetOnnxCore.SUPPORTED_MODELS
+        return NemoOnnxCore.SUPPORTED_MODELS
 
     def get_languages(self) -> list[str]:
         """Return list of supported languages."""
@@ -251,5 +246,5 @@ class ParakeetOnnxStreamingEngine(BaseRealtimeTranscribeEngine):
 if __name__ == "__main__":
     import asyncio
 
-    engine = ParakeetOnnxStreamingEngine()
+    engine = NemoOnnxRealtimeEngine()
     asyncio.run(engine.run())

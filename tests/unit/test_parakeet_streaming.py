@@ -1,6 +1,6 @@
 """Unit tests for Parakeet real-time streaming engine.
 
-Tests the ParakeetStreamingEngine implementation with mocked NeMo models and CUDA.
+Tests the NemoRealtimeEngine implementation with mocked NeMo models and CUDA.
 Run with: uv run --extra dev pytest tests/unit/test_parakeet_streaming.py
 """
 
@@ -16,7 +16,7 @@ torch = pytest.importorskip("torch")
 
 
 def load_parakeet_streaming_engine():
-    """Load ParakeetStreamingEngine from engines directory using importlib."""
+    """Load NemoRealtimeEngine from engines directory using importlib."""
     engine_path = Path("engines/stt-rt/parakeet/engine.py")
     if not engine_path.exists():
         pytest.skip("Parakeet streaming engine not found")
@@ -30,7 +30,7 @@ def load_parakeet_streaming_engine():
     module = importlib.util.module_from_spec(spec)
     sys.modules["parakeet_streaming_engine"] = module
     spec.loader.exec_module(module)
-    return module.ParakeetStreamingEngine
+    return module.NemoRealtimeEngine
 
 
 @pytest.fixture
@@ -77,8 +77,8 @@ class TestParakeetStreamingEngineGetModels:
 
         M44: NeMo runtime container can load any supported Parakeet model on-demand.
         """
-        ParakeetStreamingEngine = load_parakeet_streaming_engine()
-        engine = ParakeetStreamingEngine()
+        NemoRealtimeEngine = load_parakeet_streaming_engine()
+        engine = NemoRealtimeEngine()
         models = engine.get_models()
 
         # M44: Returns all models the NeMoModelManager can load
@@ -96,8 +96,8 @@ class TestParakeetStreamingEngineGetLanguages:
 
     def test_get_languages_returns_english_only(self, mock_cuda_available):
         """Test that get_languages returns only English."""
-        ParakeetStreamingEngine = load_parakeet_streaming_engine()
-        engine = ParakeetStreamingEngine()
+        NemoRealtimeEngine = load_parakeet_streaming_engine()
+        engine = NemoRealtimeEngine()
         languages = engine.get_languages()
 
         assert languages == ["en"]
@@ -113,8 +113,8 @@ class TestParakeetStreamingEngineHealthCheck:
 
         M44: Health check reports model manager state instead of static model.
         """
-        ParakeetStreamingEngine = load_parakeet_streaming_engine()
-        engine = ParakeetStreamingEngine()
+        NemoRealtimeEngine = load_parakeet_streaming_engine()
+        engine = NemoRealtimeEngine()
         health = engine.health_check()
 
         # M44: Dynamic model manager fields
@@ -130,8 +130,8 @@ class TestParakeetStreamingEngineGPUMemory:
 
     def test_get_gpu_memory_usage_format(self, mock_cuda_available):
         """Test that GPU memory usage is returned in correct format."""
-        ParakeetStreamingEngine = load_parakeet_streaming_engine()
-        engine = ParakeetStreamingEngine()
+        NemoRealtimeEngine = load_parakeet_streaming_engine()
+        engine = NemoRealtimeEngine()
         usage = engine.get_gpu_memory_usage()
 
         assert "GB" in usage

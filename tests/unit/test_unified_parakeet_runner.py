@@ -116,20 +116,20 @@ class TestUnifiedRunnerClassStructure:
         assert hasattr(cls, "_run_batch")
 
     def test_parakeet_runner_uses_parakeet_core(self) -> None:
-        """Runner module must import and reference ParakeetCore."""
+        """Runner module must import and reference NemoCore."""
         module = _load_runner_module(_PARAKEET_RUNNER_PATH, "parakeet_runner_core_ref")
-        from dalston.engine_sdk.cores.parakeet_core import ParakeetCore
+        from dalston.engine_sdk.cores.parakeet_core import NemoCore
 
-        assert module.ParakeetCore is ParakeetCore
+        assert module.NemoCore is NemoCore
 
     def test_parakeet_onnx_runner_uses_parakeet_onnx_core(self) -> None:
-        """Runner module must import and reference ParakeetOnnxCore."""
+        """Runner module must import and reference NemoOnnxCore."""
         module = _load_runner_module(
             _PARAKEET_ONNX_RUNNER_PATH, "parakeet_onnx_runner_core_ref"
         )
-        from dalston.engine_sdk.cores.parakeet_onnx_core import ParakeetOnnxCore
+        from dalston.engine_sdk.cores.parakeet_onnx_core import NemoOnnxCore
 
-        assert module.ParakeetOnnxCore is ParakeetOnnxCore
+        assert module.NemoOnnxCore is NemoOnnxCore
 
 
 # ---------------------------------------------------------------------------

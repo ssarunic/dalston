@@ -15,6 +15,7 @@ from dalston.common.pipeline_types import (
     Character,
     Phoneme,
     TimestampGranularity,
+    TranscribeInput,
     Transcript,
     TranscriptSegment,
     TranscriptWord,
@@ -32,22 +33,18 @@ class BaseRealtimeTranscribeEngine(RealtimeEngine):
     def transcribe(
         self,
         audio: np.ndarray,
-        language: str,
-        model_variant: str,
-        vocabulary: list[str] | None = None,
+        params: TranscribeInput,
     ) -> Transcript:
         """Transcribe audio and return a Transcript.
 
         Subclasses should override ``transcribe_v1()`` instead.
         """
-        return self.transcribe_v1(audio, language, model_variant, vocabulary)
+        return self.transcribe_v1(audio, params)
 
     def transcribe_v1(
         self,
         audio: np.ndarray,
-        language: str,
-        model_variant: str,
-        vocabulary: list[str] | None = None,
+        params: TranscribeInput,
     ) -> Transcript:
         """Transcribe audio and return a Transcript.
 
@@ -55,9 +52,7 @@ class BaseRealtimeTranscribeEngine(RealtimeEngine):
 
         Args:
             audio: Audio samples as float32 numpy array, mono, 16kHz
-            language: Language code (e.g., "en") or "auto" for detection
-            model_variant: Model name (e.g., "large-v3-turbo")
-            vocabulary: List of terms to boost recognition
+            params: Typed transcriber parameters for this utterance
 
         Returns:
             Canonical transcript output

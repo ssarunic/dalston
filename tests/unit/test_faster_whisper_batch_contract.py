@@ -2,7 +2,7 @@
 
 Verifies that the batch engine produces the correct output shape
 (Transcript with segments, text, language) and that word
-timestamp behavior is preserved after delegation to TranscribeCore.
+timestamp behavior is preserved after delegation to FasterWhisperCore.
 
 These tests mock the faster-whisper model to avoid GPU/model dependencies.
 """
@@ -31,14 +31,14 @@ def _ctx(task_id: str, job_id: str) -> BatchTaskContext:
 
 
 def _load_whisper_engine_class():
-    """Load WhisperEngine class once from file to avoid import path issues."""
+    """Load FasterWhisperBatchEngine class once from file to avoid import path issues."""
     engine_path = Path("engines/stt-transcribe/faster-whisper/engine.py")
     spec = importlib.util.spec_from_file_location("m63_whisper_engine", engine_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules["m63_whisper_engine"] = module
     spec.loader.exec_module(module)
-    return module.WhisperEngine
+    return module.FasterWhisperBatchEngine
 
 
 # Load once at module level to avoid re-importing native C extensions
@@ -86,7 +86,7 @@ def _make_mock_info(
 
 
 def _build_engine_with_mock(segments, info):
-    """Create a WhisperEngine with a mocked TranscribeCore."""
+    """Create a FasterWhisperBatchEngine with a mocked FasterWhisperCore."""
     engine = _WhisperEngine()
 
     # Mock the core's manager to return a mock model
@@ -233,7 +233,7 @@ class TestBatchOutputShape:
 
 
 class TestBatchConfigPassthrough:
-    """Verify that config values are passed through to TranscribeCore."""
+    """Verify that config values are passed through to FasterWhisperCore."""
 
     def test_language_auto_maps_to_none(self) -> None:
         segments = [_make_mock_segment()]

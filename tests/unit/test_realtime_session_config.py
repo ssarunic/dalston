@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from dalston.common.pipeline_types import TranscribeInput
 from dalston.realtime_sdk.base import RealtimeEngine
 from dalston.realtime_sdk.session import SessionConfig
 
@@ -14,7 +15,7 @@ class MockRealtimeEngine(RealtimeEngine):
     def load_models(self) -> None:
         pass
 
-    def transcribe(self, audio, language, model_variant, vocabulary=None):
+    def transcribe(self, audio, params: TranscribeInput):
         pass
 
 

@@ -3,7 +3,7 @@
 Uses the faster-whisper library (CTranslate2-based) for efficient
 speech-to-text transcription with GPU acceleration.
 
-Delegates inference to TranscribeCore (shared with the realtime engine).
+Delegates inference to FasterWhisperCore (shared with the realtime engine).
 
 Features:
     - Runtime model swapping via config["runtime_model_id"]
@@ -33,21 +33,21 @@ from dalston.common.pipeline_types import (
 from dalston.engine_sdk import BatchTaskContext, EngineInput
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 from dalston.engine_sdk.cores.faster_whisper_core import (
-    TranscribeConfig,
-    TranscribeCore,
+    FasterWhisperConfig,
+    FasterWhisperCore,
 )
 
 
-class WhisperEngine(BaseBatchTranscribeEngine):
+class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
     """Faster-Whisper transcription engine with TTL-based model management.
 
-    This engine delegates inference to TranscribeCore, which is shared
+    This engine delegates inference to FasterWhisperCore, which is shared
     with the realtime faster-whisper engine. The batch adapter handles:
     - Task config parsing
     - Output formatting to Transcript
     - Heartbeat state reporting
 
-    When run standalone, creates its own TranscribeCore. When used within
+    When run standalone, creates its own FasterWhisperCore. When used within
     a unified runner, accepts an injected core to share a single loaded
     model with the realtime adapter.
 
@@ -60,7 +60,7 @@ class WhisperEngine(BaseBatchTranscribeEngine):
     DEFAULT_VAD_FILTER = True
     DEFAULT_MODEL_ID = "large-v3-turbo"
 
-    def __init__(self, core: TranscribeCore | None = None) -> None:
+    def __init__(self, core: FasterWhisperCore | None = None) -> None:
         super().__init__()
 
         # Get configuration from environment
@@ -70,7 +70,7 @@ class WhisperEngine(BaseBatchTranscribeEngine):
         self._runtime = os.environ.get("DALSTON_RUNTIME", "faster-whisper")
 
         # Use injected core (unified runner) or create own (standalone)
-        self._core = core if core is not None else TranscribeCore.from_env()
+        self._core = core if core is not None else FasterWhisperCore.from_env()
 
         self.logger.info(
             "engine_init",
@@ -86,7 +86,7 @@ class WhisperEngine(BaseBatchTranscribeEngine):
     def transcribe_audio(
         self, engine_input: EngineInput, ctx: BatchTaskContext
     ) -> Transcript:
-        """Transcribe audio using Faster-Whisper via shared TranscribeCore.
+        """Transcribe audio using Faster-Whisper via shared FasterWhisperCore.
 
         Args:
             engine_input: Task input with audio file path and config
@@ -96,13 +96,13 @@ class WhisperEngine(BaseBatchTranscribeEngine):
             Transcript with text, segments, and language
         """
         audio_path = engine_input.audio_path
-        config = engine_input.config
+        params = engine_input.get_transcribe_params()
 
-        # Parse config into TranscribeConfig
-        channel = config.get("channel")
-        vocabulary = config.get("vocabulary")
-        prompt = config.get("prompt")
-        raw_temperature = config.get("temperature", 0.0)
+        # Parse config into FasterWhisperConfig
+        channel = params.channel
+        vocabulary = params.vocabulary
+        prompt = params.prompt
+        raw_temperature = params.temperature
 
         if isinstance(raw_temperature, list):
             parsed_temperatures = [float(value) for value in raw_temperature]
@@ -117,17 +117,23 @@ class WhisperEngine(BaseBatchTranscribeEngine):
             decode_temperature = segment_temperature
 
         # Get model to use from task config
-        runtime_model_id = config.get("runtime_model_id", self._default_model_id)
+        runtime_model_id = params.runtime_model_id or self._default_model_id
 
         # Build transcribe config
         hotwords = " ".join(vocabulary) if vocabulary else None
-        transcribe_config = TranscribeConfig(
-            language=config.get("language"),
-            beam_size=config.get("beam_size", self.DEFAULT_BEAM_SIZE),
-            vad_filter=config.get("vad_filter", self.DEFAULT_VAD_FILTER),
-            word_timestamps=True,
+        transcribe_config = FasterWhisperConfig(
+            language=params.language,
+            beam_size=(
+                params.beam_size
+                if params.beam_size is not None
+                else self.DEFAULT_BEAM_SIZE
+            ),
+            vad_filter=params.vad_filter,
+            word_timestamps=(
+                True if params.word_timestamps is None else params.word_timestamps
+            ),
             temperature=decode_temperature,
-            task=config.get("task", "transcribe"),
+            task=params.task,
             initial_prompt=prompt,
             hotwords=hotwords,
         )
@@ -254,5 +260,5 @@ class WhisperEngine(BaseBatchTranscribeEngine):
 
 
 if __name__ == "__main__":
-    engine = WhisperEngine()
+    engine = FasterWhisperBatchEngine()
     engine.run()

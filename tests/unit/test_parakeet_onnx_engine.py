@@ -1,6 +1,6 @@
 """Unit tests for Parakeet ONNX batch transcription engine.
 
-Tests the ParakeetOnnxEngine implementation with mocked onnx-asr models.
+Tests the NemoOnnxBatchEngine implementation with mocked onnx-asr models.
 Run with: uv run --extra dev pytest tests/unit/test_parakeet_onnx_engine.py
 """
 
@@ -12,7 +12,7 @@ import pytest
 
 
 def load_parakeet_onnx_engine():
-    """Load ParakeetOnnxEngine from engines directory using importlib."""
+    """Load NemoOnnxBatchEngine from engines directory using importlib."""
     engine_path = Path("engines/stt-transcribe/parakeet-onnx/engine.py")
     if not engine_path.exists():
         pytest.skip("Parakeet ONNX engine not found")
@@ -24,7 +24,7 @@ def load_parakeet_onnx_engine():
     module = importlib.util.module_from_spec(spec)
     sys.modules["parakeet_onnx_engine"] = module
     spec.loader.exec_module(module)
-    return module.ParakeetOnnxEngine
+    return module.NemoOnnxBatchEngine
 
 
 class TestParakeetOnnxEngineModelVariants:
@@ -32,36 +32,36 @@ class TestParakeetOnnxEngineModelVariants:
 
     def test_default_model_id_is_ctc_0_6b(self):
         """Test that default model is nvidia/parakeet-ctc-0.6b."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        assert ParakeetOnnxEngine.DEFAULT_MODEL_ID == "nvidia/parakeet-ctc-0.6b"
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        assert NemoOnnxBatchEngine.DEFAULT_MODEL_ID == "nvidia/parakeet-ctc-0.6b"
 
     def test_supported_models_include_ctc_variants(self):
         """Test that CTC model variants are supported."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        assert "nvidia/parakeet-ctc-0.6b" in ParakeetOnnxEngine.SUPPORTED_MODELS
-        assert "nvidia/parakeet-ctc-1.1b" in ParakeetOnnxEngine.SUPPORTED_MODELS
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        assert "nvidia/parakeet-ctc-0.6b" in NemoOnnxBatchEngine.SUPPORTED_MODELS
+        assert "nvidia/parakeet-ctc-1.1b" in NemoOnnxBatchEngine.SUPPORTED_MODELS
 
     def test_supported_models_include_tdt_variants(self):
         """Test that TDT model variants are supported."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        assert "nvidia/parakeet-tdt-0.6b-v2" in ParakeetOnnxEngine.SUPPORTED_MODELS
-        assert "nvidia/parakeet-tdt-0.6b-v3" in ParakeetOnnxEngine.SUPPORTED_MODELS
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        assert "nvidia/parakeet-tdt-0.6b-v2" in NemoOnnxBatchEngine.SUPPORTED_MODELS
+        assert "nvidia/parakeet-tdt-0.6b-v3" in NemoOnnxBatchEngine.SUPPORTED_MODELS
 
     def test_supported_models_include_rnnt_variant(self):
         """Test that RNNT model variant is supported."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        assert "nvidia/parakeet-rnnt-0.6b" in ParakeetOnnxEngine.SUPPORTED_MODELS
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        assert "nvidia/parakeet-rnnt-0.6b" in NemoOnnxBatchEngine.SUPPORTED_MODELS
 
     def test_supported_models_excludes_unavailable(self):
         """Test that models without ONNX conversions are not supported."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
         # TDT 1.1b has no ONNX conversion available
-        assert "nvidia/parakeet-tdt-1.1b" not in ParakeetOnnxEngine.SUPPORTED_MODELS
+        assert "nvidia/parakeet-tdt-1.1b" not in NemoOnnxBatchEngine.SUPPORTED_MODELS
 
     def test_supported_models_count(self):
         """Test that all 5 ONNX models are supported."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        assert len(ParakeetOnnxEngine.SUPPORTED_MODELS) == 5
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        assert len(NemoOnnxBatchEngine.SUPPORTED_MODELS) == 5
 
 
 class TestParakeetOnnxEngineHealthCheck:
@@ -69,8 +69,8 @@ class TestParakeetOnnxEngineHealthCheck:
 
     def test_health_check_returns_required_fields(self):
         """Test that health check includes engine information."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
         health = engine.health_check()
 
         assert "status" in health
@@ -81,8 +81,8 @@ class TestParakeetOnnxEngineHealthCheck:
 
     def test_health_check_reports_healthy(self):
         """Test that health check reports healthy on init."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
         health = engine.health_check()
 
         assert health["status"] == "healthy"
@@ -90,8 +90,8 @@ class TestParakeetOnnxEngineHealthCheck:
 
     def test_health_check_reports_runtime(self):
         """Test that health check reports correct runtime."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
         health = engine.health_check()
 
         assert health["runtime"] == "nemo-onnx"
@@ -102,48 +102,48 @@ class TestParakeetOnnxEngineCapabilities:
 
     def test_get_capabilities_returns_nemo_onnx_runtime(self):
         """Test that capabilities report nemo-onnx runtime."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
         caps = engine.get_capabilities()
 
         assert caps.runtime == "nemo-onnx"
 
     def test_get_capabilities_supports_word_timestamps(self):
         """Test that capabilities report word timestamp support."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
         caps = engine.get_capabilities()
 
         assert caps.supports_word_timestamps is True
 
     def test_get_capabilities_supports_cpu(self):
         """Test that capabilities report CPU support."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
         caps = engine.get_capabilities()
 
         assert caps.supports_cpu is True
 
     def test_get_capabilities_english_only(self):
         """Test that capabilities report English-only support."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
         caps = engine.get_capabilities()
 
         assert caps.languages == ["en"]
 
     def test_get_capabilities_transcribe_stage(self):
         """Test that capabilities report transcribe stage."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
         caps = engine.get_capabilities()
 
         assert "transcribe" in caps.stages
 
     def test_get_capabilities_no_streaming(self):
         """Test that capabilities report no streaming support (CTC)."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
         caps = engine.get_capabilities()
 
         assert caps.supports_streaming is False
@@ -174,47 +174,53 @@ class TestParakeetOnnxDecoderTypeDetection:
 
     def test_ctc_decoder_type(self):
         """Test that CTC model IDs produce ctc decoder type."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        assert ParakeetOnnxEngine._get_decoder_type("nvidia/parakeet-ctc-0.6b") == "ctc"
-        assert ParakeetOnnxEngine._get_decoder_type("nvidia/parakeet-ctc-1.1b") == "ctc"
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        assert (
+            NemoOnnxBatchEngine._get_decoder_type("nvidia/parakeet-ctc-0.6b") == "ctc"
+        )
+        assert (
+            NemoOnnxBatchEngine._get_decoder_type("nvidia/parakeet-ctc-1.1b") == "ctc"
+        )
 
     def test_tdt_decoder_type(self):
         """Test that TDT model IDs produce tdt decoder type."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
         assert (
-            ParakeetOnnxEngine._get_decoder_type("nvidia/parakeet-tdt-0.6b-v2") == "tdt"
+            NemoOnnxBatchEngine._get_decoder_type("nvidia/parakeet-tdt-0.6b-v2")
+            == "tdt"
         )
         assert (
-            ParakeetOnnxEngine._get_decoder_type("nvidia/parakeet-tdt-0.6b-v3") == "tdt"
+            NemoOnnxBatchEngine._get_decoder_type("nvidia/parakeet-tdt-0.6b-v3")
+            == "tdt"
         )
 
     def test_rnnt_decoder_type(self):
         """Test that RNNT model IDs produce rnnt decoder type."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
         assert (
-            ParakeetOnnxEngine._get_decoder_type("nvidia/parakeet-rnnt-0.6b") == "rnnt"
+            NemoOnnxBatchEngine._get_decoder_type("nvidia/parakeet-rnnt-0.6b") == "rnnt"
         )
 
     def test_alignment_method_ctc(self):
         """Test that CTC maps to AlignmentMethod.CTC."""
         from dalston.common.pipeline_types import AlignmentMethod
 
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        assert ParakeetOnnxEngine._alignment_method_for("ctc") == AlignmentMethod.CTC
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        assert NemoOnnxBatchEngine._alignment_method_for("ctc") == AlignmentMethod.CTC
 
     def test_alignment_method_tdt(self):
         """Test that TDT maps to AlignmentMethod.TDT."""
         from dalston.common.pipeline_types import AlignmentMethod
 
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        assert ParakeetOnnxEngine._alignment_method_for("tdt") == AlignmentMethod.TDT
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        assert NemoOnnxBatchEngine._alignment_method_for("tdt") == AlignmentMethod.TDT
 
     def test_alignment_method_rnnt(self):
         """Test that RNNT maps to AlignmentMethod.RNNT."""
         from dalston.common.pipeline_types import AlignmentMethod
 
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        assert ParakeetOnnxEngine._alignment_method_for("rnnt") == AlignmentMethod.RNNT
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        assert NemoOnnxBatchEngine._alignment_method_for("rnnt") == AlignmentMethod.RNNT
 
 
 class TestParakeetOnnxCatalogIntegration:
@@ -309,8 +315,8 @@ class TestParakeetOnnxTokensToWords:
 
     def test_tokens_to_words_basic_unicode(self):
         """Test basic subword token grouping with Unicode word boundaries."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
 
         # SentencePiece tokens with \u2581 word boundaries
         tokens = ["\u2581Hello", "\u2581world"]
@@ -324,8 +330,8 @@ class TestParakeetOnnxTokensToWords:
 
     def test_tokens_to_words_basic_space(self):
         """Test basic subword token grouping with space word boundaries (onnx-asr style)."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
 
         # onnx-asr style tokens with space prefix
         tokens = [" Hello", " world"]
@@ -339,8 +345,8 @@ class TestParakeetOnnxTokensToWords:
 
     def test_tokens_to_words_multipiece(self):
         """Test grouping multi-piece words from subword tokens."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
 
         # "transcription" split into subwords, then "is"
         tokens = [" trans", "crip", "tion", " is"]
@@ -356,16 +362,16 @@ class TestParakeetOnnxTokensToWords:
 
     def test_tokens_to_words_empty(self):
         """Test that empty token list returns empty word list."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
 
         words = engine._core._tokens_to_words([], [])
         assert words == []
 
     def test_tokens_to_words_timestamps_preserved(self):
         """Test that word timestamps reflect first and last token times."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
 
         # "good" then "morning" split into subwords
         tokens = [" good", " morn", "ing"]
@@ -385,8 +391,8 @@ class TestParakeetOnnxWordsToSegments:
 
     def test_words_to_segments_single_sentence(self):
         """Test that a single sentence creates one segment."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
 
         from dalston.engine_sdk.cores.parakeet_onnx_core import OnnxWordResult
 
@@ -403,8 +409,8 @@ class TestParakeetOnnxWordsToSegments:
 
     def test_words_to_segments_multiple_sentences(self):
         """Test that multiple sentences create multiple segments."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
 
         from dalston.engine_sdk.cores.parakeet_onnx_core import OnnxWordResult
 
@@ -423,8 +429,8 @@ class TestParakeetOnnxWordsToSegments:
 
     def test_words_to_segments_question_mark(self):
         """Test that question marks create segment boundaries."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
 
         from dalston.engine_sdk.cores.parakeet_onnx_core import OnnxWordResult
 
@@ -441,8 +447,8 @@ class TestParakeetOnnxWordsToSegments:
 
     def test_words_to_segments_no_punctuation(self):
         """Test that text without sentence-ending punctuation stays as one segment."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
 
         from dalston.engine_sdk.cores.parakeet_onnx_core import OnnxWordResult
 
@@ -458,8 +464,8 @@ class TestParakeetOnnxWordsToSegments:
 
     def test_words_to_segments_empty(self):
         """Test that empty words list creates fallback segment from full_text."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
 
         segments = engine._core._words_to_segments([], "Some text")
 
@@ -469,8 +475,8 @@ class TestParakeetOnnxWordsToSegments:
 
     def test_words_to_segments_timestamps_preserved(self):
         """Test that segment timestamps match first/last word times."""
-        ParakeetOnnxEngine = load_parakeet_onnx_engine()
-        engine = ParakeetOnnxEngine()
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
 
         from dalston.engine_sdk.cores.parakeet_onnx_core import OnnxWordResult
 

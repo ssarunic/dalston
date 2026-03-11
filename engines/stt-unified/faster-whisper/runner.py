@@ -1,6 +1,6 @@
 """Unified faster-whisper runner: one process, one model, both interfaces.
 
-This runner creates a single TranscribeCore (one loaded model) and passes
+This runner creates a single FasterWhisperCore (one loaded model) and passes
 it to both the batch engine adapter (queue polling) and the realtime engine
 adapter (WebSocket server). An AdmissionController gates both paths to
 prevent realtime starvation under batch load.
@@ -32,7 +32,7 @@ from dalston.engine_sdk.admission import (
     AdmissionController,
     TaskDeferredError,
 )
-from dalston.engine_sdk.cores.faster_whisper_core import TranscribeCore
+from dalston.engine_sdk.cores.faster_whisper_core import FasterWhisperCore
 
 logger = structlog.get_logger()
 
@@ -41,7 +41,7 @@ class UnifiedFasterWhisperRunner:
     """Runs batch + realtime faster-whisper adapters in a single process.
 
     Key properties:
-    - ONE TranscribeCore instance (one model in GPU memory)
+    - ONE FasterWhisperCore instance (one model in GPU memory)
     - ONE AdmissionController (shared QoS policy)
     - Batch adapter runs in a background thread (sync queue polling)
     - RT adapter runs in the async event loop (WebSocket server)
@@ -52,7 +52,7 @@ class UnifiedFasterWhisperRunner:
 
     def __init__(self) -> None:
         # Create single shared core
-        self._core = TranscribeCore.from_env()
+        self._core = FasterWhisperCore.from_env()
 
         # Create admission controller
         self._admission = AdmissionController(AdmissionConfig.from_env())
@@ -86,12 +86,12 @@ class UnifiedFasterWhisperRunner:
         self._running = True
 
         # Import adapters here to avoid circular imports at module level
-        from engines.stt_rt_faster_whisper import WhisperStreamingEngine
-        from engines.stt_transcribe_faster_whisper import WhisperEngine
+        from engines.stt_rt_faster_whisper import FasterWhisperRealtimeEngine
+        from engines.stt_transcribe_faster_whisper import FasterWhisperBatchEngine
 
-        # Create adapters sharing the same TranscribeCore
-        self._batch_engine = WhisperEngine(core=self._core)
-        self._rt_engine = WhisperStreamingEngine(core=self._core)
+        # Create adapters sharing the same FasterWhisperCore
+        self._batch_engine = FasterWhisperBatchEngine(core=self._core)
+        self._rt_engine = FasterWhisperRealtimeEngine(core=self._core)
 
         # Wrap batch engine's process to check admission
         original_process = self._batch_engine.process

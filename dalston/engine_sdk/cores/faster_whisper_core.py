@@ -73,7 +73,7 @@ class TranscriptionResult:
 
 
 @dataclass
-class TranscribeConfig:
+class FasterWhisperConfig:
     """Parameters for a single transcription call.
 
     Both batch and RT adapters construct this from their own config
@@ -91,11 +91,11 @@ class TranscribeConfig:
 
 
 # ---------------------------------------------------------------------------
-# TranscribeCore — shared inference logic
+# FasterWhisperCore — shared inference logic
 # ---------------------------------------------------------------------------
 
 
-class TranscribeCore:
+class FasterWhisperCore:
     """Shared inference logic for faster-whisper batch and realtime.
 
     Owns the model manager and provides a unified transcription interface.
@@ -224,7 +224,7 @@ class TranscribeCore:
         self,
         audio: str | Path | np.ndarray,
         model_id: str,
-        config: TranscribeConfig | None = None,
+        config: FasterWhisperConfig | None = None,
     ) -> TranscriptionResult:
         """Run transcription on audio input.
 
@@ -239,7 +239,7 @@ class TranscribeCore:
             TranscriptionResult with segments, language, and duration.
         """
         if config is None:
-            config = TranscribeConfig()
+            config = FasterWhisperConfig()
 
         model_id = self.normalize_model_id(model_id)
         model = self._manager.acquire(model_id)
@@ -252,7 +252,7 @@ class TranscribeCore:
         self,
         model: WhisperModel,
         audio: str | Path | np.ndarray,
-        config: TranscribeConfig,
+        config: FasterWhisperConfig,
     ) -> TranscriptionResult:
         """Execute transcription with an already-acquired model."""
         # Normalize audio input
@@ -365,8 +365,8 @@ class TranscribeCore:
         cls,
         device: str | None = None,
         compute_type: str | None = None,
-    ) -> TranscribeCore:
-        """Create a TranscribeCore configured from environment variables.
+    ) -> FasterWhisperCore:
+        """Create a FasterWhisperCore configured from environment variables.
 
         Args:
             device: Override device (None = auto-detect or from env)

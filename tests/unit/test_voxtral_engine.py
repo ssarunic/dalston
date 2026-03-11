@@ -17,7 +17,7 @@ HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 
 def load_voxtral_engine():
-    """Load VoxtralEngine from engines directory using importlib."""
+    """Load VoxtralBatchEngine from engines directory using importlib."""
     engine_path = Path("engines/stt-transcribe/voxtral/engine.py")
     if not engine_path.exists():
         pytest.skip("Voxtral engine not found")
@@ -29,12 +29,12 @@ def load_voxtral_engine():
     module = importlib.util.module_from_spec(spec)
     sys.modules["voxtral_engine"] = module
     spec.loader.exec_module(module)
-    return module.VoxtralEngine
+    return module.VoxtralBatchEngine
 
 
 @pytest.mark.skipif(not HAS_TORCH, reason="torch not installed")
 class TestVoxtralEngine:
-    """Test VoxtralEngine without loading actual model."""
+    """Test VoxtralBatchEngine without loading actual model."""
 
     @pytest.fixture
     def mock_torch(self):
@@ -63,8 +63,8 @@ class TestVoxtralEngine:
         if "voxtral_engine" in sys.modules:
             del sys.modules["voxtral_engine"]
 
-        VoxtralEngine = load_voxtral_engine()
-        engine = VoxtralEngine()
+        VoxtralBatchEngine = load_voxtral_engine()
+        engine = VoxtralBatchEngine()
         return engine
 
     def test_engine_init_cpu_fallback(self, engine):
@@ -168,9 +168,9 @@ class TestVoxtralEngineEnvironment:
             os.environ, {"DALSTON_MODEL_VARIANT": "unknown", "DALSTON_DEVICE": "cpu"}
         ):
             with patch("torch.cuda.is_available", return_value=False):
-                VoxtralEngine = load_voxtral_engine()
+                VoxtralBatchEngine = load_voxtral_engine()
 
-                engine = VoxtralEngine()
+                engine = VoxtralBatchEngine()
                 assert engine._model_variant == "mini-3b"
 
     def test_explicit_cpu_device(self):
@@ -179,7 +179,7 @@ class TestVoxtralEngineEnvironment:
             os.environ, {"DALSTON_DEVICE": "cpu", "DALSTON_MODEL_VARIANT": "mini-3b"}
         ):
             with patch("torch.cuda.is_available", return_value=True):
-                VoxtralEngine = load_voxtral_engine()
+                VoxtralBatchEngine = load_voxtral_engine()
 
-                engine = VoxtralEngine()
+                engine = VoxtralBatchEngine()
                 assert engine._device == "cpu"

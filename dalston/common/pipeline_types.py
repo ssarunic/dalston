@@ -348,6 +348,14 @@ class PrepareInput(StageInput):
 class TranscribeInput(StageInput):
     """Input for transcription stage."""
 
+    # Runtime/model selection
+    runtime_model_id: str | None = Field(
+        default=None, description="Runtime-specific model ID to load"
+    )
+    channel: int | None = Field(
+        default=None, ge=0, description="Audio channel index for per-channel tasks"
+    )
+
     # Language
     language: str | None = Field(
         default=None, description="ISO 639-1 code, None=auto-detect"
@@ -361,6 +369,13 @@ class TranscribeInput(StageInput):
     # Timestamps
     timestamp_granularity: TimestampGranularity = Field(
         default=TimestampGranularity.WORD, description="Requested timestamp precision"
+    )
+    word_timestamps: bool | None = Field(
+        default=None,
+        description=(
+            "Explicit word timestamp request flag. When None, "
+            "timestamp_granularity decides."
+        ),
     )
 
     # Vocabulary boosting

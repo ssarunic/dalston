@@ -58,11 +58,11 @@ class OnnxTranscriptionResult:
 
 
 # ---------------------------------------------------------------------------
-# ParakeetOnnxCore — shared inference logic
+# NemoOnnxCore — shared inference logic
 # ---------------------------------------------------------------------------
 
 
-class ParakeetOnnxCore:
+class NemoOnnxCore:
     """Shared inference logic for ONNX Parakeet batch and realtime.
 
     Owns the NeMoOnnxModelManager and provides a unified transcription
@@ -333,8 +333,8 @@ class ParakeetOnnxCore:
     # -- Factory -------------------------------------------------------------
 
     @classmethod
-    def from_env(cls) -> ParakeetOnnxCore:
-        """Create a ParakeetOnnxCore configured from environment variables.
+    def from_env(cls) -> NemoOnnxCore:
+        """Create a NemoOnnxCore configured from environment variables.
 
         Environment variables:
             DALSTON_DEVICE: Device ("cuda" or "cpu", default: auto-detect)

@@ -26,6 +26,7 @@ import structlog
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
+    TranscribeInput,
     Transcript,
     TranscriptWord,
 )
@@ -66,13 +67,7 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
         self._asr = riva.client.ASRService(self._channel)
         logger.info("riva_nim_channel_ready", uri=self._uri)
 
-    def transcribe_v1(
-        self,
-        audio: np.ndarray,
-        language: str,
-        model_variant: str,
-        vocabulary: list[str] | None = None,
-    ) -> Transcript:
+    def transcribe_v1(self, audio: np.ndarray, params: TranscribeInput) -> Transcript:
         """Transcribe an audio segment via Riva NIM.
 
         Called by SessionHandler when VAD detects an utterance endpoint
@@ -80,9 +75,7 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
 
         Args:
             audio: Audio samples as float32 numpy array, mono, 16kHz
-            language: Language code (e.g., "en") or "auto"
-            model_variant: Model name (ignored — NIM manages models)
-            vocabulary: Not supported yet
+            params: Typed transcriber parameters for this utterance
 
         Returns:
             Transcript with text, words, language, confidence
@@ -94,7 +87,9 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
         audio_int16 = (audio * 32767).astype(np.int16)
         audio_bytes = audio_int16.tobytes()
 
-        lang_code = language if language and language != "auto" else "en"
+        lang_code = (
+            params.language if params.language and params.language != "auto" else "en"
+        )
 
         config = riva.client.RecognitionConfig(
             language_code=lang_code,

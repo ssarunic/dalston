@@ -2,7 +2,7 @@
 
 Verifies that the batch engine produces the correct output shape
 (Transcript with segments, text, language) and that word
-timestamp behavior is preserved after delegation to ParakeetCore.
+timestamp behavior is preserved after delegation to NemoCore.
 
 These tests mock the NeMo model to avoid GPU/model dependencies.
 """
@@ -33,14 +33,14 @@ def _ctx(task_id: str, job_id: str) -> BatchTaskContext:
 
 
 def _load_parakeet_engine_class():
-    """Load ParakeetEngine class from file to avoid import path issues."""
+    """Load NemoBatchEngine class from file to avoid import path issues."""
     engine_path = Path("engines/stt-transcribe/parakeet/engine.py")
     spec = importlib.util.spec_from_file_location("m63_parakeet_engine", engine_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules["m63_parakeet_engine"] = module
     spec.loader.exec_module(module)
-    return module.ParakeetEngine
+    return module.NemoBatchEngine
 
 
 # Load once at module level to avoid re-importing native C extensions.
@@ -75,7 +75,7 @@ def _make_rnnt_hypothesis(
 
 
 def _build_engine_with_mock_core(hypothesis):
-    """Create a ParakeetEngine with a mocked ParakeetCore."""
+    """Create a NemoBatchEngine with a mocked NemoCore."""
     mock_core = MagicMock()
     mock_core.device = "cpu"
 
@@ -86,10 +86,10 @@ def _build_engine_with_mock_core(hypothesis):
     mock_core.manager.release = MagicMock()
 
     # Mock core.transcribe to call transcribe_with_model with the mock model
-    from dalston.engine_sdk.cores.parakeet_core import ParakeetCore
+    from dalston.engine_sdk.cores.parakeet_core import NemoCore
 
-    # Use a real ParakeetCore._parse_hypothesis for result
-    segments, words = ParakeetCore._parse_hypothesis(hypothesis, hypothesis.text)
+    # Use a real NemoCore._parse_hypothesis for result
+    segments, words = NemoCore._parse_hypothesis(hypothesis, hypothesis.text)
     from dalston.engine_sdk.cores.parakeet_core import NeMoTranscriptionResult
 
     result = NeMoTranscriptionResult(

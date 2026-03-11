@@ -1,6 +1,6 @@
 """Unit tests for Parakeet ONNX real-time streaming engine.
 
-Tests the ParakeetOnnxStreamingEngine implementation with M44 dynamic model loading.
+Tests the NemoOnnxRealtimeEngine implementation with M44 dynamic model loading.
 Run with: uv run --extra dev pytest tests/unit/test_parakeet_onnx_streaming.py
 """
 
@@ -12,7 +12,7 @@ import pytest
 
 
 def load_parakeet_onnx_streaming_engine():
-    """Load ParakeetOnnxStreamingEngine from engines directory using importlib."""
+    """Load NemoOnnxRealtimeEngine from engines directory using importlib."""
     engine_path = Path("engines/stt-rt/parakeet-onnx/engine.py")
     if not engine_path.exists():
         pytest.skip("Parakeet ONNX streaming engine not found")
@@ -26,7 +26,7 @@ def load_parakeet_onnx_streaming_engine():
     module = importlib.util.module_from_spec(spec)
     sys.modules["parakeet_onnx_streaming_engine"] = module
     spec.loader.exec_module(module)
-    return module.ParakeetOnnxStreamingEngine
+    return module.NemoOnnxRealtimeEngine
 
 
 class TestParakeetOnnxStreamingGetModels:

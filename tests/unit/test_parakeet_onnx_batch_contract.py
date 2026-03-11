@@ -2,7 +2,7 @@
 
 Verifies that the batch engine produces the correct output shape
 (Transcript with segments, text, language) and that word
-timestamp behavior is preserved after delegation to ParakeetOnnxCore.
+timestamp behavior is preserved after delegation to NemoOnnxCore.
 """
 
 from __future__ import annotations
@@ -16,10 +16,10 @@ from uuid import uuid4
 from dalston.engine_sdk import EngineInput
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.cores.parakeet_onnx_core import (
+    NemoOnnxCore,
     OnnxSegmentResult,
     OnnxTranscriptionResult,
     OnnxWordResult,
-    ParakeetOnnxCore,
 )
 
 
@@ -42,7 +42,7 @@ def _load_onnx_engine_class():
     module = importlib.util.module_from_spec(spec)
     sys.modules["m63_parakeet_onnx_engine"] = module
     spec.loader.exec_module(module)
-    return module.ParakeetOnnxEngine
+    return module.NemoOnnxBatchEngine
 
 
 _ParakeetOnnxEngine = _load_onnx_engine_class()
@@ -74,7 +74,7 @@ def _make_core_result(
 
 
 def _build_engine_with_mock_core(core_result: OnnxTranscriptionResult):
-    mock_core = MagicMock(spec=ParakeetOnnxCore)
+    mock_core = MagicMock(spec=NemoOnnxCore)
     mock_core.device = "cpu"
     mock_core.quantization = "none"
     mock_core.transcribe.return_value = core_result

@@ -94,8 +94,8 @@ class RivaBatchEngine(BaseBatchTranscribeEngine):
             Transcript with text, segments, and words
         """
         audio_path = engine_input.audio_path
-        config = engine_input.config
-        language = config.get("language") or "en"
+        params = engine_input.get_transcribe_params()
+        language = params.language or "en"
 
         self.logger.info("transcribing", audio_path=str(audio_path))
 
